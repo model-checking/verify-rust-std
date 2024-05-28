@@ -25,9 +25,8 @@ Here are some details for the contest
     2. Once the tool is approved, it needs to be enabled using CI pipelines.
 5. Each contribution or attempt should be submitted via a pull request that will be analyzed by the committee.
 6. Each contribution will be reviewed on a first come first serve basis. Acceptance will be based on a unanimous affirmative vote from the review committee. 
-7. In the case of multiple contributions for the same challenge, rewards will be shared equally between all approved solutions.
-8. The contribution must be automated and should work in CI.
-9. Once approved by the review committee, the change will be merged into the repository and the reward will be disbursed.
+7. The contribution must be automated and should work in CI.
+8. Once approved by the review committee, the change will be merged into the repository.
 
 
 For more details, refer to the [contest book page](http://link to contest book page) here.
