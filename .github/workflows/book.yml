@@ -1,0 +1,55 @@
+# Copyright Kani Contributors
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+name: Build Book
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+  push:
+    paths:
+      - 'docs/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mdbook
+        run: cargo install mdbook --version "^0.4" --locked
+
+      - name: Install linkchecker
+        run: cargo install mdbook-linkcheck "0.7" --locked
+
+      - name: Build Documentation
+        run: mkdbook build
+
+      - name: Upload book
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: book/
+          retention-days: "2"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && startsWith('refs/heads/main', github.ref) }}
+
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write      # to deploy to Pages
+      id-token: write   # to verify source
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    # Specify runner + deployment step
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+
