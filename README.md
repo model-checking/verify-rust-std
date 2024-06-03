@@ -12,7 +12,7 @@ The goal is to have a contest to help verify the [Rust standard library](https:/
 
 To help you get started in the contest, Amazon’s [Kani-rust-verifier team](https://github.com/model-checking/kani) has created mechanisms and tools to help participants verify the standard library. The Kani team has also created some initial contracts and proofs (To be filled and linked here later) to help you get started as a participant.
 
-NOTE: This work is not official, affiliated, or endorsed by the Rust project or Rust Foundation
+NOTE: This work is not official, affiliated, or endorsed by the Rust project or Rust Foundation.
 * * *
 
 ## Contest Details
