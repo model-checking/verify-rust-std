@@ -1,7 +1,13 @@
 # Copyright Kani Contributors
 # SPDX-License-Identifier: Apache-2.0 OR MIT
+
+# This workflow is responsible for building and releasing the contest book.
+# It should only run when there has been a change to the contest book files
+# or via manual trigger.
+
 name: Build Book
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'doc/**'
@@ -17,13 +23,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install mdbook
-        run: cargo install mdbook --version "^0.4" --locked
+        run: |
+          cargo install mdbook --version "^0.4" --locked
+          echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
 
       - name: Install linkchecker
         run: cargo install mdbook-linkcheck --version "^0.7" --locked
 
       - name: Build Documentation
-        run: mkdbook build doc
+        run: mdbook build doc
 
       - name: Upload book
         uses: actions/upload-pages-artifact@v3
