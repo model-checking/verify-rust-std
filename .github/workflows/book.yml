@@ -20,13 +20,13 @@ jobs:
         run: cargo install mdbook --version "^0.4" --locked
 
       - name: Install linkchecker
-        run: cargo install mdbook-linkcheck "0.7" --locked
+        run: cargo install mdbook-linkcheck --version "^0.7" --locked
 
       - name: Build Documentation
         run: mkdbook build doc
 
       - name: Upload book
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v3
         with:
           path: book/html
           retention-days: "2"
