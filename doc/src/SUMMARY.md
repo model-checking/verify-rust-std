@@ -8,8 +8,8 @@
 - [Verification Tools](./tools.md)
   - [Kani](./tools/kani.md)
 
-<!-- [todo](todo.md)>
 
 ---
 
 # Challenges
+- [Coming soon](./todo.md)

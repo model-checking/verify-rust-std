@@ -23,12 +23,12 @@ jobs:
         run: cargo install mdbook-linkcheck "0.7" --locked
 
       - name: Build Documentation
-        run: mkdbook build
+        run: mkdbook build doc
 
       - name: Upload book
         uses: actions/upload-pages-artifact@v4
         with:
-          path: book/
+          path: book/html
           retention-days: "2"
 
   deploy:
@@ -45,8 +45,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
 
-    # Specify runner + deployment step
-    runs-on: ubuntu-latest
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
