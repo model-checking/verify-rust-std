@@ -3,12 +3,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 
 Files: library/*
-       LICENSE-APACHE
-       LICENSE-MIT
-       README.md
-       RELEASES.md
-       .gitignore
-       .gitmodules
 Copyright: The Rust Project Developers (see https://thanks.rust-lang.org)
 License: MIT or Apache-2.0
 
