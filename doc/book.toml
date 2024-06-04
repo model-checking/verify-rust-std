@@ -1,0 +1,25 @@
+# Copyright Kani Contributors
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+[book]
+title = "Verify Rust Std Lib Contest"
+description = "Contest Rules and Challenges"
+authors = ["Kani Developers"]
+language = "en"
+multilingual = false
+
+[build]
+build-dir = "../book"
+
+[output.html]
+site-url = "/verify-rust-std/"
+git-repository-url = "https://github.com/model-checking/verify-rust-std"
+edit-url-template = "https://github.com/model-checking/verify-rust-std/edit/main/doc/{path}"
+
+[output.html.playground]
+runnable = false
+
+[output.linkcheck]
+
+
+[rust]
+edition = "2021"
