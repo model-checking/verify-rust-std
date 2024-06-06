@@ -19,7 +19,7 @@ NOTE: This work is not official, affiliated, or endorsed by the Rust project or 
 
 Here are some details for the contest
 
-1. This repository will contain templates for [Issues](https://github.com/model-checking/verify-rust-std/issues), [pull requests](https://github.com/model-checking/verify-rust-std/pulls) etc. that will be used to create new challenges for verifying the Rust standard library.
+1. This repository will contain templates for [Issues](https://github.com/model-checking/verify-rust-std/issues), and [pull requests](https://github.com/model-checking/verify-rust-std/pulls), that will be used to create new challenges for verifying the Rust standard library.
 2. This repository will contain the initial contracts and proofs that AWS creates using Kani as a tool to verify the standard library.
 3. Verification of the functions will be enabled using CI pipelines and Kani tool initially.
 4. Any new tool that participants want to enable will require an application using an Issue template. This tool will be analyzed by an independent committee consisting of members from the Rust open-source developers and AWS
