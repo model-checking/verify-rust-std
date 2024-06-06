@@ -55,7 +55,7 @@ You can find out more about Kani from the [Kani book](https://model-checking.git
 
 ## Contact
 
-For questions, suggestions or feedback, feel free to open an [issue on the Kani page](https://github.com/model-checking/verify-rust-std/issues) with the tag `stdlib-contest`  or contact us directly at [kani-developers@amazon.com](mailto:kani-developers@amazon.com).
+For questions, suggestions or feedback, feel free to open an [issue here](https://github.com/model-checking/verify-rust-std/issues).
 
 ## Security
 
