@@ -1,0 +1,54 @@
+# Copyright Kani Contributors
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+## File system
+.DS_Store
+desktop.ini
+
+## Editor
+*.swp
+*.swo
+Session.vim
+.cproject
+.idea
+*.iml
+.vscode
+.project
+.favorites.json
+.settings/
+*.orig
+*.rej
+
+## Build
+/book/
+/build/
+/target
+*.rlib
+*.rmeta
+*.mir
+
+## Temporary files
+*~
+\#*
+\#*\#
+.#*
+
+## Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+## Node
+node_modules
+package-lock.json
+
+# Tools
+## Kani
+*.out
+
+
+# Added by cargo
+#
+# already existing elements were commented out
+
+#/target
