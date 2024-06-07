@@ -1,0 +1,9 @@
+# Copyright Kani Contributors
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+# This version should be updated whenever we update the version of the Rust
+# standard library we currently track.
+
+[toolchain]
+channel = "nightly-2024-05-23"
+components = ["llvm-tools-preview", "rustc-dev", "rust-src", "rustfmt"]

@@ -11,9 +11,11 @@ on:
   pull_request:
     paths:
       - 'doc/**'
+      - '.github/workflows/book.yml'
   push:
     paths:
       - 'doc/**'
+      - '.github/workflows/book.yml'
 
 jobs:
   build:
@@ -27,8 +29,9 @@ jobs:
           cargo install mdbook --version "^0.4" --locked
           echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
 
+      # Removed --locked for now since it is broken due to old proc_macro feature.
       - name: Install linkchecker
-        run: cargo install mdbook-linkcheck --version "^0.7" --locked
+        run: cargo install mdbook-linkcheck --version "^0.7"
 
       - name: Build Documentation
         run: mdbook build doc

@@ -1,0 +1,66 @@
+# Copyright Kani Contributors
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+# This workflow is responsible for building the standard library using the bootstrap script
+# and executing the Rust regression.
+
+name: Rust Tests
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'library/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/rustc.yml'
+  push:
+    paths:
+      - 'library/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/rustc.yml'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Note windows-latest is currently failing.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout Library
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: Checkout `upstream/master`
+        uses: actions/checkout@v4
+        with:
+          repository: rust-lang/rust
+          path: upstream
+          fetch-depth: 0
+          submodules: true
+
+      # Run rustc twice in case the toolchain needs to be installed.
+      # Retrieve the commit id from the `rustc --version`. Output looks like:
+      # `rustc 1.80.0-nightly (84b40fc90 2024-05-27)`
+      - name: Checkout matching commit
+        run: |
+          cd head
+          rustc --version
+          COMMIT_ID=$(rustc --version | sed -e "s/.*(\(.*\) .*/\1/")
+          cd ../upstream
+          git checkout ${COMMIT_ID}
+
+      - name: Copy Library
+        run: |
+          rm -rf upstream/library
+          cp -r head/library upstream
+
+      - name: Run tests
+        working-directory: upstream
+        run: |
+          ./configure --set=llvm.download-ci-llvm=true
+          ./x test --stage 0 library/std

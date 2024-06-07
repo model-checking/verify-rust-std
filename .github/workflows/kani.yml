@@ -1,0 +1,52 @@
+# Copyright Kani Contributors
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+# This workflow is responsible for verifying the standard library with Kani.
+
+name: Kani
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'library/**'
+      - '.github/workflows/kani.yml'
+  push:
+    paths:
+      - 'library/**'
+      - '.github/workflows/kani.yml'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Library
+        uses: actions/checkout@v4
+        with:
+          path: verify-rust-std
+          submodules: true
+
+      # We currently build Kani from a branch that tracks a rustc version compatible with this library version.
+      - name: Checkout `Kani`
+        uses: actions/checkout@v4
+        with:
+          repository: model-checking/kani
+          path: kani
+          ref: features/verify-rust-std
+
+      - name: Build `Kani`
+        working-directory: kani
+        run: |
+          cargo build-dev --release
+          echo "$(pwd)/scripts" >> $GITHUB_PATH
+
+      - name: Run tests
+        working-directory: verify-rust-std
+        env:
+          RUST_BACKTRACE: 1
+        run: |
+          kani verify-std -Z unstable-options ./library --target-dir "target"
+          
