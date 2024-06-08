@@ -21,7 +21,11 @@ defaults:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Kani does not support windows.
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout Library
         uses: actions/checkout@v4
