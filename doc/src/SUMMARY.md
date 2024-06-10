@@ -13,3 +13,4 @@
 
 # Challenges
 - [Coming soon](./todo.md)
+- [Core Transmutation](./core-transmutation.md)
