@@ -1,19 +1,12 @@
 # Challenge XXXX[^challenge_id]: Challenge Title
 
 - **Status:** *One of the following: [Open | Resolved | Expired]*
-  - **Solution:** *Option field to point to the PR that solved this challenge.*
+- **Solution:** *Option field to point to the PR that solved this challenge.*
 - **Tracking Issue:** *Link to issue*
 - **Start date:** *YY/MM/DD*
 - **End date:** *YY/MM/DD*
 
 -------------------
-
-
-Status: [Open | Resolved | Expired]:
-Tracking issue:
-Start date:
-Due date:
-Author(s):
 
 
 ## Goal
@@ -30,7 +23,7 @@ Author(s):
 
 ### Assumptions
 
-*Mention any assumption that users may make. Example, "assuming the usage of Stack Borrow".*
+*Mention any assumption that users may make. Example, "assuming the usage of Stacked Borrows".*
 
 ### Success Criteria*
 
@@ -61,6 +54,6 @@ All proofs must automatically ensure the absence of the following undefined beha
 *List of UBs*
 
 Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](general-rules.md)
-in addition to the ones listed below
+in addition to the ones listed above
 
 [^challenge_id]: The number of the challenge sorted by publication date.
