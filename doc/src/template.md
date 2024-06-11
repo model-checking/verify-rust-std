@@ -27,7 +27,7 @@
 
 ### Success Criteria*
 
-*Here are few possible criteria:*
+*Here are some examples of possible criteria:*
 
 All the following unsafe functions must be annotated with safety contracts and the contracts have been verified:
 
@@ -54,6 +54,6 @@ All proofs must automatically ensure the absence of the following undefined beha
 *List of UBs*
 
 Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](general-rules.md)
-in addition to the ones listed above
+in addition to the ones listed above.
 
 [^challenge_id]: The number of the challenge sorted by publication date.
