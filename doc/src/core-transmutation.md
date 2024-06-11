@@ -76,6 +76,8 @@ A new entry to the specification book is created explaining the relevant pattern
 
 At least 35 of the following 47 intrinsics and functions (i.e. approximately 75%) have been annotated with contracts, and, for non-intrinsics, had their bodies verified.
 
+For the safe functions, you do not need to provide a full-functional correctness specificatipn; it will suffice to add pre- and post-conditions (i.e. assumptions and assertions) around the relevant part of the code that calls the transmutation-related unsafe function or intrinsic.
+
 
 | Function              | Location          |
 |-----------------------|-------------------|
