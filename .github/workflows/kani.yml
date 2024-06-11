@@ -52,5 +52,6 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          kani verify-std -Z unstable-options ./library --target-dir "target"
+          kani verify-std -Z unstable-options ./library --target-dir ${{ runner.temp }} -Z function-contracts \
+            -Z mem-predicates -Z ptr-to-ref-cast-checks
           
