@@ -21,5 +21,5 @@ pub fn requires(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn ensures(attr: TokenStream, item: TokenStream) -> TokenStream {
-    tool::requires(attr, item)
+    tool::ensures(attr, item)
 }
