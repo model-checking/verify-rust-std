@@ -19,7 +19,6 @@ edit-url-template = "https://github.com/model-checking/verify-rust-std/edit/main
 runnable = false
 
 [output.linkcheck]
-optional = true
 
 [rust]
 edition = "2021"

@@ -1,8 +1,8 @@
 # Kani Rust Verifier
 
-The Kani Rust Verifier is a bit-precise model checker for Rust.
+The [Kani Rust Verifier](https://github.com/model-checking/kani) is a bit-precise model checker for Rust.
 Kani is designed to prove safety properties in your code as well as
-the absence of undefined behavior. It uses formal methods under the hood to ensure that
+the absence of some forms of undefined behavior. It uses model checking under the hood to ensure that
 Rust programs adhere to user specified properties.
 
 You can find more informations about how to install in [this section of the Kani book](https://model-checking.github.io/kani/install-guide.html).
@@ -59,7 +59,7 @@ To aid the std library verification effort, Kani provides a subcommand out of th
 Modify your local copy of the rust std library by writing proofs for the functions/methods that you want to verify.
 
 For example, insert this short blob into your copy of the std library. This blob imports the building-block APIs such as
-`assert`, `assume`, `proof` and function-contracts such as `proof_for_contract` and `fake_function`.
+`assert`, `assume`, `proof` and [function-contracts](https://github.com/model-checking/kani/blob/main/rfc/src/rfcs/0009-function-contracts.md) such as `proof_for_contract` and `fake_function`.
 
 ``` rust
 // src/lib/.rs
@@ -107,8 +107,6 @@ For more details on Kani's features, refer to [the features section in the Kani 
 After running the command, you can expect an output that looks like this:
 
 ```
-... Details about properties that failed or suceeded verifiaction
-
 SUMMARY:
  ** 0 of 1 failed
 
