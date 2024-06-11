@@ -26,6 +26,11 @@ jobs:
       matrix:
         # Kani does not support windows.
         os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
     steps:
       - name: Checkout Library
         uses: actions/checkout@v4
@@ -40,6 +45,11 @@ jobs:
           repository: model-checking/kani
           path: kani
           ref: features/verify-rust-std
+
+      - name: Setup Dependencies
+        working-directory: kani
+        run: |
+          ./scripts/setup/${{ matrix.base }}/install_deps.sh
 
       - name: Build `Kani`
         working-directory: kani
