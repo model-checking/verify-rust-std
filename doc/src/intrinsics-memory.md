@@ -12,18 +12,6 @@
 
 Annotate Rust core::intrinsics functions that manipulate raw pointers with their safety contract and verify their usage in the standard library are in fact safe.
 
-## Motivation
-
-*Explain why this is a challenge that should be prioritized. Consider using a motivating example.*
-
-## Description
-
-*Describe the challenge in more details.*
-
-### Assumptions
-
-*Mention any assumption that users may make. Example, "assuming the usage of Stacked Borrows".*
-
 ### Success Criteria*
 
 1. All the following intrinsic functions must be annotated with safety contracts.
@@ -102,5 +90,3 @@ All proofs must automatically ensure the absence of the following undefined beha
 
 Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](general-rules.md)
 in addition to the ones listed above.
-
-[^challenge_id]: The number of the challenge sorted by publication date.
