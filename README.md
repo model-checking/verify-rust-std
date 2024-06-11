@@ -1,5 +1,9 @@
 # Rust std-lib verification
 
+[![Rust Tests](https://github.com/model-checking/verify-rust-std/actions/workflows/rustc.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/rustc.yml)
+[![Build Book](https://github.com/model-checking/verify-rust-std/actions/workflows/book.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/book.yml)
+
+
 This repository is a fork of the official Rust programming
 language repository, created solely to verify the Rust standard
 library. It should not be used as an alternative to the official

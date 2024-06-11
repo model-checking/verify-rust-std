@@ -9,9 +9,9 @@ please see the [Tool Application](general-rules.md#tool-applications) section.
 
 ## Approved tools:
 
-| Tool      | CI Status |
-|-----------|-----------|
- | Kani     | TODO      |
+| Tool                | CI Status |
+|---------------------|-------|
+ | Kani Rust Verifier  | [![Kani](https://github.com/model-checking/verify-rust-std/actions/workflows/kani.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/kani.yml)      |
 
 
 
