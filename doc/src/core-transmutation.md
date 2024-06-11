@@ -1,50 +1,56 @@
-Challenge: Preconditions for core transmuting methods
+# Challenge: Verify `core` transmuting methods
 
-## Status
+- **Status:** *One of the following: [Open | Resolved | Expired]* Open
+- **Tracking Issue:** *Link to issue*
+- **Start date:** *YY/MM/DD*
+- **End date:** *YY/MM/DD*
 
-\[Open | Resolved | Expired\]: Open
-
-## Dates
-
-Start date:
-
-End date:
+-------------------
 
 ## Goal
 
-Confirm the correctness of value transmutations performed by libcore, including those transmutations exposed as public methods provided by libcore.
+Confirm the soundness of value transmutations performed by libcore, including those transmutations exposed as public methods provided by libcore. A value-to-value transmutation is sound if:
+1. the source value is a bit-valid instance of the destination type;
+2. violations of library safety invariants (e.g., invariants on a field's value) of the destination type are not violated by subsequent use of the transmuted value.
 
-To keep the goal somewhat manageable, it excludes some classes of code (e.g. utf8-validation, async tasks, and others); see the assumptions for the full list of excluded categories.
+If the context of the transmute is safe, these conditions should be proven with local reasoning. If the context of the transmute is unsafe, they may be discharged with a safety obligation on the caller.
+
+To keep the goal somewhat manageable, it excludes some classes of code (e.g. UTF8-validation, async tasks, and others); see the assumptions for the full list of excluded categories.
 
 ## Details
 
 ### Motivating Example
 
-There are several calls to these unsafe methods within the code of safe methods exported libcore itself, so having clear and verifiable safety contracts is critical for verifying the safety of the safe methods that invoke them.
+There are several calls to unsafe methods using transmute within the code of safe methods exported by libcore itself, so having clear and verifiable safety contracts is critical for verifying the safety of the safe methods that invoke them.
 
-For example, `std::slice::align_to` (which unsafely converts any slice `&[T]` into a tuple `(&[T], &[U], &[T])` composed of a prefix, a maximal sequence of values of type `U`, and a suffix) just says for its safety that “all the usual caveats pertaining to `transmute::<T, U>` also apply here”, but the documentation for `transmute` is frankly (and rightfully) scary.
+For example, `std::slice::align_to` (which unsafely converts any slice `&[T]` into a tuple `(&[T], &[U], &[T])` composed of a prefix, a maximal sequence of values of type `U`, and a suffix) just says for its safety that “all the usual caveats pertaining to `transmute::<T, U>` also apply here”, which might be an under specification. For more details, see the [documentation](https://doc.rust-lang.org/std/mem/fn.transmute.html) for `transmute`.
 
-### Part 1: the two intrinsics
 
-The public unsafe intrinsic `transmute<T, U>` takes a value of type `T` and reinterprets it to have type `U`, with the sole (statically-enforced) restriction being that the types `T` and `U` must have the same size. The unstable intrinsic `transmute_unchecked` is similar, except that it removes the static size restriction, treating violations of it as undefined behavior.
+### Breaking-down the verification
 
-What is the right way to encode the preconditions of the two transmutation intrinsics?
+We lay out the verification challenge from the bottom up. Starting with the core implementation of `transmute` moving up to all unsafe and safe APIs that rely on it.
 
-If one is solely concerned about safety: The Rustonomicon lists several ways that transmutation can yield undefined behavior. Encoding a correct safety contract for transmute is crucial.
+#### Part I - The Two Intrinsics
+
+The public unsafe intrinsic [`transmute<T, U>`](https://doc.rust-lang.org/std/mem/fn.transmute.html) takes a value of type `T` and reinterprets it to have type `U`, with the sole (statically-enforced) restriction being that the types `T` and `U` must have the same size. The unstable intrinsic [`transmute_unchecked<T, U>`](https://doc.rust-lang.org/core/intrinsics/fn.transmute_unchecked.html) is similar, except that it removes the static size restriction, treating violations of it as undefined behavior.
+
+_What is the right way to encode the preconditions of the two transmutation intrinsics?_
+
+If one is solely concerned about safety: The [Rustonomicon](https://doc.rust-lang.org/nomicon/transmutes.html) lists several ways that transmutation can yield undefined behavior. Encoding a safety contract for transmute that captures all the relevant criteria laid out in the documentation is crucial.
 
 If one is concerned about proving functional correctness, then reasoning about transmutation will require reasoning about the byte representation of values to justify that the reinterpretation of the value’s bytes for satisfying the pending proof obligation associated with the output value.
 
 
-### Part 2: unsafe APIs with validity constraints
+#### Part II - `unsafe` APIs with Validity Constraints
 
-There are unsafe methods (which are defined by libcore and reexported by libstd) have the effect of a transmutation between a (sequence of) T and a (sequence of) U. Come up with an appropriate safety contract for each of them; they should usually be something less arduous for callers than transmute itself (we hope).
+There are unsafe methods (which are defined by libcore and reexported by libstd) that have the effect of a transmutation between a (sequence of) `T` and a (sequence of) `U`. Come up with an appropriate safety contract for each of them; they should usually be something simpler for callers than transmute itself (we hope).
 
 
-### Part 3: unsafe APIs with richer constraints
+#### Part III - `unsafe` APIs with Richer Constraints
 
 Similar to part 2, there are also unsafe methods, but now the safety condition is more complicated, such as “is valid ascii character” or "is valid unicode scalar value."
 
-### Part 4: safe APIs
+#### Part IV - `safe` APIs
 
 These are safe APIs that call into the unsafe API's from parts 1 through 3 above. Now our final goal is to prove that they actually are safe, despite calling transmute or transmute-related methods in their implementations.
 
@@ -54,7 +60,7 @@ For this challenge, the following assumptions are acceptable:
 
 We are not attempting to validate all details of the memory model for this challenge; for example, you do not need to worry about whether we are using the Stacked Borrows or Tree Borrows aliasing models. Likewise, you do not need to validate the provenance-related API in `std::ptr`.
 
-You are allowed, but not required, to leverage the unstable `Transmutability` trait under development as part of your solution. This is a libstd-internal feature for auditing whether a given transmutation is safe. (It seems like something tools should try to leverage in some way; but it is also experimental.) Note that if you need to add new impls of `Transmutability`, then those new impl’s need to be accepted by (and landed in) the upstream Rust project before your solutiokn can be considered completed. See also https://github.com/rust-lang/rust/issues/99571
+You are allowed, but not required, to leverage the unstable `Transmutability` trait under development as part of your solution. This is a libstd-internal feature for auditing whether a given transmutation is safe. (It seems like something tools should try to leverage in some way; but it is also experimental.) Note that if you need to add new impls of `Transmutability`, then those new impl’s need to be accepted by (and landed in) the upstream Rust project before your solution can be considered completed. See also https://github.com/rust-lang/rust/issues/99571
 
 You do not need to verify the correctness of the transmute calls in the unit tests embedded in libcore, though it would be great to do so!
 
@@ -76,14 +82,13 @@ A new entry to the specification book is created explaining the relevant pattern
 
 At least 35 of the following 47 intrinsics and functions (i.e. approximately 75%) have been annotated with contracts, and, for non-intrinsics, had their bodies verified.
 
-For the safe functions, you do not need to provide a full-functional correctness specificatipn; it will suffice to add pre- and post-conditions (i.e. assumptions and assertions) around the relevant part of the code that calls the transmutation-related unsafe function or intrinsic.
+For the safe functions, you do not need to provide a full-functional correctness specification; it will suffice to add pre- and post-conditions (i.e. assumptions and assertions) around the relevant part of the code that calls the transmutation-related unsafe function or intrinsic.
 
 
 | Function              | Location          |
 |-----------------------|-------------------|
 | `transmute_unchecked` | `core::intrinsics` |
 | `transmute`           | `core::intrinsics` |
-| | |
 | `MaybeUninit<T>::array_assume_init`    | `core::mem` |
 | `MaybeUninit<[T; N]>::transpose`       | `core::mem` |
 | `<[MaybeUninit<T>; N]>::transpose`     | `core::mem` |
@@ -99,7 +104,6 @@ For the safe functions, you do not need to provide a full-functional correctness
 | `Alignment::new_unchecked` | `core::ptr::alignment` |
 | `MaybeUninit<T>::copy_from_slice` | `core::mem` |
 | `str::as_bytes_mut`        | `core::str` |
-| | |
 | `<Filter<I,P> as Iterator>::next_chunk` | `core::iter::adapters` |
 | `<FilterMap<I,F> as Iterator>::next_chunk` | `core::iter::adapters` |
 | `try_from_fn` | `core::array` |
@@ -117,7 +121,6 @@ For the safe functions, you do not need to provide a full-functional correctness
 | `Layout::from_size_align_unchecked` | `core::alloc::layout` |
 | `make_ascii_lowercase` | `core::str` |
 | `make_ascii_uppercase` | `core::str` |
-| | |
 | `<char as Step>::forward_checked` | `core::iter::range` |
 | `<Chars as Iterator>::next`                 | `core::str::iter` |
 | `<Chars as DoubleEndedIterator>::next_back` | `core::str::iter` |
@@ -132,7 +135,7 @@ For the safe functions, you do not need to provide a full-functional correctness
 | `do_count_chars` | `str::count` |
 
 
-* All solutions to verification challenges need to satisfy the criteria established in the challenge book (TODO: Add link) in addition to the ones listed below
+* All solutions to verification challenges need to satisfy the criteria established in the [challenge book](https://model-checking.github.io/verify-rust-std/general-rules.html) in addition to the ones listed below
 
 ## Appendix A: The list construction
 
