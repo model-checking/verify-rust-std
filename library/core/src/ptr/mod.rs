@@ -1769,7 +1769,6 @@ pub unsafe fn read_volatile<T>(src: *const T) -> T {
 #[stable(feature = "volatile", since = "1.9.0")]
 #[rustc_diagnostic_item = "ptr_write_volatile"]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-// What happens to the value that was replaced? No drop?
 #[safety::requires(ub_checks::can_write(dst))]
 pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
     // SAFETY: the caller must uphold the safety contract for `volatile_store`.

@@ -168,11 +168,12 @@ pub use predicates::*;
 /// At runtime, they are no-op, and always return true.
 #[cfg(not(kani))]
 mod predicates {
-    /// Check if a pointer can be dereferenced. I.e.:
-    ///   * `src` must be valid for reads. See [crate::ptr] documentation.
-    ///   * `src` must be properly aligned. Use read_unaligned if this is not the case.
-    ///   * `src` must point to a properly initialized value of type T.
+    /// Checks if a pointer can be dereferenced, ensuring:
+    ///   * `src` is valid for reads (see [`crate::ptr`] documentation).
+    ///   * `src` is properly aligned (use `read_unaligned` if not).
+    ///   * `src` points to a properly initialized value of type `T`.
     ///
+    /// [`crate::ptr`]: https://doc.rust-lang.org/std/ptr/index.html
     pub fn can_dereference<T>(src: *const T) -> bool {
         let _ = src;
         true
@@ -180,7 +181,7 @@ mod predicates {
 
     /// Check if a pointer can be written to:
     /// * `dst` must be valid for writes.
-    /// * `dst` must be properly aligned. Use [`write_unaligned`] if this is not the
+    /// * `dst` must be properly aligned. Use `write_unaligned` if this is not the
     ///    case.
     pub fn can_write<T>(dst: *mut T) -> bool {
         let _ = dst;
@@ -195,6 +196,7 @@ mod predicates {
         true
     }
 
+    /// Check if a pointer can be the target of unaligned writes.
     /// * `dst` must be valid for writes.
     pub fn can_write_unaligned<T>(dst: *mut T) -> bool {
         let _ = dst;
