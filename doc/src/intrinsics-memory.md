@@ -75,7 +75,7 @@ Annotate and verify all the functions that below that expose intrinsics with saf
 
 ### List of UBs
 
-All proofs must automatically ensure the absence of the following undefined behaviors [[ref]](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
+All proofs must automatically ensure the absence of the following undefined behaviors [ref](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
 
 * Invoking undefined behavior via compiler intrinsics.
 * Accessing (loading from or storing to) a place that is dangling or based on a misaligned pointer.

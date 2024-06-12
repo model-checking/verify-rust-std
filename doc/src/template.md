@@ -49,7 +49,7 @@ At least N of the following usages were proven safe:
 |	|	|
 |	|	|
 
-All proofs must automatically ensure the absence of the following undefined behaviors [[ref]](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
+All proofs must automatically ensure the absence of the following undefined behaviors [ref](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
 
 *List of UBs*
 

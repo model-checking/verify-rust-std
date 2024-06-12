@@ -10,7 +10,7 @@ NOTE: This work is not officially affiliated, or endorsed by the Rust project or
 tracking issue where contributors can add comments and ask clarification questions.
 You can find the list of [open challenges here](https://github.com/model-checking/verify-rust-std/labels/Challenge).
 
-**Solutions:** Solutions to a problem should be submitted as a single Pull Request (PR) to this repository. 
+**Solutions:** Solutions to a problem should be submitted as a single Pull Request (PR) to this repository.
 The solution should run as part of the CI.
 See more details about [minimum requirements for each solution](general-rules.md#solution-requirements).
 
@@ -33,13 +33,13 @@ well as to track the status of the challenge.
 
 A proposed solution to a verification problem will only **be reviewed** if all the minimum requirements below are met:
 
-* Each contribution or attempt should be submitted via a pull request to be analyzed by reviewers. 
+* Each contribution or attempt should be submitted via a pull request to be analyzed by reviewers.
 * By submitting the solution, participants confirm that they can use, modify, copy, and redistribute their contribution,
   under the terms of their choice.
 * The contribution must be automated and should be checked and pass as part of the PR checks.
 * All tools used by the solution must be in [the list of accepted tools](tools.md#approved-tools),
   and previously integrated in the repository.
-  If that is not the case, please submit a separate [tool application first](todo.md).
+  If that is not the case, please submit a separate [tool application first](./todo.md).
 * There is no restriction on the number of contributors for a solution.
   Make sure you have the rights to submit your solution and that all contributors are properly mentioned.
 * The solution cannot impact the runtime logic of the standard library unless the change is proposed and incorporated
@@ -56,7 +56,7 @@ The type of obstacles users face may depend on which part of the standard librar
 Everyone is welcome to submit new challenge proposals for review by our committee.
 Follow the following steps to create a new proposal:
 
-1. Create a tracking issue using the Issue template [Challenge Proposal](todo.md) for your challenge.
+1. Create a tracking issue using the Issue template [Challenge Proposal](./todo.md) for your challenge.
 2. In your fork of this repository do the following:
     1. Copy the template file (`book/src/challenge_template.md`) to `book/src/challenges/<ID_NUMBER>-<challenge-name>.md`.
     2. Fill in the details according to the template instructions.
@@ -69,7 +69,7 @@ Follow the following steps to create a new proposal:
 
 Solutions must be automated using one of the tools previously approved and listed [here](tools.md#approved-tools):
 
-* Any new tool that participants want to enable will require an application using the Issue template [Tool application](todo.md).
+* Any new tool that participants want to enable will require an application using the Issue template [Tool application](./todo.md).
 * The tool will be analyzed by an independent committee consisting of members from the Rust open-source developers and AWS
 * A new tool application should clearly specify the differences to existing techniques and provide sufficient background
   of why this is needed.
