@@ -23,8 +23,8 @@ Annotate Rust core::intrinsics functions that manipulate raw pointers with their
 
 Intrinsic functions to be annotated with safety contracts
 
-|Function	|Location	|
-|---	|---	|
+| Function | Location |
+|---------|---------|
 |typed_swap | core::intrisics |
 |vtable_size| core::intrisics |
 |vtable_align| core::intrisics |
@@ -50,8 +50,8 @@ Intrinsic functions to be annotated with safety contracts
 
 All the following usages of intrinsics were proven safe:
 
-|Function	|Location	|
-|---	|---	|
+| Function | Location |
+|---------|---------|
 |copy_from_slice	| core::slice |
 |parse_u64_into	| std::fmt |
 |swap | core::mem |
@@ -62,14 +62,13 @@ All the following usages of intrinsics were proven safe:
 
 Annotate and verify all the functions that below that expose intrinsics with safety contracts
 
-|Function	|Location	|
-|---	|---	|
+| Function | Location |
+|---------|---------|
 |copy_from_slice	| std::ptr |
 |parse_u64_into	| std::ptr |
 |swap | std::ptr |
 |align_of_val | std::ptr |
 |zeroed | std::ptr |
-
 
 
 
