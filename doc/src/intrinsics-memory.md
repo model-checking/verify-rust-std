@@ -46,8 +46,6 @@ Intrinsic functions to be annotated with safety contracts
 |ptr_offset_from_unsigned| core::intrisics |
 |read_via_copy| core::intrisics |
 |write_via_move| core::intrisics |
-|	|	|
-
 
 
 All the following usages of intrinsics were proven safe:
