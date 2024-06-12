@@ -1,6 +1,6 @@
 # Challenge: Verify `core` transmuting methods
 
-- **Status:** *One of the following: [Open | Resolved | Expired]* Open
+- **Status:** Open
 - **Tracking Issue:** *Link to issue*
 - **Start date:** *YY/MM/DD*
 - **End date:** *YY/MM/DD*
