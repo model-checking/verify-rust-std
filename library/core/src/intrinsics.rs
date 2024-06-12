@@ -2718,8 +2718,7 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
 #[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
-#[requires(x.addr() > y.addr() || (y.addr() >= x.addr() + core::mem::size_of::<T>()))]
-#[requires(x.addr() < y.addr() || (x.addr() >= y.addr() + core::mem::size_of::<T>()))]
+#[requires((x.addr() >= y.addr() + core::mem::size_of::<T>()) || (y.addr() >= x.addr() + core::mem::size_of::<T>()))]
 pub const unsafe fn typed_swap<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
     // pointers, so swapping them with `count: 1` is fine.
