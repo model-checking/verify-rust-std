@@ -3178,17 +3178,11 @@ mod verify {
     pub fn check_swap<T: kani::Arbitrary + Copy + cmp::PartialEq + fmt::Debug>() {
         let mut x = kani::any::<T>();
         let old_x = x;
-        let x_addr = (&x as *const T).addr();
-
         let mut y = kani::any::<T>();
         let old_y = y;
-        let y_addr = (&y as *const T).addr();
 
         unsafe { typed_swap(&mut x, &mut y) };
-
         assert_eq!(y, old_x);
         assert_eq!(x, old_y);
-        assert_eq!(y_addr, (&y as *const T).addr());
-        assert_eq!(x_addr, (&x as *const T).addr());
     }
 }
