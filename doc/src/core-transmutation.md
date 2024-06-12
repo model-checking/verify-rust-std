@@ -1,4 +1,4 @@
-# Challenge: Verify `core` transmuting methods
+# Challenge 1: Verify `core` transmuting methods
 
 - **Status:** Open
 - **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/19)
