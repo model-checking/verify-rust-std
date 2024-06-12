@@ -12,5 +12,4 @@
 ---
 
 # Challenges
-- [Coming soon](./todo.md)
 - [Memory safety of core intrinsics](./intrinsics-memory.md)
