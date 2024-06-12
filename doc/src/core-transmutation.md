@@ -143,4 +143,4 @@ The list of methods and intrinsics was gathered by surveying the call-graph (sol
 
 As mentioned in the assumptions, some (large) classes of methods were omitted from the challenge, either because 1. they encompassed a large API surface (e.g. `core::num`) that deserved separate treatment, 2. they had an enormous number of callers that would deserve separate treatment (e.g. `core::str::from_utf8_unchecked`), or 3. they interact with aspects of the Rust memory model that still need to be better understood by reasoning tools (e.g. the provenance APIs).
 
-You can see the [call graph produced by the survey here](https://hackmd.io/PYQNIL_aTxK0N6-AltxfbQ)
+You can see the [call graph produced by the survey here](https://hackmd.io/PYQNIL_aTxK0N6-AltxfbQ).
