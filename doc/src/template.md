@@ -25,31 +25,23 @@
 
 *Mention any assumption that users may make. Example, "assuming the usage of Stacked Borrows".*
 
-### Success Criteria*
+### Success Criteria
 
 *Here are some examples of possible criteria:*
 
 All the following unsafe functions must be annotated with safety contracts and the contracts have been verified:
 
-|Function	|Location	|
-|---	|---	|
-|	|	|
-|	|	|
-|	|	|
-|	|	|
-|	|	|
+| Function | Location |
+|---------|---------|
+|  abc   |  def    |
 
 At least N of the following usages were proven safe:
 
-|Function	|Location	|
-|---	|---	|
-|	|	|
-|	|	|
-|	|	|
-|	|	|
-|	|	|
+| Function | Location |
+|---------|---------|
+|  xyz   |  123   |
 
-All proofs must automatically ensure the absence of the following undefined behaviors [[ref]](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
+All proofs must automatically ensure the absence of the following undefined behaviors [ref](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
 
 *List of UBs*
 

@@ -8,10 +8,7 @@ name: Rust Tests
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - 'library/**'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/rustc.yml'
+    branches: [ main ]
   push:
     paths:
       - 'library/**'
@@ -61,6 +58,9 @@ jobs:
 
       - name: Run tests
         working-directory: upstream
+        env:
+          # Avoid error due to unexpected `cfg`.
+          RUSTFLAGS: "--check-cfg cfg(kani) --check-cfg cfg(feature,values(any()))"
         run: |
           ./configure --set=llvm.download-ci-llvm=true
           ./x test --stage 0 library/std

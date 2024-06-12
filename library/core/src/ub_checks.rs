@@ -160,3 +160,51 @@ pub(crate) const fn is_nonoverlapping(
     // This is just for safety checks so we can const_eval_select.
     const_eval_select((src, dst, size, count), comptime, runtime)
 }
+
+pub use predicates::*;
+
+/// Provide a few predicates to be used in safety contracts.
+///
+/// At runtime, they are no-op, and always return true.
+#[cfg(not(kani))]
+mod predicates {
+    /// Checks if a pointer can be dereferenced, ensuring:
+    ///   * `src` is valid for reads (see [`crate::ptr`] documentation).
+    ///   * `src` is properly aligned (use `read_unaligned` if not).
+    ///   * `src` points to a properly initialized value of type `T`.
+    ///
+    /// [`crate::ptr`]: https://doc.rust-lang.org/std/ptr/index.html
+    pub fn can_dereference<T>(src: *const T) -> bool {
+        let _ = src;
+        true
+    }
+
+    /// Check if a pointer can be written to:
+    /// * `dst` must be valid for writes.
+    /// * `dst` must be properly aligned. Use `write_unaligned` if this is not the
+    ///    case.
+    pub fn can_write<T>(dst: *mut T) -> bool {
+        let _ = dst;
+        true
+    }
+
+    /// Check if a pointer can be the target of unaligned reads.
+    /// * `src` must be valid for reads.
+    /// * `src` must point to a properly initialized value of type `T`.
+    pub fn can_read_unaligned<T>(src: *const T) -> bool {
+        let _ = src;
+        true
+    }
+
+    /// Check if a pointer can be the target of unaligned writes.
+    /// * `dst` must be valid for writes.
+    pub fn can_write_unaligned<T>(dst: *mut T) -> bool {
+        let _ = dst;
+        true
+    }
+}
+
+#[cfg(kani)]
+mod predicates {
+    pub use crate::kani::mem::{can_dereference, can_write, can_read_unaligned, can_write_unaligned};
+}

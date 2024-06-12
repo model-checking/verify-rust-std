@@ -7,9 +7,7 @@ name: Kani
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - 'library/**'
-      - '.github/workflows/kani.yml'
+    branches: [ main ]
   push:
     paths:
       - 'library/**'
@@ -26,6 +24,11 @@ jobs:
       matrix:
         # Kani does not support windows.
         os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
     steps:
       - name: Checkout Library
         uses: actions/checkout@v4
@@ -41,6 +44,11 @@ jobs:
           path: kani
           ref: features/verify-rust-std
 
+      - name: Setup Dependencies
+        working-directory: kani
+        run: |
+          ./scripts/setup/${{ matrix.base }}/install_deps.sh
+
       - name: Build `Kani`
         working-directory: kani
         run: |
@@ -52,5 +60,6 @@ jobs:
         env:
           RUST_BACKTRACE: 1
         run: |
-          kani verify-std -Z unstable-options ./library --target-dir "target"
+          kani verify-std -Z unstable-options ./library --target-dir ${{ runner.temp }} -Z function-contracts \
+            -Z mem-predicates -Z ptr-to-ref-cast-checks
           

@@ -26,6 +26,7 @@ Session.vim
 *.rlib
 *.rmeta
 *.mir
+Cargo.lock
 
 ## Temporary files
 *~

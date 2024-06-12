@@ -431,6 +431,9 @@ mod unit;
 #[stable(feature = "core_primitive", since = "1.43.0")]
 pub mod primitive;
 
+#[cfg(kani)]
+kani_core::kani_lib!(core);
+
 // Pull in the `core_arch` crate directly into core. The contents of
 // `core_arch` are in a different repository: rust-lang/stdarch.
 //
