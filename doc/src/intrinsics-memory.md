@@ -2,8 +2,8 @@
 
 - **Status:** Open
 - **Tracking Issue:** *Link to issue*
-- **Start date:** *YY/MM/DD*
-- **End date:** *YY/MM/DD*
+- **Start date:** *24/06/12*
+- **End date:** *24/12/10*
 
 -------------------
 
@@ -21,7 +21,7 @@ Annotate Rust core::intrinsics functions that manipulate raw pointers with their
 5. The verification of each intrinsic should ensure all the documented safety conditions are met, and that meeting them is enough to guarantee safe usage.
 
 
-### Functions for verification
+Intrinsic functions to be annotated with safety contracts
 
 |Function	|Location	|
 |---	|---	|
@@ -50,7 +50,7 @@ Annotate Rust core::intrinsics functions that manipulate raw pointers with their
 
 
 
-**At least 10 of the following usages of intrinsics were proven safe:**
+All the following usages of intrinsics were proven safe:
 
 |Function	|Location	|
 |---	|---	|
@@ -59,11 +59,10 @@ Annotate Rust core::intrinsics functions that manipulate raw pointers with their
 |swap | core::mem |
 |align_of_val | core::mem |
 |zeroed | core::mem::maybe_uninit |
-|	|	|
 
 
 
-**At least 5 unsafe functions that expose those intrinsics are also annotated with safety contracts, and those contracts are verified:**
+Annotate and verify all the functions that below that expose intrinsics with safety contracts
 
 |Function	|Location	|
 |---	|---	|
@@ -72,7 +71,6 @@ Annotate Rust core::intrinsics functions that manipulate raw pointers with their
 |swap | std::ptr |
 |align_of_val | std::ptr |
 |zeroed | std::ptr |
-|	|	|
 
 
 
@@ -83,7 +81,7 @@ All proofs must automatically ensure the absence of the following undefined beha
 
 * Invoking undefined behavior via compiler intrinsics.
 * Accessing (loading from or storing to) a place that is dangling or based on a misaligned pointer.
-* Uninitialized memory
+* Reading from uninitialized memory except for padding or unions.
 * Mutating immutable bytes.
 * Producing an invalid value
 
