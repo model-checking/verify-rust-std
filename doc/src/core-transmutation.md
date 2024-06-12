@@ -3,7 +3,7 @@
 - **Status:** Open
 - **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/19)
 - **Start date:** *YY/MM/DD*
-- **End date:** *YY/MM/DD*
+- **End date:** 2024-12-10
 
 -------------------
 
