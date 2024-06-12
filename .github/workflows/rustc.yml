@@ -61,6 +61,9 @@ jobs:
 
       - name: Run tests
         working-directory: upstream
+        env:
+          # Avoid error due to unexpected `cfg`.
+          RUSTFLAGS: "--check-cfg cfg(kani) --check-cfg cfg(feature,values(any()))"
         run: |
           ./configure --set=llvm.download-ci-llvm=true
           ./x test --stage 0 library/std

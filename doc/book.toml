@@ -20,6 +20,5 @@ runnable = false
 
 [output.linkcheck]
 
-
 [rust]
 edition = "2021"
