@@ -43,7 +43,7 @@ If one is concerned about proving functional correctness, then reasoning about t
 
 #### Part II - `unsafe` APIs with Validity Constraints
 
-There are unsafe methods (which are defined by libcore and reexported by libstd) that have the effect of a transmutation between a (sequence of) `T` and a (sequence of) `U`. Come up with an appropriate safety contract for each of them; they should usually be something simpler for callers than transmute itself (we hope).
+There are unsafe methods (which are defined by libcore and reexported by libstd) that have the effect of a transmutation between a (sequence of) `T` and a (sequence of) `U`. Come up with an appropriate safety contract for each of them.
 
 
 #### Part III - `unsafe` APIs with Richer Constraints
