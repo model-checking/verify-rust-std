@@ -15,7 +15,7 @@ Confirm the soundness of value transmutations performed by libcore, including th
 
 If the context of the transmute is safe, these conditions should be proven with local reasoning. If the context of the transmute is unsafe, they may be discharged with a safety obligation on the caller.
 
-To keep the goal somewhat manageable, it excludes some classes of code (e.g. UTF8-validation, async tasks, and others); see the assumptions for the full list of excluded categories.
+To keep the goal somewhat manageable, it excludes some classes of code (e.g., UTF8-validation, async tasks, and others); see the assumptions listed below for the full list of excluded categories.
 
 ## Details
 
