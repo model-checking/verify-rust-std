@@ -7,9 +7,7 @@ name: Kani
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - 'library/**'
-      - '.github/workflows/kani.yml'
+    branches: [ main ]
   push:
     paths:
       - 'library/**'

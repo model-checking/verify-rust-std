@@ -2,16 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 # This workflow is responsible for building and releasing the book.
-# It should only run when there has been a change to the book files
-# or via manual trigger.
 
 name: Build Book
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - 'doc/**'
-      - '.github/workflows/book.yml'
+    branches: [ main ]
   push:
     paths:
       - 'doc/**'

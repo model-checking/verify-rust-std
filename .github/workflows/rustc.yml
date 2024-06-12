@@ -8,10 +8,7 @@ name: Rust Tests
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - 'library/**'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/rustc.yml'
+    branches: [ main ]
   push:
     paths:
       - 'library/**'
