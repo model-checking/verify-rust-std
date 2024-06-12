@@ -63,11 +63,15 @@
 )]
 #![allow(missing_docs)]
 
+use safety::requires;
 use crate::marker::DiscriminantKind;
 use crate::marker::Tuple;
 use crate::mem::align_of;
 use crate::ptr;
 use crate::ub_checks;
+
+#[cfg(kani)]
+use crate::kani;
 
 pub mod mir;
 pub mod simd;
@@ -2709,6 +2713,13 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[rustc_intrinsic]
 // This has fallback `const fn` MIR, so shouldn't need stability, see #122652
 #[rustc_const_unstable(feature = "const_typed_swap", issue = "none")]
+#[cfg_attr(kani, kani::modifies(x))]
+#[cfg_attr(kani, kani::modifies(y))]
+#[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
+#[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
+#[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
+#[requires(x.addr() > y.addr() || (y.addr() >= x.addr() + core::mem::size_of::<T>()))]
+#[requires(x.addr() < y.addr() || (x.addr() >= y.addr() + core::mem::size_of::<T>()))]
 pub const unsafe fn typed_swap<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
     // pointers, so swapping them with `count: 1` is fine.
@@ -3141,4 +3152,44 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
     const fn compiletime(_ptr: *const (), _align: usize) {}
 
     const_eval_select((ptr, align), compiletime, runtime);
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use core::{cmp, fmt};
+    use super::*;
+    use crate::kani;
+
+    #[kani::proof_for_contract(typed_swap)]
+    pub fn check_typed_swap_u8() {
+        check_swap::<u8>()
+    }
+
+    #[kani::proof_for_contract(typed_swap)]
+    pub fn check_typed_swap_char() {
+        check_swap::<char>()
+    }
+
+    #[kani::proof_for_contract(typed_swap)]
+    pub fn check_typed_swap_non_zero() {
+        check_swap::<core::num::NonZeroI32>()
+    }
+
+    pub fn check_swap<T: kani::Arbitrary + Copy + cmp::PartialEq + fmt::Debug>() {
+        let mut x = kani::any::<T>();
+        let old_x = x;
+        let x_addr = (&x as *const T).addr();
+
+        let mut y = kani::any::<T>();
+        let old_y = y;
+        let y_addr = (&y as *const T).addr();
+
+        unsafe { typed_swap(&mut x, &mut y) };
+
+        assert_eq!(y, old_x);
+        assert_eq!(x, old_y);
+        assert_eq!(y_addr, (&y as *const T).addr());
+        assert_eq!(x_addr, (&x as *const T).addr());
+    }
 }

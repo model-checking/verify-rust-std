@@ -13,6 +13,9 @@ use crate::intrinsics;
 use crate::marker::DiscriminantKind;
 use crate::ptr;
 
+#[cfg(kani)]
+use crate::kani;
+
 mod manually_drop;
 #[stable(feature = "manually_drop", since = "1.20.0")]
 pub use manually_drop::ManuallyDrop;
@@ -725,6 +728,8 @@ pub unsafe fn uninitialized<T>() -> T {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_unstable(feature = "const_swap", issue = "83163")]
 #[rustc_diagnostic_item = "mem_swap"]
+#[cfg_attr(kani, crate::kani::modifies(x))]
+#[cfg_attr(kani, crate::kani::modifies(y))]
 pub const fn swap<T>(x: &mut T, y: &mut T) {
     // SAFETY: `&mut` guarantees these are typed readable and writable
     // as well as non-overlapping.
@@ -1344,4 +1349,39 @@ impl<T> SizedTypeProperties for T {}
 pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
     // The `{}` is for better error messages
     {builtin # offset_of($Container, $($fields)+)}
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    /// Use this type to ensure that mem swap does not drop the value.
+    #[derive(kani::Arbitrary)]
+    struct CannotDrop<T: kani::Arbitrary> {
+        inner: T,
+    }
+
+    impl<T: kani::Arbitrary> Drop for CannotDrop<T> {
+        fn drop(&mut self) {
+            unreachable!("Cannot drop")
+        }
+    }
+
+    #[kani::proof_for_contract(swap)]
+    pub fn check_swap_primitive() {
+        let mut x: u8 = kani::any();
+        let mut y: u8 = kani::any();
+        swap(&mut x, &mut y)
+    }
+
+    #[kani::proof_for_contract(swap)]
+    pub fn check_swap_adt_no_drop() {
+        let mut x: CannotDrop<char> = kani::any();
+        let mut y: CannotDrop<char> = kani::any();
+        swap(&mut x, &mut y);
+        forget(x);
+        forget(y);
+    }
 }
