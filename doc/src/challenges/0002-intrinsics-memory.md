@@ -83,5 +83,5 @@ All proofs must automatically ensure the absence of the following undefined beha
 * Producing an invalid value
 
 
-Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](general-rules.md)
+Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](../general-rules.md)
 in addition to the ones listed above.

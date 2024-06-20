@@ -1,6 +1,6 @@
 # Challenge XXXX[^challenge_id]: Challenge Title
 
-- **Status:** *One of the following: [Open | Resolved | Expired]*
+- **Status:** *One of the following: \[Open | Resolved | Expired\]*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
 - **Tracking Issue:** *Link to issue*
 - **Start date:** *YY/MM/DD*

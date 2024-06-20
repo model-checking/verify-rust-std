@@ -12,6 +12,6 @@
 
 ---
 
-# Challenges
-- [Core Transmutation](./core-transmutation.md)
-- [Memory safety of core intrinsics](./intrinsics-memory.md)
+- [Challenges](./challenges.md)
+  - [Core Transmutation](./challenges/0001-core-transmutation.md)
+  - [Memory safety of core intrinsics](./challenges/0002-intrinsics-memory.md)
