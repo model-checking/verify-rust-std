@@ -18,7 +18,7 @@ raw pointer access.
 
 Raw pointer arithmetic is a common operation employed in the implementation of highly optimized code,
 as well as containers with dynamic size.
-Examples of the former are `str::repeat`, `[u8]::is_asc_ii`,
+Examples of the former are `str::repeat`, `[u8]::is_ascii`,
 while for the latter we have `Vec`, `VecDeque`, `HashMap`.
 
 These unsafe operations are usually abstracted from the end user with the usage of
