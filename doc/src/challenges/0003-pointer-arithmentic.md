@@ -32,11 +32,11 @@ They are critical for Rust applications safety, and they are modular by design.
 
 ## Description
 
-Rust provide different options for pointer arithmetic, which have different semantics when it comes to safety.
+Rust provides different options for pointer arithmetic, which have different semantics when it comes to safety.
 For example, methods such as [`ptr::offset`](https://doc.rust-lang.org/std/primitive.pointer.html#method.offset),
 [`ptr::add`](https://doc.rust-lang.org/std/primitive.pointer.html#method.add),
 and [`ptr::sub`](https://doc.rust-lang.org/std/primitive.pointer.html#method.sub)
-are unsafe, and one of their safety condition is that:
+are unsafe, and one of their safety conditions is that:
 > - Both the starting and resulting pointer must be either in bounds or one byte past the end of the same allocated object.
 
 I.e., violating this safety condition triggers immediate UB.
@@ -49,17 +49,17 @@ are safe, however, the resulting pointer must not be used to read or write other
 
 Thus, we would like to be able to verify usage of these different methods within the standard library
 to ensure they are safely employed,
-as well as provide function contract that can be used by other Rust crates to verify their own usage of these methods.
+as well as provide function contracts that can be used by other Rust crates to verify their own usage of these methods.
 
 ### Assumptions
 
 For this challenge, we do not require a full proof that is independent of the pointee type `T`.
 Instead, we require that the verification is done for the following pointee types:
-1. All integer type.
+1. All integer types.
 2. At least one `dyn Trait`.
 3. At least one slice.
 4. For unit type.
-5. At least one composite types with multiple non-ZST fields.
+5. At least one composite type with multiple non-ZST fields.
 
 ### Success Criteria
 
