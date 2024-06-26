@@ -1,0 +1,147 @@
+name: Check PR Approvals
+
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  check-approvals:
+    if: github.event.review.state == 'APPROVED' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install TOML parser
+        run: npm install @iarna/toml
+
+      - name: Check PR Relevance and Approvals
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+            const toml = require('@iarna/toml');
+            const { owner, repo } = context.repo;
+            let pull_number;
+
+            if (github.event_name === 'workflow_dispatch') {
+              const branch = github.ref.replace('refs/heads/', '');
+              const prs = await github.rest.pulls.list({
+                owner,
+                repo,
+                head: `${owner}:${branch}`,
+                state: 'open'
+              });
+              if (prs.data.length === 0) {
+                console.log('No open PR found for this branch.');
+                return;
+              }
+              pull_number = prs.data[0].number;
+            } else {
+              pull_number = context.issue.number;
+            }
+
+            // Get PR files
+            const files = await github.rest.pulls.listFiles({
+              owner,
+              repo,
+              pull_number
+            });
+
+            const relevantPaths = ['library/', 'doc/src/challenges/'];
+            const isRelevantPR = files.data.some(file =>
+              relevantPaths.some(path => file.filename.startsWith(path))
+            );
+
+            if (!isRelevantPR) {
+              console.log('PR does not touch relevant paths. Exiting workflow.');
+              return;
+            }
+
+            // Get parsed data
+            try {
+              const tomlContent = fs.readFileSync('.github/pull_requests.toml', 'utf8');
+              console.log('TOML content:', tomlContent);
+              const tomlData = toml.parse(tomlContent);
+              console.log('Parsed TOML data:', JSON.stringify(tomlData, null, 2));
+
+              if (!tomlData.committee || !Array.isArray(tomlData.committee.members)) {
+                throw new Error('committee.members is not an array in the TOML file');
+              }
+              requiredApprovers = tomlData.committee.members;
+            } catch (error) {
+              console.error('Error reading or parsing TOML file:', error);
+              core.setFailed('Failed to read required approvers list');
+              return;
+            }
+
+            // Get all reviews
+            const reviews = await github.rest.pulls.listReviews({
+              owner,
+              repo,
+              pull_number
+            });
+
+            const approvers = new Set(
+              reviews.data
+                .filter(review => review.state === 'APPROVED')
+                .map(review => review.user.login)
+            );
+
+            const requiredApprovals = 2;
+            const requiredApproversCount = Array.from(approvers)
+              .filter(approver => requiredApprovers.includes(approver))
+              .length;
+
+            console.log('PR Approvers:', Array.from(approvers));
+            console.log('Required Approvers:', requiredApproversCount);
+
+            const checkName = 'PR Approval Status';
+            const conclusion = (approvers.size >= requiredApprovals && requiredApproversCount >= 2) ? 'success' : 'failure';
+            const output = {
+              title: checkName,
+              summary: `PR has ${approvers.size} total approvals and ${requiredApproversCount} required approvals.`,
+              text: `Approvers: ${Array.from(approvers).join(', ')}\nRequired Approvers: ${requiredApprovers.join(', ')}`
+            };
+
+            // Get PR details
+            const pr = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number
+            });
+
+            // Create or update check run
+            const checkRuns = await github.rest.checks.listForRef({
+              owner,
+              repo,
+              ref: pr.data.head.sha,
+              check_name: checkName
+            });
+
+            if (checkRuns.data.total_count > 0) {
+              await github.rest.checks.update({
+                owner,
+                repo,
+                check_run_id: checkRuns.data.check_runs[0].id,
+                status: 'completed',
+                conclusion,
+                output
+              });
+            } else {
+              await github.rest.checks.create({
+                owner,
+                repo,
+                name: checkName,
+                head_sha: pr.data.head.sha,
+                status: 'completed',
+                conclusion,
+                output
+              });
+            }
+
+            if (conclusion === 'failure') {
+              core.setFailed(`PR needs at least ${requiredApprovals} total approvals and 2 required approvals. Current approvals: ${approvers.size}, Required approvals: ${requiredApproversCount}`);
+            }
