@@ -15,7 +15,7 @@ This is one of the main modules used for implementing the `BTreeMap` collection,
 
 ### Success Criteria
 
-All public functions (especially safe ones) containing unsafe code must be annotated with safety contracts and the contracts have been verified, e.g.:
+The memory safety of all public functions (especially safe ones) containing unsafe code must be verified, e.g.:
 
 1. `LeafNode::new`
 1. `NodeRef::new_internal`
@@ -51,6 +51,8 @@ All public functions (especially safe ones) containing unsafe code must be annot
 1. `BalancingContext::steal_right`
 1. `BalancingContext::bulk_steal_left`
 1. `BalancingContext::bulk_steal_right`
+
+The verification must be unbounded for functions that are recursive or that contain loops (e.g. `Handle::insert_recursing`).
 
 ### List of UBs
 
