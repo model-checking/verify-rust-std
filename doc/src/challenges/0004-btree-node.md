@@ -1,4 +1,4 @@
-# Challenge 4: Verify the memory safety of the `alloc::collections::btree::node` module
+# Challenge 4: Towards the memory safety of BTreeMap
 
 - **Status:** Open
 - **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/25)
@@ -12,8 +12,6 @@
 
 Verify the memory safety of the [`alloc::collections::btree::node` module](https://github.com/rust-lang/rust/blob/c290e9de32e8ba6a673ef125fde40eadd395d170/library/alloc/src/collections/btree/node.rs).
 This is one of the main modules used for implementing the `BTreeMap` collection, and it includes a lot of unsafe code.
-
-After annotating functions in this module with their safety contract and verifying those contracts, verify that their usage from `BTreeMap` satisfies the contracts.
 
 ### Success Criteria
 
@@ -53,8 +51,6 @@ All public functions (especially safe ones) containing unsafe code must be annot
 1. `BalancingContext::steal_right`
 1. `BalancingContext::bulk_steal_left`
 1. `BalancingContext::bulk_steal_right`
-
-The usage of the above functions in `BTreeMap` is proven safe.
 
 ### List of UBs
 
