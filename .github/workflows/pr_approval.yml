@@ -1,9 +1,13 @@
 name: Check PR Approvals
 
+# For now, the workflow gets triggered only when a review is submitted
+# This technically means, a PR with zero approvals can be merged by the rules of this workflow alone
+# To protect against that scenario, we can turn on number of approvals required to 2 in the github settings
+# of the repository
 on:
   pull_request_review:
     types: [submitted]
-  workflow_dispatch:  # Allows manual triggering
+  workflow_dispatch:
 
 jobs:
   check-approvals:
@@ -84,6 +88,7 @@ jobs:
               pull_number
             });
 
+            # Example: approvers = ["celina", "zyad"]
             const approvers = new Set(
               reviews.data
                 .filter(review => review.state === 'APPROVED')
@@ -95,9 +100,11 @@ jobs:
               .filter(approver => requiredApprovers.includes(approver))
               .length;
 
+            # TODO: Improve logging and messaging to the user
             console.log('PR Approvers:', Array.from(approvers));
             console.log('Required Approvers:', requiredApproversCount);
 
+            # Core logic that checks if the approvers are in the committee
             const checkName = 'PR Approval Status';
             const conclusion = (approvers.size >= requiredApprovals && requiredApproversCount >= 2) ? 'success' : 'failure';
             const output = {
@@ -121,6 +128,9 @@ jobs:
               check_name: checkName
             });
 
+            # Reuse the same workflow everytime there's a new review submitted
+            # instead of creating new workflows. Better efficiency and readability
+            # as the number of workflows is kept to a minimal number
             if (checkRuns.data.total_count > 0) {
               await github.rest.checks.update({
                 owner,
