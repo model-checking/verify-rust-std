@@ -86,7 +86,7 @@ Solutions must be automated using one of the tools previously approved and liste
 
 You can apply to be part of the committee by submitting a pull request that adds your github login name to the pull_request.toml file.
 
-For example, add @rahulku without @ to the committee member's list,
+For example, if your user login is @rahulku, add the login without @ to the committee member's list,
 ```
 [committee]
 members = [
