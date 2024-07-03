@@ -1,6 +1,3 @@
-# Copyright Kani Contributors
-# SPDX-License-Identifier: Apache-2.0 OR MIT
-
 # This version should be updated whenever we update the version of the Rust
 # standard library we currently track.
 

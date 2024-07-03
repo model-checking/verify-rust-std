@@ -1,6 +1,3 @@
-# Copyright Kani Contributors
-# SPDX-License-Identifier: Apache-2.0 OR MIT
-
 # This workflow is responsible for building the standard library using the bootstrap script
 # and executing the Rust regression.
 

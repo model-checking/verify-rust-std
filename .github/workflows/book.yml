@@ -1,6 +1,3 @@
-# Copyright Kani Contributors
-# SPDX-License-Identifier: Apache-2.0 OR MIT
-
 # This workflow is responsible for building and releasing the book.
 
 name: Build Book
