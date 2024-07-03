@@ -84,7 +84,7 @@ Solutions must be automated using one of the tools previously approved and liste
 
 ## Committee Applications
 
-You can apply to be part of the committee by submitting a pull request that adds your github login name to the pull_request.toml file.
+You can apply to be part of the committee by submitting a pull request that adds your GitHub login name to the `pull_request.toml` file.
 
 For example, if your user login is @rahulku, add the login without @ to the committee member's list,
 ```
