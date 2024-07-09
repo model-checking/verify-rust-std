@@ -4,11 +4,15 @@
 // collections, resulting in having to optimize down excess IR multiple times.
 // Your performance intuition is useless. Run perf.
 
+use safety::requires;
 use crate::cmp;
 use crate::error::Error;
 use crate::fmt;
 use crate::mem;
 use crate::ptr::{Alignment, NonNull};
+
+#[cfg(kani)]
+use crate::kani;
 
 // While this function is used in one place and its implementation
 // could be inlined, the previous attempts to do so made rustc
@@ -117,6 +121,9 @@ impl Layout {
     #[must_use]
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
+    #[requires(align > 0)]
+    #[requires((align & (align - 1)) == 0)]
+    #[requires(size <= isize::MAX as usize - (align - 1))]
     pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self {
         // SAFETY: the caller is required to uphold the preconditions.
         unsafe { Layout { size, align: Alignment::new_unchecked(align) } }
@@ -490,5 +497,28 @@ impl Error for LayoutError {}
 impl fmt::Display for LayoutError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("invalid parameters to Layout::from_size_align")
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof_for_contract(Layout::from_size_align_unchecked)]
+    pub fn check_from_size_align_unchecked() {
+        let shift_index = kani::any::<usize>();
+        kani::assume(shift_index < core::mem::size_of::<usize>() * 8);
+        let a : usize = 1 << shift_index;
+        kani::assume(a > 0);
+
+        let s = kani::any::<usize>();
+        kani::assume(s <= isize::MAX as usize - (a - 1));
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            assert_eq!(layout.size(), s);
+            assert_eq!(layout.align(), a);
+        }
     }
 }
