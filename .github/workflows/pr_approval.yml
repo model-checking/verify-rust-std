@@ -23,7 +23,6 @@ jobs:
       - name: Check PR Relevance and Approvals
         uses: actions/github-script@v6
         with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
             const fs = require('fs');
             const toml = require('@iarna/toml');
