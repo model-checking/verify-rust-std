@@ -87,7 +87,7 @@ jobs:
               pull_number
             });
 
-            # Example: approvers = ["celina", "zyad"]
+            // Example: approvers = ["celina", "zyad"]
             const approvers = new Set(
               reviews.data
                 .filter(review => review.state === 'APPROVED')
@@ -99,11 +99,11 @@ jobs:
               .filter(approver => requiredApprovers.includes(approver))
               .length;
 
-            # TODO: Improve logging and messaging to the user
+            // TODO: Improve logging and messaging to the user
             console.log('PR Approvers:', Array.from(approvers));
             console.log('Required Approvers:', requiredApproversCount);
 
-            # Core logic that checks if the approvers are in the committee
+            // Core logic that checks if the approvers are in the committee
             const checkName = 'PR Approval Status';
             const conclusion = (approvers.size >= requiredApprovals && requiredApproversCount >= 2) ? 'success' : 'failure';
             const output = {
@@ -127,9 +127,9 @@ jobs:
               check_name: checkName
             });
 
-            # Reuse the same workflow everytime there's a new review submitted
-            # instead of creating new workflows. Better efficiency and readability
-            # as the number of workflows is kept to a minimal number
+            // Reuse the same workflow everytime there's a new review submitted
+            // instead of creating new workflows. Better efficiency and readability
+            // as the number of workflows is kept to a minimal number
             if (checkRuns.data.total_count > 0) {
               await github.rest.checks.update({
                 owner,
