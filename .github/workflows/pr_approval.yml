@@ -51,23 +51,6 @@ jobs:
               pull_number = context.issue.number;
             }
 
-            // Get PR files
-            const files = await github.rest.pulls.listFiles({
-              owner,
-              repo,
-              pull_number
-            });
-
-            const relevantPaths = ['library/', 'doc/src/challenges/'];
-            const isRelevantPR = files.data.some(file =>
-              relevantPaths.some(path => file.filename.startsWith(path))
-            );
-
-            if (!isRelevantPR) {
-              console.log('PR does not touch relevant paths. Exiting workflow.');
-              return;
-            }
-
             // Get parsed data
             try {
               const tomlContent = fs.readFileSync('.github/pull_requests.toml', 'utf8');
