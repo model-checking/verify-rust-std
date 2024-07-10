@@ -100,7 +100,7 @@ jobs:
             );
 
             const requiredApprovals = 2;
-            const requiredApproversCount = Array.from(approvers)
+            const currentCountfromCommittee = Array.from(approvers)
               .filter(approver => requiredApprovers.includes(approver))
               .length;
 
@@ -110,7 +110,7 @@ jobs:
 
             // Core logic that checks if the approvers are in the committee
             const checkName = 'PR Approval Status';
-            const conclusion = (approvers.size >= requiredApprovals && requiredApproversCount >= 2) ? 'success' : 'failure';
+            const conclusion = (approvers.size >= requiredApprovals && currentCountfromCommittee >= 2) ? 'success' : 'failure';
             const output = {
               title: checkName,
               summary: `PR has ${approvers.size} total approvals and ${requiredApprovals} required approvals.`,
@@ -157,5 +157,5 @@ jobs:
             }
 
             if (conclusion === 'failure') {
-              core.setFailed(`PR needs at least ${requiredApprovals} total approvals and 2 required approvals. Current approvals: ${approvers.size}, Required approvals: ${requiredApproversCount}`);
+              core.setFailed(`PR needs at least ${requiredApprovals} total approvals and 2 required approvals. Current approvals: ${approvers.size}, Required approvals: ${requiredApprovals}`);
             }
