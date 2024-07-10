@@ -108,14 +108,14 @@ jobs:
 
             // TODO: Improve logging and messaging to the user
             console.log('PR Approvers:', Array.from(approvers));
-            console.log('Required Approvers:', requiredApproversCount);
+            console.log('Required Approvers:', requiredApprovals);
 
             // Core logic that checks if the approvers are in the committee
             const checkName = 'PR Approval Status';
             const conclusion = (approvers.size >= requiredApprovals && requiredApproversCount >= 2) ? 'success' : 'failure';
             const output = {
               title: checkName,
-              summary: `PR has ${approvers.size} total approvals and ${requiredApproversCount} required approvals.`,
+              summary: `PR has ${approvers.size} total approvals and ${requiredApprovals} required approvals.`,
               text: `Approvers: ${Array.from(approvers).join(', ')}\nRequired Approvers: ${requiredApprovers.join(', ')}`
             };
 
