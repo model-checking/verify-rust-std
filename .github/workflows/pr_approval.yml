@@ -13,7 +13,11 @@ on:
 # Without these permissions, we get a 403 error from github
 # for trying to modify the pull request for newer project.
 # Source: https://stackoverflow.com/a/76994510
-permissions: write-all
+permissions:
+  contents: write
+  actions: write
+  pull-requests: write
+  checks: write
 
 jobs:
   check-approvals:
