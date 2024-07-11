@@ -121,9 +121,7 @@ impl Layout {
     #[must_use]
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
-    #[requires(align > 0)]
-    #[requires((align & (align - 1)) == 0)]
-    #[requires(size <= isize::MAX as usize - (align - 1))]
+    #[requires(Layout::from_size_align(size, align).is_ok())]
     pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self {
         // SAFETY: the caller is required to uphold the preconditions.
         unsafe { Layout { size, align: Alignment::new_unchecked(align) } }
@@ -507,13 +505,8 @@ mod verify {
 
     #[kani::proof_for_contract(Layout::from_size_align_unchecked)]
     pub fn check_from_size_align_unchecked() {
-        let shift_index = kani::any::<usize>();
-        kani::assume(shift_index < core::mem::size_of::<usize>() * 8);
-        let a : usize = 1 << shift_index;
-        kani::assume(a > 0);
-
         let s = kani::any::<usize>();
-        kani::assume(s <= isize::MAX as usize - (a - 1));
+        let a = kani::any::<usize>();
 
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
