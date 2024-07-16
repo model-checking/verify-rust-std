@@ -17,4 +17,4 @@
   - [Memory safety of core intrinsics](./challenges/0002-intrinsics-memory.md)
   - [Pointer Arithmetic](./challenges/0003-pointer-arithmentic.md)
   - [Inductive data type](./challenges/0005-linked-list.md)
-  - [Memory safety of the `btree::node` module](./challenges/0006-btree-node.md)
+  - [Memory safety of BTreeMap's `btree::node` module](./challenges/0006-btree-node.md)

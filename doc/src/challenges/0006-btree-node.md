@@ -1,4 +1,4 @@
-# Challenge 4: Towards the memory safety of BTreeMap
+# Challenge 4: Memory safety of BTreeMap's `btree::node` module
 
 - **Status:** Open
 - **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/25)
@@ -59,7 +59,7 @@ The verification must be unbounded for functions that are recursive or that cont
 All proofs must automatically ensure the absence of the following [undefined behaviors](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
 
 * Accessing (loading from or storing to) a place that is dangling or based on a misaligned pointer.
-* Reading from uninitialized memory except for padding or unions.
+* Reading from uninitialized memory.
 * Mutating immutable bytes.
 * Producing an invalid value
 
