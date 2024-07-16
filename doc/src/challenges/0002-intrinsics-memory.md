@@ -32,7 +32,6 @@ Intrinsic functions to be annotated with safety contracts
 |copy| core::intrisics |
 |write_bytes| core::intrisics |
 |size_of_val| core::intrisics |
-|arith_offset| core::intrisics |
 |volatile_copy_nonoverlapping_memory| core::intrisics |
 |volatile_copy_memory| core::intrisics |
 |volatile_set_memory| core::intrisics |

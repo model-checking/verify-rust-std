@@ -1063,7 +1063,17 @@ extern "rust-intrinsic" {
     /// The stabilized version of this intrinsic is [`crate::mem::size_of_val`].
     #[rustc_const_unstable(feature = "const_size_of_val", issue = "46571")]
     #[rustc_nounwind]
-    pub fn size_of_val<T: ?Sized>(_: *const T) -> usize;
+    // FIXME: Kani currently does not support annotating intrinsics.
+    // See https://github.com/model-checking/kani/issues/3325
+    #[cfg_attr(not(kani), requires(matches!(
+        <T as Pointee>::Metadata::map_dyn(crate::ptr::metadata(_val)::metadata(),
+            |dyn_meta| { ub_checks::can_dereference(dyn_meta)}),
+        None | Some(true))))]
+    #[cfg_attr(not(kani), requires(matches!(
+        <T as Pointee>::Metadata::map_len(crate::ptr::metadata(_val)::metadata(),
+            |_| { ub_checks::can_dereference(_val)}),
+        None | Some(true))))]
+    pub fn size_of_val<T: ?Sized>(_val: *const T) -> usize;
     /// The required alignment of the referenced value.
     ///
     /// The stabilized version of this intrinsic is [`core::mem::align_of_val`].
@@ -2789,6 +2799,9 @@ pub const unsafe fn const_deallocate(_ptr: *mut u8, _size: usize, _align: usize)
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
+// FIXME(kani): Cannot verify intrinsics contract yet.
+// <https://github.com/model-checking/kani/issues/3345>
+#[requires(ub_checks::can_dereference(_ptr as *const crate::ptr::DynMetadata<dyn crate::any::Any>))]
 pub unsafe fn vtable_size(_ptr: *const ()) -> usize {
     unreachable!()
 }
@@ -2799,6 +2812,9 @@ pub unsafe fn vtable_size(_ptr: *const ()) -> usize {
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
+// FIXME(kani): Cannot verify intrinsics contract yet.
+// <https://github.com/model-checking/kani/issues/3345>
+#[requires(ub_checks::can_dereference(_ptr as *const crate::ptr::DynMetadata<dyn crate::any::Any>))]
 pub unsafe fn vtable_align(_ptr: *const ()) -> usize {
     unreachable!()
 }
@@ -2940,6 +2956,14 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(_ptr: *cons
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy_nonoverlapping"]
+#[requires(!count.overflowing_mul(size_of::<T>()).1
+  && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src, count))
+  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+#[requires(src.addr() != dst.addr() || core::mem::size_of::<T>() == 0)]
+#[requires((src.addr() >= dst.addr() + core::mem::size_of::<T>()) || (dst.addr() >= src.addr() + core::mem::size_of::<T>()))]
+// TODO: Modifies doesn't work with slices today.
+// https://github.com/model-checking/kani/pull/3295
+// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
@@ -3042,6 +3066,13 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy"]
+// FIXME: How to verify safety for types that do not implement Copy and count > 1??
+#[requires(!count.overflowing_mul(size_of::<T>()).1
+    && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src, count))
+    && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+// TODO: Modifies doesn't work with slices today.
+// https://github.com/model-checking/kani/pull/3295
+// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
@@ -3060,7 +3091,10 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
                 align: usize = align_of::<T>(),
             ) =>
             ub_checks::is_aligned_and_not_null(src, align)
-                && ub_checks::is_aligned_and_not_null(dst, align)
+
+
+
+            && ub_checks::is_aligned_and_not_null(dst, align)
         );
         copy(src, dst, count)
     }
@@ -3122,6 +3156,11 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_write_bytes"]
+#[requires(!count.overflowing_mul(size_of::<T>()).1
+  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst as *mut u8, count)))]
+// TODO: Modifies doesn't work with slices today.
+// https://github.com/model-checking/kani/pull/3295
+// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
@@ -3196,5 +3235,139 @@ mod verify {
         unsafe { typed_swap(&mut x, &mut y) };
         assert_eq!(y, old_x);
         assert_eq!(x, old_y);
+    }
+
+    /// Note that in `core` we cannot check allocated pointers.
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, kani::Arbitrary)]
+    enum PtrKind {
+        /// Dangling pointers
+        Dangling,
+        /// Null pointers
+        Null,
+        /// Stack pointers
+        Stack,
+        /// Overlapping pointers
+        Overlap,
+        /// Unaligned pointers
+        Unaligned,
+        /// Pointer to uninitialized memory
+        Uninitialized,
+    }
+
+    struct ArbitraryPointers<T> {
+        src: *const T,
+        dst: *mut T,
+        dst_kind: PtrKind,
+        src_kind: PtrKind,
+    }
+
+    impl<T: kani::Arbitrary> ArbitraryPointers<T> {
+        fn with_arbitrary<F>(harness: F) where F: FnOnce(ArbitraryPointers<u32>) {
+            #[repr(C)]
+            struct WithPadding {
+                byte: u8,
+                // padding in the middle.
+                bytes: u64,
+            }
+            let mut single = kani::any::<u32>();
+            let ptr1 = crate::ptr::addr_of_mut!(single);
+
+            let mut array = [kani::any::<u32>(); 100];
+            let ptr2 = crate::ptr::addr_of_mut!(array) as *mut u32;
+
+            let mut buffer = [0u8, 6];
+            let unaligned = unsafe { crate::ptr::addr_of_mut!(buffer).byte_offset(1) } as *mut u32;
+
+            let mut padding = WithPadding { byte: 0, bytes: 0};
+            let uninit = unsafe { crate::ptr::addr_of_mut!(padding.byte).byte_offset(4)} as *mut u32;
+
+            let arbitrary = ArbitraryPointers::from(ptr1, ptr2, unaligned, uninit);
+            harness(arbitrary);
+        }
+
+        fn from(ptr1: *mut T, ptr2: *mut T, unaligned: *mut T, uninit: *mut T) -> Self {
+            let (src_kind, src) = ArbitraryPointers::any(ptr1, ptr2, unaligned, uninit);
+            let (dst_kind, dst) = ArbitraryPointers::any(ptr2, ptr1, unaligned, uninit);
+            ArbitraryPointers {
+                src_kind,
+                src,
+                dst_kind,
+                dst,
+            }
+        }
+
+        fn any(unique: *mut T, overlap: *mut T, unaligned: *mut T, uninit: *mut T) -> (PtrKind, *mut T) {
+            let kind = kani::any::<PtrKind>();
+            let ptr = match kind {
+                PtrKind::Dangling =>  {
+                    crate::ptr::dangling_mut::<T>()
+                }
+                PtrKind::Null => {
+                    crate::ptr::null_mut::<T>()
+                }
+                PtrKind::Stack => {
+                    unique
+                }
+                PtrKind::Overlap => {
+                    if kani::any() { unique } else { overlap }
+                }
+                PtrKind::Unaligned => {
+                    unaligned
+                }
+                PtrKind::Uninitialized => {
+                    uninit
+                }
+            };
+            (kind, ptr)
+        }
+    }
+
+    /// This harness currently fails because we cannot define the modifies clause for slices.
+    #[kani::proof_for_contract(copy)]
+    fn check_copy() {
+        ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
+            // Skip dangling for now since it makes Kani contract panic.
+            // Verify this case in a separate harness.
+            kani::assume(arbitrary.dst_kind != PtrKind::Dangling);
+            kani::assume(arbitrary.src_kind != PtrKind::Dangling);
+            unsafe { copy(arbitrary.src, arbitrary.dst, kani::any()) }
+        });
+    }
+
+    /// This harness fails because Kani cannot assume a pointer is valid.
+    ///
+    /// The specification should ensure the pointers passed are allocated, and this harness should
+    /// succeed since `copy` ensures would reject dangling pointers.
+    #[cfg(ignore)]
+    #[kani::proof_for_contract(copy)]
+    fn check_copy_dangling() {
+        ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
+            // Verify the dangling case.
+            kani::assume(arbitrary.dst_kind == PtrKind::Dangling || arbitrary.src_kind == PtrKind::Dangling);
+            unsafe { copy(arbitrary.src, arbitrary.dst, kani::any()) }
+        });
+    }
+
+    /// This harness currently fails because we cannot define the modifies clause for slices.
+    #[kani::proof_for_contract(copy_nonoverlapping)]
+    fn check_copy_nonoverlapping() {
+        ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
+            // Skip dangling for now since it makes Kani contract panic.
+            // Verify this case in a separate harness.
+            kani::assume(arbitrary.dst_kind != PtrKind::Dangling);
+            kani::assume(arbitrary.src_kind != PtrKind::Dangling);
+            unsafe { copy_nonoverlapping(arbitrary.src, arbitrary.dst, kani::any()) }
+        });
+    }
+
+    /// This harness currently fails because we cannot define the modifies clause for slices.
+    #[kani::proof_for_contract(write_bytes)]
+    fn check_write_bytes() {
+        ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
+            // Skip dangling for now since it makes Kani contract panic.
+            // Verify this case in a separate harness.
+            kani::assume(arbitrary.dst_kind != PtrKind::Dangling);
+            unsafe { write_bytes(arbitrary.dst, kani::any(), kani::any()) }
+        });
     }
 }

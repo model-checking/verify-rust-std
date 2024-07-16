@@ -163,6 +163,72 @@ pub(crate) const fn is_nonoverlapping(
 
 pub use predicates::*;
 
+pub(crate) trait MetadataPredicates<T> where T: ?Sized {
+    /// If the metadata is the length of a slice or str, run the map function.
+    fn map_len<U, F>(metadata: *const Self, map: F) -> Option<U>
+    where
+        F: Fn(*const usize) -> U;
+
+    /// If the metadata is of type DynMetadata, run the map function and return its result.
+    fn map_dyn<U, F>(metadata: *const Self, map: F) -> Option<U>
+    where
+        F: Fn(*const crate::ptr::DynMetadata<T>) -> U;
+}
+
+impl<T> MetadataPredicates<T> for () {
+    /// Return None.
+    fn map_len<U, F>(_metadata: *const Self, _map: F) -> Option<U>
+    where
+        F: Fn(*const usize) -> U,
+    {
+        None
+    }
+
+    /// Return None.
+    fn map_dyn<U, F>(_metadata: *const Self, _map: F) -> Option<U>
+    where
+        F: Fn(*const crate::ptr::DynMetadata<T>) -> U,
+    {
+        None
+    }
+}
+
+impl<T> MetadataPredicates<T> for usize where T: ?Sized{
+    /// Return the result of the map function.
+    fn map_len<U, F>(metadata: *const Self, map: F) -> Option<U>
+    where
+        F: Fn(*const usize) -> U,
+    {
+        Some(map(metadata))
+    }
+
+    /// This is not a DynMetadata. Return `None`.
+    fn map_dyn<U, F>(_metadata: *const Self, _map: F) -> Option<U>
+    where
+        F: Fn(*const crate::ptr::DynMetadata<T>) -> U
+    {
+        None
+    }
+}
+
+impl<T> MetadataPredicates<T> for crate::ptr::DynMetadata<T> where T: ?Sized {
+    /// Not a length. Return None.
+    fn map_len<U, F>(_metadata: *const Self, _map: F) -> Option<U>
+    where
+        F: Fn(*const usize) -> U,
+    {
+        None
+    }
+
+    /// Return the result of the map function.
+    fn map_dyn<U, F>(metadata: *const Self, map: F) -> Option<U>
+    where
+        F: Fn(*const crate::ptr::DynMetadata<T>) -> U,
+    {
+       Some(map(metadata))
+    }
+}
+
 /// Provide a few predicates to be used in safety contracts.
 ///
 /// At runtime, they are no-op, and always return true.
