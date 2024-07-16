@@ -1,4 +1,4 @@
-# Challenge 4: Memory safety of BTreeMap's `btree::node` module
+# Challenge 6: Memory safety of BTreeMap's `btree::node` module
 
 - **Status:** Open
 - **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/25)
