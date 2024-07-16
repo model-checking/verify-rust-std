@@ -81,3 +81,15 @@ Solutions must be automated using one of the tools previously approved and liste
   I.e., the action may no longer pass after an update.
   This will not impact the approval status of the tool, however,
   new solutions that want to employ the tool may need to ensure the action is passing first.
+
+## Committee Applications
+
+You can apply to be part of the committee by submitting a pull request that adds your GitHub login name to the `pull_request.toml` file.
+
+For example, if your user login is @rahulku, add the login without @ to the committee member's list,
+```
+[committee]
+members = [
++   "rahulku"
+]
+```
