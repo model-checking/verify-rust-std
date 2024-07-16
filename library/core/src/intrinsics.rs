@@ -2727,7 +2727,7 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
 #[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
-#[requires((x.addr() >= y.addr() + core::mem::size_of::<T>()) || (y.addr() >= x.addr() + core::mem::size_of::<T>()))]
+#[requires(ub_checks::is_nonoverlapping(x as *const (), x as *const (), size_of::<T>(), 1))]
 pub const unsafe fn typed_swap<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
     // pointers, so swapping them with `count: 1` is fine.
@@ -2956,11 +2956,11 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(_ptr: *cons
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy_nonoverlapping"]
+// Copy is "untyped".
 #[requires(!count.overflowing_mul(size_of::<T>()).1
-  && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src, count))
+  && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-#[requires(src.addr() != dst.addr() || core::mem::size_of::<T>() == 0)]
-#[requires((src.addr() >= dst.addr() + core::mem::size_of::<T>()) || (dst.addr() >= src.addr() + core::mem::size_of::<T>()))]
+#[requires(ub_checks::is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
 // TODO: Modifies doesn't work with slices today.
 // https://github.com/model-checking/kani/pull/3295
 // #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
@@ -3068,8 +3068,8 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[rustc_diagnostic_item = "ptr_copy"]
 // FIXME: How to verify safety for types that do not implement Copy and count > 1??
 #[requires(!count.overflowing_mul(size_of::<T>()).1
-    && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src, count))
-    && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+  && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
 // TODO: Modifies doesn't work with slices today.
 // https://github.com/model-checking/kani/pull/3295
 // #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
