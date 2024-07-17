@@ -163,7 +163,7 @@ pub(crate) const fn is_nonoverlapping(
 
 pub use predicates::*;
 
-pub(crate) trait MetadataPredicates<T> where T: ?Sized {
+pub trait MetadataPredicates<T> where T: ?Sized {
     /// If the metadata is the length of a slice or str, run the map function.
     fn map_len<U, F>(metadata: *const Self, map: F) -> Option<U>
     where
@@ -193,7 +193,10 @@ impl<T> MetadataPredicates<T> for () {
     }
 }
 
-impl<T> MetadataPredicates<T> for usize where T: ?Sized{
+impl<T> MetadataPredicates<T> for usize
+where
+    T: ?Sized
+{
     /// Return the result of the map function.
     fn map_len<U, F>(metadata: *const Self, map: F) -> Option<U>
     where
@@ -211,7 +214,10 @@ impl<T> MetadataPredicates<T> for usize where T: ?Sized{
     }
 }
 
-impl<T> MetadataPredicates<T> for crate::ptr::DynMetadata<T> where T: ?Sized {
+impl<T> MetadataPredicates<T> for crate::ptr::DynMetadata<T>
+where
+    T: ?Sized
+{
     /// Not a length. Return None.
     fn map_len<U, F>(_metadata: *const Self, _map: F) -> Option<U>
     where
@@ -225,7 +231,7 @@ impl<T> MetadataPredicates<T> for crate::ptr::DynMetadata<T> where T: ?Sized {
     where
         F: Fn(*const crate::ptr::DynMetadata<T>) -> U,
     {
-       Some(map(metadata))
+        Some(map(metadata))
     }
 }
 
