@@ -145,8 +145,7 @@
 //! to `into_iter()` for boxed slices will defer to the slice implementation on editions before
 //! 2024:
 //!
-#![cfg_attr(bootstrap, doc = "```rust,edition2021,ignore")]
-#![cfg_attr(not(bootstrap), doc = "```rust,edition2021")]
+//! ```rust,edition2021
 //! // Rust 2015, 2018, and 2021:
 //!
 //! # #![allow(boxed_slice_into_iter)] // override our `deny(warnings)`
@@ -189,6 +188,8 @@
 use core::any::Any;
 use core::async_iter::AsyncIterator;
 use core::borrow;
+#[cfg(not(no_global_oom_handling))]
+use core::clone::CloneToUninit;
 use core::cmp::Ordering;
 use core::error::Error;
 use core::fmt;
@@ -208,7 +209,7 @@ use core::slice;
 use core::task::{Context, Poll};
 
 #[cfg(not(no_global_oom_handling))]
-use crate::alloc::{handle_alloc_error, WriteCloneIntoRaw};
+use crate::alloc::handle_alloc_error;
 use crate::alloc::{AllocError, Allocator, Global, Layout};
 #[cfg(not(no_global_oom_handling))]
 use crate::borrow::Cow;
@@ -1212,6 +1213,9 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// let static_ref: &'static mut usize = Box::leak(x);
     /// *static_ref += 1;
     /// assert_eq!(*static_ref, 42);
+    /// # // FIXME(https://github.com/rust-lang/miri/issues/3670):
+    /// # // use -Zmiri-disable-leak-check instead of unleaking in tests meant to leak.
+    /// # drop(unsafe { Box::from_raw(static_ref) });
     /// ```
     ///
     /// Unsized data:
@@ -1221,6 +1225,9 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// let static_ref = Box::leak(x);
     /// static_ref[0] = 4;
     /// assert_eq!(*static_ref, [4, 2, 3]);
+    /// # // FIXME(https://github.com/rust-lang/miri/issues/3670):
+    /// # // use -Zmiri-disable-leak-check instead of unleaking in tests meant to leak.
+    /// # drop(unsafe { Box::from_raw(static_ref) });
     /// ```
     #[stable(feature = "box_leak", since = "1.26.0")]
     #[inline]
@@ -1347,7 +1354,7 @@ impl<T: Clone, A: Allocator + Clone> Clone for Box<T, A> {
         // Pre-allocate memory to allow writing the cloned value directly.
         let mut boxed = Self::new_uninit_in(self.1.clone());
         unsafe {
-            (**self).write_clone_into_raw(boxed.as_mut_ptr());
+            (**self).clone_to_uninit(boxed.as_mut_ptr());
             boxed.assume_init()
         }
     }
@@ -2123,23 +2130,23 @@ impl<I> FromIterator<I> for Box<[I]> {
 
 /// This implementation is required to make sure that the `Box<[I]>: IntoIterator`
 /// implementation doesn't overlap with `IntoIterator for T where T: Iterator` blanket.
-#[stable(feature = "boxed_slice_into_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
 impl<I, A: Allocator> !Iterator for Box<[I], A> {}
 
 /// This implementation is required to make sure that the `&Box<[I]>: IntoIterator`
 /// implementation doesn't overlap with `IntoIterator for T where T: Iterator` blanket.
-#[stable(feature = "boxed_slice_into_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
 impl<'a, I, A: Allocator> !Iterator for &'a Box<[I], A> {}
 
 /// This implementation is required to make sure that the `&mut Box<[I]>: IntoIterator`
 /// implementation doesn't overlap with `IntoIterator for T where T: Iterator` blanket.
-#[stable(feature = "boxed_slice_into_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
 impl<'a, I, A: Allocator> !Iterator for &'a mut Box<[I], A> {}
 
 // Note: the `#[rustc_skip_during_method_dispatch(boxed_slice)]` on `trait IntoIterator`
 // hides this implementation from explicit `.into_iter()` calls on editions < 2024,
 // so those calls will still resolve to the slice implementation, by reference.
-#[stable(feature = "boxed_slice_into_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
 impl<I, A: Allocator> IntoIterator for Box<[I], A> {
     type IntoIter = vec::IntoIter<I, A>;
     type Item = I;
@@ -2148,7 +2155,7 @@ impl<I, A: Allocator> IntoIterator for Box<[I], A> {
     }
 }
 
-#[stable(feature = "boxed_slice_into_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
 impl<'a, I, A: Allocator> IntoIterator for &'a Box<[I], A> {
     type IntoIter = slice::Iter<'a, I>;
     type Item = &'a I;
@@ -2157,7 +2164,7 @@ impl<'a, I, A: Allocator> IntoIterator for &'a Box<[I], A> {
     }
 }
 
-#[stable(feature = "boxed_slice_into_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
 impl<'a, I, A: Allocator> IntoIterator for &'a mut Box<[I], A> {
     type IntoIter = slice::IterMut<'a, I>;
     type Item = &'a mut I;
@@ -2167,7 +2174,7 @@ impl<'a, I, A: Allocator> IntoIterator for &'a mut Box<[I], A> {
 }
 
 #[cfg(not(no_global_oom_handling))]
-#[stable(feature = "boxed_str_from_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_str_from_iter", since = "1.80.0")]
 impl FromIterator<char> for Box<str> {
     fn from_iter<T: IntoIterator<Item = char>>(iter: T) -> Self {
         String::from_iter(iter).into_boxed_str()
@@ -2175,7 +2182,7 @@ impl FromIterator<char> for Box<str> {
 }
 
 #[cfg(not(no_global_oom_handling))]
-#[stable(feature = "boxed_str_from_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_str_from_iter", since = "1.80.0")]
 impl<'a> FromIterator<&'a char> for Box<str> {
     fn from_iter<T: IntoIterator<Item = &'a char>>(iter: T) -> Self {
         String::from_iter(iter).into_boxed_str()
@@ -2183,7 +2190,7 @@ impl<'a> FromIterator<&'a char> for Box<str> {
 }
 
 #[cfg(not(no_global_oom_handling))]
-#[stable(feature = "boxed_str_from_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_str_from_iter", since = "1.80.0")]
 impl<'a> FromIterator<&'a str> for Box<str> {
     fn from_iter<T: IntoIterator<Item = &'a str>>(iter: T) -> Self {
         String::from_iter(iter).into_boxed_str()
@@ -2191,7 +2198,7 @@ impl<'a> FromIterator<&'a str> for Box<str> {
 }
 
 #[cfg(not(no_global_oom_handling))]
-#[stable(feature = "boxed_str_from_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_str_from_iter", since = "1.80.0")]
 impl FromIterator<String> for Box<str> {
     fn from_iter<T: IntoIterator<Item = String>>(iter: T) -> Self {
         String::from_iter(iter).into_boxed_str()
@@ -2199,7 +2206,7 @@ impl FromIterator<String> for Box<str> {
 }
 
 #[cfg(not(no_global_oom_handling))]
-#[stable(feature = "boxed_str_from_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_str_from_iter", since = "1.80.0")]
 impl<A: Allocator> FromIterator<Box<str, A>> for Box<str> {
     fn from_iter<T: IntoIterator<Item = Box<str, A>>>(iter: T) -> Self {
         String::from_iter(iter).into_boxed_str()
@@ -2207,7 +2214,7 @@ impl<A: Allocator> FromIterator<Box<str, A>> for Box<str> {
 }
 
 #[cfg(not(no_global_oom_handling))]
-#[stable(feature = "boxed_str_from_iter", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "boxed_str_from_iter", since = "1.80.0")]
 impl<'a> FromIterator<Cow<'a, str>> for Box<str> {
     fn from_iter<T: IntoIterator<Item = Cow<'a, str>>>(iter: T) -> Self {
         String::from_iter(iter).into_boxed_str()
@@ -2373,7 +2380,7 @@ impl dyn Error + Send {
         let err: Box<dyn Error> = self;
         <dyn Error>::downcast(err).map_err(|s| unsafe {
             // Reapply the `Send` marker.
-            Box::from_raw(Box::into_raw(s) as *mut (dyn Error + Send))
+            mem::transmute::<Box<dyn Error>, Box<dyn Error + Send>>(s)
         })
     }
 }
@@ -2386,8 +2393,8 @@ impl dyn Error + Send + Sync {
     pub fn downcast<T: Error + 'static>(self: Box<Self>) -> Result<Box<T>, Box<Self>> {
         let err: Box<dyn Error> = self;
         <dyn Error>::downcast(err).map_err(|s| unsafe {
-            // Reapply the `Send + Sync` marker.
-            Box::from_raw(Box::into_raw(s) as *mut (dyn Error + Send + Sync))
+            // Reapply the `Send + Sync` markers.
+            mem::transmute::<Box<dyn Error>, Box<dyn Error + Send + Sync>>(s)
         })
     }
 }

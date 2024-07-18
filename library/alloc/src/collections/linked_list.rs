@@ -1495,6 +1495,14 @@ impl<'a, T, A: Allocator> Cursor<'a, T, A> {
     pub fn back(&self) -> Option<&'a T> {
         self.list.back()
     }
+
+    /// Provides a reference to the cursor's parent list.
+    #[must_use]
+    #[inline(always)]
+    #[unstable(feature = "linked_list_cursors", issue = "58533")]
+    pub fn as_list(&self) -> &'a LinkedList<T, A> {
+        self.list
+    }
 }
 
 impl<'a, T, A: Allocator> CursorMut<'a, T, A> {
@@ -1605,6 +1613,18 @@ impl<'a, T, A: Allocator> CursorMut<'a, T, A> {
     pub fn as_cursor(&self) -> Cursor<'_, T, A> {
         Cursor { list: self.list, current: self.current, index: self.index }
     }
+
+    /// Provides a read-only reference to the cursor's parent list.
+    ///
+    /// The lifetime of the returned reference is bound to that of the
+    /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
+    /// `CursorMut` is frozen for the lifetime of the reference.
+    #[must_use]
+    #[inline(always)]
+    #[unstable(feature = "linked_list_cursors", issue = "58533")]
+    pub fn as_list(&self) -> &LinkedList<T, A> {
+        self.list
+    }
 }
 
 // Now the list editing operations
@@ -1705,7 +1725,7 @@ impl<'a, T, A: Allocator> CursorMut<'a, T, A> {
         unsafe {
             self.current = unlinked_node.as_ref().next;
             self.list.unlink_node(unlinked_node);
-            let unlinked_node = Box::from_raw(unlinked_node.as_ptr());
+            let unlinked_node = Box::from_raw_in(unlinked_node.as_ptr(), &self.list.alloc);
             Some(unlinked_node.element)
         }
     }
@@ -1946,7 +1966,7 @@ where
                 if (self.pred)(&mut node.as_mut().element) {
                     // `unlink_node` is okay with aliasing `element` references.
                     self.list.unlink_node(node);
-                    return Some(Box::from_raw(node.as_ptr()).element);
+                    return Some(Box::from_raw_in(node.as_ptr(), &self.list.alloc).element);
                 }
             }
         }

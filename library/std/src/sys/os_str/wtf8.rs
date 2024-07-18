@@ -1,5 +1,5 @@
-/// The underlying OsString/OsStr implementation on Windows is a
-/// wrapper around the "WTF-8" encoding; see the `wtf8` module for more.
+//! The underlying OsString/OsStr implementation on Windows is a
+//! wrapper around the "WTF-8" encoding; see the `wtf8` module for more.
 use crate::borrow::Cow;
 use crate::collections::TryReserveError;
 use crate::fmt;
@@ -70,7 +70,7 @@ impl Buf {
 
     #[inline]
     pub unsafe fn from_encoded_bytes_unchecked(s: Vec<u8>) -> Self {
-        Self { inner: Wtf8Buf::from_bytes_unchecked(s) }
+        unsafe { Self { inner: Wtf8Buf::from_bytes_unchecked(s) } }
     }
 
     pub fn with_capacity(capacity: usize) -> Buf {
@@ -139,6 +139,11 @@ impl Buf {
     }
 
     #[inline]
+    pub fn leak<'a>(self) -> &'a mut Slice {
+        unsafe { mem::transmute(self.inner.leak()) }
+    }
+
+    #[inline]
     pub fn into_box(self) -> Box<Slice> {
         unsafe { mem::transmute(self.inner.into_box()) }
     }
@@ -159,10 +164,20 @@ impl Buf {
         self.as_slice().into_rc()
     }
 
-    /// Part of a hack to make PathBuf::push/pop more efficient.
+    /// Provides plumbing to core `Vec::truncate`.
+    /// More well behaving alternative to allowing outer types
+    /// full mutable access to the core `Vec`.
     #[inline]
-    pub(crate) fn as_mut_vec_for_path_buf(&mut self) -> &mut Vec<u8> {
-        self.inner.as_mut_vec_for_path_buf()
+    pub(crate) fn truncate(&mut self, len: usize) {
+        self.inner.truncate(len);
+    }
+
+    /// Provides plumbing to core `Vec::extend_from_slice`.
+    /// More well behaving alternative to allowing outer types
+    /// full mutable access to the core `Vec`.
+    #[inline]
+    pub(crate) fn extend_from_slice(&mut self, other: &[u8]) {
+        self.inner.extend_from_slice(other);
     }
 }
 
@@ -174,7 +189,7 @@ impl Slice {
 
     #[inline]
     pub unsafe fn from_encoded_bytes_unchecked(s: &[u8]) -> &Slice {
-        mem::transmute(Wtf8::from_bytes_unchecked(s))
+        unsafe { mem::transmute(Wtf8::from_bytes_unchecked(s)) }
     }
 
     #[track_caller]

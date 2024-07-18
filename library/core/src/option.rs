@@ -137,10 +137,13 @@
 //!
 //! [^extern_fn]: this remains true for any argument/return types and any other ABI: `extern "abi" fn` (_e.g._, `extern "system" fn`)
 //!
+//! Under some conditions the above types `T` are also null pointer optimized when wrapped in a [`Result`][result_repr].
+//!
 //! [`Box<U>`]: ../../std/boxed/struct.Box.html
 //! [`num::NonZero*`]: crate::num
 //! [`ptr::NonNull<U>`]: crate::ptr::NonNull
 //! [function call ABI]: ../primitive.fn.html#abi-compatibility
+//! [result_repr]: crate::result#representation
 //!
 //! This is called the "null pointer optimization" or NPO.
 //!
@@ -651,6 +654,32 @@ impl<T> Option<T> {
         !self.is_some()
     }
 
+    /// Returns `true` if the option is a [`None`] or the value inside of it matches a predicate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(is_none_or)]
+    ///
+    /// let x: Option<u32> = Some(2);
+    /// assert_eq!(x.is_none_or(|x| x > 1), true);
+    ///
+    /// let x: Option<u32> = Some(0);
+    /// assert_eq!(x.is_none_or(|x| x > 1), false);
+    ///
+    /// let x: Option<u32> = None;
+    /// assert_eq!(x.is_none_or(|x| x > 1), true);
+    /// ```
+    #[must_use]
+    #[inline]
+    #[unstable(feature = "is_none_or", issue = "126383")]
+    pub fn is_none_or(self, f: impl FnOnce(T) -> bool) -> bool {
+        match self {
+            None => true,
+            Some(x) => f(x),
+        }
+    }
+
     /////////////////////////////////////////////////////////////////////////
     // Adapter for working with references
     /////////////////////////////////////////////////////////////////////////
@@ -768,7 +797,8 @@ impl<T> Option<T> {
     #[inline]
     #[must_use]
     #[stable(feature = "option_as_slice", since = "1.75.0")]
-    pub fn as_slice(&self) -> &[T] {
+    #[rustc_const_unstable(feature = "const_option_ext", issue = "91930")]
+    pub const fn as_slice(&self) -> &[T] {
         // SAFETY: When the `Option` is `Some`, we're using the actual pointer
         // to the payload, with a length of 1, so this is equivalent to
         // `slice::from_ref`, and thus is safe.
@@ -782,7 +812,7 @@ impl<T> Option<T> {
         unsafe {
             slice::from_raw_parts(
                 (self as *const Self).byte_add(core::mem::offset_of!(Self, Some.0)).cast(),
-                usize::from(self.is_some()),
+                self.is_some() as usize,
             )
         }
     }
@@ -822,7 +852,8 @@ impl<T> Option<T> {
     #[inline]
     #[must_use]
     #[stable(feature = "option_as_slice", since = "1.75.0")]
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
+    #[rustc_const_unstable(feature = "const_option_ext", issue = "91930")]
+    pub const fn as_mut_slice(&mut self) -> &mut [T] {
         // SAFETY: When the `Option` is `Some`, we're using the actual pointer
         // to the payload, with a length of 1, so this is equivalent to
         // `slice::from_mut`, and thus is safe.
@@ -838,7 +869,7 @@ impl<T> Option<T> {
         unsafe {
             slice::from_raw_parts_mut(
                 (self as *mut Self).byte_add(core::mem::offset_of!(Self, Some.0)).cast(),
-                usize::from(self.is_some()),
+                self.is_some() as usize,
             )
         }
     }
@@ -1705,8 +1736,6 @@ impl<T> Option<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(option_take_if)]
-    ///
     /// let mut x = Some(42);
     ///
     /// let prev = x.take_if(|v| if *v == 42 {
@@ -1723,7 +1752,7 @@ impl<T> Option<T> {
     /// assert_eq!(prev, Some(43));
     /// ```
     #[inline]
-    #[unstable(feature = "option_take_if", issue = "98934")]
+    #[stable(feature = "option_take_if", since = "1.80.0")]
     pub fn take_if<P>(&mut self, predicate: P) -> Option<T>
     where
         P: FnOnce(&mut T) -> bool,

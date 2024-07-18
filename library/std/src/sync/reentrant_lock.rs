@@ -117,6 +117,9 @@ pub struct ReentrantLockGuard<'a, T: ?Sized + 'a> {
 impl<T: ?Sized> !Send for ReentrantLockGuard<'_, T> {}
 
 #[unstable(feature = "reentrant_lock", issue = "121440")]
+unsafe impl<T: ?Sized + Sync> Sync for ReentrantLockGuard<'_, T> {}
+
+#[unstable(feature = "reentrant_lock", issue = "121440")]
 impl<T> ReentrantLock<T> {
     /// Creates a new re-entrant lock in an unlocked state ready for use.
     ///
@@ -241,7 +244,9 @@ impl<T: ?Sized> ReentrantLock<T> {
     }
 
     unsafe fn increment_lock_count(&self) -> Option<()> {
-        *self.lock_count.get() = (*self.lock_count.get()).checked_add(1)?;
+        unsafe {
+            *self.lock_count.get() = (*self.lock_count.get()).checked_add(1)?;
+        }
         Some(())
     }
 }

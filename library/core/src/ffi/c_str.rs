@@ -263,8 +263,6 @@ impl CStr {
     /// ```
     ///
     /// ```
-    /// #![feature(const_cstr_from_ptr)]
-    ///
     /// use std::ffi::{c_char, CStr};
     ///
     /// const HELLO_PTR: *const c_char = {
@@ -280,11 +278,11 @@ impl CStr {
     #[inline] // inline is necessary for codegen to see strlen.
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_cstr_from_ptr", issue = "113219")]
+    #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "CURRENT_RUSTC_VERSION")]
     pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr {
         // SAFETY: The caller has provided a pointer that points to a valid C
         // string with a NUL terminator less than `isize::MAX` from `ptr`.
-        let len = unsafe { const_strlen(ptr) };
+        let len = unsafe { strlen(ptr) };
 
         // SAFETY: The caller has provided a valid pointer with length less than
         // `isize::MAX`, so `from_raw_parts` is safe. The content remains valid
@@ -515,7 +513,10 @@ impl CStr {
     #[inline]
     #[must_use]
     const fn as_non_null_ptr(&self) -> NonNull<c_char> {
-        NonNull::from(&self.inner).as_non_null_ptr()
+        // FIXME(effects) replace with `NonNull::from`
+        // SAFETY: a reference is never null
+        unsafe { NonNull::new_unchecked(&self.inner as *const [c_char] as *mut [c_char]) }
+            .as_non_null_ptr()
     }
 
     /// Returns the length of `self`. Like C's `strlen`, this does not include the nul terminator.
@@ -539,7 +540,7 @@ impl CStr {
     #[must_use]
     #[doc(alias("len", "strlen"))]
     #[stable(feature = "cstr_count_bytes", since = "1.79.0")]
-    #[rustc_const_unstable(feature = "const_cstr_from_ptr", issue = "113219")]
+    #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "CURRENT_RUSTC_VERSION")]
     pub const fn count_bytes(&self) -> usize {
         self.inner.len() - 1
     }
@@ -739,7 +740,10 @@ impl AsRef<CStr> for CStr {
 /// The pointer must point to a valid buffer that contains a NUL terminator. The NUL must be
 /// located within `isize::MAX` from `ptr`.
 #[inline]
-const unsafe fn const_strlen(ptr: *const c_char) -> usize {
+#[unstable(feature = "cstr_internals", issue = "none")]
+#[rustc_const_stable(feature = "const_cstr_from_ptr", since = "CURRENT_RUSTC_VERSION")]
+#[rustc_allow_const_fn_unstable(const_eval_select)]
+const unsafe fn strlen(ptr: *const c_char) -> usize {
     const fn strlen_ct(s: *const c_char) -> usize {
         let mut len = 0;
 
@@ -777,8 +781,15 @@ const unsafe fn const_strlen(ptr: *const c_char) -> usize {
 pub struct Bytes<'a> {
     // since we know the string is nul-terminated, we only need one pointer
     ptr: NonNull<u8>,
-    phantom: PhantomData<&'a u8>,
+    phantom: PhantomData<&'a [c_char]>,
 }
+
+#[unstable(feature = "cstr_bytes", issue = "112115")]
+unsafe impl Send for Bytes<'_> {}
+
+#[unstable(feature = "cstr_bytes", issue = "112115")]
+unsafe impl Sync for Bytes<'_> {}
+
 impl<'a> Bytes<'a> {
     #[inline]
     fn new(s: &'a CStr) -> Self {
@@ -811,7 +822,7 @@ impl Iterator for Bytes<'_> {
             if ret == 0 {
                 None
             } else {
-                self.ptr = self.ptr.offset(1);
+                self.ptr = self.ptr.add(1);
                 Some(ret)
             }
         }
@@ -820,6 +831,12 @@ impl Iterator for Bytes<'_> {
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         if self.is_empty() { (0, Some(0)) } else { (1, None) }
+    }
+
+    #[inline]
+    fn count(self) -> usize {
+        // SAFETY: We always hold a valid pointer to a C string
+        unsafe { strlen(self.ptr.as_ptr().cast()) }
     }
 }
 
