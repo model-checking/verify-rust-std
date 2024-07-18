@@ -18,7 +18,6 @@ This is one of the main modules used for implementing the `BTreeMap` collection,
 The memory safety of all public functions (especially safe ones) containing unsafe code must be verified, e.g.:
 
 1. `LeafNode::new`
-1. `NodeRef::new_internal`
 1. `NodeRef::as_internal_mut`
 1. `NodeRef::len`
 1. `NodeRef::ascend`
@@ -37,7 +36,6 @@ The memory safety of all public functions (especially safe ones) containing unsa
 1. `Handle::right_edge`
 1. `Handle::left_kv`
 1. `Handle::right_kv`
-1. `Handle::insert_recursing`
 1. `Handle::descend`
 1. `Handle::into_kv`
 1. `Handle::key_mut`
@@ -45,14 +43,17 @@ The memory safety of all public functions (especially safe ones) containing unsa
 1. `Handle::into_kv_mut`
 1. `Handle::into_kv_valmut`
 1. `Handle::kv_mut`
+
+Verification must be unbounded for functions that use recursion or contain loops, e.g.
+
+1. `NodeRef::new_internal`
+1. `Handle::insert_recursing`
 1. `BalancingContext::do_merge`
 1. `BalancingContext::merge_tracking_child_edge`
 1. `BalancingContext::steal_left`
 1. `BalancingContext::steal_right`
 1. `BalancingContext::bulk_steal_left`
 1. `BalancingContext::bulk_steal_right`
-
-The verification must be unbounded for functions that are recursive or that contain loops (e.g. `Handle::insert_recursing`).
 
 ### List of UBs
 
