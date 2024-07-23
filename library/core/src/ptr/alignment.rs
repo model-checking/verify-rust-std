@@ -370,3 +370,20 @@ enum AlignmentEnum {
     _Align1Shl62 = 1 << 62,
     _Align1Shl63 = 1 << 63,
 }
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof_for_contract(Alignment::new_unchecked)]
+    pub fn check_new_unchecked() {
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let alignment = Alignment::new_unchecked(a);
+            assert_eq!(alignment.as_usize(), a);
+            assert!(a.is_power_of_two());
+        }
+    }
+}
