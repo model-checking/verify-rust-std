@@ -80,8 +80,7 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
-    #[requires(align > 0)]
-    #[requires((align & (align - 1)) == 0)]
+    #[requires(align > 0 && (align & (align - 1)) == 0)]
     pub const unsafe fn new_unchecked(align: usize) -> Self {
         #[cfg(debug_assertions)]
         assert_unsafe_precondition!(
