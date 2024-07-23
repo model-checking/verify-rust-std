@@ -503,6 +503,22 @@ impl fmt::Display for LayoutError {
 mod verify {
     use super::*;
 
+    // pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::from_size_align)]
+    pub fn check_from_size_align() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        if let Some(layout) = Layout::from_size_align(s, a) {
+            assert_eq!(layout.size(), s);
+            assert_eq!(layout.align(), a);
+            assert!(a > 0);
+            assert!(a.is_power_of_two());
+            assert!(s <= isize::MAX as usize - (a - 1));
+        }
+    }
+
+    // pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self
     #[kani::proof_for_contract(Layout::from_size_align_unchecked)]
     pub fn check_from_size_align_unchecked() {
         let s = kani::any::<usize>();
@@ -513,5 +529,188 @@ mod verify {
             assert_eq!(layout.size(), s);
             assert_eq!(layout.align(), a);
         }
+    }
+
+    // pub const fn size(&self) -> usize
+    #[kani::proof_for_contract(Layout::size)]
+    pub fn check_size() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            assert_eq!(layout.size(), s);
+        }
+    }
+
+    // pub const fn align(&self) -> usize
+    #[kani::proof_for_contract(Layout::align)]
+    pub fn check_align() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            assert!(layout.align().is_power_of_two());
+        }
+    }
+
+    // pub const fn new<T>() -> Self
+    #[kani::proof_for_contract(Layout::new<i32>)]
+    pub fn check_new_i32() {
+        let layout = Layout::new<i32>();
+        assert_eq!(layout.size(), 4);
+        assert!(layout.align().is_power_of_two());
+    }
+
+    // pub const fn for_value<T: ?Sized>(t: &T) -> Self
+    #[kani::proof_for_contract(Layout::for_value<i32>)]
+    pub fn check_for_value_i32() {
+        let array : [i32; 2] = [1, 2];
+        let layout = Layout::for_value<&i32>(&array[1 .. 1);
+        assert!(layout.align().is_power_of_two());
+    }
+
+    // pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self
+    #[kani::proof_for_contract(Layout::for_value_raw<i32>)]
+    pub fn check_for_value_raw_i32() {
+        unsafe {
+            let layout = Layout::for_value_raw<i32>(&[]);
+            assert!(layout.align().is_power_of_two());
+        }
+    }
+
+    // pub const fn dangling(&self) -> NonNull<u8>
+    #[kani::proof_for_contract(Layout::dangling)]
+    pub fn check_dangling() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            assert!(layout.dangling().is_aligned());
+        }
+    }
+
+    // pub fn align_to(&self, align: usize) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::align_to)]
+    pub fn check_align_to() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            let a2 = kani::any::<usize>();
+            if let Some(layout2) = layout.align_to(a2) {
+                assert!(layout2.align() > 0);
+                assert!(layout2.align().is_power_of_two());
+            }
+        }
+    }
+
+    // pub const fn padding_needed_for(&self, align: usize) -> usize
+    #[kani::proof_for_contract(Layout::padding_needed_for)]
+    pub fn check_padding_needed_for() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            let a2 = kani::any::<usize>();
+            if(a2.is_power_of_two() && a2 <= a) {
+                let p = layout.padding_needed_for(a2);
+                assert!(p <= a2);
+            }
+        }
+    }
+
+    // pub const fn pad_to_align(&self) -> Layout
+    #[kani::proof_for_contract(Layout::pad_to_align)]
+    pub fn check_pad_to_align() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            let layout2 = layout.pad_to_align();
+            assert_eq!(layout2.size() % a, 0);
+            assert_eq!(layout.size() + layout.padding_needed_for(layout.align()), layout2.size());
+        }
+    }
+
+    // pub fn repeat(&self, n: usize) -> Result<(Self, usize), LayoutError>
+    #[kani::proof_for_contract(Layout::repeat)]
+    pub fn check_repeat() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            let n = kani::any::<usize>();
+            if let Some((layout2, padding)) = layout.repeat(n) {
+                assert!(n == 0 || layout2.size() >= s);
+                assert!(n == 0 || padding < a);
+            }
+        }
+    }
+
+    // pub fn extend(&self, next: Self) -> Result<(Self, usize), LayoutError>
+    #[kani::proof_for_contract(Layout::extend)]
+    pub fn check_extend() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            let s2 = kani::any::<usize>();
+            let a2 = kani::any::<usize>();
+            let layout2 = Layout::from_size_align_unchecked(s2, a2);
+            if let Some((layout3, offset)) = layout.extend(layout2) {
+                assert_eq!(layout3.align(), cmp::max(a, a2));
+                assert!(layout3.size() >= s + s2);
+                assert!(offset >= s);
+                assert!(offset <= layout3.size());
+            }
+        }
+    }
+
+    // pub fn repeat_packed(&self, n: usize) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::repeat_packed)]
+    pub fn check_repeat_packed() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            let n = kani::any::<usize>();
+            if let Some(layout2) = layout.repeat_packed(n) {
+                assert!(n == 0 || layout2.size() >= s);
+            }
+        }
+    }
+
+    // pub fn extend_packed(&self, next: Self) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::extend_packed)]
+    pub fn check_extend_packed() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(s, a);
+            let s2 = kani::any::<usize>();
+            let a2 = kani::any::<usize>();
+            let layout2 = Layout::from_size_align_unchecked(s2, a2);
+            if let Some(layout3) = layout.extend_packed(layout2) {
+                assert_eq!(layout3.align(), a);
+                assert_eq!(layout3.size(), s + s2);
+            }
+        }
+    }
+
+    // pub const fn array<T>(n: usize) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::array<i32>)]
+    pub fn check_array_i32() {
+        let layout = Layout::array<i32>();
+        assert!(layout.align().is_power_of_two());
     }
 }
