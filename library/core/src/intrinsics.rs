@@ -63,7 +63,7 @@
 )]
 #![allow(missing_docs)]
 
-use safety::requires;
+use safety::{ensures, requires};
 use crate::marker::DiscriminantKind;
 use crate::marker::Tuple;
 use crate::ptr;
@@ -2728,6 +2728,7 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
 #[requires(ub_checks::is_nonoverlapping(x as *const (), x as *const (), size_of::<T>(), 1))]
+#[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
 pub const unsafe fn typed_swap<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
     // pointers, so swapping them with `count: 1` is fine.
@@ -2957,13 +2958,23 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(_ptr: *cons
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy_nonoverlapping"]
 // Copy is "untyped".
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 #[requires(!count.overflowing_mul(size_of::<T>()).1
   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
 #[requires(ub_checks::is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
-// TODO: Modifies doesn't work with slices today.
-// https://github.com/model-checking/kani/pull/3295
-// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+// TODO: Use quantifiers once it's available.
+// Ensures the initialization state is preserved.
+#[ensures(|_| {
+    if count > 0 {
+        let byte = kani::any_where(| sz: &usize | *sz < size_of::< T >);
+        let elem = kani::any_where(| val: &usize | *val < count);
+        let src_data = src as * const u8;
+        let dst_data = unsafe { dst.offset(elem) } as * const u8;
+        ub_checks::can_dereference(unsafe { src_data.offset(byte) })
+            == ub_checks::can_dereference(unsafe { dst_data.offset(byte) })
+    }
+})]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
@@ -3066,13 +3077,20 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy"]
-// FIXME: How to verify safety for types that do not implement Copy and count > 1??
+// FIXME(kani): How to verify safety for types that do not implement Copy and count > 1??
 #[requires(!count.overflowing_mul(size_of::<T>()).1
   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-// TODO: Modifies doesn't work with slices today.
-// https://github.com/model-checking/kani/pull/3295
-// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+#[ensures(|_| {
+    if count > 0 {
+        let byte = kani::any_where(| sz: &usize | *sz < size_of::< T >);
+        let elem = kani::any_where(| val: &usize | *val < count);
+        let src_data = src as * const u8;
+        let dst_data = unsafe { dst.offset(elem) } as * const u8;
+        ub_checks::can_dereference(unsafe { src_data.offset(byte) })
+            == ub_checks::can_dereference(unsafe { dst_data.offset(byte) })
+    }
+})]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
@@ -3156,11 +3174,14 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_write_bytes"]
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 #[requires(!count.overflowing_mul(size_of::<T>()).1
   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst as *mut u8, count)))]
-// TODO: Modifies doesn't work with slices today.
-// https://github.com/model-checking/kani/pull/3295
-// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+// TODO: Change this to quantifiers when available.
+#[ensures(|_| {
+    let idx = kani::any_where(|idx: &usize| *idx < count);
+    ub_checks::can_dereference(dst.offset(idx) as * const u8)
+})]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
@@ -3208,6 +3229,7 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
 #[unstable(feature="kani", issue="none")]
 mod verify {
     use core::{cmp, fmt};
+    use core::ptr::addr_of_mut;
     use super::*;
     use crate::kani;
 
@@ -3270,16 +3292,18 @@ mod verify {
                 bytes: u64,
             }
             let mut single = kani::any::<u32>();
-            let ptr1 = crate::ptr::addr_of_mut!(single);
+            let ptr1 = addr_of_mut!(single);
 
-            let mut array = [kani::any::<u32>(); 100];
-            let ptr2 = crate::ptr::addr_of_mut!(array) as *mut u32;
+            // FIXME(kani) this should be but this is not available in `kani_core` yet:
+            // let mut array: [u8; 100] = kani::any();
+            let mut array = [kani::any::<u32>(), 100];
+            let ptr2 = addr_of_mut!(array) as *mut u32;
 
-            let mut buffer = [0u8, 6];
-            let unaligned = unsafe { crate::ptr::addr_of_mut!(buffer).byte_offset(1) } as *mut u32;
+            let mut buffer = [0u8; 6];
+            let unaligned = unsafe { addr_of_mut!(buffer).byte_offset(1) } as *mut u32;
 
-            let mut padding = WithPadding { byte: 0, bytes: 0};
-            let uninit = unsafe { crate::ptr::addr_of_mut!(padding.byte).byte_offset(4)} as *mut u32;
+            let mut padding = WithPadding { byte: kani::any(), bytes: kani::any()};
+            let uninit = unsafe { addr_of_mut!(padding.byte).byte_offset(4)} as *mut u32;
 
             let arbitrary = ArbitraryPointers::from(ptr1, ptr2, unaligned, uninit);
             harness(arbitrary);
@@ -3348,7 +3372,7 @@ mod verify {
         });
     }
 
-    /// This harness currently fails because we cannot define the modifies clause for slices.
+    /// FIXME(kani): This harness currently fails because we cannot define the modifies clause for slices.
     #[kani::proof_for_contract(copy_nonoverlapping)]
     fn check_copy_nonoverlapping() {
         ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
@@ -3360,7 +3384,7 @@ mod verify {
         });
     }
 
-    /// This harness currently fails because we cannot define the modifies clause for slices.
+    /// FIXME(kani): This harness currently fails because we cannot define the modifies clause for slices.
     #[kani::proof_for_contract(write_bytes)]
     fn check_write_bytes() {
         ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
