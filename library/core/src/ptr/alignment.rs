@@ -1,4 +1,4 @@
-use safety::requires;
+use safety::{ensures, requires};
 use crate::num::NonZero;
 #[cfg(debug_assertions)]
 use crate::ub_checks::assert_unsafe_precondition;
@@ -60,6 +60,7 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[ensures(|result| align.is_power_of_two() == result.is_some())]
     pub const fn new(align: usize) -> Option<Self> {
         if align.is_power_of_two() {
             // SAFETY: Just checked it only has one bit set
@@ -81,6 +82,8 @@ impl Alignment {
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
     #[requires(align > 0 && (align & (align - 1)) == 0)]
+    #[ensures(|result| result.as_usize() == align)]
+    #[ensures(|result| result.as_usize().is_power_of_two())]
     pub const unsafe fn new_unchecked(align: usize) -> Self {
         #[cfg(debug_assertions)]
         assert_unsafe_precondition!(
@@ -98,6 +101,7 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[ensures(|result| result.is_power_of_two())]
     pub const fn as_usize(self) -> usize {
         self.0 as usize
     }
@@ -106,6 +110,7 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[ensures(|result| result.get().is_power_of_two())]
     pub const fn as_nonzero(self) -> NonZero<usize> {
         // SAFETY: All the discriminants are non-zero.
         unsafe { NonZero::new_unchecked(self.as_usize()) }
@@ -127,6 +132,7 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[ensures(|result| (*result as usize) < mem::size_of::<usize>() * 8)]
     pub const fn log2(self) -> u32 {
         self.as_nonzero().trailing_zeros()
     }
@@ -157,6 +163,7 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[ensures(|result| *result > 0)]
     pub const fn mask(self) -> usize {
         // SAFETY: The alignment is always nonzero, and therefore decrementing won't overflow.
         !(unsafe { self.as_usize().unchecked_sub(1) })
@@ -375,14 +382,68 @@ enum AlignmentEnum {
 mod verify {
     use super::*;
 
+    // pub const fn of<T>() -> Self
+    #[kani::proof]
+    pub fn check_of_i32() {
+        let alignment = Alignment::of::<i32>();
+        assert!(alignment.as_usize().is_power_of_two());
+    }
+
+    // pub const fn new(align: usize) -> Option<Self>
+    #[kani::proof_for_contract(Alignment::new)]
+    pub fn check_new() {
+        let a = kani::any::<usize>();
+        let alignment_opt = Alignment::new(a);
+        match alignment_opt {
+            Some(alignment) => assert_eq!(alignment.as_usize(), a),
+            None => assert!(!a.is_power_of_two())
+        }
+    }
+
+    // pub const unsafe fn new_unchecked(align: usize) -> Self
     #[kani::proof_for_contract(Alignment::new_unchecked)]
     pub fn check_new_unchecked() {
         let a = kani::any::<usize>();
 
         unsafe {
             let alignment = Alignment::new_unchecked(a);
+            assert!(alignment.as_usize() > 0);
+        }
+    }
+
+    // pub const fn as_usize(self) -> usize
+    #[kani::proof_for_contract(Alignment::as_usize)]
+    pub fn check_as_usize() {
+        let a = kani::any::<usize>();
+        if let Some(alignment) = Alignment::new(a) {
             assert_eq!(alignment.as_usize(), a);
-            assert!(a.is_power_of_two());
+        }
+    }
+
+    // pub const fn as_nonzero(self) -> NonZero<usize>
+    #[kani::proof_for_contract(Alignment::as_nonzero)]
+    pub fn check_as_nonzero() {
+        let a = kani::any::<usize>();
+        if let Some(alignment) = Alignment::new(a) {
+            assert_eq!(alignment.as_nonzero().get(), a);
+        }
+    }
+
+    // pub const fn log2(self) -> u32
+    #[kani::proof_for_contract(Alignment::log2)]
+    pub fn check_log2() {
+        let a = kani::any::<usize>();
+        if let Some(alignment) = Alignment::new(a) {
+            assert_eq!(1usize << alignment.log2(), a);
+        }
+    }
+
+    // pub const fn mask(self) -> usize
+    #[kani::proof_for_contract(Alignment::mask)]
+    pub fn check_mask() {
+        let a = kani::any::<usize>();
+        if let Some(alignment) = Alignment::new(a) {
+            assert_eq!(a & alignment.mask(), a);
         }
     }
 }
