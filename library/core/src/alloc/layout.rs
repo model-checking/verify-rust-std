@@ -4,7 +4,7 @@
 // collections, resulting in having to optimize down excess IR multiple times.
 // Your performance intuition is useless. Run perf.
 
-use safety::requires;
+use safety::{ensures, requires};
 use crate::cmp;
 use crate::error::Error;
 use crate::fmt;
@@ -71,6 +71,7 @@ impl Layout {
     #[rustc_const_stable(feature = "const_alloc_layout_size_align", since = "1.50.0")]
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
+    #[ensures(|result| result.is_err() || align.is_power_of_two())]
     pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError> {
         if !align.is_power_of_two() {
             return Err(LayoutError);
@@ -145,6 +146,7 @@ impl Layout {
                   without modifying the layout"]
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
+    #[ensures(|result| result.is_power_of_two())]
     pub const fn align(&self) -> usize {
         self.align.as_usize()
     }
@@ -154,6 +156,7 @@ impl Layout {
     #[rustc_const_stable(feature = "alloc_layout_const_new", since = "1.42.0")]
     #[must_use]
     #[inline]
+    #[ensures(|result| result.align().is_power_of_two())]
     pub const fn new<T>() -> Self {
         let (size, align) = size_align::<T>();
         // SAFETY: if the type is instantiated, rustc already ensures that its
@@ -169,6 +172,7 @@ impl Layout {
     #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
     #[must_use]
     #[inline]
+    #[ensures(|result| result.align().is_power_of_two())]
     pub const fn for_value<T: ?Sized>(t: &T) -> Self {
         let (size, align) = (mem::size_of_val(t), mem::align_of_val(t));
         // SAFETY: see rationale in `new` for why this is using the unsafe variant
@@ -203,6 +207,7 @@ impl Layout {
     #[unstable(feature = "layout_for_ptr", issue = "69835")]
     #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
     #[must_use]
+    #[ensures(|result| result.align().is_power_of_two())]
     pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
         // SAFETY: we pass along the prerequisites of these functions to the caller
         let (size, align) = unsafe { (mem::size_of_val_raw(t), mem::align_of_val_raw(t)) };
@@ -220,6 +225,7 @@ impl Layout {
     #[rustc_const_unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[must_use]
     #[inline]
+    #[ensures(|result| result.is_aligned())]
     pub const fn dangling(&self) -> NonNull<u8> {
         // SAFETY: align is guaranteed to be non-zero
         unsafe { NonNull::new_unchecked(crate::ptr::without_provenance_mut::<u8>(self.align())) }
@@ -241,6 +247,7 @@ impl Layout {
     /// `align` violates the conditions listed in [`Layout::from_size_align`].
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
     #[inline]
+    #[ensures(|result| result.is_err() || result.unwrap().is_aligned())]
     pub fn align_to(&self, align: usize) -> Result<Self, LayoutError> {
         Layout::from_size_align(self.size(), cmp::max(self.align(), align))
     }
@@ -532,7 +539,7 @@ mod verify {
     }
 
     // pub const fn size(&self) -> usize
-    #[kani::proof_for_contract(Layout::size)]
+    #[kani::proof]
     pub fn check_size() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
