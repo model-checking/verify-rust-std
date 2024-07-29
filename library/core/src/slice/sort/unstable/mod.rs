@@ -1,5 +1,7 @@
 //! This module contains the entry points for `slice::sort_unstable`.
 
+use crate::kani;
+
 use crate::intrinsics;
 use crate::mem::SizedTypeProperties;
 
@@ -73,4 +75,24 @@ where
     // The binary OR by one is used to eliminate the zero-check in the logarithm.
     let limit = 2 * (len | 1).ilog2();
     crate::slice::sort::unstable::quicksort::quicksort(v, None, limit, is_less);
+}
+
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    #[kani::modifies(v)]
+    #[kani::ensures(|_| v.is_sorted_by(|a,b| a < b))]
+    pub fn sort_u32(v: &mut [u32]) {
+        sort(v,&mut |a,b| a < b)
+    }
+
+    #[kani::proof_for_contract(sort_u32)]
+    pub fn sort_harness(){
+        let mut arr: [u32; 2] = crate::array::from_fn(|_| kani::any::<u32>());
+        let x : &mut [u32] = arr.as_mut_slice();
+        sort_u32(x)
+    }
 }
