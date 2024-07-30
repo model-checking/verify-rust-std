@@ -89,9 +89,9 @@ mod verify {
         sort(v,is_less)
     }
 
-    #[kani::proof_for_contract(sort_u32)]
+    #[kani::proof_for_contract(sort)]
     pub fn sort_harness(){
-        let mut arr: [u32; 1] = crate::array::from_fn(|_| kani::any::<u32>());
+        let mut arr: [u32; 20] = crate::array::from_fn(|_| kani::any::<u32>());
         let x : &mut [u32] = arr.as_mut_slice();
         sort_clone(x,&mut |a,b| a < b)
     }
