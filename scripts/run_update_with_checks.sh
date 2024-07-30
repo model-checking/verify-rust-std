@@ -4,13 +4,15 @@ set -eux
 
 BASE_HOME_DIR="$(pwd)"
 
-# Set variables
-REPO_OWNER="jaisnan"
-REPO_NAME="rust-dev"
-BRANCH_NAME="features/verifuy-07-21"
+# Set variables for verify-rust-std
+# NOTE: This process assumes that verify-rust-std is updated automatically
+# and independently
+REPO_OWNER="model-checking"
+REPO_NAME="kani"
+BRANCH_NAME="features/verify-rust-std"
 TOOLCHAIN_FILE="rust-toolchain.toml"
 
-# Set base
+# Set base as verify-rust-std's origin/main branch
 BASE_REPO="https://github.com/model-checking/verify-rust-std.git"
 
 # Create a temporary directory

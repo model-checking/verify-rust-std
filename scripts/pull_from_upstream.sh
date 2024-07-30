@@ -21,3 +21,5 @@ git subtree split --prefix=library --onto subtree/library -b subtree/library
 git fetch origin
 git checkout -b ${SYNC_BRANCH} origin/main
 git subtree merge --prefix=library subtree/library --squash
+
+# TODO: Update origin/subtree/library as well after the process by pushing to it
