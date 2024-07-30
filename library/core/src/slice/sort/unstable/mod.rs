@@ -85,7 +85,7 @@ mod verify {
 
     #[kani::modifies(v)]
     #[kani::ensures(|_| v.is_sorted_by(is_less.clone()))]
-    pub fn sort_u32<T, F: FnMut(&T, &T) -> bool + Clone>(v: &mut [T], is_less: &mut F) {
+    pub fn sort_clone<T, F: FnMut(&T, &T) -> bool + Clone>(v: &mut [T], is_less: &mut F) {
         sort(v,is_less)
     }
 
@@ -93,6 +93,6 @@ mod verify {
     pub fn sort_harness(){
         let mut arr: [u32; 1] = crate::array::from_fn(|_| kani::any::<u32>());
         let x : &mut [u32] = arr.as_mut_slice();
-        sort_u32(x,&mut |a,b| a < b)
+        sort_clone(x,&mut |a,b| a < b)
     }
 }
