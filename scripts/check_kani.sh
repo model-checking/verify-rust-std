@@ -39,4 +39,4 @@ echo
 
 # Clean up the Kani directory (optional)
 rm -rf "$KANI_DIR"
-rm -rf "$VERIFY_RUST_STD_DIR"
+# rm -rf "$VERIFY_RUST_STD_DIR"

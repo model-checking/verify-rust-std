@@ -4,8 +4,6 @@ set -eux
 
 BASE_HOME_DIR="$(pwd)"
 
-# TODO: Remove all relative paths, with that blob that gets the scripts dir
-
 # Set variables
 REPO_OWNER="jaisnan"
 REPO_NAME="rust-dev"
@@ -177,6 +175,9 @@ if [ "${#OUTPUT_SCRIPT4[@]}" -eq 0 ]; then
 else
     echo "script4.sh completed successfully."
 fi
+
+# TODO: Issue a Pull Request from the sync branch of the temp repo
+# cd $TEMP_HOME_DIR
 
 # Remove the temporary directory
 # rm -rf "$TEMP_DIR"
