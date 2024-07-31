@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # Set the working directory for your local repository
 HEAD_DIR=$1
 

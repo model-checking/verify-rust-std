@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # Set the working directories
 VERIFY_RUST_STD_DIR="$1"
 KANI_DIR=$(mktemp -d)
