@@ -1,5 +1,7 @@
 //! This module contains a variety of sort implementations that are optimized for small lengths.
 
+use crate::kani;
+
 use crate::intrinsics;
 use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::ptr;
@@ -852,4 +854,26 @@ fn panic_on_ord_violation() -> ! {
 pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
     // Heuristic that holds true on all tested 64-bit capable architectures.
     mem::size_of::<T>() <= 8 // mem::size_of::<u64>()
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    #[kani::requires(offset !=0)]
+    #[kani::requires(offset <= v.len())]
+    #[kani::requires(v[0..offset].is_sorted_by(is_less.clone()))]
+    #[kani::modifies(v)]
+    #[kani::ensures(|_| v.is_sorted_by(is_less.clone()))]
+    pub fn insertion_sort_shift_left_clone<T, F: FnMut(&T, &T) -> bool + Clone>(v: &mut [T], offset: usize, is_less: &mut F) {
+        insertion_sort_shift_left(v,offset,is_less)
+    }
+
+    #[kani::proof_for_contract(insertion_sort_shift_left_clone)]
+    pub fn insertion_sort_shift_left_harness(){
+        let mut arr: [u32; 2] = crate::array::from_fn(|_| kani::any::<u32>());
+        let x : &mut [u32] = arr.as_mut_slice();
+        insertion_sort_shift_left_clone(x,1,&mut |a,b| a <= b)
+    }
 }
