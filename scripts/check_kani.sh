@@ -6,6 +6,9 @@ KANI_DIR=$(mktemp -d)
 
 RUNNER_TEMP=$(mktemp -d)
 
+# Get the OS name
+os_name=$(uname -s)
+
 # Checkout your local repository
 echo "Checking out local repository..."
 echo
@@ -16,11 +19,18 @@ echo "Checking out Kani repository..."
 echo
 git clone --depth 1 -b features/verify-rust-std https://github.com/model-checking/kani.git "$KANI_DIR"
 
+# Check the OS and
 # Setup dependencies for Kani
 echo "Setting up dependencies for Kani..."
 echo
 cd "$KANI_DIR"
-./scripts/setup/ubuntu/install_deps.sh
+if [ "$os_name" == "Linux" ]; then
+    ./scripts/setup/ubuntu/install_deps.sh
+elif [ "$os_name" == "Darwin" ]; then
+    ./scripts/setup/macos/install_deps.sh
+else
+    echo "Unknown operating system"
+fi
 
 # Build Kani
 echo "Building Kani..."
