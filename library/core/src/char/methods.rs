@@ -1,9 +1,13 @@
 //! impl char {}
 
+use safety::ensures;
 use crate::slice;
 use crate::str::from_utf8_unchecked_mut;
 use crate::unicode::printable::is_printable;
 use crate::unicode::{self, conversions};
+
+#[cfg(kani)]
+use crate::kani;
 
 use super::*;
 
@@ -1833,6 +1837,33 @@ pub fn encode_utf16_raw(mut code: u32, dst: &mut [u16]) -> &mut [u16] {
                 code,
                 dst.len(),
             )
+        }
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    #[ensures(|result| c.is_ascii() == result.is_some())]
+    fn as_ascii_clone(c: &char) -> Option<ascii::Char> {
+        c.as_ascii()
+    }
+
+    #[kani::proof_for_contract(as_ascii_clone)]
+    fn check_as_ascii_ascii_char() {
+        let ascii: char = kani::any_where(|c : &char| c.is_ascii());
+        unsafe { 
+            as_ascii_clone(&ascii);
+        };
+    }
+
+    #[kani::proof_for_contract(as_ascii_clone)]
+    fn check_as_ascii_non_ascii_char() {
+        let non_ascii: char = kani::any_where(|c: &char| !c.is_ascii());
+        unsafe {
+            as_ascii_clone(&non_ascii);
         }
     }
 }

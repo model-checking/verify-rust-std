@@ -3,8 +3,12 @@
 //! suggestions from rustc if you get anything slightly wrong in here, and overall
 //! helps with clarity as we're also referring to `char` intentionally in here.
 
+use safety::{ensures, requires};
 use crate::fmt::{self, Write};
 use crate::mem::transmute;
+
+#[cfg(kani)]
+use crate::kani;
 
 /// One of the 128 Unicode characters from U+0000 through U+007F,
 /// often known as the [ASCII] subset.
@@ -449,6 +453,7 @@ impl AsciiChar {
     /// or returns `None` if it's too large.
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
+    #[ensures(|result| (b <= 127) == result.is_some())]
     pub const fn from_u8(b: u8) -> Option<Self> {
         if b <= 127 {
             // SAFETY: Just checked that `b` is in-range
@@ -466,6 +471,7 @@ impl AsciiChar {
     /// `b` must be in `0..=127`, or else this is UB.
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
+    #[requires(b <= 127)]
     pub const unsafe fn from_u8_unchecked(b: u8) -> Self {
         // SAFETY: Our safety precondition is that `b` is in-range.
         unsafe { transmute(b) }
@@ -614,5 +620,24 @@ impl fmt::Debug for AsciiChar {
             f.write_str(byte.as_str())?;
         }
         f.write_char('\'')
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+    use AsciiChar;
+
+    #[kani::proof_for_contract(AsciiChar::from_u8)]
+    fn check_from_u8() {
+        let b: u8 = kani::any();
+        unsafe { AsciiChar::from_u8(b) };
+    }
+
+    #[kani::proof_for_contract(AsciiChar::from_u8_unchecked)]
+    fn check_from_u8_unchecked() {
+        let b: u8 = kani::any();
+        unsafe { AsciiChar::from_u8_unchecked(b) };
     }
 }
