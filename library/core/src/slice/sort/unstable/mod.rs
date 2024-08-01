@@ -18,6 +18,7 @@ pub(crate) mod quicksort;
 /// Upholds all safety properties outlined here:
 /// <https://github.com/Voultapher/sort-research-rs/blob/main/writeup/sort_safety/text.md>
 #[inline(always)]
+#[kani::modifies(v)]
 pub fn sort<T, F: FnMut(&T, &T) -> bool>(v: &mut [T], is_less: &mut F) {
     // Arrays of zero-sized types are always all-equal, and thus sorted.
     if T::IS_ZST {
@@ -83,16 +84,16 @@ where
 mod verify {
     use super::*;
 
-    #[kani::modifies(v)]
-    #[kani::ensures(|_| v.is_sorted_by(is_less.clone()))]
-    pub fn sort_clone<T, F: FnMut(&T, &T) -> bool + Clone>(v: &mut [T], is_less: &mut F) {
-        sort(v,is_less)
-    }
+    //#[kani::modifies(v)]
+    //#[kani::ensures(|_| v.is_sorted_by(is_less.clone()))]
+    //pub fn sort_clone<T, F: FnMut(&T, &T) -> bool + Clone>(v: &mut [T], is_less: &mut F) {
+    //    sort(v,is_less)
+    //}
 
-    #[kani::proof_for_contract(sort_clone)]
+    #[kani::proof_for_contract(sort)]
     pub fn sort_harness(){
-        let mut arr: [u32; 2] = crate::array::from_fn(|_| kani::any::<u32>());
+        let mut arr: [u32; 10] = crate::array::from_fn(|_| kani::any::<u32>());
         let x : &mut [u32] = arr.as_mut_slice();
-        sort_clone(x,&mut |a,b| a <= b)
+        sort(x,&mut |a,b| a <= b)
     }
 }

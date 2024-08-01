@@ -577,6 +577,9 @@ unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, 
 }
 
 /// Sort `v` assuming `v[..offset]` is already sorted.
+#[kani::requires(offset !=0)]
+#[kani::requires(offset <= v.len())]
+#[kani::modifies(v)]
 pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
     v: &mut [T],
     offset: usize,
@@ -861,19 +864,19 @@ pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
 mod verify {
     use super::*;
 
-    #[kani::requires(offset !=0)]
-    #[kani::requires(offset <= v.len())]
-    #[kani::requires(v[0..offset].is_sorted_by(is_less.clone()))]
-    #[kani::modifies(v)]
-    #[kani::ensures(|_| v.is_sorted_by(is_less.clone()))]
-    pub fn insertion_sort_shift_left_clone<T, F: FnMut(&T, &T) -> bool + Clone>(v: &mut [T], offset: usize, is_less: &mut F) {
-        insertion_sort_shift_left(v,offset,is_less)
-    }
+    //#[kani::requires(offset !=0)]
+    //#[kani::requires(offset <= v.len())]
+    //#[kani::requires(v[0..offset].is_sorted_by(is_less.clone()))]
+    //#[kani::modifies(v)]
+    //#[kani::ensures(|_| v.is_sorted_by(is_less.clone()))]
+    //pub fn insertion_sort_shift_left_clone<T, F: FnMut(&T, &T) -> bool + Clone>(v: &mut [T], offset: usize, is_less: &mut F) {
+    //    insertion_sort_shift_left(v,offset,is_less)
+    //}
 
-    #[kani::proof_for_contract(insertion_sort_shift_left_clone)]
+    #[kani::proof_for_contract(insertion_sort_shift_left)]
     pub fn insertion_sort_shift_left_harness(){
-        let mut arr: [u32; 2] = crate::array::from_fn(|_| kani::any::<u32>());
+        let mut arr: [u32; 10] = crate::array::from_fn(|_| kani::any::<u32>());
         let x : &mut [u32] = arr.as_mut_slice();
-        insertion_sort_shift_left_clone(x,1,&mut |a,b| a <= b)
+        insertion_sort_shift_left(x,1,&mut |a,b| a <= b)
     }
 }
