@@ -1,6 +1,5 @@
 //! impl char {}
 
-use safety::ensures;
 use crate::slice;
 use crate::str::from_utf8_unchecked_mut;
 use crate::unicode::printable::is_printable;
@@ -1845,6 +1844,7 @@ pub fn encode_utf16_raw(mut code: u32, dst: &mut [u16]) -> &mut [u16] {
 #[unstable(feature="kani", issue="none")]
 mod verify {
     use super::*;
+    use safety::ensures;
 
     #[ensures(|result| c.is_ascii() == (result.is_some() && (result.unwrap() as u8 as char == *c)))]
     fn as_ascii_clone(c: &char) -> Option<ascii::Char> {
