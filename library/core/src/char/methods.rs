@@ -1846,7 +1846,7 @@ pub fn encode_utf16_raw(mut code: u32, dst: &mut [u16]) -> &mut [u16] {
 mod verify {
     use super::*;
 
-    #[ensures(|result| c.is_ascii() == result.is_some())]
+    #[ensures(|result| c.is_ascii() == (result.is_some() && (result.unwrap() as u8 as char == *c)))]
     fn as_ascii_clone(c: &char) -> Option<ascii::Char> {
         c.as_ascii()
     }
@@ -1854,16 +1854,12 @@ mod verify {
     #[kani::proof_for_contract(as_ascii_clone)]
     fn check_as_ascii_ascii_char() {
         let ascii: char = kani::any_where(|c : &char| c.is_ascii());
-        unsafe { 
-            as_ascii_clone(&ascii);
-        };
+        as_ascii_clone(&ascii);
     }
 
     #[kani::proof_for_contract(as_ascii_clone)]
     fn check_as_ascii_non_ascii_char() {
         let non_ascii: char = kani::any_where(|c: &char| !c.is_ascii());
-        unsafe {
-            as_ascii_clone(&non_ascii);
-        }
+        as_ascii_clone(&non_ascii);
     }
 }
