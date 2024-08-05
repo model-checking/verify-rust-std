@@ -61,6 +61,7 @@ impl Alignment {
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
     #[ensures(|result| align.is_power_of_two() == result.is_some())]
+    #[ensures(|result| result.is_none() || result.unwrap().as_usize() == align)]
     pub const fn new(align: usize) -> Option<Self> {
         if align.is_power_of_two() {
             // SAFETY: Just checked it only has one bit set
@@ -132,6 +133,7 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[requires(self.as_usize().is_power_of_two())]
     #[ensures(|result| (*result as usize) < mem::size_of::<usize>() * 8)]
     pub const fn log2(self) -> u32 {
         self.as_nonzero().trailing_zeros()
@@ -164,6 +166,7 @@ impl Alignment {
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
     #[ensures(|result| *result > 0)]
+    #[ensures(|result| *result == !(self.as_usize() -1))]
     pub const fn mask(self) -> usize {
         // SAFETY: The alignment is always nonzero, and therefore decrementing won't overflow.
         !(unsafe { self.as_usize().unchecked_sub(1) })
