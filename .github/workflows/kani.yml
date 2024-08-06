@@ -9,6 +9,7 @@ on:
     paths:
       - 'library/**'
       - '.github/workflows/kani.yml'
+      - 'scripts/check_kani.sh'
 
 defaults:
   run:
@@ -30,32 +31,8 @@ jobs:
       - name: Checkout Library
         uses: actions/checkout@v4
         with:
-          path: verify-rust-std
+          path: head
           submodules: true
 
-      # We currently build Kani from a branch that tracks a rustc version compatible with this library version.
-      - name: Checkout `Kani`
-        uses: actions/checkout@v4
-        with:
-          repository: model-checking/kani
-          path: kani
-          ref: features/verify-rust-std
-
-      - name: Setup Dependencies
-        working-directory: kani
-        run: |
-          ./scripts/setup/${{ matrix.base }}/install_deps.sh
-
-      - name: Build `Kani`
-        working-directory: kani
-        run: |
-          cargo build-dev --release
-          echo "$(pwd)/scripts" >> $GITHUB_PATH
-
-      - name: Run tests
-        working-directory: verify-rust-std
-        env:
-          RUST_BACKTRACE: 1
-        run: |
-          kani verify-std -Z unstable-options ./library --target-dir ${{ runner.temp }} -Z function-contracts \
-            -Z mem-predicates -Z ptr-to-ref-cast-checks
+      - name: Run Kani Script
+        run: bash ./head/scripts/check_kani.sh ${{github.workspace}}/head
