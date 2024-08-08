@@ -513,9 +513,13 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::requires;
 use crate::iter::{self, FusedIterator, TrustedLen};
 use crate::ops::{self, ControlFlow, Deref, DerefMut};
 use crate::{convert, fmt, hint};
+
+#[cfg(kani)]
+use crate::kani;
 
 /// `Result` is a type that represents either success ([`Ok`]) or failure ([`Err`]).
 ///
@@ -1480,6 +1484,7 @@ impl<T, E> Result<T, E> {
     #[inline]
     #[track_caller]
     #[stable(feature = "option_result_unwrap_unchecked", since = "1.58.0")]
+    #[requires(self.is_ok())]
     pub unsafe fn unwrap_unchecked(self) -> T {
         debug_assert!(self.is_ok());
         match self {
@@ -1512,6 +1517,7 @@ impl<T, E> Result<T, E> {
     #[inline]
     #[track_caller]
     #[stable(feature = "option_result_unwrap_unchecked", since = "1.58.0")]
+    #[requires(self.is_err())]
     pub unsafe fn unwrap_err_unchecked(self) -> E {
         debug_assert!(self.is_err());
         match self {
@@ -2002,4 +2008,18 @@ impl<T, E, F: From<E>> ops::FromResidual<ops::Yeet<E>> for Result<T, F> {
 #[unstable(feature = "try_trait_v2_residual", issue = "91285")]
 impl<T, E> ops::Residual<T> for Result<convert::Infallible, E> {
     type TryType = Result<T, E>;
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof_for_contract(Result::unwrap_unchecked)]
+    pub fn check_unwrap_unchecked() {
+        let val: Result<u32, u64> = kani::any();
+        let ok_variant: Result<u32, u64> = Ok(0);
+        let copy = unsafe { ok_variant.unwrap_unchecked() };
+        assert_eq!(val, Result::Ok(copy));
+    }
 }
