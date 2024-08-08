@@ -72,6 +72,9 @@ impl Layout {
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
     #[ensures(|result| result.is_err() || align.is_power_of_two())]
+    #[ensures(|result| result.is_err() || size <= isize::MAX as usize - (align - 1))]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == size)]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == align)]
     pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError> {
         if !align.is_power_of_two() {
             return Err(LayoutError);
@@ -123,6 +126,8 @@ impl Layout {
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
     #[requires(Layout::from_size_align(size, align).is_ok())]
+    #[ensures(|result| result.size() == size)]
+    #[ensures(|result| result.align() == align)]
     pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self {
         // SAFETY: the caller is required to uphold the preconditions.
         unsafe { Layout { size, align: Alignment::new_unchecked(align) } }
@@ -247,6 +252,7 @@ impl Layout {
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
     #[inline]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() >= align)]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align().is_power_of_two())]
     pub fn align_to(&self, align: usize) -> Result<Self, LayoutError> {
         Layout::from_size_align(self.size(), cmp::max(self.align(), align))
     }
@@ -309,7 +315,10 @@ impl Layout {
     #[must_use = "this returns a new `Layout`, \
                   without modifying the original"]
     #[inline]
+    #[ensures(|result| result.size() >= self.size())]
+    #[ensures(|result| result.align() == self.align())]
     #[ensures(|result| result.size() % result.align() == 0)]
+    #[ensures(|result| self.size() + self.padding_needed_for(self.align()) == result.size())]
     pub const fn pad_to_align(&self) -> Layout {
         let pad = self.padding_needed_for(self.align());
         // This cannot overflow. Quoting from the invariant of Layout:
@@ -332,7 +341,9 @@ impl Layout {
     /// On arithmetic overflow, returns `LayoutError`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
-    #[ensures(|result| result.is_err() || result.as_ref().unwrap().1 % n == 0)]
+    #[ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().1 % n == 0)]
+    #[ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() >= self.size())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.size() == n * result.as_ref().unwrap().1)]
     pub fn repeat(&self, n: usize) -> Result<(Self, usize), LayoutError> {
         // This cannot overflow. Quoting from the invariant of Layout:
         // > `size`, when rounded up to the nearest multiple of `align`,
@@ -393,6 +404,9 @@ impl Layout {
     /// ```
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
     #[inline]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.align() == cmp::max(self.align(), next.align()))]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.size() >= self.size() + next.size())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().1 >= self.size())]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().1 <= result.as_ref().unwrap().0.size())]
     pub fn extend(&self, next: Self) -> Result<(Self, usize), LayoutError> {
         let new_align = cmp::max(self.align, next.align);
@@ -420,7 +434,8 @@ impl Layout {
     /// On arithmetic overflow, returns `LayoutError`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
-    #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() % n == 0)]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == n * self.size())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == self.align())]
     pub fn repeat_packed(&self, n: usize) -> Result<Self, LayoutError> {
         let size = self.size().checked_mul(n).ok_or(LayoutError)?;
         // The safe constructor is called here to enforce the isize size limit.
@@ -435,7 +450,11 @@ impl Layout {
     /// On arithmetic overflow, returns `LayoutError`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
+    // the below is wrong but was written in a previous commit; keeping it for now to confirm that
+    // this is caught
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() <= next.size())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == self.size() + next.size())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == self.align())]
     pub fn extend_packed(&self, next: Self) -> Result<Self, LayoutError> {
         let new_size = self.size().checked_add(next.size()).ok_or(LayoutError)?;
         // The safe constructor is called here to enforce the isize size limit.
@@ -520,14 +539,7 @@ mod verify {
     pub fn check_from_size_align() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
-        if let Ok(layout) = Layout::from_size_align(s, a) {
-            assert_eq!(layout.size(), s);
-            assert_eq!(layout.align(), a);
-            assert!(a > 0);
-            assert!(a.is_power_of_two());
-            assert!(s <= isize::MAX as usize - (a - 1));
-        }
+        let _ = Layout::from_size_align(s, a);
     }
 
     // pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self
@@ -535,11 +547,8 @@ mod verify {
     pub fn check_from_size_align_unchecked() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            assert_eq!(layout.size(), s);
-            assert_eq!(layout.align(), a);
+            let _ = Layout::from_size_align_unchecked(s, a);
         }
     }
 
@@ -548,7 +557,6 @@ mod verify {
     pub fn check_size() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             assert_eq!(layout.size(), s);
@@ -560,10 +568,9 @@ mod verify {
     pub fn check_align() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
-            assert!(layout.align().is_power_of_two());
+            let _ = layout.align();
         }
     }
 
@@ -579,16 +586,14 @@ mod verify {
     #[kani::proof_for_contract(Layout::for_value)]
     pub fn check_for_value_i32() {
         let array : [i32; 2] = [1, 2];
-        let layout = Layout::for_value::<[i32]>(&array[1 .. 1]);
-        assert!(layout.align().is_power_of_two());
+        let _ = Layout::for_value::<[i32]>(&array[1 .. 1]);
     }
 
     // pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self
     #[kani::proof_for_contract(Layout::for_value_raw)]
     pub fn check_for_value_raw_i32() {
         unsafe {
-            let layout = Layout::for_value_raw::<[i32]>(&[] as *const [i32]);
-            assert!(layout.align().is_power_of_two());
+            let _ = Layout::for_value_raw::<[i32]>(&[] as *const [i32]);
         }
     }
 
@@ -597,10 +602,9 @@ mod verify {
     pub fn check_dangling() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
-            assert!(layout.dangling().is_aligned());
+            let _ = layout.dangling();
         }
     }
 
@@ -609,14 +613,10 @@ mod verify {
     pub fn check_align_to() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let a2 = kani::any::<usize>();
-            if let Ok(layout2) = layout.align_to(a2) {
-                assert!(layout2.align() > 0);
-                assert!(layout2.align().is_power_of_two());
-            }
+            let _ = layout.align_to(a2);
         }
     }
 
@@ -625,13 +625,11 @@ mod verify {
     pub fn check_padding_needed_for() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let a2 = kani::any::<usize>();
             if(a2.is_power_of_two() && a2 <= a) {
-                let p = layout.padding_needed_for(a2);
-                assert!(p <= a2);
+                let _ = layout.padding_needed_for(a2);
             }
         }
     }
@@ -641,12 +639,9 @@ mod verify {
     pub fn check_pad_to_align() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
-            let layout2 = layout.pad_to_align();
-            assert_eq!(layout2.size() % a, 0);
-            assert_eq!(layout.size() + layout.padding_needed_for(layout.align()), layout2.size());
+            let _ = layout.pad_to_align();
         }
     }
 
@@ -655,14 +650,10 @@ mod verify {
     pub fn check_repeat() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let n = kani::any::<usize>();
-            if let Ok((layout2, padded_size)) = layout.repeat(n) {
-                assert!(n == 0 || layout2.size() >= s);
-                assert_eq!(layout2.size(), n * padded_size);
-            }
+            let _ = layout.repeat(n);
         }
     }
 
@@ -671,18 +662,12 @@ mod verify {
     pub fn check_extend() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let s2 = kani::any::<usize>();
             let a2 = kani::any::<usize>();
             let layout2 = Layout::from_size_align_unchecked(s2, a2);
-            if let Ok((layout3, offset)) = layout.extend(layout2) {
-                assert_eq!(layout3.align(), cmp::max(a, a2));
-                assert!(layout3.size() >= s + s2);
-                assert!(offset >= s);
-                assert!(offset <= layout3.size());
-            }
+            let _ = layout.extend(layout2);
         }
     }
 
@@ -691,13 +676,10 @@ mod verify {
     pub fn check_repeat_packed() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let n = kani::any::<usize>();
-            if let Ok(layout2) = layout.repeat_packed(n) {
-                assert!(n == 0 || layout2.size() >= s);
-            }
+            let _ = layout.repeat_packed(n);
         }
     }
 
@@ -706,16 +688,12 @@ mod verify {
     pub fn check_extend_packed() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
-
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let s2 = kani::any::<usize>();
             let a2 = kani::any::<usize>();
             let layout2 = Layout::from_size_align_unchecked(s2, a2);
-            if let Ok(layout3) = layout.extend_packed(layout2) {
-                assert_eq!(layout3.align(), a);
-                assert_eq!(layout3.size(), s + s2);
-            }
+            let _ = layout.extend_packed(layout2);
         }
     }
 
