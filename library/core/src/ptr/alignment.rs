@@ -112,6 +112,7 @@ impl Alignment {
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
     #[ensures(|result| result.get().is_power_of_two())]
+    #[ensures(|result| result.get() == self.as_usize())]
     pub const fn as_nonzero(self) -> NonZero<usize> {
         // SAFETY: All the discriminants are non-zero.
         unsafe { NonZero::new_unchecked(self.as_usize()) }
@@ -135,6 +136,7 @@ impl Alignment {
     #[inline]
     #[requires(self.as_usize().is_power_of_two())]
     #[ensures(|result| (*result as usize) < mem::size_of::<usize>() * 8)]
+    #[ensures(|result| 1usize << *result == self.as_usize())]
     pub const fn log2(self) -> u32 {
         self.as_nonzero().trailing_zeros()
     }
@@ -167,6 +169,7 @@ impl Alignment {
     #[inline]
     #[ensures(|result| *result > 0)]
     #[ensures(|result| *result == !(self.as_usize() -1))]
+    #[ensures(|result| self.as_usize() & *result == self.as_usize())]
     pub const fn mask(self) -> usize {
         // SAFETY: The alignment is always nonzero, and therefore decrementing won't overflow.
         !(unsafe { self.as_usize().unchecked_sub(1) })
@@ -396,21 +399,15 @@ mod verify {
     #[kani::proof_for_contract(Alignment::new)]
     pub fn check_new() {
         let a = kani::any::<usize>();
-        let alignment_opt = Alignment::new(a);
-        match alignment_opt {
-            Some(alignment) => assert_eq!(alignment.as_usize(), a),
-            None => assert!(!a.is_power_of_two())
-        }
+        let _ = Alignment::new(a);
     }
 
     // pub const unsafe fn new_unchecked(align: usize) -> Self
     #[kani::proof_for_contract(Alignment::new_unchecked)]
     pub fn check_new_unchecked() {
         let a = kani::any::<usize>();
-
         unsafe {
-            let alignment = Alignment::new_unchecked(a);
-            assert!(alignment.as_usize() > 0);
+            let _ = Alignment::new_unchecked(a);
         }
     }
 
@@ -428,7 +425,7 @@ mod verify {
     pub fn check_as_nonzero() {
         let a = kani::any::<usize>();
         if let Some(alignment) = Alignment::new(a) {
-            assert_eq!(alignment.as_nonzero().get(), a);
+            let _ = alignment.as_nonzero();
         }
     }
 
@@ -437,7 +434,7 @@ mod verify {
     pub fn check_log2() {
         let a = kani::any::<usize>();
         if let Some(alignment) = Alignment::new(a) {
-            assert_eq!(1usize << alignment.log2(), a);
+            let _ = alignment.log2();
         }
     }
 
@@ -446,7 +443,7 @@ mod verify {
     pub fn check_mask() {
         let a = kani::any::<usize>();
         if let Some(alignment) = Alignment::new(a) {
-            assert_eq!(a & alignment.mask(), a);
+            let _ = alignment.mask();
         }
     }
 }
