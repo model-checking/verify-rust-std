@@ -341,7 +341,7 @@ impl Layout {
     /// On arithmetic overflow, returns `LayoutError`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
-    #[ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().1 % n == 0)]
+    #[ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() % n == 0)]
     #[ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() >= self.size())]
     // the below multiplication might be too costly to prove at this time
     // #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.size() == n * result.as_ref().unwrap().1)]
@@ -572,6 +572,7 @@ mod verify {
     pub fn check_align() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let _ = layout.align();
