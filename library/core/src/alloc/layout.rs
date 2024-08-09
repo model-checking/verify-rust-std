@@ -560,6 +560,7 @@ mod verify {
     pub fn check_size() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             assert_eq!(layout.size(), s);
@@ -605,6 +606,7 @@ mod verify {
     pub fn check_dangling() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let _ = layout.dangling();
@@ -616,6 +618,7 @@ mod verify {
     pub fn check_align_to() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let a2 = kani::any::<usize>();
@@ -628,6 +631,7 @@ mod verify {
     pub fn check_padding_needed_for() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let a2 = kani::any::<usize>();
@@ -642,6 +646,7 @@ mod verify {
     pub fn check_pad_to_align() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let _ = layout.pad_to_align();
@@ -653,6 +658,7 @@ mod verify {
     pub fn check_repeat() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let n = kani::any::<usize>();
@@ -665,10 +671,12 @@ mod verify {
     pub fn check_extend() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let s2 = kani::any::<usize>();
             let a2 = kani::any::<usize>();
+            kani::assume(Layout::from_size_align(s2, a2).is_ok());
             let layout2 = Layout::from_size_align_unchecked(s2, a2);
             let _ = layout.extend(layout2);
         }
@@ -679,6 +687,7 @@ mod verify {
     pub fn check_repeat_packed() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let n = kani::any::<usize>();
@@ -691,10 +700,12 @@ mod verify {
     pub fn check_extend_packed() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             let s2 = kani::any::<usize>();
             let a2 = kani::any::<usize>();
+            kani::assume(Layout::from_size_align(s2, a2).is_ok());
             let layout2 = Layout::from_size_align_unchecked(s2, a2);
             let _ = layout.extend_packed(layout2);
         }
