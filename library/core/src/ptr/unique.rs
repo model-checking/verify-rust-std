@@ -218,7 +218,7 @@ mod verify {
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(Unique::new_unchecked)]
     pub fn check_new_unchecked() {
-        let mut x : i32 = 42;
+        let mut x : i32 = kani::any();
         let xptr = &mut x;
 
         unsafe {
@@ -230,7 +230,7 @@ mod verify {
     // pub const fn new(ptr: *mut T) -> Option<Self>
     #[kani::proof_for_contract(Unique::new)]
     pub fn check_new() {
-        let mut x : i32 = 42;
+        let mut x : i32 = kani::any();
         let xptr = &mut x;
 
         if let Some(unique) = Unique::new(xptr as *mut i32) {
@@ -241,7 +241,7 @@ mod verify {
     // pub const fn as_ptr(self) -> *mut T
     #[kani::proof_for_contract(Unique::as_ptr)]
     pub fn check_as_ptr() {
-        let mut x : i32 = 42;
+        let mut x : i32 = kani::any();
         let xptr = &mut x;
 
         unsafe {
@@ -253,7 +253,7 @@ mod verify {
     // pub const fn as_non_null_ptr(self) -> NonNull<T>
     #[kani::proof]
     pub fn check_as_non_null_ptr() {
-        let mut x : i32 = 42;
+        let mut x : i32 = kani::any();
         let xptr = &mut x;
 
         unsafe {
@@ -265,7 +265,7 @@ mod verify {
     // pub const unsafe fn as_ref(&self) -> &T
     #[kani::proof]
     pub fn check_as_ref() {
-        let mut x : i32 = 42;
+        let mut x : i32 = kani::any();
         let xptr = &mut x;
 
         unsafe {
@@ -277,7 +277,7 @@ mod verify {
     // pub const unsafe fn as_mut(&mut self) -> &mut T
     #[kani::proof]
     pub fn check_as_mut() {
-        let mut x : i32 = 42;
+        let mut x : i32 = kani::any();
         let xptr = &mut x;
 
         unsafe {
@@ -289,7 +289,7 @@ mod verify {
     // pub const fn cast<U>(self) -> Unique<U>
     #[kani::proof_for_contract(Unique::cast<U>)]
     pub fn check_cast<U>() {
-        let mut x : i32 = 42;
+        let mut x : i32 = kani::any();
         let xptr = &mut x;
 
         unsafe {
