@@ -89,6 +89,7 @@ impl<T: ?Sized> Unique<T> {
     /// `ptr` must be non-null.
     #[inline]
     #[requires(!ptr.is_null())]
+    #[ensures(|result| result.as_ptr() == ptr)]
     pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
         // SAFETY: the caller must guarantee that `ptr` is non-null.
         unsafe { Unique { pointer: NonNull::new_unchecked(ptr), _marker: PhantomData } }
@@ -96,7 +97,7 @@ impl<T: ?Sized> Unique<T> {
 
     /// Creates a new `Unique` if `ptr` is non-null.
     #[inline]
-    #[ensures(|result| result.is_none() == result.unwrap().as_ptr().is_null())]
+    #[ensures(|result| result.is_none() == ptr.is_null())]
     #[ensures(|result| result.is_none() || result.unwrap().as_ptr() == ptr)]
     pub const fn new(ptr: *mut T) -> Option<Self> {
         if let Some(pointer) = NonNull::new(ptr) {
@@ -117,6 +118,7 @@ impl<T: ?Sized> Unique<T> {
     /// Acquires the underlying `*mut` pointer.
     #[must_use = "`self` will be dropped if the result is not used"]
     #[inline]
+    #[ensures(|result| result.as_ptr() == self.pointer.as_ptr())]
     pub const fn as_non_null_ptr(self) -> NonNull<T> {
         self.pointer
     }
@@ -220,10 +222,8 @@ mod verify {
     pub fn check_new_unchecked() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
-
         unsafe {
-            let unique = Unique::new_unchecked(xptr as *mut i32);
-            assert_eq!(unique.as_ptr(), xptr as *mut i32);
+            let _ = Unique::new_unchecked(xptr as *mut i32);
         }
     }
 
@@ -232,10 +232,7 @@ mod verify {
     pub fn check_new() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
-
-        if let Some(unique) = Unique::new(xptr as *mut i32) {
-            assert_eq!(unique.as_ptr(), xptr as *mut i32);
-        }
+        let _ = Unique::new(xptr as *mut i32);
     }
 
     // pub const fn as_ptr(self) -> *mut T
@@ -243,7 +240,6 @@ mod verify {
     pub fn check_as_ptr() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
-
         unsafe {
             let unique = Unique::new_unchecked(xptr as *mut i32);
             assert_eq!(unique.as_ptr(), xptr as *mut i32);
@@ -255,10 +251,9 @@ mod verify {
     pub fn check_as_non_null_ptr() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
-
         unsafe {
             let unique = Unique::new_unchecked(xptr as *mut i32);
-            assert_eq!(unique.as_non_null_ptr().as_ptr(), xptr as *mut i32);
+            let _ = unique.as_non_null_ptr();
         }
     }
 
@@ -267,7 +262,6 @@ mod verify {
     pub fn check_as_ref() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
-
         unsafe {
             let unique = Unique::new_unchecked(xptr as *mut i32);
             assert_eq!(*unique.as_ref(), x);
@@ -279,7 +273,6 @@ mod verify {
     pub fn check_as_mut() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
-
         unsafe {
             let mut unique = Unique::new_unchecked(xptr as *mut i32);
             assert_eq!(*unique.as_mut(), x);
@@ -291,7 +284,6 @@ mod verify {
     pub fn check_cast<U>() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
-
         unsafe {
             let unique = Unique::new_unchecked(xptr as *mut i32);
             assert_eq!(*unique.cast::<u32>().as_ref(), x as u32);
