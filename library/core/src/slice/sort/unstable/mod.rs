@@ -52,6 +52,7 @@ pub fn sort<T, F: FnMut(&T, &T) -> bool>(v: &mut [T], is_less: &mut F) {
 /// Deliberately don't inline the main sorting routine entrypoint to ensure the
 /// inlined insertion sort i-cache footprint remains minimal.
 #[inline(never)]
+#[kani::modifies(v)]
 fn ipnsort<T, F>(v: &mut [T], is_less: &mut F)
 where
     F: FnMut(&T, &T) -> bool,
@@ -84,13 +85,16 @@ where
 mod verify {
     use super::*;
 
-    //#[kani::modifies(v)]
-    //#[kani::ensures(|_| v.is_sorted_by(is_less.clone()))]
-    //pub fn sort_clone<T, F: FnMut(&T, &T) -> bool + Clone>(v: &mut [T], is_less: &mut F) {
-    //    sort(v,is_less)
-    //}
-
+    #[kani::proof_for_contract(ipnsort)]
+    pub fn ipnsort_harness(){
+        let mut arr: [u32; 10] = crate::array::from_fn(|_| kani::any::<u32>());
+        let x : &mut [u32] = arr.as_mut_slice();
+        sort(x,&mut |a,b| a <= b)
+    }
+ 
     #[kani::proof_for_contract(sort)]
+    #[kani::stub_verified(ipnsort)]
+    #[kani::stub_verified(insertion_sort_shift_left)]
     pub fn sort_harness(){
         let mut arr: [u32; 10] = crate::array::from_fn(|_| kani::any::<u32>());
         let x : &mut [u32] = arr.as_mut_slice();
