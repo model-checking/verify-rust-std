@@ -22,4 +22,10 @@ git fetch origin
 git checkout -b ${SYNC_BRANCH} origin/main
 git subtree merge --prefix=library subtree/library --squash
 
+# 4. Pull library's submodules
+# The subtree command does not recursively pull submodules, so we do this manually.
+cd library
+git clone https://github.com/rust-lang/backtrace-rs.git
+git clone https://github.com/rust-lang/stdarch.git
+
 # TODO: Update origin/subtree/library as well after the process by pushing to it
