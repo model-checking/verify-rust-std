@@ -5,6 +5,9 @@ use crate::str::from_utf8_unchecked_mut;
 use crate::unicode::printable::is_printable;
 use crate::unicode::{self, conversions};
 
+#[cfg(kani)]
+use crate::kani;
+
 use super::*;
 
 impl char {
@@ -223,7 +226,10 @@ impl char {
     /// assert_eq!('❤', c);
     /// ```
     #[stable(feature = "assoc_char_funcs", since = "1.52.0")]
-    #[rustc_const_unstable(feature = "const_char_from_u32_unchecked", issue = "89259")]
+    #[rustc_const_stable(
+        feature = "const_char_from_u32_unchecked",
+        since = "CURRENT_RUSTC_VERSION"
+    )]
     #[must_use]
     #[inline]
     pub const unsafe fn from_u32_unchecked(i: u32) -> char {
@@ -1831,5 +1837,29 @@ pub fn encode_utf16_raw(mut code: u32, dst: &mut [u16]) -> &mut [u16] {
                 dst.len(),
             )
         }
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+    use safety::ensures;
+
+    #[ensures(|result| c.is_ascii() == (result.is_some() && (result.unwrap() as u8 as char == *c)))]
+    fn as_ascii_clone(c: &char) -> Option<ascii::Char> {
+        c.as_ascii()
+    }
+
+    #[kani::proof_for_contract(as_ascii_clone)]
+    fn check_as_ascii_ascii_char() {
+        let ascii: char = kani::any_where(|c : &char| c.is_ascii());
+        as_ascii_clone(&ascii);
+    }
+
+    #[kani::proof_for_contract(as_ascii_clone)]
+    fn check_as_ascii_non_ascii_char() {
+        let non_ascii: char = kani::any_where(|c: &char| !c.is_ascii());
+        as_ascii_clone(&non_ascii);
     }
 }

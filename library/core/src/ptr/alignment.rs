@@ -1,7 +1,11 @@
+use safety::requires;
 use crate::num::NonZero;
 #[cfg(debug_assertions)]
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{cmp, fmt, hash, mem, num};
+
+#[cfg(kani)]
+use crate::kani;
 
 /// A type storing a `usize` which is a power of two, and thus
 /// represents a possible alignment in the Rust abstract machine.
@@ -76,6 +80,8 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[requires(align > 0)]
+    #[requires((align & (align - 1)) == 0)]
     pub const unsafe fn new_unchecked(align: usize) -> Self {
         #[cfg(debug_assertions)]
         assert_unsafe_precondition!(

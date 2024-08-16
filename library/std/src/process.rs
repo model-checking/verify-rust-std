@@ -96,9 +96,9 @@
 //! child processes must agree on how the commandline string is encoded.
 //!
 //! Most programs use the standard C run-time `argv`, which in practice results
-//! in consistent argument handling. However some programs have their own way of
+//! in consistent argument handling. However, some programs have their own way of
 //! parsing the commandline string. In these cases using [`arg`] or [`args`] may
-//! result in the child process seeing a different array of arguments then the
+//! result in the child process seeing a different array of arguments than the
 //! parent process intended.
 //!
 //! Two ways of mitigating this are:
@@ -629,6 +629,25 @@ impl Command {
     ///     .spawn()
     ///     .expect("sh command failed to start");
     /// ```
+    ///
+    /// # Caveats
+    ///
+    /// [`Command::new`] is only intended to accept the path of the program. If you pass a program
+    /// path along with arguments like `Command::new("ls -l").spawn()`, it will try to search for
+    /// `ls -l` literally. The arguments need to be passed separately, such as via [`arg`] or
+    /// [`args`].
+    ///
+    /// ```no_run
+    /// use std::process::Command;
+    ///
+    /// Command::new("ls")
+    ///     .arg("-l") // arg passed separately
+    ///     .spawn()
+    ///     .expect("ls command failed to start");
+    /// ```
+    ///
+    /// [`arg`]: Self::arg
+    /// [`args`]: Self::args
     #[stable(feature = "process", since = "1.0.0")]
     pub fn new<S: AsRef<OsStr>>(program: S) -> Command {
         Command { inner: imp::Command::new(program.as_ref()) }

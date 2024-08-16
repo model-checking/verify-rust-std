@@ -18,7 +18,8 @@ use crate::sys::{c, cvt, Align8};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::thread;
 
-use super::{api, to_u16s, IoResult};
+use super::api::{self, WinError};
+use super::{to_u16s, IoResult};
 use crate::sys::path::maybe_verbatim;
 
 pub struct File {
@@ -27,12 +28,12 @@ pub struct File {
 
 #[derive(Clone)]
 pub struct FileAttr {
-    attributes: c::DWORD,
+    attributes: u32,
     creation_time: c::FILETIME,
     last_access_time: c::FILETIME,
     last_write_time: c::FILETIME,
     file_size: u64,
-    reparse_tag: c::DWORD,
+    reparse_tag: u32,
     volume_serial_number: Option<u32>,
     number_of_links: Option<u32>,
     file_index: Option<u64>,
@@ -40,8 +41,8 @@ pub struct FileAttr {
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FileType {
-    attributes: c::DWORD,
-    reparse_tag: c::DWORD,
+    attributes: u32,
+    reparse_tag: u32,
 }
 
 pub struct ReadDir {
@@ -74,16 +75,16 @@ pub struct OpenOptions {
     create_new: bool,
     // system-specific
     custom_flags: u32,
-    access_mode: Option<c::DWORD>,
-    attributes: c::DWORD,
-    share_mode: c::DWORD,
-    security_qos_flags: c::DWORD,
-    security_attributes: c::LPSECURITY_ATTRIBUTES,
+    access_mode: Option<u32>,
+    attributes: u32,
+    share_mode: u32,
+    security_qos_flags: u32,
+    security_attributes: *mut c::SECURITY_ATTRIBUTES,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FilePermissions {
-    attrs: c::DWORD,
+    attrs: u32,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -130,10 +131,11 @@ impl Iterator for ReadDir {
             let mut wfd = mem::zeroed();
             loop {
                 if c::FindNextFileW(self.handle.0, &mut wfd) == 0 {
-                    if api::get_last_error().code == c::ERROR_NO_MORE_FILES {
-                        return None;
-                    } else {
-                        return Some(Err(Error::last_os_error()));
+                    match api::get_last_error() {
+                        WinError::NO_MORE_FILES => return None,
+                        WinError { code } => {
+                            return Some(Err(Error::from_raw_os_error(code as i32)));
+                        }
                     }
                 }
                 if let Some(e) = DirEntry::new(&self.root, &wfd) {
@@ -239,13 +241,11 @@ impl OpenOptions {
         // receive is `SECURITY_ANONYMOUS = 0x0`, which we can't check for later on.
         self.security_qos_flags = flags | c::SECURITY_SQOS_PRESENT;
     }
-    pub fn security_attributes(&mut self, attrs: c::LPSECURITY_ATTRIBUTES) {
+    pub fn security_attributes(&mut self, attrs: *mut c::SECURITY_ATTRIBUTES) {
         self.security_attributes = attrs;
     }
 
-    fn get_access_mode(&self) -> io::Result<c::DWORD> {
-        const ERROR_INVALID_PARAMETER: i32 = 87;
-
+    fn get_access_mode(&self) -> io::Result<u32> {
         match (self.read, self.write, self.append, self.access_mode) {
             (.., Some(mode)) => Ok(mode),
             (true, false, false, None) => Ok(c::GENERIC_READ),
@@ -255,23 +255,23 @@ impl OpenOptions {
             (true, _, true, None) => {
                 Ok(c::GENERIC_READ | (c::FILE_GENERIC_WRITE & !c::FILE_WRITE_DATA))
             }
-            (false, false, false, None) => Err(Error::from_raw_os_error(ERROR_INVALID_PARAMETER)),
+            (false, false, false, None) => {
+                Err(Error::from_raw_os_error(c::ERROR_INVALID_PARAMETER as i32))
+            }
         }
     }
 
-    fn get_creation_mode(&self) -> io::Result<c::DWORD> {
-        const ERROR_INVALID_PARAMETER: i32 = 87;
-
+    fn get_creation_mode(&self) -> io::Result<u32> {
         match (self.write, self.append) {
             (true, false) => {}
             (false, false) => {
                 if self.truncate || self.create || self.create_new {
-                    return Err(Error::from_raw_os_error(ERROR_INVALID_PARAMETER));
+                    return Err(Error::from_raw_os_error(c::ERROR_INVALID_PARAMETER as i32));
                 }
             }
             (_, true) => {
                 if self.truncate && !self.create_new {
-                    return Err(Error::from_raw_os_error(ERROR_INVALID_PARAMETER));
+                    return Err(Error::from_raw_os_error(c::ERROR_INVALID_PARAMETER as i32));
                 }
             }
         }
@@ -287,7 +287,7 @@ impl OpenOptions {
         })
     }
 
-    fn get_flags_and_attributes(&self) -> c::DWORD {
+    fn get_flags_and_attributes(&self) -> u32 {
         self.custom_flags
             | self.attributes
             | self.security_qos_flags
@@ -315,7 +315,7 @@ impl File {
             // Manual truncation. See #115745.
             if opts.truncate
                 && creation == c::OPEN_ALWAYS
-                && unsafe { c::GetLastError() } == c::ERROR_ALREADY_EXISTS
+                && api::get_last_error() == WinError::ALREADY_EXISTS
             {
                 unsafe {
                     // This originally used `FileAllocationInfo` instead of
@@ -397,21 +397,21 @@ impl File {
                 self.handle.as_raw_handle(),
                 c::FileBasicInfo,
                 core::ptr::addr_of_mut!(info) as *mut c_void,
-                size as c::DWORD,
+                size as u32,
             ))?;
             let mut attr = FileAttr {
                 attributes: info.FileAttributes,
                 creation_time: c::FILETIME {
-                    dwLowDateTime: info.CreationTime as c::DWORD,
-                    dwHighDateTime: (info.CreationTime >> 32) as c::DWORD,
+                    dwLowDateTime: info.CreationTime as u32,
+                    dwHighDateTime: (info.CreationTime >> 32) as u32,
                 },
                 last_access_time: c::FILETIME {
-                    dwLowDateTime: info.LastAccessTime as c::DWORD,
-                    dwHighDateTime: (info.LastAccessTime >> 32) as c::DWORD,
+                    dwLowDateTime: info.LastAccessTime as u32,
+                    dwHighDateTime: (info.LastAccessTime >> 32) as u32,
                 },
                 last_write_time: c::FILETIME {
-                    dwLowDateTime: info.LastWriteTime as c::DWORD,
-                    dwHighDateTime: (info.LastWriteTime >> 32) as c::DWORD,
+                    dwLowDateTime: info.LastWriteTime as u32,
+                    dwHighDateTime: (info.LastWriteTime >> 32) as u32,
                 },
                 file_size: 0,
                 reparse_tag: 0,
@@ -425,7 +425,7 @@ impl File {
                 self.handle.as_raw_handle(),
                 c::FileStandardInfo,
                 core::ptr::addr_of_mut!(info) as *mut c_void,
-                size as c::DWORD,
+                size as u32,
             ))?;
             attr.file_size = info.AllocationSize as u64;
             attr.number_of_links = Some(info.NumberOfLinks);
@@ -495,7 +495,7 @@ impl File {
             SeekFrom::End(n) => (c::FILE_END, n),
             SeekFrom::Current(n) => (c::FILE_CURRENT, n),
         };
-        let pos = pos as c::LARGE_INTEGER;
+        let pos = pos as i64;
         let mut newpos = 0;
         cvt(unsafe { c::SetFilePointerEx(self.handle.as_raw_handle(), pos, &mut newpos, whence) })?;
         Ok(newpos as u64)
@@ -511,7 +511,7 @@ impl File {
     fn reparse_point(
         &self,
         space: &mut Align8<[MaybeUninit<u8>]>,
-    ) -> io::Result<(c::DWORD, *mut c::REPARSE_DATA_BUFFER)> {
+    ) -> io::Result<(u32, *mut c::REPARSE_DATA_BUFFER)> {
         unsafe {
             let mut bytes = 0;
             cvt({
@@ -524,7 +524,7 @@ impl File {
                     ptr::null_mut(),
                     0,
                     space.0.as_mut_ptr().cast(),
-                    len as c::DWORD,
+                    len as u32,
                     &mut bytes,
                     ptr::null_mut(),
                 )
@@ -609,8 +609,7 @@ impl File {
                 "Cannot set file timestamp to 0",
             ));
         }
-        let is_max =
-            |t: c::FILETIME| t.dwLowDateTime == c::DWORD::MAX && t.dwHighDateTime == c::DWORD::MAX;
+        let is_max = |t: c::FILETIME| t.dwLowDateTime == u32::MAX && t.dwHighDateTime == u32::MAX;
         if times.accessed.map_or(false, is_max)
             || times.modified.map_or(false, is_max)
             || times.created.map_or(false, is_max)
@@ -641,7 +640,7 @@ impl File {
                 self.handle.as_raw_handle(),
                 c::FileBasicInfo,
                 core::ptr::addr_of_mut!(info) as *mut c_void,
-                size as c::DWORD,
+                size as u32,
             ))?;
             Ok(info)
         }
@@ -795,10 +794,12 @@ impl<'a> Iterator for DirBuffIter<'a> {
 }
 
 unsafe fn from_maybe_unaligned<'a>(p: *const u16, len: usize) -> Cow<'a, [u16]> {
-    if p.is_aligned() {
-        Cow::Borrowed(crate::slice::from_raw_parts(p, len))
-    } else {
-        Cow::Owned((0..len).map(|i| p.add(i).read_unaligned()).collect())
+    unsafe {
+        if p.is_aligned() {
+            Cow::Borrowed(crate::slice::from_raw_parts(p, len))
+        } else {
+            Cow::Owned((0..len).map(|i| p.add(i).read_unaligned()).collect())
+        }
     }
 }
 
@@ -845,7 +846,7 @@ fn open_link_no_reparse(parent: &File, name: &[u16], access: u32) -> io::Result<
             // We make a special exception for `STATUS_DELETE_PENDING` because
             // otherwise this will be mapped to `ERROR_ACCESS_DENIED` which is
             // very unhelpful.
-            Err(io::Error::from_raw_os_error(c::ERROR_DELETE_PENDING as _))
+            Err(io::Error::from_raw_os_error(c::ERROR_DELETE_PENDING as i32))
         } else if status == c::STATUS_INVALID_PARAMETER
             && ATTRIBUTES.load(Ordering::Relaxed) == c::OBJ_DONT_REPARSE
         {
@@ -897,7 +898,9 @@ impl IntoRawHandle for File {
 
 impl FromRawHandle for File {
     unsafe fn from_raw_handle(raw_handle: RawHandle) -> Self {
-        Self { handle: FromInner::from_inner(FromRawHandle::from_raw_handle(raw_handle)) }
+        unsafe {
+            Self { handle: FromInner::from_inner(FromRawHandle::from_raw_handle(raw_handle)) }
+        }
     }
 }
 
@@ -1020,7 +1023,7 @@ impl FileTimes {
 }
 
 impl FileType {
-    fn new(attrs: c::DWORD, reparse_tag: c::DWORD) -> FileType {
+    fn new(attrs: u32, reparse_tag: u32) -> FileType {
         FileType { attributes: attrs, reparse_tag }
     }
     pub fn is_dir(&self) -> bool {
@@ -1097,7 +1100,7 @@ pub fn readdir(p: &Path) -> io::Result<ReadDir> {
             //
             // See issue #120040: https://github.com/rust-lang/rust/issues/120040.
             let last_error = api::get_last_error();
-            if last_error.code == c::ERROR_FILE_NOT_FOUND {
+            if last_error == WinError::FILE_NOT_FOUND {
                 return Ok(ReadDir {
                     handle: FindNextFileHandle(find_handle),
                     root: Arc::new(root),
@@ -1417,20 +1420,22 @@ pub fn canonicalize(p: &Path) -> io::Result<PathBuf> {
 
 pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
     unsafe extern "system" fn callback(
-        _TotalFileSize: c::LARGE_INTEGER,
-        _TotalBytesTransferred: c::LARGE_INTEGER,
-        _StreamSize: c::LARGE_INTEGER,
-        StreamBytesTransferred: c::LARGE_INTEGER,
-        dwStreamNumber: c::DWORD,
-        _dwCallbackReason: c::DWORD,
+        _TotalFileSize: i64,
+        _TotalBytesTransferred: i64,
+        _StreamSize: i64,
+        StreamBytesTransferred: i64,
+        dwStreamNumber: u32,
+        _dwCallbackReason: u32,
         _hSourceFile: c::HANDLE,
         _hDestinationFile: c::HANDLE,
-        lpData: c::LPCVOID,
-    ) -> c::DWORD {
-        if dwStreamNumber == 1 {
-            *(lpData as *mut i64) = StreamBytesTransferred;
+        lpData: *const c_void,
+    ) -> u32 {
+        unsafe {
+            if dwStreamNumber == 1 {
+                *(lpData as *mut i64) = StreamBytesTransferred;
+            }
+            c::PROGRESS_CONTINUE
         }
-        c::PROGRESS_CONTINUE
     }
     let pfrom = maybe_verbatim(from)?;
     let pto = maybe_verbatim(to)?;
@@ -1531,7 +1536,7 @@ pub fn junction_point(original: &Path, link: &Path) -> io::Result<()> {
 }
 
 // Try to see if a file exists but, unlike `exists`, report I/O errors.
-pub fn try_exists(path: &Path) -> io::Result<bool> {
+pub fn exists(path: &Path) -> io::Result<bool> {
     // Open the file to ensure any symlinks are followed to their target.
     let mut opts = OpenOptions::new();
     // No read, write, etc access rights are needed.

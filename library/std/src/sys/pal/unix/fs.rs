@@ -20,18 +20,14 @@ use crate::sys::time::SystemTime;
 use crate::sys::{cvt, cvt_r};
 use crate::sys_common::{AsInner, AsInnerMut, FromInner, IntoInner};
 
-#[cfg(any(all(target_os = "linux", target_env = "gnu"), target_vendor = "apple"))]
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
 use crate::sys::weak::syscall;
-#[cfg(any(target_os = "android", target_os = "macos", target_os = "solaris"))]
+#[cfg(target_os = "android")]
 use crate::sys::weak::weak;
 
 use libc::{c_int, mode_t};
 
-#[cfg(any(
-    target_os = "solaris",
-    all(target_os = "linux", target_env = "gnu"),
-    target_vendor = "apple",
-))]
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
 use libc::c_char;
 #[cfg(any(
     all(target_os = "linux", not(target_env = "musl")),
@@ -101,7 +97,7 @@ use libc::{
 ))]
 use libc::{dirent64, fstat64, ftruncate64, lseek64, lstat64, off64_t, open64, stat64};
 
-pub use crate::sys_common::fs::try_exists;
+pub use crate::sys_common::fs::exists;
 
 pub struct File(FileDesc);
 
@@ -1481,29 +1477,33 @@ impl FromRawFd for File {
 
 impl fmt::Debug for File {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "netbsd",
-            target_os = "illumos",
-            target_os = "solaris"
-        ))]
+        #[cfg(any(target_os = "linux", target_os = "illumos", target_os = "solaris"))]
         fn get_path(fd: c_int) -> Option<PathBuf> {
             let mut p = PathBuf::from("/proc/self/fd");
             p.push(&fd.to_string());
             readlink(&p).ok()
         }
 
-        #[cfg(target_vendor = "apple")]
+        #[cfg(any(target_vendor = "apple", target_os = "netbsd"))]
         fn get_path(fd: c_int) -> Option<PathBuf> {
             // FIXME: The use of PATH_MAX is generally not encouraged, but it
-            // is inevitable in this case because Apple targets define `fcntl`
+            // is inevitable in this case because Apple targets and NetBSD define `fcntl`
             // with `F_GETPATH` in terms of `MAXPATHLEN`, and there are no
             // alternatives. If a better method is invented, it should be used
             // instead.
             let mut buf = vec![0; libc::PATH_MAX as usize];
             let n = unsafe { libc::fcntl(fd, libc::F_GETPATH, buf.as_ptr()) };
             if n == -1 {
-                return None;
+                cfg_if::cfg_if! {
+                    if #[cfg(target_os = "netbsd")] {
+                        // fallback to procfs as last resort
+                        let mut p = PathBuf::from("/proc/self/fd");
+                        p.push(&fd.to_string());
+                        return readlink(&p).ok();
+                    } else {
+                        return None;
+                    }
+                }
             }
             let l = buf.iter().position(|&c| c == 0).unwrap();
             buf.truncate(l as usize);
@@ -1557,6 +1557,8 @@ impl fmt::Debug for File {
             target_os = "netbsd",
             target_os = "openbsd",
             target_os = "vxworks",
+            target_os = "solaris",
+            target_os = "illumos",
             target_vendor = "apple",
         ))]
         fn get_mode(fd: c_int) -> Option<(bool, bool)> {
@@ -1579,6 +1581,8 @@ impl fmt::Debug for File {
             target_os = "netbsd",
             target_os = "openbsd",
             target_os = "vxworks",
+            target_os = "solaris",
+            target_os = "illumos",
             target_vendor = "apple",
         )))]
         fn get_mode(_fd: c_int) -> Option<(bool, bool)> {
@@ -1745,19 +1749,6 @@ pub fn link(original: &Path, link: &Path) -> io::Result<()> {
                     // Android has `linkat` on newer versions, but we happen to know `link`
                     // always has the correct behavior, so it's here as well.
                     cvt(unsafe { libc::link(original.as_ptr(), link.as_ptr()) })?;
-                } else if #[cfg(any(target_os = "macos", target_os = "solaris"))] {
-                    // MacOS (<=10.9) and Solaris 10 lack support for linkat while newer
-                    // versions have it. We want to use linkat if it is available, so we use weak!
-                    // to check. `linkat` is preferable to `link` because it gives us a flag to
-                    // specify how symlinks should be handled. We pass 0 as the flags argument,
-                    // meaning it shouldn't follow symlinks.
-                    weak!(fn linkat(c_int, *const c_char, c_int, *const c_char, c_int) -> c_int);
-
-                    if let Some(f) = linkat.get() {
-                        cvt(unsafe { f(libc::AT_FDCWD, original.as_ptr(), libc::AT_FDCWD, link.as_ptr(), 0) })?;
-                    } else {
-                        cvt(unsafe { libc::link(original.as_ptr(), link.as_ptr()) })?;
-                    };
                 } else {
                     // Where we can, use `linkat` instead of `link`; see the comment above
                     // this one for details on why.
@@ -1900,8 +1891,6 @@ pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
 
 #[cfg(target_vendor = "apple")]
 pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
-    use crate::sync::atomic::{AtomicBool, Ordering};
-
     const COPYFILE_ALL: libc::copyfile_flags_t = libc::COPYFILE_METADATA | libc::COPYFILE_DATA;
 
     struct FreeOnDrop(libc::copyfile_state_t);
@@ -1910,46 +1899,27 @@ pub fn copy(from: &Path, to: &Path) -> io::Result<u64> {
             // The code below ensures that `FreeOnDrop` is never a null pointer
             unsafe {
                 // `copyfile_state_free` returns -1 if the `to` or `from` files
-                // cannot be closed. However, this is not considered this an
-                // error.
+                // cannot be closed. However, this is not considered an error.
                 libc::copyfile_state_free(self.0);
             }
         }
     }
 
-    // MacOS prior to 10.12 don't support `fclonefileat`
-    // We store the availability in a global to avoid unnecessary syscalls
-    static HAS_FCLONEFILEAT: AtomicBool = AtomicBool::new(true);
-    syscall! {
-        // Mirrors `libc::fclonefileat`
-        fn fclonefileat(
-            srcfd: libc::c_int,
-            dst_dirfd: libc::c_int,
-            dst: *const c_char,
-            flags: libc::c_int
-        ) -> libc::c_int
-    }
-
     let (reader, reader_metadata) = open_from(from)?;
 
-    // Opportunistically attempt to create a copy-on-write clone of `from`
-    // using `fclonefileat`.
-    if HAS_FCLONEFILEAT.load(Ordering::Relaxed) {
-        let clonefile_result = run_path_with_cstr(to, &|to| {
-            cvt(unsafe { fclonefileat(reader.as_raw_fd(), libc::AT_FDCWD, to.as_ptr(), 0) })
-        });
-        match clonefile_result {
-            Ok(_) => return Ok(reader_metadata.len()),
-            Err(err) => match err.raw_os_error() {
-                // `fclonefileat` will fail on non-APFS volumes, if the
-                // destination already exists, or if the source and destination
-                // are on different devices. In all these cases `fcopyfile`
-                // should succeed.
-                Some(libc::ENOTSUP) | Some(libc::EEXIST) | Some(libc::EXDEV) => (),
-                Some(libc::ENOSYS) => HAS_FCLONEFILEAT.store(false, Ordering::Relaxed),
-                _ => return Err(err),
-            },
-        }
+    let clonefile_result = run_path_with_cstr(to, &|to| {
+        cvt(unsafe { libc::fclonefileat(reader.as_raw_fd(), libc::AT_FDCWD, to.as_ptr(), 0) })
+    });
+    match clonefile_result {
+        Ok(_) => return Ok(reader_metadata.len()),
+        Err(e) => match e.raw_os_error() {
+            // `fclonefileat` will fail on non-APFS volumes, if the
+            // destination already exists, or if the source and destination
+            // are on different devices. In all these cases `fcopyfile`
+            // should succeed.
+            Some(libc::ENOTSUP) | Some(libc::EEXIST) | Some(libc::EXDEV) => (),
+            _ => return Err(e),
+        },
     }
 
     // Fall back to using `fcopyfile` if `fclonefileat` does not succeed.
@@ -2006,13 +1976,14 @@ pub fn chroot(dir: &Path) -> io::Result<()> {
 
 pub use remove_dir_impl::remove_dir_all;
 
-// Fallback for REDOX, ESP-ID, Horizon, Vita and Miri
+// Fallback for REDOX, ESP-ID, Horizon, Vita, Vxworks and Miri
 #[cfg(any(
     target_os = "redox",
     target_os = "espidf",
     target_os = "horizon",
     target_os = "vita",
     target_os = "nto",
+    target_os = "vxworks",
     miri
 ))]
 mod remove_dir_impl {
@@ -2026,6 +1997,7 @@ mod remove_dir_impl {
     target_os = "horizon",
     target_os = "vita",
     target_os = "nto",
+    target_os = "vxworks",
     miri
 )))]
 mod remove_dir_impl {
@@ -2038,56 +2010,10 @@ mod remove_dir_impl {
     use crate::sys::common::small_c_string::run_path_with_cstr;
     use crate::sys::{cvt, cvt_r};
 
-    #[cfg(not(any(
-        all(target_os = "linux", target_env = "gnu"),
-        all(target_os = "macos", not(target_arch = "aarch64"))
-    )))]
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
     use libc::{fdopendir, openat, unlinkat};
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     use libc::{fdopendir, openat64 as openat, unlinkat};
-    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
-    use macos_weak::{fdopendir, openat, unlinkat};
-
-    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
-    mod macos_weak {
-        use crate::sys::weak::weak;
-        use libc::{c_char, c_int, DIR};
-
-        fn get_openat_fn() -> Option<unsafe extern "C" fn(c_int, *const c_char, c_int) -> c_int> {
-            weak!(fn openat(c_int, *const c_char, c_int) -> c_int);
-            openat.get()
-        }
-
-        pub fn has_openat() -> bool {
-            get_openat_fn().is_some()
-        }
-
-        pub unsafe fn openat(dirfd: c_int, pathname: *const c_char, flags: c_int) -> c_int {
-            get_openat_fn().map(|openat| openat(dirfd, pathname, flags)).unwrap_or_else(|| {
-                crate::sys::pal::unix::os::set_errno(libc::ENOSYS);
-                -1
-            })
-        }
-
-        pub unsafe fn fdopendir(fd: c_int) -> *mut DIR {
-            #[cfg(all(target_os = "macos", target_arch = "x86"))]
-            weak!(fn fdopendir(c_int) -> *mut DIR, "fdopendir$INODE64$UNIX2003");
-            #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-            weak!(fn fdopendir(c_int) -> *mut DIR, "fdopendir$INODE64");
-            fdopendir.get().map(|fdopendir| fdopendir(fd)).unwrap_or_else(|| {
-                crate::sys::pal::unix::os::set_errno(libc::ENOSYS);
-                crate::ptr::null_mut()
-            })
-        }
-
-        pub unsafe fn unlinkat(dirfd: c_int, pathname: *const c_char, flags: c_int) -> c_int {
-            weak!(fn unlinkat(c_int, *const c_char, c_int) -> c_int);
-            unlinkat.get().map(|unlinkat| unlinkat(dirfd, pathname, flags)).unwrap_or_else(|| {
-                crate::sys::pal::unix::os::set_errno(libc::ENOSYS);
-                -1
-            })
-        }
-    }
 
     pub fn openat_nofollow_dironly(parent_fd: Option<RawFd>, p: &CStr) -> io::Result<OwnedFd> {
         let fd = cvt_r(|| unsafe {
@@ -2200,19 +2126,7 @@ mod remove_dir_impl {
         }
     }
 
-    #[cfg(not(all(target_os = "macos", not(target_arch = "aarch64"))))]
     pub fn remove_dir_all(p: &Path) -> io::Result<()> {
         remove_dir_all_modern(p)
-    }
-
-    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
-    pub fn remove_dir_all(p: &Path) -> io::Result<()> {
-        if macos_weak::has_openat() {
-            // openat() is available with macOS 10.10+, just like unlinkat() and fdopendir()
-            remove_dir_all_modern(p)
-        } else {
-            // fall back to classic implementation
-            crate::sys_common::fs::remove_dir_all(p)
-        }
     }
 }

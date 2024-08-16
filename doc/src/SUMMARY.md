@@ -16,4 +16,5 @@
   - [Core Transmutation](./challenges/0001-core-transmutation.md)
   - [Memory safety of core intrinsics](./challenges/0002-intrinsics-memory.md)
   - [Pointer Arithmetic](./challenges/0003-pointer-arithmentic.md)
+  - [Memory safety of BTreeMap's `btree::node` module](./challenges/0004-btree-node.md)
   - [Inductive data type](./challenges/0005-linked-list.md)
