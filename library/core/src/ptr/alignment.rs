@@ -388,6 +388,13 @@ enum AlignmentEnum {
 mod verify {
     use super::*;
 
+    impl kani::Arbitrary for Alignment {
+        fn any() -> Self {
+            let align = kani::any_where(|a: &usize| a.is_power_of_two());
+            unsafe { mem::transmute::<usize, Alignment>(align) }
+        }
+    }
+
     // pub const fn of<T>() -> Self
     #[kani::proof]
     pub fn check_of_i32() {
@@ -423,10 +430,8 @@ mod verify {
     // pub const fn as_nonzero(self) -> NonZero<usize>
     #[kani::proof_for_contract(Alignment::as_nonzero)]
     pub fn check_as_nonzero() {
-        let a = kani::any::<usize>();
-        if let Some(alignment) = Alignment::new(a) {
-            let _ = alignment.as_nonzero();
-        }
+        let alignment = kani::any::<Alignment>();
+        let _ = alignment.as_nonzero();
     }
 
     // pub const fn log2(self) -> u32
