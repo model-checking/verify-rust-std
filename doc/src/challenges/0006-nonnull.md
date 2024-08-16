@@ -1,7 +1,7 @@
 # Challenge 6: Safety of NonNull
 
 - **Status:** Open
-- **Tracking Issue:** [Link to issue](TODO: https://github.com/model-checking/verify-rust-std/issues/TBA)
+- **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/53)
 - **Start date:** *2024-08-16*
 - **End date:** *2024-12-10*
 
