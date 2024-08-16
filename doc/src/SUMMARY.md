@@ -18,3 +18,4 @@
   - [Pointer Arithmetic](./challenges/0003-pointer-arithmentic.md)
   - [Memory safety of BTreeMap's `btree::node` module](./challenges/0004-btree-node.md)
   - [Inductive data type](./challenges/0005-linked-list.md)
+  - [Safety of NonNull](./challenges/0006-nonnull.md)
