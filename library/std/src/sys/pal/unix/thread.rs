@@ -1,16 +1,13 @@
-use crate::cmp;
 use crate::ffi::CStr;
-use crate::io;
-use crate::mem;
+use crate::mem::{self, ManuallyDrop};
 use crate::num::NonZero;
-use crate::ptr;
-use crate::sys::{os, stack_overflow};
-use crate::time::Duration;
-
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 use crate::sys::weak::dlsym;
 #[cfg(any(target_os = "solaris", target_os = "illumos", target_os = "nto"))]
 use crate::sys::weak::weak;
+use crate::sys::{os, stack_overflow};
+use crate::time::Duration;
+use crate::{cmp, io, ptr};
 #[cfg(not(any(target_os = "l4re", target_os = "vxworks", target_os = "espidf")))]
 pub const DEFAULT_MIN_STACK_SIZE: usize = 2 * 1024 * 1024;
 #[cfg(target_os = "l4re")]
@@ -268,11 +265,9 @@ impl Thread {
     }
 
     pub fn join(self) {
-        unsafe {
-            let ret = libc::pthread_join(self.id, ptr::null_mut());
-            mem::forget(self);
-            assert!(ret == 0, "failed to join thread: {}", io::Error::from_raw_os_error(ret));
-        }
+        let id = self.into_id();
+        let ret = unsafe { libc::pthread_join(id, ptr::null_mut()) };
+        assert!(ret == 0, "failed to join thread: {}", io::Error::from_raw_os_error(ret));
     }
 
     pub fn id(&self) -> libc::pthread_t {
@@ -280,9 +275,7 @@ impl Thread {
     }
 
     pub fn into_id(self) -> libc::pthread_t {
-        let id = self.id;
-        mem::forget(self);
-        id
+        ManuallyDrop::new(self).id
     }
 }
 
@@ -462,8 +455,18 @@ pub fn available_parallelism() -> io::Result<NonZero<usize>> {
 
                 Ok(NonZero::new_unchecked(sinfo.cpu_count as usize))
             }
+        } else if #[cfg(target_os = "vxworks")] {
+            // Note: there is also `vxCpuConfiguredGet`, closer to _SC_NPROCESSORS_CONF
+            // expectations than the actual cores availability.
+            extern "C" {
+                fn vxCpuEnabledGet() -> libc::cpuset_t;
+            }
+
+            // always fetches a valid bitmask
+            let set = unsafe { vxCpuEnabledGet() };
+            Ok(NonZero::new_unchecked(set.count_ones() as usize))
         } else {
-            // FIXME: implement on vxWorks, Redox, l4re
+            // FIXME: implement on Redox, l4re
             Err(io::const_io_error!(io::ErrorKind::Unsupported, "Getting the number of hardware threads is not supported on the target platform"))
         }
     }
@@ -479,11 +482,9 @@ mod cgroups {
     use crate::borrow::Cow;
     use crate::ffi::OsString;
     use crate::fs::{exists, File};
-    use crate::io::Read;
-    use crate::io::{BufRead, BufReader};
+    use crate::io::{BufRead, BufReader, Read};
     use crate::os::unix::ffi::OsStringExt;
-    use crate::path::Path;
-    use crate::path::PathBuf;
+    use crate::path::{Path, PathBuf};
     use crate::str::from_utf8;
 
     #[derive(PartialEq)]

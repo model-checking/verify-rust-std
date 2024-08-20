@@ -3,7 +3,6 @@
 //! Better known as "varargs".
 
 use crate::ffi::c_void;
-
 #[allow(unused_imports)]
 use crate::fmt;
 use crate::marker::PhantomData;
@@ -23,7 +22,7 @@ use crate::ops::{Deref, DerefMut};
     target_os = "uefi",
     windows,
 ))]
-#[cfg_attr(not(doc), repr(transparent))] // work around https://github.com/rust-lang/rust/issues/90435
+#[repr(transparent)]
 #[lang = "va_list"]
 pub struct VaListImpl<'f> {
     ptr: *mut c_void,
@@ -115,7 +114,7 @@ pub struct VaListImpl<'f> {
 }
 
 /// A wrapper for a `va_list`
-#[cfg_attr(not(doc), repr(transparent))] // work around https://github.com/rust-lang/rust/issues/90435
+#[repr(transparent)]
 #[derive(Debug)]
 pub struct VaList<'a, 'f: 'a> {
     #[cfg(any(
@@ -162,7 +161,7 @@ pub struct VaList<'a, 'f: 'a> {
     windows,
 ))]
 impl<'f> VaListImpl<'f> {
-    /// Convert a `VaListImpl` into a `VaList` that is binary-compatible with C's `va_list`.
+    /// Converts a `VaListImpl` into a `VaList` that is binary-compatible with C's `va_list`.
     #[inline]
     pub fn as_va_list<'a>(&'a mut self) -> VaList<'a, 'f> {
         VaList { inner: VaListImpl { ..*self }, _marker: PhantomData }
@@ -182,7 +181,7 @@ impl<'f> VaListImpl<'f> {
     not(windows),
 ))]
 impl<'f> VaListImpl<'f> {
-    /// Convert a `VaListImpl` into a `VaList` that is binary-compatible with C's `va_list`.
+    /// Converts a `VaListImpl` into a `VaList` that is binary-compatible with C's `va_list`.
     #[inline]
     pub fn as_va_list<'a>(&'a mut self) -> VaList<'a, 'f> {
         VaList { inner: self, _marker: PhantomData }
