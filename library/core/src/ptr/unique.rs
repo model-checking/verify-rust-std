@@ -247,7 +247,7 @@ mod verify {
     }
 
     // pub const fn as_non_null_ptr(self) -> NonNull<T>
-    #[kani::proof]
+    #[kani::proof_for_contract(Unique::as_non_null_ptr)]
     pub fn check_as_non_null_ptr() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
