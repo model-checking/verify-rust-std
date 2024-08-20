@@ -48,6 +48,8 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[requires(mem::align_of::<T>().is_power_of_two())]
+    #[ensures(|result| result.as_usize().is_power_of_two())]
     pub const fn of<T>() -> Self {
         // SAFETY: rustc ensures that type alignment is always a power of two.
         unsafe { Alignment::new_unchecked(mem::align_of::<T>()) }
@@ -396,10 +398,9 @@ mod verify {
     }
 
     // pub const fn of<T>() -> Self
-    #[kani::proof]
+    #[kani::proof_for_contract(Alignment::of)]
     pub fn check_of_i32() {
-        let alignment = Alignment::of::<i32>();
-        assert!(alignment.as_usize().is_power_of_two());
+        let _ = Alignment::of::<i32>();
     }
 
     // pub const fn new(align: usize) -> Option<Self>
