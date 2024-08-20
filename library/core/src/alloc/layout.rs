@@ -159,6 +159,9 @@ impl Layout {
     #[rustc_const_stable(feature = "alloc_layout_const_new", since = "1.42.0")]
     #[must_use]
     #[inline]
+    #[requires(mem::align_of::<T>().is_power_of_two())]
+    #[ensures(|result| result.size() == mem::size_of::<T>())]
+    #[ensures(|result| result.align() == mem::align_of::<T>())]
     pub const fn new<T>() -> Self {
         let (size, align) = size_align::<T>();
         // SAFETY: if the type is instantiated, rustc already ensures that its
@@ -472,6 +475,8 @@ impl Layout {
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
     #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
     #[inline]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == n * mem::size_of::<T>())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == mem::align_of::<T>())]
     pub const fn array<T>(n: usize) -> Result<Self, LayoutError> {
         // Reduce the amount of code we need to monomorphize per `T`.
         return inner(mem::size_of::<T>(), Alignment::of::<T>(), n);
@@ -538,6 +543,13 @@ impl fmt::Display for LayoutError {
 mod verify {
     use super::*;
 
+    impl kani::Arbitrary for Layout {
+        fn any() -> Self {
+            let size = kani::any::<usize>();
+            unsafe { Layout { size, align: kani::any::<Alignment>() } }
+        }
+    }
+
     // pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError>
     #[kani::proof_for_contract(Layout::from_size_align)]
     pub fn check_from_size_align() {
@@ -571,21 +583,14 @@ mod verify {
     // pub const fn align(&self) -> usize
     #[kani::proof_for_contract(Layout::align)]
     pub fn check_align() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let _ = layout.align();
-        }
+        let layout = kani::any::<Layout>();
+        let _ = layout.align();
     }
 
     // pub const fn new<T>() -> Self
-    #[kani::proof]
+    #[kani::proof_for_contract(Layout::new)]
     pub fn check_new_i32() {
-        let layout = Layout::new::<i32>();
-        assert_eq!(layout.size(), 4);
-        assert!(layout.align().is_power_of_two());
+        let _ = Layout::new::<i32>();
     }
 
     // pub const fn for_value<T: ?Sized>(t: &T) -> Self
@@ -606,115 +611,69 @@ mod verify {
     // pub const fn dangling(&self) -> NonNull<u8>
     #[kani::proof_for_contract(Layout::dangling)]
     pub fn check_dangling() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let _ = layout.dangling();
-        }
+        let layout = kani::any::<Layout>();
+        let _ = layout.dangling();
     }
 
     // pub fn align_to(&self, align: usize) -> Result<Self, LayoutError>
     #[kani::proof_for_contract(Layout::align_to)]
     pub fn check_align_to() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let a2 = kani::any::<usize>();
-            let _ = layout.align_to(a2);
-        }
+        let layout = kani::any::<Layout>();
+        let a2 = kani::any::<usize>();
+        let _ = layout.align_to(a2);
     }
 
     // pub const fn padding_needed_for(&self, align: usize) -> usize
     #[kani::proof_for_contract(Layout::padding_needed_for)]
     pub fn check_padding_needed_for() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let a2 = kani::any::<usize>();
-            if(a2.is_power_of_two() && a2 <= a) {
-                let _ = layout.padding_needed_for(a2);
-            }
+        let layout = kani::any::<Layout>();
+        let a2 = kani::any::<usize>();
+        if(a2.is_power_of_two() && a2 <= layout.align()) {
+            let _ = layout.padding_needed_for(a2);
         }
     }
 
     // pub const fn pad_to_align(&self) -> Layout
     #[kani::proof_for_contract(Layout::pad_to_align)]
     pub fn check_pad_to_align() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let _ = layout.pad_to_align();
-        }
+        let layout = kani::any::<Layout>();
+        let _ = layout.pad_to_align();
     }
 
     // pub fn repeat(&self, n: usize) -> Result<(Self, usize), LayoutError>
     #[kani::proof_for_contract(Layout::repeat)]
     pub fn check_repeat() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let n = kani::any::<usize>();
-            let _ = layout.repeat(n);
-        }
+        let layout = kani::any::<Layout>();
+        let n = kani::any::<usize>();
+        let _ = layout.repeat(n);
     }
 
     // pub fn extend(&self, next: Self) -> Result<(Self, usize), LayoutError>
     #[kani::proof_for_contract(Layout::extend)]
     pub fn check_extend() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let s2 = kani::any::<usize>();
-            let a2 = kani::any::<usize>();
-            kani::assume(Layout::from_size_align(s2, a2).is_ok());
-            let layout2 = Layout::from_size_align_unchecked(s2, a2);
-            let _ = layout.extend(layout2);
-        }
+        let layout = kani::any::<Layout>();
+        let layout2 = kani::any::<Layout>();
+        let _ = layout.extend(layout2);
     }
 
     // pub fn repeat_packed(&self, n: usize) -> Result<Self, LayoutError>
     #[kani::proof_for_contract(Layout::repeat_packed)]
     pub fn check_repeat_packed() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let n = kani::any::<usize>();
-            let _ = layout.repeat_packed(n);
-        }
+        let layout = kani::any::<Layout>();
+        let n = kani::any::<usize>();
+        let _ = layout.repeat_packed(n);
     }
 
     // pub fn extend_packed(&self, next: Self) -> Result<Self, LayoutError>
     #[kani::proof_for_contract(Layout::extend_packed)]
     pub fn check_extend_packed() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        kani::assume(Layout::from_size_align(s, a).is_ok());
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(s, a);
-            let s2 = kani::any::<usize>();
-            let a2 = kani::any::<usize>();
-            kani::assume(Layout::from_size_align(s2, a2).is_ok());
-            let layout2 = Layout::from_size_align_unchecked(s2, a2);
-            let _ = layout.extend_packed(layout2);
-        }
+        let layout = kani::any::<Layout>();
+        let layout2 = kani::any::<Layout>();
+        let _ = layout.extend_packed(layout2);
     }
 
     // pub const fn array<T>(n: usize) -> Result<Self, LayoutError>
-    #[kani::proof]
+    #[kani::proof_for_contract(Layout::array)]
     pub fn check_array_i32() {
         let n = kani::any::<usize>();
         if let Ok(layout) = Layout::array::<i32>(n) {
