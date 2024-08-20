@@ -7,6 +7,7 @@ mod pal;
 
 mod personality;
 
+pub mod anonymous_pipe;
 pub mod backtrace;
 pub mod cmath;
 pub mod exit_guard;

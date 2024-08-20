@@ -4,29 +4,6 @@
 #[cfg(test)]
 mod tests;
 
-use crate::os::unix::prelude::*;
-
-use crate::ffi::{CStr, OsStr, OsString};
-use crate::fmt::{self, Write as _};
-use crate::io::{self, BorrowedCursor, Error, IoSlice, IoSliceMut, SeekFrom};
-use crate::mem;
-use crate::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd};
-use crate::path::{Path, PathBuf};
-use crate::ptr;
-use crate::sync::Arc;
-use crate::sys::common::small_c_string::run_path_with_cstr;
-use crate::sys::fd::FileDesc;
-use crate::sys::time::SystemTime;
-use crate::sys::{cvt, cvt_r};
-use crate::sys_common::{AsInner, AsInnerMut, FromInner, IntoInner};
-
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
-use crate::sys::weak::syscall;
-#[cfg(target_os = "android")]
-use crate::sys::weak::weak;
-
-use libc::{c_int, mode_t};
-
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 use libc::c_char;
 #[cfg(any(
@@ -73,6 +50,7 @@ use libc::readdir64_r;
     target_os = "hurd",
 )))]
 use libc::readdir_r as readdir64_r;
+use libc::{c_int, mode_t};
 #[cfg(target_os = "android")]
 use libc::{
     dirent as dirent64, fstat as fstat64, fstatat as fstatat64, ftruncate64, lseek64,
@@ -97,7 +75,24 @@ use libc::{
 ))]
 use libc::{dirent64, fstat64, ftruncate64, lseek64, lstat64, off64_t, open64, stat64};
 
+use crate::ffi::{CStr, OsStr, OsString};
+use crate::fmt::{self, Write as _};
+use crate::io::{self, BorrowedCursor, Error, IoSlice, IoSliceMut, SeekFrom};
+use crate::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd};
+use crate::os::unix::prelude::*;
+use crate::path::{Path, PathBuf};
+use crate::sync::Arc;
+use crate::sys::common::small_c_string::run_path_with_cstr;
+use crate::sys::fd::FileDesc;
+use crate::sys::time::SystemTime;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use crate::sys::weak::syscall;
+#[cfg(target_os = "android")]
+use crate::sys::weak::weak;
+use crate::sys::{cvt, cvt_r};
 pub use crate::sys_common::fs::exists;
+use crate::sys_common::{AsInner, AsInnerMut, FromInner, IntoInner};
+use crate::{mem, ptr};
 
 pub struct File(FileDesc);
 
@@ -463,15 +458,15 @@ impl FileAttr {
 #[cfg(target_os = "aix")]
 impl FileAttr {
     pub fn modified(&self) -> io::Result<SystemTime> {
-        Ok(SystemTime::new(self.stat.st_mtime.tv_sec as i64, self.stat.st_mtime.tv_nsec as i64))
+        SystemTime::new(self.stat.st_mtime.tv_sec as i64, self.stat.st_mtime.tv_nsec as i64)
     }
 
     pub fn accessed(&self) -> io::Result<SystemTime> {
-        Ok(SystemTime::new(self.stat.st_atime.tv_sec as i64, self.stat.st_atime.tv_nsec as i64))
+        SystemTime::new(self.stat.st_atime.tv_sec as i64, self.stat.st_atime.tv_nsec as i64)
     }
 
     pub fn created(&self) -> io::Result<SystemTime> {
-        Ok(SystemTime::new(self.stat.st_ctime.tv_sec as i64, self.stat.st_ctime.tv_nsec as i64))
+        SystemTime::new(self.stat.st_ctime.tv_sec as i64, self.stat.st_ctime.tv_nsec as i64)
     }
 }
 
@@ -857,6 +852,7 @@ impl Drop for Dir {
             target_os = "espidf",
             target_os = "fuchsia",
             target_os = "horizon",
+            target_os = "vxworks",
         )))]
         {
             let fd = unsafe { libc::dirfd(self.0) };
@@ -1313,7 +1309,12 @@ impl File {
     }
 
     pub fn set_times(&self, times: FileTimes) -> io::Result<()> {
-        #[cfg(not(any(target_os = "redox", target_os = "espidf", target_os = "horizon")))]
+        #[cfg(not(any(
+            target_os = "redox",
+            target_os = "espidf",
+            target_os = "horizon",
+            target_os = "vxworks"
+        )))]
         let to_timespec = |time: Option<SystemTime>| match time {
             Some(time) if let Some(ts) = time.t.to_timespec() => Ok(ts),
             Some(time) if time > crate::sys::time::UNIX_EPOCH => Err(io::const_io_error!(
@@ -1327,10 +1328,11 @@ impl File {
             None => Ok(libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT as _ }),
         };
         cfg_if::cfg_if! {
-            if #[cfg(any(target_os = "redox", target_os = "espidf", target_os = "horizon"))] {
+            if #[cfg(any(target_os = "redox", target_os = "espidf", target_os = "horizon", target_os = "vxworks"))] {
                 // Redox doesn't appear to support `UTIME_OMIT`.
                 // ESP-IDF and HorizonOS do not support `futimens` at all and the behavior for those OS is therefore
                 // the same as for Redox.
+                // `futimens` and `UTIME_OMIT` are a work in progress for vxworks.
                 let _ = times;
                 Err(io::const_io_error!(
                     io::ErrorKind::Unsupported,
@@ -1962,6 +1964,7 @@ pub fn fchown(fd: c_int, uid: u32, gid: u32) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_os = "vxworks"))]
 pub fn lchown(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
     run_path_with_cstr(path, &|path| {
         cvt(unsafe { libc::lchown(path.as_ptr(), uid as libc::uid_t, gid as libc::gid_t) })
@@ -1969,9 +1972,21 @@ pub fn lchown(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
     })
 }
 
+#[cfg(target_os = "vxworks")]
+pub fn lchown(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
+    let (_, _, _) = (path, uid, gid);
+    Err(io::const_io_error!(io::ErrorKind::Unsupported, "lchown not supported by vxworks"))
+}
+
 #[cfg(not(any(target_os = "fuchsia", target_os = "vxworks")))]
 pub fn chroot(dir: &Path) -> io::Result<()> {
     run_path_with_cstr(dir, &|dir| cvt(unsafe { libc::chroot(dir.as_ptr()) }).map(|_| ()))
+}
+
+#[cfg(target_os = "vxworks")]
+pub fn chroot(dir: &Path) -> io::Result<()> {
+    let _ = dir;
+    Err(io::const_io_error!(io::ErrorKind::Unsupported, "chroot not supported by vxworks"))
 }
 
 pub use remove_dir_impl::remove_dir_all;
@@ -2001,6 +2016,11 @@ mod remove_dir_impl {
     miri
 )))]
 mod remove_dir_impl {
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    use libc::{fdopendir, openat, unlinkat};
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    use libc::{fdopendir, openat64 as openat, unlinkat};
+
     use super::{lstat, Dir, DirEntry, InnerReadDir, ReadDir};
     use crate::ffi::CStr;
     use crate::io;
@@ -2009,11 +2029,6 @@ mod remove_dir_impl {
     use crate::path::{Path, PathBuf};
     use crate::sys::common::small_c_string::run_path_with_cstr;
     use crate::sys::{cvt, cvt_r};
-
-    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
-    use libc::{fdopendir, openat, unlinkat};
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    use libc::{fdopendir, openat64 as openat, unlinkat};
 
     pub fn openat_nofollow_dironly(parent_fd: Option<RawFd>, p: &CStr) -> io::Result<OwnedFd> {
         let fd = cvt_r(|| unsafe {
