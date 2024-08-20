@@ -546,8 +546,9 @@ mod verify {
 
     impl kani::Arbitrary for Layout {
         fn any() -> Self {
-            let size = kani::any::<usize>();
-            unsafe { Layout { size, align: kani::any::<Alignment>() } }
+            let align = kani::any::<Alignment>();
+            let size = kani::any_where(|s: &usize| *s <= isize::MAX as usize - (align.as_usize() - 1));
+            unsafe { Layout { size, align } }
         }
     }
 
