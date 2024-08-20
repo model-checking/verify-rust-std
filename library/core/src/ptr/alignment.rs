@@ -437,18 +437,14 @@ mod verify {
     // pub const fn log2(self) -> u32
     #[kani::proof_for_contract(Alignment::log2)]
     pub fn check_log2() {
-        let a = kani::any::<usize>();
-        if let Some(alignment) = Alignment::new(a) {
-            let _ = alignment.log2();
-        }
+        let alignment = kani::any::<Alignment>();
+        let _ = alignment.log2();
     }
 
     // pub const fn mask(self) -> usize
     #[kani::proof_for_contract(Alignment::mask)]
     pub fn check_mask() {
-        let a = kani::any::<usize>();
-        if let Some(alignment) = Alignment::new(a) {
-            let _ = alignment.mask();
-        }
+        let alignment = kani::any::<Alignment>();
+        let _ = alignment.mask();
     }
 }
