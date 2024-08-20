@@ -187,26 +187,26 @@
 
 use core::any::Any;
 use core::async_iter::AsyncIterator;
-use core::borrow;
 #[cfg(not(no_global_oom_handling))]
 use core::clone::CloneToUninit;
 use core::cmp::Ordering;
 use core::error::Error;
-use core::fmt;
 use core::future::Future;
 use core::hash::{Hash, Hasher};
 use core::iter::FusedIterator;
-use core::marker::Tuple;
-use core::marker::Unsize;
+use core::marker::{Tuple, Unsize};
 use core::mem::{self, SizedTypeProperties};
-use core::ops::{AsyncFn, AsyncFnMut, AsyncFnOnce};
 use core::ops::{
-    CoerceUnsized, Coroutine, CoroutineState, Deref, DerefMut, DerefPure, DispatchFromDyn, Receiver,
+    AsyncFn, AsyncFnMut, AsyncFnOnce, CoerceUnsized, Coroutine, CoroutineState, Deref, DerefMut,
+    DerefPure, DispatchFromDyn, Receiver,
 };
 use core::pin::Pin;
 use core::ptr::{self, addr_of_mut, NonNull, Unique};
-use core::slice;
 use core::task::{Context, Poll};
+use core::{borrow, fmt, slice};
+
+#[unstable(feature = "thin_box", issue = "92791")]
+pub use thin::ThinBox;
 
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
@@ -221,9 +221,6 @@ use crate::string::String;
 use crate::vec;
 #[cfg(not(no_global_oom_handling))]
 use crate::vec::Vec;
-
-#[unstable(feature = "thin_box", issue = "92791")]
-pub use thin::ThinBox;
 
 mod thin;
 
@@ -704,7 +701,7 @@ impl<T> Box<[T]> {
     }
 
     /// Constructs a new boxed slice with uninitialized contents. Returns an error if
-    /// the allocation fails
+    /// the allocation fails.
     ///
     /// # Examples
     ///
@@ -739,7 +736,7 @@ impl<T> Box<[T]> {
     }
 
     /// Constructs a new boxed slice with uninitialized contents, with the memory
-    /// being filled with `0` bytes. Returns an error if the allocation fails
+    /// being filled with `0` bytes. Returns an error if the allocation fails.
     ///
     /// See [`MaybeUninit::zeroed`][zeroed] for examples of correct and incorrect usage
     /// of this method.
@@ -830,6 +827,85 @@ impl<T, A: Allocator> Box<[T], A> {
     #[must_use]
     pub fn new_zeroed_slice_in(len: usize, alloc: A) -> Box<[mem::MaybeUninit<T>], A> {
         unsafe { RawVec::with_capacity_zeroed_in(len, alloc).into_box(len) }
+    }
+
+    /// Constructs a new boxed slice with uninitialized contents in the provided allocator. Returns an error if
+    /// the allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api, new_uninit)]
+    ///
+    /// use std::alloc::System;
+    ///
+    /// let mut values = Box::<[u32], _>::try_new_uninit_slice_in(3, System)?;
+    /// let values = unsafe {
+    ///     // Deferred initialization:
+    ///     values[0].as_mut_ptr().write(1);
+    ///     values[1].as_mut_ptr().write(2);
+    ///     values[2].as_mut_ptr().write(3);
+    ///     values.assume_init()
+    /// };
+    ///
+    /// assert_eq!(*values, [1, 2, 3]);
+    /// # Ok::<(), std::alloc::AllocError>(())
+    /// ```
+    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[inline]
+    pub fn try_new_uninit_slice_in(
+        len: usize,
+        alloc: A,
+    ) -> Result<Box<[mem::MaybeUninit<T>], A>, AllocError> {
+        let ptr = if T::IS_ZST || len == 0 {
+            NonNull::dangling()
+        } else {
+            let layout = match Layout::array::<mem::MaybeUninit<T>>(len) {
+                Ok(l) => l,
+                Err(_) => return Err(AllocError),
+            };
+            alloc.allocate(layout)?.cast()
+        };
+        unsafe { Ok(RawVec::from_raw_parts_in(ptr.as_ptr(), len, alloc).into_box(len)) }
+    }
+
+    /// Constructs a new boxed slice with uninitialized contents in the provided allocator, with the memory
+    /// being filled with `0` bytes. Returns an error if the allocation fails.
+    ///
+    /// See [`MaybeUninit::zeroed`][zeroed] for examples of correct and incorrect usage
+    /// of this method.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api, new_uninit)]
+    ///
+    /// use std::alloc::System;
+    ///
+    /// let values = Box::<[u32], _>::try_new_zeroed_slice_in(3, System)?;
+    /// let values = unsafe { values.assume_init() };
+    ///
+    /// assert_eq!(*values, [0, 0, 0]);
+    /// # Ok::<(), std::alloc::AllocError>(())
+    /// ```
+    ///
+    /// [zeroed]: mem::MaybeUninit::zeroed
+    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[inline]
+    pub fn try_new_zeroed_slice_in(
+        len: usize,
+        alloc: A,
+    ) -> Result<Box<[mem::MaybeUninit<T>], A>, AllocError> {
+        let ptr = if T::IS_ZST || len == 0 {
+            NonNull::dangling()
+        } else {
+            let layout = match Layout::array::<mem::MaybeUninit<T>>(len) {
+                Ok(l) => l,
+                Err(_) => return Err(AllocError),
+            };
+            alloc.allocate_zeroed(layout)?.cast()
+        };
+        unsafe { Ok(RawVec::from_raw_parts_in(ptr.as_ptr(), len, alloc).into_box(len)) }
     }
 }
 
@@ -1097,6 +1173,7 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// ```
     ///
     /// [memory layout]: self#memory-layout
+    #[must_use = "losing the pointer will leak memory"]
     #[stable(feature = "box_raw", since = "1.4.0")]
     #[inline]
     pub fn into_raw(b: Self) -> *mut T {
@@ -1150,6 +1227,7 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// ```
     ///
     /// [memory layout]: self#memory-layout
+    #[must_use = "losing the pointer will leak memory"]
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
     pub fn into_raw_with_allocator(b: Self) -> (*mut T, A) {
@@ -1189,9 +1267,11 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     }
 
     /// Consumes and leaks the `Box`, returning a mutable reference,
-    /// `&'a mut T`. Note that the type `T` must outlive the chosen lifetime
-    /// `'a`. If the type has only static references, or none at all, then this
-    /// may be chosen to be `'static`.
+    /// `&'a mut T`.
+    ///
+    /// Note that the type `T` must outlive the chosen lifetime `'a`. If the type
+    /// has only static references, or none at all, then this may be chosen to be
+    /// `'static`.
     ///
     /// This function is mainly useful for data that lives for the remainder of
     /// the program's life. Dropping the returned reference will cause a memory
@@ -1774,7 +1854,7 @@ impl<T, const N: usize> TryFrom<Vec<T>> for Box<[T; N]> {
 }
 
 impl<A: Allocator> Box<dyn Any, A> {
-    /// Attempt to downcast the box to a concrete type.
+    /// Attempts to downcast the box to a concrete type.
     ///
     /// # Examples
     ///
@@ -1833,7 +1913,7 @@ impl<A: Allocator> Box<dyn Any, A> {
 }
 
 impl<A: Allocator> Box<dyn Any + Send, A> {
-    /// Attempt to downcast the box to a concrete type.
+    /// Attempts to downcast the box to a concrete type.
     ///
     /// # Examples
     ///
@@ -1892,7 +1972,7 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
 }
 
 impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
-    /// Attempt to downcast the box to a concrete type.
+    /// Attempts to downcast the box to a concrete type.
     ///
     /// # Examples
     ///

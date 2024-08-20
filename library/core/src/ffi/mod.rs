@@ -9,19 +9,16 @@
 #![stable(feature = "core_ffi", since = "1.30.0")]
 #![allow(non_camel_case_types)]
 
-use crate::fmt;
-
-#[doc(no_inline)]
-#[stable(feature = "core_c_str", since = "1.64.0")]
-pub use self::c_str::FromBytesWithNulError;
-
-#[doc(no_inline)]
-#[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
-pub use self::c_str::FromBytesUntilNulError;
-
 #[doc(inline)]
 #[stable(feature = "core_c_str", since = "1.64.0")]
 pub use self::c_str::CStr;
+#[doc(no_inline)]
+#[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
+pub use self::c_str::FromBytesUntilNulError;
+#[doc(no_inline)]
+#[stable(feature = "core_c_str", since = "1.64.0")]
+pub use self::c_str::FromBytesWithNulError;
+use crate::fmt;
 
 #[unstable(feature = "c_str_module", issue = "112134")]
 pub mod c_str;
@@ -191,7 +188,7 @@ mod c_long_definition {
 //     be UB.
 #[doc = include_str!("c_void.md")]
 #[lang = "c_void"]
-#[cfg_attr(not(doc), repr(u8))] // work around https://github.com/rust-lang/rust/issues/90435
+#[cfg_attr(not(doc), repr(u8))] // An implementation detail we don't want to show up in rustdoc
 #[stable(feature = "core_c_void", since = "1.30.0")]
 pub enum c_void {
     #[unstable(
