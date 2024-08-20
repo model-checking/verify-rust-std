@@ -3,14 +3,11 @@
 #![stable(feature = "io_safety", since = "1.63.0")]
 
 use super::raw::{AsRawSocket, FromRawSocket, IntoRawSocket, RawSocket};
-use crate::fmt;
-use crate::io;
 use crate::marker::PhantomData;
-use crate::mem;
-use crate::mem::forget;
-use crate::sys;
+use crate::mem::{self, ManuallyDrop};
 #[cfg(not(target_vendor = "uwp"))]
 use crate::sys::cvt;
+use crate::{fmt, io, sys};
 
 /// A borrowed socket.
 ///
@@ -64,7 +61,7 @@ pub struct OwnedSocket {
 }
 
 impl BorrowedSocket<'_> {
-    /// Return a `BorrowedSocket` holding the given raw socket.
+    /// Returns a `BorrowedSocket` holding the given raw socket.
     ///
     /// # Safety
     ///
@@ -191,9 +188,7 @@ impl AsRawSocket for OwnedSocket {
 impl IntoRawSocket for OwnedSocket {
     #[inline]
     fn into_raw_socket(self) -> RawSocket {
-        let socket = self.socket;
-        forget(self);
-        socket
+        ManuallyDrop::new(self).socket
     }
 }
 

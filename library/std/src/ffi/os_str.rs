@@ -4,18 +4,15 @@
 mod tests;
 
 use crate::borrow::{Borrow, Cow};
-use crate::cmp;
 use crate::collections::TryReserveError;
-use crate::fmt;
 use crate::hash::{Hash, Hasher};
 use crate::ops::{self, Range};
 use crate::rc::Rc;
-use crate::slice;
 use crate::str::FromStr;
 use crate::sync::Arc;
-
 use crate::sys::os_str::{Buf, Slice};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::{cmp, fmt, slice};
 
 /// A type that can represent owned, mutable platform-native strings, but is
 /// cheaply inter-convertible with Rust strings.
@@ -115,10 +112,8 @@ impl crate::sealed::Sealed for OsString {}
 #[stable(feature = "rust1", since = "1.0.0")]
 // `OsStr::from_inner` current implementation relies
 // on `OsStr` being layout-compatible with `Slice`.
-// However, `OsStr` layout is considered an implementation detail and must not be relied upon. We
-// want `repr(transparent)` but we don't want it to show up in rustdoc, so we hide it under
-// `cfg(doc)`. This is an ad-hoc implementation of attribute privacy.
-#[cfg_attr(not(doc), repr(transparent))]
+// However, `OsStr` layout is considered an implementation detail and must not be relied upon.
+#[repr(transparent)]
 pub struct OsStr {
     inner: Slice,
 }

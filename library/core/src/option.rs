@@ -557,13 +557,10 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 use crate::iter::{self, FusedIterator, TrustedLen};
+use crate::ops::{self, ControlFlow, Deref, DerefMut};
 use crate::panicking::{panic, panic_display};
 use crate::pin::Pin;
-use crate::{
-    cmp, convert, hint, mem,
-    ops::{self, ControlFlow, Deref, DerefMut},
-    slice,
-};
+use crate::{cmp, convert, hint, mem, slice};
 
 /// The `Option` type. See [the module level documentation](self) for more.
 #[derive(Copy, Eq, Debug, Hash)]
@@ -770,6 +767,13 @@ impl<T> Option<T> {
         }
     }
 
+    #[inline]
+    const fn len(&self) -> usize {
+        // Using the intrinsic avoids emitting a branch to get the 0 or 1.
+        let discriminant: isize = crate::intrinsics::discriminant_value(self);
+        discriminant as usize
+    }
+
     /// Returns a slice of the contained value, if any. If this is `None`, an
     /// empty slice is returned. This can be useful to have a single type of
     /// iterator over an `Option` or slice.
@@ -812,7 +816,7 @@ impl<T> Option<T> {
         unsafe {
             slice::from_raw_parts(
                 (self as *const Self).byte_add(core::mem::offset_of!(Self, Some.0)).cast(),
-                self.is_some() as usize,
+                self.len(),
             )
         }
     }
@@ -869,7 +873,7 @@ impl<T> Option<T> {
         unsafe {
             slice::from_raw_parts_mut(
                 (self as *mut Self).byte_add(core::mem::offset_of!(Self, Some.0)).cast(),
-                self.is_some() as usize,
+                self.len(),
             )
         }
     }
@@ -2242,10 +2246,8 @@ impl<A> Iterator for Item<A> {
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match self.opt {
-            Some(_) => (1, Some(1)),
-            None => (0, Some(0)),
-        }
+        let len = self.len();
+        (len, Some(len))
     }
 }
 
@@ -2256,7 +2258,12 @@ impl<A> DoubleEndedIterator for Item<A> {
     }
 }
 
-impl<A> ExactSizeIterator for Item<A> {}
+impl<A> ExactSizeIterator for Item<A> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.opt.len()
+    }
+}
 impl<A> FusedIterator for Item<A> {}
 unsafe impl<A> TrustedLen for Item<A> {}
 
@@ -2497,6 +2504,7 @@ impl<T> ops::FromResidual for Option<T> {
     }
 }
 
+#[diagnostic::do_not_recommend]
 #[unstable(feature = "try_trait_v2_yeet", issue = "96374")]
 impl<T> ops::FromResidual<ops::Yeet<()>> for Option<T> {
     #[inline]

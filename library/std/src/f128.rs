@@ -7,11 +7,11 @@
 #[cfg(test)]
 mod tests;
 
-#[cfg(not(test))]
-use crate::intrinsics;
-
 #[unstable(feature = "f128", issue = "116909")]
 pub use core::f128::consts;
+
+#[cfg(not(test))]
+use crate::intrinsics;
 
 #[cfg(not(test))]
 impl f128 {
@@ -53,7 +53,6 @@ impl f128 {
     /// # }
     /// ```
     #[inline]
-    #[cfg(not(bootstrap))]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
