@@ -1,26 +1,21 @@
 use core::ptr::addr_of;
 
-use crate::os::windows::prelude::*;
-
+use super::api::{self, WinError};
+use super::{to_u16s, IoResult};
 use crate::borrow::Cow;
 use crate::ffi::{c_void, OsStr, OsString};
-use crate::fmt;
 use crate::io::{self, BorrowedCursor, Error, IoSlice, IoSliceMut, SeekFrom};
 use crate::mem::{self, MaybeUninit};
 use crate::os::windows::io::{AsHandle, BorrowedHandle};
+use crate::os::windows::prelude::*;
 use crate::path::{Path, PathBuf};
-use crate::ptr;
-use crate::slice;
 use crate::sync::Arc;
 use crate::sys::handle::Handle;
+use crate::sys::path::maybe_verbatim;
 use crate::sys::time::SystemTime;
 use crate::sys::{c, cvt, Align8};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
-use crate::thread;
-
-use super::api::{self, WinError};
-use super::{to_u16s, IoResult};
-use crate::sys::path::maybe_verbatim;
+use crate::{fmt, ptr, slice, thread};
 
 pub struct File {
     handle: Handle,
@@ -32,6 +27,7 @@ pub struct FileAttr {
     creation_time: c::FILETIME,
     last_access_time: c::FILETIME,
     last_write_time: c::FILETIME,
+    change_time: Option<c::FILETIME>,
     file_size: u64,
     reparse_tag: u32,
     volume_serial_number: Option<u32>,
@@ -377,6 +373,7 @@ impl File {
                 creation_time: info.ftCreationTime,
                 last_access_time: info.ftLastAccessTime,
                 last_write_time: info.ftLastWriteTime,
+                change_time: None, // Only available in FILE_BASIC_INFO
                 file_size: (info.nFileSizeLow as u64) | ((info.nFileSizeHigh as u64) << 32),
                 reparse_tag,
                 volume_serial_number: Some(info.dwVolumeSerialNumber),
@@ -413,6 +410,10 @@ impl File {
                     dwLowDateTime: info.LastWriteTime as u32,
                     dwHighDateTime: (info.LastWriteTime >> 32) as u32,
                 },
+                change_time: Some(c::FILETIME {
+                    dwLowDateTime: info.ChangeTime as u32,
+                    dwHighDateTime: (info.ChangeTime >> 32) as u32,
+                }),
                 file_size: 0,
                 reparse_tag: 0,
                 volume_serial_number: None,
@@ -631,7 +632,7 @@ impl File {
         Ok(())
     }
 
-    /// Get only basic file information such as attributes and file times.
+    /// Gets only basic file information such as attributes and file times.
     fn basic_info(&self) -> io::Result<c::FILE_BASIC_INFO> {
         unsafe {
             let mut info: c::FILE_BASIC_INFO = mem::zeroed();
@@ -957,6 +958,10 @@ impl FileAttr {
         to_u64(&self.creation_time)
     }
 
+    pub fn changed_u64(&self) -> Option<u64> {
+        self.change_time.as_ref().map(|c| to_u64(c))
+    }
+
     pub fn volume_serial_number(&self) -> Option<u32> {
         self.volume_serial_number
     }
@@ -976,6 +981,7 @@ impl From<c::WIN32_FIND_DATAW> for FileAttr {
             creation_time: wfd.ftCreationTime,
             last_access_time: wfd.ftLastAccessTime,
             last_write_time: wfd.ftLastWriteTime,
+            change_time: None,
             file_size: ((wfd.nFileSizeHigh as u64) << 32) | (wfd.nFileSizeLow as u64),
             reparse_tag: if wfd.dwFileAttributes & c::FILE_ATTRIBUTE_REPARSE_POINT != 0 {
                 // reserved unless this is a reparse point

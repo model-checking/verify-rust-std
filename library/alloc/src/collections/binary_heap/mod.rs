@@ -144,12 +144,11 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 use core::alloc::Allocator;
-use core::fmt;
 use core::iter::{FusedIterator, InPlaceIterable, SourceIter, TrustedFused, TrustedLen};
 use core::mem::{self, swap, ManuallyDrop};
 use core::num::NonZero;
 use core::ops::{Deref, DerefMut};
-use core::ptr;
+use core::{fmt, ptr};
 
 use crate::alloc::Global;
 use crate::collections::TryReserveError;
@@ -484,7 +483,7 @@ impl<T: Ord, A: Allocator> BinaryHeap<T, A> {
     /// heap.push(4);
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[rustc_const_unstable(feature = "const_binary_heap_new_in", issue = "112353")]
+    #[rustc_const_unstable(feature = "const_binary_heap_new_in", issue = "125961")]
     #[must_use]
     pub const fn new_in(alloc: A) -> BinaryHeap<T, A> {
         BinaryHeap { data: Vec::new_in(alloc) }
@@ -965,6 +964,7 @@ impl<T, A: Allocator> BinaryHeap<T, A> {
     }
 
     /// Returns an iterator which retrieves elements in heap order.
+    ///
     /// This method consumes the original heap.
     ///
     /// # Examples
@@ -1361,7 +1361,7 @@ struct Hole<'a, T: 'a> {
 }
 
 impl<'a, T> Hole<'a, T> {
-    /// Create a new `Hole` at index `pos`.
+    /// Creates a new `Hole` at index `pos`.
     ///
     /// Unsafe because pos must be within the data slice.
     #[inline]
