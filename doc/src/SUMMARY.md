@@ -19,3 +19,4 @@
   - [Memory safety of BTreeMap's `btree::node` module](./challenges/0004-btree-node.md)
   - [Inductive data type](./challenges/0005-linked-list.md)
   - [Contracts for SmallSort](./challenges/0008-smallsort.md)
+  - [Memory Safety of Floats/Integers](./challenges/0009-floats-ints.md)
