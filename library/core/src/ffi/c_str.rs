@@ -3,16 +3,11 @@
 use crate::cmp::Ordering;
 use crate::error::Error;
 use crate::ffi::c_char;
-use crate::fmt;
-use crate::intrinsics;
 use crate::iter::FusedIterator;
 use crate::marker::PhantomData;
-use crate::ops;
-use crate::ptr::addr_of;
-use crate::ptr::NonNull;
-use crate::slice;
+use crate::ptr::{addr_of, NonNull};
 use crate::slice::memchr;
-use crate::str;
+use crate::{fmt, intrinsics, ops, slice, str};
 
 // FIXME: because this is doc(inline)d, we *have* to use intra-doc links because the actual link
 //   depends on where the item is being documented. however, since this is libcore, we can't
@@ -94,7 +89,7 @@ use crate::str;
 /// ```
 ///
 /// [str]: prim@str "str"
-#[derive(Hash)]
+#[derive(PartialEq, Eq, Hash)]
 #[stable(feature = "core_c_str", since = "1.64.0")]
 #[rustc_has_incoherent_inherent_impls]
 #[lang = "CStr"]
@@ -103,8 +98,7 @@ use crate::str;
 // However, `CStr` layout is considered an implementation detail and must not be relied upon. We
 // want `repr(transparent)` but we don't want it to show up in rustdoc, so we hide it under
 // `cfg(doc)`. This is an ad-hoc implementation of attribute privacy.
-#[cfg_attr(not(doc), repr(transparent))]
-#[allow(clippy::derived_hash_with_manual_eq)]
+#[repr(transparent)]
 pub struct CStr {
     // FIXME: this should not be represented with a DST slice but rather with
     //        just a raw `c_char` along with some form of marker to make
@@ -278,7 +272,7 @@ impl CStr {
     #[inline] // inline is necessary for codegen to see strlen.
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
     pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr {
         // SAFETY: The caller has provided a pointer that points to a valid C
         // string with a NUL terminator less than `isize::MAX` from `ptr`.
@@ -540,7 +534,7 @@ impl CStr {
     #[must_use]
     #[doc(alias("len", "strlen"))]
     #[stable(feature = "cstr_count_bytes", since = "1.79.0")]
-    #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
     pub const fn count_bytes(&self) -> usize {
         self.inner.len() - 1
     }
@@ -678,15 +672,9 @@ impl CStr {
     }
 }
 
-#[stable(feature = "rust1", since = "1.0.0")]
-impl PartialEq for CStr {
-    #[inline]
-    fn eq(&self, other: &CStr) -> bool {
-        self.to_bytes().eq(other.to_bytes())
-    }
-}
-#[stable(feature = "rust1", since = "1.0.0")]
-impl Eq for CStr {}
+// `.to_bytes()` representations are compared instead of the inner `[c_char]`s,
+// because `c_char` is `i8` (not `u8`) on some platforms.
+// That is why this is implemented manually and not derived.
 #[stable(feature = "rust1", since = "1.0.0")]
 impl PartialOrd for CStr {
     #[inline]
@@ -741,7 +729,7 @@ impl AsRef<CStr> for CStr {
 /// located within `isize::MAX` from `ptr`.
 #[inline]
 #[unstable(feature = "cstr_internals", issue = "none")]
-#[rustc_const_stable(feature = "const_cstr_from_ptr", since = "CURRENT_RUSTC_VERSION")]
+#[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
 #[rustc_allow_const_fn_unstable(const_eval_select)]
 const unsafe fn strlen(ptr: *const c_char) -> usize {
     const fn strlen_ct(s: *const c_char) -> usize {
