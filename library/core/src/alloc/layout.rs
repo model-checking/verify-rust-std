@@ -177,7 +177,8 @@ impl Layout {
     #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
     #[must_use]
     #[inline]
-    #[ensures(|result| result.align().is_power_of_two())]
+    #[requires(mem::align_of_val(t).is_power_of_two())]
+    #[ensures(|result| result.align() == mem::align_of_val(t))]
     pub const fn for_value<T: ?Sized>(t: &T) -> Self {
         let (size, align) = (mem::size_of_val(t), mem::align_of_val(t));
         // SAFETY: see rationale in `new` for why this is using the unsafe variant
@@ -596,15 +597,23 @@ mod verify {
     // pub const fn for_value<T: ?Sized>(t: &T) -> Self
     #[kani::proof_for_contract(Layout::for_value)]
     pub fn check_for_value_i32() {
+        let x = kani::any::<i32>();
+        let _ = Layout::for_value::<i32>(&x);
         let array : [i32; 2] = [1, 2];
         let _ = Layout::for_value::<[i32]>(&array[1 .. 1]);
+        // TODO: the case of a trait object as unsized tail is not yet covered
+        // TODO: the case of an extern type as unsized tail is not yet covered
     }
 
     // pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self
     #[kani::proof_for_contract(Layout::for_value_raw)]
     pub fn check_for_value_raw_i32() {
         unsafe {
+            let x = kani::any::<i32>();
+            let _ = Layout::for_value_raw::<i32>(&x as *const i32);
             let _ = Layout::for_value_raw::<[i32]>(&[] as *const [i32]);
+            // TODO: the case of a trait object as unsized tail is not yet covered
+            // TODO: the case of an extern type as unsized tail is not yet covered
         }
     }
 
