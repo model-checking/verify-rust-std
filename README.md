@@ -7,7 +7,8 @@
 This repository is a fork of the official Rust programming
 language repository, created solely to verify the Rust standard
 library. It should not be used as an alternative to the official
-Rust releases.
+Rust releases. The repository is tool agnostic and welcomes the addition of 
+new tools.
 
 The goal is to have a verified [Rust standard library](https://doc.rust-lang.org/std/) and prove that it is safe.
 1. Contributing to the core mechanism of verifying the rust standard library
@@ -45,3 +46,7 @@ See [LICENSE-APACHE](https://github.com/model-checking/kani/blob/main/LICENSE-AP
 Rust is primarily distributed under the terms of both the MIT license and the Apache License (Version 2.0), with portions covered by various BSD-like licenses.
 
 See [the Rust repository](https://github.com/rust-lang/rust) for details.
+
+## Introducing a New Tool
+
+Please use the [template available in this repository](https://github.com/model-checking/kani/.github/TOOL_REQUEST_TEMPLATE.md) to introduce a new verification tool.
