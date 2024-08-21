@@ -6,7 +6,7 @@ _Please enter your tool name here._
 ## Description
 _Please enter a description for your tool and any information you deem relevant._
 
-### Tool Information
+## Tool Information
 
 * [ ] Does the tool perform Rust verification? 
 * [ ] Does the tool deal with *unsafe* Rust code? 
@@ -15,17 +15,17 @@ _Please enter a description for your tool and any information you deem relevant.
 * [ ] Is the tool under development? 
 * [ ] Will you or your team be able to provide support for the tool?
 
-### Licenses
+## Licenses
 _Please list the license(s) that are used by your tool, and if to your knowledge they conflict with the Rust standard library license(s)._
 
-### Steps to Use the Tool
+## Steps to Use the Tool
 
 1. [First Step]
 2. [Second Step]
 3. [and so on...]
 
-### Artifacts
+## Artifacts
 _If there are noteworthy examples of using the tool to perform verificaiton, please include them in this section.Links, papers, etc._
 
-### CI & Versioning
+## CI & Versioning
 _Please describe how you version the tool and how it will be supported in CI pipelines._
