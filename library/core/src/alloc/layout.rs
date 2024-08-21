@@ -215,6 +215,9 @@ impl Layout {
     #[unstable(feature = "layout_for_ptr", issue = "69835")]
     #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
     #[must_use]
+    // TODO: we should try to capture the above constraints on T in a `requires` clause, and the
+    // metadata helpers from https://github.com/model-checking/verify-rust-std/pull/37 may be able
+    // to accomplish this.
     #[ensures(|result| result.align().is_power_of_two())]
     pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
         // SAFETY: we pass along the prerequisites of these functions to the caller
@@ -345,13 +348,20 @@ impl Layout {
     /// On arithmetic overflow, returns `LayoutError`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
-    // the below modulo operation might be too costly to prove
-    #[cfg_attr(not(kani), ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() % n == 0))]
-    #[cfg_attr(kani, ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() >= self.size()))]
-    // the below multiplication might be too costly to prove at this time
-    // #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.size() == n * result.as_ref().unwrap().1)]
-    // use the weaker statement below for now
-    #[ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() >= result.as_ref().unwrap().1)]
+    // for Kani (v0.54.0), the below modulo operation is too costly to prove (running into the
+    // 6-hours timeout on GitHub); we use a weaker postcondition instead
+    #[cfg_attr(not(kani),
+        ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() % n == 0))]
+    #[cfg_attr(kani,
+        ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() >= self.size()))]
+    // for Kani (v0.54.0), the below multiplication is too costly to prove (running into the
+    // 6-hours timeout on GitHub); we use a weaker postcondition instead
+    #[cfg_attr(not(kani),
+        ensures(|result| result.is_err() ||
+            result.as_ref().unwrap().0.size() == n * result.as_ref().unwrap().1))]
+    #[cfg_attr(kani,
+        ensures(|result| result.is_err() || n == 0 ||
+            result.as_ref().unwrap().0.size() >= result.as_ref().unwrap().1))]
     pub fn repeat(&self, n: usize) -> Result<(Self, usize), LayoutError> {
         // This cannot overflow. Quoting from the invariant of Layout:
         // > `size`, when rounded up to the nearest multiple of `align`,
@@ -442,10 +452,12 @@ impl Layout {
     /// On arithmetic overflow, returns `LayoutError`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
-    // the below multiplication might be too costly to prove at this time
-    // #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == n * self.size())]
-    // use the weaker statement below for now
-    #[ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().size() >= self.size())]
+    // for Kani (v0.54.0), the below multiplication is too costly to prove (running into the
+    // 6-hours timeout on GitHub); we use a weaker postcondition instead
+    #[cfg_attr(not(kani),
+        ensures(|result| result.is_err() || result.as_ref().unwrap().size() == n * self.size()))]
+    #[cfg_attr(kani,
+        ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().size() >= self.size()))]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == self.align())]
     pub fn repeat_packed(&self, n: usize) -> Result<Self, LayoutError> {
         let size = self.size().checked_mul(n).ok_or(LayoutError)?;
@@ -602,7 +614,8 @@ mod verify {
         let _ = Layout::for_value::<i32>(&x);
         let array : [i32; 2] = [1, 2];
         let _ = Layout::for_value::<[i32]>(&array[1 .. 1]);
-        // TODO: the case of a trait object as unsized tail is not yet covered
+        let trait_ref: &dyn core::fmt::Debug = &x;
+        let _ = Layout::for_value::<dyn core::fmt::Debug>(trait_ref);
         // TODO: the case of an extern type as unsized tail is not yet covered
     }
 
@@ -613,7 +626,8 @@ mod verify {
             let x = kani::any::<i32>();
             let _ = Layout::for_value_raw::<i32>(&x as *const i32);
             let _ = Layout::for_value_raw::<[i32]>(&[] as *const [i32]);
-            // TODO: the case of a trait object as unsized tail is not yet covered
+            let trait_ref: &dyn core::fmt::Debug = &x;
+            let _ = Layout::for_value_raw::<dyn core::fmt::Debug>(trait_ref);
             // TODO: the case of an extern type as unsized tail is not yet covered
         }
     }
