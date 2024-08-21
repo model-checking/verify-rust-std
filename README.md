@@ -37,12 +37,10 @@ See [SECURITY](https://github.com/model-checking/kani/security/policy) for more 
 ## License
 
 ### Kani
-
 Kani is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
 See [LICENSE-APACHE](https://github.com/model-checking/kani/blob/main/LICENSE-APACHE) and [LICENSE-MIT](https://github.com/model-checking/kani/blob/main/LICENSE-MIT) for details.
 
 ## Rust
-
 Rust is primarily distributed under the terms of both the MIT license and the Apache License (Version 2.0), with portions covered by various BSD-like licenses.
 
 See [the Rust repository](https://github.com/rust-lang/rust) for details.

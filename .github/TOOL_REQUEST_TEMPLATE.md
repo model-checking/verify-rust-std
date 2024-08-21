@@ -1,4 +1,4 @@
-_The following form is designed to provide information for your tool that should be included in the effort to verify the Rust standard library. Please note that the tool will need to be supported if it is to be included._
+_The following form is designed to provide information for your tool that should be included in the effort to verify the Rust standard library. Please note that the tool will need to be **supported** if it is to be included._
 
 ## Tool Name
 _Please enter your tool name here._
@@ -13,10 +13,10 @@ _Please enter a description for your tool and any information you deem relevant.
 * [ ] Does the tool run independently in CI? 
 * [ ] Is the tool open source?
 * [ ] Is the tool under development? 
-* [ ] Will you or your team be able to provide support for the tool? 
+* [ ] Will you or your team be able to provide support for the tool?
 
 ### Licenses
-<!-- Please list the licenses that the tool uses and can be used under. -->
+_Please list the license(s) that are used by your tool, and if to your knowledge they conflict with the Rust standard library license(s)._
 
 ### Steps to Use the Tool
 
