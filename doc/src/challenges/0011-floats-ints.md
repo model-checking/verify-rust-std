@@ -1,4 +1,4 @@
-# Challenge 11: Safety of Floats and Integers
+# Challenge 11: Safety of Floats and Integers in `core::num`
 
 
 - **Status:** Open
@@ -10,7 +10,7 @@
 
 ## Goal
 
-Verify the memory safety of public unsafe methods for floats and integers in `core::num`.
+Verify the safety of public unsafe methods for floats and integers in `core::num`.
 
 ## Success Criteria
 
