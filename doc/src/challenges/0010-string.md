@@ -1,4 +1,4 @@
-# Challenge X: Memory safety of String
+# Challenge 10: Memory safety of String
 
 - **Status:** Open
 - **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/61)
