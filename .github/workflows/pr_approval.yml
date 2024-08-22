@@ -58,7 +58,7 @@ jobs:
               pull_number
             });
 
-            const relevantPaths = ['library/', 'doc/src/challenges/'];
+            const relevantPaths = ['library/', 'doc/src/challenges/', '.github/workflows'];
             const isRelevantPR = files.data.some(file =>
               relevantPaths.some(path => file.filename.startsWith(path))
             );
