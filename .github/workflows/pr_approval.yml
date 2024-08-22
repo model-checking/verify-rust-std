@@ -7,10 +7,14 @@ name: Check PR Approvals
 on:
   workflow_dispatch:
   pull_request:
-    types:
-      - opened
-      - edited
     branches: [ main ]
+  pull_request_review:
+    types: [submitted]
+  push:
+    paths:
+      - 'library/**'
+      - 'doc/src/challenges/'
+      - '.github/workflows'
 
 jobs:
   check-approvals:
