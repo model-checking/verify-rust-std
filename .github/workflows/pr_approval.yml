@@ -116,31 +116,9 @@ jobs:
               text: `Approvers: ${Array.from(approvers).join(', ')}\nRequired Approvers: ${requiredApprovers.join(', ')}`
             };
 
-            // Get PR details
-            const pr = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number
-            });
-
-            // Update check run
-            const checkRuns = await github.rest.checks.listForRef({
-              owner,
-              repo,
-              ref: pr.data.head.sha,
-              check_name: checkName
-            });
-
-            await github.rest.checks.create({
-              owner,
-              repo,
-              name: checkName,
-              head_sha: pr.data.head.sha,
-              status: 'completed',
-              conclusion,
-              output
-            });
-
+            // Simplify to not use github create at all
             if (conclusion === 'failure') {
               core.setFailed(`PR needs at least ${requiredApprovals} total approvals and 2 required approvals. Current approvals: ${approvers.size}, Required approvals: ${requiredApprovals}`);
+            } else {
+              console.log(`PR has sufficient approvals (${approvers.size}/${requiredApprovals})`);
             }
