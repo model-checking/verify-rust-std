@@ -73,7 +73,6 @@ jobs:
               const tomlContent = fs.readFileSync('.github/pull_requests.toml', 'utf8');
               console.log('TOML content:', tomlContent);
               const tomlData = toml.parse(tomlContent);
-              console.log('Parsed TOML data:', JSON.stringify(tomlData, null, 2));
 
               if (!tomlData.committee || !Array.isArray(tomlData.committee.members)) {
                 throw new Error('committee.members is not an array in the TOML file');
@@ -124,7 +123,7 @@ jobs:
               pull_number
             });
 
-            // Create or update check run
+            // Update check run
             const checkRuns = await github.rest.checks.listForRef({
               owner,
               repo,
