@@ -5,18 +5,12 @@ name: Check PR Approvals
 # To protect against that scenario, we can turn on number of approvals required to 2 in the github settings
 # of the repository
 on:
-  pull_request_review:
-    types: [submitted]
   workflow_dispatch:
-
-# Without these permissions, we get a 403 error from github
-# for trying to modify the pull request for newer project.
-# Source: https://stackoverflow.com/a/76994510
-permissions: write-all
+  pull_request:
+    branches: [ main ]
 
 jobs:
   check-approvals:
-    if: github.event.review.state == 'APPROVED' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
