@@ -98,7 +98,7 @@ jobs:
                 .map(review => review.user.login)
             );
 
-            const requiredApprovals = 1;
+            const requiredApprovals = 2;
             const currentCountfromCommittee = Array.from(approvers)
               .filter(approver => requiredApprovers.includes(approver))
               .length;
