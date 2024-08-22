@@ -109,7 +109,7 @@ jobs:
 
             // Core logic that checks if the approvers are in the committee
             const checkName = 'PR Approval Status';
-            const conclusion = (approvers.size >= requiredApprovals && currentCountfromCommittee >= 2) ? 'success' : 'failure';
+            const conclusion = (currentCountfromCommittee >= requiredApprovals) ? 'success' : 'failure';
             const output = {
               title: checkName,
               summary: `PR has ${approvers.size} total approvals and ${requiredApprovals} required approvals.`,
