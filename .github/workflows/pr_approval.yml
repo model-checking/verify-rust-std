@@ -132,29 +132,15 @@ jobs:
               check_name: checkName
             });
 
-            // Reuse the same workflow everytime there's a new review submitted
-            // instead of creating new workflows. Better efficiency and readability
-            // as the number of workflows is kept to a minimal number
-            if (checkRuns.data.total_count > 0) {
-              await github.rest.checks.update({
-                owner,
-                repo,
-                check_run_id: checkRuns.data.check_runs[0].id,
-                status: 'completed',
-                conclusion,
-                output
-              });
-            } else {
-              await github.rest.checks.create({
-                owner,
-                repo,
-                name: checkName,
-                head_sha: pr.data.head.sha,
-                status: 'completed',
-                conclusion,
-                output
-              });
-            }
+            await github.rest.checks.create({
+              owner,
+              repo,
+              name: checkName,
+              head_sha: pr.data.head.sha,
+              status: 'completed',
+              conclusion,
+              output
+            });
 
             if (conclusion === 'failure') {
               core.setFailed(`PR needs at least ${requiredApprovals} total approvals and 2 required approvals. Current approvals: ${approvers.size}, Required approvals: ${requiredApprovals}`);
