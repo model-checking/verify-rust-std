@@ -1884,6 +1884,20 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
 ///
 /// Any questions go to @nagisa.
 #[lang = "align_offset"]
+#[safety::requires(a.is_power_of_two())]
+// If T is a ZST, then answer should either be 0 or usize::MAX
+#[safety::ensures(|result|
+    mem::size_of::<T>() != 0 || (p.addr() % a == 0 && *result == 0) || (p.addr() % a != 0 && *result == usize::MAX)
+)]
+#[safety::ensures(|result| {
+    // If T is not a ZST and p can be aligned, then applying result as an offest should produce an aligned address
+    mem::size_of::<T>() == 0 || *result == usize::MAX ||
+    {
+        let product = usize::wrapping_mul(*result, mem::size_of::<T>());
+        let new_addr = usize::wrapping_add(product, p.addr());
+        new_addr % a == 0
+    }
+})]
 pub(crate) const unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     // FIXME(#75598): Direct use of these intrinsics improves codegen significantly at opt-level <=
     // 1, where the method versions of these operations are not inlined.
@@ -1901,6 +1915,8 @@ pub(crate) const unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usiz
     ///
     /// Implementation of this function shall not panic. Ever.
     #[inline]
+    #[safety::requires(m.is_power_of_two())]
+    #[safety::requires(x < m)]
     const unsafe fn mod_inv(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
         ///
@@ -2387,5 +2403,52 @@ mod verify {
         let ptr = &val as *const _;
         let copy = unsafe { read_volatile(ptr) };
         assert_eq!(val, copy);
+    }
+
+    fn check_align_offset<T>(p: *const T) {
+        let a = kani::any::<usize>();
+        unsafe { align_offset(p, a) };
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_zst() {
+        let p = kani::any::<usize>() as *const ();
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u8() {
+        let p = kani::any::<usize>() as *const u8;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u16() {
+        let p = kani::any::<usize>() as *const u16;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u32() {
+        let p = kani::any::<usize>() as *const u32;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u64() {
+        let p = kani::any::<usize>() as *const u64;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u128() {
+        let p = kani::any::<usize>() as *const u128;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_4096() {
+        let p = kani::any::<usize>() as *const [u128; 64];
+        check_align_offset(p);
     }
 }
