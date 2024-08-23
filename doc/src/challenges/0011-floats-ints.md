@@ -14,32 +14,31 @@ Verify the safety of public unsafe methods for floats and integers in `core::num
 
 ## Success Criteria
 
-### Signed Integers
+### Part 1: Unsafe Integer Methods
 
-Prove the absence of undefined behavior in the following methods:
+Prove the absence of undefined behavior in the following methods for each of the listed integers types, given that their safety preconditions are satisfied:
 
-1. `int_macros::unchecked_add`
-2. `int_macros::unchecked_sub`
-3. `int_macros::unchecked_mul`
-4. `int_macros::unchecked_neg`
-5. `int_macros::unchecked_shl`
-6. `int_macros::unchecked_shr`
+| Method              | Integer Types |
+| :---           |     :---
+| `unchecked_add`  |  `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128` |
+| `unchecked_sub`  |  `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128` |
+| `unchecked_mul`  |  `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128` |
+| `unchecked_shl`  |  `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128` |
+| `unchecked_shr`  |  `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128` |
+| `unchecked_neg`  |  `i8`, `i16`, `i32`, `i64`, `i128` |
 
-for each of the [signed integer types](https://doc.rust-lang.org/beta/book/ch03-02-data-types.html#integer-types).
+### Part 2: Safe API Verification
 
-### Unsigned Integers
+Now, verify some of the safe APIs that leverage the unsafe integer methods from Part 1. Verify the safety of the following methods for each of the listed integer types:
 
-Prove the absence of undefined behavior in the following methods:
+| Method              | Integer Types |
+| :---           |     :---
+| `wrapping_shl`  |  `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128` |
+| `wrapping_shr`  |  `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128` |
+| `widening_mul`  |  `u8`, `u16`, `u32`, `u64` |
+| `carrying_mul`  |  `u8`, `u16`, `u32`, `u64` |
 
-1. `uint_macros::unchecked_add`
-2. `uint_macros::unchecked_sub`
-3. `uint_macros::unchecked_mul`
-4. `uint_macros::unchecked_shl`
-5. `uint_macros::unchecked_shr`
-
-for each of the [unsigned integer types](https://doc.rust-lang.org/beta/book/ch03-02-data-types.html#integer-types). 
-
-### Float to Integer Conversion
+### Part 3: Float to Integer Conversion
 
 Verify the absence of undefined behavior in `to_int_unchecked` for `f16`, `f32`, `f64`, and `f128`. 
 
