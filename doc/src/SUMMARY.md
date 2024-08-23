@@ -20,3 +20,4 @@
   - [Inductive data type](./challenges/0005-linked-list.md)
   - [Contracts for SmallSort](./challenges/0008-smallsort.md)
   - [Memory safety of String](./challenges/0010-string.md)
+  - [Safety of NonZero](./challenges/0012-nonzero.md)
