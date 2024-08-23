@@ -1,4 +1,4 @@
-# Challenge 11: Safety of Floats and Integers in `core::num`
+# Challenge 11: Safety of Numeric Primitive Types
 
 
 - **Status:** Open
