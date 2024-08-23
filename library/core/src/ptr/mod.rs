@@ -2396,6 +2396,9 @@ mod verify {
     use crate::fmt::Debug;
     use super::*;
     use crate::kani;
+    use intrinsics::{
+        mul_with_overflow, unchecked_sub, wrapping_mul, wrapping_sub
+    };
 
     #[kani::proof_for_contract(read_volatile)]
     pub fn check_read_u128() {
@@ -2450,5 +2453,59 @@ mod verify {
     fn check_align_offset_4096() {
         let p = kani::any::<usize>() as *const [u128; 64];
         check_align_offset(p);
+    }
+
+    // This function lives inside align_offset, so it is not publicly accessible (hence this copy).
+    #[safety::requires(m.is_power_of_two())]
+    #[safety::requires(x < m)]
+    const unsafe fn mod_inv_copy(x: usize, m: usize) -> usize {
+        /// Multiplicative modular inverse table modulo 2⁴ = 16.
+        ///
+        /// Note, that this table does not contain values where inverse does not exist (i.e., for
+        /// `0⁻¹ mod 16`, `2⁻¹ mod 16`, etc.)
+        const INV_TABLE_MOD_16: [u8; 8] = [1, 11, 13, 7, 9, 3, 5, 15];
+        /// Modulo for which the `INV_TABLE_MOD_16` is intended.
+        const INV_TABLE_MOD: usize = 16;
+
+        // SAFETY: `m` is required to be a power-of-two, hence non-zero.
+        let m_minus_one = unsafe { unchecked_sub(m, 1) };
+        let mut inverse = INV_TABLE_MOD_16[(x & (INV_TABLE_MOD - 1)) >> 1] as usize;
+        let mut mod_gate = INV_TABLE_MOD;
+        // We iterate "up" using the following formula:
+        //
+        // $$ xy ≡ 1 (mod 2ⁿ) → xy (2 - xy) ≡ 1 (mod 2²ⁿ) $$
+        //
+        // This application needs to be applied at least until `2²ⁿ ≥ m`, at which point we can
+        // finally reduce the computation to our desired `m` by taking `inverse mod m`.
+        //
+        // This computation is `O(log log m)`, which is to say, that on 64-bit machines this loop
+        // will always finish in at most 4 iterations.
+        loop {
+            // y = y * (2 - xy) mod n
+            //
+            // Note, that we use wrapping operations here intentionally – the original formula
+            // uses e.g., subtraction `mod n`. It is entirely fine to do them `mod
+            // usize::MAX` instead, because we take the result `mod n` at the end
+            // anyway.
+            if mod_gate >= m {
+                break;
+            }
+            inverse = wrapping_mul(inverse, wrapping_sub(2usize, wrapping_mul(x, inverse)));
+            let (new_gate, overflow) = mul_with_overflow(mod_gate, mod_gate);
+            if overflow {
+                break;
+            }
+            mod_gate = new_gate;
+        }
+        inverse & m_minus_one
+    }
+
+    // The specification for mod_inv states that it cannot ever panic.
+    // Verify that is the case, given that the function's safety preconditions are met.
+    #[kani::proof_for_contract(mod_inv_copy)]
+    fn check_mod_inv() {
+        let x = kani::any::<usize>();
+        let m = kani::any::<usize>();
+        unsafe { mod_inv_copy(x, m) };
     }
 }
