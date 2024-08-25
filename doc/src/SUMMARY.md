@@ -20,3 +20,4 @@
   - [Inductive data type](./challenges/0005-linked-list.md)
   - [Contracts for SmallSort](./challenges/0008-smallsort.md)
   - [Safe abstractions for `core::time::Duration`](./challenges/0009-duration.md)
+  - [Memory safety of String](./challenges/0010-string.md)
