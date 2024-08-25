@@ -1,7 +1,7 @@
 # Challenge 9: Safe abstractions for `core::time::Duration`
 
 - **Status:** Open
-- **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/)
+- **Tracking Issue:** [#72](https://github.com/model-checking/verify-rust-std/issues/72)
 - **Start date:** *2024-08-20*
 - **End date:** *2024-12-20*
 
@@ -10,7 +10,7 @@
 
 ## Goal
 
-In this challenge, the goal is to write function contracts for `core::time::Duration` that can be used as safe abstractions.
+Write function contracts for `core::time::Duration` that can be used as safe abstractions.
 Even though the majority of `Duration` methods are safe, many of them are safe abstractions over unsafe code.
 
 For instance, the `new` method is implemented as follows in v1.3.0:
@@ -33,7 +33,7 @@ pub const fn new(secs: u64, nanos: u32) -> Duration {
 
 ### Success Criteria
 
-Write contracts for the following public functions.
+Write a type invariant for the struct `Duration`. Write function contracts for the following public functions.
 
 1. `Duration::new(secs: u64, nanos: u32) -> Duration`
 2. `Duration::from_secs(secs: u64) -> Duration`
