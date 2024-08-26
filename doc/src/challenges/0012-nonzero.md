@@ -29,9 +29,9 @@ Specifically, write and verify contracts specifying the following:
     a. A `NonZero` object is created if and only if the input was nonzero.  
     b. The value of the `NonZeroInner` object equals `n`.
 
-#### Part 2: Callers of `new_unchecked`
+#### Part 2: Other Uses of `unsafe`
 
-Verify the safety of the following callers of `new_unchecked` (all located within `core::num::nonzero`):
+Verify the safety of the following functions and methods (all located within `core::num::nonzero`):
 
 | Function |
 |--------- |
@@ -69,23 +69,10 @@ Verify the safety of the following callers of `new_unchecked` (all located withi
 |  `checked_neg`   |
 |  `overflowing_neg`   |
 |  `wrapping_neg` |
-
-You are not required to write correctness contracts for these methods (e.g., for `max`, ensuring that the `result` is indeed the maximum of the inputs), but it would be great to do so!
-
-#### Part 3: Other Uses of `unsafe`
-
-Verify the safety of the rest of the functions leveraging `unsafe` inside `NonZero`:
-
-| Function |
-|--------- |
 |  `from_mut`   |
 |  `from_mut_unchecked` |
-|  `leading_zeros`   |
-|  `trailing_zeros`   |
-|  `div`   |
-|  `rem`   |
 
-Note that `get` is missing from this list because we [assume](#Assumptions) that `ZeroablePrimitive`'s invariants hold.
+You are not required to write correctness contracts for these methods (e.g., for `max`, ensuring that the `result` is indeed the maximum of the inputs), but it would be great to do so!
 
 ### List of UBs
 
