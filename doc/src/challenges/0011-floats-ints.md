@@ -1,4 +1,4 @@
-# Challenge 11: Safety of Numeric Primitive Types
+# Challenge 11: Safety of Methods for Numeric Primitive Types
 
 
 - **Status:** Open
@@ -11,6 +11,8 @@
 ## Goal
 
 Verify the safety of public unsafe methods for floats and integers in `core::num`.
+
+To find the documentation for these methods, navigate first to the [`core::num` documentation](https://doc.rust-lang.org/core/num/index.html), then click on the appropriate primitive type in the left-side menu bar. For example, for `i8::unchecked_add`, click on `i8`.
 
 ## Success Criteria
 
@@ -27,6 +29,7 @@ Prove the absence of undefined behavior in the following methods for each of the
 | `unchecked_shr`  |  `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128` |
 | `unchecked_neg`  |  `i8`, `i16`, `i32`, `i64`, `i128` |
 
+
 ### Part 2: Safe API Verification
 
 Now, verify some of the safe APIs that leverage the unsafe integer methods from Part 1. Verify the safety of the following methods for each of the listed integer types:
@@ -38,9 +41,11 @@ Now, verify some of the safe APIs that leverage the unsafe integer methods from 
 | `widening_mul`  |  `u8`, `u16`, `u32`, `u64` |
 | `carrying_mul`  |  `u8`, `u16`, `u32`, `u64` |
 
+
 ### Part 3: Float to Integer Conversion
 
-Verify the absence of undefined behavior in `to_int_unchecked` for `f16`, `f32`, `f64`, and `f128`. 
+Verify the absence of undefined behavior in `to_int_unchecked` for `f16`, `f32`, `f64`, and `f128`.
+
 
 ## List of UBs
 
