@@ -16,7 +16,7 @@ Verify the safety of public unsafe methods for floats and integers in `core::num
 
 ### Part 1: Unsafe Integer Methods
 
-Prove the absence of undefined behavior in the following methods for each of the listed integers types, given that their safety preconditions are satisfied:
+Prove the absence of undefined behavior in the following methods for each of the listed integer types, given that their safety preconditions are satisfied:
 
 | Method              | Integer Types |
 | :---           |     :---
