@@ -18,7 +18,7 @@ To find the documentation for these methods, navigate first to the [`core::num` 
 
 ### Part 1: Unsafe Integer Methods
 
-Prove the absence of undefined behavior in the following methods for each of the listed integer types, given that their safety preconditions are satisfied:
+Prove the absence of arithmetic overflow/underflow and undefined behavior in the following methods for each of the listed integer types, given that their safety preconditions are satisfied:
 
 | Method              | Integer Types |
 | :---           |     :---
@@ -32,7 +32,7 @@ Prove the absence of undefined behavior in the following methods for each of the
 
 ### Part 2: Safe API Verification
 
-Now, verify some of the safe APIs that leverage the unsafe integer methods from Part 1. Verify the safety of the following methods for each of the listed integer types:
+Now, verify some of the safe APIs that leverage the unsafe integer methods from Part 1. Verify the absence of arithmetic overflow/underflow and undefined behavior of the following methods for each of the listed integer types:
 
 | Method              | Integer Types |
 | :---           |     :---
@@ -44,7 +44,7 @@ Now, verify some of the safe APIs that leverage the unsafe integer methods from 
 
 ### Part 3: Float to Integer Conversion
 
-Verify the absence of undefined behavior in `to_int_unchecked` for `f16`, `f32`, `f64`, and `f128`.
+Verify the absence of arithmetic overflow/underflow and undefined behavior in `to_int_unchecked` for `f16`, `f32`, `f64`, and `f128`.
 
 
 ## List of UBs
