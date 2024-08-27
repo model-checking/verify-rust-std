@@ -1887,7 +1887,7 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
 #[safety::requires(a.is_power_of_two())]
 // If T is a ZST, then answer should either be 0 or usize::MAX
 #[safety::ensures(|result|
-    mem::size_of::<T>() != 0 || if p.addr() % a == 0 { *result == 0 } else { *result == usize::MAX})
+    mem::size_of::<T>() != 0 || if p.addr() % a == 0 { *result == 0 } else { *result == usize::MAX}
 )]
 #[safety::ensures(|result| {
     // If T is not a ZST and p can be aligned, then applying result as an offest should produce an aligned address
