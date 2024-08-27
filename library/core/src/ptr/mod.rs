@@ -2458,7 +2458,7 @@ mod verify {
     // This function lives inside align_offset, so it is not publicly accessible (hence this copy).
     #[safety::requires(m.is_power_of_two())]
     #[safety::requires(x < m)]
-    const unsafe fn mod_inv_copy(x: usize, m: usize) -> usize {
+    unsafe fn mod_inv_copy(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
         ///
         /// Note, that this table does not contain values where inverse does not exist (i.e., for
