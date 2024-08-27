@@ -33,7 +33,7 @@ pub const fn new(secs: u64, nanos: u32) -> Duration {
 
 ### Success Criteria
 
-Write a type invariant for the struct `Duration`. Write function contracts for the following public functions.
+Write a [type invariant](https://model-checking.github.io/kani/crates/doc/kani/derive.Invariant.html) for the struct `Duration`. Write function contracts for the following public functions.
 
 1. `Duration::new(secs: u64, nanos: u32) -> Duration`
 2. `Duration::from_secs(secs: u64) -> Duration`
