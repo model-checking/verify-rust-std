@@ -12,6 +12,7 @@ build-dir = "../book"
 site-url = "/verify-rust-std/"
 git-repository-url = "https://github.com/model-checking/verify-rust-std"
 edit-url-template = "https://github.com/model-checking/verify-rust-std/edit/main/doc/{path}"
+no-section-label = true
 
 [output.html.playground]
 runnable = false
