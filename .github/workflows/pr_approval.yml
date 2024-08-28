@@ -7,12 +7,6 @@ name: Check PR Approvals
 on:
   pull_request_review:
     types: [submitted]
-  workflow_dispatch:
-
-# Without these permissions, we get a 403 error from github
-# for trying to modify the pull request for newer project.
-# Source: https://stackoverflow.com/a/76994510
-permissions: write-all
 
 jobs:
   check-approvals:
@@ -51,22 +45,6 @@ jobs:
               pull_number = context.issue.number;
             }
 
-            // Get PR files
-            const files = await github.rest.pulls.listFiles({
-              owner,
-              repo,
-              pull_number
-            });
-
-            const relevantPaths = ['library/', 'doc/src/challenges/'];
-            const isRelevantPR = files.data.some(file =>
-              relevantPaths.some(path => file.filename.startsWith(path))
-            );
-
-            if (!isRelevantPR) {
-              console.log('PR does not touch relevant paths. Exiting workflow.');
-              return;
-            }
 
             // Get parsed data
             try {
@@ -116,45 +94,6 @@ jobs:
               summary: `PR has ${approvers.size} total approvals and ${requiredApprovals} required approvals.`,
               text: `Approvers: ${Array.from(approvers).join(', ')}\nRequired Approvers: ${requiredApprovers.join(', ')}`
             };
-
-            // Get PR details
-            const pr = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number
-            });
-
-            // Create or update check run
-            const checkRuns = await github.rest.checks.listForRef({
-              owner,
-              repo,
-              ref: pr.data.head.sha,
-              check_name: checkName
-            });
-
-            // Reuse the same workflow everytime there's a new review submitted
-            // instead of creating new workflows. Better efficiency and readability
-            // as the number of workflows is kept to a minimal number
-            if (checkRuns.data.total_count > 0) {
-              await github.rest.checks.update({
-                owner,
-                repo,
-                check_run_id: checkRuns.data.check_runs[0].id,
-                status: 'completed',
-                conclusion,
-                output
-              });
-            } else {
-              await github.rest.checks.create({
-                owner,
-                repo,
-                name: checkName,
-                head_sha: pr.data.head.sha,
-                status: 'completed',
-                conclusion,
-                output
-              });
-            }
 
             if (conclusion === 'failure') {
               core.setFailed(`PR needs at least ${requiredApprovals} total approvals and 2 required approvals. Current approvals: ${approvers.size}, Required approvals: ${requiredApprovals}`);
