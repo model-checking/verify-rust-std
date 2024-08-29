@@ -1885,32 +1885,37 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
 /// Any questions go to @nagisa.
 #[lang = "align_offset"]
 #[safety::requires(a.is_power_of_two())]
-// If T is a ZST, then answer should either be 0 or usize::MAX
-#[safety::ensures(|result|
-    mem::size_of::<T>() != 0 || if p.addr() % a == 0 { *result == 0 } else { *result == usize::MAX }
-)]
-// If T is not a ZST and p cannot be aligned, return usize::MAX
-// Note that this does not cover the case where a % stride != 0, 
-// since that requires computing their gcd, which is too expensive
 #[safety::ensures(|result| {
     let stride = mem::size_of::<T>();
-    if stride == 0 { return true; }
-    if a % stride == 0 && p.addr() % stride != 0 {
-        *result == usize::MAX
-    } else {
-        true
+    // ZSTs
+    if stride == 0 {
+        if p.addr() % a == 0 { 
+            return *result == 0;
+        } else { 
+            return *result == usize::MAX;
+        }
     }
-})]
-// If T is not a ZST and p can be aligned, then applying result as an offset should produce an aligned address
-#[safety::ensures(|result| {
-    let stride = mem::size_of::<T>();
-    if stride != 0 && *result != usize::MAX {
-        let product = usize::wrapping_mul(*result, stride);
-        let new_addr = usize::wrapping_add(product, p.addr());
-        new_addr % a == 0
-    } else {
-        true
+
+    // In this case, the pointer cannot be aligned
+    if (a % stride == 0) && (p.addr() % stride != 0) {
+        return *result == usize::MAX;
     }
+
+    // Checking if the answer should indeed be usize::MAX when a % stride != 0
+    // requires computing gcd(a, stride), which is too expensive without
+    // quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html).
+    // This should be updated once quantifiers are available.
+    if (a % stride != 0 && *result == usize::MAX) { 
+        return true; 
+    }
+
+    // If we reach this case, either:
+    //  - a % stride == 0 and p.addr() % stride == 0, so it is definitely possible to align the pointer
+    //  - a % stride != 0 and result != usize::MAX, so align_offset is claiming that it's possible to align the pointer
+    // Check that applying the returned result does indeed produce an aligned address
+    let product = usize::wrapping_mul(*result, stride);
+    let new_addr = usize::wrapping_add(product, p.addr());
+    *result != usize::MAX && new_addr % a == 0
 })]
 pub(crate) const unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     // FIXME(#75598): Direct use of these intrinsics improves codegen significantly at opt-level <=
