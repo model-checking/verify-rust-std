@@ -1890,7 +1890,7 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
     mem::size_of::<T>() != 0 || if p.addr() % a == 0 { *result == 0 } else { *result == usize::MAX }
 )]
 #[safety::ensures(|result| {
-    // If T is not a ZST and p can be aligned, then applying result as an offest should produce an aligned address
+    // If T is not a ZST and p can be aligned, then applying result as an offset should produce an aligned address
     mem::size_of::<T>() == 0 || *result == usize::MAX ||
     {
         let product = usize::wrapping_mul(*result, mem::size_of::<T>());
