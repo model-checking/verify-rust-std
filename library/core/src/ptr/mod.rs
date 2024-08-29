@@ -1889,13 +1889,27 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
 #[safety::ensures(|result|
     mem::size_of::<T>() != 0 || if p.addr() % a == 0 { *result == 0 } else { *result == usize::MAX }
 )]
+// If T is not a ZST and p cannot be aligned, return usize::MAX
+// Note that this does not cover the case where a % stride != 0, 
+// since that requires computing their gcd, which is too expensive
 #[safety::ensures(|result| {
-    // If T is not a ZST and p can be aligned, then applying result as an offset should produce an aligned address
-    mem::size_of::<T>() == 0 || *result == usize::MAX ||
-    {
-        let product = usize::wrapping_mul(*result, mem::size_of::<T>());
+    let stride = mem::size_of::<T>();
+    if stride == 0 { return true; }
+    if a % stride == 0 && p.addr() % stride != 0 {
+        *result == usize::MAX
+    } else {
+        true
+    }
+})]
+// If T is not a ZST and p can be aligned, then applying result as an offset should produce an aligned address
+#[safety::ensures(|result| {
+    let stride = mem::size_of::<T>();
+    if stride != 0 && *result != usize::MAX {
+        let product = usize::wrapping_mul(*result, stride);
         let new_addr = usize::wrapping_add(product, p.addr());
         new_addr % a == 0
+    } else {
+        true
     }
 })]
 pub(crate) const unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
@@ -2458,7 +2472,7 @@ mod verify {
     // This function lives inside align_offset, so it is not publicly accessible (hence this copy).
     #[safety::requires(m.is_power_of_two())]
     #[safety::requires(x < m)]
-    unsafe fn mod_inv_copy(x: usize, m: usize) -> usize {
+    const unsafe fn mod_inv_copy(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
         ///
         /// Note, that this table does not contain values where inverse does not exist (i.e., for
