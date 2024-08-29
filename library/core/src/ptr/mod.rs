@@ -2472,6 +2472,12 @@ mod verify {
     // This function lives inside align_offset, so it is not publicly accessible (hence this copy).
     #[safety::requires(m.is_power_of_two())]
     #[safety::requires(x < m)]
+    // TODO: add ensures contract to check that the answer is indeed correct
+    // This will require quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html)
+    // so that we can add a precondition that gcd(x, m) = 1 like so:
+    // ∀d, d > 0 ∧ x % d = 0 ∧ m % d = 0 → d = 1
+    // With this precondition, we can then write this postcondition to check the correctness of the answer:
+    // #[safety::ensures(|result| wrapping_mul(*result, x) % m == 1)]
     const unsafe fn mod_inv_copy(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
         ///
