@@ -2527,6 +2527,9 @@ mod verify {
 
     // The specification for mod_inv states that it cannot ever panic.
     // Verify that is the case, given that the function's safety preconditions are met.
+
+    // TODO: Once https://github.com/model-checking/kani/issues/3467 is fixed,
+    // move this harness inside `align_offset` and delete `mod_inv_copy`
     #[kani::proof_for_contract(mod_inv_copy)]
     fn check_mod_inv() {
         let x = kani::any::<usize>();
