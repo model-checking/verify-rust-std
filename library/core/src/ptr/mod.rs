@@ -1934,8 +1934,6 @@ pub(crate) const unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usiz
     ///
     /// Implementation of this function shall not panic. Ever.
     #[inline]
-    #[safety::requires(m.is_power_of_two())]
-    #[safety::requires(x < m)]
     const unsafe fn mod_inv(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
         ///
@@ -2471,6 +2469,12 @@ mod verify {
     #[kani::proof_for_contract(align_offset)]
     fn check_align_offset_4096() {
         let p = kani::any::<usize>() as *const [u128; 64];
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_17() {
+        let p = kani::any::<usize>() as *const [char; 17];
         check_align_offset(p);
     }
 
