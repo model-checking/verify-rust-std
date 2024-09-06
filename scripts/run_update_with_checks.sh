@@ -170,9 +170,9 @@ fi
 # Checking compatiblity with kani
 echo "Checking compatiblity with kani..."
 source $BASE_HOME_DIR/run-kani.sh "$TEMP_HOME_DIR"
-check_kani=("$?")
-if [ "${#check_kani[@]}" -eq 0 ]; then
-    echo "check_kani.sh failed to run."
+run_kani=("$?")
+if [ "${#run_kani[@]}" -eq 0 ]; then
+    echo "run_kani.sh failed to run."
     exit 1
 else
     echo "Changes compatible with kani's features/verify-std branch."
