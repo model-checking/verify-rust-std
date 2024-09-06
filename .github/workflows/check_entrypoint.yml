@@ -39,7 +39,7 @@ jobs:
 
       - name: Run Kani Script without -p
         working-directory: ${{github.workspace}}/head
-        run: bash ./head/run-kani.sh --kani-args --harness ptr::verify::check_read_u128 --harness ptr::unique::verify::check_as_mut
+        run: bash ./run-kani.sh --kani-args --harness ptr::verify::check_read_u128 --harness ptr::unique::verify::check_as_mut
 
       - name: Run Kani Script with a path
         run: bash ./head/run-kani.sh -p ${{github.workspace}}/head
