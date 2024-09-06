@@ -1,7 +1,7 @@
 # Challenge 2: Verify the memory safery of core intrinsics using raw pointers
 
 - **Status:** Open
-- **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/16)
+- **Tracking Issue:** [#16](https://github.com/model-checking/verify-rust-std/issues/16)
 - **Start date:** *24/06/12*
 - **End date:** *24/12/10*
 

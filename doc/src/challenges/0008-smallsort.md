@@ -1,7 +1,7 @@
 # Challenge 8: Contracts for SmallSort
 
 - **Status:** Open
-- **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/56)
+- **Tracking Issue:** [#56](https://github.com/model-checking/verify-rust-std/issues/56)
 - **Start date:** *2024-08-17*
 - **End date:** *2024-12-10*
 

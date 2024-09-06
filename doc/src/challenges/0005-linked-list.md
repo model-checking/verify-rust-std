@@ -1,7 +1,7 @@
 # Challenge 5: Verify functions iterating over inductive data type: `linked_list`
 
 - **Status:** Open
-- **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/29)
+- **Tracking Issue:** [#29](https://github.com/model-checking/verify-rust-std/issues/29)
 - **Start date:** *24/07/01*
 - **End date:** *24/12/10*
 

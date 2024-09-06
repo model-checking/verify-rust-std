@@ -1,7 +1,7 @@
 # Challenge 10: Memory safety of String
 
 - **Status:** Open
-- **Tracking Issue:** [Link to issue](https://github.com/model-checking/verify-rust-std/issues/61)
+- **Tracking Issue:** [#61](https://github.com/model-checking/verify-rust-std/issues/61)
 - **Start date:** *2024-08-19*
 - **End date:** *2024-12-10*
 
