@@ -26,15 +26,6 @@ fi
 
 cd "$WORK_DIR" || exit 1
 
-log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
-}
-
-error_exit() {
-    log "ERROR: $1"
-    exit 1
-}
-
 # Default values
 DEFAULT_TOML_FILE="kani-version.toml"
 DEFAULT_REPO_URL="https://github.com/model-checking/kani.git"
