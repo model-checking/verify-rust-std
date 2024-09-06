@@ -86,6 +86,15 @@ get_current_commit() {
 build_project() {
     local directory="$1"
     cd "$directory"
+
+    if [ "$os_name" == "Linux" ]; then
+        ./scripts/setup/ubuntu/install_deps.sh
+    elif [ "$os_name" == "Darwin" ]; then
+        ./scripts/setup/macos/install_deps.sh
+    else
+        echo "Unknown operating system"
+    fi
+
     cargo build-dev --release
     cd ..
 }
