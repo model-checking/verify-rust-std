@@ -10,7 +10,6 @@ on:
 
 jobs:
   check-approvals:
-    if: github.event.review.state == 'APPROVED' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
