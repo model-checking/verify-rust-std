@@ -1,6 +1,6 @@
 # This workflow is responsible for verifying the standard library with Kani.
 
-name: Check entry-point
+name: Kani
 on:
   workflow_dispatch:
   pull_request:
