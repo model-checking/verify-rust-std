@@ -35,4 +35,4 @@ jobs:
           submodules: true
 
       - name: Run Kani Script
-        run: bash ./head/run-kani.sh ${{github.workspace}}/head
+        run: bash ./head/run-kani.sh --path ${{github.workspace}}/head
