@@ -2,5 +2,4 @@
 # incomaptible with the verify-std repo.
 
 [kani]
-kani-version = "0.54.0"
 commit = "e2a209bcb847803e8a5abb20ef7002b109ed0bf6"
