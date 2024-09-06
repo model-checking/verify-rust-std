@@ -3,23 +3,54 @@
 set -e
 
 usage() {
-    echo "Usage: $0 [directory]"
-    echo "If directory is not provided, the current directory will be used."
+    echo "Usage: $0 [options] [-p <path>] [--k-args <command arguments>]"
+    echo "Options:"
+    echo "  -h, --help         Show this help message"
+    echo "  -p, --path <path>  Specify a path (optional)"
+    echo "  --kani-args           Optional: Arguments to pass to the command"
+    exit 1
 }
 
-if [[ "$1" == "-h" || "$1" == "--help" ]]; then
-    usage
-    exit 0
-fi
+# Initialize variables
+command_args=""
+path=""
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            usage
+            ;;
+        -p|--path)
+            if [[ -n $2 ]]; then
+                path=$2
+                shift 2
+            else
+                echo "Error: Path argument is missing"
+                usage
+            fi
+            ;;
+        --kani-args)
+            shift  # Remove --k-args from the argument list
+            command_args="$@"  # Capture all remaining arguments
+            break  # Stop processing further arguments
+            ;;
+        *)
+            # If --k-args is not used, treat all remaining arguments as command arguments
+            command_args="$@"
+            break
+            ;;
+    esac
+done
 
 # Set working directory
-if [[ -n "$1" ]]; then
-    if [[ ! -d "$1" ]]; then
+if [[ -n "$path" ]]; then
+    if [[ ! -d "$path" ]]; then
         echo "Error: Specified directory does not exist."
         usage
         exit 1
     fi
-    WORK_DIR=$(realpath "$1")
+    WORK_DIR=$(realpath "$path")
 else
     WORK_DIR=$(pwd)
 fi
@@ -166,7 +197,13 @@ main() {
 
     echo "Running Kani verify-std command..."
     cd $current_dir
-    "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse
+
+    # Run the command with the provided arguments (if any)
+    if [ -n "$command_args" ]; then
+        "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse $command_args
+    else
+        "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse
+    fi
 }
 
 main
