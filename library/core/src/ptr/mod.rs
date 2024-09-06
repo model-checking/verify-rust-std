@@ -1884,6 +1884,39 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
 ///
 /// Any questions go to @nagisa.
 #[lang = "align_offset"]
+#[safety::requires(a.is_power_of_two())]
+#[safety::ensures(|result| {
+    let stride = mem::size_of::<T>();
+    // ZSTs
+    if stride == 0 {
+        if p.addr() % a == 0 { 
+            return *result == 0;
+        } else { 
+            return *result == usize::MAX;
+        }
+    }
+
+    // In this case, the pointer cannot be aligned
+    if (a % stride == 0) && (p.addr() % stride != 0) {
+        return *result == usize::MAX;
+    }
+
+    // Checking if the answer should indeed be usize::MAX when a % stride != 0
+    // requires computing gcd(a, stride), which is too expensive without
+    // quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html).
+    // This should be updated once quantifiers are available.
+    if (a % stride != 0 && *result == usize::MAX) { 
+        return true; 
+    }
+
+    // If we reach this case, either:
+    //  - a % stride == 0 and p.addr() % stride == 0, so it is definitely possible to align the pointer
+    //  - a % stride != 0 and result != usize::MAX, so align_offset is claiming that it's possible to align the pointer
+    // Check that applying the returned result does indeed produce an aligned address
+    let product = usize::wrapping_mul(*result, stride);
+    let new_addr = usize::wrapping_add(product, p.addr());
+    *result != usize::MAX && new_addr % a == 0
+})]
 pub(crate) const unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     // FIXME(#75598): Direct use of these intrinsics improves codegen significantly at opt-level <=
     // 1, where the method versions of these operations are not inlined.
@@ -2380,6 +2413,9 @@ mod verify {
     use crate::fmt::Debug;
     use super::*;
     use crate::kani;
+    use intrinsics::{
+        mul_with_overflow, unchecked_sub, wrapping_mul, wrapping_sub
+    };
 
     #[kani::proof_for_contract(read_volatile)]
     pub fn check_read_u128() {
@@ -2387,5 +2423,121 @@ mod verify {
         let ptr = &val as *const _;
         let copy = unsafe { read_volatile(ptr) };
         assert_eq!(val, copy);
+    }
+
+    fn check_align_offset<T>(p: *const T) {
+        let a = kani::any::<usize>();
+        unsafe { align_offset(p, a) };
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_zst() {
+        let p = kani::any::<usize>() as *const ();
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u8() {
+        let p = kani::any::<usize>() as *const u8;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u16() {
+        let p = kani::any::<usize>() as *const u16;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u32() {
+        let p = kani::any::<usize>() as *const u32;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u64() {
+        let p = kani::any::<usize>() as *const u64;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_u128() {
+        let p = kani::any::<usize>() as *const u128;
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_4096() {
+        let p = kani::any::<usize>() as *const [u128; 64];
+        check_align_offset(p);
+    }
+
+    #[kani::proof_for_contract(align_offset)]
+    fn check_align_offset_17() {
+        let p = kani::any::<usize>() as *const [char; 17];
+        check_align_offset(p);
+    }
+
+    // This function lives inside align_offset, so it is not publicly accessible (hence this copy).
+    #[safety::requires(m.is_power_of_two())]
+    #[safety::requires(x < m)]
+    // TODO: add ensures contract to check that the answer is indeed correct
+    // This will require quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html)
+    // so that we can add a precondition that gcd(x, m) = 1 like so:
+    // ∀d, d > 0 ∧ x % d = 0 ∧ m % d = 0 → d = 1
+    // With this precondition, we can then write this postcondition to check the correctness of the answer:
+    // #[safety::ensures(|result| wrapping_mul(*result, x) % m == 1)]
+    const unsafe fn mod_inv_copy(x: usize, m: usize) -> usize {
+        /// Multiplicative modular inverse table modulo 2⁴ = 16.
+        ///
+        /// Note, that this table does not contain values where inverse does not exist (i.e., for
+        /// `0⁻¹ mod 16`, `2⁻¹ mod 16`, etc.)
+        const INV_TABLE_MOD_16: [u8; 8] = [1, 11, 13, 7, 9, 3, 5, 15];
+        /// Modulo for which the `INV_TABLE_MOD_16` is intended.
+        const INV_TABLE_MOD: usize = 16;
+
+        // SAFETY: `m` is required to be a power-of-two, hence non-zero.
+        let m_minus_one = unsafe { unchecked_sub(m, 1) };
+        let mut inverse = INV_TABLE_MOD_16[(x & (INV_TABLE_MOD - 1)) >> 1] as usize;
+        let mut mod_gate = INV_TABLE_MOD;
+        // We iterate "up" using the following formula:
+        //
+        // $$ xy ≡ 1 (mod 2ⁿ) → xy (2 - xy) ≡ 1 (mod 2²ⁿ) $$
+        //
+        // This application needs to be applied at least until `2²ⁿ ≥ m`, at which point we can
+        // finally reduce the computation to our desired `m` by taking `inverse mod m`.
+        //
+        // This computation is `O(log log m)`, which is to say, that on 64-bit machines this loop
+        // will always finish in at most 4 iterations.
+        loop {
+            // y = y * (2 - xy) mod n
+            //
+            // Note, that we use wrapping operations here intentionally – the original formula
+            // uses e.g., subtraction `mod n`. It is entirely fine to do them `mod
+            // usize::MAX` instead, because we take the result `mod n` at the end
+            // anyway.
+            if mod_gate >= m {
+                break;
+            }
+            inverse = wrapping_mul(inverse, wrapping_sub(2usize, wrapping_mul(x, inverse)));
+            let (new_gate, overflow) = mul_with_overflow(mod_gate, mod_gate);
+            if overflow {
+                break;
+            }
+            mod_gate = new_gate;
+        }
+        inverse & m_minus_one
+    }
+
+    // The specification for mod_inv states that it cannot ever panic.
+    // Verify that is the case, given that the function's safety preconditions are met.
+
+    // TODO: Once https://github.com/model-checking/kani/issues/3467 is fixed,
+    // move this harness inside `align_offset` and delete `mod_inv_copy`
+    #[kani::proof_for_contract(mod_inv_copy)]
+    fn check_mod_inv() {
+        let x = kani::any::<usize>();
+        let m = kani::any::<usize>();
+        unsafe { mod_inv_copy(x, m) };
     }
 }
