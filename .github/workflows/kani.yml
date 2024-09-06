@@ -9,7 +9,7 @@ on:
     paths:
       - 'library/**'
       - '.github/workflows/kani.yml'
-      - 'scripts/check_kani.sh'
+      - 'run-kani.sh'
 
 defaults:
   run:
