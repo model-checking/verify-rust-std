@@ -157,7 +157,7 @@ main() {
 
     echo "Running Kani verify-std command..."
     cd $current_dir
-    "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates
+    "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse
 }
 
 main
