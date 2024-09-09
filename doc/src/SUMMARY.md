@@ -19,6 +19,7 @@
   - [4: Memory safety of BTreeMap's `btree::node` module](./challenges/0004-btree-node.md)
   - [5: Verify functions iterating over inductive data type: `linked_list`](./challenges/0005-linked-list.md)
   - [6: Safety of `NonNull`](./challenges/0006-nonnull.md)
+  - [7: Safety of Methods for Atomic Types and `ReentrantLock`](./challenges/0007-atomic-types.md)
   - [8: Contracts for SmallSort](./challenges/0008-smallsort.md)
   - [9: Safe abstractions for `core::time::Duration`](./challenges/0009-duration.md)
   - [10: Memory safety of String](./challenges/0010-string.md)
