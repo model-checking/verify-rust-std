@@ -60,22 +60,6 @@ impl RawWaker {
         RawWaker { data, vtable }
     }
 
-    /// Gets the `data` pointer used to create this `RawWaker`.
-    #[inline]
-    #[must_use]
-    #[unstable(feature = "waker_getters", issue = "96992")]
-    pub fn data(&self) -> *const () {
-        self.data
-    }
-
-    /// Gets the `vtable` pointer used to create this `RawWaker`.
-    #[inline]
-    #[must_use]
-    #[unstable(feature = "waker_getters", issue = "96992")]
-    pub fn vtable(&self) -> &'static RawWakerVTable {
-        self.vtable
-    }
-
     #[unstable(feature = "noop_waker", issue = "98286")]
     const NOOP: RawWaker = {
         const VTABLE: RawWakerVTable = RawWakerVTable::new(
@@ -250,7 +234,7 @@ pub struct Context<'a> {
 impl<'a> Context<'a> {
     /// Creates a new `Context` from a [`&Waker`](Waker).
     #[stable(feature = "futures_api", since = "1.36.0")]
-    #[rustc_const_stable(feature = "const_waker", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_waker", since = "1.82.0")]
     #[must_use]
     #[inline]
     pub const fn from_waker(waker: &'a Waker) -> Self {
@@ -261,7 +245,7 @@ impl<'a> Context<'a> {
     #[inline]
     #[must_use]
     #[stable(feature = "futures_api", since = "1.36.0")]
-    #[rustc_const_stable(feature = "const_waker", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_waker", since = "1.82.0")]
     pub const fn waker(&self) -> &'a Waker {
         &self.waker
     }
@@ -337,7 +321,7 @@ impl<'a> ContextBuilder<'a> {
     /// Creates a ContextBuilder from a Waker.
     #[inline]
     #[unstable(feature = "local_waker", issue = "118959")]
-    #[rustc_const_stable(feature = "const_waker", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_waker", since = "1.82.0")]
     pub const fn from_waker(waker: &'a Waker) -> Self {
         // SAFETY: LocalWaker is just Waker without thread safety
         let local_waker = unsafe { transmute(waker) };
@@ -395,7 +379,7 @@ impl<'a> ContextBuilder<'a> {
     /// Builds the `Context`.
     #[inline]
     #[unstable(feature = "local_waker", issue = "118959")]
-    #[rustc_const_stable(feature = "const_waker", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_waker", since = "1.82.0")]
     pub const fn build(self) -> Context<'a> {
         let ContextBuilder { waker, local_waker, ext, _marker, _marker2 } = self;
         Context { waker, local_waker, ext: AssertUnwindSafe(ext), _marker, _marker2 }
@@ -502,9 +486,42 @@ impl Waker {
     #[must_use]
     #[stable(feature = "futures_api", since = "1.36.0")]
     pub fn will_wake(&self, other: &Waker) -> bool {
+        // We optimize this by comparing vtable addresses instead of vtable contents.
+        // This is permitted since the function is documented as best-effort.
         let RawWaker { data: a_data, vtable: a_vtable } = self.waker;
         let RawWaker { data: b_data, vtable: b_vtable } = other.waker;
         a_data == b_data && ptr::eq(a_vtable, b_vtable)
+    }
+
+    /// Creates a new `Waker` from the provided `data` pointer and `vtable`.
+    ///
+    /// The `data` pointer can be used to store arbitrary data as required
+    /// by the executor. This could be e.g. a type-erased pointer to an `Arc`
+    /// that is associated with the task.
+    /// The value of this pointer will get passed to all functions that are part
+    /// of the `vtable` as the first parameter.
+    ///
+    /// It is important to consider that the `data` pointer must point to a
+    /// thread safe type such as an `Arc`.
+    ///
+    /// The `vtable` customizes the behavior of a `Waker`. For each operation
+    /// on the `Waker`, the associated function in the `vtable` will be called.
+    ///
+    /// # Safety
+    ///
+    /// The behavior of the returned `Waker` is undefined if the contract defined
+    /// in [`RawWakerVTable`]'s documentation is not upheld.
+    ///
+    /// (Authors wishing to avoid unsafe code may implement the [`Wake`] trait instead, at the
+    /// cost of a required heap allocation.)
+    ///
+    /// [`Wake`]: ../../alloc/task/trait.Wake.html
+    #[inline]
+    #[must_use]
+    #[stable(feature = "waker_getters", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "waker_getters", since = "CURRENT_RUSTC_VERSION")]
+    pub const unsafe fn new(data: *const (), vtable: &'static RawWakerVTable) -> Self {
+        Waker { waker: RawWaker { data, vtable } }
     }
 
     /// Creates a new `Waker` from [`RawWaker`].
@@ -521,16 +538,24 @@ impl Waker {
     #[inline]
     #[must_use]
     #[stable(feature = "futures_api", since = "1.36.0")]
-    #[rustc_const_stable(feature = "const_waker", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_waker", since = "1.82.0")]
     pub const unsafe fn from_raw(waker: RawWaker) -> Waker {
         Waker { waker }
     }
 
     /// Returns a reference to a `Waker` that does nothing when used.
     ///
+    // Note!  Much of the documentation for this method is duplicated
+    // in the docs for `LocalWaker::noop`.
+    // If you edit it, consider editing the other copy too.
+    //
     /// This is mostly useful for writing tests that need a [`Context`] to poll
     /// some futures, but are not expecting those futures to wake the waker or
     /// do not need to do anything specific if it happens.
+    ///
+    /// More generally, using `Waker::noop()` to poll a future
+    /// means discarding the notification of when the future should be polled again.
+    /// So it should only be used when such a notification will not be needed to make progress.
     ///
     /// If an owned `Waker` is needed, `clone()` this one.
     ///
@@ -555,12 +580,20 @@ impl Waker {
         WAKER
     }
 
-    /// Gets a reference to the underlying [`RawWaker`].
+    /// Gets the `data` pointer used to create this `Waker`.
     #[inline]
     #[must_use]
-    #[unstable(feature = "waker_getters", issue = "96992")]
-    pub fn as_raw(&self) -> &RawWaker {
-        &self.waker
+    #[stable(feature = "waker_getters", since = "CURRENT_RUSTC_VERSION")]
+    pub fn data(&self) -> *const () {
+        self.waker.data
+    }
+
+    /// Gets the `vtable` pointer used to create this `Waker`.
+    #[inline]
+    #[must_use]
+    #[stable(feature = "waker_getters", since = "CURRENT_RUSTC_VERSION")]
+    pub fn vtable(&self) -> &'static RawWakerVTable {
+        self.waker.vtable
     }
 }
 
@@ -761,7 +794,35 @@ impl LocalWaker {
     #[must_use]
     #[unstable(feature = "local_waker", issue = "118959")]
     pub fn will_wake(&self, other: &LocalWaker) -> bool {
-        self.waker == other.waker
+        // We optimize this by comparing vtable addresses instead of vtable contents.
+        // This is permitted since the function is documented as best-effort.
+        let RawWaker { data: a_data, vtable: a_vtable } = self.waker;
+        let RawWaker { data: b_data, vtable: b_vtable } = other.waker;
+        a_data == b_data && ptr::eq(a_vtable, b_vtable)
+    }
+
+    /// Creates a new `LocalWaker` from the provided `data` pointer and `vtable`.
+    ///
+    /// The `data` pointer can be used to store arbitrary data as required
+    /// by the executor. This could be e.g. a type-erased pointer to an `Arc`
+    /// that is associated with the task.
+    /// The value of this pointer will get passed to all functions that are part
+    /// of the `vtable` as the first parameter.
+    ///
+    /// The `vtable` customizes the behavior of a `LocalWaker`. For each
+    /// operation on the `LocalWaker`, the associated function in the `vtable`
+    /// will be called.
+    ///
+    /// # Safety
+    ///
+    /// The behavior of the returned `Waker` is undefined if the contract defined
+    /// in [`RawWakerVTable`]'s documentation is not upheld.
+    ///
+    #[inline]
+    #[must_use]
+    #[unstable(feature = "local_waker", issue = "118959")]
+    pub const unsafe fn new(data: *const (), vtable: &'static RawWakerVTable) -> Self {
+        LocalWaker { waker: RawWaker { data, vtable } }
     }
 
     /// Creates a new `LocalWaker` from [`RawWaker`].
@@ -777,11 +838,21 @@ impl LocalWaker {
         Self { waker }
     }
 
-    /// Creates a new `LocalWaker` that does nothing when `wake` is called.
+    /// Returns a reference to a `LocalWaker` that does nothing when used.
     ///
+    // Note!  Much of the documentation for this method is duplicated
+    // in the docs for `Waker::noop`.
+    // If you edit it, consider editing the other copy too.
+    //
     /// This is mostly useful for writing tests that need a [`Context`] to poll
     /// some futures, but are not expecting those futures to wake the waker or
     /// do not need to do anything specific if it happens.
+    ///
+    /// More generally, using `LocalWaker::noop()` to poll a future
+    /// means discarding the notification of when the future should be polled again,
+    /// So it should only be used when such a notification will not be needed to make progress.
+    ///
+    /// If an owned `LocalWaker` is needed, `clone()` this one.
     ///
     /// # Examples
     ///
@@ -807,12 +878,20 @@ impl LocalWaker {
         WAKER
     }
 
-    /// Gets a reference to the underlying [`RawWaker`].
+    /// Gets the `data` pointer used to create this `LocalWaker`.
     #[inline]
     #[must_use]
-    #[unstable(feature = "waker_getters", issue = "96992")]
-    pub fn as_raw(&self) -> &RawWaker {
-        &self.waker
+    #[unstable(feature = "local_waker", issue = "118959")]
+    pub fn data(&self) -> *const () {
+        self.waker.data
+    }
+
+    /// Gets the `vtable` pointer used to create this `LocalWaker`.
+    #[inline]
+    #[must_use]
+    #[unstable(feature = "local_waker", issue = "118959")]
+    pub fn vtable(&self) -> &'static RawWakerVTable {
+        self.waker.vtable
     }
 }
 #[unstable(feature = "local_waker", issue = "118959")]

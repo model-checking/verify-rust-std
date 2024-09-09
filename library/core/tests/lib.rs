@@ -1,5 +1,4 @@
 // tidy-alphabetical-start
-#![cfg_attr(bootstrap, feature(offset_of_nested))]
 #![cfg_attr(target_has_atomic = "128", feature(integer_atomics))]
 #![cfg_attr(test, feature(cfg_match))]
 #![feature(alloc_layout_extra)]
@@ -43,6 +42,7 @@
 #![feature(core_io_borrowed_buf)]
 #![feature(core_private_bignum)]
 #![feature(core_private_diy_float)]
+#![feature(debug_more_non_exhaustive)]
 #![feature(dec2flt)]
 #![feature(duration_constants)]
 #![feature(duration_constructors)]
@@ -73,7 +73,6 @@
 #![feature(iter_next_chunk)]
 #![feature(iter_order_by)]
 #![feature(iter_partition_in_place)]
-#![feature(iter_repeat_n)]
 #![feature(iterator_try_collect)]
 #![feature(iterator_try_reduce)]
 #![feature(layout_for_ptr)]
@@ -112,7 +111,6 @@
 #![feature(unsize)]
 #![feature(unsized_tuple_coercion)]
 #![feature(unwrap_infallible)]
-#![feature(waker_getters)]
 // tidy-alphabetical-end
 #![allow(internal_features)]
 #![deny(fuzzy_provenance_casts)]
@@ -122,6 +120,7 @@ mod alloc;
 mod any;
 mod array;
 mod ascii;
+mod ascii_char;
 mod asserting;
 mod async_iter;
 mod atomic;
@@ -140,7 +139,6 @@ mod intrinsics;
 mod io;
 mod iter;
 mod lazy;
-#[cfg(test)]
 mod macros;
 mod manually_drop;
 mod mem;
