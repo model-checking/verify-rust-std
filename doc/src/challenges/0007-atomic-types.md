@@ -1,7 +1,7 @@
 # Challenge 7: Safety of Methods for Atomic Types and `ReentrantLock`
 
 - **Status:** Open
-- **Tracking Issue:** *Link to issue*
+- **Tracking Issue:** [#83](https://github.com/model-checking/verify-rust-std/issues/83)
 - **Start date:** *2024-09-09*
 - **End date:** *2024-12-10*
 
