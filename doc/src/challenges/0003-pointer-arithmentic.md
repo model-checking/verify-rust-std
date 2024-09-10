@@ -2,7 +2,7 @@
 
 - **Status:** Open
 - **Solution:**
-- **Tracking Issue:** <https://github.com/model-checking/verify-rust-std/issues/21>
+- **Tracking Issue:** [#76](https://github.com/model-checking/verify-rust-std/issues/76)
 - **Start date:** 24/06/24
 - **End date:** 24/12/10
 
