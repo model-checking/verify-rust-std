@@ -6,8 +6,8 @@ usage() {
     echo "Usage: $0 [options] [-p <path>] [--k-args <command arguments>]"
     echo "Options:"
     echo "  -h, --help         Show this help message"
-    echo "  -p, --path <path>  Specify a path (optional)"
-    echo "  --kani-args           Optional: Arguments to pass to the command"
+    echo "  -p, --path <path>  Optional: Specify a path to a copy of the std library. For example, if you want to run the script from an outside directory."
+    echo "  --kani-args        Optional: Arguments to pass to the command"
     exit 1
 }
 
@@ -31,9 +31,9 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         --kani-args)
-            shift  # Remove --k-args from the argument list
-            command_args="$@"  # Capture all remaining arguments
-            break  # Stop processing further arguments
+            shift
+            command_args="$@"
+            break
             ;;
         *)
             # If --k-args is not used, treat all remaining arguments as command arguments
@@ -58,15 +58,13 @@ fi
 cd "$WORK_DIR" || exit 1
 
 # Default values
-DEFAULT_TOML_FILE="kani-version.toml"
+DEFAULT_TOML_FILE="tool_config/kani-version.toml"
 DEFAULT_REPO_URL="https://github.com/model-checking/kani.git"
-DEFAULT_TARGET_DIR="kani_repo"
 DEFAULT_BRANCH_NAME="features/verify-rust-std"
 
 # Use environment variables if set, otherwise use defaults
 TOML_FILE=${KANI_TOML_FILE:-$DEFAULT_TOML_FILE}
 REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
-TARGET_DIR=${KANI_TARGET_DIR:-$DEFAULT_TARGET_DIR}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
 os_name=$(uname -s)

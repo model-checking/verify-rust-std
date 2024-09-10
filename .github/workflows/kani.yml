@@ -9,7 +9,7 @@ on:
     paths:
       - 'library/**'
       - '.github/workflows/kani.yml'
-      - 'run-kani.sh'
+      - 'scripts/run-kani.sh'
 
 defaults:
   run:
@@ -35,4 +35,11 @@ jobs:
           submodules: true
 
       - name: Run Kani Script
-        run: bash ./head/run-kani.sh --path ${{github.workspace}}/head
+        run: bash ./head/scripts/run-kani.sh --path ${{github.workspace}}/head
+
+      - name: Run Kani Script with --kani-args and -p
+        run: bash ./head/scripts/run-kani.sh -p ${{github.workspace}}/head --kani-args --harness ptr::verify::check_read_u128 --harness ptr::unique::verify::check_as_mut
+
+      - name: Run Kani Script without -p
+        working-directory: ${{github.workspace}}/head
+        run: bash ./scripts/run-kani.sh --kani-args --harness ptr::verify::check_read_u128 --harness ptr::unique::verify::check_as_mut
