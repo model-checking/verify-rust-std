@@ -3,11 +3,11 @@
 set -e
 
 usage() {
-    echo "Usage: $0 [options] [-p <path>] [--k-args <command arguments>]"
+    echo "Usage: $0 [options] [-p <path>] [--kani-args <command arguments>]"
     echo "Options:"
     echo "  -h, --help         Show this help message"
     echo "  -p, --path <path>  Optional: Specify a path to a copy of the std library. For example, if you want to run the script from an outside directory."
-    echo "  --kani-args        Optional: Arguments to pass to the command"
+    echo "  --kani-args  <command arguments to kani>  Optional: Arguments to pass to the command. Simply pass them in the same way you would to the Kani binary. This should be the last argument."
     exit 1
 }
 
@@ -16,6 +16,7 @@ command_args=""
 path=""
 
 # Parse command line arguments
+# TODO: Improve parsing with getopts
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help)
@@ -36,8 +37,6 @@ while [[ $# -gt 0 ]]; do
             break
             ;;
         *)
-            # If --k-args is not used, treat all remaining arguments as command arguments
-            command_args="$@"
             break
             ;;
     esac
