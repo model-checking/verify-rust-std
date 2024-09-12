@@ -9,6 +9,9 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 
+#[cfg(kani)]
+use crate::kani;
+
 /// `*mut T` but non-zero and [covariant].
 ///
 /// This is often the correct thing to use when building data structures using
@@ -192,6 +195,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[rustc_const_stable(feature = "const_nonnull_new_unchecked", since = "1.25.0")]
     #[inline]
+    #[requires(!ptr.is_null())]
+    #[ensures(|result| result.as_ptr() == ptr)]
     pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
         // SAFETY: the caller must guarantee that `ptr` is non-null.
         unsafe {
@@ -1768,5 +1773,20 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
     fn from(reference: &T) -> Self {
         // SAFETY: A reference cannot be null.
         unsafe { NonNull { pointer: reference as *const T } }
+    }
+}
+
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
+    #[kani::proof_for_contract(NonNull::new_unchecked)]
+    pub fn check_new_unchecked() {
+        let mut x : i32 = kani::any();
+        let xptr = &mut x;
+        unsafe {
+            let _ = NonNull::new_unchecked(xptr as *mut i32);
+        }
     }
 }
