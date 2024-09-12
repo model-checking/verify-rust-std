@@ -8,6 +8,7 @@ use crate::ptr::Unique;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
+use safety::{ensures, requires};
 
 #[cfg(kani)]
 use crate::kani;
@@ -1776,7 +1777,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
     }
 }
 
-#[unstable(feature="kani", issue="none")]
+//#[unstable(feature="kani", issue="none")]
 mod verify {
     use super::*;
 
