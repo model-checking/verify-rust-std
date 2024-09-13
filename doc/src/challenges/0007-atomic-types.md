@@ -82,11 +82,6 @@ Then, write and verify safety contracts for the remaining unsafe functions:
 - `atomic_umax`
 - `atomic_umin`
 
-These functions are wrappers around compiler intrinsics.
-Thus, your task is to ensure that we cannot cause undefined behavior by invoking the intrinsics on these inputs.
-For instance, if the intrinsic takes as input a raw pointer and reads the value at that pointer, your contracts should ensure that we would not cause UB by performing the read.
-For the purpose of this challenge, you may assume that any UB in the intrinsics would be a direct consequence of malformed inputs.
-
 You are not required to write correctness contracts for these functions (e.g., that `atomic_sub` correctly subtracts the operands and stores the result), but it would be great to do so!
 
 #### Part 2: Reentrant Lock
