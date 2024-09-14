@@ -60,7 +60,7 @@ For example, insert this short blob into a rust file named `example.rs` inside y
 
 ``` rust
 #[cfg(kani)]
-use crate::kani;
+kani_core::kani_lib!(core);
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
