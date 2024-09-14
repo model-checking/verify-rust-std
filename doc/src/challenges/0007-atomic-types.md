@@ -65,24 +65,36 @@ Verify that for any arbitrary value for this inner pointer (i.e., any arbitrary 
 However, you need not verify the method for all possible instantiations of `T`.
 It suffices to verify this method for `T` of byte sizes 0, 1, 2, 4, and at least one non-power of two.
 
-Then, write and verify safety contracts for the remaining unsafe functions:
+Then, write and verify safety contracts for the remaining methods that use `unsafe`:
 
-- `atomic_store`
-- `atomic_load`
-- `atomic_swap`
-- `atomic_add`
-- `atomic_sub`
-- `atomic_compare_exchange`
-- `atomic_compare_exchange_weak`
-- `atomic_and`
-- `atomic_nand`
-- `atomic_or`
-- `atomic_xor`
-- `atomic_max`
-- `atomic_umax`
-- `atomic_umin`
+| Method                  | Types |
+| :---                    |     :---
+| `from_mut`              | `AtomicBool`, `AtomicPtr`, `AtomicI8`,`AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `get_mut_slice`         | `AtomicBool`, `AtomicPtr`, `AtomicI8`,`AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `from_mut_slice`        | `AtomicBool`, `AtomicPtr`, `AtomicI8`,`AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `load`                  | `AtomicBool`, `AtomicPtr`, `AtomicI8`,`AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `store`                 | `AtomicBool`, `AtomicPtr`, `AtomicI8`,`AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `swap`                  | `AtomicBool`, `AtomicPtr`, `AtomicI8`,`AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `compare_exchange`      | `AtomicBool`, `AtomicPtr`, `AtomicI8`,`AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `compare_exchange_weak` | `AtomicBool`, `AtomicPtr`, `AtomicI8`,`AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `fetch_update`          | `AtomicBool`, `AtomicPtr`, `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `fetch_and`             | `AtomicBool`, `AtomicPtr`, `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `fetch_xor`             | `AtomicBool`, `AtomicPtr`, `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `fetch_nand`            | `AtomicBool`, `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128`|
+| `fetch_or`              | `AtomicBool`, `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `fetch_add`             | `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `fetch_sub`             | `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `fetch_max`             | `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `fetch_min`             | `AtomicI8`, `AtomicU8`,`AtomicI16`,`AtomicU16` `AtomicI32`, `AtomicU32`, `AtomicI64`, `AtomicU64`, `AtomicI128`,`AtomicU128` |
+| `get_mut`               | `AtomicBool`|
+| `fetch_not`             | `AtomicBool`|
+| `fetch_ptr_add`         | `AtomicPtr`|
+| `fetch_ptr_sub`         | `AtomicPtr`|
+| `fetch_byte_add`        | `AtomicPtr`|
+| `fetch_byte_sub`        | `AtomicPtr`|
+| `fetch_or`              | `AtomicPtr`|
 
-You are not required to write correctness contracts for these functions (e.g., that `atomic_sub` correctly subtracts the operands and stores the result), but it would be great to do so!
+You are not required to write correctness contracts for these functions (e.g., that `AtomicI8::fetch_sub` correctly subtracts the operands and stores the result), but it would be great to do so!
 
 #### Part 2: Reentrant Lock
 
