@@ -55,12 +55,12 @@ To aid the Rust Standard Library verification effort, Kani provides a sub-comman
 
 Modify your local copy of the Rust Standard Library by writing proofs for the functions/methods that you want to verify.
 
-For example, insert this short blob into your copy of the library. This blob imports the building-block APIs such as
+For example, insert this short blob into a rust file named `example.rs` inside your copy of the library folder. This blob imports the building-block APIs such as
 `assert`, `assume`, `proof` and [function-contracts](https://github.com/model-checking/kani/blob/main/rfc/src/rfcs/0009-function-contracts.md) such as `proof_for_contract` and `fake_function`.
 
 ``` rust
 #[cfg(kani)]
-kani_core::kani_lib!(core);
+use crate::kani;
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -88,14 +88,14 @@ pub mod verify {
 
 Run the following command in your local terminal:
 
-`kani verify-std -Z unstable-options "path/to/library" --target-dir "/path/to/target" -Z function-contracts -Z stubbing`.
+`kani verify-std -Z unstable-options "path/to/library" --target-dir "/path/to/target" -Z function-contracts -Z stubbing -Z mem-predicates`.
 
 The command `kani verify-std` is a sub-command of the `kani`. This specific sub-command is used to verify the Rust Standard Library with the following arguments.
 
 - `"path/to/library"`: This argument specifies the path to the modified Rust Standard Library that was prepared earlier in the script.
 - `--target-dir "path/to/target"`: This optional argument sets the target directory where Kani will store its output and intermediate files.
 
-Apart from these, you can use your regular `kani-args` such as `-Z function-contracts` and `-Z stubbing` depending on your verification needs.
+Apart from these, you can use your regular `kani-args` such as `-Z function-contracts`, `-Z stubbing` and `-Z mem-predicates` depending on your verification needs. If you run into kani error that says `Use of unstable feature`, add the corresponding feature with `-Z` to the command.
 For more details on Kani's features, refer to [the features section in the Kani Book](https://model-checking.github.io/kani/reference/attributes.html)
 
 ### Step 3
@@ -111,6 +111,9 @@ Verification Time: 0.017101772s
 
 Complete - 2 successfully verified harnesses, 0 failures, 2 total.
 ```
+
+### Step 4
+Now you can write proof harnesses to verify specific functions in the library. The current convention is to keep proofs in the same module file of the verification target. To run kani for individual proof, use `--harness [harness_function_name]`. Note that Kani will batch run all proofs in the library folder if you do not supply the `--harness` flag. If kani returns the error `no harnesses matched the harness filter`, you can give the fullname of the harness. For example, to run the proof harness named `check_new` in `library/core/src/ptr/unique.rs`, use `--harness ptr::unique::verify::check_new`. To run all proofs in `unique.rs`, use `--harness ptr::unique::verify`. To find the fullname of a harness, check the kani output and find the line starting with `Checking harness [harness fullname]`.
 
 ## More details
 
