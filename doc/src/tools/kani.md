@@ -86,7 +86,7 @@ pub mod verify {
 
 ### Step 2
 
-Run the following command in your local terminal:
+Run the following command in your local terminal (replace /path/ with your local paths):
 
 `kani verify-std -Z unstable-options "path/to/library" --target-dir "/path/to/target" -Z function-contracts -Z stubbing -Z mem-predicates`.
 
