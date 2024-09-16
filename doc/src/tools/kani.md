@@ -86,9 +86,9 @@ pub mod verify {
 
 ### Step 2
 
-Run the following command in your local terminal (replace /path/ with your local paths):
+Run the following command in your local terminal (replace /path/to/ with your local paths):
 
-`kani verify-std -Z unstable-options "path/to/library" --target-dir "/path/to/target" -Z function-contracts -Z stubbing -Z mem-predicates`.
+`kani verify-std -Z unstable-options "path/to/library" --target-dir "/path/to/target" -Z function-contracts -Z mem-predicates`.
 
 The command `kani verify-std` is a sub-command of the `kani`. This specific sub-command is used to verify the Rust Standard Library with the following arguments.
 
