@@ -53,22 +53,20 @@
 //!
 //! # Memory layout
 //!
-//! For non-zero-sized values, a [`Box`] will use the [`Global`] allocator for
-//! its allocation. It is valid to convert both ways between a [`Box`] and a
-//! raw pointer allocated with the [`Global`] allocator, given that the
-//! [`Layout`] used with the allocator is correct for the type. More precisely,
-//! a `value: *mut T` that has been allocated with the [`Global`] allocator
-//! with `Layout::for_value(&*value)` may be converted into a box using
-//! [`Box::<T>::from_raw(value)`]. Conversely, the memory backing a `value: *mut
-//! T` obtained from [`Box::<T>::into_raw`] may be deallocated using the
-//! [`Global`] allocator with [`Layout::for_value(&*value)`].
+//! For non-zero-sized values, a [`Box`] will use the [`Global`] allocator for its allocation. It is
+//! valid to convert both ways between a [`Box`] and a raw pointer allocated with the [`Global`]
+//! allocator, given that the [`Layout`] used with the allocator is correct for the type and the raw
+//! pointer points to a valid value of the right type. More precisely, a `value: *mut T` that has
+//! been allocated with the [`Global`] allocator with `Layout::for_value(&*value)` may be converted
+//! into a box using [`Box::<T>::from_raw(value)`]. Conversely, the memory backing a `value: *mut T`
+//! obtained from [`Box::<T>::into_raw`] may be deallocated using the [`Global`] allocator with
+//! [`Layout::for_value(&*value)`].
 //!
-//! For zero-sized values, the `Box` pointer still has to be [valid] for reads
-//! and writes and sufficiently aligned. In particular, casting any aligned
-//! non-zero integer literal to a raw pointer produces a valid pointer, but a
-//! pointer pointing into previously allocated memory that since got freed is
-//! not valid. The recommended way to build a Box to a ZST if `Box::new` cannot
-//! be used is to use [`ptr::NonNull::dangling`].
+//! For zero-sized values, the `Box` pointer has to be non-null and sufficiently aligned. The
+//! recommended way to build a Box to a ZST if `Box::new` cannot be used is to use
+//! [`ptr::NonNull::dangling`].
+//!
+//! On top of these basic layout requirements, a `Box<T>` must point to a valid value of `T`.
 //!
 //! So long as `T: Sized`, a `Box<T>` is guaranteed to be represented
 //! as a single pointer and is also ABI-compatible with C pointers
@@ -200,7 +198,7 @@ use core::ops::{
     AsyncFn, AsyncFnMut, AsyncFnOnce, CoerceUnsized, Coroutine, CoroutineState, Deref, DerefMut,
     DerefPure, DispatchFromDyn, Receiver,
 };
-use core::pin::Pin;
+use core::pin::{Pin, PinCoerceUnsized};
 use core::ptr::{self, addr_of_mut, NonNull, Unique};
 use core::task::{Context, Poll};
 use core::{borrow, fmt, slice};
@@ -262,8 +260,6 @@ impl<T> Box<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_uninit)]
-    ///
     /// let mut five = Box::<u32>::new_uninit();
     ///
     /// let five = unsafe {
@@ -276,7 +272,7 @@ impl<T> Box<T> {
     /// assert_eq!(*five, 5)
     /// ```
     #[cfg(not(no_global_oom_handling))]
-    #[unstable(feature = "new_uninit", issue = "63291")]
+    #[stable(feature = "new_uninit", since = "1.82.0")]
     #[must_use]
     #[inline]
     pub fn new_uninit() -> Box<mem::MaybeUninit<T>> {
@@ -292,7 +288,7 @@ impl<T> Box<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_uninit)]
+    /// #![feature(new_zeroed_alloc)]
     ///
     /// let zero = Box::<u32>::new_zeroed();
     /// let zero = unsafe { zero.assume_init() };
@@ -303,7 +299,7 @@ impl<T> Box<T> {
     /// [zeroed]: mem::MaybeUninit::zeroed
     #[cfg(not(no_global_oom_handling))]
     #[inline]
-    #[unstable(feature = "new_uninit", issue = "63291")]
+    #[unstable(feature = "new_zeroed_alloc", issue = "129396")]
     #[must_use]
     pub fn new_zeroed() -> Box<mem::MaybeUninit<T>> {
         Self::new_zeroed_in(Global)
@@ -349,7 +345,7 @@ impl<T> Box<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// let mut five = Box::<u32>::try_new_uninit()?;
     ///
@@ -379,7 +375,7 @@ impl<T> Box<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// let zero = Box::<u32>::try_new_zeroed()?;
     /// let zero = unsafe { zero.assume_init() };
@@ -459,7 +455,7 @@ impl<T, A: Allocator> Box<T, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// use std::alloc::System;
     ///
@@ -497,7 +493,7 @@ impl<T, A: Allocator> Box<T, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// use std::alloc::System;
     ///
@@ -537,7 +533,7 @@ impl<T, A: Allocator> Box<T, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// use std::alloc::System;
     ///
@@ -575,7 +571,7 @@ impl<T, A: Allocator> Box<T, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// use std::alloc::System;
     ///
@@ -653,8 +649,6 @@ impl<T> Box<[T]> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_uninit)]
-    ///
     /// let mut values = Box::<[u32]>::new_uninit_slice(3);
     ///
     /// let values = unsafe {
@@ -669,7 +663,7 @@ impl<T> Box<[T]> {
     /// assert_eq!(*values, [1, 2, 3])
     /// ```
     #[cfg(not(no_global_oom_handling))]
-    #[unstable(feature = "new_uninit", issue = "63291")]
+    #[stable(feature = "new_uninit", since = "1.82.0")]
     #[must_use]
     pub fn new_uninit_slice(len: usize) -> Box<[mem::MaybeUninit<T>]> {
         unsafe { RawVec::with_capacity(len).into_box(len) }
@@ -684,7 +678,7 @@ impl<T> Box<[T]> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_uninit)]
+    /// #![feature(new_zeroed_alloc)]
     ///
     /// let values = Box::<[u32]>::new_zeroed_slice(3);
     /// let values = unsafe { values.assume_init() };
@@ -694,7 +688,7 @@ impl<T> Box<[T]> {
     ///
     /// [zeroed]: mem::MaybeUninit::zeroed
     #[cfg(not(no_global_oom_handling))]
-    #[unstable(feature = "new_uninit", issue = "63291")]
+    #[unstable(feature = "new_zeroed_alloc", issue = "129396")]
     #[must_use]
     pub fn new_zeroed_slice(len: usize) -> Box<[mem::MaybeUninit<T>]> {
         unsafe { RawVec::with_capacity_zeroed(len).into_box(len) }
@@ -706,7 +700,7 @@ impl<T> Box<[T]> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// let mut values = Box::<[u32]>::try_new_uninit_slice(3)?;
     /// let values = unsafe {
@@ -744,7 +738,7 @@ impl<T> Box<[T]> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// let values = Box::<[u32]>::try_new_zeroed_slice(3)?;
     /// let values = unsafe { values.assume_init() };
@@ -776,7 +770,7 @@ impl<T, A: Allocator> Box<[T], A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// use std::alloc::System;
     ///
@@ -810,7 +804,7 @@ impl<T, A: Allocator> Box<[T], A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// use std::alloc::System;
     ///
@@ -835,7 +829,7 @@ impl<T, A: Allocator> Box<[T], A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// use std::alloc::System;
     ///
@@ -878,7 +872,7 @@ impl<T, A: Allocator> Box<[T], A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(allocator_api, new_uninit)]
+    /// #![feature(allocator_api)]
     ///
     /// use std::alloc::System;
     ///
@@ -925,8 +919,6 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_uninit)]
-    ///
     /// let mut five = Box::<u32>::new_uninit();
     ///
     /// let five: Box<u32> = unsafe {
@@ -938,7 +930,7 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     ///
     /// assert_eq!(*five, 5)
     /// ```
-    #[unstable(feature = "new_uninit", issue = "63291")]
+    #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
     pub unsafe fn assume_init(self) -> Box<T, A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
@@ -955,7 +947,7 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_uninit)]
+    /// #![feature(box_uninit_write)]
     ///
     /// let big_box = Box::<[usize; 1024]>::new_uninit();
     ///
@@ -972,7 +964,7 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     ///     assert_eq!(*x, i);
     /// }
     /// ```
-    #[unstable(feature = "new_uninit", issue = "63291")]
+    #[unstable(feature = "box_uninit_write", issue = "129397")]
     #[inline]
     pub fn write(mut boxed: Self, value: T) -> Box<T, A> {
         unsafe {
@@ -998,8 +990,6 @@ impl<T, A: Allocator> Box<[mem::MaybeUninit<T>], A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_uninit)]
-    ///
     /// let mut values = Box::<[u32]>::new_uninit_slice(3);
     ///
     /// let values = unsafe {
@@ -1013,7 +1003,7 @@ impl<T, A: Allocator> Box<[mem::MaybeUninit<T>], A> {
     ///
     /// assert_eq!(*values, [1, 2, 3])
     /// ```
-    #[unstable(feature = "new_uninit", issue = "63291")]
+    #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
     pub unsafe fn assume_init(self) -> Box<[T], A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
@@ -1252,6 +1242,95 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     pub fn into_unique(b: Self) -> (Unique<T>, A) {
         let (ptr, alloc) = Box::into_raw_with_allocator(b);
         unsafe { (Unique::from(&mut *ptr), alloc) }
+    }
+
+    /// Returns a raw mutable pointer to the `Box`'s contents.
+    ///
+    /// The caller must ensure that the `Box` outlives the pointer this
+    /// function returns, or else it will end up dangling.
+    ///
+    /// This method guarantees that for the purpose of the aliasing model, this method
+    /// does not materialize a reference to the underlying memory, and thus the returned pointer
+    /// will remain valid when mixed with other calls to [`as_ptr`] and [`as_mut_ptr`].
+    /// Note that calling other methods that materialize references to the memory
+    /// may still invalidate this pointer.
+    /// See the example below for how this guarantee can be used.
+    ///
+    /// # Examples
+    ///
+    /// Due to the aliasing guarantee, the following code is legal:
+    ///
+    /// ```rust
+    /// #![feature(box_as_ptr)]
+    ///
+    /// unsafe {
+    ///     let mut b = Box::new(0);
+    ///     let ptr1 = Box::as_mut_ptr(&mut b);
+    ///     ptr1.write(1);
+    ///     let ptr2 = Box::as_mut_ptr(&mut b);
+    ///     ptr2.write(2);
+    ///     // Notably, the write to `ptr2` did *not* invalidate `ptr1`:
+    ///     ptr1.write(3);
+    /// }
+    /// ```
+    ///
+    /// [`as_mut_ptr`]: Self::as_mut_ptr
+    /// [`as_ptr`]: Self::as_ptr
+    #[unstable(feature = "box_as_ptr", issue = "129090")]
+    #[rustc_never_returns_null_ptr]
+    #[inline]
+    pub fn as_mut_ptr(b: &mut Self) -> *mut T {
+        // This is a primitive deref, not going through `DerefMut`, and therefore not materializing
+        // any references.
+        ptr::addr_of_mut!(**b)
+    }
+
+    /// Returns a raw pointer to the `Box`'s contents.
+    ///
+    /// The caller must ensure that the `Box` outlives the pointer this
+    /// function returns, or else it will end up dangling.
+    ///
+    /// The caller must also ensure that the memory the pointer (non-transitively) points to
+    /// is never written to (except inside an `UnsafeCell`) using this pointer or any pointer
+    /// derived from it. If you need to mutate the contents of the `Box`, use [`as_mut_ptr`].
+    ///
+    /// This method guarantees that for the purpose of the aliasing model, this method
+    /// does not materialize a reference to the underlying memory, and thus the returned pointer
+    /// will remain valid when mixed with other calls to [`as_ptr`] and [`as_mut_ptr`].
+    /// Note that calling other methods that materialize mutable references to the memory,
+    /// as well as writing to this memory, may still invalidate this pointer.
+    /// See the example below for how this guarantee can be used.
+    ///
+    /// # Examples
+    ///
+    /// Due to the aliasing guarantee, the following code is legal:
+    ///
+    /// ```rust
+    /// #![feature(box_as_ptr)]
+    ///
+    /// unsafe {
+    ///     let mut v = Box::new(0);
+    ///     let ptr1 = Box::as_ptr(&v);
+    ///     let ptr2 = Box::as_mut_ptr(&mut v);
+    ///     let _val = ptr2.read();
+    ///     // No write to this memory has happened yet, so `ptr1` is still valid.
+    ///     let _val = ptr1.read();
+    ///     // However, once we do a write...
+    ///     ptr2.write(1);
+    ///     // ... `ptr1` is no longer valid.
+    ///     // This would be UB: let _val = ptr1.read();
+    /// }
+    /// ```
+    ///
+    /// [`as_mut_ptr`]: Self::as_mut_ptr
+    /// [`as_ptr`]: Self::as_ptr
+    #[unstable(feature = "box_as_ptr", issue = "129090")]
+    #[rustc_never_returns_null_ptr]
+    #[inline]
+    pub fn as_ptr(b: &Self) -> *const T {
+        // This is a primitive deref, not going through `DerefMut`, and therefore not materializing
+        // any references.
+        ptr::addr_of!(**b)
     }
 
     /// Returns a reference to the underlying allocator.
@@ -2726,3 +2805,6 @@ impl<T: core::error::Error> core::error::Error for Box<T> {
         core::error::Error::provide(&**self, request);
     }
 }
+
+#[unstable(feature = "pin_coerce_unsized_trait", issue = "123430")]
+unsafe impl<T: ?Sized, A: Allocator> PinCoerceUnsized for Box<T, A> {}

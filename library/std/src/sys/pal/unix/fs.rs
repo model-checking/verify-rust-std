@@ -478,6 +478,7 @@ impl FileAttr {
         target_os = "horizon",
         target_os = "vita",
         target_os = "hurd",
+        target_os = "rtems",
     )))]
     pub fn modified(&self) -> io::Result<SystemTime> {
         #[cfg(target_pointer_width = "32")]
@@ -490,7 +491,12 @@ impl FileAttr {
         SystemTime::new(self.stat.st_mtime as i64, self.stat.st_mtime_nsec as i64)
     }
 
-    #[cfg(any(target_os = "vxworks", target_os = "espidf", target_os = "vita"))]
+    #[cfg(any(
+        target_os = "vxworks",
+        target_os = "espidf",
+        target_os = "vita",
+        target_os = "rtems",
+    ))]
     pub fn modified(&self) -> io::Result<SystemTime> {
         SystemTime::new(self.stat.st_mtime as i64, 0)
     }
@@ -506,6 +512,7 @@ impl FileAttr {
         target_os = "horizon",
         target_os = "vita",
         target_os = "hurd",
+        target_os = "rtems",
     )))]
     pub fn accessed(&self) -> io::Result<SystemTime> {
         #[cfg(target_pointer_width = "32")]
@@ -518,7 +525,12 @@ impl FileAttr {
         SystemTime::new(self.stat.st_atime as i64, self.stat.st_atime_nsec as i64)
     }
 
-    #[cfg(any(target_os = "vxworks", target_os = "espidf", target_os = "vita"))]
+    #[cfg(any(
+        target_os = "vxworks",
+        target_os = "espidf",
+        target_os = "vita",
+        target_os = "rtems"
+    ))]
     pub fn accessed(&self) -> io::Result<SystemTime> {
         SystemTime::new(self.stat.st_atime as i64, 0)
     }
@@ -853,6 +865,7 @@ impl Drop for Dir {
             target_os = "fuchsia",
             target_os = "horizon",
             target_os = "vxworks",
+            target_os = "rtems",
         )))]
         {
             let fd = unsafe { libc::dirfd(self.0) };
@@ -970,6 +983,7 @@ impl DirEntry {
         target_os = "aix",
         target_os = "nto",
         target_os = "hurd",
+        target_os = "rtems",
         target_vendor = "apple",
     ))]
     pub fn ino(&self) -> u64 {
@@ -1552,17 +1566,6 @@ impl fmt::Debug for File {
             None
         }
 
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "hurd",
-            target_os = "netbsd",
-            target_os = "openbsd",
-            target_os = "vxworks",
-            target_os = "solaris",
-            target_os = "illumos",
-            target_vendor = "apple",
-        ))]
         fn get_mode(fd: c_int) -> Option<(bool, bool)> {
             let mode = unsafe { libc::fcntl(fd, libc::F_GETFL) };
             if mode == -1 {
@@ -1574,22 +1577,6 @@ impl fmt::Debug for File {
                 libc::O_WRONLY => Some((false, true)),
                 _ => None,
             }
-        }
-
-        #[cfg(not(any(
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "hurd",
-            target_os = "netbsd",
-            target_os = "openbsd",
-            target_os = "vxworks",
-            target_os = "solaris",
-            target_os = "illumos",
-            target_vendor = "apple",
-        )))]
-        fn get_mode(_fd: c_int) -> Option<(bool, bool)> {
-            // FIXME(#24570): implement this for other Unix platforms
-            None
         }
 
         let fd = self.as_raw_fd();
@@ -1744,7 +1731,7 @@ pub fn link(original: &Path, link: &Path) -> io::Result<()> {
     run_path_with_cstr(original, &|original| {
         run_path_with_cstr(link, &|link| {
             cfg_if::cfg_if! {
-                if #[cfg(any(target_os = "vxworks", target_os = "redox", target_os = "android", target_os = "espidf", target_os = "horizon", target_os = "vita"))] {
+                if #[cfg(any(target_os = "vxworks", target_os = "redox", target_os = "android", target_os = "espidf", target_os = "horizon", target_os = "vita", target_os = "nto"))] {
                     // VxWorks, Redox and ESP-IDF lack `linkat`, so use `link` instead. POSIX leaves
                     // it implementation-defined whether `link` follows symlinks, so rely on the
                     // `symlink_hard_link` test in library/std/src/fs/tests.rs to check the behavior.
@@ -2029,6 +2016,7 @@ mod remove_dir_impl {
     use crate::path::{Path, PathBuf};
     use crate::sys::common::small_c_string::run_path_with_cstr;
     use crate::sys::{cvt, cvt_r};
+    use crate::sys_common::ignore_notfound;
 
     pub fn openat_nofollow_dironly(parent_fd: Option<RawFd>, p: &CStr) -> io::Result<OwnedFd> {
         let fd = cvt_r(|| unsafe {
@@ -2082,6 +2070,16 @@ mod remove_dir_impl {
         }
     }
 
+    fn is_enoent(result: &io::Result<()>) -> bool {
+        if let Err(err) = result
+            && matches!(err.raw_os_error(), Some(libc::ENOENT))
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn remove_dir_all_recursive(parent_fd: Option<RawFd>, path: &CStr) -> io::Result<()> {
         // try opening as directory
         let fd = match openat_nofollow_dironly(parent_fd, &path) {
@@ -2105,27 +2103,35 @@ mod remove_dir_impl {
         for child in dir {
             let child = child?;
             let child_name = child.name_cstr();
-            match is_dir(&child) {
-                Some(true) => {
-                    remove_dir_all_recursive(Some(fd), child_name)?;
+            // we need an inner try block, because if one of these
+            // directories has already been deleted, then we need to
+            // continue the loop, not return ok.
+            let result: io::Result<()> = try {
+                match is_dir(&child) {
+                    Some(true) => {
+                        remove_dir_all_recursive(Some(fd), child_name)?;
+                    }
+                    Some(false) => {
+                        cvt(unsafe { unlinkat(fd, child_name.as_ptr(), 0) })?;
+                    }
+                    None => {
+                        // POSIX specifies that calling unlink()/unlinkat(..., 0) on a directory can succeed
+                        // if the process has the appropriate privileges. This however can causing orphaned
+                        // directories requiring an fsck e.g. on Solaris and Illumos. So we try recursing
+                        // into it first instead of trying to unlink() it.
+                        remove_dir_all_recursive(Some(fd), child_name)?;
+                    }
                 }
-                Some(false) => {
-                    cvt(unsafe { unlinkat(fd, child_name.as_ptr(), 0) })?;
-                }
-                None => {
-                    // POSIX specifies that calling unlink()/unlinkat(..., 0) on a directory can succeed
-                    // if the process has the appropriate privileges. This however can causing orphaned
-                    // directories requiring an fsck e.g. on Solaris and Illumos. So we try recursing
-                    // into it first instead of trying to unlink() it.
-                    remove_dir_all_recursive(Some(fd), child_name)?;
-                }
+            };
+            if result.is_err() && !is_enoent(&result) {
+                return result;
             }
         }
 
         // unlink the directory after removing its contents
-        cvt(unsafe {
+        ignore_notfound(cvt(unsafe {
             unlinkat(parent_fd.unwrap_or(libc::AT_FDCWD), path.as_ptr(), libc::AT_REMOVEDIR)
-        })?;
+        }))?;
         Ok(())
     }
 

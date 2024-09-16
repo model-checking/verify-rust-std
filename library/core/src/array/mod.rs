@@ -37,7 +37,7 @@ pub use iter::IntoIter;
 ///
 /// # Example
 ///
-/// Creating muliple copies of a `String`:
+/// Creating multiple copies of a `String`:
 /// ```rust
 /// #![feature(array_repeat)]
 ///
@@ -889,6 +889,7 @@ impl<T> Guard<'_, T> {
 }
 
 impl<T> Drop for Guard<'_, T> {
+    #[inline]
     fn drop(&mut self) {
         debug_assert!(self.initialized <= self.array_mut.len());
 

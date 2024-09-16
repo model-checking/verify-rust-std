@@ -412,7 +412,6 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// #![feature(thread_spawn_unchecked)]
     /// use std::thread;
     ///
     /// let builder = thread::Builder::new();
@@ -433,26 +432,25 @@ impl Builder {
     /// ```
     ///
     /// [`io::Result`]: crate::io::Result
-    #[unstable(feature = "thread_spawn_unchecked", issue = "55132")]
-    pub unsafe fn spawn_unchecked<'a, F, T>(self, f: F) -> io::Result<JoinHandle<T>>
+    #[stable(feature = "thread_spawn_unchecked", since = "1.82.0")]
+    pub unsafe fn spawn_unchecked<F, T>(self, f: F) -> io::Result<JoinHandle<T>>
     where
         F: FnOnce() -> T,
-        F: Send + 'a,
-        T: Send + 'a,
+        F: Send,
+        T: Send,
     {
         Ok(JoinHandle(unsafe { self.spawn_unchecked_(f, None) }?))
     }
 
-    unsafe fn spawn_unchecked_<'a, 'scope, F, T>(
+    unsafe fn spawn_unchecked_<'scope, F, T>(
         self,
         f: F,
         scope_data: Option<Arc<scoped::ScopeData>>,
     ) -> io::Result<JoinInner<'scope, T>>
     where
         F: FnOnce() -> T,
-        F: Send + 'a,
-        T: Send + 'a,
-        'scope: 'a,
+        F: Send,
+        T: Send,
     {
         let Builder { name, stack_size } = self;
 
@@ -532,7 +530,7 @@ impl Builder {
             // will call `decrement_num_running_threads` and therefore signal that this thread is
             // done.
             drop(their_packet);
-            // Here, the lifetime `'a` and even `'scope` can end. `main` keeps running for a bit
+            // Here, the lifetime `'scope` can end. `main` keeps running for a bit
             // after that before returning itself.
         };
 

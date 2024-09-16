@@ -13,9 +13,8 @@ use crate::time::Duration;
 #[macro_use]
 pub mod compat;
 
-mod api;
+pub mod api;
 
-pub mod alloc;
 pub mod args;
 pub mod c;
 pub mod env;

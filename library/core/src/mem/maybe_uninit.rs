@@ -237,6 +237,7 @@ use crate::{fmt, intrinsics, ptr, slice};
 #[lang = "maybe_uninit"]
 #[derive(Copy)]
 #[repr(transparent)]
+#[rustc_pub_transparent]
 pub union MaybeUninit<T> {
     uninit: (),
     value: ManuallyDrop<T>,

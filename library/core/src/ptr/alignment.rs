@@ -1,6 +1,5 @@
 use safety::{ensures, requires};
 use crate::num::NonZero;
-#[cfg(debug_assertions)]
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{cmp, fmt, hash, mem, num};
 
@@ -88,7 +87,6 @@ impl Alignment {
     #[ensures(|result| result.as_usize() == align)]
     #[ensures(|result| result.as_usize().is_power_of_two())]
     pub const unsafe fn new_unchecked(align: usize) -> Self {
-        #[cfg(debug_assertions)]
         assert_unsafe_precondition!(
             check_language_ub,
             "Alignment::new_unchecked requires a power of two",

@@ -255,6 +255,7 @@ use crate::fmt::{self, Debug, Display};
 use crate::marker::{PhantomData, Unsize};
 use crate::mem;
 use crate::ops::{CoerceUnsized, Deref, DerefMut, DerefPure, DispatchFromDyn};
+use crate::pin::PinCoerceUnsized;
 use crate::ptr::{self, NonNull};
 
 mod lazy;
@@ -305,6 +306,7 @@ pub use once::OnceCell;
 /// See the [module-level documentation](self) for more.
 #[stable(feature = "rust1", since = "1.0.0")]
 #[repr(transparent)]
+#[rustc_pub_transparent]
 pub struct Cell<T: ?Sized> {
     value: UnsafeCell<T>,
 }
@@ -2054,6 +2056,7 @@ impl<T: ?Sized + fmt::Display> fmt::Display for RefMut<'_, T> {
 #[lang = "unsafe_cell"]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[repr(transparent)]
+#[rustc_pub_transparent]
 pub struct UnsafeCell<T: ?Sized> {
     value: T,
 }
@@ -2296,6 +2299,7 @@ impl<T> UnsafeCell<*mut T> {
 /// See [`UnsafeCell`] for details.
 #[unstable(feature = "sync_unsafe_cell", issue = "95439")]
 #[repr(transparent)]
+#[rustc_pub_transparent]
 pub struct SyncUnsafeCell<T: ?Sized> {
     value: UnsafeCell<T>,
 }
@@ -2396,3 +2400,21 @@ fn assert_coerce_unsized(
     let _: Cell<&dyn Send> = c;
     let _: RefCell<&dyn Send> = d;
 }
+
+#[unstable(feature = "pin_coerce_unsized_trait", issue = "123430")]
+unsafe impl<T: ?Sized> PinCoerceUnsized for UnsafeCell<T> {}
+
+#[unstable(feature = "pin_coerce_unsized_trait", issue = "123430")]
+unsafe impl<T: ?Sized> PinCoerceUnsized for SyncUnsafeCell<T> {}
+
+#[unstable(feature = "pin_coerce_unsized_trait", issue = "123430")]
+unsafe impl<T: ?Sized> PinCoerceUnsized for Cell<T> {}
+
+#[unstable(feature = "pin_coerce_unsized_trait", issue = "123430")]
+unsafe impl<T: ?Sized> PinCoerceUnsized for RefCell<T> {}
+
+#[unstable(feature = "pin_coerce_unsized_trait", issue = "123430")]
+unsafe impl<'b, T: ?Sized> PinCoerceUnsized for Ref<'b, T> {}
+
+#[unstable(feature = "pin_coerce_unsized_trait", issue = "123430")]
+unsafe impl<'b, T: ?Sized> PinCoerceUnsized for RefMut<'b, T> {}
