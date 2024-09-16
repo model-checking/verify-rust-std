@@ -166,7 +166,6 @@ impl Layout {
                   without modifying the layout"]
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
-    #[ensures(|result| result.is_power_of_two())]
     pub const fn align(&self) -> usize {
         self.align.as_usize()
     }
@@ -176,7 +175,6 @@ impl Layout {
     #[rustc_const_stable(feature = "alloc_layout_const_new", since = "1.42.0")]
     #[must_use]
     #[inline]
-    #[requires(mem::align_of::<T>().is_power_of_two())]
     #[ensures(|result| result.size() == mem::size_of::<T>())]
     #[ensures(|result| result.align() == mem::align_of::<T>())]
     pub const fn new<T>() -> Self {
@@ -235,7 +233,8 @@ impl Layout {
     // TODO: we should try to capture the above constraints on T in a `requires` clause, and the
     // metadata helpers from https://github.com/model-checking/verify-rust-std/pull/37 may be able
     // to accomplish this.
-    #[ensures(|result| result.align().is_power_of_two())]
+    #[cfg_attr(not(kani), ensures(|result| result.align().is_power_of_two()))]
+    #[cfg_attr(kani, ensures(|result| result.is_safe()))]
     pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
         // SAFETY: we pass along the prerequisites of these functions to the caller
         let (size, align) = unsafe { (mem::size_of_val_raw(t), mem::align_of_val_raw(t)) };
@@ -581,6 +580,12 @@ mod verify {
         }
     }
 
+    impl kani::Invariant for Layout {
+        fn is_safe(&self) -> bool {
+            self.align.as_usize().is_power_of_two()
+        }
+    }
+
     // pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError>
     #[kani::proof_for_contract(Layout::from_size_align)]
     pub fn check_from_size_align() {
@@ -612,10 +617,10 @@ mod verify {
     }
 
     // pub const fn align(&self) -> usize
-    #[kani::proof_for_contract(Layout::align)]
+    #[kani::proof]
     pub fn check_align() {
         let layout = kani::any::<Layout>();
-        let _ = layout.align();
+        assert!(layout.align().is_power_of_two());
     }
 
     // pub const fn new<T>() -> Self
