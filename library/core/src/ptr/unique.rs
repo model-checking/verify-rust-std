@@ -284,8 +284,8 @@ mod verify {
     }
 
     // pub const fn cast<U>(self) -> Unique<U>
-    #[kani::proof_for_contract(Unique::cast<U>)]
-    pub fn check_cast<U>() {
+    #[kani::proof]
+    pub fn check_cast() {
         let mut x : i32 = kani::any();
         let xptr = &mut x;
         unsafe {
