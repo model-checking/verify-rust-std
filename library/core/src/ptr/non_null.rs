@@ -1,3 +1,4 @@
+use super::*;
 use crate::cmp::Ordering;
 use crate::marker::Unsize;
 use crate::mem::{MaybeUninit, SizedTypeProperties};
@@ -227,6 +228,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[rustc_const_unstable(feature = "const_nonnull_new", issue = "93235")]
     #[inline]
+    #[ensures(|result| result.is_some() == !ptr.is_null())]
+    #[ensures(|result| result.is_none() || result.expect("ptr is null!").as_ptr() == ptr)]
     pub const fn new(ptr: *mut T) -> Option<Self> {
         if !ptr.is_null() {
             // SAFETY: The pointer is already checked and is not null
@@ -1788,6 +1791,18 @@ mod verify {
         let xptr = &mut x;
         unsafe {
             let _ = NonNull::new_unchecked(xptr as *mut i32);
+        }
+    }
+
+    // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
+    #[kani::proof_for_contract(NonNull::new)]
+    pub fn non_null_check_new() {
+        let mut x : i32 = kani::any();
+        let xptr = &mut x;
+        unsafe {
+            let nonnull_ptr = NonNull::new(xptr as *mut i32);
+            let null_ptr = NonNull::<u32>::new(null_mut());
+            assert!(null_ptr.is_none());
         }
     }
 }
