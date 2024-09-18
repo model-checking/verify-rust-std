@@ -1,6 +1,6 @@
-use safety::{ensures, requires};
+use safety::{ensures, invariant, requires};
 use crate::num::NonZero;
-use crate::ub_checks::assert_unsafe_precondition;
+use crate::ub_checks::{assert_unsafe_precondition, Invariant};
 use crate::{cmp, fmt, hash, mem, num};
 
 #[cfg(kani)]
@@ -14,6 +14,7 @@ use crate::kani;
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
+#[invariant(self.as_usize().is_power_of_two())]
 pub struct Alignment(AlignmentEnum);
 
 // Alignment is `repr(usize)`, but via extra steps.
@@ -391,7 +392,9 @@ mod verify {
     impl kani::Arbitrary for Alignment {
         fn any() -> Self {
             let align = kani::any_where(|a: &usize| a.is_power_of_two());
-            unsafe { mem::transmute::<usize, Alignment>(align) }
+            let ret = unsafe { mem::transmute::<usize, Alignment>(align) };
+            kani::assert(ret.is_safe(), "Alignment is safe");
+            ret
         }
     }
 

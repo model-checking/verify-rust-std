@@ -4,10 +4,11 @@
 // collections, resulting in having to optimize down excess IR multiple times.
 // Your performance intuition is useless. Run perf.
 
-use safety::requires;
+use safety::{invariant, requires};
 use crate::error::Error;
 use crate::ptr::{Alignment, NonNull};
 use crate::{assert_unsafe_precondition, cmp, fmt, mem};
+use crate::ub_checks::Invariant;
 
 #[cfg(kani)]
 use crate::kani;
@@ -39,6 +40,7 @@ const fn size_align<T>() -> (usize, usize) {
 #[stable(feature = "alloc_layout", since = "1.28.0")]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[lang = "alloc_layout"]
+#[invariant(self.align.is_safe())]
 pub struct Layout {
     // size of the requested block of memory, measured in bytes.
     size: usize,
@@ -529,6 +531,7 @@ mod verify {
             let layout = Layout::from_size_align_unchecked(s, a);
             assert_eq!(layout.size(), s);
             assert_eq!(layout.align(), a);
+            assert!(layout.is_safe());
         }
     }
 }
