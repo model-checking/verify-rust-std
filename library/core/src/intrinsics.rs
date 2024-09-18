@@ -1042,56 +1042,6 @@ extern "rust-intrinsic" {
     #[rustc_nounwind]
     pub fn breakpoint();
 
-    /// Executes a breakpoint trap, for inspection by a debugger.
-    ///
-    /// This intrinsic does not have a stable counterpart.
-    #[rustc_nounwind]
-    // FIXME: Kani currently does not support annotating intrinsics.
-    // See https://github.com/model-checking/kani/issues/3325
-    #[cfg_attr(not(kani), requires(matches!(
-        <T as Pointee>::Metadata::map_dyn(crate::ptr::metadata(_val)::metadata(),
-            |dyn_meta| { ub_checks::can_dereference(dyn_meta)}),
-        None | Some(true))))]
-    #[cfg_attr(not(kani), requires(matches!(
-        <T as Pointee>::Metadata::map_len(crate::ptr::metadata(_val)::metadata(),
-            |_| { ub_checks::can_dereference(_val)}),
-        None | Some(true))))]
-    pub fn size_of_val<T: ?Sized>(_val: *const T) -> usize;
-    /// The required alignment of the referenced value.
-    ///
-    /// The stabilized version of this intrinsic is [`core::mem::align_of_val`].
-    #[rustc_const_unstable(feature = "const_align_of_val", issue = "46571")]
-    #[rustc_nounwind]
-    pub fn min_align_of_val<T: ?Sized>(_: *const T) -> usize;
-
-    /// Gets a static string slice containing the name of a type.
-    ///
-    /// Note that, unlike most intrinsics, this is safe to call;
-    /// it does not require an `unsafe` block.
-    /// Therefore, implementations must not require the user to uphold
-    /// any safety invariants.
-    ///
-    /// The stabilized version of this intrinsic is [`core::any::type_name`].
-    #[rustc_const_unstable(feature = "const_type_name", issue = "63084")]
-    #[rustc_safe_intrinsic]
-    #[rustc_nounwind]
-    pub fn type_name<T: ?Sized>() -> &'static str;
-
-    /// Gets an identifier which is globally unique to the specified type. This
-    /// function will return the same value for a type regardless of whichever
-    /// crate it is invoked in.
-    ///
-    /// Note that, unlike most intrinsics, this is safe to call;
-    /// it does not require an `unsafe` block.
-    /// Therefore, implementations must not require the user to uphold
-    /// any safety invariants.
-    ///
-    /// The stabilized version of this intrinsic is [`core::any::TypeId::of`].
-    #[rustc_const_unstable(feature = "const_type_id", issue = "77125")]
-    #[rustc_safe_intrinsic]
-    #[rustc_nounwind]
-    pub fn type_id<T: ?Sized + 'static>() -> u128;
-
     /// A guard for unsafe functions that cannot ever be executed if `T` is uninhabited:
     /// This will statically either panic, or do nothing.
     ///
@@ -3166,6 +3116,14 @@ pub const fn variant_count<T>() -> usize {
 #[rustc_const_unstable(feature = "const_size_of_val", issue = "46571")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
+#[cfg_attr(not(kani), requires(matches!(
+    <T as Pointee>::Metadata::map_dyn(crate::ptr::metadata(_val)::metadata(),
+    |dyn_meta| { ub_checks::can_dereference(dyn_meta)}),
+    None | Some(true))))]
+#[cfg_attr(not(kani), requires(matches!(
+    <T as Pointee>::Metadata::map_len(crate::ptr::metadata(_val)::metadata(),
+    |_| { ub_checks::can_dereference(_val)}),
+    None | Some(true))))]
 pub const unsafe fn size_of_val<T: ?Sized>(_ptr: *const T) -> usize {
     unreachable!()
 }
@@ -3363,20 +3321,10 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(_ptr: *cons
 #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 #[requires(!count.overflowing_mul(size_of::<T>()).1
   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
-  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-#[requires(ub_checks::is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
-// TODO: Use quantifiers once it's available.
-// Ensures the initialization state is preserved.
-#[ensures(|_| {
-    if count > 0 {
-        let byte = kani::any_where(| sz: &usize | *sz < size_of::< T >);
-        let elem = kani::any_where(| val: &usize | *val < count);
-        let src_data = src as * const u8;
-        let dst_data = unsafe { dst.offset(elem) } as * const u8;
-        ub_checks::can_dereference(unsafe { src_data.offset(byte) })
-            == ub_checks::can_dereference(unsafe { dst_data.offset(byte) })
-    }
-})]
+  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
+  && ub_checks::is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
+#[ensures(|_| { check_copy_untyped(src, dst, count)}) ]
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
@@ -3483,16 +3431,8 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[requires(!count.overflowing_mul(size_of::<T>()).1
   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-#[ensures(|_| {
-    if count > 0 {
-        let byte = kani::any_where(| sz: &usize | *sz < size_of::< T >);
-        let elem = kani::any_where(| val: &usize | *val < count);
-        let src_data = src as * const u8;
-        let dst_data = unsafe { dst.offset(elem) } as * const u8;
-        ub_checks::can_dereference(unsafe { src_data.offset(byte) })
-            == ub_checks::can_dereference(unsafe { dst_data.offset(byte) })
-    }
-})]
+#[ensures(|_| { check_copy_untyped(src, dst, count) })]
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
@@ -3576,14 +3516,12 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_write_bytes"]
-#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 #[requires(!count.overflowing_mul(size_of::<T>()).1
-  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst as *mut u8, count)))]
-// TODO: Change this to quantifiers when available.
-#[ensures(|_| {
-    let idx = kani::any_where(|idx: &usize| *idx < count);
-    ub_checks::can_dereference(dst.offset(idx) as * const u8)
-})]
+  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+#[requires(count > 0 || ub_checks::is_aligned_and_not_null(dst as *const (), align_of::<T>()))]
+#[ensures(|_|
+    ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(dst as *const u8, count * size_of::<T>())))]
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
@@ -3602,6 +3540,22 @@ pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
             ) => ub_checks::is_aligned_and_not_null(addr, align)
         );
         write_bytes(dst, val, count)
+    }
+}
+
+// Ensures the initialization state is preserved.
+// This is used for contracts only.
+#[allow(dead_code)]
+fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
+    if count > 0 {
+        let byte = kani::any_where(| sz: &usize | *sz < size_of::< T >());
+        let elem = kani::any_where(| val: &usize | *val < count);
+        let src_data = src as * const u8;
+        let dst_data = unsafe { dst.add(elem) } as * const u8;
+        ub_checks::can_dereference(unsafe { src_data.add(byte) })
+            == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
+    } else {
+        true
     }
 }
 
@@ -3632,6 +3586,7 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
 mod verify {
     use core::{cmp, fmt};
     use core::ptr::addr_of_mut;
+    use core::mem::MaybeUninit;
     use super::*;
     use crate::kani;
 
@@ -3686,28 +3641,44 @@ mod verify {
     }
 
     impl<T: kani::Arbitrary> ArbitraryPointers<T> {
-        fn with_arbitrary<F>(harness: F) where F: FnOnce(ArbitraryPointers<u32>) {
+        const MAX_SIZE_T: usize = 100;
+        const SIZE_T: usize = size_of::<T>();
+
+        const IS_VALID: () = assert!(Self::SIZE_T < Self::MAX_SIZE_T, "Exceeded supported type size");
+
+        fn with_arbitrary<F>(harness: F) where F: FnOnce(ArbitraryPointers<T>) {
+
             #[repr(C)]
-            struct WithPadding {
-                byte: u8,
-                // padding in the middle.
-                bytes: u64,
+            struct WithUninit<const SIZE: usize> {
+                bytes: [MaybeUninit<u8>; SIZE],
             }
-            let mut single = kani::any::<u32>();
-            let ptr1 = addr_of_mut!(single);
 
-            // FIXME(kani) this should be but this is not available in `kani_core` yet:
-            // let mut array: [u8; 100] = kani::any();
-            let mut array = [kani::any::<u32>(), 100];
-            let ptr2 = addr_of_mut!(array) as *mut u32;
+            #[repr(C)]
+            #[repr(packed)]
+            #[derive(kani::Arbitrary)]
+            struct Unaligned<T> {
+                first: u8,
+                val: T, // If alignment of T > 1, this value will be unaligned but valid otherwise.
+            }
 
-            let mut buffer = [0u8; 6];
-            let unaligned = unsafe { addr_of_mut!(buffer).byte_offset(1) } as *mut u32;
+            let mut single = kani::any::<T>();
+            let single_ptr = addr_of_mut!(single);
 
-            let mut padding = WithPadding { byte: kani::any(), bytes: kani::any()};
-            let uninit = unsafe { addr_of_mut!(padding.byte).byte_offset(4)} as *mut u32;
+            let mut array: [T; 100] = kani::any();
+            let array_ptr = addr_of_mut!(array) as *mut T;
 
-            let arbitrary = ArbitraryPointers::from(ptr1, ptr2, unaligned, uninit);
+            let mut unaligned: Unaligned<T> = kani::any();
+            let unaligned_ptr = addr_of_mut!(unaligned.val) as *mut T;
+
+            let mut uninit = WithUninit { bytes: [MaybeUninit::zeroed(); Self::MAX_SIZE_T] };
+            for i in 0..Self::SIZE_T {
+                if kani::any() {
+                    uninit.bytes[i] = MaybeUninit::uninit();
+                }
+            }
+            let uninit_ptr = &mut uninit as *mut _ as *mut T;
+
+            let arbitrary = ArbitraryPointers::from(single_ptr, array_ptr, unaligned_ptr, uninit_ptr);
             harness(arbitrary);
         }
 
@@ -3748,7 +3719,6 @@ mod verify {
         }
     }
 
-    /// This harness currently fails because we cannot define the modifies clause for slices.
     #[kani::proof_for_contract(copy)]
     fn check_copy() {
         ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
@@ -3774,7 +3744,6 @@ mod verify {
         });
     }
 
-    /// FIXME(kani): This harness currently fails because we cannot define the modifies clause for slices.
     #[kani::proof_for_contract(copy_nonoverlapping)]
     fn check_copy_nonoverlapping() {
         ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
@@ -3786,7 +3755,6 @@ mod verify {
         });
     }
 
-    /// FIXME(kani): This harness currently fails because we cannot define the modifies clause for slices.
     #[kani::proof_for_contract(write_bytes)]
     fn check_write_bytes() {
         ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
