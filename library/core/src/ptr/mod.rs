@@ -2552,8 +2552,9 @@ mod verify {
     }
 
     #[kani::proof_for_contract(align_offset)]
-    fn check_align_offset_17() {
-        let p = kani::any::<usize>() as *const [char; 17];
+    #[kani::solver(kissat)]
+    fn check_align_offset_5() {
+        let p = kani::any::<usize>() as *const [char; 5];
         check_align_offset(p);
     }
 
