@@ -5,13 +5,9 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use crate::clone;
-use crate::cmp;
-use crate::fmt;
-use crate::hash;
-use crate::intrinsics;
+use crate::alloc::Layout;
 use crate::marker::DiscriminantKind;
-use crate::ptr;
+use crate::{clone, cmp, fmt, hash, intrinsics, ptr};
 
 #[cfg(kani)]
 use crate::kani;
@@ -26,7 +22,7 @@ pub use maybe_uninit::MaybeUninit;
 
 mod transmutability;
 #[unstable(feature = "transmutability", issue = "99571")]
-pub use transmutability::{Assume, BikeshedIntrinsicFrom};
+pub use transmutability::{Assume, TransmuteFrom};
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(inline)]
@@ -362,6 +358,12 @@ pub const fn size_of_val<T: ?Sized>(val: &T) -> usize {
 ///     - a [slice], then the length of the slice tail must be an initialized
 ///       integer, and the size of the *entire value*
 ///       (dynamic tail length + statically sized prefix) must fit in `isize`.
+///       For the special case where the dynamic tail length is 0, this function
+///       is safe to call.
+//        NOTE: the reason this is safe is that if an overflow were to occur already with size 0,
+//        then we would stop compilation as even the "statically known" part of the type would
+//        already be too big (or the call may be in dead code and optimized away, but then it
+//        doesn't matter).
 ///     - a [trait object], then the vtable part of the pointer must point
 ///       to a valid vtable acquired by an unsizing coercion, and the size
 ///       of the *entire value* (dynamic tail length + statically sized prefix)
@@ -509,6 +511,8 @@ pub const fn align_of_val<T: ?Sized>(val: &T) -> usize {
 ///     - a [slice], then the length of the slice tail must be an initialized
 ///       integer, and the size of the *entire value*
 ///       (dynamic tail length + statically sized prefix) must fit in `isize`.
+///       For the special case where the dynamic tail length is 0, this function
+///       is safe to call.
 ///     - a [trait object], then the vtable part of the pointer must point
 ///       to a valid vtable acquired by an unsizing coercion, and the size
 ///       of the *entire value* (dynamic tail length + statically sized prefix)
@@ -611,7 +615,7 @@ pub const fn needs_drop<T: ?Sized>() -> bool {
 ///
 /// There is no guarantee that an all-zero byte-pattern represents a valid value
 /// of some type `T`. For example, the all-zero byte-pattern is not a valid value
-/// for reference types (`&T`, `&mut T`) and functions pointers. Using `zeroed`
+/// for reference types (`&T`, `&mut T`) and function pointers. Using `zeroed`
 /// on such types causes immediate [undefined behavior][ub] because [the Rust
 /// compiler assumes][inv] that there always is a valid value in a variable it
 /// considers initialized.
@@ -1240,6 +1244,10 @@ pub trait SizedTypeProperties: Sized {
     #[doc(hidden)]
     #[unstable(feature = "sized_type_properties", issue = "none")]
     const IS_ZST: bool = size_of::<Self>() == 0;
+
+    #[doc(hidden)]
+    #[unstable(feature = "sized_type_properties", issue = "none")]
+    const LAYOUT: Layout = Layout::new::<Self>();
 }
 #[doc(hidden)]
 #[unstable(feature = "sized_type_properties", issue = "none")]
@@ -1323,7 +1331,7 @@ impl<T> SizedTypeProperties for T {}
 /// # Examples
 ///
 /// ```
-/// #![feature(offset_of_enum, offset_of_nested)]
+/// #![feature(offset_of_enum)]
 ///
 /// use std::mem;
 /// #[repr(C)]

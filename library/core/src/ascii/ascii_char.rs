@@ -3,8 +3,12 @@
 //! suggestions from rustc if you get anything slightly wrong in here, and overall
 //! helps with clarity as we're also referring to `char` intentionally in here.
 
-use crate::fmt::{self, Write};
+use safety::{ensures, requires};
 use crate::mem::transmute;
+use crate::{assert_unsafe_precondition, fmt};
+
+#[cfg(kani)]
+use crate::kani;
 
 /// One of the 128 Unicode characters from U+0000 through U+007F,
 /// often known as the [ASCII] subset.
@@ -449,6 +453,7 @@ impl AsciiChar {
     /// or returns `None` if it's too large.
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
+    #[ensures(|result| (b <= 127) == (result.is_some() && result.unwrap() as u8 == b))]
     pub const fn from_u8(b: u8) -> Option<Self> {
         if b <= 127 {
             // SAFETY: Just checked that `b` is in-range
@@ -466,6 +471,8 @@ impl AsciiChar {
     /// `b` must be in `0..=127`, or else this is UB.
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
+    #[requires(b <= 127)]
+    #[ensures(|result| *result as u8 == b)]
     pub const unsafe fn from_u8_unchecked(b: u8) -> Self {
         // SAFETY: Our safety precondition is that `b` is in-range.
         unsafe { transmute(b) }
@@ -497,14 +504,18 @@ impl AsciiChar {
     /// Notably, it should not be expected to return hex digits, or any other
     /// reasonable extension of the decimal digits.
     ///
-    /// (This lose safety condition is intended to simplify soundness proofs
+    /// (This loose safety condition is intended to simplify soundness proofs
     /// when writing code using this method, since the implementation doesn't
     /// need something really specific, not to make those other arguments do
     /// something useful. It might be tightened before stabilization.)
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
     pub const unsafe fn digit_unchecked(d: u8) -> Self {
-        debug_assert!(d < 10);
+        assert_unsafe_precondition!(
+            check_language_ub,
+            "`AsciiChar::digit_unchecked` input cannot exceed 9.",
+            (d: u8 = d) => d < 10
+        );
 
         // SAFETY: `'0'` through `'9'` are U+00030 through U+0039,
         // so because `d` must be 64 or less the addition can return at most
@@ -583,9 +594,10 @@ impl fmt::Display for AsciiChar {
 #[unstable(feature = "ascii_char", issue = "110998")]
 impl fmt::Debug for AsciiChar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[inline]
-        fn backslash(a: AsciiChar) -> ([AsciiChar; 4], u8) {
-            ([AsciiChar::ReverseSolidus, a, AsciiChar::Null, AsciiChar::Null], 2)
+        use AsciiChar::{Apostrophe, Null, ReverseSolidus as Backslash};
+
+        fn backslash(a: AsciiChar) -> ([AsciiChar; 6], usize) {
+            ([Apostrophe, Backslash, a, Apostrophe, Null, Null], 4)
         }
 
         let (buf, len) = match self {
@@ -595,24 +607,36 @@ impl fmt::Debug for AsciiChar {
             AsciiChar::LineFeed => backslash(AsciiChar::SmallN),
             AsciiChar::ReverseSolidus => backslash(AsciiChar::ReverseSolidus),
             AsciiChar::Apostrophe => backslash(AsciiChar::Apostrophe),
-            _ => {
-                let byte = self.to_u8();
-                if !byte.is_ascii_control() {
-                    ([*self, AsciiChar::Null, AsciiChar::Null, AsciiChar::Null], 1)
-                } else {
-                    const HEX_DIGITS: [AsciiChar; 16] = *b"0123456789abcdef".as_ascii().unwrap();
+            _ if self.to_u8().is_ascii_control() => {
+                const HEX_DIGITS: [AsciiChar; 16] = *b"0123456789abcdef".as_ascii().unwrap();
 
-                    let hi = HEX_DIGITS[usize::from(byte >> 4)];
-                    let lo = HEX_DIGITS[usize::from(byte & 0xf)];
-                    ([AsciiChar::ReverseSolidus, AsciiChar::SmallX, hi, lo], 4)
-                }
+                let byte = self.to_u8();
+                let hi = HEX_DIGITS[usize::from(byte >> 4)];
+                let lo = HEX_DIGITS[usize::from(byte & 0xf)];
+                ([Apostrophe, Backslash, AsciiChar::SmallX, hi, lo, Apostrophe], 6)
             }
+            _ => ([Apostrophe, *self, Apostrophe, Null, Null, Null], 3),
         };
 
-        f.write_char('\'')?;
-        for byte in &buf[..len as usize] {
-            f.write_str(byte.as_str())?;
-        }
-        f.write_char('\'')
+        f.write_str(buf[..len].as_str())
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+    use AsciiChar;
+
+    #[kani::proof_for_contract(AsciiChar::from_u8)]
+    fn check_from_u8() {
+        let b: u8 = kani::any();
+        AsciiChar::from_u8(b);
+    }
+
+    #[kani::proof_for_contract(AsciiChar::from_u8_unchecked)]
+    fn check_from_u8_unchecked() {
+        let b: u8 = kani::any();
+        unsafe { AsciiChar::from_u8_unchecked(b) };
     }
 }

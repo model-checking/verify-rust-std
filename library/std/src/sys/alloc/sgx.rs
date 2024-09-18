@@ -1,9 +1,8 @@
 use crate::alloc::{GlobalAlloc, Layout, System};
 use crate::ptr;
-use core::sync::atomic::{AtomicBool, Ordering};
-
-use super::abi::mem as sgx_mem;
-use super::waitqueue::SpinMutex;
+use crate::sync::atomic::{AtomicBool, Ordering};
+use crate::sys::pal::abi::mem as sgx_mem;
+use crate::sys::pal::waitqueue::SpinMutex;
 
 // Using a SpinMutex because we never want to exit the enclave waiting for the
 // allocator.

@@ -3,19 +3,19 @@
 #[cfg(test)]
 mod tests;
 
+use core::clone::CloneToUninit;
+
 use crate::borrow::{Borrow, Cow};
-use crate::cmp;
 use crate::collections::TryReserveError;
-use crate::fmt;
 use crate::hash::{Hash, Hasher};
 use crate::ops::{self, Range};
+use crate::ptr::addr_of_mut;
 use crate::rc::Rc;
-use crate::slice;
 use crate::str::FromStr;
 use crate::sync::Arc;
-
 use crate::sys::os_str::{Buf, Slice};
 use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::{cmp, fmt, slice};
 
 /// A type that can represent owned, mutable platform-native strings, but is
 /// cheaply inter-convertible with Rust strings.
@@ -115,10 +115,8 @@ impl crate::sealed::Sealed for OsString {}
 #[stable(feature = "rust1", since = "1.0.0")]
 // `OsStr::from_inner` current implementation relies
 // on `OsStr` being layout-compatible with `Slice`.
-// However, `OsStr` layout is considered an implementation detail and must not be relied upon. We
-// want `repr(transparent)` but we don't want it to show up in rustdoc, so we hide it under
-// `cfg(doc)`. This is an ad-hoc implementation of attribute privacy.
-#[cfg_attr(not(doc), repr(transparent))]
+// However, `OsStr` layout is considered an implementation detail and must not be relied upon.
+#[repr(transparent)]
 pub struct OsStr {
     inner: Slice,
 }
@@ -854,7 +852,7 @@ impl OsStr {
 
     /// Converts an `OsStr` to a <code>[Cow]<[str]></code>.
     ///
-    /// Any non-Unicode sequences are replaced with
+    /// Any non-UTF-8 sequences are replaced with
     /// [`U+FFFD REPLACEMENT CHARACTER`][U+FFFD].
     ///
     /// [U+FFFD]: crate::char::REPLACEMENT_CHARACTER
@@ -1263,6 +1261,16 @@ impl Clone for Box<OsStr> {
     #[inline]
     fn clone(&self) -> Self {
         self.to_os_string().into_boxed_os_str()
+    }
+}
+
+#[unstable(feature = "clone_to_uninit", issue = "126799")]
+unsafe impl CloneToUninit for OsStr {
+    #[inline]
+    #[cfg_attr(debug_assertions, track_caller)]
+    unsafe fn clone_to_uninit(&self, dst: *mut Self) {
+        // SAFETY: we're just a wrapper around a platform-specific Slice
+        unsafe { self.inner.clone_to_uninit(addr_of_mut!((*dst).inner)) }
     }
 }
 

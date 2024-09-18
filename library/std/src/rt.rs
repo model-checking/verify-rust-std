@@ -16,9 +16,11 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(unused_macros)]
 
+#[rustfmt::skip]
 pub use crate::panicking::{begin_panic, panic_count};
 pub use core::panicking::{panic_display, panic_fmt};
 
+#[rustfmt::skip]
 use crate::sync::Once;
 use crate::sys;
 use crate::thread::{self, Thread};
@@ -144,7 +146,7 @@ fn lang_start_internal(
             rtabort!("drop of the panic payload panicked");
         });
     panic::catch_unwind(cleanup).map_err(rt_abort)?;
-    // Guard against multple threads calling `libc::exit` concurrently.
+    // Guard against multiple threads calling `libc::exit` concurrently.
     // See the documentation for `unique_thread_exit` for more information.
     panic::catch_unwind(|| crate::sys::exit_guard::unique_thread_exit()).map_err(rt_abort)?;
     ret_code

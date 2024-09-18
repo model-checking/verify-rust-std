@@ -1,11 +1,15 @@
 //! Character conversions.
 
+use safety::{requires, ensures};
 use crate::char::TryFromCharError;
 use crate::error::Error;
 use crate::fmt;
 use crate::mem::transmute;
 use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;
+
+#[cfg(kani)]
+use crate::kani;
 
 /// Converts a `u32` to a `char`. See [`char::from_u32`].
 #[must_use]
@@ -21,6 +25,8 @@ pub(super) const fn from_u32(i: u32) -> Option<char> {
 /// Converts a `u32` to a `char`, ignoring validity. See [`char::from_u32_unchecked`].
 #[inline]
 #[must_use]
+#[requires(char_try_from_u32(i).is_ok())]
+#[ensures(|result| *result as u32 == i)]
 pub(super) const unsafe fn from_u32_unchecked(i: u32) -> char {
     // SAFETY: the caller must guarantee that `i` is a valid char value.
     unsafe {
@@ -288,5 +294,17 @@ pub(super) const fn from_digit(num: u32, radix: u32) -> Option<char> {
         if num < 10 { Some((b'0' + num) as char) } else { Some((b'a' + num - 10) as char) }
     } else {
         None
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof_for_contract(from_u32_unchecked)]
+    fn check_from_u32_unchecked() {
+        let i: u32 = kani::any();
+        unsafe { from_u32_unchecked(i) };
     }
 }

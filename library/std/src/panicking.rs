@@ -9,26 +9,23 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use crate::panic::{BacktraceStyle, PanicHookInfo};
 use core::panic::{Location, PanicPayload};
 
-use crate::any::Any;
-use crate::fmt;
-use crate::intrinsics;
-use crate::mem::{self, ManuallyDrop};
-use crate::process;
-use crate::sync::atomic::{AtomicBool, Ordering};
-use crate::sync::{PoisonError, RwLock};
-use crate::sys::backtrace;
-use crate::sys::stdio::panic_output;
-use crate::thread;
-
-#[cfg(not(test))]
-use crate::io::try_set_output_capture;
 // make sure to use the stderr output configured
 // by libtest in the real copy of std
 #[cfg(test)]
 use realstd::io::try_set_output_capture;
+
+use crate::any::Any;
+#[cfg(not(test))]
+use crate::io::try_set_output_capture;
+use crate::mem::{self, ManuallyDrop};
+use crate::panic::{BacktraceStyle, PanicHookInfo};
+use crate::sync::atomic::{AtomicBool, Ordering};
+use crate::sync::{PoisonError, RwLock};
+use crate::sys::backtrace;
+use crate::sys::stdio::panic_output;
+use crate::{fmt, intrinsics, process, thread};
 
 // Binary interface to the panic runtime that the standard library depends on.
 //
@@ -234,6 +231,7 @@ where
 }
 
 /// The default panic handler.
+#[optimize(size)]
 fn default_hook(info: &PanicHookInfo<'_>) {
     // If this is a double panic, make sure that we print a backtrace
     // for this panic. Otherwise only print it if logging is enabled.
@@ -252,7 +250,8 @@ fn default_hook(info: &PanicHookInfo<'_>) {
     let thread = thread::try_current();
     let name = thread.as_ref().and_then(|t| t.name()).unwrap_or("<unnamed>");
 
-    let write = |err: &mut dyn crate::io::Write| {
+    let write = #[optimize(size)]
+    |err: &mut dyn crate::io::Write| {
         // Use a lock to prevent mixed output in multithreading context.
         // Some platforms also require it when printing a backtrace, like `SymFromAddr` on Windows.
         let mut lock = backtrace::lock();
@@ -278,7 +277,7 @@ fn default_hook(info: &PanicHookInfo<'_>) {
                     if cfg!(miri) {
                         let _ = writeln!(
                             err,
-                            "note: in Miri, you may have to set `-Zmiri-env-forward=RUST_BACKTRACE` \
+                            "note: in Miri, you may have to set `MIRIFLAGS=-Zmiri-env-forward=RUST_BACKTRACE` \
                                 for the environment variable to have an effect"
                         );
                     }
@@ -530,6 +529,7 @@ pub unsafe fn r#try<R, F: FnOnce() -> R>(f: F) -> Result<R, Box<dyn Any + Send>>
     // optimizer (in most cases this function is not inlined even as a normal,
     // non-cold function, though, as of the writing of this comment).
     #[cold]
+    #[optimize(size)]
     unsafe fn cleanup(payload: *mut u8) -> Box<dyn Any + Send + 'static> {
         // SAFETY: The whole unsafe block hinges on a correct implementation of
         // the panic handler `__rust_panic_cleanup`. As such we can only
@@ -689,7 +689,7 @@ pub fn begin_panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
 // lang item for CTFE panic support
 // never inline unless panic_immediate_abort to avoid code
 // bloat at the call sites as much as possible
-#[cfg_attr(not(feature = "panic_immediate_abort"), inline(never), cold)]
+#[cfg_attr(not(feature = "panic_immediate_abort"), inline(never), cold, optimize(size))]
 #[cfg_attr(feature = "panic_immediate_abort", inline)]
 #[track_caller]
 #[rustc_do_not_const_check] // hooked by const-eval
@@ -759,6 +759,7 @@ fn payload_as_str(payload: &dyn Any) -> &str {
 /// Executes the primary logic for a panic, including checking for recursive
 /// panics, panic hooks, and finally dispatching to the panic runtime to either
 /// abort or unwind.
+#[optimize(size)]
 fn rust_panic_with_hook(
     payload: &mut dyn PanicPayload,
     location: &Location<'_>,
