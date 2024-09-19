@@ -226,5 +226,6 @@ mod predicates {
 /// Therefore, validity invariants must be upheld at all times, while safety
 /// invariants only need to be upheld at the boundaries to safe code.
 pub trait Invariant {
+    /// Specify the type's safety invariants 
     fn is_safe(&self) -> bool;
 }
