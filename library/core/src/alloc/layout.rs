@@ -4,7 +4,7 @@
 // collections, resulting in having to optimize down excess IR multiple times.
 // Your performance intuition is useless. Run perf.
 
-use safety::{invariant, requires};
+use safety::{ensures, invariant, requires};
 use crate::error::Error;
 use crate::ptr::{Alignment, NonNull};
 use crate::{assert_unsafe_precondition, cmp, fmt, mem};
@@ -132,6 +132,7 @@ impl Layout {
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
     #[requires(Layout::from_size_align(size, align).is_ok())]
+    #[ensures(|layout| layout.is_safe())]
     pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -533,7 +534,6 @@ mod verify {
             let layout = Layout::from_size_align_unchecked(s, a);
             assert_eq!(layout.size(), s);
             assert_eq!(layout.align(), a);
-            assert!(layout.is_safe());
         }
     }
 }
