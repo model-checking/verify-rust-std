@@ -3,9 +3,8 @@
 
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
-use syn::{Fields, ItemStruct, parse_macro_input};
-use syn::spanned::Spanned;
-use quote::{quote, quote_spanned};
+use syn::{ItemStruct, parse_macro_input};
+use quote::quote;
 
 #[cfg(kani_host)]
 #[path = "kani.rs"]
@@ -20,7 +19,7 @@ mod tool;
 pub fn invariant(attr: TokenStream, item: TokenStream) -> TokenStream {
     let safe_body = proc_macro2::TokenStream::from(attr);
     let item = parse_macro_input!(item as ItemStruct);
-    let mut item_name = &item.ident;
+    let item_name = &item.ident;
     let (impl_generics, ty_generics, where_clause) = item.generics.split_for_impl();
 
     let expanded = quote! {

@@ -1,10 +1,13 @@
 use safety::{ensures, invariant, requires};
 use crate::num::NonZero;
-use crate::ub_checks::{assert_unsafe_precondition, Invariant};
+use crate::ub_checks::assert_unsafe_precondition;
 use crate::{cmp, fmt, hash, mem, num};
 
 #[cfg(kani)]
 use crate::kani;
+
+#[cfg(kani)]
+use crate::ub_checks::Invariant;
 
 /// A type storing a `usize` which is a power of two, and thus
 /// represents a possible alignment in the Rust abstract machine.

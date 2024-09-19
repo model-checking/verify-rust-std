@@ -8,10 +8,12 @@ use safety::{invariant, requires};
 use crate::error::Error;
 use crate::ptr::{Alignment, NonNull};
 use crate::{assert_unsafe_precondition, cmp, fmt, mem};
-use crate::ub_checks::Invariant;
 
 #[cfg(kani)]
 use crate::kani;
+
+#[cfg(kani)]
+use crate::ub_checks::Invariant;
 
 // While this function is used in one place and its implementation
 // could be inlined, the previous attempts to do so made rustc
