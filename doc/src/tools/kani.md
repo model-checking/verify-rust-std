@@ -59,7 +59,7 @@ Create a local copy of the model-checking fork of the Rust Standard Library. The
 building-block APIs (such as
 `assert`, `assume`, `proof` and [function-contracts](https://github.com/model-checking/kani/blob/main/rfc/src/rfcs/0009-function-contracts.md) such as `modifies`, `requires` and `ensures`) directly.
 
-For example, insert this module into an existing file like `library/core/src/lib.rs` in your copy of the library.
+For example, insert this module into an existing file in the core library, like `library/core/src/hint.rs` or `library/core/src/error.rs` in your copy of the library. This is just for the purpose of getting started, so you can insert in any existing file in the core library if you have other preferences.
 
 ``` rust
 #[cfg(kani)]
@@ -87,10 +87,10 @@ pub mod verify {
 ### Step 2 - Run the Kani verify-std subcommand
 
 To aid the Rust Standard Library verification effort, Kani provides a sub-command out of the box to help you get started.
-Run the following command in your local terminal (Replace "path/to/library" and "path/to/target" with your local paths):
+Run the following command in your local terminal (Replace "/path/to/library" and "/path/to/target" with your local paths) from the verify repository root:
 
 ```
-kani verify-std -Z unstable-options "path/to/library" --target-dir "/path/to/target" -Z function-contracts -Z mem-predicates
+kani verify-std -Z unstable-options "/path/to/library" --target-dir "/path/to/target" -Z function-contracts -Z mem-predicates
 ```
 
 The command `kani verify-std` is a sub-command of the `kani`. This specific sub-command is used to verify the Rust Standard Library with the following arguments.
