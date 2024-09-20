@@ -51,10 +51,9 @@ For a more detailed tutorial, you can refer to the [tutorial section of the Kani
 
 ## Using Kani to verify the Rust Standard Library
 
-To aid the Rust Standard Library verification effort, Kani provides a sub-command out of the box to help you get started.
 Here is a short tutorial to get started with using Kani to verify some proofs that you write for the standard library.
 
-### Step 1
+### Step 1 - Add some proofs to your copy of the model-checking std
 
 Create a local copy of the model-checking fork of the Rust Standard Library. The fork comes with Kani initiated, so all you'll need to do is to call Kani's
 building-block APIs (such as
@@ -85,8 +84,9 @@ pub mod verify {
 }
 ```
 
-### Step 2
+### Step 2 - Run the Kani verify-std subcommand
 
+To aid the Rust Standard Library verification effort, Kani provides a sub-command out of the box to help you get started.
 Run the following command in your local terminal (Replace "path/to/library" and "path/to/target" with your local paths):
 
 ```
@@ -101,7 +101,7 @@ The command `kani verify-std` is a sub-command of the `kani`. This specific sub-
 Apart from these, you can use your regular `kani-args` such as `-Z function-contracts` and `-Z stubbing` depending on your verification needs.
 For more details on Kani's features, refer to [the features section in the Kani Book](https://model-checking.github.io/kani/reference/attributes.html)
 
-### Step 3
+### Step 3 - Check verification result
 
 After running the command, you can expect an output that looks like this:
 
