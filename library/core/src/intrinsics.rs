@@ -3323,7 +3323,7 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(_ptr: *cons
   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
   && ub_checks::is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
-#[ensures(|_| { check_copy_untyped(src, dst, count)}) ]
+#[ensures(|_| { check_copy_untyped(src, dst, count)})]
 #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
@@ -3427,7 +3427,6 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy"]
-// FIXME(kani): How to verify safety for types that do not implement Copy and count > 1??
 #[requires(!count.overflowing_mul(size_of::<T>()).1
   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
@@ -3543,10 +3542,14 @@ pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     }
 }
 
-// Ensures the initialization state is preserved.
-// This is used for contracts only.
+/// Return whether the initialization state is preserved.
+///
+/// This is used for contracts only.
+/// FIXME: Change this once we add support to quantifiers.
 #[allow(dead_code)]
+#[allow(unused_variables)]
 fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
+    #[cfg(kani)]
     if count > 0 {
         let byte = kani::any_where(| sz: &usize | *sz < size_of::< T >());
         let elem = kani::any_where(| val: &usize | *val < count);
@@ -3557,6 +3560,8 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
     } else {
         true
     }
+    #[cfg(not(kani))]
+    false
 }
 
 /// Inform Miri that a given pointer definitely has a certain alignment.
@@ -3706,7 +3711,7 @@ mod verify {
         let mut generator = PointerGenerator::<char, 10>::new();
         let src = generator.generate_ptr();
         let dst = if kani::any() {
-            generator.generate_ptr();
+            generator.generate_ptr()
         } else {
             PointerGenerator::<char, 10>::new().generate_ptr()
         };
@@ -3720,9 +3725,9 @@ mod verify {
     fn check_copy_nonoverlapping() {
         let mut generator = PointerGenerator::<char, 10>::new();
         let src = generator.generate_ptr();
-        // Destination may or may not have the same precedence as src.
+        // Destination may or may not have the same provenance as src.
         let dst = if kani::any() {
-            generator.generate_ptr();
+            generator.generate_ptr()
         } else {
             PointerGenerator::<char, 10>::new().generate_ptr()
         };

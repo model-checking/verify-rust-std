@@ -164,9 +164,10 @@ pub(crate) const fn is_nonoverlapping(
 
 pub use predicates::*;
 
-pub trait MetadataPredicates<T> where T: ?Sized {
+/// Trait that allow us to inspect metadata independently on the type `T`.
+pub trait MetadataExt<T, M> where T: core::ptr::Pointee<Metadata=M> + ?Sized {
     /// If the metadata is the length of a slice or str, run the map function.
-    fn map_len<U, F>(metadata: *const Self, map: F) -> Option<U>
+    unsafe fn map_len<U, F>(ptr: *const T, map: F) -> Option<U>
     where
         F: Fn(*const usize) -> U;
 
@@ -176,9 +177,10 @@ pub trait MetadataPredicates<T> where T: ?Sized {
         F: Fn(*const crate::ptr::DynMetadata<T>) -> U;
 }
 
-impl<T> MetadataPredicates<T> for () {
+/// Sized types will have a metadata of type `()`.
+impl<T> MetadataExt<T> for () {
     /// Return None.
-    fn map_len<U, F>(_metadata: *const Self, _map: F) -> Option<U>
+    fn map_len<U, F>(&self, map: F) -> Option<U>
     where
         F: Fn(*const usize) -> U,
     {
@@ -186,7 +188,7 @@ impl<T> MetadataPredicates<T> for () {
     }
 
     /// Return None.
-    fn map_dyn<U, F>(_metadata: *const Self, _map: F) -> Option<U>
+    fn map_dyn<U, F>(&self, map: F) -> Option<U>
     where
         F: Fn(*const crate::ptr::DynMetadata<T>) -> U,
     {
@@ -194,43 +196,43 @@ impl<T> MetadataPredicates<T> for () {
     }
 }
 
-impl<T> MetadataPredicates<T> for usize
-where
-    T: ?Sized
+/// Slices and string slices will have metadata of type `usize`.
+impl<T> MetadataExt<T> for usize
 {
     /// Return the result of the map function.
-    fn map_len<U, F>(metadata: *const Self, map: F) -> Option<U>
+    fn map_len<U, F>(&self, map: F) -> Option<U>
     where
-        F: Fn(*const usize) -> U,
+        F: Fn(usize) -> U,
     {
         Some(map(metadata))
     }
 
     /// This is not a DynMetadata. Return `None`.
-    fn map_dyn<U, F>(_metadata: *const Self, _map: F) -> Option<U>
+    fn map_dyn<U, F>(&self, map: F) -> Option<U>
     where
-        F: Fn(*const crate::ptr::DynMetadata<T>) -> U
+        F: Fn(crate::ptr::DynMetadata<T>) -> U,
     {
         None
     }
 }
 
-impl<T> MetadataPredicates<T> for crate::ptr::DynMetadata<T>
+#[cfg(kani)]
+impl<T> MetadataExt<T> for crate::ptr::DynMetadata<T>
 where
     T: ?Sized
 {
     /// Not a length. Return None.
-    fn map_len<U, F>(_metadata: *const Self, _map: F) -> Option<U>
+    fn map_len<U, F>(&self, map: F) -> Option<U>
     where
-        F: Fn(*const usize) -> U,
+        F: Fn(usize) -> U,
     {
         None
     }
 
     /// Return the result of the map function.
-    fn map_dyn<U, F>(metadata: *const Self, map: F) -> Option<U>
+    fn map_dyn<U, F>(&self, map: F) -> Option<U>
     where
-        F: Fn(*const crate::ptr::DynMetadata<T>) -> U,
+        F: Fn(crate::ptr::DynMetadata<T>) -> U,
     {
         Some(map(metadata))
     }
