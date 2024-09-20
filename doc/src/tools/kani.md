@@ -51,7 +51,7 @@ For a more detailed tutorial, you can refer to the [tutorial section of the Kani
 
 ## Using Kani to verify the Rust Standard Library
 
-Here is a short tutorial to get started with using Kani to verify some proofs that you write for the standard library.
+Here is a short tutorial of how to use Kani to verify proofs for the standard library.
 
 ### Step 1 - Add some proofs to your copy of the model-checking std
 
@@ -124,7 +124,7 @@ For example, in your local copy of the verify repo, run the following command.
 kani verify-std --harness harness_introduction -Z unstable-options "./library" --target-dir "/tmp" -Z function-contracts -Z mem-predicates
 ```
 
-This gives you the verification result for just `harness_introduction` from the afore-mentioned blob.
+This gives you the verification result for just `harness_introduction` from the aforementioned blob.
 
 ```
 RESULTS:
