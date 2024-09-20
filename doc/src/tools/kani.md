@@ -57,7 +57,7 @@ Here is a short tutorial to get started with using Kani to verify some proofs th
 
 Create a local copy of the model-checking fork of the Rust Standard Library. The fork comes with Kani initiated, so all you'll need to do is to call Kani's
 building-block APIs (such as
-`assert`, `assume`, `proof` and [function-contracts](https://github.com/model-checking/kani/blob/main/rfc/src/rfcs/0009-function-contracts.md) such as `proof_for_contract` and `fake_function`) directly.
+`assert`, `assume`, `proof` and [function-contracts](https://github.com/model-checking/kani/blob/main/rfc/src/rfcs/0009-function-contracts.md) such as `modifies`, `requires` and `ensures`) directly.
 
 For example, insert this module into an existing file like `library/core/src/lib.rs` in your copy of the library.
 
@@ -117,7 +117,7 @@ Complete - 2 successfully verified harnesses, 0 failures, 2 total.
 
 ### Running on a specific harness
 
-You can specify a specific harness to be verified using the --harness flag.
+You can specify a specific harness to be verified using the `--harness` flag.
 
 For example, in your local copy of the verify repo, run the following command.
 ```
