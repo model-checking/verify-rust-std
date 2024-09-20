@@ -5,7 +5,6 @@ use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
 use crate::ptr::Unique;
-use crate::ptr::null_mut;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
@@ -1785,6 +1784,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 #[unstable(feature="kani", issue="none")]
 mod verify {
     use super::*;
+    use crate::ptr::null_mut;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
