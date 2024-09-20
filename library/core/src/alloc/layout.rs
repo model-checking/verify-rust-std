@@ -12,7 +12,8 @@ use crate::{assert_unsafe_precondition, cmp, fmt, mem};
 #[cfg(kani)]
 use crate::kani;
 
-#[cfg(kani)]
+// Used only for contract verification.
+#[allow(unused_imports)]
 use crate::ub_checks::Invariant;
 
 // While this function is used in one place and its implementation
