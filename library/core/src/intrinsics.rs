@@ -3616,152 +3616,129 @@ mod verify {
         assert_eq!(x, old_y);
     }
 
-    /// Note that in `core` we cannot check allocated pointers.
     #[derive(Copy, Clone, Debug, PartialEq, Eq, kani::Arbitrary)]
-    enum PtrKind {
+    enum AllocationStatus {
         /// Dangling pointers
         Dangling,
+        /// Pointer to dead object
+        DeadObj,
         /// Null pointers
         Null,
-        /// Stack pointers
-        Stack,
-        /// Overlapping pointers
-        Overlap,
-        /// Unaligned pointers
-        Unaligned,
-        /// Pointer to uninitialized memory
-        Uninitialized,
+        /// In bounds pointer (it may be unaligned)
+        InBounds,
+        /// Out of bounds
+        OutBounds,
     }
 
-    struct ArbitraryPointers<T> {
-        src: *const T,
-        dst: *mut T,
-        dst_kind: PtrKind,
-        src_kind: PtrKind,
+    struct PointerGenerator<T, const BUF_LEN: usize> {
+        // Internal allocation that may be used to generate valid pointers.
+        buf: MaybeUninit<[T; BUF_LEN]>,
     }
 
-    impl<T: kani::Arbitrary> ArbitraryPointers<T> {
-        const MAX_SIZE_T: usize = 100;
-        const SIZE_T: usize = size_of::<T>();
+    struct ArbitraryPointer<T> {
+        pub ptr: *mut T,
+        pub status: AllocationStatus,
+        pub is_initialized: bool,
+    }
 
-        const IS_VALID: () = assert!(Self::SIZE_T < Self::MAX_SIZE_T, "Exceeded supported type size");
+    impl<T: kani::Arbitrary, const BUF_LEN: usize> PointerGenerator<T, BUF_LEN> {
+        const SZ : usize = BUF_LEN * size_of::<T>();
 
-        fn with_arbitrary<F>(harness: F) where F: FnOnce(ArbitraryPointers<T>) {
-
-            #[repr(C)]
-            struct WithUninit<const SIZE: usize> {
-                bytes: [MaybeUninit<u8>; SIZE],
-            }
-
-            #[repr(C)]
-            #[repr(packed)]
-            #[derive(kani::Arbitrary)]
-            struct Unaligned<T> {
-                first: u8,
-                val: T, // If alignment of T > 1, this value will be unaligned but valid otherwise.
-            }
-
-            let mut single = kani::any::<T>();
-            let single_ptr = addr_of_mut!(single);
-
-            let mut array: [T; 100] = kani::any();
-            let array_ptr = addr_of_mut!(array) as *mut T;
-
-            let mut unaligned: Unaligned<T> = kani::any();
-            let unaligned_ptr = addr_of_mut!(unaligned.val) as *mut T;
-
-            let mut uninit = WithUninit { bytes: [MaybeUninit::zeroed(); Self::MAX_SIZE_T] };
-            for i in 0..Self::SIZE_T {
-                if kani::any() {
-                    uninit.bytes[i] = MaybeUninit::uninit();
-                }
-            }
-            let uninit_ptr = &mut uninit as *mut _ as *mut T;
-
-            let arbitrary = ArbitraryPointers::from(single_ptr, array_ptr, unaligned_ptr, uninit_ptr);
-            harness(arbitrary);
-        }
-
-        fn from(ptr1: *mut T, ptr2: *mut T, unaligned: *mut T, uninit: *mut T) -> Self {
-            let (src_kind, src) = ArbitraryPointers::any(ptr1, ptr2, unaligned, uninit);
-            let (dst_kind, dst) = ArbitraryPointers::any(ptr2, ptr1, unaligned, uninit);
-            ArbitraryPointers {
-                src_kind,
-                src,
-                dst_kind,
-                dst,
+        pub fn new() -> Self {
+            PointerGenerator {
+                buf: MaybeUninit::uninit()
             }
         }
 
-        fn any(unique: *mut T, overlap: *mut T, unaligned: *mut T, uninit: *mut T) -> (PtrKind, *mut T) {
-            let kind = kani::any::<PtrKind>();
-            let ptr = match kind {
-                PtrKind::Dangling =>  {
-                    crate::ptr::dangling_mut::<T>()
+        /// Create another ArbitraryPointer that may have the same precedence as the `other` pointer.
+        ///
+        /// I.e.: Non-deterministically derive a pointer from the given pointer or create a new
+        /// arbitrary pointer.
+        pub fn generate_ptr(&mut self) -> ArbitraryPointer<T> {
+            // Create an arbitrary pointer, but leave `ptr` as unset for now.
+            let mut arbitrary = ArbitraryPointer {
+                ptr: ptr::null_mut::<T>(),
+                is_initialized: false,
+                status: kani::any(),
+            };
+
+            let buf_ptr = addr_of_mut!(self.buf) as *mut T;
+
+            // Offset is used to potentially generate unaligned pointer.
+            let offset = kani::any_where(|b: &usize| *b < size_of::<T>());
+            let ptr = match arbitrary.status {
+                AllocationStatus::Dangling => {
+                    crate::ptr::dangling_mut::<T>().wrapping_add(offset)
                 }
-                PtrKind::Null => {
+                AllocationStatus::DeadObj => {
+                    let mut obj: T = kani::any();
+                    &mut obj as *mut _
+                }
+                AllocationStatus::Null => {
                     crate::ptr::null_mut::<T>()
                 }
-                PtrKind::Stack => {
-                    unique
+                AllocationStatus::InBounds => {
+                    let pos = kani::any_where(|i: &usize| *i < (BUF_LEN - 1));
+                    let ptr: *mut T = buf_ptr.wrapping_add(pos).wrapping_byte_add(offset);
+                    if kani::any() {
+                        arbitrary.is_initialized = true;
+                        // This should be in bounds of arbitrary.alloc.
+                        unsafe { ptr.write_unaligned(kani::any()) };
+                    }
+                    ptr
                 }
-                PtrKind::Overlap => {
-                    if kani::any() { unique } else { overlap }
-                }
-                PtrKind::Unaligned => {
-                    unaligned
-                }
-                PtrKind::Uninitialized => {
-                    uninit
+                AllocationStatus::OutBounds => {
+                    if kani::any() {
+                        buf_ptr.wrapping_add(BUF_LEN).wrapping_byte_sub(offset)
+                    } else {
+                        buf_ptr.wrapping_add(BUF_LEN).wrapping_byte_add(offset)
+                    }
                 }
             };
-            (kind, ptr)
+
+            arbitrary
         }
     }
+
 
     #[kani::proof_for_contract(copy)]
     fn check_copy() {
-        ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
-            // Skip dangling for now since it makes Kani contract panic.
-            // Verify this case in a separate harness.
-            kani::assume(arbitrary.dst_kind != PtrKind::Dangling);
-            kani::assume(arbitrary.src_kind != PtrKind::Dangling);
-            unsafe { copy(arbitrary.src, arbitrary.dst, kani::any()) }
-        });
-    }
-
-    /// This harness fails because Kani cannot assume a pointer is valid.
-    ///
-    /// The specification should ensure the pointers passed are allocated, and this harness should
-    /// succeed since `copy` ensures would reject dangling pointers.
-    #[cfg(ignore)]
-    #[kani::proof_for_contract(copy)]
-    fn check_copy_dangling() {
-        ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
-            // Verify the dangling case.
-            kani::assume(arbitrary.dst_kind == PtrKind::Dangling || arbitrary.src_kind == PtrKind::Dangling);
-            unsafe { copy(arbitrary.src, arbitrary.dst, kani::any()) }
-        });
+        let mut generator = PointerGenerator::<char, 10>::new();
+        let src = generator.generate_ptr();
+        let dst = if kani::any() {
+            generator.generate_ptr();
+        } else {
+            PointerGenerator::<char, 10>::new().generate_ptr()
+        };
+        // Skip dangling for now since it makes Kani contract panic.
+        kani::assume(src.status != AllocationStatus::Dangling);
+        kani::assume(dst.status != AllocationStatus::Dangling);
+        unsafe { copy(src.ptr, dst.ptr, kani::any()) }
     }
 
     #[kani::proof_for_contract(copy_nonoverlapping)]
     fn check_copy_nonoverlapping() {
-        ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
-            // Skip dangling for now since it makes Kani contract panic.
-            // Verify this case in a separate harness.
-            kani::assume(arbitrary.dst_kind != PtrKind::Dangling);
-            kani::assume(arbitrary.src_kind != PtrKind::Dangling);
-            unsafe { copy_nonoverlapping(arbitrary.src, arbitrary.dst, kani::any()) }
-        });
+        let mut generator = PointerGenerator::<char, 10>::new();
+        let src = generator.generate_ptr();
+        // Destination may or may not have the same precedence as src.
+        let dst = if kani::any() {
+            generator.generate_ptr();
+        } else {
+            PointerGenerator::<char, 10>::new().generate_ptr()
+        };
+        // Skip dangling for now since it makes Kani contract panic.
+        kani::assume(src.status != AllocationStatus::Dangling);
+        kani::assume(dst.status != AllocationStatus::Dangling);
+        unsafe { copy_nonoverlapping(src.ptr, dst.ptr, kani::any()) }
     }
 
     #[kani::proof_for_contract(write_bytes)]
     fn check_write_bytes() {
-        ArbitraryPointers::<u32>::with_arbitrary(|arbitrary| {
-            // Skip dangling for now since it makes Kani contract panic.
-            // Verify this case in a separate harness.
-            kani::assume(arbitrary.dst_kind != PtrKind::Dangling);
-            unsafe { write_bytes(arbitrary.dst, kani::any(), kani::any()) }
-        });
+        let mut generator = PointerGenerator::<char, 10>::new();
+        let src = generator.generate_ptr();
+        kani::assume(src.status != AllocationStatus::Dangling);
+        // Skip dangling for now since it makes Kani contract panic.
+        // Verify this case in a separate harness.
+        unsafe { write_bytes(src.ptr, kani::any(), kani::any()) }
     }
 }
