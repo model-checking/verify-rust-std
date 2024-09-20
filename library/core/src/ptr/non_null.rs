@@ -1,4 +1,3 @@
-use super::*;
 use crate::cmp::Ordering;
 use crate::marker::Unsize;
 use crate::mem::{MaybeUninit, SizedTypeProperties};
@@ -6,10 +5,12 @@ use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
 use crate::ptr::Unique;
+use crate::ptr::null_mut;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
+
 
 #[cfg(kani)]
 use crate::kani;
@@ -1780,14 +1781,15 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
     }
 }
 
-//#[unstable(feature="kani", issue="none")]
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
 mod verify {
     use super::*;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
     pub fn non_null_check_new_unchecked() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
         unsafe {
             let _ = NonNull::new_unchecked(xptr as *mut i32);
@@ -1797,12 +1799,9 @@ mod verify {
     // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
     #[kani::proof_for_contract(NonNull::new)]
     pub fn non_null_check_new() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
-        unsafe {
-            let nonnull_ptr = NonNull::new(xptr as *mut i32);
-            let null_ptr = NonNull::<u32>::new(null_mut());
-            assert!(null_ptr.is_none());
-        }
+        let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
+        let _ = NonNull::new(maybe_null_ptr);
     }
 }
