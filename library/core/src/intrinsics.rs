@@ -3720,7 +3720,7 @@ mod verify {
     fn check_copy_nonoverlapping() {
         let mut generator = PointerGenerator::<char, 10>::new();
         let src = generator.generate_ptr();
-        // Destination may or may not have the same precedence as src.
+        // Destination may or may not have the same provenance as src.
         let dst = if kani::any() {
             generator.generate_ptr();
         } else {
