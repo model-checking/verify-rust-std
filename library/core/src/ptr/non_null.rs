@@ -631,6 +631,11 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_allow_const_fn_unstable(unchecked_neg)]
+    #[kani::requires(!self.as_ptr().is_null())]
+    #[kani::requires(count <= isize::MAX as usize)] // Ensure count fits within isize range
+    #[kani::requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
+    #[kani::requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)]
+    #[kani::ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -1784,7 +1789,6 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
 
-    // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
     pub fn non_null_check_new_unchecked() {
         let mut x : i32 = kani::any();
@@ -1794,7 +1798,6 @@ mod verify {
         }
     }
 
-    // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
     #[kani::proof_for_contract(NonNull::new)]
     pub fn non_null_check_new() {
         let mut x : i32 = kani::any();
@@ -1805,4 +1808,30 @@ mod verify {
             assert!(null_ptr.is_none());
         }
     }
+
+    #[kani::proof_for_contract(NonNull::sub)]
+    pub fn non_null_check_sub() {
+        const SIZE: usize = 10;
+        kani::assume(SIZE > 0);
+        
+        let arr: [i32; SIZE] = kani::any();  // Create a non-deterministic array of size SIZE
+        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  // Get a raw pointer to the array
+        
+        // Point to the last element of the array
+        let last_ptr = unsafe { NonNull::new(raw_ptr.add(SIZE - 1)).unwrap() };  // Pointer to the last element
+        
+        let count: usize = kani::any();  // Create a non-deterministic count value
+ 
+        // Ensure that the subtraction does not go out of the bounds of the array
+        kani::assume(count < SIZE);  // Ensure count is less than SIZE to stay within bounds
+
+        unsafe {
+            // Perform the pointer subtraction from the last element
+            let result = last_ptr.sub(count);
+        }
+    }
+
+
+    
+    
 }
