@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
-use quote::{quote, format_ident};
-use syn::{ItemFn, parse_macro_input};
+use quote::{format_ident, quote};
+use syn::{parse_macro_input, ItemFn};
 
 pub(crate) fn requires(attr: TokenStream, item: TokenStream) -> TokenStream {
     rewrite_attr(attr, item, "requires")
@@ -17,5 +17,6 @@ fn rewrite_attr(attr: TokenStream, item: TokenStream, name: &str) -> TokenStream
     quote!(
         #[kani_core::#attribute(#args)]
         #fn_item
-    ).into()
+    )
+    .into()
 }
