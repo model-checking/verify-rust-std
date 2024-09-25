@@ -24,17 +24,18 @@ mod tool;
 /// # Example
 ///
 /// ```ignore
-/// #[invariant(width == height)]
+/// #[invariant(self.width == self.height)]
 /// struct Square {
 ///     width: u32,
 ///     height: u32,
 /// }
 /// ```
+/// 
 /// expands to:
 /// ```ignore
 /// impl core::ub_checks::Invariant for Square {
 ///   fn is_safe(&self) -> bool {
-///     width == height
+///     self.width == self.height
 ///   }
 /// }
 /// ```
@@ -60,7 +61,6 @@ pub fn invariant(attr: TokenStream, item: TokenStream) -> TokenStream {
     proc_macro::TokenStream::from(expanded)
 }
 
-///
 /// Expands the derive macro for the Invariant trait.
 /// The macro expands to an implementation of the `is_safe` method for the `Invariant` trait.
 /// This macro is only supported for structs.
@@ -74,6 +74,7 @@ pub fn invariant(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     height: u32,
 /// }
 /// ```
+/// 
 /// expands to:
 /// ```ignore
 /// impl core::ub_checks::Invariant for Square {
