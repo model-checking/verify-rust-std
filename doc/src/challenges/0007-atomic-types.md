@@ -9,19 +9,16 @@
 
 ## Goal
 
-(Throughout this challenge, when we say "safe", it is identical to saying "does not exhibit undefined behavior").
-
 `core::sync::atomic` provides methods that operate on atomic types.
-For example, `atomic_store(dst: *mut T, val: T, order: Ordering)` stores `val` at the memory location pointed to by `dst` according to the specified [atomic memory ordering](https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html).
-Rust developers can use these methods to ensure that their concurrent code is thread-safe.
+For example, `AtomicBool::store(&self, val: bool, order: Ordering)` stores `val` in the atomic boolean referenced by `self` according to the specified [atomic memory ordering](https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html).
 
-The goal of this challenge is to verify that these methods (and the intrinsincs they invoke) are safe.
+The goal of this challenge is to verify that these methods are safe.[^1]
 
 ### Success Criteria
 
-#### Part 1: `from_ptr` Method for Atomic Types
+#### Part 1: Unsafe Methods
 
-First, verify that the unsafe `from_ptr` methods are safe.
+First, verify that the unsafe `from_ptr` methods are safe, given that their safety preconditions are met.
 
 Write safety contracts for each of the `from_ptr` methods:
 
@@ -38,7 +35,7 @@ Write safety contracts for each of the `from_ptr` methods:
 - `AtomicI128::from_ptr`
 - `AtomicU128::from_ptr`
 
-Specifically, encode the conditions about `ptr`'s alignment and validity (marked `#Safety` in the comments above the methods) as preconditions.
+Specifically, encode the conditions about `ptr`'s alignment and validity (marked `#Safety` in the methods' documentation) as preconditions.
 Then, verify that the methods are safe for all possible values for the type that `ptr` points to, given that `ptr` satisfies those preconditions.
 
 For example, `AtomicI8::from_ptr` is defined as:
@@ -52,7 +49,7 @@ pub const unsafe fn from_ptr<'a>(ptr: *mut i8) -> &'a AtomicI8 {
 
 To verify this method, first encode the safety comments (e.g., about pointer validity) as preconditions, then verify the absence of undefined behavior for all possible `i8` values.
 
-For the `AtomicPtr` case only, we do not require that you verify safety for all possible values for the type pointed to.
+For the `AtomicPtr` case only, we do not require that you verify safety for all possible types.
 Concretely, below is the type signature for `AtomicPtr::from_ptr`:
 
 ```rust
@@ -89,9 +86,14 @@ Write and verify safety contracts for the unsafe functions:
 - `atomic_umax`
 - `atomic_umin`
 
-Also write contracts enforcing that the functions are not invoked with `order`s that would cause them to panic.
+#### Part 3: Safe Abstractions
 
-#### Part 3: Atomic Intrinsics
+For each of the safe methods that invoke an unsafe function from Part 2, write contracts that ensure that they are not invoked with `order`s that would cause panics.
+
+For example, `atomic_store` panics if invoked with `Acquire` or `AcqRel` ordering.
+In this case, you would write contracts on the safe `store` methods that enforce that they are not called with either of those `order`s.
+
+#### Part 4: Atomic Intrinsics
 
 Write and verify safety contracts for the intrinsics invoked by the unsafe functions from Part 2 (in `core::intrinsics`):
 
@@ -115,7 +117,7 @@ Write and verify safety contracts for the intrinsics invoked by the unsafe funct
 
 ## List of UBs
 
-In addition to any properties called out as SAFETY comments in the source code, all proofs must automatically ensure the absence of the following [undefined behaviors](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
+In addition to any safety properties mentioned in the API documentation, all proofs must automatically ensure the absence of the following [undefined behaviors](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
 
 * Data races.
 * Accessing (loading from or storing to) a place that is dangling or based on a misaligned pointer.
@@ -124,3 +126,5 @@ In addition to any properties called out as SAFETY comments in the source code, 
 * Producing an invalid value.
 
 Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](../general-rules.md) in addition to the ones listed above.
+
+[^1]: Throughout this challenge, when we say "safe", it is identical to saying "does not exhibit undefined behavior".
