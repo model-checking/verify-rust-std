@@ -229,3 +229,41 @@ pub trait Invariant {
     /// Specify the type's safety invariants 
     fn is_safe(&self) -> bool;
 }
+
+/// Any value is considered safe for the type
+macro_rules! trivial_invariant {
+    ( $type: ty ) => {
+        impl Invariant for $type {
+            #[inline(always)]
+            fn is_safe(&self) -> bool {
+                true
+            }
+        }
+    };
+}
+
+trivial_invariant!(u8);
+trivial_invariant!(u16);
+trivial_invariant!(u32);
+trivial_invariant!(u64);
+trivial_invariant!(u128);
+trivial_invariant!(usize);
+
+trivial_invariant!(i8);
+trivial_invariant!(i16);
+trivial_invariant!(i32);
+trivial_invariant!(i64);
+trivial_invariant!(i128);
+trivial_invariant!(isize);
+
+trivial_invariant!(());
+trivial_invariant!(bool);
+trivial_invariant!(char);
+
+// We do not constrain the safety invariant for floating point types.
+// Users can create a newtype wrapping the floating point type and define an
+// invariant that checks for NaN, infinite, or subnormal values.
+trivial_invariant!(f16);
+trivial_invariant!(f32);
+trivial_invariant!(f64);
+trivial_invariant!(f128);

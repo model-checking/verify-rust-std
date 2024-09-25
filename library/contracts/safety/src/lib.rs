@@ -14,6 +14,29 @@ mod tool;
 #[path = "runtime.rs"]
 mod tool;
 
+///
+/// Expands the `#[invariant(...)]` attribute macro.
+/// The macro expands to an implementation of the `is_safe` method for the `Invariant` trait.
+/// This attribute is only supported for structs.
+/// 
+/// # Example
+///
+/// ```ignore
+/// #[invariant(width == height)]
+/// struct Square {
+///     width: u32,
+///     height: u32,
+/// }
+/// ```
+/// expands to:
+/// ```ignore
+/// impl core::ub_checks::Invariant for Square {
+///   fn is_safe(&self) -> bool {
+///     width == height
+///   }
+/// }
+/// ```
+/// For more information on the Invariant trait, see its documentation in core::ub_checks.
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn invariant(attr: TokenStream, item: TokenStream) -> TokenStream {
