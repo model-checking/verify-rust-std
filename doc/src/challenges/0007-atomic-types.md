@@ -61,13 +61,13 @@ Verify that for any arbitrary value for this `*mut T` (i.e., any arbitrary memor
 However, you need not verify the method for all possible instantiations of `T`.
 It suffices to verify this method for `T` of byte sizes 0, 1, 2, 4, and at least one non-power of two.
 
-#### Part 2: Unsafe Atomic Functions
+#### Part 2: Safe Abstractions
 
-The atomic types expose safe methods for atomic operations.
-These safe methods call unsafe private helper functions, which in turn invoke atomic instrinsics.
+The atomic types expose safe abstractions for atomic operations.
+In this part, you will work toward verifying that these abstractions are indeed safe by writing and verifying safety contracts for the unsafe code in their bodies.
+
 For example, `AtomicBool::store` is the (public) safe method that atomically updates the boolean's value.
 This method invokes the unsafe function `atomic_store`, which in turn calls `intrinsics::atomic_store_relaxed`, `intrinsics::atomic_store_release`, or `intrinsics::atomic_store_seqcst`, depending on the provided ordering.
-In this part, you will write safety contracts for each of the the unsafe helper functions.
 
 Write and verify safety contracts for the unsafe functions:
 
@@ -86,14 +86,12 @@ Write and verify safety contracts for the unsafe functions:
 - `atomic_umax`
 - `atomic_umin`
 
-#### Part 3: Safe Abstractions
-
-For each of the safe methods that invoke an unsafe function from Part 2, write contracts that ensure that they are not invoked with `order`s that would cause panics.
+Then, for each of the safe abstractions that invoke the unsafe functions listed above, write contracts that ensure that they are not invoked with `order`s that would cause panics.
 
 For example, `atomic_store` panics if invoked with `Acquire` or `AcqRel` ordering.
 In this case, you would write contracts on the safe `store` methods that enforce that they are not called with either of those `order`s.
 
-#### Part 4: Atomic Intrinsics
+#### Part 3: Atomic Intrinsics
 
 Write and verify safety contracts for the intrinsics invoked by the unsafe functions from Part 2 (in `core::intrinsics`):
 
