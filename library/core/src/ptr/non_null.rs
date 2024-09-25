@@ -1789,10 +1789,9 @@ mod verify {
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
     pub fn non_null_check_new_unchecked() {
-        let mut x: i32 = kani::any();
-        let xptr = &mut x;
+        let raw_ptr = kani::any::<usize>() as *mut i32;
         unsafe {
-            let _ = NonNull::new_unchecked(xptr as *mut i32);
+            let _ = NonNull::new_unchecked(raw_ptr);
         }
     }
 
