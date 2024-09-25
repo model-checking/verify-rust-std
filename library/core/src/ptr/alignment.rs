@@ -260,6 +260,7 @@ impl Default for Alignment {
 #[cfg(target_pointer_width = "16")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u16)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -282,6 +283,7 @@ enum AlignmentEnum {
 #[cfg(target_pointer_width = "32")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u32)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -320,6 +322,7 @@ enum AlignmentEnum {
 #[cfg(target_pointer_width = "64")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u64)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -394,10 +397,9 @@ mod verify {
 
     impl kani::Arbitrary for Alignment {
         fn any() -> Self {
-            let align = kani::any_where(|a: &usize| a.is_power_of_two());
-            let ret = unsafe { mem::transmute::<usize, Alignment>(align) };
-            kani::assert(ret.is_safe(), "Alignment is safe");
-            ret
+            let obj = Self { 0: kani::any() };
+            kani::assume(obj.is_safe());
+            obj
         }
     }
 
