@@ -1,8 +1,0 @@
-Kani Rust Verifier 0.55.0 (standalone)
-error: internal compiler error: Kani unexpectedly panicked at panicked at kani-compiler/src/codegen_cprover_gotoc/codegen/contract.rs:46:14:
-                                called `Option::unwrap()` on a `None` value.
-
-error: Failed to compile `core` due to an internal compiler error.: error: internal compiler error: Kani unexpectedly panicked at panicked at kani-compiler/src/codegen_cprover_gotoc/codegen/contract.rs:46:14:
-                                called `Option::unwrap()` on a `None` value.
-
-
