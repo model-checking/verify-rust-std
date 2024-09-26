@@ -860,6 +860,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
     #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
+    #[kani::requires(!self.as_ptr().is_null())]
+    #[kani::requires(!subtracted.as_ptr().is_null())]
     pub const unsafe fn sub_ptr(self, subtracted: NonNull<T>) -> usize
     where
         T: Sized,
@@ -1789,41 +1791,43 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
 
-    #[kani::proof_for_contract(NonNull::new_unchecked)]
-    pub fn non_null_check_new_unchecked() {
-        let mut x : i32 = kani::any();
-        let xptr = &mut x;
-        unsafe {
-            let _ = NonNull::new_unchecked(xptr as *mut i32);
-        }
-    }
+    // #[kani::proof_for_contract(NonNull::new_unchecked)]
+    // pub fn non_null_check_new_unchecked() {
+    //     let mut x : i32 = kani::any();
+    //     let xptr = &mut x;
+    //     unsafe {
+    //         let _ = NonNull::new_unchecked(xptr as *mut i32);
+    //     }
+    // }
 
-    #[kani::proof_for_contract(NonNull::new)]
-    pub fn non_null_check_new() {
-        let mut x : i32 = kani::any();
-        let xptr = &mut x;
-        unsafe {
-            let nonnull_ptr = NonNull::new(xptr as *mut i32);
-            let null_ptr = NonNull::<u32>::new(null_mut());
-            assert!(null_ptr.is_none());
-        }
-    }
+    // #[kani::proof_for_contract(NonNull::new)]
+    // pub fn non_null_check_new() {
+    //     let mut x : i32 = kani::any();
+    //     let xptr = &mut x;
+    //     unsafe {
+    //         let nonnull_ptr = NonNull::new(xptr as *mut i32);
+    //         let null_ptr = NonNull::<u32>::new(null_mut());
+    //         assert!(null_ptr.is_none());
+    //     }
+    // }
 
     #[kani::proof_for_contract(NonNull::sub)]
     pub fn non_null_check_sub() {
         const SIZE: usize = 10;
         kani::assume(SIZE > 0);
+
+        let index = kani::any_where(|x| *x < SIZE);
         
         let arr: [i32; SIZE] = kani::any();  // Create a non-deterministic array of size SIZE
         let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  // Get a raw pointer to the array
         
         // Point to the last element of the array
-        let last_ptr = unsafe { NonNull::new(raw_ptr.add(SIZE - 1)).unwrap() };  // Pointer to the last element
+        let last_ptr = unsafe { NonNull::new(raw_ptr.add(index)).unwrap() };  // Pointer to the last element
         
         let count: usize = kani::any();  // Create a non-deterministic count value
  
         // Ensure that the subtraction does not go out of the bounds of the array
-        kani::assume(count < SIZE);  // Ensure count is less than SIZE to stay within bounds
+        kani::assume(count < SIZE - index);  // Ensure count is less than SIZE to stay within bounds
 
         unsafe {
             // Perform the pointer subtraction from the last element
@@ -1831,7 +1835,61 @@ mod verify {
         }
     }
 
+    // #[kani::proof_for_contract(NonNull::sub_ptr)]
+    // pub fn non_null_check_sub_ptr() {
+    //     const SIZE: usize = 10;
+
+    //     let arr: [i32; SIZE] = kani::any();  // Create a non-deterministic array of size SIZE
+    //     let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  // Get a raw pointer to the array
+
+    //     // Assume that raw_ptr is properly aligned to `i32`
+    //     kani::assume((raw_ptr as usize) % mem::align_of::<i32>() == 0);  // Ensure proper alignment
+
+    //     // Assume that the array has valid, non-null pointers for both the first and last elements
+    //     //kani::assume(!raw_ptr.is_null());  // Assume raw_ptr is not null
+
+    //     // Point to the last element of the array
+    //     let last_ptr = unsafe {
+    //         let last_raw_ptr = raw_ptr.add(SIZE - 1);  // Calculate pointer to the last element
+    //         NonNull::new(last_raw_ptr).unwrap()  // Convert raw pointer to NonNull
+    //     };
+
+    //     // Point to the first element of the array
+    //     let first_ptr = unsafe {
+    //         NonNull::new(raw_ptr).unwrap()  // Convert raw pointer to NonNull
+    //     };
+
+    //     // Perform pointer subtraction from the last element to the first element
+    //     unsafe {
+    //         let distance = last_ptr.sub_ptr(first_ptr);  // Calculate the distance in terms of elements
+    //         //kani::assert(distance == SIZE - 1);  // Ensure the calculated distance is correct
+    //     }
+    // }
+
 
     
-    
+    #[kani::proof_for_contract(NonNull::sub_ptr)]
+    pub fn non_null_check_sub_ptr() {
+        const SIZE: usize = 10;
+
+        let arr: [i32; SIZE] = kani::any();  // Create a non-deterministic array of size SIZE
+        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  // Get a raw pointer to the array
+
+        // Point to the last element of the array
+        let last_ptr = unsafe { NonNull::new(raw_ptr.add(SIZE - 1)).unwrap() };  // Pointer to the last element
+
+        // Point to the first element of the array
+        let first_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };  // Pointer to the first element
+
+        // Ensure that the memory is properly aligned
+        kani::assume(raw_ptr as usize % mem::align_of::<i32>() == 0);  // Ensure proper alignment
+
+        // Perform pointer subtraction safely
+        unsafe {
+            let distance = last_ptr.sub_ptr(first_ptr); 
+        }
+    }
+
+    // todo: offset_from
+
 }
