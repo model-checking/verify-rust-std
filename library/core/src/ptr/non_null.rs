@@ -8,6 +8,11 @@ use crate::ptr::Unique;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
+use safety::{ensures, requires};
+
+
+#[cfg(kani)]
+use crate::kani;
 
 /// `*mut T` but non-zero and [covariant].
 ///
@@ -192,6 +197,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[rustc_const_stable(feature = "const_nonnull_new_unchecked", since = "1.25.0")]
     #[inline]
+    #[requires(!ptr.is_null())]
+    #[ensures(|result| result.as_ptr() == ptr)]
     pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
         // SAFETY: the caller must guarantee that `ptr` is non-null.
         unsafe {
@@ -221,6 +228,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[rustc_const_unstable(feature = "const_nonnull_new", issue = "93235")]
     #[inline]
+    #[ensures(|result| result.is_some() == !ptr.is_null())]
+    #[ensures(|result| result.is_none() || result.expect("ptr is null!").as_ptr() == ptr)]
     pub const fn new(ptr: *mut T) -> Option<Self> {
         if !ptr.is_null() {
             // SAFETY: The pointer is already checked and is not null
@@ -1768,5 +1777,30 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
     fn from(reference: &T) -> Self {
         // SAFETY: A reference cannot be null.
         unsafe { NonNull { pointer: reference as *const T } }
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+    use crate::ptr::null_mut;
+
+    // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
+    #[kani::proof_for_contract(NonNull::new_unchecked)]
+    pub fn non_null_check_new_unchecked() {
+        let raw_ptr = kani::any::<usize>() as *mut i32;
+        unsafe {
+            let _ = NonNull::new_unchecked(raw_ptr);
+        }
+    }
+
+    // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
+    #[kani::proof_for_contract(NonNull::new)]
+    pub fn non_null_check_new() {
+        let mut x: i32 = kani::any();
+        let xptr = &mut x;
+        let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
+        let _ = NonNull::new(maybe_null_ptr);
     }
 }
