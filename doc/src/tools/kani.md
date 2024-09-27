@@ -98,7 +98,7 @@ The command `kani verify-std` is a sub-command of the `kani`. This specific sub-
 - `"path/to/library"`: This argument specifies the path to the modified Rust Standard Library that was prepared earlier in the script. For example, `./library` or `/home/ubuntu/verify-rust-std/library`
 - `--target-dir "path/to/target"`: This optional argument sets the target directory where Kani will store its output and intermediate files. For example, `/tmp` or `/tmp/verify-std`
 
-Apart from these, you can use your regular `kani-args` such as `-Z function-contracts`, `-Z stubbing` and `-Z mem-predicates` depending on your verification needs. If you run into kani error that says `Use of unstable feature`, add the corresponding feature with `-Z` to the command.
+Apart from these, you can use your regular `kani-args` such as `-Z function-contracts`, `-Z stubbing` and `-Z mem-predicates` depending on your verification needs. If you run into a Kani error that says `Use of unstable feature`, add the corresponding feature with `-Z` to the command line.
 For more details on Kani's features, refer to [the features section in the Kani Book](https://model-checking.github.io/kani/reference/attributes.html)
 
 ### Step 3 - Check verification result
