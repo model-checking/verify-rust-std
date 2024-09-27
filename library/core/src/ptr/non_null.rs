@@ -626,11 +626,11 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_allow_const_fn_unstable(unchecked_neg)]
-    #[kani::requires(!self.as_ptr().is_null())]
-    #[kani::requires(count <= isize::MAX as usize)] // SAFETY: count does not overflow isize
-    #[kani::requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
-    #[kani::requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)] // SAFETY: count * size_of::<T>() does not overflow isize
-    #[kani::ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
+    #[requires(!self.as_ptr().is_null())]
+    #[requires(count <= isize::MAX as usize)] // SAFETY: count does not overflow isize
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
+    #[requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)] // SAFETY: count * size_of::<T>() does not overflow isize
+    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -855,8 +855,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
     #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
-    #[kani::requires(!self.as_ptr().is_null())]
-    #[kani::requires(!subtracted.as_ptr().is_null())]
+    #[requires(!self.as_ptr().is_null())]
+    #[requires(!subtracted.as_ptr().is_null())]
     pub const unsafe fn sub_ptr(self, subtracted: NonNull<T>) -> usize
     where
         T: Sized,
