@@ -146,7 +146,7 @@ Complete - 1 successfully verified harnesses, 0 failures, 1 total.
 
 Now you can write proof harnesses to verify specific functions in the library. 
 The current convention is to keep proofs in the same module file of the verification target. 
-To run kani for individual proof, use `--harness [harness_function_name]`. 
+To run Kani for an individual proof, use `--harness [harness_function_name]`. 
 Note that Kani will batch run all proofs in the library folder if you do not supply the `--harness` flag. 
 If kani returns the error `no harnesses matched the harness filter`, you can give the fullname of the harness. 
 For example, to run the proof harness named `check_new` in `library/core/src/ptr/unique.rs`, use 
