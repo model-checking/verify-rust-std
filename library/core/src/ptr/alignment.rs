@@ -1,10 +1,13 @@
-use safety::{ensures, requires};
+use safety::{ensures, invariant, requires};
 use crate::num::NonZero;
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{cmp, fmt, hash, mem, num};
 
 #[cfg(kani)]
 use crate::kani;
+
+#[cfg(kani)]
+use crate::ub_checks::Invariant;
 
 /// A type storing a `usize` which is a power of two, and thus
 /// represents a possible alignment in the Rust abstract machine.
@@ -14,6 +17,7 @@ use crate::kani;
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
+#[invariant(self.as_usize().is_power_of_two())]
 pub struct Alignment(AlignmentEnum);
 
 // Alignment is `repr(usize)`, but via extra steps.
@@ -256,6 +260,7 @@ impl Default for Alignment {
 #[cfg(target_pointer_width = "16")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u16)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -278,6 +283,7 @@ enum AlignmentEnum {
 #[cfg(target_pointer_width = "32")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u32)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -316,6 +322,7 @@ enum AlignmentEnum {
 #[cfg(target_pointer_width = "64")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u64)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -390,8 +397,9 @@ mod verify {
 
     impl kani::Arbitrary for Alignment {
         fn any() -> Self {
-            let align = kani::any_where(|a: &usize| a.is_power_of_two());
-            unsafe { mem::transmute::<usize, Alignment>(align) }
+            let obj = Self { 0: kani::any() };
+            kani::assume(obj.is_safe());
+            obj
         }
     }
 
