@@ -552,6 +552,9 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
+    #[requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)] // SAFETY: count * size_of::<T>() does not overflow isize
+    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
@@ -1802,5 +1805,29 @@ mod verify {
         let xptr = &mut x;
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
+    }
+
+    // pub const unsafe fn add(self, count: usize) -> Self
+    #[kani::proof_for_contract(NonNull::add)]
+    pub fn non_null_check_add() {
+        const SIZE: usize = 10;
+        // Randomiz pointer offset within array bound
+        let offset = kani::any_where(|x| *x < SIZE);
+        // Create a non-deterministic array of size SIZE
+        let arr: [i8; SIZE] = kani::any();  
+        // Get a raw pointer to the array
+        let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
+        // NonNUll pointer to the random offset
+        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };  
+        // Create a non-deterministic count value
+        let count: usize = kani::any();  
+
+        // SAFETY: Ensure that the pointer operation does not go out of the bounds of the array
+        //kani::assume(count < SIZE - offset);
+
+        unsafe {
+            // Add a positive offset to pointer
+            let result = ptr.add(count);
+        }
     }
 }
