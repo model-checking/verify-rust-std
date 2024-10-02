@@ -233,8 +233,7 @@ impl Layout {
     // TODO: we should try to capture the above constraints on T in a `requires` clause, and the
     // metadata helpers from https://github.com/model-checking/verify-rust-std/pull/37 may be able
     // to accomplish this.
-    #[cfg_attr(not(kani), ensures(|result| result.align().is_power_of_two()))]
-    #[cfg_attr(kani, ensures(|result| result.is_safe()))]
+    #[ensures(|result| result.align().is_power_of_two())]
     pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
         // SAFETY: we pass along the prerequisites of these functions to the caller
         let (size, align) = unsafe { (mem::size_of_val_raw(t), mem::align_of_val_raw(t)) };
@@ -577,12 +576,6 @@ mod verify {
             let align = kani::any::<Alignment>();
             let size = kani::any_where(|s: &usize| *s <= isize::MAX as usize - (align.as_usize() - 1));
             unsafe { Layout { size, align } }
-        }
-    }
-
-    impl kani::Invariant for Layout {
-        fn is_safe(&self) -> bool {
-            self.align.as_usize().is_power_of_two()
         }
     }
 
