@@ -1620,13 +1620,13 @@ mod verify {
     }
 
     macro_rules! generate_unchecked_neg_harness {
-        ($type:ty, $method:ident, $harness_name:ident) => {
-            #[kani::proof_for_contract($type::$method)]
+        ($type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::unchecked_neg)]
             pub fn $harness_name() {
                 let num1: $type = kani::any::<$type>();
 
                 unsafe {
-                    num1.$method();
+                    num1.unchecked_neg();
                 }
             }
         }
@@ -1654,4 +1654,21 @@ mod verify {
     generate_unchecked_math_harness!(u64, unchecked_add, checked_unchecked_add_u64);
     generate_unchecked_math_harness!(u128, unchecked_add, checked_unchecked_add_u128);
     generate_unchecked_math_harness!(usize, unchecked_add, checked_unchecked_add_usize);
+
+    // `unchecked_neg` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128, size} -- 6 types in total
+    //
+    // Target contracts:
+    // #[requires(!self.overflowing_neg().1)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_neg(self) -> Self
+    generate_unchecked_neg_harness!(i8, checked_unchecked_neg_i8);
+    generate_unchecked_neg_harness!(i16, checked_unchecked_neg_i16);
+    generate_unchecked_neg_harness!(i32, checked_unchecked_neg_i32);
+    generate_unchecked_neg_harness!(i64, checked_unchecked_neg_i64);
+    generate_unchecked_neg_harness!(i128, checked_unchecked_neg_i128);
+    generate_unchecked_neg_harness!(isize, checked_unchecked_neg_isize);
 }
