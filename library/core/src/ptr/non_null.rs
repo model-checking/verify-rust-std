@@ -1846,7 +1846,7 @@ mod verify {
     }
 
     // pub fn align_offset(self, align: usize) -> usize
-    #[kani::proof_for_contract(NonNull::align_offset)]
+    #[kani::proof]
     pub fn non_null_check_align_offset() {
         const SIZE: usize = 10;
         // Non-deterministic input array of i8 (signed 8-bit integers)
