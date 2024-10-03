@@ -1620,13 +1620,13 @@ mod verify {
     }
 
     macro_rules! generate_unchecked_neg_harness {
-        ($type:ty, $method:ident, $harness_name:ident) => {
-            #[kani::proof_for_contract($type::$method)]
+        ($type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::unchecked_neg)]
             pub fn $harness_name() {
                 let num1: $type = kani::any::<$type>();
 
                 unsafe {
-                    num1.$method();
+                    num1.unchecked_neg();
                 }
             }
         }
