@@ -1841,9 +1841,13 @@ mod verify {
     // pub fn addr(self) -> NonZero<usize>
     #[kani::proof_for_contract(NonNull::addr)]
     pub fn non_null_check_addr() {
+        
+        // Create NonNull pointer
         let mut x: i32 = kani::any();
         let xptr = &mut x as *mut i32;
         let nonnull_xptr = NonNull::new(xptr).unwrap();
+
+        // Get pointer address
         let address = nonnull_xptr.addr();
     }
 
