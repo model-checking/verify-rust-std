@@ -9,7 +9,6 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-use crate::ub_checks;
 
 
 #[cfg(kani)]
@@ -557,7 +556,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
     #[requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)] // SAFETY: count * size_of::<T>() does not overflow isize
-    #[requires(ub_checks::can_write(self.as_ptr()))]
+    #[requires(ub_checks::can_write(self.as_ptr().offset(count as isize)))]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
@@ -1792,6 +1791,8 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
+    use crate::ub_checks;
+    use crate::mem::align_of;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -1802,7 +1803,7 @@ mod verify {
         }
     }
 
-    // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
+    // pub const fn new(ptr: *mut T) -> Option<Self>
     #[kani::proof_for_contract(NonNull::new)]
     pub fn non_null_check_new() {
         let mut x: i32 = kani::any();
@@ -1814,7 +1815,7 @@ mod verify {
     // pub const unsafe fn add(self, count: usize) -> Self
     #[kani::proof_for_contract(NonNull::add)]
     pub fn non_null_check_add() {
-        const SIZE: usize = 10;
+        const SIZE: usize = 100000;
         // Randomiz pointer offset within array bound
         let offset = kani::any_where(|x| *x < SIZE);
         // Create a non-deterministic array of size SIZE
@@ -1835,12 +1836,47 @@ mod verify {
         }
     }
 
-    // pub const unsafe fn addr(self) -> NonZero<usize>
+    // pub fn addr(self) -> NonZero<usize>
     #[kani::proof_for_contract(NonNull::addr)]
     pub fn non_null_check_addr() {
         let mut x: i32 = kani::any();
         let xptr = &mut x as *mut i32;
         let nonnull_xptr = NonNull::new(xptr).unwrap();
         let address = nonnull_xptr.addr();
+    }
+
+    // pub fn align_offset(self, align: usize) -> usize
+    #[kani::proof_for_contract(NonNull::align_offset)]
+    pub fn non_null_check_align_offset() {
+        const SIZE: usize = 10;
+        // Non-deterministic input array of i8 (signed 8-bit integers)
+        let x: [i8; SIZE] = kani::any();
+    
+        // Non-null pointer to the start of the array
+        let ptr = NonNull::new(x.as_ptr() as *mut i8).unwrap();
+    
+        // Calculate the offset needed to align the pointer to u16 alignment
+        let offset = ptr.align_offset(align_of::<u16>());
+    
+        // Ensure that the offset is within bounds (must be able to read at least two i8 values as u16)
+        if offset < SIZE - 1 {
+            // Cast the aligned pointer to u16
+            let u16_ptr = unsafe { ptr.add(offset).cast::<u16>() };
+    
+            // Read the u16 value at the aligned pointer
+            let value = unsafe { u16_ptr.read() };
+    
+            // Convert the corresponding adjacent i8 values to u16 using native-endian conversion
+            let byte1 = x[offset] as u8;
+            let byte2 = x[offset + 1] as u8;
+            let expected_value = u16::from_ne_bytes([byte1, byte2]);
+    
+            // Verify that the read value matches the expected value
+            kani::assert!(
+                value == expected_value,
+                "Read value {} did not match expected u16 value {} from adjacent i8 values.",
+                value, expected_value
+            );
+        }
     }
 }
