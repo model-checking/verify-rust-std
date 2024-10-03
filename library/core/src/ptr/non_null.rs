@@ -1184,6 +1184,8 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_align_offset", issue = "90962")]
+    #[requires(!self.pointer.is_null())]
+    #[ensures(!self.pointer.is_null())]
     pub const fn align_offset(self, align: usize) -> usize
     where
         T: Sized,
@@ -1846,7 +1848,7 @@ mod verify {
     }
 
     // pub fn align_offset(self, align: usize) -> usize
-    #[kani::proof]
+    #[kani::proof_for_contract(NonNull::align_offset)]
     pub fn non_null_check_align_offset() {
         const SIZE: usize = 10;
         // Non-deterministic input array of i8 (signed 8-bit integers)
@@ -1874,8 +1876,27 @@ mod verify {
             // Verify that the read value matches the expected value
             kani::assert(
                 value == expected_value,
-                "Read value {} did not match expected u16 value {} from adjacent i8 values."
+                "Read value did not match expected u16 value from adjacent i8 values."
             );
         }
+    }
+
+    // pub fn align_offset(self, align: usize) -> usize
+    #[kani::should_panic]
+    #[kani::proof_for_contract(NonNull::align_offset)]
+    pub fn non_null_check_align_offset_negative() {
+        const SIZE: usize = 10;
+        // Non-deterministic input array of i8 (signed 8-bit integers)
+        let x: [i8; SIZE] = kani::any();
+    
+        // Non-null pointer to the start of the array
+        let ptr = NonNull::new(x.as_ptr() as *mut i8).unwrap();
+
+        // Generate align value that is not a power of two
+        let invald_align: usize = kani::any();
+        kani::assume(!invalid_align.is_power_of_two())
+    
+        // Trigger panic
+        let offset = ptr.align_offset(invalid_align);
     }
 }
