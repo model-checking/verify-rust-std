@@ -9,6 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
+use crate::ub_checks;
 
 
 #[cfg(kani)]
@@ -556,6 +557,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
     #[requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)] // SAFETY: count * size_of::<T>() does not overflow isize
+    #[requires(ub_checks::can_write(self.as_ptr()))]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
@@ -1820,7 +1822,7 @@ mod verify {
         // Get a raw pointer to the array
         let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
         // NonNUll pointer to the random offset
-        let ptr = NonNull::new(raw_ptr.add(offset)).unwrap();  
+        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap()};  
         // Create a non-deterministic count value
         let count: usize = kani::any();  
 
@@ -1838,7 +1840,7 @@ mod verify {
     pub fn non_null_check_addr() {
         let mut x: i32 = kani::any();
         let xptr = &mut x as *mut i32;
-        let nonnull_xptr = NonNull::new(xptr);
+        let nonnull_xptr = NonNull::new(xptr).unwrap();
         let address = nonnull_xptr.addr();
     }
 }
