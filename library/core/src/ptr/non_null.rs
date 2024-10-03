@@ -279,6 +279,8 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[unstable(feature = "strict_provenance", issue = "95228")]
+    #[requires(!self.as_ptr().is_null())]
+    #[ensures(|result| result.get() != 0)]    
     pub fn addr(self) -> NonZero<usize> {
         // SAFETY: The pointer is guaranteed by the type to be non-null,
         // meaning that the address will be non-zero.
@@ -1818,7 +1820,7 @@ mod verify {
         // Get a raw pointer to the array
         let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
         // NonNUll pointer to the random offset
-        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };  
+        let ptr = NonNull::new(raw_ptr.add(offset)).unwrap();  
         // Create a non-deterministic count value
         let count: usize = kani::any();  
 
@@ -1829,5 +1831,14 @@ mod verify {
             // Add a positive offset to pointer
             let result = ptr.add(count);
         }
+    }
+
+    // pub const unsafe fn addr(self) -> NonZero<usize>
+    #[kani::proof_for_contract(NonNull::addr)]
+    pub fn non_null_check_addr() {
+        let mut x: i32 = kani::any();
+        let xptr = &mut x as *mut i32;
+        let nonnull_xptr = NonNull::new(xptr);
+        let address = nonnull_xptr.addr();
     }
 }
