@@ -9,6 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
+use crate::ub_checks::can_write;
 
 
 #[cfg(kani)]
@@ -1791,7 +1792,6 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
-    use crate::ub_checks;
     use crate::mem::align_of;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
@@ -1872,7 +1872,7 @@ mod verify {
             let expected_value = u16::from_ne_bytes([byte1, byte2]);
     
             // Verify that the read value matches the expected value
-            kani::assert!(
+            kani::assert(
                 value == expected_value,
                 "Read value {} did not match expected u16 value {} from adjacent i8 values.",
                 value, expected_value
