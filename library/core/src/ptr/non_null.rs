@@ -9,7 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-use crate::ub_checks::can_write;
+use crate::ub_checks;
 
 
 #[cfg(kani)]
@@ -1874,8 +1874,7 @@ mod verify {
             // Verify that the read value matches the expected value
             kani::assert(
                 value == expected_value,
-                "Read value {} did not match expected u16 value {} from adjacent i8 values.",
-                value, expected_value
+                "Read value {} did not match expected u16 value {} from adjacent i8 values."
             );
         }
     }
