@@ -69,7 +69,7 @@ Follow the following steps to create a new proposal:
 
 Solutions must be automated using one of the tools previously approved and listed [here](tools.md#approved-tools):
 
-* Any new tool that participants want to enable will require an application using the Issue template [Tool application](todo.md).
+* Any new tool that participants want to enable will require an application using the issue template for [tool applications](https://github.com/model-checking/verify-rust-std/blob/main/.github/TOOL_REQUEST_TEMPLATE.md).
 * The tool will be analyzed by an independent committee consisting of members from the Rust open-source developers and AWS
 * A new tool application should clearly specify the differences to existing techniques and provide sufficient background
   of why this is needed.
