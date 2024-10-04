@@ -4,7 +4,7 @@
 
 - [General Rules](./general-rules.md)
   - [Challenge Template](./template.md)
-  - [Tool application](./todo.md)
+  - [Tool application](./general-rules.md#tool-applications)
 
 - [Verification Tools](./tools.md)
   - [Kani](./tools/kani.md)
