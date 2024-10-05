@@ -5,6 +5,10 @@
 use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{ascii, intrinsics, mem};
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
 
 // Used because the `?` operator is not allowed in a const context.
 macro_rules! try_opt {
@@ -1581,3 +1585,73 @@ from_str_radix_size_impl! { i16 isize, u16 usize }
 from_str_radix_size_impl! { i32 isize, u32 usize }
 #[cfg(target_pointer_width = "64")]
 from_str_radix_size_impl! { i64 isize, u64 usize }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    macro_rules! generate_unchecked_math_harness {
+        ($type:ty, $method:ident, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::$method)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+                let num2: $type = kani::any::<$type>();
+
+                unsafe {
+                    num1.$method(num2);
+                }
+            }
+        }
+    }
+
+    macro_rules! generate_unchecked_shift_harness {
+        ($type:ty, $method:ident, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::$method)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+                let num2: u32 = kani::any::<u32>();
+
+                unsafe {
+                    num1.$method(num2);
+                }
+            }
+        }
+    }
+
+    macro_rules! generate_unchecked_neg_harness {
+        ($type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::unchecked_neg)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+
+                unsafe {
+                    num1.unchecked_neg();
+                }
+            }
+        }
+    }
+
+    // `unchecked_add` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128, size} and u{8,16,32,64,128, size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[requires(!self.overflowing_add(rhs).1)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_add(self, rhs: Self) -> Self
+    generate_unchecked_math_harness!(i8, unchecked_add, checked_unchecked_add_i8);
+    generate_unchecked_math_harness!(i16, unchecked_add, checked_unchecked_add_i16);
+    generate_unchecked_math_harness!(i32, unchecked_add, checked_unchecked_add_i32);
+    generate_unchecked_math_harness!(i64, unchecked_add, checked_unchecked_add_i64);
+    generate_unchecked_math_harness!(i128, unchecked_add, checked_unchecked_add_i128);
+    generate_unchecked_math_harness!(isize, unchecked_add, checked_unchecked_add_isize);
+    generate_unchecked_math_harness!(u8, unchecked_add, checked_unchecked_add_u8);
+    generate_unchecked_math_harness!(u16, unchecked_add, checked_unchecked_add_u16);
+    generate_unchecked_math_harness!(u32, unchecked_add, checked_unchecked_add_u32);
+    generate_unchecked_math_harness!(u64, unchecked_add, checked_unchecked_add_u64);
+    generate_unchecked_math_harness!(u128, unchecked_add, checked_unchecked_add_u128);
+    generate_unchecked_math_harness!(usize, unchecked_add, checked_unchecked_add_usize);
+}
