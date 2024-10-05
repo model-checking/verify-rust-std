@@ -1,6 +1,6 @@
 use crate::cmp::Ordering;
 use crate::marker::Unsize;
-use crate::mem::{MaybeUninit, SizedTypeProperties};
+use crate::mem::{self, MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
@@ -196,6 +196,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[rustc_const_stable(feature = "const_nonnull_new_unchecked", since = "1.25.0")]
     #[inline]
+    #[requires(!ptr.is_null())]
+    #[ensures(|result| result.as_ptr() == ptr)]
     pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
         // SAFETY: the caller must guarantee that `ptr` is non-null.
         unsafe {
@@ -225,6 +227,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[rustc_const_unstable(feature = "const_nonnull_new", issue = "93235")]
     #[inline]
+    #[ensures(|result| result.is_some() == !ptr.is_null())]
+    #[ensures(|result| result.is_none() || result.expect("ptr is null!").as_ptr() == ptr)]
     pub const fn new(ptr: *mut T) -> Option<Self> {
         if !ptr.is_null() {
             // SAFETY: The pointer is already checked and is not null
@@ -1784,6 +1788,25 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 #[unstable(feature="kani", issue="none")]
 mod verify {
     use super::*;
+    use crate::ptr::null_mut;
+
+    // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
+    #[kani::proof_for_contract(NonNull::new_unchecked)]
+    pub fn non_null_check_new_unchecked() {
+        let raw_ptr = kani::any::<usize>() as *mut i32;
+        unsafe {
+            let _ = NonNull::new_unchecked(raw_ptr);
+        }
+    }
+
+    // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
+    #[kani::proof_for_contract(NonNull::new)]
+    pub fn non_null_check_new() {
+        let mut x: i32 = kani::any();
+        let xptr = &mut x;
+        let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
+        let _ = NonNull::new(maybe_null_ptr);
+    }
 
     #[kani::proof_for_contract(NonNull::sub)]
     pub fn non_null_check_sub() {
@@ -1807,19 +1830,19 @@ mod verify {
             let result = ptr.sub(count);
         }
     }
-    
+
     #[kani::proof_for_contract(NonNull::sub_ptr)]
     pub fn non_null_check_sub_ptr() {
 
         const SIZE: usize = 100000;
 
-
+        let index = kani::any_where(|x| *x < SIZE);
         // Create a non-deterministic array of size SIZE
         let arr: [i32; SIZE] = kani::any();  
         // Get a raw pointer to the array
         let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  
 
-
+        let ptr = unsafe { NonNull::new(raw_ptr.add(index)).unwrap() };
         // Point to the first element of the array
         let first_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };  // Pointer to the first element
 
@@ -1829,10 +1852,9 @@ mod verify {
 
         // Perform pointer subtraction safely
         unsafe {
-            let distance = offset_ptr.sub_ptr(head_ptr); 
+            let distance = ptr.sub_ptr(first_ptr); 
         }
     }
-
 
     // todo: offset_from
     #[kani::proof_for_contract(NonNull::offset_from)]
@@ -1857,5 +1879,5 @@ mod verify {
             let distance = ptr.offset_from(first_ptr); 
         }
     }
+    
 }
-
