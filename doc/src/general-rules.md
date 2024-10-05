@@ -56,7 +56,7 @@ The type of obstacles users face may depend on which part of the standard librar
 Everyone is welcome to submit new challenge proposals for review by our committee.
 Follow the following steps to create a new proposal:
 
-1. Create a tracking issue using the Issue template [Challenge Proposal](template.md) for your challenge.
+1. Create a tracking issue using the [challenge template](./challenge_template.md) for your challenge.
 2. In your fork of this repository do the following:
     1. Copy the template file (`book/src/challenge_template.md`) to `book/src/challenges/<ID_NUMBER>-<challenge-name>.md`.
     2. Fill in the details according to the template instructions.
@@ -69,7 +69,7 @@ Follow the following steps to create a new proposal:
 
 Solutions must be automated using one of the tools previously approved and listed [here](tools.md#approved-tools):
 
-* Any new tool that participants want to enable will require an application using the issue template for [tool applications](https://github.com/model-checking/verify-rust-std/blob/main/.github/TOOL_REQUEST_TEMPLATE.md).
+* Any new tool that participants want to enable will require an application using the [tool application template](./tool_template.md).
 * The tool will be analyzed by an independent committee consisting of members from the Rust open-source developers and AWS
 * A new tool application should clearly specify the differences to existing techniques and provide sufficient background
   of why this is needed.
