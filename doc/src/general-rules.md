@@ -39,7 +39,7 @@ A proposed solution to a verification problem will only **be reviewed** if all t
 * The contribution must be automated and should be checked and pass as part of the PR checks.
 * All tools used by the solution must be in [the list of accepted tools](tools.md#approved-tools),
   and previously integrated in the repository.
-  If that is not the case, please submit a separate [tool application first](todo.md).
+  If that is not the case, please submit a separate [tool application first](./general-rules.md#tool-applications).
 * There is no restriction on the number of contributors for a solution.
   Make sure you have the rights to submit your solution and that all contributors are properly mentioned.
 * The solution cannot impact the runtime logic of the standard library unless the change is proposed and incorporated
