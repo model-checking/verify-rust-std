@@ -368,8 +368,23 @@ where
     #[rustc_const_stable(feature = "nonzero", since = "1.28.0")]
     #[must_use]
     #[inline]
-    #[requires(n != T::zero())]
-    #[ensures(|result: Self| result.get() == n)]
+    #[rustc_allow_const_fn_unstable(const_refs_to_cell)]
+    #[requires({
+        let size = core::mem::size_of::<T>();
+        let ptr = &n as *const T as *const u8;
+        let slice = unsafe { core::slice::from_raw_parts(ptr, size) };
+        !slice.iter().all(|&byte| byte == 0)
+    })]
+    #[ensures(|result: &Self|{
+        let size = core::mem::size_of::<T>();
+        let n_ptr: *const T = &n;
+        let result_inner: T = result.get();
+        let result_ptr: *const T = &result_inner;
+        let n_slice = unsafe { core::slice::from_raw_parts(n_ptr as *const u8, size) };
+        let result_slice = unsafe { core::slice::from_raw_parts(result_ptr as *const u8, size) };
+    
+        n_slice == result_slice
+    })]
     pub const unsafe fn new_unchecked(n: T) -> Self {
         match Self::new(n) {
             Some(n) => n,
