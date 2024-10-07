@@ -5,11 +5,11 @@
 use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{ascii, intrinsics, mem};
-/*use safety::requires;
+use safety::requires;
 
 #[cfg(kani)]
 use crate::kani;
-*/
+
 // Used because the `?` operator is not allowed in a const context.
 macro_rules! try_opt {
     ($e:expr) => {
