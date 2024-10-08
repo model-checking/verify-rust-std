@@ -1664,7 +1664,8 @@ mod verify {
     // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
     //
     // Target contracts:
-    // #[requires(!self.overflowing_add(rhs).1)] // Preconditions: No overflow should occur
+    // Preconditions: No overflow should occur
+    // #[requires(!self.overflowing_add(rhs).1)]
     //
     // Target function:
     // pub const unsafe fn unchecked_add(self, rhs: Self) -> Self
@@ -1687,7 +1688,7 @@ mod verify {
     // i{8,16,32,64,128,size} -- 6 types in total
     //
     // Target contracts:
-    // #[requires(!self.overflowing_neg().1)]
+    // #[requires(self != $SelfT::MIN)]
     //
     // Target function:
     // pub const unsafe fn unchecked_neg(self) -> Self
@@ -1703,7 +1704,9 @@ mod verify {
     // Target types:
     // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total, with different interval checks for each.
     // Total types of checks including intervals -- 36
+    //
     // Target contracts:
+    // Preconditions: No overflow should occur
     // #[requires(!self.overflowing_mul(rhs).1)]
     //
     // Target function:
@@ -1827,6 +1830,7 @@ mod verify {
     // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
     //
     // Target contracts:
+    // Preconditions: No overflow should occur
     // #[requires(!self.overflowing_sub(rhs).1)] 
     //
     // Target function:
