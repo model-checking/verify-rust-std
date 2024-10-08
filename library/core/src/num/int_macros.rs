@@ -1168,6 +1168,7 @@ macro_rules! int_impl {
         #[inline(always)]
         #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
         #[requires(self != $SelfT::MIN)]
+        #[ensures(|result| *result == -self)]
         pub const unsafe fn unchecked_neg(self) -> Self {
             assert_unsafe_precondition!(
                 check_language_ub,
