@@ -1,5 +1,6 @@
 use crate::cmp::Ordering;
 use crate::marker::Unsize;
+//use crate::num::NonZeroUsize;
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
@@ -476,6 +477,12 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    // Requires that the input pointer is not null
+    #[kani::requires(!self.as_ptr().is_null())]
+    // Requires that multiplying count by the size of T doesn't overflow isize
+    #[kani::requires(count.checked_mul(core::mem::size_of::<T>() as isize).is_some())]
+    //Two conditions for postconditions: 1.Resulting pointer is not null 2.Safe operation of pointer arithmetic
+    #[kani::ensures(|result: &NonNull<T>|  !result.as_ptr().is_null() && (result.as_ptr() as isize) == (self.as_ptr() as isize).wrapping_add(count.wrapping_mul(core::mem::size_of::<T>() as isize)))]
     pub const unsafe fn offset(self, count: isize) -> Self
     where
         T: Sized,
@@ -663,6 +670,12 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_allow_const_fn_unstable(set_ptr_value)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    //Requires that the input pointer is not null
+    #[kani::requires(!self.as_ptr().is_null())]
+    // Requires that count doesnt exceed Max
+    #[kani::requires(count <= isize::MAX as usize)] 
+    //Ensures that result is not null
+    #[kani::ensures(|result: &NonNull<T>| !result.as_ptr().is_null())] 
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `sub` and `byte_sub` has the same
         // safety contract.
@@ -1802,5 +1815,45 @@ mod verify {
         let xptr = &mut x;
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
+    }
+   #[kani::proof_for_contract(NonNull::byte_sub)]
+    pub fn non_null_check_byte_sub() {
+    // Initializing array of size 10000
+    const ARR_SIZE: usize = 100000;
+    let arr: [i32; ARR_SIZE] = kani::any();
+    //Randomizing start pointer within array
+    let offset = kani::any_where(|x| *x <= ARR_SIZE);
+    // Create a NonNull pointer to the end of the array
+    let raw_ptr: *mut i32 = unsafe { arr.as_ptr().add(offset) as *mut i32 };
+    let ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
+    // Choose an arbitrary count to subtract
+    let count: usize = kani::any();
+    // Ensure that the subtraction doesnt go out of bounds of array
+     kani::assume(count < ARR_SIZE - offset);
+  unsafe {
+     // Perform the byte_sub operation
+     let result = ptr.byte_sub(count);
+  }}
+
+  #[kani::proof_for_contract(NonNull::offset)]
+   pub fn non_null_check_offset(){
+        //Initializing array of size 10000
+        const ARR_SIZE: usize = 10000;
+        let arr: [i32; ARR_SIZE] = kani::any(); 
+         // Randomizing start pointer within array
+        let start_offset = kani::any_where(|x| *x < ARR_SIZE);
+        // Creating a NonNull pointer to a random position within the array
+        let ptr = unsafe { NonNull::new(arr.as_ptr().add(start_offset) as *mut i32).unwrap() };
+        // Choose an arbitrary count to offset
+        let count: isize = kani::any();
+        // Constraining the count to ensure it doesn't go out of bounds
+        kani::assume(
+            (count >= 0 && (count as usize) < ARR_SIZE - start_offset) ||
+            (count < 0 && count.unsigned_abs() <= start_offset)
+        );
+        unsafe {
+            // Perform the offset operation
+            let result = ptr.offset(count);
+        }
     }
 }
