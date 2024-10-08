@@ -2213,9 +2213,6 @@ nonzero_integer! {
 fn nonzero_check_new_unchecked() {
     let x: i32 = kani::any();  // Generates a symbolic value of type i32
 
-    // Only proceed if x is not zero, because passing zero would violate the precondition
-    kani::assume(x != 0);
-
     unsafe {
         let _ = NonZeroI32::new_unchecked(x);  // Calls NonZero::new_unchecked
         }
