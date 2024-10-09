@@ -63,9 +63,11 @@
 )]
 #![allow(missing_docs)]
 
-use safety::requires;
-use crate::marker::{DiscriminantKind, Tuple};
-use crate::{ptr, ub_checks};
+use safety::{ensures, requires};
+use crate::marker::DiscriminantKind;
+use crate::marker::Tuple;
+use crate::ptr;
+use crate::ub_checks;
 
 #[cfg(kani)]
 use crate::kani;
@@ -2935,7 +2937,8 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
 #[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
-#[requires((x.addr() >= y.addr() + core::mem::size_of::<T>()) || (y.addr() >= x.addr() + core::mem::size_of::<T>()))]
+#[requires(ub_checks::is_nonoverlapping(x as *const (), x as *const (), size_of::<T>(), 1))]
+#[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
 pub const unsafe fn typed_swap<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
     // pointers, so swapping them with `count: 1` is fine.
@@ -3010,6 +3013,9 @@ pub const unsafe fn const_deallocate(_ptr: *mut u8, _size: usize, _align: usize)
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
+// FIXME(kani): Cannot verify intrinsics contract yet.
+// <https://github.com/model-checking/kani/issues/3345>
+#[requires(ub_checks::can_dereference(_ptr as *const crate::ptr::DynMetadata<dyn crate::any::Any>))]
 pub unsafe fn vtable_size(_ptr: *const ()) -> usize {
     unreachable!()
 }
@@ -3023,6 +3029,9 @@ pub unsafe fn vtable_size(_ptr: *const ()) -> usize {
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
+// FIXME(kani): Cannot verify intrinsics contract yet.
+// <https://github.com/model-checking/kani/issues/3345>
+#[requires(ub_checks::can_dereference(_ptr as *const crate::ptr::DynMetadata<dyn crate::any::Any>))]
 pub unsafe fn vtable_align(_ptr: *const ()) -> usize {
     unreachable!()
 }
@@ -3107,6 +3116,14 @@ pub const fn variant_count<T>() -> usize {
 #[rustc_const_unstable(feature = "const_size_of_val", issue = "46571")]
 #[rustc_intrinsic]
 #[rustc_intrinsic_must_be_overridden]
+#[cfg_attr(not(kani), requires(matches!(
+    <T as Pointee>::Metadata::map_dyn(crate::ptr::metadata(_val)::metadata(),
+    |dyn_meta| { ub_checks::can_dereference(dyn_meta)}),
+    None | Some(true))))]
+#[cfg_attr(not(kani), requires(matches!(
+    <T as Pointee>::Metadata::map_len(crate::ptr::metadata(_val)::metadata(),
+    |_| { ub_checks::can_dereference(_val)}),
+    None | Some(true))))]
 pub const unsafe fn size_of_val<T: ?Sized>(_ptr: *const T) -> usize {
     unreachable!()
 }
@@ -3300,6 +3317,14 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(_ptr: *cons
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy_nonoverlapping"]
+// Copy is "untyped".
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+#[requires(!count.overflowing_mul(size_of::<T>()).1
+  && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
+  && ub_checks::is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
+#[ensures(|_| { check_copy_untyped(src, dst, count)}) ]
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
@@ -3402,6 +3427,12 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy"]
+// FIXME(kani): How to verify safety for types that do not implement Copy and count > 1??
+#[requires(!count.overflowing_mul(size_of::<T>()).1
+  && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+#[ensures(|_| { check_copy_untyped(src, dst, count) })]
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
@@ -3420,7 +3451,10 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
                 align: usize = align_of::<T>(),
             ) =>
             ub_checks::is_aligned_and_not_null(src, align)
-                && ub_checks::is_aligned_and_not_null(dst, align)
+
+
+
+            && ub_checks::is_aligned_and_not_null(dst, align)
         );
         copy(src, dst, count)
     }
@@ -3482,6 +3516,12 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_write_bytes"]
+#[requires(!count.overflowing_mul(size_of::<T>()).1
+  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+#[requires(count > 0 || ub_checks::is_aligned_and_not_null(dst as *const (), align_of::<T>()))]
+#[ensures(|_|
+    ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(dst as *const u8, count * size_of::<T>())))]
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     extern "rust-intrinsic" {
         #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
@@ -3500,6 +3540,22 @@ pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
             ) => ub_checks::is_aligned_and_not_null(addr, align)
         );
         write_bytes(dst, val, count)
+    }
+}
+
+// Ensures the initialization state is preserved.
+// This is used for contracts only.
+#[allow(dead_code)]
+fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
+    if count > 0 {
+        let byte = kani::any_where(| sz: &usize | *sz < size_of::< T >());
+        let elem = kani::any_where(| val: &usize | *val < count);
+        let src_data = src as * const u8;
+        let dst_data = unsafe { dst.add(elem) } as * const u8;
+        ub_checks::can_dereference(unsafe { src_data.add(byte) })
+            == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
+    } else {
+        true
     }
 }
 
@@ -3529,6 +3585,8 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
 #[unstable(feature="kani", issue="none")]
 mod verify {
     use core::{cmp, fmt};
+    use core::ptr::addr_of_mut;
+    use core::mem::MaybeUninit;
     use super::*;
     use crate::kani;
 
@@ -3556,5 +3614,131 @@ mod verify {
         unsafe { typed_swap(&mut x, &mut y) };
         assert_eq!(y, old_x);
         assert_eq!(x, old_y);
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, kani::Arbitrary)]
+    enum AllocationStatus {
+        /// Dangling pointers
+        Dangling,
+        /// Pointer to dead object
+        DeadObj,
+        /// Null pointers
+        Null,
+        /// In bounds pointer (it may be unaligned)
+        InBounds,
+        /// Out of bounds
+        OutBounds,
+    }
+
+    struct PointerGenerator<T, const BUF_LEN: usize> {
+        // Internal allocation that may be used to generate valid pointers.
+        buf: MaybeUninit<[T; BUF_LEN]>,
+    }
+
+    struct ArbitraryPointer<T> {
+        pub ptr: *mut T,
+        pub status: AllocationStatus,
+        pub is_initialized: bool,
+    }
+
+    impl<T: kani::Arbitrary, const BUF_LEN: usize> PointerGenerator<T, BUF_LEN> {
+        const SZ : usize = BUF_LEN * size_of::<T>();
+
+        pub fn new() -> Self {
+            PointerGenerator {
+                buf: MaybeUninit::uninit()
+            }
+        }
+
+        /// Create another ArbitraryPointer that may have the same precedence as the `other` pointer.
+        ///
+        /// I.e.: Non-deterministically derive a pointer from the given pointer or create a new
+        /// arbitrary pointer.
+        pub fn generate_ptr(&mut self) -> ArbitraryPointer<T> {
+            // Create an arbitrary pointer, but leave `ptr` as unset for now.
+            let mut arbitrary = ArbitraryPointer {
+                ptr: ptr::null_mut::<T>(),
+                is_initialized: false,
+                status: kani::any(),
+            };
+
+            let buf_ptr = addr_of_mut!(self.buf) as *mut T;
+
+            // Offset is used to potentially generate unaligned pointer.
+            let offset = kani::any_where(|b: &usize| *b < size_of::<T>());
+            let ptr = match arbitrary.status {
+                AllocationStatus::Dangling => {
+                    crate::ptr::dangling_mut::<T>().wrapping_add(offset)
+                }
+                AllocationStatus::DeadObj => {
+                    let mut obj: T = kani::any();
+                    &mut obj as *mut _
+                }
+                AllocationStatus::Null => {
+                    crate::ptr::null_mut::<T>()
+                }
+                AllocationStatus::InBounds => {
+                    let pos = kani::any_where(|i: &usize| *i < (BUF_LEN - 1));
+                    let ptr: *mut T = buf_ptr.wrapping_add(pos).wrapping_byte_add(offset);
+                    if kani::any() {
+                        arbitrary.is_initialized = true;
+                        // This should be in bounds of arbitrary.alloc.
+                        unsafe { ptr.write_unaligned(kani::any()) };
+                    }
+                    ptr
+                }
+                AllocationStatus::OutBounds => {
+                    if kani::any() {
+                        buf_ptr.wrapping_add(BUF_LEN).wrapping_byte_sub(offset)
+                    } else {
+                        buf_ptr.wrapping_add(BUF_LEN).wrapping_byte_add(offset)
+                    }
+                }
+            };
+
+            arbitrary
+        }
+    }
+
+
+    #[kani::proof_for_contract(copy)]
+    fn check_copy() {
+        let mut generator = PointerGenerator::<char, 10>::new();
+        let src = generator.generate_ptr();
+        let dst = if kani::any() {
+            generator.generate_ptr();
+        } else {
+            PointerGenerator::<char, 10>::new().generate_ptr()
+        };
+        // Skip dangling for now since it makes Kani contract panic.
+        kani::assume(src.status != AllocationStatus::Dangling);
+        kani::assume(dst.status != AllocationStatus::Dangling);
+        unsafe { copy(src.ptr, dst.ptr, kani::any()) }
+    }
+
+    #[kani::proof_for_contract(copy_nonoverlapping)]
+    fn check_copy_nonoverlapping() {
+        let mut generator = PointerGenerator::<char, 10>::new();
+        let src = generator.generate_ptr();
+        // Destination may or may not have the same provenance as src.
+        let dst = if kani::any() {
+            generator.generate_ptr();
+        } else {
+            PointerGenerator::<char, 10>::new().generate_ptr()
+        };
+        // Skip dangling for now since it makes Kani contract panic.
+        kani::assume(src.status != AllocationStatus::Dangling);
+        kani::assume(dst.status != AllocationStatus::Dangling);
+        unsafe { copy_nonoverlapping(src.ptr, dst.ptr, kani::any()) }
+    }
+
+    #[kani::proof_for_contract(write_bytes)]
+    fn check_write_bytes() {
+        let mut generator = PointerGenerator::<char, 10>::new();
+        let src = generator.generate_ptr();
+        kani::assume(src.status != AllocationStatus::Dangling);
+        // Skip dangling for now since it makes Kani contract panic.
+        // Verify this case in a separate harness.
+        unsafe { write_bytes(src.ptr, kani::any(), kani::any()) }
     }
 }
