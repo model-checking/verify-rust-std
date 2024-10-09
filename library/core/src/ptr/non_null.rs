@@ -10,7 +10,6 @@ use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
 
-
 #[cfg(kani)]
 use crate::kani;
 
@@ -631,6 +630,9 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_allow_const_fn_unstable(unchecked_neg)]
+    #[kani::requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
+    #[kani::requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)]
+    #[kani::ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -762,6 +764,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[kani::ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / core::mem::size_of::<T>() as isize)]
     pub const unsafe fn offset_from(self, origin: NonNull<T>) -> isize
     where
         T: Sized,
@@ -855,6 +858,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
     #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
+    #[kani::ensures(|result: &usize| *result == self.as_ptr().offset_from(subtracted.as_ptr()) as usize)]
     pub const unsafe fn sub_ptr(self, subtracted: NonNull<T>) -> usize
     where
         T: Sized,
@@ -1803,4 +1807,77 @@ mod verify {
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
+
+    #[kani::proof_for_contract(NonNull::sub)]
+    pub fn non_null_check_sub() {
+        const SIZE: usize = 10;
+        // Randomiz pointer offset within array bound
+        let offset = kani::any_where(|x| *x < SIZE);
+        // Create a non-deterministic array of size SIZE
+        let arr: [i32; SIZE] = kani::any();  
+        // Get a raw pointer to the array
+        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  
+        // NonNUll pointer to the random offset
+        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };  
+        // Create a non-deterministic count value
+        let count: usize = kani::any();  
+ 
+        // SAFETY: Ensure that the subtraction does not go out of the bounds of the array
+        kani::assume(count < SIZE - offset);
+
+        unsafe {
+            // Perform the pointer subtraction from the last element
+            let result = ptr.sub(count);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::sub_ptr)]
+    pub fn non_null_check_sub_ptr() {
+
+        const SIZE: usize = 100000;
+
+        let index = kani::any_where(|x| *x < SIZE);
+        // Create a non-deterministic array of size SIZE
+        let arr: [i32; SIZE] = kani::any();  
+        // Get a raw pointer to the array
+        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  
+
+        let ptr = unsafe { NonNull::new(raw_ptr.add(index)).unwrap() };
+        // Point to the first element of the array
+        let first_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };  // Pointer to the first element
+
+        // Ensure that the memory is properly aligned
+        //kani::assume(raw_ptr as usize % mem::align_of::<i32>() == 0);  // Ensure proper alignment
+
+
+        // Perform pointer subtraction safely
+        unsafe {
+            let distance = ptr.sub_ptr(first_ptr); 
+        }
+    }
+
+    // todo: offset_from
+    #[kani::proof_for_contract(NonNull::offset_from)]
+    pub fn non_null_check_offset_from() {
+        const SIZE: usize = 200000;
+
+        let index = kani::any_where(|x| *x < SIZE);
+
+        let arr: [i32; SIZE] = kani::any();  // Create a non-deterministic array of size SIZE
+        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  // Get a raw pointer to the array
+
+        let ptr = unsafe { NonNull::new(raw_ptr.add(index)).unwrap() };  // Pointer to random index
+
+        // Point to the first element of the array
+        let first_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };  // Pointer to the first element
+
+        // Ensure that the memory is properly aligned
+        //kani::assume(raw_ptr as usize % mem::align_of::<i32>() == 0);  // Ensure proper alignment
+
+        // Perform pointer subtraction safely
+        unsafe {
+            let distance = ptr.offset_from(first_ptr); 
+        }
+    }
+    
 }
