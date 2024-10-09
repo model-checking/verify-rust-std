@@ -8,6 +8,9 @@ use crate::ops::{BitOr, BitOrAssign, Div, DivAssign, Neg, Rem, RemAssign};
 use crate::panic::{RefUnwindSafe, UnwindSafe};
 use crate::str::FromStr;
 use crate::{fmt, intrinsics, ptr, ub_checks};
+use safety::{ensures, requires};
+#[cfg(kani)]
+use crate::kani;
 
 /// A marker trait for primitive types which can be zero.
 ///
@@ -348,6 +351,7 @@ where
     #[rustc_const_stable(feature = "const_nonzero_int_methods", since = "1.47.0")]
     #[must_use]
     #[inline]
+
     pub const fn new(n: T) -> Option<Self> {
         // SAFETY: Memory layout optimization guarantees that `Option<NonZero<T>>` has
         //         the same layout and size as `T`, with `0` representing `None`.
@@ -364,6 +368,23 @@ where
     #[rustc_const_stable(feature = "nonzero", since = "1.28.0")]
     #[must_use]
     #[inline]
+    #[rustc_allow_const_fn_unstable(const_refs_to_cell)]
+    #[requires({
+        let size = core::mem::size_of::<T>();
+        let ptr = &n as *const T as *const u8;
+        let slice = unsafe { core::slice::from_raw_parts(ptr, size) };
+        !slice.iter().all(|&byte| byte == 0)
+    })]
+    #[ensures(|result: &Self|{
+        let size = core::mem::size_of::<T>();
+        let n_ptr: *const T = &n;
+        let result_inner: T = result.get();
+        let result_ptr: *const T = &result_inner;
+        let n_slice = unsafe { core::slice::from_raw_parts(n_ptr as *const u8, size) };
+        let result_slice = unsafe { core::slice::from_raw_parts(result_ptr as *const u8, size) };
+    
+        n_slice == result_slice
+    })]
     pub const unsafe fn new_unchecked(n: T) -> Self {
         match Self::new(n) {
             Some(n) => n,
@@ -380,6 +401,10 @@ where
             }
         }
     }
+
+
+
+
 
     /// Converts a reference to a non-zero mutable reference
     /// if the referenced value is not zero.
@@ -441,6 +466,9 @@ where
         unsafe { intrinsics::transmute_unchecked(self) }
     }
 }
+
+
+
 
 macro_rules! nonzero_integer {
     (
@@ -2170,4 +2198,23 @@ nonzero_integer! {
     swap_op = "0x1234567890123456",
     swapped = "0x5634129078563412",
     reversed = "0x6a2c48091e6a2c48",
+}
+
+#[unstable(feature="kani", issue="none")]
+#[cfg(kani)]
+    mod verify {
+    use core::num::NonZeroI32; // Use core::num instead of std::num
+    use super::*;
+    use NonZero;
+
+
+// pub const unsafe fn newunchecked(n: T) -> Self
+#[kani::proof_for_contract(NonZero::new_unchecked)]
+fn nonzero_check_new_unchecked() {
+    let x: i32 = kani::any();  // Generates a symbolic value of type i32
+
+    unsafe {
+        let _ = NonZeroI32::new_unchecked(x);  // Calls NonZero::new_unchecked
+        }
+    }
 }
