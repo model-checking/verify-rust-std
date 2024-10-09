@@ -1,6 +1,6 @@
 use crate::cmp::Ordering;
 use crate::marker::Unsize;
-use crate::mem::{self, MaybeUninit, SizedTypeProperties};
+use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
@@ -764,7 +764,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / mem::size_of::<T>() as isize)]
+    #[kani::ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / core::mem::size_of::<T>() as isize)]
     pub const unsafe fn offset_from(self, origin: NonNull<T>) -> isize
     where
         T: Sized,
