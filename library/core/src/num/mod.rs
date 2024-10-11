@@ -1585,6 +1585,7 @@ from_str_radix_size_impl! { i16 isize, u16 usize }
 from_str_radix_size_impl! { i32 isize, u32 usize }
 #[cfg(target_pointer_width = "64")]
 from_str_radix_size_impl! { i64 isize, u64 usize }
+
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
