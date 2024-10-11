@@ -1,6 +1,5 @@
 use crate::cmp::Ordering;
 use crate::marker::Unsize;
-//use crate::num::NonZeroUsize;
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
