@@ -11,6 +11,7 @@ use crate::{fmt, intrinsics, ptr, ub_checks};
 use safety::{ensures, requires};
 #[cfg(kani)]
 use crate::kani;
+use paste::paste;
 
 /// A marker trait for primitive types which can be zero.
 ///
@@ -2207,14 +2208,33 @@ nonzero_integer! {
     use super::*;
     use NonZero;
 
-
-// pub const unsafe fn newunchecked(n: T) -> Self
-#[kani::proof_for_contract(NonZero::new_unchecked)]
-fn nonzero_check_new_unchecked() {
-    let x: i32 = kani::any();  // Generates a symbolic value of type i32
-
-    unsafe {
-        let _ = NonZeroI32::new_unchecked(x);  // Calls NonZero::new_unchecked
-        }
+    macro_rules! nonzero_check {
+        ($t:ty, $nonzero_type:ty) => {
+            paste! {
+                #[kani::proof_for_contract(NonZero::new_unchecked)]
+                pub fn [<nonzero_check_new_unchecked_for_ $t>]() {
+                    let x: $t = kani::any();  // Generates a symbolic value of the provided type
+    
+                    // Only proceed if x is not zero, because passing zero would violate the precondition
+                    kani::assume(x != 0);
+    
+                    unsafe {
+                        let _ = <$nonzero_type>::new_unchecked(x);  // Calls NonZero::new_unchecked for the specified NonZero type
+                    }
+                }
+            }
+        };
     }
+    
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check!(i8, core::num::NonZeroI8);
+    nonzero_check!(i16, core::num::NonZeroI16);
+    nonzero_check!(i64, core::num::NonZeroI64);
+    nonzero_check!(i128, core::num::NonZeroI128);
+    nonzero_check!(u8, core::num::NonZeroU8);
+    nonzero_check!(u16, core::num::NonZeroU16);
+    nonzero_check!(u32, core::num::NonZeroU32);
+    nonzero_check!(u64, core::num::NonZeroU64);
+    nonzero_check!(u128, core::num::NonZeroU128);
+    nonzero_check!(usize, core::num::NonZeroUsize);
 }
