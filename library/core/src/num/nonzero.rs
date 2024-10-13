@@ -2229,6 +2229,7 @@ nonzero_integer! {
     // Use the macro to generate different versions of the function for multiple types
     nonzero_check!(i8, core::num::NonZeroI8);
     nonzero_check!(i16, core::num::NonZeroI16);
+    nonzero_check!(i32, core::num::NonZeroI32);
     nonzero_check!(i64, core::num::NonZeroI64);
     nonzero_check!(i128, core::num::NonZeroI128);
     nonzero_check!(u8, core::num::NonZeroU8);
@@ -2237,4 +2238,5 @@ nonzero_integer! {
     nonzero_check!(u64, core::num::NonZeroU64);
     nonzero_check!(u128, core::num::NonZeroU128);
     nonzero_check!(usize, core::num::NonZeroUsize);
+    nonzero_check!(isize, core::num::NonZeroIsize);
 }
