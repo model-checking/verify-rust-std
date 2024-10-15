@@ -21,7 +21,7 @@ Session.vim
 /build/
 /kani_build/
 /target
-/library/target
+library/target
 *.rlib
 *.rmeta
 *.mir
