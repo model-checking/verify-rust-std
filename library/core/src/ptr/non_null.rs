@@ -140,6 +140,8 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "const_ptr_as_ref", issue = "91822")]
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]  // Ensure the pointer is valid to create a reference.
+    #[ensures(|result: &&MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))]  // Ensure returned reference points to the correct memory location.
     pub const unsafe fn as_uninit_ref<'a>(self) -> &'a MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -1828,6 +1830,19 @@ mod verify {
 
         unsafe {
             let _ = ptr.as_ref();
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::as_uninit_ref)]
+    pub fn non_null_check_as_uninit_ref() {
+        use core::mem::MaybeUninit;
+
+        // Create an uninitialized MaybeUninit value
+        let mut uninit: MaybeUninit<u32> = MaybeUninit::uninit();
+        let ptr = NonNull::new(uninit.as_mut_ptr()).unwrap();
+
+        unsafe {
+            let uninit_ref =  ptr.as_uninit_ref();
         }
     }
 }
