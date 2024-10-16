@@ -63,10 +63,8 @@
 )]
 #![allow(missing_docs)]
 
-use crate::marker::DiscriminantKind;
-use crate::marker::Tuple;
-use crate::ptr;
-use crate::ub_checks;
+use crate::marker::{DiscriminantKind, Tuple};
+use crate::{ptr, ub_checks};
 use safety::{ensures, requires};
 
 #[cfg(kani)]
@@ -77,19 +75,12 @@ pub mod simd;
 
 // These imports are used for simplifying intra-doc links
 #[allow(unused_imports)]
-#[cfg(all(
-    target_has_atomic = "8",
-    target_has_atomic = "32",
-    target_has_atomic = "ptr"
-))]
+#[cfg(all(target_has_atomic = "8", target_has_atomic = "32", target_has_atomic = "ptr"))]
 use crate::sync::atomic::{self, AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
 
 #[stable(feature = "drop_in_place", since = "1.8.0")]
 #[rustc_allowed_through_unstable_modules]
-#[deprecated(
-    note = "no longer an intrinsic - use `ptr::drop_in_place` directly",
-    since = "1.52.0"
-)]
+#[deprecated(note = "no longer an intrinsic - use `ptr::drop_in_place` directly", since = "1.52.0")]
 #[inline]
 pub unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T) {
     // SAFETY: see `ptr::drop_in_place`
@@ -1039,11 +1030,7 @@ pub const fn unlikely(b: bool) -> bool {
 #[miri::intrinsic_fallback_is_spec]
 #[inline]
 pub fn select_unpredictable<T>(b: bool, true_val: T, false_val: T) -> T {
-    if b {
-        true_val
-    } else {
-        false_val
-    }
+    if b { true_val } else { false_val }
 }
 
 extern "rust-intrinsic" {
@@ -3452,9 +3439,6 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
                 align: usize = align_of::<T>(),
             ) =>
             ub_checks::is_aligned_and_not_null(src, align)
-
-
-
             && ub_checks::is_aligned_and_not_null(dst, align)
         );
         copy(src, dst, count)
