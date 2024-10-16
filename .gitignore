@@ -20,6 +20,7 @@ Session.vim
 /book/
 /build/
 /target
+library/target
 *.rlib
 *.rmeta
 *.mir
