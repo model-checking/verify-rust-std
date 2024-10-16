@@ -487,12 +487,10 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    // Requires that the input pointer is not null
-    #[kani::requires(!self.as_ptr().is_null())]
     // Requires that multiplying count by the size of T doesn't overflow isize
-    #[kani::requires(count.checked_mul(core::mem::size_of::<T>() as isize).is_some())]
+    #[requires(count.checked_mul(core::mem::size_of::<T>() as isize).is_some())]
     //Two conditions for postconditions: 1.Resulting pointer is not null 2.Safe operation of pointer arithmetic
-    #[kani::ensures(|result: &NonNull<T>|  !result.as_ptr().is_null() && (result.as_ptr() as isize) == (self.as_ptr() as isize).wrapping_add(count.wrapping_mul(core::mem::size_of::<T>() as isize)))]
+    #[ensures(|result: &NonNull<T>|  !result.as_ptr().is_null() && (result.as_ptr() as isize) == (self.as_ptr() as isize).wrapping_add(count.wrapping_mul(core::mem::size_of::<T>() as isize)))]
     pub const unsafe fn offset(self, count: isize) -> Self
     where
         T: Sized,
@@ -680,12 +678,10 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_allow_const_fn_unstable(set_ptr_value)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    //Requires that the input pointer is not null
-    #[kani::requires(!self.as_ptr().is_null())]
     // Requires that count doesnt exceed Max
-    #[kani::requires(count <= isize::MAX as usize)] 
+    #[requires(count <= isize::MAX as usize)] 
     //Ensures that result is not null
-    #[kani::ensures(|result: &NonNull<T>| !result.as_ptr().is_null())] 
+    #[ensures(|result: &NonNull<T>| !result.as_ptr().is_null())] 
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `sub` and `byte_sub` has the same
         // safety contract.
