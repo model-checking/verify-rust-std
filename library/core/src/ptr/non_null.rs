@@ -9,6 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
+use crate::{ub_checks};
 
 
 #[cfg(kani)]
@@ -406,6 +407,10 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_unstable(feature = "const_ptr_as_ref", issue = "91822")]
     #[must_use]
     #[inline(always)]
+    // verify that `self` meets all the requirements for a mutable reference
+    #[requires(ub_checks::can_dereference(self))]
+    // verify result (a mutable reference) is still associated with the same memory address as the raw pointer stored in self
+    #[ensures(|result: &&mut T| core::ptr::eq(*result, self.as_ptr()))]
     pub const unsafe fn as_mut<'a>(&mut self) -> &'a mut T {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a mutable reference.
@@ -1802,5 +1807,15 @@ mod verify {
         let xptr = &mut x;
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
+    }
+
+    #[kani::proof_for_contract(NonNull::as_mut)]
+    pub fn non_null_check_as_mut() {
+        let mut x: i32 = kani::any();
+        let mut ptr = NonNull::new(x as *mut i32).unwrap();
+
+        unsafe {
+            let result = ptr.as_mut();
+        }
     }
 }
