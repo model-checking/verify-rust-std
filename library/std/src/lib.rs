@@ -269,7 +269,7 @@
 #![cfg_attr(any(windows, target_os = "uefi"), feature(round_char_boundary))]
 #![cfg_attr(target_family = "wasm", feature(stdarch_wasm_atomic_wait))]
 #![cfg_attr(target_arch = "wasm64", feature(simd_wasm64))]
-#![feature(kani)]
+#![cfg_attr(kani, feature(kani))]
 //
 // Language features:
 // tidy-alphabetical-start
