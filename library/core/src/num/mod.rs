@@ -1687,6 +1687,19 @@ mod verify {
         }
     }
 
+    // Verify `wrapping_{shl, shr}` which internally uses `unchecked_{shl,shr}`
+    macro_rules! generate_wrapping_shift_harness {
+        ($type:ty, $method:ident, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::$method)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+                let num2: u32 = kani::any::<u32>();
+
+                let _ = num1.$method(num2);
+            }
+        }
+    }
+
     // `unchecked_add` proofs
     //
     // Target types:
@@ -1905,4 +1918,29 @@ mod verify {
         widening_mul_u64_large, u64::MAX - 10u64, u64::MAX,
         widening_mul_u64_mid_edge, (u64::MAX / 2) - 10u64, (u64::MAX / 2) + 10u64
     );
+
+    // `wrapping_shl` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[ensures(|result| *result == self << (rhs & (Self::BITS - 1)))]
+    //
+    // Target function:
+    // pub const fn wrapping_shl(self, rhs: u32) -> Self
+    //
+    // This function performs an panic-free bitwise left shift operation.
+    generate_wrapping_shift_harness!(i8, wrapping_shl, checked_wrapping_shl_i8);
+    generate_wrapping_shift_harness!(i16, wrapping_shl, checked_wrapping_shl_i16);
+    generate_wrapping_shift_harness!(i32, wrapping_shl, checked_wrapping_shl_i32);
+    generate_wrapping_shift_harness!(i64, wrapping_shl, checked_wrapping_shl_i64);
+    generate_wrapping_shift_harness!(i128, wrapping_shl, checked_wrapping_shl_i128);
+    generate_wrapping_shift_harness!(isize, wrapping_shl, checked_wrapping_shl_isize);
+    generate_wrapping_shift_harness!(u8, wrapping_shl, checked_wrapping_shl_u8);
+    generate_wrapping_shift_harness!(u16, wrapping_shl, checked_wrapping_shl_u16);
+    generate_wrapping_shift_harness!(u32, wrapping_shl, checked_wrapping_shl_u32);
+    generate_wrapping_shift_harness!(u64, wrapping_shl, checked_wrapping_shl_u64);
+    generate_wrapping_shift_harness!(u128, wrapping_shl, checked_wrapping_shl_u128);
+    generate_wrapping_shift_harness!(usize, wrapping_shl, checked_wrapping_shl_usize);
 }

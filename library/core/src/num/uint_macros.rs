@@ -2138,6 +2138,7 @@ macro_rules! uint_impl {
                       without modifying the original"]
         #[inline(always)]
         #[rustc_allow_const_fn_unstable(unchecked_shifts)]
+        #[ensures(|result| *result == self << (rhs & (Self::BITS - 1)))]
         pub const fn wrapping_shl(self, rhs: u32) -> Self {
             // SAFETY: the masking by the bitsize of the type ensures that we do not shift
             // out of bounds
