@@ -502,6 +502,11 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(!origin.as_ptr().is_null())]
+    #[ensures(
+        |result: &isize|
+        *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
+    )]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset` and `byte_offset` has
         // the same safety contract.
@@ -579,6 +584,11 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_allow_const_fn_unstable(set_ptr_value)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(!self.as_ptr().is_null())]
+    #[ensures(
+        |result: &NonNull<T>|
+        (result.as_ptr() as *const () as usize) == ((self.as_ptr() as *const () as usize) + count)
+    )]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add` and `byte_add` has the same
         // safety contract.
@@ -783,6 +793,11 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(!origin.as_ptr().is_null())]
+    #[ensures(
+        |result: &isize|
+        *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
+    )]
     pub const unsafe fn byte_offset_from<U: ?Sized>(self, origin: NonNull<U>) -> isize {
         // SAFETY: the caller must uphold the safety contract for `byte_offset_from`.
         unsafe { self.pointer.byte_offset_from(origin.pointer) }
@@ -1802,5 +1817,64 @@ mod verify {
         let xptr = &mut x;
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
+    }
+
+    #[kani::proof_for_contract(NonNull::byte_add)]
+    pub fn non_null_byte_add_proof() {
+        const ARR_SIZE: usize = 100000;
+        let arr: [i32; ARR_SIZE] = kani::any();
+        let offset = kani::any_where(|x| *x <= ARR_SIZE);
+        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;
+        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
+        let count: usize = kani::any();
+
+        kani::assume(count < usize::MAX);
+        kani::assume(count.checked_mul(mem::size_of::<i32>()).is_some());
+        kani::assume(count * mem::size_of::<i32>() <= (isize::MAX as usize));
+        kani::assume(count < ARR_SIZE - offset);
+
+        unsafe {
+            let result = ptr.byte_add(count);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::byte_offset)]
+    pub fn non_null_byte_offset_proof() {
+        const ARR_SIZE: usize = 100000;
+        let arr: [i32; ARR_SIZE] = kani::any();
+        let offset = kani::any_where(|x| *x <= ARR_SIZE);
+        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;
+        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
+        let count: isize = kani::any();
+
+        kani::assume(count >= isize::MIN);
+        kani::assume(count <= isize::MAX);
+        kani::assume(count.checked_mul(mem::size_of::<i32>() as isize).is_some());
+        kani::assume(count * (mem::size_of::<i32>() as isize) <= (isize::MAX as isize));
+        kani::assume((offset as isize + count) < (ARR_SIZE as isize));
+
+        unsafe {
+            let result = ptr.byte_offset(count);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::byte_offset_from)]
+    pub fn non_null_byte_offset_from_proof() {
+        const ARR_SIZE: usize = 100000;
+        let arr: [i32; ARR_SIZE] = kani::any();
+
+        // Randomly generate offsets for the pointers
+        let offset = kani::any_where(|x| *x < ARR_SIZE);
+        let origin_offset = kani::any_where(|x| *x < ARR_SIZE);
+
+        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;
+        let origin_ptr: *mut i32 = arr.as_ptr() as *mut i32;
+
+        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
+        let origin = unsafe { NonNull::new(origin_ptr.add(origin_offset)).unwrap() };
+
+        unsafe {
+            let result = ptr.byte_offset_from(origin);
+        }
     }
 }
