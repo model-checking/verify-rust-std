@@ -11,8 +11,6 @@ use crate::{fmt, intrinsics, ptr, ub_checks};
 use safety::{ensures, requires};
 #[cfg(kani)]
 use crate::kani;
-use paste::paste;
-
 /// A marker trait for primitive types which can be zero.
 ///
 /// This is an implementation detail for <code>[NonZero]\<T></code> which may disappear or be replaced at any time.
@@ -402,10 +400,6 @@ where
             }
         }
     }
-
-
-
-
 
     /// Converts a reference to a non-zero mutable reference
     /// if the referenced value is not zero.
@@ -2209,34 +2203,29 @@ nonzero_integer! {
     use NonZero;
 
     macro_rules! nonzero_check {
-        ($t:ty, $nonzero_type:ty) => {
-            paste! {
-                #[kani::proof_for_contract(NonZero::new_unchecked)]
-                pub fn [<nonzero_check_new_unchecked_for_ $t>]() {
-                    let x: $t = kani::any();  // Generates a symbolic value of the provided type
-    
-                    // Only proceed if x is not zero, because passing zero would violate the precondition
-                    kani::assume(x != 0);
-    
-                    unsafe {
-                        let _ = <$nonzero_type>::new_unchecked(x);  // Calls NonZero::new_unchecked for the specified NonZero type
-                    }
+        ($t:ty, $nonzero_type:ty, $nonzero_check_new_unchecked_for:ident) => {
+            #[kani::proof_for_contract(NonZero::new_unchecked)]
+            pub fn $nonzero_check_new_unchecked_for() {
+                let x: $t = kani::any();  // Generates a symbolic value of the provided type
+
+                unsafe {
+                    <$nonzero_type>::new_unchecked(x);  // Calls NonZero::new_unchecked for the specified NonZero type
                 }
             }
         };
     }
     
     // Use the macro to generate different versions of the function for multiple types
-    nonzero_check!(i8, core::num::NonZeroI8);
-    nonzero_check!(i16, core::num::NonZeroI16);
-    nonzero_check!(i32, core::num::NonZeroI32);
-    nonzero_check!(i64, core::num::NonZeroI64);
-    nonzero_check!(i128, core::num::NonZeroI128);
-    nonzero_check!(u8, core::num::NonZeroU8);
-    nonzero_check!(u16, core::num::NonZeroU16);
-    nonzero_check!(u32, core::num::NonZeroU32);
-    nonzero_check!(u64, core::num::NonZeroU64);
-    nonzero_check!(u128, core::num::NonZeroU128);
-    nonzero_check!(usize, core::num::NonZeroUsize);
-    nonzero_check!(isize, core::num::NonZeroIsize);
+    nonzero_check!(i8, core::num::NonZeroI8, nonzero_check_new_unchecked_for_i8);
+    nonzero_check!(i16, core::num::NonZeroI16, nonzero_check_new_unchecked_for_16);
+    nonzero_check!(i32, core::num::NonZeroI32, nonzero_check_new_unchecked_for_32);
+    nonzero_check!(i64, core::num::NonZeroI64, nonzero_check_new_unchecked_for_64);
+    nonzero_check!(i128, core::num::NonZeroI128, nonzero_check_new_unchecked_for_128);
+    nonzero_check!(isize, core::num::NonZeroIsize, nonzero_check_new_unchecked_for_isize);
+    nonzero_check!(u8, core::num::NonZeroU8, nonzero_check_new_unchecked_for_u8);
+    nonzero_check!(u16, core::num::NonZeroU16, nonzero_check_new_unchecked_for_u16);
+    nonzero_check!(u32, core::num::NonZeroU32, nonzero_check_new_unchecked_for_u32);
+    nonzero_check!(u64, core::num::NonZeroU64, nonzero_check_new_unchecked_for_u64);
+    nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
+    nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 }
