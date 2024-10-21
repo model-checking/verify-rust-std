@@ -3,8 +3,8 @@
 [Introduction](intro.md)
 
 - [General Rules](./general-rules.md)
-  - [Challenge Template](./template.md)
-  - [Tool application](./todo.md)
+  - [Challenge Template](./challenge_template.md)
+  - [Tool Application Template](./tool_template.md)
 
 - [Verification Tools](./tools.md)
   - [Kani](./tools/kani.md)
