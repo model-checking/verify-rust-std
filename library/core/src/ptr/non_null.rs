@@ -1,6 +1,6 @@
 use crate::cmp::Ordering;
 use crate::marker::Unsize;
-use crate::mem::{self, MaybeUninit, SizedTypeProperties};
+use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
@@ -279,8 +279,7 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[unstable(feature = "strict_provenance", issue = "95228")]
-    #[requires(!self.as_ptr().is_null())]
-    #[ensures(|result| result.get() != 0)]    
+    #[ensures(|result| result.get() != 0 && result.get() == self.as_ptr() as *const() as usize)]
     pub fn addr(self) -> NonZero<usize> {
         // SAFETY: The pointer is guaranteed by the type to be non-null,
         // meaning that the address will be non-zero.
@@ -554,10 +553,9 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
-    #[requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)] // SAFETY: count * size_of::<T>() does not overflow isize
-    //#[requires(ub_checks::can_write(self.as_ptr().offset(count as isize)))] // not working
-    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some() 
+        && count * core::mem::size_of::<T>() <= isize::MAX as usize)]
+    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))] //TODO: use same_allocation to check pointer
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
@@ -566,8 +564,6 @@ impl<T: ?Sized> NonNull<T> {
         // Additionally safety contract of `offset` guarantees that the resulting pointer is
         // pointing to an allocation, there can't be an allocation at null, thus it's safe to
         // construct `NonNull`.
-        assert!(core::mem::size_of::<T>() == 1, "element size is 1");
-        assert!(count * core::mem::size_of::<T>() <= isize::MAX as usize, "count should not overflow");
         unsafe { NonNull { pointer: intrinsics::offset(self.pointer, count) } }
     }
 
@@ -1185,10 +1181,9 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_align_offset", issue = "90962")]
-    #[requires(!self.pointer.is_null())]
     #[ensures(|result| {
         // Post-condition reference: https://github.com/model-checking/verify-rust-std/pull/69/files
-        let stride = mem::size_of::<T>();
+        let stride = crate::mem::size_of::<T>();
         // ZSTs
         if stride == 0 {
             if self.pointer.addr() % align == 0 { 
@@ -1824,7 +1819,6 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
-    use crate::mem::align_of;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -1848,19 +1842,20 @@ mod verify {
     #[kani::proof_for_contract(NonNull::add)]
     pub fn non_null_check_add() {
         const SIZE: usize = 100000;
-        // Randomiz pointer offset within array bound
-        let offset = kani::any_where(|x| *x < SIZE);
+        // Randomize pointer offset within array bound
+        let offset = kani::any_where(|x| * x <= SIZE as isize);
+        kani::assume(offset >= 0);
         // Create a non-deterministic array of size SIZE
         let arr: [i8; SIZE] = kani::any();  
         // Get a raw pointer to the array
         let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
         // NonNUll pointer to the random offset
-        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap()};  
+        let ptr = unsafe { NonNull::new(raw_ptr.offset(offset)).unwrap()};
         // Create a non-deterministic count value
         let count: usize = kani::any();  
 
         // Workaround: SAFETY: Ensure that the pointer operation does not go out of the bounds of the array
-        kani::assume(count < SIZE - offset);
+        kani::assume(count < SIZE - offset as usize);
 
         unsafe {
             // Add a positive offset to pointer
