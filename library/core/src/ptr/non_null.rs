@@ -1812,7 +1812,7 @@ mod verify {
     pub fn non_null_check_sub() {
         const SIZE: usize = 10;
         // Randomiz pointer offset within array bound
-        let offset = kani::any_where(|x| *x < SIZE);
+        let offset = kani::any_where(|x| *x <= SIZE);
         // Create a non-deterministic array of size SIZE
         let arr: [i32; SIZE] = kani::any();  
         // Get a raw pointer to the array
@@ -1836,7 +1836,7 @@ mod verify {
 
         const SIZE: usize = 100000;
 
-        let index = kani::any_where(|x| *x < SIZE);
+        let index = kani::any_where(|x| *x <= SIZE);
         // Create a non-deterministic array of size SIZE
         let arr: [i32; SIZE] = kani::any();  
         // Get a raw pointer to the array
@@ -1845,10 +1845,6 @@ mod verify {
         let ptr = unsafe { NonNull::new(raw_ptr.add(index)).unwrap() };
         // Point to the first element of the array
         let first_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };  // Pointer to the first element
-
-        // Ensure that the memory is properly aligned
-        //kani::assume(raw_ptr as usize % mem::align_of::<i32>() == 0);  // Ensure proper alignment
-
 
         // Perform pointer subtraction safely
         unsafe {
@@ -1861,7 +1857,7 @@ mod verify {
     pub fn non_null_check_offset_from() {
         const SIZE: usize = 200000;
 
-        let index = kani::any_where(|x| *x < SIZE);
+        let index = kani::any_where(|x| *x <= SIZE);
 
         let arr: [i32; SIZE] = kani::any();  // Create a non-deterministic array of size SIZE
         let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  // Get a raw pointer to the array
@@ -1870,9 +1866,6 @@ mod verify {
 
         // Point to the first element of the array
         let first_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };  // Pointer to the first element
-
-        // Ensure that the memory is properly aligned
-        //kani::assume(raw_ptr as usize % mem::align_of::<i32>() == 0);  // Ensure proper alignment
 
         // Perform pointer subtraction safely
         unsafe {
