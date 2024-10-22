@@ -16,7 +16,7 @@ defaults:
 
 jobs:
   check-kani-on-std:
-    name: Verify Rust Code (Default Configuration)
+    name: Verify std Code with Kani
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -35,11 +35,11 @@ jobs:
           submodules: true
 
       # Step 2: Run Kani on the std library (default configuration)
-      - name: Run Kani Verification (Default)
+      - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
 
   test-kani-script:
-    name: Verify Rust Code (Custom Configuration)
+    name: Test Kani Script
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
