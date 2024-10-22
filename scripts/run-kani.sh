@@ -54,7 +54,7 @@ else
     WORK_DIR=$(pwd)
 fi
 
-cd "$WORK_DIR" || exit 1
+cd "$WORK_DIR"
 
 # Default values
 DEFAULT_TOML_FILE="tool_config/kani-version.toml"
@@ -66,17 +66,15 @@ TOML_FILE=${KANI_TOML_FILE:-$DEFAULT_TOML_FILE}
 REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
-os_name=$(uname -s)
-
 # Function to read commit ID from TOML file
 read_commit_from_toml() {
     local file="$1"
-    if [ ! -f "$file" ]; then
+    if [[ ! -f "$file" ]]; then
         echo "Error: TOML file not found: $file" >&2
         exit 1
     fi
     local commit=$(grep '^commit *=' "$file" | sed 's/^commit *= *"\(.*\)"/\1/')
-    if [ -z "$commit" ]; then
+    if [[ -z "$commit" ]]; then
         echo "Error: 'commit' field not found in TOML file" >&2
         exit 1
     fi
@@ -88,18 +86,10 @@ clone_repo() {
     local directory="$2"
     local branch="$3"
     local commit="$4"
-    git clone --depth 1 -b "$branch" "$repo_url" "$directory"
-    cd "$directory"
+    git clone --depth 1 "$repo_url" "$directory"
+    pushd -q "$directory"
     git checkout "$commit"
-    cd - > /dev/null
-}
-
-checkout_commit() {
-    local directory="$1"
-    local commit="$2"
-    cd "$directory"
-    git checkout "$commit"
-    cd ..
+    popd -q
 }
 
 get_current_commit() {
@@ -111,20 +101,21 @@ get_current_commit() {
     fi
 }
 
-build_project() {
+build_kani() {
     local directory="$1"
-    cd "$directory"
+    pushd -q "$directory"
+    os_name=$(uname -s)
 
-    if [ "$os_name" == "Linux" ]; then
+    if [[ "$os_name" == "Linux" ]]; then
         ./scripts/setup/ubuntu/install_deps.sh
-    elif [ "$os_name" == "Darwin" ]; then
+    elif [[ "$os_name" == "Darwin" ]]; then
         ./scripts/setup/macos/install_deps.sh
     else
         echo "Unknown operating system"
     fi
 
     cargo build-dev --release
-    cd ..
+    popd -q
 }
 
 get_kani_path() {
@@ -144,9 +135,9 @@ check_binary_exists() {
     local expected_commit="$2"
     local kani_path="$build_dir/scripts/kani"
 
-    if [ -f "$kani_path" ]; then
+    if [[ -f "$kani_path" ]]; then
         local current_commit=$(get_current_commit "$build_dir")
-        if [ "$current_commit" = "$expected_commit" ]; then
+        if [[ "$current_commit" = "$expected_commit" ]]; then
             return 0
         fi
     fi
@@ -155,7 +146,6 @@ check_binary_exists() {
 
 
 main() {
-    local current_dir=$(pwd)
     local build_dir="$WORK_DIR/kani_build"
     local temp_dir_target=$(mktemp -d)
 
@@ -180,7 +170,7 @@ main() {
         clone_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit"
 
         # Build project
-        build_project "$build_dir"
+        build_kani "$build_dir"
 
         echo "Kani build completed successfully!"
     fi
@@ -193,14 +183,16 @@ main() {
     "$kani_path" --version
 
     echo "Running Kani verify-std command..."
-    cd $current_dir
 
-    # Run the command with the provided arguments (if any)
-    if [ -n "$command_args" ]; then
-        "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse $command_args
-    else
-        "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse
-    fi
+    "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse $command_args
+
 }
 
 main
+
+cleanup()
+{
+  rm -rf "$temp_dir_target"
+}
+
+trap cleanup EXIT
