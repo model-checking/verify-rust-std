@@ -1943,4 +1943,28 @@ mod verify {
     generate_wrapping_shift_harness!(u64, wrapping_shl, checked_wrapping_shl_u64);
     generate_wrapping_shift_harness!(u128, wrapping_shl, checked_wrapping_shl_u128);
     generate_wrapping_shift_harness!(usize, wrapping_shl, checked_wrapping_shl_usize);
+
+    // `wrapping_shr` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[ensures(|result| *result == self >> (rhs & (Self::BITS - 1)))]
+    // Target function:
+    // pub const fn wrapping_shr(self, rhs: u32) -> Self {
+    //
+    // This function performs an panic-free bitwise right shift operation.
+    generate_wrapping_shift_harness!(i8, wrapping_shr, checked_wrapping_shr_i8);
+    generate_wrapping_shift_harness!(i16, wrapping_shr, checked_wrapping_shr_i16);
+    generate_wrapping_shift_harness!(i32, wrapping_shr, checked_wrapping_shr_i32);
+    generate_wrapping_shift_harness!(i64, wrapping_shr, checked_wrapping_shr_i64);
+    generate_wrapping_shift_harness!(i128, wrapping_shr, checked_wrapping_shr_i128);
+    generate_wrapping_shift_harness!(isize, wrapping_shr, checked_wrapping_shr_isize);
+    generate_wrapping_shift_harness!(u8, wrapping_shr, checked_wrapping_shr_u8);
+    generate_wrapping_shift_harness!(u16, wrapping_shr, checked_wrapping_shr_u16);
+    generate_wrapping_shift_harness!(u32, wrapping_shr, checked_wrapping_shr_u32);
+    generate_wrapping_shift_harness!(u64, wrapping_shr, checked_wrapping_shr_u64);
+    generate_wrapping_shift_harness!(u128, wrapping_shr, checked_wrapping_shr_u128);
+    generate_wrapping_shift_harness!(usize, wrapping_shr, checked_wrapping_shr_usize);
 }
