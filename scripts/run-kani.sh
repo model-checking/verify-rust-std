@@ -81,15 +81,15 @@ read_commit_from_toml() {
     echo "$commit"
 }
 
-clone_repo() {
+clone_kani_repo() {
     local repo_url="$1"
     local directory="$2"
     local branch="$3"
     local commit="$4"
-    git clone --depth 1 "$repo_url" "$directory"
-    pushd -q "$directory"
+    git clone "$repo_url" "$directory"
+    pushd "$directory"
     git checkout "$commit"
-    popd -q
+    popd
 }
 
 get_current_commit() {
@@ -103,7 +103,7 @@ get_current_commit() {
 
 build_kani() {
     local directory="$1"
-    pushd -q "$directory"
+    pushd "$directory"
     os_name=$(uname -s)
 
     if [[ "$os_name" == "Linux" ]]; then
@@ -115,7 +115,7 @@ build_kani() {
     fi
 
     cargo build-dev --release
-    popd -q
+    popd
 }
 
 get_kani_path() {
@@ -154,7 +154,6 @@ main() {
 
     # Read commit ID from TOML file
     commit=$(read_commit_from_toml "$TOML_FILE")
-    echo "Kani commit: $commit"
 
     # Check if binary already exists and is up to date
     if check_binary_exists "$build_dir" "$commit"; then
@@ -167,7 +166,7 @@ main() {
         mkdir -p "$build_dir"
 
         # Clone repository and checkout specific commit
-        clone_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit"
+        clone_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit"
 
         # Build project
         build_kani "$build_dir"
@@ -185,7 +184,6 @@ main() {
     echo "Running Kani verify-std command..."
 
     "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse $command_args
-
 }
 
 main
