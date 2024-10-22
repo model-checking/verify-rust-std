@@ -9,7 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-
+use crate::{ub_checks};
 
 #[cfg(kani)]
 use crate::kani;
@@ -334,6 +334,8 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_never_returns_null_ptr]
     #[must_use]
     #[inline(always)]
+    //Ensures address of resulting pointer is same as original
+    #[ensures(|result: &*mut T| *result as *const () as usize == self.pointer as *const () as usize)]
     pub const fn as_ptr(self) -> *mut T {
         self.pointer as *mut T
     }
@@ -430,6 +432,10 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[inline]
+    //Address presaervation
+    #[ensures(|result: &NonNull<U>|  result.as_ptr() as *const () as usize == self.as_ptr() as *const () as usize )]
+    //Ensures size of pointer types is same and pointer is properly aligned for new type 'U'
+    #[ensures(|result: &NonNull<U>|  core::mem::size_of::<*mut U>() == core::mem::size_of::<*mut T>() || (self.as_ptr() as *const () as usize) % core::mem::align_of::<U>() == 0)]
     pub const fn cast<U>(self) -> NonNull<U> {
         // SAFETY: `self` is a `NonNull` pointer which is necessarily non-null
         unsafe { NonNull { pointer: self.as_ptr() as *mut U } }
@@ -1508,6 +1514,10 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_const_unstable(feature = "slice_ptr_get", issue = "74265")]
+    // Require slice pointer be valid before converting it
+    #[requires(kani::mem::can_dereference(self.as_ptr()))]
+    //Address preservation
+    #[ensures(|result: &NonNull<T>| result.as_ptr() as *const () as usize == self.as_ptr() as *const () as usize)]
     pub const fn as_non_null_ptr(self) -> NonNull<T> {
         self.cast()
     }
@@ -1528,6 +1538,8 @@ impl<T> NonNull<[T]> {
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_const_unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_never_returns_null_ptr]
+    //Address preservation
+    #[ensures(|result: &*mut T| *result as *const () as usize == self.as_non_null_ptr().as_ptr() as *const () as usize)]
     pub const fn as_mut_ptr(self) -> *mut T {
         self.as_non_null_ptr().as_ptr()
     }
@@ -1803,4 +1815,42 @@ mod verify {
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
+
+  #[kani::proof_for_contract(NonNull::as_ptr)]
+  pub fn non_null_check_as_ptr() {
+      // Create a non-null pointer to a random value
+      let mut x: i32 = kani::any();
+      let ptr = NonNull::new(&mut x as *mut i32).unwrap();
+      // Call as_ptr
+      let raw_ptr = ptr.as_ptr();
+    }
+#[kani::proof_for_contract(NonNull::<[T]>::as_mut_ptr)]
+pub fn non_null_check_as_mut_ptr() {
+    // Create a non-null slice pointer
+    let mut value: i32 = kani::any();
+    let ptr = NonNull::new(&mut value as *mut i32).unwrap();
+    let slice_ptr = NonNull::slice_from_raw_parts(ptr, 1);
+    // Call as_mut_ptr
+    let raw_ptr = slice_ptr.as_mut_ptr();
+}
+
+#[kani::proof_for_contract(NonNull::<T>::cast)]
+pub fn non_null_check_cast() {
+    // Create a non-null pointer to a random value
+    let mut x: i32 = kani::any();
+    let ptr = NonNull::new(&mut x as *mut i32).unwrap();
+    // Perform the cast
+    unsafe{ let casted_ptr: NonNull<u8> = ptr.cast();}
+}
+#[kani::proof_for_contract(NonNull::<[T]>::as_non_null_ptr)]
+pub fn non_null_check_as_non_null_ptr() {
+ // Create a non-null pointer to a random value
+let mut value: i32 = kani::any();
+let ptr = NonNull::new(&mut value as *mut i32).unwrap();
+// Create a slice pointer
+let slice_ptr = NonNull::slice_from_raw_parts(ptr, 1);
+// Call as_non_null_ptr
+let result = slice_ptr.as_non_null_ptr();
+}
+    
 }
