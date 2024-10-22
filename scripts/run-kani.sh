@@ -47,7 +47,6 @@ if [[ -n "$path" ]]; then
     if [[ ! -d "$path" ]]; then
         echo "Error: Specified directory does not exist."
         usage
-        exit 1
     fi
     WORK_DIR=$(realpath "$path")
 else
@@ -133,7 +132,7 @@ run_kani_command() {
 check_binary_exists() {
     local build_dir="$1"
     local expected_commit="$2"
-    local kani_path="$build_dir/scripts/kani"
+    local kani_path=$(get_kani_path "$build_dir")
 
     if [[ -f "$kani_path" ]]; then
         local current_commit=$(get_current_commit "$build_dir")

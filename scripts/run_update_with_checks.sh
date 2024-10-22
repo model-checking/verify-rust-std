@@ -135,47 +135,47 @@ fi
 
 echo "------------------------------------"
 # Call the first script to update the subtree
-echo "Update subtree in main"
+echo "Update subtree in Main"
 source $BASE_HOME_DIR/scripts/pull_from_upstream.sh "$TEMP_HOME_DIR" $TOOLCHAIN_DATE $COMMIT_HASH
-pull_from_upstream=("$?")
-if [ "${#pull_from_upstream[@]}" -eq 0 ]; then
-    echo "pull_from_upstream.sh failed to run."
+OUTPUT_SCRIPT1=("$?")
+if [ "${#OUTPUT_SCRIPT1[@]}" -eq 0 ]; then
+    echo "script1.sh failed to run."
     exit 1
 else
-    echo "Pulled from upstream succesfully."
+    echo "script1.sh completed successfully."
 fi
 
 # Call the second script
-echo "Updating toolchain..."
+echo "Running script2.sh..."
 source $BASE_HOME_DIR/scripts/update_toolchain_date.sh "$TEMP_HOME_DIR" "$TOOLCHAIN_DATE"
-update_toolchain_date=("$?")
-if [ "${#update_toolchain_date[@]}" -eq 0 ]; then
-    echo "update_toolchain_date.sh failed to run."
+OUTPUT_SCRIPT2=("$?")
+if [ "${#OUTPUT_SCRIPT2[@]}" -eq 0 ]; then
+    echo "script2.sh failed to run."
     exit 1
 else
-    echo "Toolchain updated succesfully."
+    echo "Update toolchain ran successfully."
 fi
 
 # Call the third script
-echo "echo "Checking compatiblity with kani..."
+echo "Running script3.sh..."
 source $BASE_HOME_DIR/scripts/check_rustc.sh "$TEMP_HOME_DIR"
-check_rustc=("$?")
-if [ "${#check_rustc[@]}" -eq 0 ]; then
-    echo "check_rustc.sh failed to run."
+OUTPUT_SCRIPT3=("$?")
+if [ "${#OUTPUT_SCRIPT3[@]}" -eq 0 ]; then
+    echo "script3.sh failed to run."
     exit 1
 else
-    echo "Changes compatible with latest rustc."
+    echo "script3.sh completed successfully."
 fi
 
-# Checking compatiblity with kani
-echo "Checking compatiblity with kani..."
-source $BASE_HOME_DIR/run-kani.sh "$TEMP_HOME_DIR"
-run_kani=("$?")
-if [ "${#run_kani[@]}" -eq 0 ]; then
-    echo "run_kani.sh failed to run."
+# Call the fourth script
+echo "Running script4.sh..."
+source $BASE_HOME_DIR/scripts/check_kani.sh "$TEMP_HOME_DIR"
+OUTPUT_SCRIPT4=("$?")
+if [ "${#OUTPUT_SCRIPT4[@]}" -eq 0 ]; then
+    echo "script4.sh failed to run."
     exit 1
 else
-    echo "Changes compatible with kani's features/verify-std branch."
+    echo "script4.sh completed successfully."
 fi
 
 # TODO: Issue a Pull Request from the sync branch of the temp repo
