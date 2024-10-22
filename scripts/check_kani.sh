@@ -44,7 +44,7 @@ cargo build-dev --release
 echo "Running tests..."
 echo
 cd "$VERIFY_RUST_STD_DIR"
-$KANI_DIR/scripts/kani verify-std -Z unstable-options $VERIFY_RUST_STD_DIR/library --target-dir "$RUNNER_TEMP" -Z function-contracts -Z mem-predicates
+$KANI_DIR/scripts/kani verify-std -Z unstable-options $VERIFY_RUST_STD_DIR/library --target-dir "$RUNNER_TEMP" -Z function-contracts -Z mem-predicates -Z loop-contracts
 
 echo "Tests completed."
 echo

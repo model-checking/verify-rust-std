@@ -15,6 +15,11 @@ use crate::simd::{self, Simd};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hint, ptr, slice};
 
+use safety::{requires, ensures};
+
+#[cfg(kani)]
+use crate::kani;
+
 #[unstable(
     feature = "slice_internals",
     issue = "none",
@@ -3362,6 +3367,7 @@ impl<T> [T] {
         // thus `next_read > next_write - 1` is too.
         unsafe {
             // Avoid bounds checks by using raw pointers.
+            #[cfg_attr(kani, kani::loop_invariant(next_read <= len && next_read >= next_write && next_write >= 1))]
             while next_read < len {
                 let ptr_read = ptr.add(next_read);
                 let prev_ptr_write = ptr.add(next_write - 1);
@@ -4910,5 +4916,40 @@ impl<const N: usize> fmt::Debug for GetManyMutError<N> {
 impl<const N: usize> fmt::Display for GetManyMutError<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt("an index is out of bounds or appeared multiple times in the array", f)
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+
+    pub fn any_slice_of_array<T, const LENGTH: usize>(arr: &[T; LENGTH]) -> &[T] {
+        let (from, to) = any_range::<LENGTH>();
+        &arr[from..to]
+    }
+
+    /// A mutable version of the previous function
+    pub fn any_slice_of_array_mut<T, const LENGTH: usize>(arr: &mut [T; LENGTH]) -> &mut [T] {
+        let (from, to) = any_range::<LENGTH>();
+        &mut arr[from..to]
+    }
+
+    fn any_range<const LENGTH: usize>() -> (usize, usize) {
+        let from: usize = kani::any();
+        let to: usize = kani::any();
+        kani::assume(to <= LENGTH);
+        kani::assume(from <= to);
+        (from, to)
+    }
+
+    #[kani::proof]
+    pub fn check_partition_dedup_by() {
+        const ARR_SIZE: usize = 1000;
+        let mut x: [u8; ARR_SIZE] = kani::any();
+        let xs = any_slice_of_array_mut(&mut x);
+        unsafe {
+            xs.partition_dedup_by(|a, b| a == b);
+        }
     }
 }
