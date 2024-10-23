@@ -113,6 +113,7 @@ build_kani() {
         echo "Unknown operating system"
     fi
 
+    git submodule update --init --recursive
     cargo build-dev --release
     popd
 }
