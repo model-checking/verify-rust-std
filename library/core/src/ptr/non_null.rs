@@ -1584,6 +1584,10 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "const_ptr_as_ref", issue = "91822")]
+    #[requires(self.as_ptr().cast::<T>().align_offset(core::mem::align_of::<T>()) == 0)] // Ensure the pointer is properly aligned
+    #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)] // Ensure the slice size does not exceed isize::MAX
+    // TODO: add a require to check the slice belong to same allocated object with `same_allocation`
+    #[ensures(|result: &&[MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))] // Ensure the memory addresses match.
     pub const unsafe fn as_uninit_slice<'a>(self) -> &'a [MaybeUninit<T>] {
         // SAFETY: the caller must uphold the safety contract for `as_uninit_slice`.
         unsafe { slice::from_raw_parts(self.cast().as_ptr(), self.len()) }
@@ -1857,7 +1861,23 @@ mod verify {
         let ptr = NonNull::new(uninit.as_mut_ptr()).unwrap();
 
         unsafe {
-            let uninit_ref =  ptr.as_uninit_ref();
+            let uninit_ref = ptr.as_uninit_ref();
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::as_uninit_slice)]
+    pub fn non_null_check_as_uninit_slice() {
+        use core::mem::MaybeUninit;
+
+        const SIZE: usize = 100000;
+        let arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let ptr = NonNull::slice_from_raw_parts(
+            NonNull::new(arr.as_ptr()).unwrap(),
+            SIZE,
+        );
+
+        unsafe {
+            let _ = ptr.as_uninit_slice();
         }
     }
 }
