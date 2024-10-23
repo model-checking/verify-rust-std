@@ -294,6 +294,15 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[unstable(feature = "strict_provenance", issue = "95228")]
+    //ensures new address is non null
+    #[requires(addr.get() != 0)]
+    //Guarantees the resulting pointer is non-null
+    #[ensures(|result: &Self| !result.as_ptr().is_null())]
+    //Ensures the resulting pointer has the exact address provided
+    #[ensures(|result: &Self| result.addr() == addr)]
+    //true for sized types; for unsized types it ensures that metadata remains same
+    //#[ensures(|result: &Self| core::mem::size_of::<*mut T>() == core::mem::size_of::<*mut ()>() || 
+                      //        result.as_ptr().to_raw_parts().1 == self.as_ptr().to_raw_parts().1)]
     pub fn with_addr(self, addr: NonZero<usize>) -> Self {
         // SAFETY: The result of `ptr::from::with_addr` is non-null because `addr` is guaranteed to be non-zero.
         unsafe { NonNull::new_unchecked(self.pointer.with_addr(addr.get()) as *mut _) }
@@ -308,6 +317,8 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[unstable(feature = "strict_provenance", issue = "95228")]
+    //guarentees that function always returns a valid (non-null) pointer
+    #[ensures(|result: &Self| !result.as_ptr().is_null())]
     pub fn map_addr(self, f: impl FnOnce(NonZero<usize>) -> NonZero<usize>) -> Self {
         self.with_addr(f(self.addr()))
     }
@@ -476,6 +487,10 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    // Requires that multiplying count by the size of T doesn't overflow isize
+    #[requires(count.checked_mul(core::mem::size_of::<T>() as isize).is_some())]
+    //Two conditions for postconditions: 1.Resulting pointer is not null 2.Safe operation of pointer arithmetic
+    #[ensures(|result: &NonNull<T>|  !result.as_ptr().is_null() && (result.as_ptr() as isize) == (self.as_ptr() as isize).wrapping_add(count.wrapping_mul(core::mem::size_of::<T>() as isize)))]
     pub const unsafe fn offset(self, count: isize) -> Self
     where
         T: Sized,
@@ -663,6 +678,10 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_allow_const_fn_unstable(set_ptr_value)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    // Requires that count doesnt exceed Max
+    #[requires(count <= isize::MAX as usize)] 
+    //Ensures that result is not null
+    #[ensures(|result: &NonNull<T>| !result.as_ptr().is_null())] 
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `sub` and `byte_sub` has the same
         // safety contract.
@@ -1785,6 +1804,8 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
+    use core::ptr::NonNull;
+    use core::num::NonZeroUsize;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -1803,4 +1824,74 @@ mod verify {
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
+   #[kani::proof_for_contract(NonNull::byte_sub)]
+    pub fn non_null_check_byte_sub() {
+    // Initializing array of size 10000
+    const ARR_SIZE: usize = 100000;
+    let arr: [i32; ARR_SIZE] = kani::any();
+    //Randomizing start pointer within array
+    let offset = kani::any_where(|x| *x <= ARR_SIZE);
+    // Create a NonNull pointer to the end of the array
+    let raw_ptr: *mut i32 = unsafe { arr.as_ptr().add(offset) as *mut i32 };
+    let ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
+    // Choose an arbitrary count to subtract
+    let count: usize = kani::any();
+    // Ensure that the subtraction doesnt go out of bounds of array
+     kani::assume(count < ARR_SIZE - offset);
+  unsafe {
+     // Perform the byte_sub operation
+     let result = ptr.byte_sub(count);
+  }}
+
+  #[kani::proof_for_contract(NonNull::offset)]
+   pub fn non_null_check_offset(){
+        //Initializing array of size 10000
+        const ARR_SIZE: usize = 10000;
+        let arr: [i32; ARR_SIZE] = kani::any(); 
+         // Randomizing start pointer within array
+        let start_offset = kani::any_where(|x| *x < ARR_SIZE);
+        // Creating a NonNull pointer to a random position within the array
+        let ptr = unsafe { NonNull::new(arr.as_ptr().add(start_offset) as *mut i32).unwrap() };
+        // Choose an arbitrary count to offset
+        let count: isize = kani::any();
+        // Constraining the count to ensure it doesn't go out of bounds
+        kani::assume(
+            (count >= 0 && (count as usize) < ARR_SIZE - start_offset) ||
+            (count < 0 && count.unsigned_abs() <= start_offset)
+        );
+        unsafe {
+            // Perform the offset operation
+            let result = ptr.offset(count);
+        }
+    }
+     #[kani::proof_for_contract(NonNull::map_addr)]
+    pub fn non_null_check_map_addr() {
+    const SIZE: usize = 100000;
+    // Create a non-deterministic array of size SIZE
+    let arr: [i32; SIZE] = kani::any();
+    // Randomize pointer offset within array bound
+    let offset: usize = kani::any_where(|&x| x < SIZE);
+    // NonNull pointer to the random offset
+    let ptr = unsafe { NonNull::new(arr.as_ptr().add(offset) as *mut i32).unwrap() };
+    // Define the mapping function
+    let f = |addr: NonZeroUsize| -> NonZeroUsize {
+        let new_offset = kani::any_where(|&x: &usize| x < SIZE);
+        // SAFETY: arr.as_ptr() as usize is non-zero and new_offset is less than SIZE
+        unsafe { NonZeroUsize::new_unchecked((arr.as_ptr() as usize) + new_offset) }
+    };
+    let result = ptr.map_addr(f);
+}
+
+    #[kani::proof_for_contract(NonNull::with_addr)]
+    pub fn non_null_check_with_addr() {
+    const SIZE: usize = 100000;
+    let arr: [i32; SIZE] = kani::any();
+    // Create a NonNull pointer within the array
+    let offset: usize = kani::any_where(|&x| x < SIZE);
+    let ptr = unsafe { NonNull::new(arr.as_ptr().add(offset) as *mut i32).unwrap() };
+    // Generate a new address within the array bounds
+    let new_offset: usize = kani::any_where(|&x| x < SIZE);
+    let new_addr = unsafe { NonZeroUsize::new_unchecked(arr.as_ptr() as usize + new_offset) };
+    let result = ptr.with_addr(new_addr);
+}
 }
