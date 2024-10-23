@@ -502,7 +502,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(!origin.as_ptr().is_null())]
+    // TODO: add a require to check whether two pointer points to the same allocated object with `same_allocation`
     #[ensures(
         |result: &isize|
         *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
@@ -584,7 +584,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_allow_const_fn_unstable(set_ptr_value)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(!self.as_ptr().is_null())]
+    // TODO: add a require to check whether two pointer points to the same allocated object with `same_allocation`
     #[ensures(
         |result: &NonNull<T>|
         (result.as_ptr() as *const () as usize) == ((self.as_ptr() as *const () as usize) + count)
@@ -793,7 +793,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(!origin.as_ptr().is_null())]
+    // TODO: add a require to check whether two pointer points to the same allocated object with `same_allocation`
     #[ensures(
         |result: &isize|
         *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
