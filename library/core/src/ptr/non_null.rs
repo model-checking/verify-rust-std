@@ -7,7 +7,7 @@ use crate::pin::PinCoerceUnsized;
 use crate::ptr::Unique;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
-use crate::{fmt, hash, intrinsics, ptr};
+use crate::{fmt, hash, intrinsics, ptr, ub_checks};
 use safety::{ensures, requires};
 
 
@@ -279,6 +279,7 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[unstable(feature = "strict_provenance", issue = "95228")]
+    #[ensures(|result| result.get() != 0 && result.get() == self.as_ptr() as *const() as usize)]
     pub fn addr(self) -> NonZero<usize> {
         // SAFETY: The pointer is guaranteed by the type to be non-null,
         // meaning that the address will be non-zero.
@@ -552,6 +553,9 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some() 
+        && count * core::mem::size_of::<T>() <= isize::MAX as usize)]
+    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))] //TODO: use same_allocation to check pointer
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
@@ -1177,6 +1181,36 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_align_offset", issue = "90962")]
+    #[ensures(|result| {
+        // Post-condition reference: https://github.com/model-checking/verify-rust-std/pull/69/files
+        let stride = crate::mem::size_of::<T>();
+        // ZSTs
+        if stride == 0 {
+            if self.pointer.addr() % align == 0 { 
+                return *result == 0;
+            } else { 
+                return *result == usize::MAX;
+            }
+        }
+        // In this case, the pointer cannot be aligned
+        if (align % stride == 0) && (self.pointer.addr() % stride != 0) {
+            return *result == usize::MAX;
+        }
+        // Checking if the answer should indeed be usize::MAX when align % stride != 0
+        // requires computing gcd(a, stride), which is too expensive without
+        // quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html).
+        // This should be updated once quantifiers are available.
+        if (align % stride != 0 && *result == usize::MAX) { 
+            return true; 
+        }
+        // If we reach this case, either:
+        //  - align % stride == 0 and self.pointer.addr() % stride == 0, so it is definitely possible to align the pointer
+        //  - align % stride != 0 and result != usize::MAX, so align_offset is claiming that it's possible to align the pointer
+        // Check that applying the returned result does indeed produce an aligned address
+        let product = usize::wrapping_mul(*result, stride);
+        let new_addr = usize::wrapping_add(product, self.pointer.addr());
+        *result != usize::MAX && new_addr % align == 0
+    })]
     pub const fn align_offset(self, align: usize) -> usize
     where
         T: Sized,
@@ -1795,12 +1829,78 @@ mod verify {
         }
     }
 
-    // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
+    // pub const fn new(ptr: *mut T) -> Option<Self>
     #[kani::proof_for_contract(NonNull::new)]
     pub fn non_null_check_new() {
         let mut x: i32 = kani::any();
         let xptr = &mut x;
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
+    }
+
+    // pub const unsafe fn add(self, count: usize) -> Self
+    #[kani::proof_for_contract(NonNull::add)]
+    pub fn non_null_check_add() {
+        const SIZE: usize = 100000;
+        // Randomize pointer offset within array bound
+        let offset = kani::any_where(|x| * x <= SIZE as isize);
+        kani::assume(offset >= 0);
+        // Create a non-deterministic array of size SIZE
+        let arr: [i8; SIZE] = kani::any();  
+        // Get a raw pointer to the array
+        let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
+        // NonNUll pointer to the random offset
+        let ptr = unsafe { NonNull::new(raw_ptr.offset(offset)).unwrap()};
+        // Create a non-deterministic count value
+        let count: usize = kani::any();  
+
+        // Workaround: SAFETY: Ensure that the pointer operation does not go out of the bounds of the array
+        kani::assume(count < SIZE - offset as usize);
+
+        unsafe {
+            // Add a positive offset to pointer
+            let result = ptr.add(count);
+        }
+    }
+
+    // pub fn addr(self) -> NonZero<usize>
+    #[kani::proof_for_contract(NonNull::addr)]
+    pub fn non_null_check_addr() {  
+        // Create NonNull pointer & get pointer address
+        let mut x: i32 = kani::any();
+        let nonnull_xptr = NonNull::new(&mut x as *mut i32).unwrap();
+        let address = nonnull_xptr.addr();
+    }
+
+    // pub fn align_offset(self, align: usize) -> usize
+    #[kani::proof_for_contract(NonNull::align_offset)]
+    pub fn non_null_check_align_offset() {
+        // Create NonNull pointer
+        let mut x: i8 = kani::any();
+        let nonnull_xptr = NonNull::new(&mut x as *mut i8).unwrap();
+    
+        // Call align_offset with valid align value
+        let align: usize = kani::any();
+        kani::assume(align.is_power_of_two());
+        nonnull_xptr.align_offset(align);
+    }
+
+    // pub fn align_offset(self, align: usize) -> usize
+    #[kani::should_panic]
+    #[kani::proof_for_contract(NonNull::align_offset)]
+    pub fn non_null_check_align_offset_negative() {
+        // Non-deterministic input array of i8 (signed 8-bit integers)
+        let mut x: i8 = kani::any();
+        let xptr = &mut x as *mut i8;
+    
+        // Non-null pointer to the start of the array
+        let nonnull_xptr = NonNull::new(xptr).unwrap();
+
+        // Generate align value that is not a power of two
+        let invalid_align: usize = kani::any();
+        kani::assume(!invalid_align.is_power_of_two());
+    
+        // Trigger panic
+        let offset = nonnull_xptr.align_offset(invalid_align);
     }
 }
