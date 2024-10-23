@@ -111,6 +111,7 @@ impl<T: Sized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_dangling", since = "1.36.0")]
     #[must_use]
     #[inline]
+    #[ensures(|result| !result.pointer.is_null() && result.pointer.is_aligned())]
     pub const fn dangling() -> Self {
         // SAFETY: mem::align_of() returns a non-zero usize which is then casted
         // to a *mut T. Therefore, `ptr` is not null and the conditions for
@@ -248,6 +249,8 @@ impl<T: ?Sized> NonNull<T> {
     #[unstable(feature = "ptr_metadata", issue = "81513")]
     #[rustc_const_unstable(feature = "ptr_metadata", issue = "81513")]
     #[inline]
+    //TODO: Do we want requires for different types?
+    #[ensures(|result| !result.pointer.is_null())]
     pub const fn from_raw_parts(
         data_pointer: NonNull<()>,
         metadata: <T as super::Pointee>::Metadata,
@@ -266,6 +269,7 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[inline]
+    #[ensures(|(data_ptr, metadata)| self == NonNull::from_raw_parts(*data_ptr, *metadata))]
     pub const fn to_raw_parts(self) -> (NonNull<()>, <T as super::Pointee>::Metadata) {
         (self.cast(), super::metadata(self.as_ptr()))
     }
@@ -1443,10 +1447,17 @@ impl<T> NonNull<[T]> {
     ///
     /// (Note that this example artificially demonstrates a use of this method,
     /// but `let slice = NonNull::from(&x[..]);` would be a better way to write code like this.)
+    // Safety: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
     #[stable(feature = "nonnull_slice_from_raw_parts", since = "1.70.0")]
     #[rustc_const_unstable(feature = "const_slice_from_raw_parts_mut", issue = "67456")]
     #[must_use]
     #[inline]
+    //TODO: The entire memory range of this slice must be contained within a single allocated object(same_allocation?) which means must be valid for reads for len * mem::size_of::<T>() many bytes
+    #[requires(data.pointer.is_aligned() 
+        && len as isize * core::mem::size_of::<T>() as isize <= isize::MAX
+        && (len as isize).checked_mul(core::mem::size_of::<T>() as isize).is_some()
+        && (data.pointer as isize).checked_add(len as isize * core::mem::size_of::<T>() as isize).is_some())] // adding len * core::mem::size_of::<T>() to data must not “wrap around” the address space
+    #[ensures(|result| !result.pointer.is_null())] //TODO: &data[..len] == result.as_ref() preserve content
     pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self {
         // SAFETY: `data` is a `NonNull` pointer which is necessarily non-null
         unsafe { Self::new_unchecked(super::slice_from_raw_parts_mut(data.as_ptr(), len)) }
@@ -1786,6 +1797,20 @@ mod verify {
     use super::*;
     use crate::ptr::null_mut;
 
+    trait SampleTrait {
+        fn get_value(&self) -> i32;
+    }
+    
+    struct SampleStruct {
+        value: i32,
+    }
+    
+    impl SampleTrait for SampleStruct {
+        fn get_value(&self) -> i32 {
+            self.value
+        }
+    }
+
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
     pub fn non_null_check_new_unchecked() {
@@ -1802,5 +1827,107 @@ mod verify {
         let xptr = &mut x;
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
+    }
+
+    // pub const fn dangling() -> Self
+    #[kani::proof_for_contract(NonNull::dangling)]
+    pub fn non_null_check_dangling() {
+        // unsigned integer types
+        let ptr_u8 = NonNull::<u8>::dangling();
+        let ptr_u16 = NonNull::<u16>::dangling();
+        let ptr_u32 = NonNull::<u32>::dangling();
+        let ptr_u64 = NonNull::<u64>::dangling();
+        let ptr_u128 = NonNull::<u128>::dangling();
+        let ptr_usize = NonNull::<usize>::dangling();
+        // signed integer types
+        let ptr_i8 = NonNull::<i8>::dangling();
+        let ptr_i16 = NonNull::<i16>::dangling();
+        let ptr_i32 = NonNull::<i32>::dangling();
+        let ptr_i64 = NonNull::<i64>::dangling();
+        let ptr_i128 = NonNull::<i128>::dangling();
+        let ptr_isize = NonNull::<isize>::dangling();
+        // unit type
+        let ptr_unit = NonNull::<()>::dangling();
+    }
+/*
+    // pub const fn from_raw_parts(data_pointer: NonNull<()>, metadata: <T as super::Pointee>::Metadata,) -> NonNull<T>
+    #[kani::proof_for_contract(NonNull::from_raw_parts)]
+    pub fn non_null_check_from_raw_parts() {
+
+        const arr_len: usize = 100;
+        // Create a non-deterministic array and its slice
+        let arr: [i8; arr_len] = kani::any();
+        let arr_slice = &arr[..];  
+        // Get a raw NonNull pointer to the start of the slice
+        let arr_slice_raw_ptr = NonNull::new(arr_slice.as_ptr() as *mut ()).unwrap();  
+        // Create NonNull pointer from the start pointer and the length of the slice
+        // Safety: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
+        let nonnull_slice = NonNull::<[i8]>::from_raw_parts(arr_slice_raw_ptr, arr_len);
+        // Ensure slice content is preserved, runtime at this step is proportional to arr_len
+        unsafe {
+            kani::assert( arr_slice == nonnull_slice.as_ref(), "slice content must preserve" );
+        }
+            
+        // Create a SampleTrait object from SampleStruct
+        let sample_struct = SampleStruct { value: kani::any() };
+        let trait_object: &dyn SampleTrait = &sample_struct;
+
+        // Get the raw data pointer and metadata for the trait object
+        let trait_ptr = NonNull::new(trait_object as *const dyn SampleTrait as *mut ()).unwrap();
+        // Safety: For trait objects, the metadata must come from a pointer to the same underlying erased type
+        let metadata = core::ptr::metadata(trait_object);
+
+        // Create NonNull<dyn MyTrait> from the data pointer and metadata
+        let nonnull_trait_object: NonNull<dyn SampleTrait> = NonNull::from_raw_parts(trait_ptr, metadata);
+
+        unsafe {
+            // Ensure trait method and member is preserved
+            kani::assert( trait_object.get_value() == nonnull_trait_object.as_ref().get_value(), "trait method and member must correctly preserve");
+        }
+
+    }
+*/
+    // pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self
+    #[kani::proof_for_contract(NonNull::slice_from_raw_parts)]
+    pub fn non_null_check_slice_from_raw_parts() {
+        const arr_len: usize = 10;
+        // Create a non-deterministic array
+        let mut arr: [i8; arr_len] = kani::any();
+        // Get a raw NonNull pointer to the start of the slice
+        let arr_raw_ptr = NonNull::new(arr.as_mut_ptr()).unwrap();  
+        // Create NonNull slice from the start pointer and ends at random slice_len
+        // Safety: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
+        let slice_len: usize = kani::any();
+        kani::assume(slice_len <= arr_len);
+        let nonnull_slice = NonNull::<[i8]>::slice_from_raw_parts(arr_raw_ptr, slice_len);
+        // Ensure slice content is preserved, runtime at this step is proportional to arr_len
+        unsafe {
+            kani::assert( &arr[..slice_len] == nonnull_slice.as_ref(), "slice content must preserve" );
+        }
+    }
+
+    // pub const fn to_raw_parts(self) -> (NonNull<()>, <T as super::Pointee>::Metadata)
+    #[kani::proof_for_contract(NonNull::to_raw_parts)]
+    pub fn non_null_check_to_raw_parts() {
+        // Create a SampleTrait object from SampleStruct
+        let sample_struct = SampleStruct { value: kani::any() };
+        let trait_object: &dyn SampleTrait = &sample_struct;
+
+        // Get the raw data pointer and metadata for the trait object
+        let trait_ptr = NonNull::from(trait_object).cast::<()>();
+        //let trait_ptr = NonNull::new(trait_object as *const dyn SampleTrait as *mut ()).unwrap();
+        // Safety: For trait objects, the metadata must come from a pointer to the same underlying erased type
+        let metadata = core::ptr::metadata(trait_object);
+
+        // Create NonNull<dyn MyTrait> from the data pointer and metadata
+        let nonnull_trait_object: NonNull<dyn SampleTrait> = NonNull::from_raw_parts(trait_ptr, metadata);
+        let (decomposed_data_ptr, decomposed_metadata) = NonNull::to_raw_parts(nonnull_trait_object);
+/*
+        unsafe {
+            // Ensure trait method and member is preserved
+            kani::assert( trait_object.get_value() == nonnull_trait_object.as_ref().get_value(), "trait method and member must correctly preserve");
+        }
+    }
+*/
     }
 }
