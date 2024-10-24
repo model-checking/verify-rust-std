@@ -1653,6 +1653,11 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "const_ptr_as_ref", issue = "91822")]
+    #[requires(self.as_ptr().cast::<T>().align_offset(core::mem::align_of::<T>()) == 0)] // Ensure the pointer is properly aligned
+    #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)] // Ensure the slice size does not exceed isize::MAX
+    // TODO: add a require to check the slice belong to same allocated object with `same_allocation`
+    #[ensures(|result: &&mut [MaybeUninit<T>]| result.len() == self.len())] // Length check
+    #[ensures(|result: &&mut [MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))]  // Address check
     pub const unsafe fn as_uninit_slice_mut<'a>(self) -> &'a mut [MaybeUninit<T>] {
         // SAFETY: the caller must uphold the safety contract for `as_uninit_slice_mut`.
         unsafe { slice::from_raw_parts_mut(self.cast().as_ptr(), self.len()) }
@@ -1681,6 +1686,8 @@ impl<T> NonNull<[T]> {
     /// ```
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[inline]
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]  // Ensure self is dereferenceable
+    #[ensures(|result: &NonNull<I::Output>| result.as_ptr() as *mut () != core::ptr::null_mut())]  // Ensure valid non-null pointer
     pub unsafe fn get_unchecked_mut<I>(self, index: I) -> NonNull<I::Output>
     where
         I: SliceIndex<[T]>,
