@@ -1870,14 +1870,30 @@ mod verify {
         use core::mem::MaybeUninit;
 
         const SIZE: usize = 100000;
-        let arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let mut arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
         let ptr = NonNull::slice_from_raw_parts(
-            NonNull::new(arr.as_ptr()).unwrap(),
+            NonNull::new(arr.as_mut_ptr()).unwrap(),
             SIZE,
         );
 
         unsafe {
             let _ = ptr.as_uninit_slice();
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::as_uninit_slice_mut)]
+    pub fn non_null_check_as_uninit_slice_mut() {
+        use core::mem::MaybeUninit;
+
+        const SIZE: usize = 100000;
+        let mut arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let ptr = NonNull::slice_from_raw_parts(
+            NonNull::new(arr.as_mut_ptr()).unwrap(),
+            SIZE,
+        );
+
+        unsafe {
+            let _ = ptr.as_uninit_slice_mut();
         }
     }
 }
