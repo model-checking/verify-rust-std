@@ -503,10 +503,15 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     // TODO: add a require to check whether two pointer points to the same allocated object with `same_allocation`
-    #[ensures(
-        |result: &isize|
-        *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
-    )]
+    #[ensures(|result: &Self| {
+        if (count >= 0) {
+            let offset_ptr = self.as_ptr().byte_add(count as usize) as *mut T;
+            result.as_ptr() == offset_ptr
+        } else {
+            let offset_ptr = self.as_ptr().byte_sub(-count as usize) as *mut T;
+            result.as_ptr() == offset_ptr
+        }
+    })]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset` and `byte_offset` has
         // the same safety contract.
@@ -1800,6 +1805,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
+    use crate::mem;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -1864,8 +1870,8 @@ mod verify {
         let arr: [i32; ARR_SIZE] = kani::any();
 
         // Randomly generate offsets for the pointers
-        let offset = kani::any_where(|x| *x < ARR_SIZE);
-        let origin_offset = kani::any_where(|x| *x < ARR_SIZE);
+        let offset = kani::any_where(|x| *x <= ARR_SIZE);
+        let origin_offset = kani::any_where(|x| *x <= ARR_SIZE);
 
         let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;
         let origin_ptr: *mut i32 = arr.as_ptr() as *mut i32;
