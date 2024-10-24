@@ -263,6 +263,7 @@
 #![feature(tbm_target_feature)]
 #![feature(wasm_target_feature)]
 #![feature(x86_amx_intrinsics)]
+#![cfg_attr(kani, feature(proc_macro_hygiene))]
 // tidy-alphabetical-end
 
 // allow using `core::` in intra-doc links
