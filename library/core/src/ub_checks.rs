@@ -260,9 +260,6 @@ trivial_invariant!(());
 trivial_invariant!(bool);
 trivial_invariant!(char);
 
-// We do not constrain the safety invariant for floating point types.
-// Users can create a newtype wrapping the floating point type and define an
-// invariant that checks for NaN, infinite, or subnormal values.
 trivial_invariant!(f16);
 trivial_invariant!(f32);
 trivial_invariant!(f64);
