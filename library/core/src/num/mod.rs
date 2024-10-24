@@ -1700,6 +1700,21 @@ mod verify {
         }
     }
 
+    // Part 3: Float to Integer Conversion function Harness Generation Macros
+    macro_rules! generate_to_int_unchecked_harness {
+        ($floatType:ty, $($intType:ty, $harness_name:ident),+) => {
+            $(
+                #[kani::proof_for_contract($floatType::to_int_unchecked)]
+                pub fn $harness_name() {
+                    let num1: $floatType = kani::any::<$floatType>();
+                    let result = unsafe { num1.to_int_unchecked::<$intType>() };
+
+                    assert_eq!(result, num1 as $intType);
+                }
+            )+
+        }
+    }
+
     // `unchecked_add` proofs
     //
     // Target types:
@@ -1967,4 +1982,32 @@ mod verify {
     generate_wrapping_shift_harness!(u64, wrapping_shr, checked_wrapping_shr_u64);
     generate_wrapping_shift_harness!(u128, wrapping_shr, checked_wrapping_shr_u128);
     generate_wrapping_shift_harness!(usize, wrapping_shr, checked_wrapping_shr_usize);
+
+    // `f32::to_int_unchecked` proofs
+    //
+    // Target integer types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // 1. Float is not `NaN` and infinite
+    // 2. Float is representable in the return type `Int`, after truncating
+    //    off its fractional part
+    // [requires(self.is_finite() && self >= Self::MIN && self <= Self::MAX)]
+    //
+    // Target function:
+    // pub unsafe fn to_int_unchecked<Int>(self) -> Int where Self: FloatToInt<Int>
+    generate_to_int_unchecked_harness!(f32,
+        i8, checked_f32_to_int_unchecked_i8,
+        i16, checked_f32_to_int_unchecked_i16,
+        i32, checked_f32_to_int_unchecked_i32,
+        i64, checked_f32_to_int_unchecked_i64,
+        i128, checked_f32_to_int_unchecked_i128,
+        isize, checked_f32_to_int_unchecked_isize,
+        u8, checked_f32_to_int_unchecked_u8,
+        u16, checked_f32_to_int_unchecked_u16,
+        u32, checked_f32_to_int_unchecked_u32,
+        u64, checked_f32_to_int_unchecked_u64,
+        u128, checked_f32_to_int_unchecked_u128,
+        usize, checked_f32_to_int_unchecked_usize
+    );
 }
