@@ -373,7 +373,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_as_ref", since = "1.73.0")]
     #[must_use]
     #[inline(always)]
-    #[requires(ub_checks::can_dereference(self))]  // Ensure pointer is valid for shared reference
+    #[requires(ub_checks::can_dereference(self) == true)]  // Ensure pointer is valid for shared reference
     #[ensures(|result: &&T| core::ptr::eq(*result, self.as_ptr()))]  // Ensure returned reference matches pointer
     pub const unsafe fn as_ref<'a>(&self) -> &'a T {
         // SAFETY: the caller must guarantee that `self` meets all the
@@ -1901,6 +1901,21 @@ mod verify {
 
         unsafe {
             let _ = ptr.as_uninit_slice_mut();
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::get_unchecked_mut)]
+    pub fn non_null_check_get_unchecked_mut() {
+        const ARR_SIZE: usize = 100000;
+        let mut arr: [i32; ARR_SIZE] = kani::any();
+        let raw_ptr = arr.as_mut_ptr();
+        let ptr = NonNull::slice_from_raw_parts(
+            NonNull::new(raw_ptr).unwrap(),
+            ARR_SIZE,
+        );
+        let index = kani::any_where(|x| *x < ARR_SIZE - 1);
+        unsafe {
+            let _ = ptr.get_unchecked_mut(index..index + 1);
         }
     }
 }
