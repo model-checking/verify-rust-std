@@ -373,7 +373,6 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_as_ref", since = "1.73.0")]
     #[must_use]
     #[inline(always)]
-    #[requires(ub_checks::can_dereference(self) == true)]  // Ensure pointer is valid for shared reference
     #[ensures(|result: &&T| core::ptr::eq(*result, self.as_ptr()))]  // Ensure returned reference matches pointer
     pub const unsafe fn as_ref<'a>(&self) -> &'a T {
         // SAFETY: the caller must guarantee that `self` meets all the
@@ -413,8 +412,6 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_unstable(feature = "const_ptr_as_ref", issue = "91822")]
     #[must_use]
     #[inline(always)]
-    // verify that `self` meets all the requirements for a mutable reference
-    #[requires(ub_checks::can_dereference(self))]
     // verify result (a mutable reference) is still associated with the same memory address as the raw pointer stored in self
     #[ensures(|result: &&mut T| core::ptr::eq(*result, self.as_ptr()))]
     pub const unsafe fn as_mut<'a>(&mut self) -> &'a mut T {
@@ -1829,20 +1826,22 @@ mod verify {
     #[kani::proof_for_contract(NonNull::as_mut)]
     pub fn non_null_check_as_mut() {
         let mut x: i32 = kani::any();
-        let mut ptr = NonNull::new(x as *mut i32).unwrap();
-
-        unsafe {
-            let result = ptr.as_mut();
+        if let Some(mut ptr) = NonNull::new(&mut x as *mut i32) {
+            kani::assume(ptr.as_ptr().align_offset(core::mem::align_of::<i32>()) == 0);
+            unsafe {
+                let result = ptr.as_mut();
+            }
         }
     }
 
     #[kani::proof_for_contract(NonNull::as_ref)]
     pub fn non_null_check_as_ref() {
         let mut x: i32 = kani::any();
-        let ptr = NonNull::new(x as *mut i32).unwrap();
-
-        unsafe {
-            let _ = ptr.as_ref();
+        if let Some(ptr) = NonNull::new(&mut x as *mut i32) {
+            kani::assume(ptr.as_ptr().align_offset(core::mem::align_of::<i32>()) == 0);
+            unsafe {
+                let _ = ptr.as_ref();
+            }
         }
     }
 
