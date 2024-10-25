@@ -23,3 +23,9 @@ pub fn requires(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn ensures(attr: TokenStream, item: TokenStream) -> TokenStream {
     tool::ensures(attr, item)
 }
+
+#[proc_macro_error]
+#[proc_macro_attribute]
+pub fn loop_invariant(attr: TokenStream, stmt_stream: TokenStream) -> TokenStream {
+    tool::loop_invariant(attr, stmt_stream)
+}
