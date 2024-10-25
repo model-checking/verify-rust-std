@@ -554,8 +554,11 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some() 
-        && count * core::mem::size_of::<T>() <= isize::MAX as usize)]
-    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))] //TODO: use same_allocation to check pointer
+        && count * core::mem::size_of::<T>() <= isize::MAX as usize
+        && (self.pointer as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some()
+        && kani::mem::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize)))] //overflowing pointer.offset
+    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize)
+        && kani::mem::same_allocation(result.pointer, self.pointer))] //TODO: use same_allocation to check pointer
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
@@ -1855,7 +1858,7 @@ mod verify {
         let count: usize = kani::any();  
 
         // Workaround: SAFETY: Ensure that the pointer operation does not go out of the bounds of the array
-        kani::assume(count < SIZE - offset as usize);
+        //kani::assume(count < SIZE - offset as usize);
 
         unsafe {
             // Add a positive offset to pointer
