@@ -9,7 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-
+use crate::{ub_checks};
 
 #[cfg(kani)]
 use crate::kani;
@@ -1100,6 +1100,9 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::replace`]: crate::ptr::replace()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(!self.as_ptr().is_null())] // Pointer must not be null or some cases will fail
+    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure valid pointer
+    #[kani::ensures(|ret: &T| core::mem::needs_drop::<T>() == false)]  // No drop should occur
     pub unsafe fn replace(self, src: T) -> T
     where
         T: Sized,
@@ -1802,5 +1805,21 @@ mod verify {
         let xptr = &mut x;
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
+    }
+
+    #[kani::proof_for_contract(NonNull::replace)]
+    pub fn non_null_check_replace() {
+        let mut x: i32 = kani::any();
+        let mut y: i32 = kani::any();
+
+        let origin_ptr = NonNull::new(x as *mut i32).unwrap();
+        unsafe {
+            let captured_original = ptr::read(origin_ptr.as_ptr());
+            let replaced = origin_ptr.replace(y);
+            let after_replace = ptr::read(origin_ptr.as_ptr());
+
+            kani::assume(replaced == x);
+            kani::assume(after_replace == y)
+        }
     }
 }
