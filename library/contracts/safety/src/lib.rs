@@ -86,7 +86,7 @@ pub fn invariant(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// For enums, the body of `is_safe` matches on the variant and calls `is_safe` on its fields,
 /// # Example
 /// 
-/// /// ```ignore
+/// ```ignore
 /// #[derive(Invariant)]
 /// enum MyEnum {
 ///     OptionOne(u32, u32),
