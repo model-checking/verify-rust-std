@@ -2193,7 +2193,7 @@ nonzero_integer! {
 
 #[unstable(feature="kani", issue="none")]
 #[cfg(kani)]
-    mod verify {
+mod verify {
       use super::*;
 
     macro_rules! nonzero_check {
