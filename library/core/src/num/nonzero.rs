@@ -461,9 +461,6 @@ where
     }
 }
 
-
-
-
 macro_rules! nonzero_integer {
     (
         #[$stability:meta]
