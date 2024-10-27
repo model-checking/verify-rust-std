@@ -2194,9 +2194,7 @@ nonzero_integer! {
 #[unstable(feature="kani", issue="none")]
 #[cfg(kani)]
     mod verify {
-    use core::num::NonZeroI32; // Use core::num instead of std::num
-    use super::*;
-    use NonZero;
+      use super::*;
 
     macro_rules! nonzero_check {
         ($t:ty, $nonzero_type:ty, $nonzero_check_new_unchecked_for:ident) => {
