@@ -10,6 +10,7 @@ use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
 
+
 #[cfg(kani)]
 use crate::kani;
 
@@ -437,11 +438,7 @@ impl<T: ?Sized> NonNull<T> {
     #[ensures(|result: &NonNull<U>| (self.as_ptr() as *const () as usize) % core::mem::align_of::<U>() == 0)]
     pub const fn cast<U>(self) -> NonNull<U> {
         // SAFETY: `self` is a `NonNull` pointer which is necessarily non-null
-        unsafe {
-            NonNull {
-                pointer: self.as_ptr() as *mut U,
-            }
-        }
+        unsafe { NonNull { pointer: self.as_ptr() as *mut U } } 
     }
 
     /// Adds an offset to a pointer.
