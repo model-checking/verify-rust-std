@@ -1797,6 +1797,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
+    // use crate::boxed::Box;  // failed to import
 
     trait SampleTrait {
         fn get_value(&self) -> i32;
@@ -1850,8 +1851,9 @@ mod verify {
         // unit type
         let ptr_unit = NonNull::<()>::dangling();
         // trait object
-        // let ptr_unit = NonNull::<dyn SampleTrait>::dangling(); question: trait is unsized
-        // question: slice??
+        // let ptr_trait = NonNull::<Box<dyn SampleTrait>>::dangling(); // failed to import Box
+        // zero length slice from dangling unit pointer
+        let zero_len_slice =  NonNull::slice_from_raw_parts(ptr_unit, 0);
     }
 
     // pub const fn from_raw_parts(data_pointer: NonNull<()>, metadata: <T as super::Pointee>::Metadata,) -> NonNull<T>
@@ -1931,8 +1933,8 @@ mod verify {
 
         unsafe {
             // Ensure trait method and member is preserved
-            kani::assert( trait_object.get_value() == nonnull_trait_object.as_ref().get_value(), "trait method and member must correctly preserve");
+            //kani::assert( trait_object.get_value() == nonnull_trait_object.as_ref().get_value(), "trait method and member must correctly preserve"); // TODO: failed checks: partial eq
+            kani::assert( trait_object as *const dyn ptr::non_null::verify::SampleTrait == nonnull_trait_object.as_ptr(), "trait method and member must correctly preserve");
         }
     }
-//Question: pointer offset with integer without creating an array
 }
