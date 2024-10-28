@@ -1,0 +1,5 @@
+# This version should be updated whenever there is a change that makes this version of kani
+# incomaptible with the verify-std repo.
+
+[kani]
+commit = "5f8f513d297827cfdce4c48065e51973ba563068"
