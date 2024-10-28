@@ -438,7 +438,7 @@ impl<T: ?Sized> NonNull<T> {
     #[ensures(|result: &NonNull<U>| (self.as_ptr() as *const () as usize) % core::mem::align_of::<U>() == 0)]
     pub const fn cast<U>(self) -> NonNull<U> {
         // SAFETY: `self` is a `NonNull` pointer which is necessarily non-null
-        unsafe { NonNull { pointer: self.as_ptr() as *mut U } } 
+        unsafe { NonNull { pointer: self.as_ptr() as *mut U } }
     }
 
     /// Adds an offset to a pointer.
@@ -490,11 +490,7 @@ impl<T: ?Sized> NonNull<T> {
         // Additionally safety contract of `offset` guarantees that the resulting pointer is
         // pointing to an allocation, there can't be an allocation at null, thus it's safe to
         // construct `NonNull`.
-        unsafe {
-            NonNull {
-                pointer: intrinsics::offset(self.pointer, count),
-            }
-        }
+        unsafe { NonNull { pointer: intrinsics::offset(self.pointer, count) } }
     }
 
     /// Calculates the offset from a pointer in bytes.
@@ -518,11 +514,7 @@ impl<T: ?Sized> NonNull<T> {
         // Additionally safety contract of `offset` guarantees that the resulting pointer is
         // pointing to an allocation, there can't be an allocation at null, thus it's safe to
         // construct `NonNull`.
-        unsafe {
-            NonNull {
-                pointer: self.pointer.byte_offset(count),
-            }
-        }
+        unsafe { NonNull { pointer: self.pointer.byte_offset(count) } }
     }
 
     /// Adds an offset to a pointer (convenience for `.offset(count as isize)`).
@@ -574,11 +566,7 @@ impl<T: ?Sized> NonNull<T> {
         // Additionally safety contract of `offset` guarantees that the resulting pointer is
         // pointing to an allocation, there can't be an allocation at null, thus it's safe to
         // construct `NonNull`.
-        unsafe {
-            NonNull {
-                pointer: intrinsics::offset(self.pointer, count),
-            }
-        }
+        unsafe { NonNull { pointer: intrinsics::offset(self.pointer, count) } }
     }
 
     /// Calculates the offset from a pointer in bytes (convenience for `.byte_offset(count as isize)`).
@@ -603,11 +591,7 @@ impl<T: ?Sized> NonNull<T> {
         // Additionally safety contract of `add` guarantees that the resulting pointer is pointing
         // to an allocation, there can't be an allocation at null, thus it's safe to construct
         // `NonNull`.
-        unsafe {
-            NonNull {
-                pointer: self.pointer.byte_add(count),
-            }
-        }
+        unsafe { NonNull { pointer: self.pointer.byte_add(count) } }
     }
 
     /// Subtracts an offset from a pointer (convenience for
@@ -691,11 +675,7 @@ impl<T: ?Sized> NonNull<T> {
         // Additionally safety contract of `sub` guarantees that the resulting pointer is pointing
         // to an allocation, there can't be an allocation at null, thus it's safe to construct
         // `NonNull`.
-        unsafe {
-            NonNull {
-                pointer: self.pointer.byte_sub(count),
-            }
-        }
+        unsafe { NonNull { pointer: self.pointer.byte_sub(count) } }
     }
 
     /// Calculates the distance between two pointers. The returned value is in
@@ -1810,16 +1790,12 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
     #[inline]
     fn from(reference: &T) -> Self {
         // SAFETY: A reference cannot be null.
-        unsafe {
-            NonNull {
-                pointer: reference as *const T,
-            }
-        }
+        unsafe { NonNull { pointer: reference as *const T } }
     }
 }
 
 #[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
+#[unstable(feature="kani", issue="none")]
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
@@ -1838,11 +1814,7 @@ mod verify {
     pub fn non_null_check_new() {
         let mut x: i32 = kani::any();
         let xptr = &mut x;
-        let maybe_null_ptr = if kani::any() {
-            xptr as *mut i32
-        } else {
-            null_mut()
-        };
+        let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
 
