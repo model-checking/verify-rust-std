@@ -1774,8 +1774,9 @@ impl<T: ?Sized> From<&mut T> for NonNull<T> {
     #[inline]
     fn from(reference: &mut T) -> Self {
         // SAFETY: A mutable reference cannot be null.
-       unsafe { NonNull { pointer: reference as *mut T } }
-}
+       unsafe { NonNull { pointer: reference as *mut T } 
+   }
+}      
 
 #[stable(feature = "nonnull", since = "1.25.0")]
 impl<T: ?Sized> From<&T> for NonNull<T> {
