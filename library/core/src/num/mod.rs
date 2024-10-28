@@ -1657,6 +1657,51 @@ mod verify {
             }
         }
     }
+    
+    /// A macro to generate Kani proof harnesses for the `carrying_mul` method,
+    ///
+    /// The macro creates multiple harnesses for different ranges of input values,
+    /// allowing testing of both small and large inputs.
+    ///
+    /// # Parameters:
+    /// - `$type`: The integer type (e.g., u8, u16) for which the `carrying_mul` function is being tested.
+    /// - `$wide_type`: A wider type to simulate the multiplication (e.g., u16 for u8, u32 for u16).
+    /// - `$harness_name`: The name of the Kani harness to be generated.
+    /// - `$min`: The minimum value for the range of inputs for `lhs`, `rhs`, and `carry_in`.
+    /// - `$max`: The maximum value for the range of inputs for `lhs`, `rhs`, and `carry_in`.
+    macro_rules! generate_carrying_mul_intervals {
+        ($type:ty, $wide_type:ty, $($harness_name:ident, $min:expr, $max:expr),+) => {
+            $(
+                #[kani::proof]
+                pub fn $harness_name() {
+                    let lhs: $type = kani::any::<$type>();
+                    let rhs: $type = kani::any::<$type>();
+                    let carry_in: $type = kani::any::<$type>();
+    
+                    kani::assume(lhs >= $min && lhs <= $max);
+                    kani::assume(rhs >= $min && rhs <= $max);
+                    kani::assume(carry_in >= $min && carry_in <= $max);
+    
+                    // Perform the carrying multiplication
+                    let (result, carry_out) = lhs.carrying_mul(rhs, carry_in);
+    
+                    // Manually compute the expected result and carry using wider type
+                    let wide_result = (lhs as $wide_type)
+                        .wrapping_mul(rhs as $wide_type)
+                        .wrapping_add(carry_in as $wide_type);
+    
+                    let expected_result = wide_result as $type;
+                    let expected_carry = (wide_result >> <$type>::BITS) as $type;
+    
+                    // Assert the result and carry are correct
+                    assert_eq!(result, expected_result);
+                    assert_eq!(carry_out, expected_carry);
+                }
+            )+
+        }
+    }
+    
+    
 
     // Part 2 : Nested unsafe functions Generation Macros --> https://github.com/verify-rust-std/blob/main/doc/src/challenges/0011-floats-ints.md
 
@@ -1741,7 +1786,7 @@ mod verify {
     generate_unchecked_neg_harness!(i128, checked_unchecked_neg_i128);
     generate_unchecked_neg_harness!(isize, checked_unchecked_neg_isize);
 
-    // unchecked_mul proofs
+    // `unchecked_mul` proofs
     //
     // Target types:
     // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total, with different interval checks for each.
@@ -1892,8 +1937,37 @@ mod verify {
     generate_unchecked_math_harness!(u128, unchecked_sub, checked_unchecked_sub_u128);
     generate_unchecked_math_harness!(usize, unchecked_sub, checked_unchecked_sub_usize);
 
+
+    // Part_2 `carrying_mul` proofs 
+    // 
+    // ====================== u8 Harnesses ======================
+    /// Kani proof harness for `carrying_mul` on `u8` type with full range of values.
+    generate_carrying_mul_intervals!(u8, u16,
+        carrying_mul_u8_full_range, 0u8, u8::MAX
+    );
+
+    // ====================== u16 Harnesses ======================
+    /// Kani proof harness for `carrying_mul` on `u16` type with full range of values.
+    generate_carrying_mul_intervals!(u16, u32,
+        carrying_mul_u16_full_range, 0u16, u16::MAX
+    );
+
+    // ====================== u32 Harnesses ======================
+    generate_carrying_mul_intervals!(u32, u64,
+        carrying_mul_u32_small, 0u32, 10u32,
+        carrying_mul_u32_large, u32::MAX - 10u32, u32::MAX,
+        carrying_mul_u32_mid_edge, (u32::MAX / 2) - 10u32, (u32::MAX / 2) + 10u32
+    );
+
+    // ====================== u64 Harnesses ======================
+    generate_carrying_mul_intervals!(u64, u128,
+        carrying_mul_u64_small, 0u64, 10u64,
+        carrying_mul_u64_large, u64::MAX - 10u64, u64::MAX,
+        carrying_mul_u64_mid_edge, (u64::MAX / 2) - 10u64, (u64::MAX / 2) + 10u64
+    );
+
     
-    // Part 2 : Proof harnesses 
+    // Part_2 `widening_mul` proofs
     
     // ====================== u8 Harnesses ======================
     generate_widening_mul_intervals!(u8, u16, widening_mul_u8, 0u8, u8::MAX);
@@ -1919,7 +1993,7 @@ mod verify {
         widening_mul_u64_mid_edge, (u64::MAX / 2) - 10u64, (u64::MAX / 2) + 10u64
     );
 
-    // `wrapping_shl` proofs
+    // Part_2 `wrapping_shl` proofs
     //
     // Target types:
     // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
@@ -1944,7 +2018,7 @@ mod verify {
     generate_wrapping_shift_harness!(u128, wrapping_shl, checked_wrapping_shl_u128);
     generate_wrapping_shift_harness!(usize, wrapping_shl, checked_wrapping_shl_usize);
 
-    // `wrapping_shr` proofs
+    // Part_2 `wrapping_shr` proofs
     //
     // Target types:
     // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
@@ -1967,4 +2041,6 @@ mod verify {
     generate_wrapping_shift_harness!(u64, wrapping_shr, checked_wrapping_shr_u64);
     generate_wrapping_shift_harness!(u128, wrapping_shr, checked_wrapping_shr_u128);
     generate_wrapping_shift_harness!(usize, wrapping_shr, checked_wrapping_shr_usize);
+
 }
+
