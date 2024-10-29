@@ -1822,4 +1822,15 @@ mod verify {
             kani::assume(after_replace == y)
         }
     }
+
+    #[kani::proof_for_contract(NonNull::drop_in_place)]
+    pub fn non_null_check_drop_in_place() {
+        let mut x: i32 = kani::any();
+        if let Some(ptr) = NonNull::new(&mut x as *mut i32) {
+            kani::assume(ptr.as_ptr().align_offset(core::mem::align_of::<i32>()) == 0);
+            unsafe {
+                ptr.drop_in_place();
+            }
+        }
+    }
 }
