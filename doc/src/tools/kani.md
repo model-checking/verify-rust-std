@@ -59,7 +59,8 @@ Create a local copy of the [model-checking fork](https://github.com/model-checki
 `assert`, `assume`, `proof` and [function-contracts](https://github.com/model-checking/kani/blob/main/rfc/src/rfcs/0009-function-contracts.md) such as `modifies`, `requires` and `ensures`) directly.
 
 
-For example, insert this module into an existing file in the core library, like `library/core/src/hint.rs` or `library/core/src/error.rs` in your copy of the library. This is just for the purpose of getting started, so you can insert in any other existing file in the core library as well.
+For example, insert this module into an existing file in the core library, like `library/core/src/hint.rs` or `library/core/src/error.rs` in your copy of the library.
+This is just for the purpose of getting started, so you can insert it in a different (existing) file in the core library instead.
 
 ``` rust
 #[cfg(kani)]
