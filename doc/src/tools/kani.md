@@ -101,6 +101,8 @@ To pass kani arguments such as `--harness`, you can run the script with `--kani-
 
 The script `run-kani` installs the right version of Kani for you, builds it and then finally runs the verify-std sub-command of the `kani` with some default flags.
 
+**NOTE:** This script may crash due to linking issues. If the script fails with an error message related to linking, link the new CBMC version, delete the `./kani_build` directory and re-run.
+
 ### Step 3 - Check verification result
 
 After running the command, you can expect an output that looks like this:
