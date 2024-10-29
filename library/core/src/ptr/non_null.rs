@@ -1786,8 +1786,8 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
     #[inline]
     fn from(reference: &T) -> Self {
         // SAFETY: A reference cannot be null.
-        unsafe { NonNull { pointer: reference as *const T } }
-    }
+       unsafe { NonNull { pointer: reference as *const T }
+   }
 }
 
 #[cfg(kani)]
