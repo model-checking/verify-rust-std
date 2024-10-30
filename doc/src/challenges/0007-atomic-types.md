@@ -2,14 +2,14 @@
 
 - **Status:** Open
 - **Tracking Issue:** [#83](https://github.com/model-checking/verify-rust-std/issues/83)
-- **Start date:** *2024-09-19*
+- **Start date:** *2024-10-30*
 - **End date:** *2024-12-10*
 
 -------------------
 
 ## Goal
 
-`core::sync::atomic` provides methods that operate on atomic types.
+[`core::sync::atomic`](https://doc.rust-lang.org/std/sync/atomic/index.html) provides methods that operate on atomic types.
 For example, `AtomicBool::store(&self, val: bool, order: Ordering)` stores `val` in the atomic boolean referenced by `self` according to the specified [atomic memory ordering](https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html).
 
 The goal of this challenge is to verify that these methods are safe.[^1]
