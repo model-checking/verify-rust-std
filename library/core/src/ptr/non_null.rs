@@ -1101,8 +1101,8 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::replace`]: crate::ptr::replace()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(!self.as_ptr().is_null())] // Pointer must not be null or some cases will fail
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure valid pointer
+    #[requires(ub_checks::can_dereference(&src))] // Ensure valid source
     #[kani::ensures(|ret: &T| core::mem::needs_drop::<T>() == false)]  // No drop should occur
     pub unsafe fn replace(self, src: T) -> T
     where
@@ -1812,15 +1812,18 @@ mod verify {
     pub fn non_null_check_replace() {
         let mut x: i32 = kani::any();
         let mut y: i32 = kani::any();
+        kani::assume((&y as *const i32) != core::ptr::null());
 
-        let origin_ptr = NonNull::new(x as *mut i32).unwrap();
-        unsafe {
-            let captured_original = ptr::read(origin_ptr.as_ptr());
-            let replaced = origin_ptr.replace(y);
-            let after_replace = ptr::read(origin_ptr.as_ptr());
+        if let Some(origin_ptr) = NonNull::new(&mut x as *mut i32) {
+            kani::assume(origin_ptr.as_ptr().align_offset(core::mem::align_of::<i32>()) == 0);
+            unsafe {
+                let captured_original = ptr::read(origin_ptr.as_ptr());
+                let replaced = origin_ptr.replace(y);
+                let after_replace = ptr::read(origin_ptr.as_ptr());
 
-            kani::assume(replaced == x);
-            kani::assume(after_replace == y)
+                kani::assume(replaced == x);
+                kani::assume(after_replace == y)
+            }
         }
     }
 
