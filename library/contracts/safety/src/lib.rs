@@ -5,8 +5,8 @@ use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 use quote::{format_ident, quote, quote_spanned};
 use syn::{
-    parse_macro_input, parse_quote, spanned::Spanned, Data, DataEnum, DeriveInput, Fields, GenericParam,
-    Generics, Ident, Index, ItemStruct,
+    parse_macro_input, parse_quote, spanned::Spanned, Data, DataEnum, DeriveInput, Fields,
+    GenericParam, Generics, Ident, Index, ItemStruct,
 };
 
 #[cfg(kani_host)]
@@ -30,7 +30,7 @@ mod tool;
 ///     height: u32,
 /// }
 /// ```
-/// 
+///
 /// expands to:
 /// ```ignore
 /// impl core::ub_checks::Invariant for Square {
@@ -74,7 +74,7 @@ pub fn invariant(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     height: u32,
 /// }
 /// ```
-/// 
+///
 /// expands to:
 /// ```ignore
 /// impl core::ub_checks::Invariant for Square {
@@ -85,7 +85,7 @@ pub fn invariant(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 /// For enums, the body of `is_safe` matches on the variant and calls `is_safe` on its fields,
 /// # Example
-/// 
+///
 /// ```ignore
 /// #[derive(Invariant)]
 /// enum MyEnum {
@@ -94,7 +94,7 @@ pub fn invariant(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     OptionThree
 /// }
 /// ```
-/// 
+///
 /// expands to:
 /// ```ignore
 /// impl core::ub_checks::Invariant for MyEnum {
@@ -120,7 +120,7 @@ pub fn derive_invariant(item: TokenStream) -> TokenStream {
         Data::Enum(enum_data) => {
             let variant_checks = variant_checks(enum_data, item_name);
 
-            quote! { 
+            quote! {
                 match self {
                     #(#variant_checks),*
                 }
@@ -162,6 +162,7 @@ pub fn ensures(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn loop_invariant(attr: TokenStream, stmt_stream: TokenStream) -> TokenStream {
     tool::loop_invariant(attr, stmt_stream)
+}
 
 /// Add a bound `T: Invariant` to every type parameter T.
 fn add_trait_bound_invariant(mut generics: Generics) -> Generics {
@@ -177,30 +178,40 @@ fn add_trait_bound_invariant(mut generics: Generics) -> Generics {
 
 /// Generate safety checks for each variant of an enum
 fn variant_checks(enum_data: DataEnum, item_name: &Ident) -> Vec<proc_macro2::TokenStream> {
-    enum_data.variants.iter().map(|variant| {
-        let variant_name = &variant.ident;
-        match &variant.fields {
-            Fields::Unnamed(fields) => {
-                let field_names: Vec<_> = fields.unnamed.iter().enumerate().map(|(i, _)| {
-                    format_ident!("field{}", i + 1)
-                }).collect();
-                
-                let field_checks: Vec<_> = field_names.iter().map(|field_name| {
-                    quote! { #field_name.is_safe() }
-                }).collect();
-                
-                quote! {
-                    #item_name::#variant_name(#(#field_names),*) => #(#field_checks)&&*
+    enum_data
+        .variants
+        .iter()
+        .map(|variant| {
+            let variant_name = &variant.ident;
+            match &variant.fields {
+                Fields::Unnamed(fields) => {
+                    let field_names: Vec<_> = fields
+                        .unnamed
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format_ident!("field{}", i + 1))
+                        .collect();
+
+                    let field_checks: Vec<_> = field_names
+                        .iter()
+                        .map(|field_name| {
+                            quote! { #field_name.is_safe() }
+                        })
+                        .collect();
+
+                    quote! {
+                        #item_name::#variant_name(#(#field_names),*) => #(#field_checks)&&*
+                    }
                 }
-            },
-            Fields::Unit => {
-                quote! {
-                    #item_name::#variant_name => true
+                Fields::Unit => {
+                    quote! {
+                        #item_name::#variant_name => true
+                    }
                 }
-            },
-            Fields::Named(_) => unreachable!("Enums do not have named fields"),
-        }
-    }).collect()
+                Fields::Named(_) => unreachable!("Enums do not have named fields"),
+            }
+        })
+        .collect()
 }
 
 /// Generate the body for the `is_safe` method.
