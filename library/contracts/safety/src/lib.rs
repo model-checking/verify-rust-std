@@ -158,6 +158,11 @@ pub fn ensures(attr: TokenStream, item: TokenStream) -> TokenStream {
     tool::ensures(attr, item)
 }
 
+#[proc_macro_error]
+#[proc_macro_attribute]
+pub fn loop_invariant(attr: TokenStream, stmt_stream: TokenStream) -> TokenStream {
+    tool::loop_invariant(attr, stmt_stream)
+
 /// Add a bound `T: Invariant` to every type parameter T.
 fn add_trait_bound_invariant(mut generics: Generics) -> Generics {
     generics.params.iter_mut().for_each(|param| {
