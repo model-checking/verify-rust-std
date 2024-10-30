@@ -1122,6 +1122,11 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_swap", issue = "83163")]
+    #[requires(self.as_ptr() != with.as_ptr())]
+    #[requires(self.as_ptr().align_offset(core::mem::align_of::<T>()) == 0)]
+    #[requires(with.as_ptr().align_offset(core::mem::align_of::<T>()) == 0)]
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]
+    #[requires(ub_checks::can_dereference(with.as_ptr()))]
     pub const unsafe fn swap(self, with: NonNull<T>)
     where
         T: Sized,
@@ -1835,6 +1840,26 @@ mod verify {
             unsafe {
                 ptr.drop_in_place();
             }
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::swap)]
+    pub fn non_null_check_swap() {
+        let mut a: i32 = kani::any();
+        let mut b: i32 = kani::any();
+
+        let ptr_a = NonNull::new(&mut a as *mut i32).unwrap();
+        let ptr_b = NonNull::new(&mut b as *mut i32).unwrap();
+
+        unsafe {
+            let old_a = ptr::read(ptr_a.as_ptr());
+            let old_b = ptr::read(ptr_b.as_ptr());
+            ptr_a.swap(ptr_b);
+            // Verify that the values have been swapped.
+            let new_a = ptr::read(ptr_a.as_ptr());
+            let new_b = ptr::read(ptr_b.as_ptr());
+            kani::assume(old_a == new_b);
+            kani::assume(old_b == new_a);
         }
     }
 }
