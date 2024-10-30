@@ -2552,8 +2552,12 @@ mod verify {
     }
 
     #[kani::proof_for_contract(align_offset)]
-    fn check_align_offset_17() {
-        let p = kani::any::<usize>() as *const [char; 17];
+    // The purpose of this harness is to test align_offset with a pointee type whose stride is not a power of two
+    // Keeping the size smaller (5) and changing the solver to kissat improves verification time
+    // c.f. https://github.com/model-checking/verify-rust-std/pull/89
+    #[kani::solver(kissat)]
+    fn check_align_offset_5() {
+        let p = kani::any::<usize>() as *const [char; 5];
         check_align_offset(p);
     }
 
