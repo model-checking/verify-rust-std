@@ -9,6 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
+use crate::{ub_checks};
 
 
 #[cfg(kani)]
@@ -1024,6 +1025,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
+    #[requires(self.as_ptr() as usize % core::mem::align_of::<T>() == 0)] // Ensure the pointer is properly aligned
+    //#[requires(self.as_ptr() as usize % core::mem::size_of::<T>() == 0)]
     pub const unsafe fn write(self, val: T)
     where
         T: Sized,
@@ -1803,4 +1806,18 @@ mod verify {
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
+
+    #[kani::proof_for_contract(NonNull::write)]
+    pub fn non_null_check_write() {
+        let mut data: i32 = kani::any();
+        let ptr = unsafe { NonNull::new(&mut data as *mut i32).unwrap() };
+        let new_value: i32 = kani::any();
+
+        unsafe {
+            // Perform the write operation
+            ptr.write(new_value);
+            assert_eq!(ptr::read(ptr.as_ptr()), new_value);
+        }
+    }
+
 }
