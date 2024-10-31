@@ -4,13 +4,17 @@
 // collections, resulting in having to optimize down excess IR multiple times.
 // Your performance intuition is useless. Run perf.
 
-use safety::{ensures, requires};
+use safety::{ensures, Invariant, requires};
 use crate::error::Error;
 use crate::ptr::{Alignment, NonNull};
 use crate::{assert_unsafe_precondition, cmp, fmt, mem};
 
 #[cfg(kani)]
 use crate::kani;
+
+// Used only for contract verification.
+#[allow(unused_imports)]
+use crate::ub_checks::Invariant;
 
 // While this function is used in one place and its implementation
 // could be inlined, the previous attempts to do so made rustc
@@ -39,6 +43,7 @@ const fn size_align<T>() -> (usize, usize) {
 #[stable(feature = "alloc_layout", since = "1.28.0")]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[lang = "alloc_layout"]
+#[derive(Invariant)]
 pub struct Layout {
     // size of the requested block of memory, measured in bytes.
     size: usize,
@@ -132,6 +137,7 @@ impl Layout {
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
     #[requires(Layout::from_size_align(size, align).is_ok())]
+    #[ensures(|result| result.is_safe())]
     #[ensures(|result| result.size() == size)]
     #[ensures(|result| result.align() == align)]
     pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self {
