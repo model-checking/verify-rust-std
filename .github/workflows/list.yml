@@ -6,6 +6,9 @@ on:
     branches: [ main ]
     types: [ closed ]
 
+permissions:
+  pull-requests: write
+
 defaults:
   run:
     shell: bash
@@ -14,6 +17,8 @@ jobs:
   run-kani-list-on-std:
     name: List Kani harnesses and contracts on std library
     runs-on: ${{ matrix.os }}
+    # Only run this job if the pull request was merged
+    if: github.event.pull_request.merged == true
     strategy:
       matrix:
         os: [ubuntu-latest]
@@ -37,16 +42,26 @@ jobs:
           echo "$output" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      # Step 3: Comment on the PR with the Kani list output
+      # Step 3: Debug Info
+      - name: Debug Info
+        run: |
+          echo "Owner: ${{ github.repository_owner }}"
+          echo "Repo: ${{ github.repository }}"
+          echo "PR Number: ${{ github.event.pull_request.number }}"
+
+      # Step 4: Post comment on PR with Kani list results
       - name: Comment PR
         uses: actions/github-script@v6
-        if: github.event.pull_request.merged == true
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
+            console.log('Owner:', context.repo.owner);
+            console.log('Repo:', context.repo.repo);
+            console.log('Issue Number:', context.issue.number);
+            
             github.rest.issues.createComment({
-              issue_number: context.issue.number,
+              issue_number: ${{ github.event.pull_request.number }},
               owner: context.repo.owner,
-              repo: context.repo.name,
+              repo: context.repo.repo,
               body: 'Kani List Results:\n```\n' + process.env.KANI_OUTPUT + '\n```'
             })
