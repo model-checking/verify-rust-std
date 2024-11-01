@@ -1009,7 +1009,7 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::drop_in_place`]: crate::ptr::drop_in_place()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[ensures(|result| ub_checks::can_dereference(result))]
+    #[kani::ensures(|result| ub_checks::can_dereference(result))]
     pub unsafe fn drop_in_place(self) {
         // SAFETY: the caller must uphold the safety contract for `drop_in_place`.
         unsafe { ptr::drop_in_place(self.as_ptr()) }
@@ -1101,8 +1101,9 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::replace`]: crate::ptr::replace()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure valid pointer
-    #[requires(ub_checks::can_dereference(&src))] // Ensure valid source
+    #[kani::modifies(self.as_ptr())]
+    #[kani::requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure valid pointer
+    #[kani::requires(ub_checks::can_dereference(&src))] // Ensure valid source
     #[kani::ensures(|ret: &T| core::mem::needs_drop::<T>() == false)]  // No drop should occur
     pub unsafe fn replace(self, src: T) -> T
     where
@@ -1122,11 +1123,9 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_swap", issue = "83163")]
-    #[requires(self.as_ptr() != with.as_ptr())]
-    #[requires(self.as_ptr().align_offset(core::mem::align_of::<T>()) == 0)]
-    #[requires(with.as_ptr().align_offset(core::mem::align_of::<T>()) == 0)]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))]
-    #[requires(ub_checks::can_dereference(with.as_ptr()))]
+    #[kani::modifies(self.as_ptr(), with.as_ptr())]
+    #[kani::requires(ub_checks::can_dereference(self.as_ptr()))]
+    #[kani::requires(ub_checks::can_dereference(with.as_ptr()))]
     pub const unsafe fn swap(self, with: NonNull<T>)
     where
         T: Sized,
@@ -1820,7 +1819,7 @@ mod verify {
         kani::assume((&y as *const i32) != core::ptr::null());
 
         if let Some(origin_ptr) = NonNull::new(&mut x as *mut i32) {
-            kani::assume(origin_ptr.as_ptr().align_offset(core::mem::align_of::<i32>()) == 0);
+            kani::assume(origin_ptr.as_ptr().is_aligned());
             unsafe {
                 let captured_original = ptr::read(origin_ptr.as_ptr());
                 let replaced = origin_ptr.replace(y);
@@ -1836,7 +1835,7 @@ mod verify {
     pub fn non_null_check_drop_in_place() {
         let mut x: i32 = kani::any();
         if let Some(ptr) = NonNull::new(&mut x as *mut i32) {
-            kani::assume(ptr.as_ptr().align_offset(core::mem::align_of::<i32>()) == 0);
+            kani::assume(ptr.as_ptr().is_aligned());
             unsafe {
                 ptr.drop_in_place();
             }
