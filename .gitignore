@@ -19,6 +19,7 @@ Session.vim
 ## Build
 /book/
 /build/
+/kani_build/
 /target
 library/target
 *.rlib
