@@ -7,7 +7,7 @@ use crate::pin::PinCoerceUnsized;
 use crate::ptr::Unique;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
-use crate::{fmt, hash, intrinsics, ptr};
+use crate::{fmt, hash, intrinsics, ptr, ub_checks};
 use safety::{ensures, requires};
 
 
@@ -867,12 +867,16 @@ impl<T: ?Sized> NonNull<T> {
     /// memory in `self` unchanged.
     ///
     /// See [`ptr::read`] for safety concerns and examples.
-    ///
+    /// src must be valid for reads.
+    /// src must be properly aligned. Use read_unaligned if this is not the case.
+    /// src must point to a properly initialized value of type T.
     /// [`ptr::read`]: crate::ptr::read()
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(self.pointer.is_aligned() && ub_checks::can_dereference(self.pointer))] // TODO: is can_dereference the best API to check if self is valid for read?
+    #[ensures(|result| self.pointer.is_aligned())] //unsafe { *result == *self.pointer } can't be used due to unsized and lack of PartialEq implementation, moved to harness
     pub const unsafe fn read(self) -> T
     where
         T: Sized,
@@ -894,6 +898,8 @@ impl<T: ?Sized> NonNull<T> {
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(self.pointer.is_aligned() && ub_checks::can_dereference(self.pointer))]
+    #[ensures(|result| self.pointer.is_aligned())]
     pub unsafe fn read_volatile(self) -> T
     where
         T: Sized,
@@ -914,6 +920,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(ub_checks::can_dereference(self.pointer))]
     pub const unsafe fn read_unaligned(self) -> T
     where
         T: Sized,
@@ -1802,5 +1809,77 @@ mod verify {
         let xptr = &mut x;
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
+    }
+
+    // pub const unsafe fn read(self) -> T where T: Sized
+    #[kani::proof_for_contract(NonNull::read)]
+    pub fn non_null_check_read() {
+        let ptr_u8: *mut u8 = &mut kani::any();
+        let nonnull_ptr_u8 = NonNull::new(ptr_u8).unwrap();
+        unsafe {
+            let result = nonnull_ptr_u8.read();
+            kani::assert(*ptr_u8 == result, "read returns the correct value");
+        }
+/*
+        const arr_len: usize = 10;
+        let offset = kani::any_where(|x| * x < arr_len);
+        kani::assume(offset >= 0);
+        let arr: [i8; arr_len] = kani::any();
+        let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
+        let nonnull_ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap()};
+        let slice_len = arr_len - offset;
+        let slice_ptr = NonNull::slice_from_raw_parts(nonnull_ptr, slice_len);
+        unsafe {
+            let result = slice_ptr.read(); //TODO: slice is unsized and cannot call read
+            kani::assert(*nonnull_ptr.pointer == result, "read returns the correct value");            
+        }
+        kani::assert(slice_ptr.as_ref().len() == slice_len, "read preserves slice length");
+        */
+    }
+
+    // pub unsafe fn read_volatile(self) -> T where T: Sized
+    #[kani::proof_for_contract(NonNull::read_volatile)]
+    pub fn non_null_check_read_volatile() {
+        let ptr_u8: *mut u8 = &mut kani::any();
+        let nonnull_ptr_u8 = NonNull::new(ptr_u8).unwrap();
+        unsafe {
+            let result = nonnull_ptr_u8.read_volatile();
+            kani::assert(*ptr_u8 == result, "read returns the correct value");
+        }
+    }
+
+    #[repr(packed, C)]
+    struct Packed {
+        _padding: u8,
+        unaligned: u32,
+    }
+
+    // pub const unsafe fn read_unaligned(self) -> T where T: Sized
+    #[kani::proof_for_contract(NonNull::read_unaligned)]
+    pub fn non_null_check_read_unaligned() {
+        const SIZE: usize = 100;
+        // cast a random offset of an u8 array to usize
+        let offset: usize = kani::any();
+        kani::assume(offset >= 0 && offset < SIZE);
+        let arr: [u8; SIZE] = kani::any();  
+        let unaligned_ptr = &arr[offset] as *const u8 as *const usize;
+        // create a NonNull pointer from the unaligned pointer
+        let nonnull_ptr = NonNull::new(unaligned_ptr as *mut usize).unwrap();
+        unsafe { 
+            let result = nonnull_ptr.read_unaligned();
+            // TODO: check result matches expectation(how to?)
+        }
+
+        // read an unaligned value from a packed struct
+        let unaligned_value: u32 = kani::any();
+        let packed = Packed {
+            _padding: kani::any::<u8>(),
+            unaligned: unaligned_value,
+        };
+
+        let unaligned_ptr = ptr::addr_of!(packed.unaligned);
+        let nonnull_packed_ptr = NonNull::new(unaligned_ptr as *mut u32).unwrap();
+        let v = unsafe { nonnull_packed_ptr.read_unaligned() };
+        assert_eq!(v, unaligned_value);
     }
 }
