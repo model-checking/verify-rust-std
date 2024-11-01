@@ -44,7 +44,7 @@ jobs:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
             const fs = require('fs');
-            const kaniOutput = fs.readFileSync('kani_list.txt', 'utf8');
+            const kaniOutput = fs.readFileSync('${{github.workspace}}/head/kani_list.txt', 'utf8');
             
             await github.rest.issues.createComment({
               issue_number: ${{ github.event.pull_request.number }},
@@ -52,8 +52,3 @@ jobs:
               repo: context.repo.repo,
               body: 'Kani List Results:\n```\n' + kaniOutput + '\n```'
             });
-
-      # Step 4: Cleanup
-      - name: Cleanup
-        if: always()
-        run: rm -f kani_list.txt

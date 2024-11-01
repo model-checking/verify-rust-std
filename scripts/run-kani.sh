@@ -202,7 +202,7 @@ main() {
         "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse $command_args
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
-        "$kani_path" list -Z list -Z function-contracts -Z mem-predicates ./library --std > kani_list.txt
+        "$kani_path" list -Z list -Z function-contracts -Z mem-predicates ./library --std > $path/kani_list.txt
     fi
 }
 
