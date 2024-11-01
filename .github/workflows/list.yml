@@ -33,12 +33,12 @@ jobs:
           path: head
           submodules: true
 
-      # Step 2: Run list on the std library (assumes it creates kani-list.txt)
+      # Step 2: Run list on the std library (assumes it creates kani_list.txt)
       - name: Run Kani List
         run: head/scripts/run-kani.sh --run list --path ${{github.workspace}}/head
 
-      # Step 3: Read kani-list.txt and post comment on PR
-      - name: Comment PR
+      # Step 3: Read kani_list.txt and post comment on PR
+      - name: Comment Results on PR
         uses: actions/github-script@v6
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
