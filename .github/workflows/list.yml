@@ -1,0 +1,33 @@
+name: Kani List
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    types: [ closed ]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  run-kani-list-on-std:
+    name: List Kani harnesses and contracts on std library
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          path: head
+          submodules: true
+
+      # Step 2: Run list on the std library (default configuration)
+      - name: Run Kani Verification
+        run: head/scripts/run-kani.sh --run list --path ${{github.workspace}}/head
