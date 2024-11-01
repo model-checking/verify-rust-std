@@ -1820,21 +1820,18 @@ mod verify {
             let result = nonnull_ptr_u8.read();
             kani::assert(*ptr_u8 == result, "read returns the correct value");
         }
-/*
+
+        // array example
         const arr_len: usize = 10;
         let offset = kani::any_where(|x| * x < arr_len);
         kani::assume(offset >= 0);
         let arr: [i8; arr_len] = kani::any();
         let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
-        let nonnull_ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap()};
-        let slice_len = arr_len - offset;
-        let slice_ptr = NonNull::slice_from_raw_parts(nonnull_ptr, slice_len);
+        let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
         unsafe {
-            let result = slice_ptr.read(); //TODO: slice is unsized and cannot call read
-            kani::assert(*nonnull_ptr.pointer == result, "read returns the correct value");            
+            let result = nonnull_ptr.add(offset).read();
+            kani::assert( *nonnull_ptr.as_ptr().add(offset) == result, "read returns the correct value");            
         }
-        kani::assert(slice_ptr.as_ref().len() == slice_len, "read preserves slice length");
-        */
     }
 
     // pub unsafe fn read_volatile(self) -> T where T: Sized
@@ -1867,7 +1864,18 @@ mod verify {
         let nonnull_ptr = NonNull::new(unaligned_ptr as *mut usize).unwrap();
         unsafe { 
             let result = nonnull_ptr.read_unaligned();
-            // TODO: check result matches expectation(how to?)
+            /*
+            let raw_result_ptr = result as *const u8;
+            let raw_original_ptr = &arr[offset] as *const u8;
+            for i in 0..core::mem::size_of::<usize>() {
+                unsafe {
+                    // Dereference and compare each byte
+                    assert_eq!(*raw_original_ptr.add(i), *raw_result_ptr.add(i));
+                }
+                
+            }
+            // TODO: check result matches expectation(how to?) compare slice of bytes
+            */
         }
 
         // read an unaligned value from a packed struct
