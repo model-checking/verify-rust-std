@@ -502,8 +502,14 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    // TODO: add a require to check whether two pointer points to the same allocated object with `same_allocation`
-    #[ensures(|result: &Self| {
+    #[kani::requires(
+        if (count >= 0) {
+            kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_add(count as usize) as *const())
+        } else {
+            kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_sub(-count as usize) as *const())
+        }
+    )]
+    #[kani::ensures(|result: &Self| {
         if (count >= 0) {
             let offset_ptr = self.as_ptr().byte_add(count as usize) as *mut T;
             result.as_ptr() == offset_ptr
@@ -589,8 +595,11 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_allow_const_fn_unstable(set_ptr_value)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    // TODO: add a require to check whether two pointer points to the same allocated object with `same_allocation`
-    #[ensures(
+    #[kani::requires(kani::mem::same_allocation(
+        self.as_ptr() as *const(),
+        ((self.as_ptr() as *const () as usize) + count) as *const()
+    ))]
+    #[kani::ensures(
         |result: &NonNull<T>|
         (result.as_ptr() as *const () as usize) == ((self.as_ptr() as *const () as usize) + count)
     )]
@@ -798,8 +807,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    // TODO: add a require to check whether two pointer points to the same allocated object with `same_allocation`
-    #[ensures(
+    #[kani::requires(kani::mem::same_allocation(self.as_ptr() as *const(), origin.as_ptr() as *const()))]
+    #[kani::ensures(
         |result: &isize|
         *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
     )]
@@ -1837,7 +1846,6 @@ mod verify {
         kani::assume(count < usize::MAX);
         kani::assume(count.checked_mul(mem::size_of::<i32>()).is_some());
         kani::assume(count * mem::size_of::<i32>() <= (isize::MAX as usize));
-        kani::assume(count < ARR_SIZE - offset);
 
         unsafe {
             let result = ptr.byte_add(count);
@@ -1857,8 +1865,6 @@ mod verify {
         kani::assume(count <= isize::MAX);
         kani::assume(count.checked_mul(mem::size_of::<i32>() as isize).is_some());
         kani::assume(count * (mem::size_of::<i32>() as isize) <= (isize::MAX as isize));
-        kani::assume((offset as isize + count) < (ARR_SIZE as isize));
-
         unsafe {
             let result = ptr.byte_offset(count);
         }
