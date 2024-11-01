@@ -15,9 +15,10 @@ usage() {
 # Initialize variables
 command_args=""
 path=""
-run_command="verify-std"  # Default value
+run_command="verify-std"
 
 # Parse command line arguments
+# TODO: Improve parsing with getopts
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help)
@@ -42,14 +43,9 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         --kani-args)
-            if [[ $# -gt 1 ]]; then
-                shift
-                command_args="$@"
-                break
-            else
-                echo "Error: --kani-args requires additional arguments"
-                usage
-            fi
+            shift
+            command_args="$@"
+            break
             ;;
         *)
             echo "Error: Unknown option $1"
