@@ -171,6 +171,7 @@ pub use predicates::*;
 /// Provide a few predicates to be used in safety contracts.
 ///
 /// At runtime, they are no-op, and always return true.
+/// FIXME: In some cases, we could do better, for example check if not null and aligned.
 #[cfg(not(kani))]
 mod predicates {
     /// Checks if a pointer can be dereferenced, ensuring:
@@ -207,11 +208,18 @@ mod predicates {
         let _ = dst;
         true
     }
+
+    /// Checks if two pointers point to the same allocation.
+    pub fn same_allocation<T>(src: *const T, dst: *const T) -> bool {
+        let _ = (src, dst);
+        true
+    }
 }
 
 #[cfg(kani)]
 mod predicates {
-    pub use crate::kani::mem::{can_dereference, can_write, can_read_unaligned, can_write_unaligned};
+    pub use crate::kani::mem::{can_dereference, can_write, can_read_unaligned, can_write_unaligned,
+    same_allocation};
 }
 
 /// This trait should be used to specify and check type safety invariants for a
