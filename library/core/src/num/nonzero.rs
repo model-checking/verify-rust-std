@@ -366,6 +366,10 @@ where
     #[rustc_const_stable(feature = "nonzero", since = "1.28.0")]
     #[must_use]
     #[inline]
+    // #[rustc_allow_const_fn_unstable(const_refs_to_cell)] enables byte-level 
+    // comparisons within const functions. This is needed here to validate the 
+    // contents of `T` by converting a pointer to a `u8` slice for our `requires` 
+    // and `ensures` checks.
     #[rustc_allow_const_fn_unstable(const_refs_to_cell)]
     #[requires({
         let size = core::mem::size_of::<T>();
