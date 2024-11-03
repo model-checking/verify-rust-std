@@ -8,15 +8,13 @@ use crate::hint::assert_unchecked;
 use crate::iter::{
     FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce, UncheckedIterator,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::PhantomData;
 use crate::mem::{self, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ptr::{NonNull, without_provenance, without_provenance_mut};
 use crate::{cmp, fmt};
-
-#[cfg(kani)]
-use crate::kani;
-
 use crate::ub_checks::Invariant;
 
 #[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
@@ -163,14 +161,15 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
 }
 
 #[unstable(feature = "ub_checks", issue = "none")]
-impl<T> crate::ub_checks::Invariant for Iter<'_, T> {
+impl<T> Invariant for Iter<'_, T> {
     fn is_safe(&self) -> bool {
         let ty_size = crate::mem::size_of::<T>();
         let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
         if ty_size == 0 || distance == 0 {
             self.ptr.is_aligned()
         } else {
-            let slice_ptr: *const [T] = crate::ptr::from_raw_parts(self.ptr.as_ptr(), distance / ty_size);
+            let slice_ptr: *const [T] =
+                crate::ptr::from_raw_parts(self.ptr.as_ptr(), distance / ty_size);
             crate::ub_checks::same_allocation(self.ptr.as_ptr(), self.end_or_len)
                 && self.ptr.addr().get() <= self.end_or_len as usize
                 && distance % ty_size == 0
@@ -219,14 +218,15 @@ pub struct IterMut<'a, T: 'a> {
 }
 
 #[unstable(feature = "ub_checks", issue = "none")]
-impl<T> crate::ub_checks::Invariant for IterMut<'_, T> {
+impl<T> Invariant for IterMut<'_, T> {
     fn is_safe(&self) -> bool {
         let size = crate::mem::size_of::<T>();
         if size == 0 {
             self.ptr.is_aligned()
         } else {
             let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
-            let slice_ptr: *mut [T] = crate::ptr::from_raw_parts_mut(self.ptr.as_ptr(), distance / size);
+            let slice_ptr: *mut [T] =
+                crate::ptr::from_raw_parts_mut(self.ptr.as_ptr(), distance / size);
             crate::ub_checks::same_allocation(self.ptr.as_ptr(), self.end_or_len)
                 && self.ptr.addr().get() <= self.end_or_len as usize
                 && distance % size == 0
@@ -3506,7 +3506,8 @@ impl<'a, T: 'a + fmt::Debug, P> fmt::Debug for ChunkByMut<'a, T, P> {
 }
 
 /// Verify the safety of the code implemented in this module (including generated code from macros).
-#[unstable(feature = "kani", issue="none")]
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
     use crate::kani;
@@ -3604,17 +3605,29 @@ mod verify {
 
                 // check_safe_abstraction!(check_advance_back_by, $ty, advance_back_by, kani::any());
 
-                check_safe_abstraction!(check_is_empty, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.is_empty(); });
-                check_safe_abstraction!(check_len, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.len(); });
-                check_safe_abstraction!(check_size_hint, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.size_hint(); });
+                check_safe_abstraction!(check_is_empty, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.is_empty();
+                });
+                check_safe_abstraction!(check_len, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.len();
+                });
+                check_safe_abstraction!(check_size_hint, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.size_hint();
+                });
                 //check_safe_abstraction!(check_nth, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth(kani::any()); });
                 //check_safe_abstraction!(check_advance_by, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.advance_by(kani::any()); });
-                //check_safe_abstraction!(check_next_back, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.next_back(); });
+                check_safe_abstraction!(check_next_back, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.next_back();
+                });
                 //check_safe_abstraction!(check_nth_back, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth_back(kani::any()); });
-                check_safe_abstraction!(check_next, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.next(); });
+                check_safe_abstraction!(check_next, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.next();
+                });
 
                 // Ensure that clone always generates a safe object.
-                check_safe_abstraction!(check_clone, $ty, |iter: &mut Iter<'_, $ty>| { kani::assert(iter.clone().is_safe(), "Clone is safe"); });
+                check_safe_abstraction!(check_clone, $ty, |iter: &mut Iter<'_, $ty>| {
+                    kani::assert(iter.clone().is_safe(), "Clone is safe");
+                });
             }
         };
     }

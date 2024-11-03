@@ -180,7 +180,7 @@ mod predicates {
     ///   * `src` points to a properly initialized value of type `T`.
     ///
     /// [`crate::ptr`]: https://doc.rust-lang.org/std/ptr/index.html
-    pub fn can_dereference<T>(src: *const T) -> bool {
+    pub fn can_dereference<T: ?Sized>(src: *const T) -> bool {
         let _ = src;
         true
     }
@@ -189,7 +189,7 @@ mod predicates {
     /// * `dst` must be valid for writes.
     /// * `dst` must be properly aligned. Use `write_unaligned` if this is not the
     ///    case.
-    pub fn can_write<T>(dst: *mut T) -> bool {
+    pub fn can_write<T: ?Sized>(dst: *mut T) -> bool {
         let _ = dst;
         true
     }
@@ -197,20 +197,20 @@ mod predicates {
     /// Check if a pointer can be the target of unaligned reads.
     /// * `src` must be valid for reads.
     /// * `src` must point to a properly initialized value of type `T`.
-    pub fn can_read_unaligned<T>(src: *const T) -> bool {
+    pub fn can_read_unaligned<T: ?Sized>(src: *const T) -> bool {
         let _ = src;
         true
     }
 
     /// Check if a pointer can be the target of unaligned writes.
     /// * `dst` must be valid for writes.
-    pub fn can_write_unaligned<T>(dst: *mut T) -> bool {
+    pub fn can_write_unaligned<T: ?Sized>(dst: *mut T) -> bool {
         let _ = dst;
         true
     }
 
     /// Checks if two pointers point to the same allocation.
-    pub fn same_allocation<T>(src: *const T, dst: *const T) -> bool {
+    pub fn same_allocation<T: ?Sized>(src: *const T, dst: *const T) -> bool {
         let _ = (src, dst);
         true
     }
