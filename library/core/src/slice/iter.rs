@@ -162,11 +162,19 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
 
 #[unstable(feature = "ub_checks", issue = "none")]
 impl<T> Invariant for Iter<'_, T> {
+    /// An iterator can be safely used if its pointer can be read for its current length.
+    ///
+    /// If the type is a ZST or the encoded length is `0`, the only safety requirement is that
+    /// its pointer is aligned (since zero-size access is always safe for aligned pointers),
+    /// and that `self.ptr` value is less or equal to `self.end_or_len`.
+    ///
+    /// For other cases, we need to ensure that it is safe to read the memory between
+    /// `self.ptr` and `self.end_or_len`.
     fn is_safe(&self) -> bool {
         let ty_size = crate::mem::size_of::<T>();
         let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
         if ty_size == 0 || distance == 0 {
-            self.ptr.is_aligned()
+            self.ptr.is_aligned() && self.ptr.addr().get() <= self.end_or_len as usize
         } else {
             let slice_ptr: *const [T] =
                 crate::ptr::from_raw_parts(self.ptr.as_ptr(), distance / ty_size);
@@ -219,10 +227,14 @@ pub struct IterMut<'a, T: 'a> {
 
 #[unstable(feature = "ub_checks", issue = "none")]
 impl<T> Invariant for IterMut<'_, T> {
+    /// This is similar to [Iter] with an extra write requirement.
+    ///
+    /// It must be safe to write in the memory interval between `self.ptr`
+    /// and `self.end_or_len`.
     fn is_safe(&self) -> bool {
         let size = crate::mem::size_of::<T>();
         if size == 0 {
-            self.ptr.is_aligned()
+            self.ptr.is_aligned() && self.ptr.addr().get() <= self.end_or_len as usize
         } else {
             let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
             let slice_ptr: *mut [T] =
@@ -3632,6 +3644,7 @@ mod verify {
         };
     }
 
+    // FIXME: Add harnesses for ZST with alignment > 1.
     check_iter_with_ty!(verify_unit, (), isize::MAX as usize);
     check_iter_with_ty!(verify_u8, u8, u32::MAX as usize);
     check_iter_with_ty!(verify_char, char, 50);
