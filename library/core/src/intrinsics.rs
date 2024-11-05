@@ -3578,8 +3578,6 @@ mod verify {
     use super::*;
     use crate::kani;
     use core::mem::MaybeUninit;
-    use core::ptr::addr_of_mut;
-    use core::{cmp, fmt};
     use kani::{AllocationStatus, Arbitrary, ArbitraryPointer, PointerGenerator};
 
     #[kani::proof_for_contract(typed_swap)]
@@ -3604,9 +3602,23 @@ mod verify {
 
     #[kani::proof_for_contract(copy_nonoverlapping)]
     fn check_copy_nonoverlapping() {
-        run_with_arbitrary_ptrs::<char>(|src, dst| unsafe {
-            copy_nonoverlapping(src, dst, kani::any())
-        });
+        // Note: cannot use `ArbitraryPointer` here since it may indirectly invoke
+        // `copy_nonoverlapping` to initialize the memory.
+        // Kani contract checking thinks that call is part of the verification workflow.
+        let gen_any_ptr = |buf:  &mut [MaybeUninit<char>; 100]| -> *mut char {
+            let base = buf.as_mut_ptr() as *mut u8;
+            base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
+        };
+        let mut buffer1 = [MaybeUninit::<char>::uninit(); 100];
+        for i in 0..100 {
+            if kani::any() {
+                buffer1[i] = MaybeUninit::new(kani::any());
+            }
+        }
+        let mut buffer2 = [MaybeUninit::<char>::uninit(); 100];
+        let src = gen_any_ptr(&mut buffer1);
+        let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+        unsafe { copy_nonoverlapping(src, dst, kani::any()) }
     }
 
     #[kani::proof_for_contract(write_bytes)]
