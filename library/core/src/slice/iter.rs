@@ -165,8 +165,7 @@ impl<T> Invariant for Iter<'_, T> {
     /// An iterator can be safely used if its pointer can be read for its current length.
     ///
     /// If the type is a ZST or the encoded length is `0`, the only safety requirement is that
-    /// its pointer is aligned (since zero-size access is always safe for aligned pointers),
-    /// and that `self.ptr` value is less or equal to `self.end_or_len`.
+    /// its pointer is aligned (since zero-size access is always safe for aligned pointers).
     ///
     /// For other cases, we need to ensure that it is safe to read the memory between
     /// `self.ptr` and `self.end_or_len`.
@@ -174,7 +173,7 @@ impl<T> Invariant for Iter<'_, T> {
         let ty_size = crate::mem::size_of::<T>();
         let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
         if ty_size == 0 || distance == 0 {
-            self.ptr.is_aligned() && self.ptr.addr().get() <= self.end_or_len as usize
+            self.ptr.is_aligned()
         } else {
             let slice_ptr: *const [T] =
                 crate::ptr::from_raw_parts(self.ptr.as_ptr(), distance / ty_size);
@@ -232,16 +231,16 @@ impl<T> Invariant for IterMut<'_, T> {
     /// It must be safe to write in the memory interval between `self.ptr`
     /// and `self.end_or_len`.
     fn is_safe(&self) -> bool {
-        let size = crate::mem::size_of::<T>();
-        if size == 0 {
-            self.ptr.is_aligned() && self.ptr.addr().get() <= self.end_or_len as usize
+        let ty_size = crate::mem::size_of::<T>();
+        let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
+        if ty_size == 0 || distance == 0 {
+            self.ptr.is_aligned()
         } else {
-            let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
-            let slice_ptr: *mut [T] =
-                crate::ptr::from_raw_parts_mut(self.ptr.as_ptr(), distance / size);
+            let slice_ptr: *const [T] =
+                crate::ptr::from_raw_parts(self.ptr.as_ptr(), distance / ty_size);
             crate::ub_checks::same_allocation(self.ptr.as_ptr(), self.end_or_len)
                 && self.ptr.addr().get() <= self.end_or_len as usize
-                && distance % size == 0
+                && distance % ty_size == 0
                 && crate::ub_checks::can_dereference(slice_ptr)
                 && crate::ub_checks::can_write(slice_ptr)
         }
