@@ -1858,21 +1858,28 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::byte_offset_from)]
     pub fn non_null_byte_offset_from_proof() {
-        const ARR_SIZE: usize = 100000;
-        let arr: [i32; ARR_SIZE] = kani::any();
+        use kani::PointerGenerator;
+        const SIZE: usize = mem::size_of::<i32>();
+        let mut generator1 = PointerGenerator::<SIZE>::new();
+        let mut generator2 = PointerGenerator::<SIZE>::new();
 
-        // Randomly generate offsets for the pointers
-        let offset = kani::any_where(|x| *x <= ARR_SIZE);
-        let origin_offset = kani::any_where(|x| *x <= ARR_SIZE);
+        let ptr: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
 
-        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;
-        let origin_ptr: *mut i32 = arr.as_ptr() as *mut i32;
+        let origin: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
 
-        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
-        let origin = unsafe { NonNull::new(origin_ptr.add(origin_offset)).unwrap() };
+        let ptr_nonnull = unsafe { NonNull::new(ptr).unwrap() };
+        let origin_nonnull = unsafe { NonNull::new(origin).unwrap() };
 
         unsafe {
-            let result = ptr.byte_offset_from(origin);
+            let result = ptr_nonnull.byte_offset_from(origin_nonnull);
         }
     }
 }
