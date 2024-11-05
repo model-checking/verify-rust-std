@@ -171,6 +171,7 @@ impl<T> Invariant for Iter<'_, T> {
     /// `self.ptr` and `self.end_or_len`.
     fn is_safe(&self) -> bool {
         let ty_size = crate::mem::size_of::<T>();
+        // Use `abs_diff` since `end_or_len` may be smaller than `ptr` if `T` is a ZST.
         let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
         if ty_size == 0 || distance == 0 {
             self.ptr.is_aligned()
@@ -236,8 +237,8 @@ impl<T> Invariant for IterMut<'_, T> {
         if ty_size == 0 || distance == 0 {
             self.ptr.is_aligned()
         } else {
-            let slice_ptr: *const [T] =
-                crate::ptr::from_raw_parts(self.ptr.as_ptr(), distance / ty_size);
+            let slice_ptr: *mut [T] =
+                crate::ptr::from_raw_parts_mut(self.ptr.as_ptr(), distance / ty_size);
             crate::ub_checks::same_allocation(self.ptr.as_ptr(), self.end_or_len)
                 && self.ptr.addr().get() <= self.end_or_len as usize
                 && distance % ty_size == 0
@@ -3525,8 +3526,8 @@ mod verify {
 
     fn any_slice<T>(orig_slice: &[T]) -> &[T] {
         if kani::any() {
-            let first = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
-            let last = kani::any_where(|idx: &usize| *idx >= first && *idx <= orig_slice.len());
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
             &orig_slice[first..last]
         } else {
             let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const T;
