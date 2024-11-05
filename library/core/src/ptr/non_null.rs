@@ -502,22 +502,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::requires(
-        if (count >= 0) {
-            kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_add(count as usize) as *const())
-        } else {
-            kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_sub(-count as usize) as *const())
-        }
-    )]
-    #[kani::ensures(|result: &Self| {
-        if (count >= 0) {
-            let offset_ptr = self.as_ptr().byte_add(count as usize) as *mut T;
-            result.as_ptr() == offset_ptr
-        } else {
-            let offset_ptr = self.as_ptr().byte_sub(-count as usize) as *mut T;
-            result.as_ptr() == offset_ptr
-        }
-    })]
+    #[kani::requires(kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_offset(count) as *const()))]
+    #[kani::ensures(|result: &Self| result.as_ptr() == self.as_ptr().byte_offset(count))]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset` and `byte_offset` has
         // the same safety contract.
