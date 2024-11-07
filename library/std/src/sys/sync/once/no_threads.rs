@@ -35,7 +35,7 @@ unsafe impl Sync for Once {}
 
 impl Once {
     #[inline]
-    #[rustc_const_stable(feature = "const_once_new", since = "1.32.0")]
+    #[cfg_attr(bootstrap, rustc_const_stable(feature = "const_once_new", since = "1.32.0"))]
     pub const fn new() -> Once {
         Once { state: Cell::new(State::Incomplete) }
     }
@@ -53,6 +53,15 @@ impl Once {
             State::Complete => ExclusiveState::Complete,
             _ => unreachable!("invalid Once state"),
         }
+    }
+
+    #[inline]
+    pub(crate) fn set_state(&mut self, new_state: ExclusiveState) {
+        self.state.set(match new_state {
+            ExclusiveState::Incomplete => State::Incomplete,
+            ExclusiveState::Poisoned => State::Poisoned,
+            ExclusiveState::Complete => State::Complete,
+        });
     }
 
     #[cold]
