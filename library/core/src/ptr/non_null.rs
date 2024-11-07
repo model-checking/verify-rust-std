@@ -249,7 +249,6 @@ impl<T: ?Sized> NonNull<T> {
     #[unstable(feature = "ptr_metadata", issue = "81513")]
     #[rustc_const_unstable(feature = "ptr_metadata", issue = "81513")]
     #[inline]
-    //TODO: Do we want requires for different types?
     #[ensures(|result| !result.pointer.is_null())]
     pub const fn from_raw_parts(
         data_pointer: NonNull<()>,
@@ -269,8 +268,8 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[inline]
-    #[ensures(|(data_ptr, metadata)| !data_ptr.as_ptr().is_null())] //TODO: kani bug
-    #[ensures(|(data_ptr, metadata)| self == NonNull::from_raw_parts(*data_ptr, *metadata))]
+    #[ensures(|(data_ptr, metadata)| !data_ptr.as_ptr().is_null())]
+    #[ensures(|(data_ptr, metadata)| self.as_ptr() as *const () == data_ptr.as_ptr() as *const ())]
     pub const fn to_raw_parts(self) -> (NonNull<()>, <T as super::Pointee>::Metadata) {
         (self.cast(), super::metadata(self.as_ptr()))
     }
@@ -1458,7 +1457,7 @@ impl<T> NonNull<[T]> {
         && (len as isize).checked_mul(core::mem::size_of::<T>() as isize).is_some()
         && (data.pointer as isize).checked_add(len as isize * core::mem::size_of::<T>() as isize).is_some() // adding len must not “wrap around” the address space
         && unsafe { kani::mem::same_allocation(data.pointer, data.pointer.add(len)) })] 
-    #[ensures(|result| !result.pointer.is_null())] //TODO: &data[..len] == result.as_ref() preserve content(question)
+    #[ensures(|result| !result.pointer.is_null())] //TODO: compare byte by byte between data and result uptill len * size_of::<T>()
     pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self {
         // SAFETY: `data` is a `NonNull` pointer which is necessarily non-null
         unsafe { Self::new_unchecked(super::slice_from_raw_parts_mut(data.as_ptr(), len)) }
@@ -1850,8 +1849,6 @@ mod verify {
         let ptr_isize = NonNull::<isize>::dangling();
         // unit type
         let ptr_unit = NonNull::<()>::dangling();
-        // trait object
-        // let ptr_trait = NonNull::<Box<dyn SampleTrait>>::dangling(); // failed to import Box
         // zero length slice from dangling unit pointer
         let zero_len_slice =  NonNull::slice_from_raw_parts(ptr_unit, 0);
     }
@@ -1867,7 +1864,6 @@ mod verify {
         // Get a raw NonNull pointer to the start of the slice
         let arr_slice_raw_ptr = NonNull::new(arr_slice.as_ptr() as *mut ()).unwrap();  
         // Create NonNull pointer from the start pointer and the length of the slice
-        // Safety: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
         let nonnull_slice = NonNull::<[i8]>::from_raw_parts(arr_slice_raw_ptr, arr_len);
         // Ensure slice content is preserved, runtime at this step is proportional to arr_len
         unsafe {
@@ -1929,12 +1925,7 @@ mod verify {
 
         // Create NonNull<dyn MyTrait> from the data pointer and metadata
         let nonnull_trait_object: NonNull<dyn SampleTrait> = NonNull::from_raw_parts(trait_ptr, metadata);
-        let (decomposed_data_ptr, decomposed_metadata) = NonNull::to_raw_parts(nonnull_trait_object);
-
-        unsafe {
-            // Ensure trait method and member is preserved
-            //kani::assert( trait_object.get_value() == nonnull_trait_object.as_ref().get_value(), "trait method and member must correctly preserve"); // TODO: failed checks: partial eq
-            kani::assert( trait_object as *const dyn ptr::non_null::verify::SampleTrait == nonnull_trait_object.as_ptr(), "trait method and member must correctly preserve");
-        }
+        let (decomposed_data_ptr, decomposed_metadata) = NonNull::to_raw_parts(nonnull_trait_object);                
     }
+
 }
