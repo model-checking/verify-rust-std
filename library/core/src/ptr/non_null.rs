@@ -279,7 +279,7 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[unstable(feature = "strict_provenance", issue = "95228")]
-    #[ensures(|result| result.get() != 0 && result.get() == self.as_ptr() as *const() as usize)]
+    #[ensures(|result| result.get() == self.as_ptr() as *const() as usize)]
     pub fn addr(self) -> NonZero<usize> {
         // SAFETY: The pointer is guaranteed by the type to be non-null,
         // meaning that the address will be non-zero.
@@ -1846,8 +1846,8 @@ mod verify {
     pub fn non_null_check_add() {
         const SIZE: usize = 100000;
         // Randomize pointer offset within array bound
-        let offset = kani::any_where(|x| * x <= SIZE as isize);
-        kani::assume(offset >= 0);
+        let offset = kani::any_where(|x| *x <= SIZE as isize && *x >=0);
+        //kani::assume(offset >= 0);
         // Create a non-deterministic array of size SIZE
         let arr: [i8; SIZE] = kani::any();  
         // Get a raw pointer to the array
@@ -1867,8 +1867,9 @@ mod verify {
     #[kani::proof_for_contract(NonNull::addr)]
     pub fn non_null_check_addr() {  
         // Create NonNull pointer & get pointer address
-        let mut x: i32 = kani::any();
-        let nonnull_xptr = NonNull::new(&mut x as *mut i32).unwrap();
+        let x = kani::any::<usize>() as *mut i32;
+        kani::assume(!x.is_null());
+        let nonnull_xptr = NonNull::new(x).unwrap();
         let address = nonnull_xptr.addr();
     }
 
@@ -1876,8 +1877,9 @@ mod verify {
     #[kani::proof_for_contract(NonNull::align_offset)]
     pub fn non_null_check_align_offset() {
         // Create NonNull pointer
-        let mut x: i8 = kani::any();
-        let nonnull_xptr = NonNull::new(&mut x as *mut i8).unwrap();
+        let x = kani::any::<usize>() as *mut i32;
+        kani::assume(!x.is_null());
+        let nonnull_xptr = NonNull::new(x).unwrap();
     
         // Call align_offset with valid align value
         let align: usize = kani::any();
@@ -1889,12 +1891,11 @@ mod verify {
     #[kani::should_panic]
     #[kani::proof_for_contract(NonNull::align_offset)]
     pub fn non_null_check_align_offset_negative() {
-        // Non-deterministic input array of i8 (signed 8-bit integers)
-        let mut x: i8 = kani::any();
-        let xptr = &mut x as *mut i8;
-    
-        // Non-null pointer to the start of the array
-        let nonnull_xptr = NonNull::new(xptr).unwrap();
+        // Create NonNull pointer
+        let x = kani::any::<usize>() as *mut i8;
+        kani::assume(!x.is_null());
+
+        let nonnull_xptr = NonNull::new(x).unwrap();
 
         // Generate align value that is not a power of two
         let invalid_align: usize = kani::any();
