@@ -1829,7 +1829,6 @@ mod verify {
         let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
         let count: usize = kani::any();
 
-        kani::assume(count < usize::MAX);
         kani::assume(count.checked_mul(mem::size_of::<i32>()).is_some());
         kani::assume(count * mem::size_of::<i32>() <= (isize::MAX as usize));
 
@@ -1847,8 +1846,6 @@ mod verify {
         let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
         let count: isize = kani::any();
 
-        kani::assume(count >= isize::MIN);
-        kani::assume(count <= isize::MAX);
         kani::assume(count.checked_mul(mem::size_of::<i32>() as isize).is_some());
         kani::assume(count * (mem::size_of::<i32>() as isize) <= (isize::MAX as isize));
         unsafe {
@@ -1859,7 +1856,7 @@ mod verify {
     #[kani::proof_for_contract(NonNull::byte_offset_from)]
     pub fn non_null_byte_offset_from_proof() {
         use kani::PointerGenerator;
-        const SIZE: usize = mem::size_of::<i32>();
+        const SIZE: usize = mem::size_of::<i32>() * 10;
         let mut generator1 = PointerGenerator::<SIZE>::new();
         let mut generator2 = PointerGenerator::<SIZE>::new();
 
