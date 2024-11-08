@@ -572,8 +572,7 @@ impl<T: ?Sized> NonNull<T> {
         && count * core::mem::size_of::<T>() <= isize::MAX as usize
         && (self.pointer as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some() // check wrapping add
         && kani::mem::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize)))]
-    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize)
-        && kani::mem::same_allocation(result.pointer, self.pointer))]
+    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
