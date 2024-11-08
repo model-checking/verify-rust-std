@@ -4,13 +4,21 @@
 // collections, resulting in having to optimize down excess IR multiple times.
 // Your performance intuition is useless. Run perf.
 
-use safety::requires;
+use safety::{ensures, Invariant, requires};
 use crate::error::Error;
+use crate::intrinsics::{unchecked_add, unchecked_mul, unchecked_sub};
+use crate::mem::SizedTypeProperties;
 use crate::ptr::{Alignment, NonNull};
-use crate::{assert_unsafe_precondition, cmp, fmt, mem};
+use crate::{assert_unsafe_precondition, fmt, mem};
 
 #[cfg(kani)]
 use crate::kani;
+#[cfg(kani)]
+use crate::cmp;
+
+// Used only for contract verification.
+#[allow(unused_imports)]
+use crate::ub_checks::Invariant;
 
 // While this function is used in one place and its implementation
 // could be inlined, the previous attempts to do so made rustc
@@ -39,6 +47,7 @@ const fn size_align<T>() -> (usize, usize) {
 #[stable(feature = "alloc_layout", since = "1.28.0")]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[lang = "alloc_layout"]
+#[derive(Invariant)]
 pub struct Layout {
     // size of the requested block of memory, measured in bytes.
     size: usize,
@@ -69,6 +78,10 @@ impl Layout {
     #[rustc_const_stable(feature = "const_alloc_layout_size_align", since = "1.50.0")]
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
+    #[ensures(|result| result.is_err() || align.is_power_of_two())]
+    #[ensures(|result| result.is_err() || size <= isize::MAX as usize - (align - 1))]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == size)]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == align)]
     pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError> {
         if Layout::is_size_align_valid(size, align) {
             // SAFETY: Layout::is_size_align_valid checks the preconditions for this call.
@@ -102,7 +115,10 @@ impl Layout {
         //
         // Above implies that checking for summation overflow is both
         // necessary and sufficient.
-        isize::MAX as usize - (align.as_usize() - 1)
+
+        // SAFETY: the maximum possible alignment is `isize::MAX + 1`,
+        // so the subtraction cannot overflow.
+        unsafe { unchecked_sub(isize::MAX as usize + 1, align.as_usize()) }
     }
 
     /// Internal helper constructor to skip revalidating alignment validity.
@@ -128,6 +144,9 @@ impl Layout {
     #[inline]
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
     #[requires(Layout::from_size_align(size, align).is_ok())]
+    #[ensures(|result| result.is_safe())]
+    #[ensures(|result| result.size() == size)]
+    #[ensures(|result| result.align() == align)]
     pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -159,7 +178,7 @@ impl Layout {
     #[must_use = "this returns the minimum alignment, \
                   without modifying the layout"]
     #[inline]
-    #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
+    #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(ptr_alignment_type))]
     pub const fn align(&self) -> usize {
         self.align.as_usize()
     }
@@ -169,6 +188,8 @@ impl Layout {
     #[rustc_const_stable(feature = "alloc_layout_const_new", since = "1.42.0")]
     #[must_use]
     #[inline]
+    #[ensures(|result| result.size() == mem::size_of::<T>())]
+    #[ensures(|result| result.align() == mem::align_of::<T>())]
     pub const fn new<T>() -> Self {
         let (size, align) = size_align::<T>();
         // SAFETY: if the type is instantiated, rustc already ensures that its
@@ -184,6 +205,8 @@ impl Layout {
     #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
     #[must_use]
     #[inline]
+    #[requires(mem::align_of_val(t).is_power_of_two())]
+    #[ensures(|result| result.align() == mem::align_of_val(t))]
     pub const fn for_value<T: ?Sized>(t: &T) -> Self {
         let (size, align) = (mem::size_of_val(t), mem::align_of_val(t));
         // SAFETY: see rationale in `new` for why this is using the unsafe variant
@@ -218,8 +241,12 @@ impl Layout {
     /// [trait object]: ../../book/ch17-02-trait-objects.html
     /// [extern type]: ../../unstable-book/language-features/extern-types.html
     #[unstable(feature = "layout_for_ptr", issue = "69835")]
-    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
+    #[rustc_const_unstable(feature = "layout_for_ptr", issue = "69835")]
     #[must_use]
+    // TODO: we should try to capture the above constraints on T in a `requires` clause, and the
+    // metadata helpers from https://github.com/model-checking/verify-rust-std/pull/37 may be able
+    // to accomplish this.
+    #[ensures(|result| result.align().is_power_of_two())]
     pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
         // SAFETY: we pass along the prerequisites of these functions to the caller
         let (size, align) = unsafe { (mem::size_of_val_raw(t), mem::align_of_val_raw(t)) };
@@ -234,9 +261,9 @@ impl Layout {
     /// sentinel value. Types that lazily allocate must track initialization by
     /// some other means.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
-    #[rustc_const_unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[must_use]
     #[inline]
+    #[ensures(|result| result.is_aligned())]
     pub const fn dangling(&self) -> NonNull<u8> {
         // SAFETY: align is guaranteed to be non-zero
         unsafe { NonNull::new_unchecked(crate::ptr::without_provenance_mut::<u8>(self.align())) }
@@ -257,9 +284,17 @@ impl Layout {
     /// Returns an error if the combination of `self.size()` and the given
     /// `align` violates the conditions listed in [`Layout::from_size_align`].
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
+    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
+    #[cfg_attr(not(bootstrap), rustc_const_stable_indirect)]
     #[inline]
-    pub fn align_to(&self, align: usize) -> Result<Self, LayoutError> {
-        Layout::from_size_align(self.size(), cmp::max(self.align(), align))
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() >= align)]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align().is_power_of_two())]
+    pub const fn align_to(&self, align: usize) -> Result<Self, LayoutError> {
+        if let Some(align) = Alignment::new(align) {
+            Layout::from_size_alignment(self.size, Alignment::max(self.align, align))
+        } else {
+            Err(LayoutError)
+        }
     }
 
     /// Returns the amount of padding we must insert after `self`
@@ -279,34 +314,47 @@ impl Layout {
     /// address for the whole allocated block of memory. One way to
     /// satisfy this constraint is to ensure `align <= self.align()`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
-    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
     #[must_use = "this returns the padding needed, \
                   without modifying the `Layout`"]
     #[inline]
+    #[ensures(|result| *result <= align)]
     pub const fn padding_needed_for(&self, align: usize) -> usize {
-        let len = self.size();
+        // FIXME: Can we just change the type on this to `Alignment`?
+        let Some(align) = Alignment::new(align) else { return usize::MAX };
+        let len_rounded_up = self.size_rounded_up_to_custom_align(align);
+        // SAFETY: Cannot overflow because the rounded-up value is never less
+        unsafe { unchecked_sub(len_rounded_up, self.size) }
+    }
 
+    /// Returns the smallest multiple of `align` greater than or equal to `self.size()`.
+    ///
+    /// This can return at most `Alignment::MAX` (aka `isize::MAX + 1`)
+    /// because the original size is at most `isize::MAX`.
+    #[inline]
+    const fn size_rounded_up_to_custom_align(&self, align: Alignment) -> usize {
+        // SAFETY:
         // Rounded up value is:
-        //   len_rounded_up = (len + align - 1) & !(align - 1);
-        // and then we return the padding difference: `len_rounded_up - len`.
+        //   size_rounded_up = (size + align - 1) & !(align - 1);
         //
-        // We use modular arithmetic throughout:
+        // The arithmetic we do here can never overflow:
         //
         // 1. align is guaranteed to be > 0, so align - 1 is always
         //    valid.
         //
-        // 2. `len + align - 1` can overflow by at most `align - 1`,
-        //    so the &-mask with `!(align - 1)` will ensure that in the
-        //    case of overflow, `len_rounded_up` will itself be 0.
-        //    Thus the returned padding, when added to `len`, yields 0,
-        //    which trivially satisfies the alignment `align`.
+        // 2. size is at most `isize::MAX`, so adding `align - 1` (which is at
+        //    most `isize::MAX`) can never overflow a `usize`.
         //
-        // (Of course, attempts to allocate blocks of memory whose
-        // size and padding overflow in the above manner should cause
-        // the allocator to yield an error anyway.)
-
-        let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
-        len_rounded_up.wrapping_sub(len)
+        // 3. masking by the alignment can remove at most `align - 1`,
+        //    which is what we just added, thus the value we return is never
+        //    less than the original `size`.
+        //
+        // (Size 0 Align MAX is already aligned, so stays the same, but things like
+        // Size 1 Align MAX or Size isize::MAX Align 2 round up to `isize::MAX + 1`.)
+        unsafe {
+            let align_m1 = unchecked_sub(align.as_usize(), 1);
+            let size_rounded_up = unchecked_add(self.size, align_m1) & !align_m1;
+            size_rounded_up
+        }
     }
 
     /// Creates a layout by rounding the size of this layout up to a multiple
@@ -316,16 +364,20 @@ impl Layout {
     /// to the layout's current size.
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
     #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
+    #[cfg_attr(not(bootstrap), rustc_const_stable_indirect)]
     #[must_use = "this returns a new `Layout`, \
                   without modifying the original"]
     #[inline]
+    #[ensures(|result| result.size() >= self.size())]
+    #[ensures(|result| result.align() == self.align())]
+    #[ensures(|result| result.size() % result.align() == 0)]
+    #[ensures(|result| self.size() + self.padding_needed_for(self.align()) == result.size())]
     pub const fn pad_to_align(&self) -> Layout {
-        let pad = self.padding_needed_for(self.align());
         // This cannot overflow. Quoting from the invariant of Layout:
         // > `size`, when rounded up to the nearest multiple of `align`,
         // > must not overflow isize (i.e., the rounded value must be
         // > less than or equal to `isize::MAX`)
-        let new_size = self.size() + pad;
+        let new_size = self.size_rounded_up_to_custom_align(self.align);
 
         // SAFETY: padded size is guaranteed to not exceed `isize::MAX`.
         unsafe { Layout::from_size_align_unchecked(new_size, self.align()) }
@@ -338,20 +390,49 @@ impl Layout {
     /// layout of the array and `offs` is the distance between the start
     /// of each element in the array.
     ///
+    /// (That distance between elements is sometimes known as "stride".)
+    ///
     /// On arithmetic overflow, returns `LayoutError`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(alloc_layout_extra)]
+    /// use std::alloc::Layout;
+    ///
+    /// // All rust types have a size that's a multiple of their alignment.
+    /// let normal = Layout::from_size_align(12, 4).unwrap();
+    /// let repeated = normal.repeat(3).unwrap();
+    /// assert_eq!(repeated, (Layout::from_size_align(36, 4).unwrap(), 12));
+    ///
+    /// // But you can manually make layouts which don't meet that rule.
+    /// let padding_needed = Layout::from_size_align(6, 4).unwrap();
+    /// let repeated = padding_needed.repeat(3).unwrap();
+    /// assert_eq!(repeated, (Layout::from_size_align(24, 4).unwrap(), 8));
+    /// ```
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
-    pub fn repeat(&self, n: usize) -> Result<(Self, usize), LayoutError> {
-        // This cannot overflow. Quoting from the invariant of Layout:
-        // > `size`, when rounded up to the nearest multiple of `align`,
-        // > must not overflow isize (i.e., the rounded value must be
-        // > less than or equal to `isize::MAX`)
-        let padded_size = self.size() + self.padding_needed_for(self.align());
-        let alloc_size = padded_size.checked_mul(n).ok_or(LayoutError)?;
-
-        // The safe constructor is called here to enforce the isize size limit.
-        let layout = Layout::from_size_alignment(alloc_size, self.align)?;
-        Ok((layout, padded_size))
+    // for Kani (v0.54.0), the below modulo operation is too costly to prove (running into the
+    // 6-hours timeout on GitHub); we use a weaker postcondition instead
+    #[cfg_attr(not(kani),
+        ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() % n == 0))]
+    #[cfg_attr(kani,
+        ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() >= self.size()))]
+    // for Kani (v0.54.0), the below multiplication is too costly to prove (running into the
+    // 6-hours timeout on GitHub); we use a weaker postcondition instead
+    #[cfg_attr(not(kani),
+        ensures(|result| result.is_err() ||
+            result.as_ref().unwrap().0.size() == n * result.as_ref().unwrap().1))]
+    #[cfg_attr(kani,
+        ensures(|result| result.is_err() || n == 0 ||
+            result.as_ref().unwrap().0.size() >= result.as_ref().unwrap().1))]
+    pub const fn repeat(&self, n: usize) -> Result<(Self, usize), LayoutError> {
+        let padded = self.pad_to_align();
+        if let Ok(repeated) = padded.repeat_packed(n) {
+            Ok((repeated, padded.size()))
+        } else {
+            Err(LayoutError)
+        }
     }
 
     /// Creates a layout describing the record for `self` followed by
@@ -400,17 +481,28 @@ impl Layout {
     /// # assert_eq!(repr_c(&[u64, u32, u16, u32]), Ok((s, vec![0, 8, 12, 16])));
     /// ```
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
+    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
+    #[cfg_attr(not(bootstrap), rustc_const_stable_indirect)]
     #[inline]
-    pub fn extend(&self, next: Self) -> Result<(Self, usize), LayoutError> {
-        let new_align = cmp::max(self.align, next.align);
-        let pad = self.padding_needed_for(next.align());
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.align() == cmp::max(self.align(), next.align()))]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.size() >= self.size() + next.size())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().1 >= self.size())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().1 <= result.as_ref().unwrap().0.size())]
+    pub const fn extend(&self, next: Self) -> Result<(Self, usize), LayoutError> {
+        let new_align = Alignment::max(self.align, next.align);
+        let offset = self.size_rounded_up_to_custom_align(next.align);
 
-        let offset = self.size().checked_add(pad).ok_or(LayoutError)?;
-        let new_size = offset.checked_add(next.size()).ok_or(LayoutError)?;
+        // SAFETY: `offset` is at most `isize::MAX + 1` (such as from aligning
+        // to `Alignment::MAX`) and `next.size` is at most `isize::MAX` (from the
+        // `Layout` type invariant).  Thus the largest possible `new_size` is
+        // `isize::MAX + 1 + isize::MAX`, which is `usize::MAX`, and cannot overflow.
+        let new_size = unsafe { unchecked_add(offset, next.size) };
 
-        // The safe constructor is called here to enforce the isize size limit.
-        let layout = Layout::from_size_alignment(new_size, new_align)?;
-        Ok((layout, offset))
+        if let Ok(layout) = Layout::from_size_alignment(new_size, new_align) {
+            Ok((layout, offset))
+        } else {
+            Err(LayoutError)
+        }
     }
 
     /// Creates a layout describing the record for `n` instances of
@@ -427,10 +519,20 @@ impl Layout {
     /// On arithmetic overflow, returns `LayoutError`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
-    pub fn repeat_packed(&self, n: usize) -> Result<Self, LayoutError> {
-        let size = self.size().checked_mul(n).ok_or(LayoutError)?;
-        // The safe constructor is called here to enforce the isize size limit.
-        Layout::from_size_alignment(size, self.align)
+    // for Kani (v0.54.0), the below multiplication is too costly to prove (running into the
+    // 6-hours timeout on GitHub); we use a weaker postcondition instead
+    #[cfg_attr(not(kani),
+        ensures(|result| result.is_err() || result.as_ref().unwrap().size() == n * self.size()))]
+    #[cfg_attr(kani,
+        ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().size() >= self.size()))]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == self.align())]
+    pub const fn repeat_packed(&self, n: usize) -> Result<Self, LayoutError> {
+        if let Some(size) = self.size.checked_mul(n) {
+            // The safe constructor is called here to enforce the isize size limit.
+            Layout::from_size_alignment(size, self.align)
+        } else {
+            Err(LayoutError)
+        }
     }
 
     /// Creates a layout describing the record for `self` followed by
@@ -441,9 +543,13 @@ impl Layout {
     /// On arithmetic overflow, returns `LayoutError`.
     #[unstable(feature = "alloc_layout_extra", issue = "55724")]
     #[inline]
-    pub fn extend_packed(&self, next: Self) -> Result<Self, LayoutError> {
-        let new_size = self.size().checked_add(next.size()).ok_or(LayoutError)?;
-        // The safe constructor is called here to enforce the isize size limit.
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == self.size() + next.size())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == self.align())]
+    pub const fn extend_packed(&self, next: Self) -> Result<Self, LayoutError> {
+        // SAFETY: each `size` is at most `isize::MAX == usize::MAX/2`, so the
+        // sum is at most `usize::MAX/2*2 == usize::MAX - 1`, and cannot overflow.
+        let new_size = unsafe { unchecked_add(self.size, next.size) };
+        // The safe constructor enforces that the new size isn't too big for the alignment
         Layout::from_size_alignment(new_size, self.align)
     }
 
@@ -453,17 +559,18 @@ impl Layout {
     /// `isize::MAX`, returns `LayoutError`.
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
     #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
+    #[cfg_attr(not(bootstrap), rustc_const_stable_indirect)]
     #[inline]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == n * mem::size_of::<T>())]
+    #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == mem::align_of::<T>())]
     pub const fn array<T>(n: usize) -> Result<Self, LayoutError> {
         // Reduce the amount of code we need to monomorphize per `T`.
-        return inner(mem::size_of::<T>(), Alignment::of::<T>(), n);
+        return inner(T::LAYOUT, n);
 
         #[inline]
-        const fn inner(
-            element_size: usize,
-            align: Alignment,
-            n: usize,
-        ) -> Result<Layout, LayoutError> {
+        const fn inner(element_layout: Layout, n: usize) -> Result<Layout, LayoutError> {
+            let Layout { size: element_size, align } = element_layout;
+
             // We need to check two things about the size:
             //  - That the total size won't overflow a `usize`, and
             //  - That the total size still fits in an `isize`.
@@ -478,7 +585,7 @@ impl Layout {
             // This is a useless hint inside this function, but after inlining this helps
             // deduplicate checks for whether the overall capacity is zero (e.g., in RawVec's
             // allocation path) before/after this multiplication.
-            let array_size = unsafe { element_size.unchecked_mul(n) };
+            let array_size = unsafe { unchecked_mul(element_size, n) };
 
             // SAFETY: We just checked above that the `array_size` will not
             // exceed `isize::MAX` even when rounded up to the alignment.
@@ -496,7 +603,8 @@ impl Layout {
 )]
 pub type LayoutErr = LayoutError;
 
-/// The parameters given to `Layout::from_size_align`
+/// The `LayoutError` is returned when the parameters given
+/// to `Layout::from_size_align`
 /// or some other `Layout` constructor
 /// do not satisfy its documented constraints.
 #[stable(feature = "alloc_layout_error", since = "1.50.0")]
@@ -520,15 +628,153 @@ impl fmt::Display for LayoutError {
 mod verify {
     use super::*;
 
+    impl kani::Arbitrary for Layout {
+        fn any() -> Self {
+            let align = kani::any::<Alignment>();
+            let size = kani::any_where(|s: &usize| *s <= isize::MAX as usize - (align.as_usize() - 1));
+            unsafe { Layout { size, align } }
+        }
+    }
+
+    // pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::from_size_align)]
+    pub fn check_from_size_align() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+        let _ = Layout::from_size_align(s, a);
+    }
+
+    // pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self
     #[kani::proof_for_contract(Layout::from_size_align_unchecked)]
     pub fn check_from_size_align_unchecked() {
         let s = kani::any::<usize>();
         let a = kani::any::<usize>();
+        unsafe {
+            let _ = Layout::from_size_align_unchecked(s, a);
+        }
+    }
 
+    // pub const fn size(&self) -> usize
+    #[kani::proof]
+    pub fn check_size() {
+        let s = kani::any::<usize>();
+        let a = kani::any::<usize>();
+        kani::assume(Layout::from_size_align(s, a).is_ok());
         unsafe {
             let layout = Layout::from_size_align_unchecked(s, a);
             assert_eq!(layout.size(), s);
-            assert_eq!(layout.align(), a);
+        }
+    }
+
+    // pub const fn align(&self) -> usize
+    #[kani::proof]
+    pub fn check_align() {
+        let layout = kani::any::<Layout>();
+        assert!(layout.align().is_power_of_two());
+    }
+
+    // pub const fn new<T>() -> Self
+    #[kani::proof_for_contract(Layout::new)]
+    pub fn check_new_i32() {
+        let _ = Layout::new::<i32>();
+    }
+
+    // pub const fn for_value<T: ?Sized>(t: &T) -> Self
+    #[kani::proof_for_contract(Layout::for_value)]
+    pub fn check_for_value_i32() {
+        let x = kani::any::<i32>();
+        let _ = Layout::for_value::<i32>(&x);
+        let array : [i32; 2] = [1, 2];
+        let _ = Layout::for_value::<[i32]>(&array[1 .. 1]);
+        let trait_ref: &dyn core::fmt::Debug = &x;
+        let _ = Layout::for_value::<dyn core::fmt::Debug>(trait_ref);
+        // TODO: the case of an extern type as unsized tail is not yet covered
+    }
+
+    // pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self
+    #[kani::proof_for_contract(Layout::for_value_raw)]
+    pub fn check_for_value_raw_i32() {
+        unsafe {
+            let x = kani::any::<i32>();
+            let _ = Layout::for_value_raw::<i32>(&x as *const i32);
+            let _ = Layout::for_value_raw::<[i32]>(&[] as *const [i32]);
+            let trait_ref: &dyn core::fmt::Debug = &x;
+            let _ = Layout::for_value_raw::<dyn core::fmt::Debug>(trait_ref);
+            // TODO: the case of an extern type as unsized tail is not yet covered
+        }
+    }
+
+    // pub const fn dangling(&self) -> NonNull<u8>
+    #[kani::proof_for_contract(Layout::dangling)]
+    pub fn check_dangling() {
+        let layout = kani::any::<Layout>();
+        let _ = layout.dangling();
+    }
+
+    // pub fn align_to(&self, align: usize) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::align_to)]
+    pub fn check_align_to() {
+        let layout = kani::any::<Layout>();
+        let a2 = kani::any::<usize>();
+        let _ = layout.align_to(a2);
+    }
+
+    // pub const fn padding_needed_for(&self, align: usize) -> usize
+    #[kani::proof_for_contract(Layout::padding_needed_for)]
+    pub fn check_padding_needed_for() {
+        let layout = kani::any::<Layout>();
+        let a2 = kani::any::<usize>();
+        if(a2.is_power_of_two() && a2 <= layout.align()) {
+            let _ = layout.padding_needed_for(a2);
+        }
+    }
+
+    // pub const fn pad_to_align(&self) -> Layout
+    #[kani::proof_for_contract(Layout::pad_to_align)]
+    pub fn check_pad_to_align() {
+        let layout = kani::any::<Layout>();
+        let _ = layout.pad_to_align();
+    }
+
+    // pub fn repeat(&self, n: usize) -> Result<(Self, usize), LayoutError>
+    #[kani::proof_for_contract(Layout::repeat)]
+    pub fn check_repeat() {
+        let layout = kani::any::<Layout>();
+        let n = kani::any::<usize>();
+        let _ = layout.repeat(n);
+    }
+
+    // pub fn extend(&self, next: Self) -> Result<(Self, usize), LayoutError>
+    #[kani::proof_for_contract(Layout::extend)]
+    pub fn check_extend() {
+        let layout = kani::any::<Layout>();
+        let layout2 = kani::any::<Layout>();
+        let _ = layout.extend(layout2);
+    }
+
+    // pub fn repeat_packed(&self, n: usize) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::repeat_packed)]
+    pub fn check_repeat_packed() {
+        let layout = kani::any::<Layout>();
+        let n = kani::any::<usize>();
+        let _ = layout.repeat_packed(n);
+    }
+
+    // pub fn extend_packed(&self, next: Self) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::extend_packed)]
+    pub fn check_extend_packed() {
+        let layout = kani::any::<Layout>();
+        let layout2 = kani::any::<Layout>();
+        let _ = layout.extend_packed(layout2);
+    }
+
+    // pub const fn array<T>(n: usize) -> Result<Self, LayoutError>
+    #[kani::proof_for_contract(Layout::array)]
+    pub fn check_array_i32() {
+        let n = kani::any::<usize>();
+        if let Ok(layout) = Layout::array::<i32>(n) {
+            assert!(layout.size() >= n * 4);
+            assert!(layout.align().is_power_of_two());
         }
     }
 }

@@ -5,8 +5,12 @@
 use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{ascii, intrinsics, mem};
+use safety::{requires, ensures};
 
-// Used because the `?` operator is not allowed in a const context.
+#[cfg(kani)]
+use crate::kani;
+
+// FIXME(const-hack): Used because the `?` operator is not allowed in a const context.
 macro_rules! try_opt {
     ($e:expr) => {
         match $e {
@@ -16,10 +20,13 @@ macro_rules! try_opt {
     };
 }
 
-#[allow_internal_unstable(const_likely)]
-macro_rules! unlikely {
-    ($e: expr) => {
-        intrinsics::unlikely($e)
+// Use this when the generated code should differ between signed and unsigned types.
+macro_rules! sign_dependent_expr {
+    (signed ? if signed { $signed_case:expr } if unsigned { $unsigned_case:expr } ) => {
+        $signed_case
+    };
+    (unsigned ? if signed { $signed_case:expr } if unsigned { $unsigned_case:expr } ) => {
+        $unsigned_case
     };
 }
 
@@ -65,9 +72,9 @@ pub use nonzero::NonZero;
 )]
 pub use nonzero::ZeroablePrimitive;
 #[stable(feature = "signed_nonzero", since = "1.34.0")]
-pub use nonzero::{NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize};
+pub use nonzero::{NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize};
 #[stable(feature = "nonzero", since = "1.28.0")]
-pub use nonzero::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize};
+pub use nonzero::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize};
 #[stable(feature = "saturating_int_impl", since = "1.74.0")]
 pub use saturating::Saturating;
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -121,6 +128,37 @@ macro_rules! midpoint_impl {
             ((self ^ rhs) >> 1) + (self & rhs)
         }
     };
+    ($SelfT:ty, signed) => {
+        /// Calculates the middle point of `self` and `rhs`.
+        ///
+        /// `midpoint(a, b)` is `(a + b) / 2` as if it were performed in a
+        /// sufficiently-large signed integral type. This implies that the result is
+        /// always rounded towards zero and that no overflow will ever occur.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// #![feature(num_midpoint)]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(4), 2);")]
+        #[doc = concat!("assert_eq!((-1", stringify!($SelfT), ").midpoint(2), 0);")]
+        #[doc = concat!("assert_eq!((-7", stringify!($SelfT), ").midpoint(0), -3);")]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(-7), -3);")]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(7), 3);")]
+        /// ```
+        #[unstable(feature = "num_midpoint", issue = "110840")]
+        #[rustc_const_unstable(feature = "const_num_midpoint", issue = "110840")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn midpoint(self, rhs: Self) -> Self {
+            // Use the well known branchless algorithm from Hacker's Delight to compute
+            // `(a + b) / 2` without overflowing: `((a ^ b) >> 1) + (a & b)`.
+            let t = ((self ^ rhs) >> 1) + (self & rhs);
+            // Except that it fails for integers whose sum is an odd negative number as
+            // their floor is one less than their average. So we adjust the result.
+            t + (if t < 0 { 1 } else { 0 } & (self ^ rhs))
+        }
+    };
     ($SelfT:ty, $WideT:ty, unsigned) => {
         /// Calculates the middle point of `self` and `rhs`.
         ///
@@ -134,6 +172,32 @@ macro_rules! midpoint_impl {
         /// #![feature(num_midpoint)]
         #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(4), 2);")]
         #[doc = concat!("assert_eq!(1", stringify!($SelfT), ".midpoint(4), 2);")]
+        /// ```
+        #[unstable(feature = "num_midpoint", issue = "110840")]
+        #[rustc_const_unstable(feature = "const_num_midpoint", issue = "110840")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn midpoint(self, rhs: $SelfT) -> $SelfT {
+            ((self as $WideT + rhs as $WideT) / 2) as $SelfT
+        }
+    };
+    ($SelfT:ty, $WideT:ty, signed) => {
+        /// Calculates the middle point of `self` and `rhs`.
+        ///
+        /// `midpoint(a, b)` is `(a + b) / 2` as if it were performed in a
+        /// sufficiently-large signed integral type. This implies that the result is
+        /// always rounded towards zero and that no overflow will ever occur.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// #![feature(num_midpoint)]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(4), 2);")]
+        #[doc = concat!("assert_eq!((-1", stringify!($SelfT), ").midpoint(2), 0);")]
+        #[doc = concat!("assert_eq!((-7", stringify!($SelfT), ").midpoint(0), -3);")]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(-7), -3);")]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(7), 3);")]
         /// ```
         #[unstable(feature = "num_midpoint", issue = "110840")]
         #[rustc_const_unstable(feature = "const_num_midpoint", issue = "110840")]
@@ -297,6 +361,7 @@ impl i8 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i8, i16, signed }
 }
 
 impl i16 {
@@ -320,6 +385,7 @@ impl i16 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i16, i32, signed }
 }
 
 impl i32 {
@@ -343,6 +409,7 @@ impl i32 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i32, i64, signed }
 }
 
 impl i64 {
@@ -366,6 +433,7 @@ impl i64 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i64, signed }
 }
 
 impl i128 {
@@ -391,6 +459,7 @@ impl i128 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i128, signed }
 }
 
 #[cfg(target_pointer_width = "16")]
@@ -415,6 +484,7 @@ impl isize {
         from_xe_bytes_doc = usize_isize_from_xe_bytes_doc!(),
         bound_condition = " on 16-bit targets",
     }
+    midpoint_impl! { isize, i32, signed }
 }
 
 #[cfg(target_pointer_width = "32")]
@@ -439,6 +509,7 @@ impl isize {
         from_xe_bytes_doc = usize_isize_from_xe_bytes_doc!(),
         bound_condition = " on 32-bit targets",
     }
+    midpoint_impl! { isize, i64, signed }
 }
 
 #[cfg(target_pointer_width = "64")]
@@ -463,6 +534,7 @@ impl isize {
         from_xe_bytes_doc = usize_isize_from_xe_bytes_doc!(),
         bound_condition = " on 64-bit targets",
     }
+    midpoint_impl! { isize, signed }
 }
 
 /// If the 6th bit is set ascii is lower case.
@@ -614,8 +686,9 @@ impl u8 {
     ///
     /// [`to_ascii_uppercase`]: Self::to_ascii_uppercase
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
+    #[rustc_const_stable(feature = "const_make_ascii", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn make_ascii_uppercase(&mut self) {
+    pub const fn make_ascii_uppercase(&mut self) {
         *self = self.to_ascii_uppercase();
     }
 
@@ -639,8 +712,9 @@ impl u8 {
     ///
     /// [`to_ascii_lowercase`]: Self::to_ascii_lowercase
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
+    #[rustc_const_stable(feature = "const_make_ascii", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn make_ascii_lowercase(&mut self) {
+    pub const fn make_ascii_lowercase(&mut self) {
         *self = self.to_ascii_lowercase();
     }
 
@@ -1385,7 +1459,7 @@ from_str_radix_int_impl! { isize i8 i16 i32 i64 i128 usize u8 u16 u32 u64 u128 }
 #[doc(hidden)]
 #[inline(always)]
 #[unstable(issue = "none", feature = "std_internals")]
-#[rustc_const_stable(feature = "const_int_from_str", since = "1.82.0")]
+#[cfg_attr(bootstrap, rustc_const_stable(feature = "const_int_from_str", since = "1.82.0"))]
 pub const fn can_not_overflow<T>(radix: u32, is_signed_ty: bool, digits: &[u8]) -> bool {
     radix <= 16 && digits.len() <= mem::size_of::<T>() * 2 - is_signed_ty as usize
 }
@@ -1404,21 +1478,32 @@ fn from_str_radix_panic_rt(radix: u32) -> ! {
 #[cfg_attr(feature = "panic_immediate_abort", inline)]
 #[cold]
 #[track_caller]
+#[rustc_allow_const_fn_unstable(const_eval_select)]
 const fn from_str_radix_panic(radix: u32) {
     // The only difference between these two functions is their panic message.
     intrinsics::const_eval_select((radix,), from_str_radix_panic_ct, from_str_radix_panic_rt);
 }
 
 macro_rules! from_str_radix {
-    ($($int_ty:ty)+) => {$(
+    ($signedness:ident $($int_ty:ty)+) => {$(
         impl $int_ty {
             /// Converts a string slice in a given base to an integer.
             ///
-            /// The string is expected to be an optional `+` sign
-            /// followed by digits.
-            /// Leading and trailing whitespace represent an error.
-            /// Digits are a subset of these characters, depending on `radix`:
+            /// The string is expected to be an optional
+            #[doc = sign_dependent_expr!{
+                $signedness ?
+                if signed {
+                    " `+` or `-` "
+                }
+                if unsigned {
+                    " `+` "
+                }
+            }]
+            /// sign followed by only digits. Leading and trailing non-digit characters (including
+            /// whitespace) represent an error. Underscores (which are accepted in rust literals)
+            /// also represent an error.
             ///
+            /// Digits are a subset of these characters, depending on `radix`:
             /// * `0-9`
             /// * `a-z`
             /// * `A-Z`
@@ -1430,9 +1515,12 @@ macro_rules! from_str_radix {
             /// # Examples
             ///
             /// Basic usage:
-            ///
             /// ```
             #[doc = concat!("assert_eq!(", stringify!($int_ty), "::from_str_radix(\"A\", 16), Ok(10));")]
+            /// ```
+            /// Trailing space returns error:
+            /// ```
+            #[doc = concat!("assert!(", stringify!($int_ty), "::from_str_radix(\"1 \", 10).is_err());")]
             /// ```
             #[stable(feature = "rust1", since = "1.0.0")]
             #[rustc_const_stable(feature = "const_int_from_str", since = "1.82.0")]
@@ -1535,20 +1623,31 @@ macro_rules! from_str_radix {
     )+}
 }
 
-from_str_radix! { i8 u8 i16 u16 i32 u32 i64 u64 i128 u128 }
+from_str_radix! { unsigned u8 u16 u32 u64 u128 }
+from_str_radix! { signed i8 i16 i32 i64 i128 }
 
 // Re-use the relevant implementation of from_str_radix for isize and usize to avoid outputting two
 // identical functions.
 macro_rules! from_str_radix_size_impl {
-    ($($t:ident $size:ty),*) => {$(
+    ($($signedness:ident $t:ident $size:ty),*) => {$(
     impl $size {
         /// Converts a string slice in a given base to an integer.
         ///
-        /// The string is expected to be an optional `+` sign
-        /// followed by digits.
-        /// Leading and trailing whitespace represent an error.
-        /// Digits are a subset of these characters, depending on `radix`:
+        /// The string is expected to be an optional
+        #[doc = sign_dependent_expr!{
+            $signedness ?
+            if signed {
+                " `+` or `-` "
+            }
+            if unsigned {
+                " `+` "
+            }
+        }]
+        /// sign followed by only digits. Leading and trailing non-digit characters (including
+        /// whitespace) represent an error. Underscores (which are accepted in rust literals)
+        /// also represent an error.
         ///
+        /// Digits are a subset of these characters, depending on `radix`:
         /// * `0-9`
         /// * `a-z`
         /// * `A-Z`
@@ -1560,9 +1659,12 @@ macro_rules! from_str_radix_size_impl {
         /// # Examples
         ///
         /// Basic usage:
-        ///
         /// ```
         #[doc = concat!("assert_eq!(", stringify!($size), "::from_str_radix(\"A\", 16), Ok(10));")]
+        /// ```
+        /// Trailing space returns error:
+        /// ```
+        #[doc = concat!("assert!(", stringify!($size), "::from_str_radix(\"1 \", 10).is_err());")]
         /// ```
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_stable(feature = "const_int_from_str", since = "1.82.0")]
@@ -1576,8 +1678,466 @@ macro_rules! from_str_radix_size_impl {
 }
 
 #[cfg(target_pointer_width = "16")]
-from_str_radix_size_impl! { i16 isize, u16 usize }
+from_str_radix_size_impl! { signed i16 isize, unsigned u16 usize }
 #[cfg(target_pointer_width = "32")]
-from_str_radix_size_impl! { i32 isize, u32 usize }
+from_str_radix_size_impl! { signed i32 isize, unsigned u32 usize }
 #[cfg(target_pointer_width = "64")]
-from_str_radix_size_impl! { i64 isize, u64 usize }
+from_str_radix_size_impl! { signed i64 isize, unsigned u64 usize }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Verify `unchecked_{add, sub, mul}`
+    macro_rules! generate_unchecked_math_harness {
+        ($type:ty, $method:ident, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::$method)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+                let num2: $type = kani::any::<$type>();
+
+                unsafe {
+                    num1.$method(num2);
+                }
+            }
+        }
+    }
+
+    // Improve unchecked_mul performance for {32, 64, 128}-bit integer types
+    // by adding upper and lower limits for inputs
+    macro_rules! generate_unchecked_mul_intervals {
+        ($type:ty, $method:ident, $($harness_name:ident, $min:expr, $max:expr),+) => {
+            $(
+                #[kani::proof_for_contract($type::$method)]
+                pub fn $harness_name() {
+                    let num1: $type = kani::any::<$type>();
+                    let num2: $type = kani::any::<$type>();
+    
+                    kani::assume(num1 >= $min && num1 <= $max);
+                    kani::assume(num2 >= $min && num2 <= $max);
+    
+                    // Ensure that multiplication does not overflow
+                    kani::assume(!num1.overflowing_mul(num2).1);
+    
+                    unsafe {
+                        num1.$method(num2);
+                    }
+                }
+            )+
+        }
+    }
+
+    // Verify `unchecked_{shl, shr}`
+    macro_rules! generate_unchecked_shift_harness {
+        ($type:ty, $method:ident, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::$method)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+                let num2: u32 = kani::any::<u32>();
+
+                unsafe {
+                    num1.$method(num2);
+                }
+            }
+        }
+    }
+
+    macro_rules! generate_unchecked_neg_harness {
+        ($type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::unchecked_neg)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+
+                unsafe {
+                    num1.unchecked_neg();
+                }
+            }
+        }
+    }
+    
+    /// A macro to generate Kani proof harnesses for the `carrying_mul` method,
+    ///
+    /// The macro creates multiple harnesses for different ranges of input values,
+    /// allowing testing of both small and large inputs.
+    ///
+    /// # Parameters:
+    /// - `$type`: The integer type (e.g., u8, u16) for which the `carrying_mul` function is being tested.
+    /// - `$wide_type`: A wider type to simulate the multiplication (e.g., u16 for u8, u32 for u16).
+    /// - `$harness_name`: The name of the Kani harness to be generated.
+    /// - `$min`: The minimum value for the range of inputs for `lhs`, `rhs`, and `carry_in`.
+    /// - `$max`: The maximum value for the range of inputs for `lhs`, `rhs`, and `carry_in`.
+    macro_rules! generate_carrying_mul_intervals {
+        ($type:ty, $wide_type:ty, $($harness_name:ident, $min:expr, $max:expr),+) => {
+            $(
+                #[kani::proof]
+                pub fn $harness_name() {
+                    let lhs: $type = kani::any::<$type>();
+                    let rhs: $type = kani::any::<$type>();
+                    let carry_in: $type = kani::any::<$type>();
+    
+                    kani::assume(lhs >= $min && lhs <= $max);
+                    kani::assume(rhs >= $min && rhs <= $max);
+                    kani::assume(carry_in >= $min && carry_in <= $max);
+    
+                    // Perform the carrying multiplication
+                    let (result, carry_out) = lhs.carrying_mul(rhs, carry_in);
+    
+                    // Manually compute the expected result and carry using wider type
+                    let wide_result = (lhs as $wide_type)
+                        .wrapping_mul(rhs as $wide_type)
+                        .wrapping_add(carry_in as $wide_type);
+    
+                    let expected_result = wide_result as $type;
+                    let expected_carry = (wide_result >> <$type>::BITS) as $type;
+    
+                    // Assert the result and carry are correct
+                    assert_eq!(result, expected_result);
+                    assert_eq!(carry_out, expected_carry);
+                }
+            )+
+        }
+    }
+    
+    
+
+    // Part 2 : Nested unsafe functions Generation Macros --> https://github.com/verify-rust-std/blob/main/doc/src/challenges/0011-floats-ints.md
+
+    // Verify `widening_mul`, which internally uses `unchecked_mul`
+    macro_rules! generate_widening_mul_intervals {
+        ($type:ty, $wide_type:ty, $($harness_name:ident, $min:expr, $max:expr),+) => {
+            $(
+                #[kani::proof]
+                pub fn $harness_name() {
+                    let lhs: $type = kani::any::<$type>();
+                    let rhs: $type = kani::any::<$type>();
+
+                    kani::assume(lhs >= $min && lhs <= $max);
+                    kani::assume(rhs >= $min && rhs <= $max);
+
+                    let (result_low, result_high) = lhs.widening_mul(rhs);
+
+                    // Compute expected result using wider type
+                    let expected = (lhs as $wide_type) * (rhs as $wide_type);
+
+                    let expected_low = expected as $type;
+                    let expected_high = (expected >> <$type>::BITS) as $type;
+
+                    assert_eq!(result_low, expected_low);
+                    assert_eq!(result_high, expected_high);
+                }
+            )+
+        }
+    }
+
+    // Verify `wrapping_{shl, shr}` which internally uses `unchecked_{shl,shr}`
+    macro_rules! generate_wrapping_shift_harness {
+        ($type:ty, $method:ident, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::$method)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+                let num2: u32 = kani::any::<u32>();
+
+                let _ = num1.$method(num2);
+            }
+        }
+    }
+
+    // `unchecked_add` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // Preconditions: No overflow should occur
+    // #[requires(!self.overflowing_add(rhs).1)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_add(self, rhs: Self) -> Self
+    generate_unchecked_math_harness!(i8, unchecked_add, checked_unchecked_add_i8);
+    generate_unchecked_math_harness!(i16, unchecked_add, checked_unchecked_add_i16);
+    generate_unchecked_math_harness!(i32, unchecked_add, checked_unchecked_add_i32);
+    generate_unchecked_math_harness!(i64, unchecked_add, checked_unchecked_add_i64);
+    generate_unchecked_math_harness!(i128, unchecked_add, checked_unchecked_add_i128);
+    generate_unchecked_math_harness!(isize, unchecked_add, checked_unchecked_add_isize);
+    generate_unchecked_math_harness!(u8, unchecked_add, checked_unchecked_add_u8);
+    generate_unchecked_math_harness!(u16, unchecked_add, checked_unchecked_add_u16);
+    generate_unchecked_math_harness!(u32, unchecked_add, checked_unchecked_add_u32);
+    generate_unchecked_math_harness!(u64, unchecked_add, checked_unchecked_add_u64);
+    generate_unchecked_math_harness!(u128, unchecked_add, checked_unchecked_add_u128);
+    generate_unchecked_math_harness!(usize, unchecked_add, checked_unchecked_add_usize);
+
+    // `unchecked_neg` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} -- 6 types in total
+    //
+    // Target contracts:
+    // #[requires(self != $SelfT::MIN)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_neg(self) -> Self
+    generate_unchecked_neg_harness!(i8, checked_unchecked_neg_i8);
+    generate_unchecked_neg_harness!(i16, checked_unchecked_neg_i16);
+    generate_unchecked_neg_harness!(i32, checked_unchecked_neg_i32);
+    generate_unchecked_neg_harness!(i64, checked_unchecked_neg_i64);
+    generate_unchecked_neg_harness!(i128, checked_unchecked_neg_i128);
+    generate_unchecked_neg_harness!(isize, checked_unchecked_neg_isize);
+
+    // `unchecked_mul` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total, with different interval checks for each.
+    // Total types of checks including intervals -- 36
+    //
+    // Target contracts:
+    // Preconditions: No overflow should occur
+    // #[requires(!self.overflowing_mul(rhs).1)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_mul(self, rhs: Self) -> Self
+    // exponential state spaces for 32,64 and 128, hence provided limited range for verification.
+    generate_unchecked_math_harness!(i8, unchecked_mul, checked_unchecked_mul_i8);
+    generate_unchecked_math_harness!(i16, unchecked_mul, checked_unchecked_mul_i16);
+
+    // ====================== i32 Harnesses ======================
+    generate_unchecked_mul_intervals!(i32, unchecked_mul,
+        unchecked_mul_i32_small, -10i32, 10i32,
+        unchecked_mul_i32_large_pos, i32::MAX - 1000i32, i32::MAX,
+        unchecked_mul_i32_large_neg, i32::MIN, i32::MIN + 1000i32,
+        unchecked_mul_i32_edge_pos, i32::MAX / 2, i32::MAX,
+        unchecked_mul_i32_edge_neg, i32::MIN, i32::MIN / 2
+    );
+    // ====================== i64 Harnesses ======================
+    generate_unchecked_mul_intervals!(i64, unchecked_mul,
+        unchecked_mul_i64_small, -10i64, 10i64,
+        unchecked_mul_i64_large_pos, i64::MAX - 1000i64, i64::MAX,
+        unchecked_mul_i64_large_neg, i64::MIN, i64::MIN + 1000i64,
+        unchecked_mul_i64_edge_pos, i64::MAX / 2, i64::MAX,
+        unchecked_mul_i64_edge_neg, i64::MIN, i64::MIN / 2
+    );
+    // ====================== i128 Harnesses ======================
+    generate_unchecked_mul_intervals!(i128, unchecked_mul,
+        unchecked_mul_i128_small, -10i128, 10i128,
+        unchecked_mul_i128_large_pos, i128::MAX - 1000i128, i128::MAX,
+        unchecked_mul_i128_large_neg, i128::MIN, i128::MIN + 1000i128,
+        unchecked_mul_i128_edge_pos, i128::MAX / 2, i128::MAX,
+        unchecked_mul_i128_edge_neg, i128::MIN, i128::MIN / 2
+    );
+    // ====================== isize Harnesses ======================
+    generate_unchecked_mul_intervals!(isize, unchecked_mul,
+        unchecked_mul_isize_small, -10isize, 10isize,
+        unchecked_mul_isize_large_pos, isize::MAX - 1000isize, isize::MAX,
+        unchecked_mul_isize_large_neg, isize::MIN, isize::MIN + 1000isize,
+        unchecked_mul_isize_edge_pos, isize::MAX / 2, isize::MAX,
+        unchecked_mul_isize_edge_neg, isize::MIN, isize::MIN / 2
+    );
+
+    generate_unchecked_math_harness!(u8, unchecked_mul, checked_unchecked_mul_u8);
+    generate_unchecked_math_harness!(u16, unchecked_mul, checked_unchecked_mul_u16);
+
+    // ====================== u32 Harnesses ======================
+    generate_unchecked_mul_intervals!(u32, unchecked_mul,
+        unchecked_mul_u32_small, 0u32, 10u32,
+        unchecked_mul_u32_large, u32::MAX - 1000u32, u32::MAX,
+        unchecked_mul_u32_edge, u32::MAX / 2, u32::MAX
+    );
+    // ====================== u64 Harnesses ======================
+    generate_unchecked_mul_intervals!(u64, unchecked_mul,
+        unchecked_mul_u64_small, 0u64, 10u64,
+        unchecked_mul_u64_large, u64::MAX - 1000u64, u64::MAX,
+        unchecked_mul_u64_edge, u64::MAX / 2, u64::MAX
+    );
+    // ====================== u128 Harnesses ======================
+    generate_unchecked_mul_intervals!(u128, unchecked_mul,
+        unchecked_mul_u128_small, 0u128, 10u128,
+        unchecked_mul_u128_large, u128::MAX - 1000u128, u128::MAX,
+        unchecked_mul_u128_edge, u128::MAX / 2, u128::MAX
+    );
+    // ====================== usize Harnesses ======================
+    generate_unchecked_mul_intervals!(usize, unchecked_mul,
+        unchecked_mul_usize_small, 0usize, 10usize,
+        unchecked_mul_usize_large, usize::MAX - 1000usize, usize::MAX,
+        unchecked_mul_usize_edge, usize::MAX / 2, usize::MAX
+    );
+
+    // unchecked_shr proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[requires(rhs < <$ActualT>::BITS)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_shr(self, rhs: u32) -> Self
+    generate_unchecked_shift_harness!(i8, unchecked_shr, checked_unchecked_shr_i8);
+    generate_unchecked_shift_harness!(i16, unchecked_shr, checked_unchecked_shr_i16);
+    generate_unchecked_shift_harness!(i32, unchecked_shr, checked_unchecked_shr_i32);
+    generate_unchecked_shift_harness!(i64, unchecked_shr, checked_unchecked_shr_i64);
+    generate_unchecked_shift_harness!(i128, unchecked_shr, checked_unchecked_shr_i128);
+    generate_unchecked_shift_harness!(isize, unchecked_shr, checked_unchecked_shr_isize);
+    generate_unchecked_shift_harness!(u8, unchecked_shr, checked_unchecked_shr_u8);
+    generate_unchecked_shift_harness!(u16, unchecked_shr, checked_unchecked_shr_u16);
+    generate_unchecked_shift_harness!(u32, unchecked_shr, checked_unchecked_shr_u32);
+    generate_unchecked_shift_harness!(u64, unchecked_shr, checked_unchecked_shr_u64);
+    generate_unchecked_shift_harness!(u128, unchecked_shr, checked_unchecked_shr_u128);
+    generate_unchecked_shift_harness!(usize, unchecked_shr, checked_unchecked_shr_usize);
+
+    // `unchecked_shl` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[requires(shift < Self::BITS)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_shl(self, shift: u32) -> Self
+    //
+    // This function performs an unchecked bitwise left shift operation.
+    generate_unchecked_shift_harness!(i8, unchecked_shl, checked_unchecked_shl_i8);
+    generate_unchecked_shift_harness!(i16, unchecked_shl, checked_unchecked_shl_i16);
+    generate_unchecked_shift_harness!(i32, unchecked_shl, checked_unchecked_shl_i32);
+    generate_unchecked_shift_harness!(i64, unchecked_shl, checked_unchecked_shl_i64);
+    generate_unchecked_shift_harness!(i128, unchecked_shl, checked_unchecked_shl_i128);
+    generate_unchecked_shift_harness!(isize, unchecked_shl, checked_unchecked_shl_isize);
+    generate_unchecked_shift_harness!(u8, unchecked_shl, checked_unchecked_shl_u8);
+    generate_unchecked_shift_harness!(u16, unchecked_shl, checked_unchecked_shl_u16);
+    generate_unchecked_shift_harness!(u32, unchecked_shl, checked_unchecked_shl_u32);
+    generate_unchecked_shift_harness!(u64, unchecked_shl, checked_unchecked_shl_u64);
+    generate_unchecked_shift_harness!(u128, unchecked_shl, checked_unchecked_shl_u128);
+    generate_unchecked_shift_harness!(usize, unchecked_shl, checked_unchecked_shl_usize);
+
+    // `unchecked_sub` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // Preconditions: No overflow should occur
+    // #[requires(!self.overflowing_sub(rhs).1)] 
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_sub(self, rhs: Self)  -> Self
+    //
+    // This function performs an unchecked subtraction operation.
+    generate_unchecked_math_harness!(i8, unchecked_sub, checked_unchecked_sub_i8);
+    generate_unchecked_math_harness!(i16, unchecked_sub, checked_unchecked_sub_i16);
+    generate_unchecked_math_harness!(i32, unchecked_sub, checked_unchecked_sub_i32);
+    generate_unchecked_math_harness!(i64, unchecked_sub, checked_unchecked_sub_i64);
+    generate_unchecked_math_harness!(i128, unchecked_sub, checked_unchecked_sub_i128);
+    generate_unchecked_math_harness!(isize, unchecked_sub, checked_unchecked_sub_isize);
+    generate_unchecked_math_harness!(u8, unchecked_sub, checked_unchecked_sub_u8);
+    generate_unchecked_math_harness!(u16, unchecked_sub, checked_unchecked_sub_u16);
+    generate_unchecked_math_harness!(u32, unchecked_sub, checked_unchecked_sub_u32);
+    generate_unchecked_math_harness!(u64, unchecked_sub, checked_unchecked_sub_u64);
+    generate_unchecked_math_harness!(u128, unchecked_sub, checked_unchecked_sub_u128);
+    generate_unchecked_math_harness!(usize, unchecked_sub, checked_unchecked_sub_usize);
+
+
+    // Part_2 `carrying_mul` proofs 
+    // 
+    // ====================== u8 Harnesses ======================
+    /// Kani proof harness for `carrying_mul` on `u8` type with full range of values.
+    generate_carrying_mul_intervals!(u8, u16,
+        carrying_mul_u8_full_range, 0u8, u8::MAX
+    );
+
+    // ====================== u16 Harnesses ======================
+    /// Kani proof harness for `carrying_mul` on `u16` type with full range of values.
+    generate_carrying_mul_intervals!(u16, u32,
+        carrying_mul_u16_full_range, 0u16, u16::MAX
+    );
+
+    // ====================== u32 Harnesses ======================
+    generate_carrying_mul_intervals!(u32, u64,
+        carrying_mul_u32_small, 0u32, 10u32,
+        carrying_mul_u32_large, u32::MAX - 10u32, u32::MAX,
+        carrying_mul_u32_mid_edge, (u32::MAX / 2) - 10u32, (u32::MAX / 2) + 10u32
+    );
+
+    // ====================== u64 Harnesses ======================
+    generate_carrying_mul_intervals!(u64, u128,
+        carrying_mul_u64_small, 0u64, 10u64,
+        carrying_mul_u64_large, u64::MAX - 10u64, u64::MAX,
+        carrying_mul_u64_mid_edge, (u64::MAX / 2) - 10u64, (u64::MAX / 2) + 10u64
+    );
+
+    
+    // Part_2 `widening_mul` proofs
+    
+    // ====================== u8 Harnesses ======================
+    generate_widening_mul_intervals!(u8, u16, widening_mul_u8, 0u8, u8::MAX);
+    
+    // ====================== u16 Harnesses ======================
+    generate_widening_mul_intervals!(u16, u32,
+        widening_mul_u16_small, 0u16, 10u16,
+        widening_mul_u16_large, u16::MAX - 10u16, u16::MAX,
+        widening_mul_u16_mid_edge, (u16::MAX / 2) - 10u16, (u16::MAX / 2) + 10u16
+    );
+
+    // ====================== u32 Harnesses ======================
+    generate_widening_mul_intervals!(u32, u64,
+        widening_mul_u32_small, 0u32, 10u32,
+        widening_mul_u32_large, u32::MAX - 10u32, u32::MAX,
+        widening_mul_u32_mid_edge, (u32::MAX / 2) - 10u32, (u32::MAX / 2) + 10u32
+    );
+
+    // ====================== u64 Harnesses ======================
+    generate_widening_mul_intervals!(u64, u128,
+        widening_mul_u64_small, 0u64, 10u64,
+        widening_mul_u64_large, u64::MAX - 10u64, u64::MAX,
+        widening_mul_u64_mid_edge, (u64::MAX / 2) - 10u64, (u64::MAX / 2) + 10u64
+    );
+
+    // Part_2 `wrapping_shl` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[ensures(|result| *result == self << (rhs & (Self::BITS - 1)))]
+    //
+    // Target function:
+    // pub const fn wrapping_shl(self, rhs: u32) -> Self
+    //
+    // This function performs an panic-free bitwise left shift operation.
+    generate_wrapping_shift_harness!(i8, wrapping_shl, checked_wrapping_shl_i8);
+    generate_wrapping_shift_harness!(i16, wrapping_shl, checked_wrapping_shl_i16);
+    generate_wrapping_shift_harness!(i32, wrapping_shl, checked_wrapping_shl_i32);
+    generate_wrapping_shift_harness!(i64, wrapping_shl, checked_wrapping_shl_i64);
+    generate_wrapping_shift_harness!(i128, wrapping_shl, checked_wrapping_shl_i128);
+    generate_wrapping_shift_harness!(isize, wrapping_shl, checked_wrapping_shl_isize);
+    generate_wrapping_shift_harness!(u8, wrapping_shl, checked_wrapping_shl_u8);
+    generate_wrapping_shift_harness!(u16, wrapping_shl, checked_wrapping_shl_u16);
+    generate_wrapping_shift_harness!(u32, wrapping_shl, checked_wrapping_shl_u32);
+    generate_wrapping_shift_harness!(u64, wrapping_shl, checked_wrapping_shl_u64);
+    generate_wrapping_shift_harness!(u128, wrapping_shl, checked_wrapping_shl_u128);
+    generate_wrapping_shift_harness!(usize, wrapping_shl, checked_wrapping_shl_usize);
+
+    // Part_2 `wrapping_shr` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[ensures(|result| *result == self >> (rhs & (Self::BITS - 1)))]
+    // Target function:
+    // pub const fn wrapping_shr(self, rhs: u32) -> Self {
+    //
+    // This function performs an panic-free bitwise right shift operation.
+    generate_wrapping_shift_harness!(i8, wrapping_shr, checked_wrapping_shr_i8);
+    generate_wrapping_shift_harness!(i16, wrapping_shr, checked_wrapping_shr_i16);
+    generate_wrapping_shift_harness!(i32, wrapping_shr, checked_wrapping_shr_i32);
+    generate_wrapping_shift_harness!(i64, wrapping_shr, checked_wrapping_shr_i64);
+    generate_wrapping_shift_harness!(i128, wrapping_shr, checked_wrapping_shr_i128);
+    generate_wrapping_shift_harness!(isize, wrapping_shr, checked_wrapping_shr_isize);
+    generate_wrapping_shift_harness!(u8, wrapping_shr, checked_wrapping_shr_u8);
+    generate_wrapping_shift_harness!(u16, wrapping_shr, checked_wrapping_shr_u16);
+    generate_wrapping_shift_harness!(u32, wrapping_shr, checked_wrapping_shr_u32);
+    generate_wrapping_shift_harness!(u64, wrapping_shr, checked_wrapping_shr_u64);
+    generate_wrapping_shift_harness!(u128, wrapping_shr, checked_wrapping_shr_u128);
+    generate_wrapping_shift_harness!(usize, wrapping_shr, checked_wrapping_shr_usize);
+
+}
