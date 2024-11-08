@@ -875,8 +875,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(self.pointer.is_aligned() && ub_checks::can_dereference(self.pointer))] // TODO: is can_dereference the best API to check if self is valid for read?
-    #[ensures(|result| self.pointer.is_aligned())] //unsafe { *result == *self.pointer } can't be used due to unsized and lack of PartialEq implementation, moved to harness
+    #[requires(self.pointer.is_aligned() && ub_checks::can_dereference(self.pointer))]
+    #[ensures(|result| self.pointer.is_aligned())] // unsafe { *result == *self.pointer } can't be used due to unsized and lack of PartialEq implementation, moved to harness
     pub const unsafe fn read(self) -> T
     where
         T: Sized,
@@ -1857,15 +1857,16 @@ mod verify {
         const SIZE: usize = 100;
         // cast a random offset of an u8 array to usize
         let offset: usize = kani::any();
-        kani::assume(offset >= 0 && offset < SIZE);
+        //const bound: usize = core::mem::size_of::<usize>();
+        kani::assume(offset >= 0 && offset < SIZE - core::mem::size_of::<usize>());
         let arr: [u8; SIZE] = kani::any();  
         let unaligned_ptr = &arr[offset] as *const u8 as *const usize;
         // create a NonNull pointer from the unaligned pointer
         let nonnull_ptr = NonNull::new(unaligned_ptr as *mut usize).unwrap();
         unsafe { 
             let result = nonnull_ptr.read_unaligned();
-            /*
-            let raw_result_ptr = result as *const u8;
+            
+            let raw_result_ptr = &result as *const usize as *const u8;
             let raw_original_ptr = &arr[offset] as *const u8;
             for i in 0..core::mem::size_of::<usize>() {
                 unsafe {
@@ -1874,8 +1875,6 @@ mod verify {
                 }
                 
             }
-            // TODO: check result matches expectation(how to?) compare slice of bytes
-            */
         }
 
         // read an unaligned value from a packed struct
