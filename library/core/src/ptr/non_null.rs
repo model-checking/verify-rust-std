@@ -1871,7 +1871,7 @@ mod verify {
     pub fn non_null_check_new() {
         let mut x: i32 = kani::any();
         let xptr = &mut x;
-        let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
+        let maybe_null_ptr = if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
 
