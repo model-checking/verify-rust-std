@@ -3,3 +3,7 @@
 
 [kani]
 commit = "8400296f5280be4f99820129bc66447e8dff63f4"
+
+# Temporarily track CBMC version with spurious CEX fix
+[cbmc]
+commit = "83f61a4127f9b2f8fcd45993dfe9a9fbecc362e1"

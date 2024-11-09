@@ -65,29 +65,30 @@ TOML_FILE=${KANI_TOML_FILE:-$DEFAULT_TOML_FILE}
 REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
-# Function to read commit ID from TOML file
+# Function to read kani_commit ID from TOML file
 read_commit_from_toml() {
     local file="$1"
+    local table="$2"
     if [[ ! -f "$file" ]]; then
         echo "Error: TOML file not found: $file" >&2
         exit 1
     fi
-    local commit=$(grep '^commit *=' "$file" | sed 's/^commit *= *"\(.*\)"/\1/')
-    if [[ -z "$commit" ]]; then
-        echo "Error: 'commit' field not found in TOML file" >&2
+    local kani_commit=$(grep -A1 "\[${table}\]" "${file}" | grep 'commit' | cut -d'"' -f2)
+    if [[ -z "$kani_commit" ]]; then
+        echo "Error: 'kani_commit' field in table '${table}' not found in TOML file" >&2
         exit 1
     fi
-    echo "$commit"
+    echo "$kani_commit"
 }
 
 clone_kani_repo() {
     local repo_url="$1"
     local directory="$2"
     local branch="$3"
-    local commit="$4"
+    local kani_commit="$4"
     git clone "$repo_url" "$directory"
     pushd "$directory"
-    git checkout "$commit"
+    git checkout "$kani_commit"
     popd
 }
 
@@ -98,6 +99,39 @@ get_current_commit() {
     else
         echo ""
     fi
+}
+
+# Build the specified CBMC commit and push installation PATH
+#
+# If the directory does not exist, we initialize an empty repository
+# and add the remote so we can do a shallow clone of a specific commit.
+build_cbmc() {
+    local directory="$1"
+    local cbmc_commit="$2"
+    if [ ! -d "${directory}" ]; then
+      mkdir -p "${directory}"
+      pushd "${directory}" > /dev/null
+      git init .
+      git remote add origin https://github.com/diffblue/cbmc
+    else
+      pushd "${directory}" > /dev/null
+    fi
+    git fetch --depth 1 origin "$cbmc_commit"
+    git checkout "$cbmc_commit"
+    if [ ! -d "${directory}/build" ]; then
+      cmake -S . -Bbuild \
+        -DWITH_JBMC=OFF \
+        -Dsat_impl="minisat2;cadical"\
+        -DCMAKE_CXX_STANDARD_LIBRARIES=-lstdc++fs \
+        -DCMAKE_CXX_FLAGS=-Wno-error=register \
+        -DCMAKE_INSTALL_PREFIX=./install
+    fi
+    cmake --build build -- -j$(nproc)
+    make -C build install
+    export PATH="${directory}/install/bin:${PATH}"
+    version=$(cbmc --version)
+    echo "Finished building CBMC ${version}"
+    popd > /dev/null
 }
 
 build_kani() {
@@ -152,27 +186,30 @@ main() {
     echo "Using TOML file: $TOML_FILE"
     echo "Using repository URL: $REPO_URL"
 
-    # Read commit ID from TOML file
-    commit=$(read_commit_from_toml "$TOML_FILE")
+    # Read kani_commit ID from TOML file
+    kani_commit=$(read_commit_from_toml "$TOML_FILE" "kani")
+    cbmc_commit=$(read_commit_from_toml "$TOML_FILE" "cbmc")
 
     # Check if binary already exists and is up to date
-    if check_binary_exists "$build_dir" "$commit"; then
+    if check_binary_exists "$build_dir" "$kani_commit"; then
         echo "Kani binary is up to date. Skipping build."
     else
-        echo "Building Kani from commit: $commit"
+        echo "Building Kani from kani_commit: $kani_commit"
 
         # Remove old build directory if it exists
         rm -rf "$build_dir"
         mkdir -p "$build_dir"
 
-        # Clone repository and checkout specific commit
-        clone_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit"
+        # Clone repository and checkout specific kani_commit
+        clone_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$kani_commit"
 
         # Build project
         build_kani "$build_dir"
 
         echo "Kani build completed successfully!"
     fi
+
+    build_cbmc "${build_dir}/cbmc" "$cbmc_commit"
 
     # Get the path to the Kani executable
     kani_path=$(get_kani_path "$build_dir")
