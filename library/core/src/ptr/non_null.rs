@@ -906,8 +906,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(self.pointer.is_aligned() && ub_checks::can_dereference(self.pointer))]
-    #[ensures(|result| self.pointer.is_aligned())] // unsafe { *result == *self.pointer } can't be used due to unsized and lack of PartialEq implementation, moved to harness
+    #[requires(ub_checks::can_dereference(self.pointer))]
     pub const unsafe fn read(self) -> T
     where
         T: Sized,
@@ -929,8 +928,7 @@ impl<T: ?Sized> NonNull<T> {
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(self.pointer.is_aligned() && ub_checks::can_dereference(self.pointer))]
-    #[ensures(|result| self.pointer.is_aligned())]
+    #[requires(ub_checks::can_dereference(self.pointer))]
     pub unsafe fn read_volatile(self) -> T
     where
         T: Sized,
@@ -951,7 +949,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(ub_checks::can_dereference(self.pointer))]
+    #[requires(ub_checks::can_read_unaligned(self.pointer))]
     pub const unsafe fn read_unaligned(self) -> T
     where
         T: Sized,
@@ -1818,6 +1816,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
+    use kani::PointerGenerator;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -1848,15 +1847,13 @@ mod verify {
         }
 
         // array example
-        const arr_len: usize = 10;
-        let offset = kani::any_where(|x| * x < arr_len);
-        kani::assume(offset >= 0);
-        let arr: [i8; arr_len] = kani::any();
-        let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
+        const ARR_LEN: usize = 10000;
+        let mut generator = PointerGenerator::<ARR_LEN>::new();
+        let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
         let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
         unsafe {
-            let result = nonnull_ptr.add(offset).read();
-            kani::assert( *nonnull_ptr.as_ptr().add(offset) == result, "read returns the correct value");            
+            let result = nonnull_ptr.read();
+            kani::assert( *nonnull_ptr.as_ptr() == result, "read returns the correct value");            
         }
     }
 
@@ -1869,6 +1866,16 @@ mod verify {
             let result = nonnull_ptr_u8.read_volatile();
             kani::assert(*ptr_u8 == result, "read returns the correct value");
         }
+
+        // array example
+        const ARR_LEN: usize = 10000;
+        let mut generator = PointerGenerator::<ARR_LEN>::new();
+        let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
+        let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
+        unsafe {
+            let result = nonnull_ptr.read_volatile();
+            kani::assert( *nonnull_ptr.as_ptr() == result, "read returns the correct value");            
+        }
     }
 
     #[repr(packed, C)]
@@ -1880,10 +1887,9 @@ mod verify {
     // pub const unsafe fn read_unaligned(self) -> T where T: Sized
     #[kani::proof_for_contract(NonNull::read_unaligned)]
     pub fn non_null_check_read_unaligned() {
-        const SIZE: usize = 100;
+        const SIZE: usize = 1000;
         // cast a random offset of an u8 array to usize
         let offset: usize = kani::any();
-        //const bound: usize = core::mem::size_of::<usize>();
         kani::assume(offset >= 0 && offset < SIZE - core::mem::size_of::<usize>());
         let arr: [u8; SIZE] = kani::any();  
         let unaligned_ptr = &arr[offset] as *const u8 as *const usize;
