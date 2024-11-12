@@ -1009,7 +1009,8 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::drop_in_place`]: crate::ptr::drop_in_place()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::ensures(|result| ub_checks::can_dereference(result))]
+    #[kani::requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure self is aligned, initialized, and valid for read
+    #[kani::requires(ub_checks::can_write(self.as_ptr() as *mut()))] // Ensure self is valid for write
     pub unsafe fn drop_in_place(self) {
         // SAFETY: the caller must uphold the safety contract for `drop_in_place`.
         unsafe { ptr::drop_in_place(self.as_ptr()) }
@@ -1102,9 +1103,8 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[kani::modifies(self.as_ptr())]
-    #[kani::requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure valid pointer
-    #[kani::requires(ub_checks::can_dereference(&src))] // Ensure valid source
-    #[kani::ensures(|ret: &T| core::mem::needs_drop::<T>() == false)]  // No drop should occur
+    #[kani::requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self is aligned, initialized, and valid for read
+    #[kani::requires(ub_checks::can_write(self.as_ptr()))] // Ensure self is valid for write
     pub unsafe fn replace(self, src: T) -> T
     where
         T: Sized,
@@ -1124,8 +1124,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_swap", issue = "83163")]
     #[kani::modifies(self.as_ptr(), with.as_ptr())]
-    #[kani::requires(ub_checks::can_dereference(self.as_ptr()))]
-    #[kani::requires(ub_checks::can_dereference(with.as_ptr()))]
+    #[kani::requires(ub_checks::can_dereference(self.as_ptr()) && ub_checks::can_write(self.as_ptr()))]
+    #[kani::requires(ub_checks::can_dereference(with.as_ptr()) && ub_checks::can_write(with.as_ptr()))]
     pub const unsafe fn swap(self, with: NonNull<T>)
     where
         T: Sized,
