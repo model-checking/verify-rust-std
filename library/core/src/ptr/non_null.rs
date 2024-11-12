@@ -1792,7 +1792,8 @@ mod verify {
 
     impl<T> kani::Arbitrary for NonNull<T> {
         fn any() -> Self {
-            let ptr: *mut T = kani::any();
+            let ptr: *mut T = kani::any::<usize>() as *mut T;
+            kani::assume(!ptr.is_null());
             NonNull::new(ptr).expect("Non-null pointer expected")
         }
     }
