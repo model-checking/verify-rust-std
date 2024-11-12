@@ -1819,14 +1819,15 @@ mod verify {
         kani::assume((&y as *const i32) != core::ptr::null());
 
         if let Some(origin_ptr) = NonNull::new(&mut x as *mut i32) {
+            // let origin_ptr = NonNull::new(x as *mut i32).unwrap();
             kani::assume(origin_ptr.as_ptr().is_aligned());
             unsafe {
                 let captured_original = ptr::read(origin_ptr.as_ptr());
                 let replaced = origin_ptr.replace(y);
                 let after_replace = ptr::read(origin_ptr.as_ptr());
 
-                kani::assume(replaced == x);
-                kani::assume(after_replace == y)
+                assert_eq!(captured_original, replaced);
+                assert_eq!(after_replace, y)
             }
         }
     }
@@ -1857,8 +1858,8 @@ mod verify {
             // Verify that the values have been swapped.
             let new_a = ptr::read(ptr_a.as_ptr());
             let new_b = ptr::read(ptr_b.as_ptr());
-            kani::assume(old_a == new_b);
-            kani::assume(old_b == new_a);
+            assert_eq!(old_a, new_b);
+            assert_eq!(old_b, new_a);
         }
     }
 }
