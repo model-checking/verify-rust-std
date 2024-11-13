@@ -1872,7 +1872,6 @@ mod verify {
         const SIZE: usize = 100000;
         // Randomize pointer offset within array bound
         let offset = kani::any_where(|x| *x <= SIZE as isize && *x >=0);
-        //kani::assume(offset >= 0);
         // Create a non-deterministic array of size SIZE
         let arr: [i8; SIZE] = kani::any();  
         // Get a raw pointer to the array
@@ -1893,8 +1892,9 @@ mod verify {
     pub fn non_null_check_addr() {  
         // Create NonNull pointer & get pointer address
         let x = kani::any::<usize>() as *mut i32;
-        kani::assume(!x.is_null());
-        let nonnull_xptr = NonNull::new(x).unwrap();
+        //kani::assume(!x.is_null());
+        //let nonnull_xptr = NonNull::new(x).unwrap();
+        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
         let address = nonnull_xptr.addr();
     }
 
@@ -1903,8 +1903,7 @@ mod verify {
     pub fn non_null_check_align_offset() {
         // Create NonNull pointer
         let x = kani::any::<usize>() as *mut i32;
-        kani::assume(!x.is_null());
-        let nonnull_xptr = NonNull::new(x).unwrap();
+        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
     
         // Call align_offset with valid align value
         let align: usize = kani::any();
@@ -1918,13 +1917,10 @@ mod verify {
     pub fn non_null_check_align_offset_negative() {
         // Create NonNull pointer
         let x = kani::any::<usize>() as *mut i8;
-        kani::assume(!x.is_null());
+        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
 
-        let nonnull_xptr = NonNull::new(x).unwrap();
-
-        // Generate align value that is not a power of two
+        // Generate align value that is not necessarily a power of two
         let invalid_align: usize = kani::any();
-        kani::assume(!invalid_align.is_power_of_two());
     
         // Trigger panic
         let offset = nonnull_xptr.align_offset(invalid_align);
