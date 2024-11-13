@@ -1819,7 +1819,6 @@ mod verify {
 
         if let Some(origin_ptr) = NonNull::new(&mut x as *mut i32) {
             // let origin_ptr = NonNull::new(x as *mut i32).unwrap();
-            kani::assume(origin_ptr.as_ptr().is_aligned());
             unsafe {
                 let captured_original = ptr::read(origin_ptr.as_ptr());
                 let replaced = origin_ptr.replace(y);
