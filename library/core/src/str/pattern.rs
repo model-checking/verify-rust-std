@@ -43,6 +43,12 @@ use crate::convert::TryInto as _;
 use crate::slice::memchr;
 use crate::{cmp, fmt};
 
+#[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
+use safety::{loop_invariant, requires};
+
+#[cfg(kani)]
+use crate::kani;
+
 // Pattern
 
 /// A string pattern.
@@ -1905,8 +1911,9 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
 /// # Safety
 ///
 /// Both slices must have the same length.
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))] // only called on x86
+#[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))] // only called on x86
 #[inline]
+#[requires(x.len() == y.len())]
 unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
     debug_assert_eq!(x.len(), y.len());
     // This function is adapted from
@@ -1951,6 +1958,11 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
     unsafe {
         let (mut px, mut py) = (x.as_ptr(), y.as_ptr());
         let (pxend, pyend) = (px.add(x.len() - 4), py.add(y.len() - 4));
+        #[loop_invariant(crate::ub_checks::same_allocation(x.as_ptr(), px)
+        && crate::ub_checks::same_allocation(y.as_ptr(), py)
+        && px.addr() >= x.as_ptr().addr()
+        && py.addr() >= y.as_ptr().addr()
+        && px.addr() - x.as_ptr().addr() == py.addr() - y.as_ptr().addr())]
         while px < pxend {
             let vx = (px as *const u32).read_unaligned();
             let vy = (py as *const u32).read_unaligned();
@@ -1964,4 +1976,51 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
         let vy = (pyend as *const u32).read_unaligned();
         vx == vy
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+
+    #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn check_small_slice_eq() {
+        // TODO: ARR_SIZE can be `std::usize::MAX` with cbmc argument
+        // `--arrays-uf-always`
+        const ARR_SIZE: usize = 1000;
+        let x: [u8; ARR_SIZE] = kani::any();
+        let y: [u8; ARR_SIZE] = kani::any();
+        let xs = kani::slice::any_slice_of_array(&x);
+        let ys = kani::slice::any_slice_of_array(&y);
+        kani::assume(xs.len() == ys.len());
+        unsafe {
+            small_slice_eq(xs, ys);
+        }
+    }
+
+    /* This harness check `small_slice_eq` with dangling pointer to slice
+       with zero size. Kani finds safety issue of `small_slice_eq` in this
+       harness and hence the proof will fail.
+
+    #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn check_small_slice_eq_empty() {
+        let ptr_x = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
+        let ptr_y = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
+        kani::assume(ptr_x.is_aligned());
+        kani::assume(ptr_y.is_aligned());
+        assert_eq!(
+            unsafe {
+                small_slice_eq(
+                    crate::slice::from_raw_parts(ptr_x, 0),
+                    crate::slice::from_raw_parts(ptr_y, 0),
+                )
+            },
+            true
+        );
+    }
+    */
 }

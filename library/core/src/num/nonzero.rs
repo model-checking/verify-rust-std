@@ -8,7 +8,9 @@ use crate::ops::{BitOr, BitOrAssign, Div, DivAssign, Neg, Rem, RemAssign};
 use crate::panic::{RefUnwindSafe, UnwindSafe};
 use crate::str::FromStr;
 use crate::{fmt, intrinsics, ptr, ub_checks};
-
+use safety::{ensures, requires};
+#[cfg(kani)]
+use crate::kani;
 /// A marker trait for primitive types which can be zero.
 ///
 /// This is an implementation detail for <code>[NonZero]\<T></code> which may disappear or be replaced at any time.
@@ -364,6 +366,27 @@ where
     #[rustc_const_stable(feature = "nonzero", since = "1.28.0")]
     #[must_use]
     #[inline]
+    // #[rustc_allow_const_fn_unstable(const_refs_to_cell)] enables byte-level 
+    // comparisons within const functions. This is needed here to validate the 
+    // contents of `T` by converting a pointer to a `u8` slice for our `requires` 
+    // and `ensures` checks.
+    #[rustc_allow_const_fn_unstable(const_refs_to_cell)]
+    #[requires({
+        let size = core::mem::size_of::<T>();
+        let ptr = &n as *const T as *const u8;
+        let slice = unsafe { core::slice::from_raw_parts(ptr, size) };
+        !slice.iter().all(|&byte| byte == 0)
+    })]
+    #[ensures(|result: &Self|{
+        let size = core::mem::size_of::<T>();
+        let n_ptr: *const T = &n;
+        let result_inner: T = result.get();
+        let result_ptr: *const T = &result_inner;
+        let n_slice = unsafe { core::slice::from_raw_parts(n_ptr as *const u8, size) };
+        let result_slice = unsafe { core::slice::from_raw_parts(result_ptr as *const u8, size) };
+    
+        n_slice == result_slice
+    })]
     pub const unsafe fn new_unchecked(n: T) -> Self {
         match Self::new(n) {
             Some(n) => n,
@@ -2158,4 +2181,37 @@ nonzero_integer! {
     swap_op = "0x1234567890123456",
     swapped = "0x5634129078563412",
     reversed = "0x6a2c48091e6a2c48",
+}
+
+#[unstable(feature="kani", issue="none")]
+#[cfg(kani)]
+mod verify {
+      use super::*;
+
+    macro_rules! nonzero_check {
+        ($t:ty, $nonzero_type:ty, $nonzero_check_new_unchecked_for:ident) => {
+            #[kani::proof_for_contract(NonZero::new_unchecked)]
+            pub fn $nonzero_check_new_unchecked_for() {
+                let x: $t = kani::any();  // Generates a symbolic value of the provided type
+
+                unsafe {
+                    <$nonzero_type>::new_unchecked(x);  // Calls NonZero::new_unchecked for the specified NonZero type
+                }
+            }
+        };
+    }
+    
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check!(i8, core::num::NonZeroI8, nonzero_check_new_unchecked_for_i8);
+    nonzero_check!(i16, core::num::NonZeroI16, nonzero_check_new_unchecked_for_16);
+    nonzero_check!(i32, core::num::NonZeroI32, nonzero_check_new_unchecked_for_32);
+    nonzero_check!(i64, core::num::NonZeroI64, nonzero_check_new_unchecked_for_64);
+    nonzero_check!(i128, core::num::NonZeroI128, nonzero_check_new_unchecked_for_128);
+    nonzero_check!(isize, core::num::NonZeroIsize, nonzero_check_new_unchecked_for_isize);
+    nonzero_check!(u8, core::num::NonZeroU8, nonzero_check_new_unchecked_for_u8);
+    nonzero_check!(u16, core::num::NonZeroU16, nonzero_check_new_unchecked_for_u16);
+    nonzero_check!(u32, core::num::NonZeroU32, nonzero_check_new_unchecked_for_u32);
+    nonzero_check!(u64, core::num::NonZeroU64, nonzero_check_new_unchecked_for_u64);
+    nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
+    nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 }
