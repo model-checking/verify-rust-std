@@ -7,7 +7,7 @@ use crate::pin::PinCoerceUnsized;
 use crate::ptr::Unique;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
-use crate::{fmt, hash, intrinsics, ptr};
+use crate::{fmt, hash, intrinsics, ptr, ub_checks};
 use safety::{ensures, requires};
 
 
@@ -1453,10 +1453,11 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[inline]
     #[requires(data.pointer.is_aligned() 
-        && len as isize * core::mem::size_of::<T>() as isize <= isize::MAX
+        //&& len as isize * core::mem::size_of::<T>() as isize <= isize::MAX
         && (len as isize).checked_mul(core::mem::size_of::<T>() as isize).is_some()
         && (data.pointer as isize).checked_add(len as isize * core::mem::size_of::<T>() as isize).is_some() // adding len must not “wrap around” the address space
-        && unsafe { kani::mem::same_allocation(data.pointer, data.pointer.add(len)) })] 
+        && unsafe { kani::mem::same_allocation(data.pointer, data.pointer.add(len))
+        && ub_checks::can_dereference(data.pointer) })] 
     #[ensures(|result| !result.pointer.is_null())] //TODO: compare byte by byte between data and result uptill len * size_of::<T>()
     pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self {
         // SAFETY: `data` is a `NonNull` pointer which is necessarily non-null
@@ -1857,15 +1858,15 @@ mod verify {
     #[kani::proof_for_contract(NonNull::from_raw_parts)]
     pub fn non_null_check_from_raw_parts() {
 
-        const arr_len: usize = 100;
+        const ARR_LEN: usize = 10000;
         // Create a non-deterministic array and its slice
-        let arr: [i8; arr_len] = kani::any();
+        let arr: [i8; ARR_LEN] = kani::any();
         let arr_slice = &arr[..];  
         // Get a raw NonNull pointer to the start of the slice
         let arr_slice_raw_ptr = NonNull::new(arr_slice.as_ptr() as *mut ()).unwrap();  
         // Create NonNull pointer from the start pointer and the length of the slice
-        let nonnull_slice = NonNull::<[i8]>::from_raw_parts(arr_slice_raw_ptr, arr_len);
-        // Ensure slice content is preserved, runtime at this step is proportional to arr_len
+        let nonnull_slice = NonNull::<[i8]>::from_raw_parts(arr_slice_raw_ptr, ARR_LEN);
+        // Ensure slice content is preserved, runtime at this step is proportional to ARR_LEN
         unsafe {
             kani::assert( arr_slice == nonnull_slice.as_ref(), "slice content must preserve" );
         }
@@ -1893,17 +1894,17 @@ mod verify {
     #[kani::proof_for_contract(NonNull::slice_from_raw_parts)]
     #[kani::unwind(11)]
     pub fn non_null_check_slice_from_raw_parts() {
-        const arr_len: usize = 10;
+        const ARR_LEN: usize = 10000;
         // Create a non-deterministic array
-        let mut arr: [i8; arr_len] = kani::any();
+        let mut arr: [i8; ARR_LEN] = kani::any();
         // Get a raw NonNull pointer to the start of the slice
         let arr_raw_ptr = NonNull::new(arr.as_mut_ptr()).unwrap();  
         // Create NonNull slice from the start pointer and ends at random slice_len
         // Safety: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
         let slice_len: usize = kani::any();
-        kani::assume(slice_len <= arr_len);
+        kani::assume(slice_len <= ARR_LEN);
         let nonnull_slice = NonNull::<[i8]>::slice_from_raw_parts(arr_raw_ptr, slice_len);
-        // Ensure slice content is preserved, runtime at this step is proportional to arr_len
+        // Ensure slice content is preserved, runtime at this step is proportional to ARR_LEN
         unsafe {
             kani::assert( &arr[..slice_len] == nonnull_slice.as_ref(), "slice content must preserve" );
         }
