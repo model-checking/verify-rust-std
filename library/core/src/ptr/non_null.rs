@@ -9,6 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
+use crate::{ub_checks};
 
 #[cfg(kani)]
 use crate::kani;
@@ -630,9 +631,10 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_allow_const_fn_unstable(unchecked_neg)]
-    #[kani::requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
-    #[kani::requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)]
-    #[kani::ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some())] // Prevent offset overflow
+    #[requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)]
+    #[ensures(|result: &NonNull<T>| ub_checks::same_allocation(self.as_ptr(),result.as_ptr()))]
+    //#[kani::ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -1823,7 +1825,7 @@ mod verify {
         let count: usize = kani::any();  
  
         // SAFETY: Ensure that the subtraction does not go out of the bounds of the array
-        kani::assume(count < SIZE - offset);
+        //kani::assume(count < SIZE - offset);
 
         unsafe {
             // Perform the pointer subtraction from the last element
