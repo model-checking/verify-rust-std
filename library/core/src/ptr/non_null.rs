@@ -964,17 +964,14 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-<<<<<<< HEAD
-    #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
-    #[kani::requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))] //The pointer is valid 
-    #[requires(ub_checks::can_dereference(dest.as_ptr()))]
-    #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const T))]
-    #[ensures(|result: &()| ub_checks::can_dereference(dest.as_ptr() as *const T))]
-    #[kani::modifies(dest.as_ptr())]
-=======
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
->>>>>>> origin
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
+        && ub_checks::can_dereference(self.as_ptr() as *const MaybeUninit<T>)
+        && ub_checks::can_write(dest.as_ptr())
+        && ub_checks::can_write(dest.as_ptr().add(count)))]
+    #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
+        && ub_checks::can_dereference(dest.as_ptr() as *const u8))]
+    #[kani::modifies(dest.as_ptr())]
     pub const unsafe fn copy_to(self, dest: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -994,19 +991,15 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-<<<<<<< HEAD
-    #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
-    #[kani::requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))]
-    #[requires(ub_checks::can_dereference(dest.as_ptr()))]
-    #[requires((self.as_ptr() as usize).abs_diff(dest.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
-    #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr()))]
-    #[ensures(|result: &()| ub_checks::can_dereference(dest.as_ptr()))]
-    #[kani::modifies(dest.as_ptr())]
-    #[kani::modifies(self.as_ptr())]
-=======
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
->>>>>>> origin
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
+        && ub_checks::can_dereference(self.as_ptr() as *const MaybeUninit<T>)
+        && ub_checks::can_write(dest.as_ptr())
+        && ub_checks::can_write(dest.as_ptr().add(count))
+        && (self.as_ptr() as usize).abs_diff(dest.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
+        #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
+        && ub_checks::can_dereference(dest.as_ptr() as *const u8))]
+    #[kani::modifies(dest.as_ptr())]
     pub const unsafe fn copy_to_nonoverlapping(self, dest: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -1026,18 +1019,15 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-<<<<<<< HEAD
-    #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
-    #[kani::requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)]
-    #[requires(ub_checks::can_dereference(src.as_ptr()) )]//The pointer is valid 
-    #[requires( ub_checks::can_dereference(self.as_ptr()))]//The pointer is valid   
-    #[requires((src.as_ptr() as usize).abs_diff(self.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
-    #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr()))]
-    #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr()))]
-    #[kani::modifies(self.as_ptr())]
-=======
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
->>>>>>> origin
+    #[requires (count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize
+        && ub_checks::can_dereference(src.as_ptr() as *const MaybeUninit<T>) 
+        && ub_checks::can_write(self.as_ptr())
+        && ub_checks::can_write (self.as_ptr().add(count)))
+        && (src.as_ptr() as usize).abs_diff(self.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
+    #[ensures (|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
+        && ub_checks::can_dereference(self.as_ptr()))]
+    #[kani::modifies(self.as_ptr())]
     pub const unsafe fn copy_from(self, src: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -1057,19 +1047,15 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-<<<<<<< HEAD
-    #[rustc_const_unstable(feature = "const_intrinsic_copy", issue = "80697")]
-    #[kani::requires(count * core::mem::size_of::<T>() <= isize::MAX as usize)]//count check
-    #[requires(ub_checks::can_dereference(self.as_ptr()))]
-    #[requires(ub_checks::can_dereference(src.as_ptr()))]
-    #[requires((self.as_ptr() as usize).abs_diff(src.as_ptr() as usize) >= count * core::mem::size_of::<T>())]//The source and destination regions do not overlap.
-    #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr()))]
-    #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr()))]
-    #[kani::modifies(self.as_ptr())]
-    #[kani::modifies(src.as_ptr())]
-=======
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
->>>>>>> origin
+    #[requires (count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize
+        && ub_checks::can_dereference(src.as_ptr() as *const MaybeUninit<T>) 
+        && ub_checks::can_write(self.as_ptr())
+        && ub_checks::can_write(self.as_ptr().add(count)))
+        && (self.as_ptr() as usize).abs_diff(src.as_ptr() as usize) >= count * core::mem::size_of::<T>())]//The source and destination regions do not overlap.
+        #[ensures (|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
+            && ub_checks::can_dereference(self.as_ptr()))]
+    #[kani::modifies(self.as_ptr())]
     pub const unsafe fn copy_from_nonoverlapping(self, src: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -1856,6 +1842,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
+    use kani::PointerGenerator;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -1877,30 +1864,19 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::<T>::copy_to)]
     pub fn non_null_check_copy_to() {
-        // Create source and destination values
-        let mut src_value: i32 = kani::any();
-        let mut dest_value: i32 = 0;
+        // PointerGenerator instance
+        let mut generator = PointerGenerator::<16>::new();
+        // Generate arbitrary pointers for src and dest
+        let src_ptr = generator.any_in_bounds::<i32>().ptr;
+        let dest_ptr = generator.any_in_bounds::<i32>().ptr;
+         // Wrap the raw pointers in NonNull
+        let src = NonNull::new(src_ptr).unwrap();
+        let dest = NonNull::new(dest_ptr).unwrap();
+        // Generate an arbitrary count using kani::any
+        let count: usize = kani::any();
+        unsafe { src.copy_to(dest, count);}
+}
 
-        // Create NonNull pointers
-        let src = NonNull::new(&mut src_value as *mut i32).unwrap();
-        let dest = NonNull::new(&mut dest_value as *mut i32).unwrap();
-        //casting the pointer
-        let src_u8 = src.as_ptr() as *const u8;
-        let dest_u8 = dest.as_ptr() as *mut u8;
-        //count is 1 as working with single i32 value
-        let count = 1;
-        unsafe {
-            kani::assume(kani::mem::can_dereference(src_u8));
-            kani::assume(kani::mem::can_dereference(
-                src_u8.add(core::mem::size_of::<i32>() - 1),
-            ));
-            kani::assume(kani::mem::can_dereference(dest_u8));
-            kani::assume(kani::mem::can_dereference(
-                dest_u8.add(core::mem::size_of::<i32>() - 1),
-            ));
-            src.copy_to(dest, count);
-        }
-    }
     #[kani::proof_for_contract(NonNull::<T>::copy_from)]
     pub fn non_null_check_copy_from() {
         // Create source and destination values
@@ -1910,20 +1886,10 @@ mod verify {
         // Create NonNull pointers
         let src = NonNull::new(&mut src_value as *mut i32).unwrap();
         let dest = NonNull::new(&mut dest_value as *mut i32).unwrap();
-        //casting the pointer
-        let src_u8 = src.as_ptr() as *const u8;
-        let dest_u8 = dest.as_ptr() as *mut u8;
+        
         //count is 1 as working with single i32 value
         let count = 1;
         unsafe {
-            kani::assume(kani::mem::can_dereference(src_u8));
-            kani::assume(kani::mem::can_dereference(
-                src_u8.add(core::mem::size_of::<i32>() - 1),
-            ));
-            kani::assume(kani::mem::can_dereference(dest_u8));
-            kani::assume(kani::mem::can_dereference(
-                dest_u8.add(core::mem::size_of::<i32>() - 1),
-            ));
             src.copy_from(dest, count);
         }
     }
@@ -1934,20 +1900,10 @@ mod verify {
 
         let src = NonNull::new(&mut src_value as *mut i32).unwrap();
         let dest = NonNull::new(&mut dest_value as *mut i32).unwrap();
-        //casting the pointer
-        let src_u8 = src.as_ptr() as *const u8;
-        let dest_u8 = dest.as_ptr() as *mut u8;
+       
         //count represents no of elements to copy
         let count = 1;
         unsafe {
-            kani::assume(kani::mem::can_dereference(src_u8));
-            kani::assume(kani::mem::can_dereference(
-                src_u8.add(core::mem::size_of::<i32>() - 1),
-            ));
-            kani::assume(kani::mem::can_dereference(dest_u8));
-            kani::assume(kani::mem::can_dereference(
-                dest_u8.add(core::mem::size_of::<i32>() - 1),
-            ));
             src.copy_to_nonoverlapping(dest, count);
         }
     }
@@ -1958,21 +1914,11 @@ mod verify {
 
         let src = NonNull::new(&mut src_value as *mut i32).unwrap();
         let dest = NonNull::new(&mut dest_value as *mut i32).unwrap();
-        //casting the pointer
-        let src_u8 = src.as_ptr() as *const u8;
-        let dest_u8 = dest.as_ptr() as *mut u8;
+    
         //count represents no of elements to copy
         let count = 1;
 
         unsafe {
-            kani::assume(kani::mem::can_dereference(src_u8));
-            kani::assume(kani::mem::can_dereference(
-                src_u8.add(core::mem::size_of::<i32>() - 1),
-            ));
-            kani::assume(kani::mem::can_dereference(dest_u8));
-            kani::assume(kani::mem::can_dereference(
-                dest_u8.add(core::mem::size_of::<i32>() - 1),
-            ));
             dest.copy_from_nonoverlapping(src, count);
         }
     }

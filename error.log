@@ -1,0 +1,50 @@
+Kani Rust Verifier 0.56.0 (standalone)
+error: expected `]`, found `&&`
+    --> /Users/dhvanikapadia/Downloads/verify-rust-std/library/core/src/ptr/non_null.rs:943:99
+     |
+173  | impl<T: ?Sized> NonNull<T> {
+     |                            - while parsing this item list starting here
+...
+943  |         ub_checks::can_dereference(dest.as_ptr() as *const T, count * core::mem::size_of::<T>())) &&//The pointer is valid for the specified number of ...
+     |                                                                                                   ^^ expected `]`
+...
+1447 | }
+     | - the item list ends here
+
+error[E0599]: no method named `copy_to` found for struct `ptr::non_null::NonNull` in the current scope
+    --> /Users/dhvanikapadia/Downloads/verify-rust-std/library/core/src/ptr/non_null.rs:1846:13
+     |
+76   | pub struct NonNull<T: ?Sized> {
+     | ----------------------------- method `copy_to` not found for this struct
+...
+1846 |         src.copy_to(dest, count);
+     |             ^^^^^^^ method not found in `NonNull<i32>`
+     |
+help: one of the expressions' fields has a method of the same name
+     |
+1846 |         src.pointer.copy_to(dest, count);
+     |             ++++++++
+
+error[E0599]: no method named `copy_from` found for struct `ptr::non_null::NonNull` in the current scope
+    --> /Users/dhvanikapadia/Downloads/verify-rust-std/library/core/src/ptr/non_null.rs:1863:13
+     |
+76   | pub struct NonNull<T: ?Sized> {
+     | ----------------------------- method `copy_from` not found for this struct
+...
+1863 |         src.copy_from(dest, count);
+     |             ^^^^^^^^^
+     |
+help: there is a method `clone_from` with a similar name, but with different arguments
+    --> /Users/dhvanikapadia/Downloads/verify-rust-std/library/core/src/clone.rs:174:5
+     |
+174  |     fn clone_from(&mut self, source: &Self) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `is_aligned` found for reference `&ptr::non_null::NonNull<u8>` in the current scope
+   --> /Users/dhvanikapadia/Downloads/verify-rust-std/library/core/src/alloc/layout.rs:254:31
+    |
+254 |     #[ensures(|result| result.is_aligned())]
+    |                               ^^^^^^^^^^ method not found in `&NonNull<u8>`
+
+For more information about this error, try `rustc --explain E0599`.
+error: Failed to execute cargo (exit status: 101). Found 4 compilation errors.
