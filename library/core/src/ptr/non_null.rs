@@ -503,8 +503,6 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[kani::requires(
-        count <= isize::MAX &&
-        count <= isize::MIN &&
         (self.as_ptr().addr() as isize).checked_add(count).is_some() &&
         kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_offset(count) as *const())
     )]
@@ -587,7 +585,6 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[kani::requires(
-        count <= (isize::MAX as usize) &&
         self.as_ptr().addr().checked_add(count).is_some() &&
         kani::mem::same_allocation(self.as_ptr() as *const(),((self.as_ptr().addr()) + count) as *const())
     )]
