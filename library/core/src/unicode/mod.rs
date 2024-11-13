@@ -31,3 +31,21 @@ mod unicode_data;
 /// [Unicode 11.0 or later, Section 3.1 Versions of the Unicode Standard](https://www.unicode.org/versions/Unicode11.0.0/ch03.pdf#page=4).
 #[stable(feature = "unicode_version", since = "1.45.0")]
 pub const UNICODE_VERSION: (u8, u8, u8) = unicode_data::UNICODE_VERSION;
+
+#[cfg(kani)]
+mod verify {
+    use super::conversions::{to_upper, to_lower};
+    use crate::kani;
+
+    /// Checks that `to_upper` does not trigger UB or panics for all valid characters.
+    #[kani::proof]
+    fn check_to_upper_safety() {
+        let _ = to_upper(kani::any());
+    }
+
+    /// Checks that `to_lower` does not trigger UB or panics for all valid characters.
+    #[kani::proof]
+    fn check_to_lower_safety() {
+        let _ = to_lower(kani::any());
+    }
+}
