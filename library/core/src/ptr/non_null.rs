@@ -502,7 +502,12 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::requires(kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_offset(count) as *const()))]
+    #[kani::requires(
+        count <= isize::MAX &&
+        count <= isize::MIN &&
+        (self.as_ptr().addr() as isize).checked_add(count).is_some() &&
+        kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_offset(count) as *const())
+    )]
     #[kani::ensures(|result: &Self| result.as_ptr() == self.as_ptr().byte_offset(count))]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset` and `byte_offset` has
@@ -581,13 +586,14 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_allow_const_fn_unstable(set_ptr_value)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::requires(kani::mem::same_allocation(
-        self.as_ptr() as *const(),
-        ((self.as_ptr() as *const () as usize) + count) as *const()
-    ))]
+    #[kani::requires(
+        count <= (isize::MAX as usize) &&
+        self.as_ptr().addr().checked_add(count).is_some() &&
+        kani::mem::same_allocation(self.as_ptr() as *const(),((self.as_ptr().addr()) + count) as *const())
+    )]
     #[kani::ensures(
         |result: &NonNull<T>|
-        (result.as_ptr() as *const () as usize) == ((self.as_ptr() as *const () as usize) + count)
+        result.as_ptr().addr() == (self.as_ptr().addr() + count)
     )]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add` and `byte_add` has the same
@@ -1801,6 +1807,7 @@ mod verify {
     use super::*;
     use crate::ptr::null_mut;
     use crate::mem;
+    use kani::PointerGenerator;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -1829,9 +1836,6 @@ mod verify {
         let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
         let count: usize = kani::any();
 
-        kani::assume(count.checked_mul(mem::size_of::<i32>()).is_some());
-        kani::assume(count * mem::size_of::<i32>() <= (isize::MAX as usize));
-
         unsafe {
             let result = ptr.byte_add(count);
         }
@@ -1846,8 +1850,6 @@ mod verify {
         let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
         let count: isize = kani::any();
 
-        kani::assume(count.checked_mul(mem::size_of::<i32>() as isize).is_some());
-        kani::assume(count * (mem::size_of::<i32>() as isize) <= (isize::MAX as isize));
         unsafe {
             let result = ptr.byte_offset(count);
         }
@@ -1855,7 +1857,6 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::byte_offset_from)]
     pub fn non_null_byte_offset_from_proof() {
-        use kani::PointerGenerator;
         const SIZE: usize = mem::size_of::<i32>() * 10;
         let mut generator1 = PointerGenerator::<SIZE>::new();
         let mut generator2 = PointerGenerator::<SIZE>::new();
