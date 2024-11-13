@@ -1816,7 +1816,6 @@ mod verify {
     pub fn non_null_check_replace() {
         let mut x: i32 = kani::any();
         let mut y: i32 = kani::any();
-        kani::assume((&y as *const i32) != core::ptr::null());
 
         if let Some(origin_ptr) = NonNull::new(&mut x as *mut i32) {
             // let origin_ptr = NonNull::new(x as *mut i32).unwrap();
@@ -1836,7 +1835,6 @@ mod verify {
     pub fn non_null_check_drop_in_place() {
         let mut x: i32 = kani::any();
         if let Some(ptr) = NonNull::new(&mut x as *mut i32) {
-            kani::assume(ptr.as_ptr().is_aligned());
             unsafe {
                 ptr.drop_in_place();
             }
