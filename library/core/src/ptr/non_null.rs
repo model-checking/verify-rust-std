@@ -1916,8 +1916,10 @@ mod verify {
         let upper = kani::any_where(|x| *x < ARR_SIZE && *x >= lower);
         unsafe {
             // NOTE: The `index` parameter cannot be used in the function contracts without being moved.
-            // Since `SliceIndex` does not guarantee that `index` implements `Clone` or `Copy`. To ensure 'index' is only used once,
-            // we put the in-bound check in proof harness as a workaround
+            // Since the `SliceIndex` trait does not guarantee that `index` implements `Clone` or `Copy`,
+            // it cannot be reused after being consumed in the precondition. To comply with Rust's ownership
+            // rules and ensure `index` is only used once, the in-bounds check is moved to the proof harness
+            // as a workaround.
             kani::assume(ptr.as_ref().get(lower..upper).is_some());
             let _ = ptr.get_unchecked_mut(lower..upper);
         }
