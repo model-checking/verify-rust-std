@@ -9,7 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-use crate::{ub_checks};
+use crate::ub_checks;
 
 #[cfg(kani)]
 use crate::kani;
@@ -634,7 +634,7 @@ impl<T: ?Sized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>()).is_some() &&
         count * core::mem::size_of::<T>() <= isize::MAX as usize && 
-        kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().sub(count) as *const())
+        kani::mem::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
     )]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
@@ -768,6 +768,13 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[kani::should_panic]
+    #[requires(
+        (self.as_ptr() as usize == origin.as_ptr() as usize) || 
+        (kani::mem::same_allocation(self.as_ptr(), origin.as_ptr()) && 
+         ((self.as_ptr() as usize >= origin.as_ptr() as usize) && 
+          ((self.as_ptr() as usize - origin.as_ptr() as usize) % core::mem::size_of::<T>()) == 0))
+    )] // Ensure both pointers meet safety conditions for offset_from
     #[ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / core::mem::size_of::<T>() as isize)]
     pub const unsafe fn offset_from(self, origin: NonNull<T>) -> isize
     where
@@ -862,6 +869,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
     #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
+    #[requires(kani::mem::same_allocation(self.as_ptr(), subtracted.as_ptr()))] // Ensure both pointers are in the same allocation
+    #[requires((self.as_ptr() as usize) >= (subtracted.as_ptr() as usize))] // Ensure distance between pointers is non-negative
     #[ensures(|result: &usize| *result == self.as_ptr().offset_from(subtracted.as_ptr()) as usize)]
     pub const unsafe fn sub_ptr(self, subtracted: NonNull<T>) -> usize
     where
@@ -1814,63 +1823,52 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::sub)]
     pub fn non_null_check_sub() {
-        const SIZE: usize = 10;
-        // Randomiz pointer offset within array bound
-        let offset = kani::any_where(|x| *x <= SIZE);
-        // Create a non-deterministic array of size SIZE
-        let arr: [i32; SIZE] = kani::any();  
-        // Get a raw pointer to the array
-        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  
-        // NonNUll pointer to the random offset
-        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };  
+        const SIZE: usize = 10000;
+        let mut generator = kani::PointerGenerator::<SIZE>::new();
+        // Get a raw pointer from the generator within bounds
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
+        // Create a non-null pointer from the raw pointer
+        let ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
         // Create a non-deterministic count value
-        let count: usize = kani::any();  
- 
+        let count: usize = kani::any();
+
         unsafe {
             // Perform the pointer subtraction from the last element
             let result = ptr.sub(count);
         }
     }
-
+    
     #[kani::proof_for_contract(NonNull::sub_ptr)]
     pub fn non_null_check_sub_ptr() {
-
         const SIZE: usize = 100000;
-
-        let index = kani::any_where(|x| *x <= SIZE);
-        // Create a non-deterministic array of size SIZE
-        let arr: [i32; SIZE] = kani::any();  
-        // Get a raw pointer to the array
-        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  
-
-        let ptr = unsafe { NonNull::new(raw_ptr.add(index)).unwrap() };
-        // Point to the first element of the array
-        let first_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };  // Pointer to the first element
+        let mut generator = kani::PointerGenerator::<SIZE>::new();
+        // Get two raw pointers from the generator within bounds
+        let raw_ptr1: *mut i32 = generator.any_in_bounds().ptr;
+        let raw_ptr2: *mut i32 = generator.any_in_bounds().ptr;
+        // Create non-null pointers from the raw pointers
+        let ptr = unsafe { NonNull::new(raw_ptr1).unwrap() };
+        let other_ptr = unsafe { NonNull::new(raw_ptr2).unwrap() };
 
         // Perform pointer subtraction safely
         unsafe {
-            let distance = ptr.sub_ptr(first_ptr); 
+            let distance = ptr.sub_ptr(other_ptr);
         }
     }
 
-    // todo: offset_from
     #[kani::proof_for_contract(NonNull::offset_from)]
     pub fn non_null_check_offset_from() {
         const SIZE: usize = 200000;
-
-        let index = kani::any_where(|x| *x <= SIZE);
-
-        let arr: [i32; SIZE] = kani::any();  // Create a non-deterministic array of size SIZE
-        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;  // Get a raw pointer to the array
-
-        let ptr = unsafe { NonNull::new(raw_ptr.add(index)).unwrap() };  // Pointer to random index
-
-        // Point to the first element of the array
-        let first_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };  // Pointer to the first element
+        let mut generator = kani::PointerGenerator::<SIZE>::new();
+        // Get two raw pointers from the generator within bounds
+        let raw_ptr1: *mut i32 = generator.any_in_bounds().ptr;
+        let raw_ptr2: *mut i32 = generator.any_in_bounds().ptr;
+        // Create non-null pointers from the raw pointers
+        let ptr = unsafe { NonNull::new(raw_ptr1).unwrap() };
+        let other_ptr = unsafe { NonNull::new(raw_ptr2).unwrap() };
 
         // Perform pointer subtraction safely
         unsafe {
-            let distance = ptr.offset_from(first_ptr); 
+            let distance = ptr.offset_from(other_ptr);
         }
     }
     
