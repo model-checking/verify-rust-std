@@ -1847,6 +1847,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
+    use kani::PointerGenerator;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -1870,19 +1871,13 @@ mod verify {
     #[kani::proof_for_contract(NonNull::add)]
     pub fn non_null_check_add() {
         const SIZE: usize = 100000;
-        // Randomize pointer offset within array bound
-        let offset = kani::any_where(|x| *x <= SIZE as isize && *x >=0);
-        // Create a non-deterministic array of size SIZE
-        let arr: [i8; SIZE] = kani::any();  
-        // Get a raw pointer to the array
-        let raw_ptr: *mut i8 = arr.as_ptr() as *mut i8;  
-        // NonNull pointer to the random offset
-        let ptr = unsafe { NonNull::new(raw_ptr.offset(offset)).unwrap()};
+        let mut generator = PointerGenerator::<100000>::new();
+        let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
+        let ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
         // Create a non-deterministic count value
         let count: usize = kani::any();  
         
         unsafe {
-            // Add a positive offset to pointer
             let result = ptr.add(count);
         }
     }
@@ -1892,8 +1887,6 @@ mod verify {
     pub fn non_null_check_addr() {  
         // Create NonNull pointer & get pointer address
         let x = kani::any::<usize>() as *mut i32;
-        //kani::assume(!x.is_null());
-        //let nonnull_xptr = NonNull::new(x).unwrap();
         let Some(nonnull_xptr) = NonNull::new(x) else { return; };
         let address = nonnull_xptr.addr();
     }
