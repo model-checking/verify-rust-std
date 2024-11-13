@@ -1817,37 +1817,42 @@ mod verify {
     #[kani::proof_for_contract(NonNull::as_ptr)]
     pub fn non_null_check_as_ptr() {
         // Create a non-null pointer to a random value
-        let mut x: i32 = kani::any();
-        let ptr = NonNull::new(&mut x as *mut i32).unwrap();
+        let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
+        if let Some(ptr) = NonNull::new(non_null_ptr){
         // Call as_ptr
-        let raw_ptr = ptr.as_ptr();
+            let raw_ptr = ptr.as_ptr();}
+    
     }
     #[kani::proof_for_contract(NonNull::<[T]>::as_mut_ptr)]
     pub fn non_null_check_as_mut_ptr() {
         // Create a non-null slice pointer
-        let mut value: i32 = kani::any();
-        let ptr = NonNull::new(&mut value as *mut i32).unwrap();
-        let slice_ptr = NonNull::slice_from_raw_parts(ptr, 1);
-        // Call as_mut_ptr
-        let raw_ptr = slice_ptr.as_mut_ptr();
-    }
-
+        const ARR_LEN: usize = 100;
+        let mut generator = kani::PointerGenerator::<ARR_LEN>::new();
+        let mut values: [i32; ARR_LEN] = [0; ARR_LEN];
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
+        if let Some(ptr) = NonNull::new(raw_ptr){
+            let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
+            // Call as_mut_ptr
+            let raw_ptr = slice_ptr.as_mut_ptr();
+    }}
     #[kani::proof_for_contract(NonNull::<T>::cast)]
     pub fn non_null_check_cast() {
         // Create a non-null pointer to a random value
-        let mut x: i32 = kani::any();
-        let ptr = NonNull::new(&mut x as *mut i32).unwrap();
+        let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
+        if let Some(ptr) = NonNull::new(non_null_ptr){
         // Perform the cast
-        let casted_ptr: NonNull<u8> = ptr.cast();
-    }
+            let casted_ptr: NonNull<u8> = ptr.cast();
+    }}
     #[kani::proof_for_contract(NonNull::<[T]>::as_non_null_ptr)]
     pub fn non_null_check_as_non_null_ptr() {
-        // Create a non-null pointer to a random value
-        let mut value: i32 = kani::any();
-        let ptr = NonNull::new(&mut value as *mut i32).unwrap();
-        // Create a slice pointer
-        let slice_ptr = NonNull::slice_from_raw_parts(ptr, 1);
-        // Call as_non_null_ptr
-        let result = slice_ptr.as_non_null_ptr();
-    }
+        const ARR_LEN: usize = 100;
+        let mut generator = kani::PointerGenerator::<ARR_LEN>::new();
+        let mut values: [i32; ARR_LEN] = [0; ARR_LEN];
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
+        if let Some(ptr) = NonNull::new(raw_ptr){
+            let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
+            let result = slice_ptr.as_non_null_ptr();
+    }}
+    
 }
+
