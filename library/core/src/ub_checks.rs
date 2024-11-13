@@ -47,7 +47,7 @@ use crate::intrinsics::{self, const_eval_select};
 /// order to call it. Since the precompiled standard library is built with full debuginfo and these
 /// variables cannot be optimized out in MIR, an innocent-looking `let` can produce enough
 /// debuginfo to have a measurable compile-time impact on debug builds.
-#[allow_internal_unstable(const_ub_checks)] // permit this to be called in stably-const fn
+#[cfg_attr(bootstrap, allow_internal_unstable(const_ub_checks))] // permit this to be called in stably-const fn
 #[macro_export]
 #[unstable(feature = "ub_checks", issue = "none")]
 macro_rules! assert_unsafe_precondition {
@@ -64,7 +64,8 @@ macro_rules! assert_unsafe_precondition {
             #[rustc_no_mir_inline]
             #[inline]
             #[rustc_nounwind]
-            #[rustc_const_unstable(feature = "const_ub_checks", issue = "none")]
+            #[cfg_attr(bootstrap, rustc_const_unstable(feature = "const_ub_checks", issue = "none"))]
+            #[rustc_allow_const_fn_unstable(const_ptr_is_null, const_ub_checks)] // only for UB checks
             const fn precondition_check($($name:$ty),*) {
                 if !$e {
                     ::core::panicking::panic_nounwind(
@@ -90,8 +91,9 @@ pub use intrinsics::ub_checks as check_library_ub;
 ///
 /// The intention is to not do that when running in the interpreter, as that one has its own
 /// language UB checks which generally produce better errors.
-#[rustc_const_unstable(feature = "const_ub_checks", issue = "none")]
+#[cfg_attr(bootstrap, rustc_const_unstable(feature = "const_ub_checks", issue = "none"))]
 #[inline]
+#[rustc_allow_const_fn_unstable(const_eval_select)]
 pub(crate) const fn check_language_ub() -> bool {
     #[inline]
     fn runtime() -> bool {
@@ -109,15 +111,16 @@ pub(crate) const fn check_language_ub() -> bool {
     intrinsics::ub_checks() && const_eval_select((), comptime, runtime)
 }
 
-/// Checks whether `ptr` is properly aligned with respect to
-/// `align_of::<T>()`.
+/// Checks whether `ptr` is properly aligned with respect to the given alignment, and
+/// if `is_zst == false`, that `ptr` is not null.
 ///
 /// In `const` this is approximate and can fail spuriously. It is primarily intended
 /// for `assert_unsafe_precondition!` with `check_language_ub`, in which case the
 /// check is anyway not executed in `const`.
 #[inline]
-pub(crate) const fn is_aligned_and_not_null(ptr: *const (), align: usize) -> bool {
-    !ptr.is_null() && ptr.is_aligned_to(align)
+#[rustc_const_unstable(feature = "const_ub_checks", issue = "none")]
+pub(crate) const fn is_aligned_and_not_null(ptr: *const (), align: usize, is_zst: bool) -> bool {
+    ptr.is_aligned_to(align) && (is_zst || !ptr.is_null())
 }
 
 #[inline]
@@ -132,6 +135,7 @@ pub(crate) const fn is_valid_allocation_size(size: usize, len: usize) -> bool {
 /// Note that in const-eval this function just returns `true` and therefore must
 /// only be used with `assert_unsafe_precondition!`, similar to `is_aligned_and_not_null`.
 #[inline]
+#[rustc_const_unstable(feature = "const_ub_checks", issue = "none")]
 pub(crate) const fn is_nonoverlapping(
     src: *const (),
     dst: *const (),
@@ -167,6 +171,7 @@ pub use predicates::*;
 /// Provide a few predicates to be used in safety contracts.
 ///
 /// At runtime, they are no-op, and always return true.
+/// FIXME: In some cases, we could do better, for example check if not null and aligned.
 #[cfg(not(kani))]
 mod predicates {
     /// Checks if a pointer can be dereferenced, ensuring:
@@ -175,7 +180,7 @@ mod predicates {
     ///   * `src` points to a properly initialized value of type `T`.
     ///
     /// [`crate::ptr`]: https://doc.rust-lang.org/std/ptr/index.html
-    pub fn can_dereference<T>(src: *const T) -> bool {
+    pub fn can_dereference<T: ?Sized>(src: *const T) -> bool {
         let _ = src;
         true
     }
@@ -184,7 +189,7 @@ mod predicates {
     /// * `dst` must be valid for writes.
     /// * `dst` must be properly aligned. Use `write_unaligned` if this is not the
     ///    case.
-    pub fn can_write<T>(dst: *mut T) -> bool {
+    pub fn can_write<T: ?Sized>(dst: *mut T) -> bool {
         let _ = dst;
         true
     }
@@ -192,22 +197,29 @@ mod predicates {
     /// Check if a pointer can be the target of unaligned reads.
     /// * `src` must be valid for reads.
     /// * `src` must point to a properly initialized value of type `T`.
-    pub fn can_read_unaligned<T>(src: *const T) -> bool {
+    pub fn can_read_unaligned<T: ?Sized>(src: *const T) -> bool {
         let _ = src;
         true
     }
 
     /// Check if a pointer can be the target of unaligned writes.
     /// * `dst` must be valid for writes.
-    pub fn can_write_unaligned<T>(dst: *mut T) -> bool {
+    pub fn can_write_unaligned<T: ?Sized>(dst: *mut T) -> bool {
         let _ = dst;
+        true
+    }
+
+    /// Checks if two pointers point to the same allocation.
+    pub fn same_allocation<T: ?Sized>(src: *const T, dst: *const T) -> bool {
+        let _ = (src, dst);
         true
     }
 }
 
 #[cfg(kani)]
 mod predicates {
-    pub use crate::kani::mem::{can_dereference, can_write, can_read_unaligned, can_write_unaligned};
+    pub use crate::kani::mem::{can_dereference, can_write, can_read_unaligned, can_write_unaligned,
+    same_allocation};
 }
 
 /// This trait should be used to specify and check type safety invariants for a

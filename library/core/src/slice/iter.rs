@@ -8,11 +8,14 @@ use crate::hint::assert_unchecked;
 use crate::iter::{
     FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce, UncheckedIterator,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::PhantomData;
 use crate::mem::{self, SizedTypeProperties};
 use crate::num::NonZero;
-use crate::ptr::{self, without_provenance, without_provenance_mut, NonNull};
+use crate::ptr::{NonNull, without_provenance, without_provenance_mut};
 use crate::{cmp, fmt};
+use crate::ub_checks::Invariant;
 
 #[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
 impl<T> !Iterator for [T] {}
@@ -157,6 +160,32 @@ impl<T> AsRef<[T]> for Iter<'_, T> {
     }
 }
 
+#[unstable(feature = "ub_checks", issue = "none")]
+impl<T> Invariant for Iter<'_, T> {
+    /// An iterator can be safely used if its pointer can be read for its current length.
+    ///
+    /// If the type is a ZST or the encoded length is `0`, the only safety requirement is that
+    /// its pointer is aligned (since zero-size access is always safe for aligned pointers).
+    ///
+    /// For other cases, we need to ensure that it is safe to read the memory between
+    /// `self.ptr` and `self.end_or_len`.
+    fn is_safe(&self) -> bool {
+        let ty_size = crate::mem::size_of::<T>();
+        // Use `abs_diff` since `end_or_len` may be smaller than `ptr` if `T` is a ZST.
+        let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
+        if ty_size == 0 || distance == 0 {
+            self.ptr.is_aligned()
+        } else {
+            let slice_ptr: *const [T] =
+                crate::ptr::from_raw_parts(self.ptr.as_ptr(), distance / ty_size);
+            crate::ub_checks::same_allocation(self.ptr.as_ptr(), self.end_or_len)
+                && self.ptr.addr().get() <= self.end_or_len as usize
+                && distance % ty_size == 0
+                && crate::ub_checks::can_dereference(slice_ptr)
+        }
+    }
+}
+
 /// Mutable slice iterator.
 ///
 /// This struct is created by the [`iter_mut`] method on [slices].
@@ -194,6 +223,29 @@ pub struct IterMut<'a, T: 'a> {
     /// For ZSTs, this is `ptr::without_provenance_mut(len)`.
     end_or_len: *mut T,
     _marker: PhantomData<&'a mut T>,
+}
+
+#[unstable(feature = "ub_checks", issue = "none")]
+impl<T> Invariant for IterMut<'_, T> {
+    /// This is similar to [Iter] with an extra write requirement.
+    ///
+    /// It must be safe to write in the memory interval between `self.ptr`
+    /// and `self.end_or_len`.
+    fn is_safe(&self) -> bool {
+        let ty_size = crate::mem::size_of::<T>();
+        let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
+        if ty_size == 0 || distance == 0 {
+            self.ptr.is_aligned()
+        } else {
+            let slice_ptr: *mut [T] =
+                crate::ptr::from_raw_parts_mut(self.ptr.as_ptr(), distance / ty_size);
+            crate::ub_checks::same_allocation(self.ptr.as_ptr(), self.end_or_len)
+                && self.ptr.addr().get() <= self.end_or_len as usize
+                && distance % ty_size == 0
+                && crate::ub_checks::can_dereference(slice_ptr)
+                && crate::ub_checks::can_write(slice_ptr)
+        }
+    }
 }
 
 #[stable(feature = "core_impl_debug", since = "1.9.0")]
@@ -3463,4 +3515,138 @@ impl<'a, T: 'a + fmt::Debug, P> fmt::Debug for ChunkByMut<'a, T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ChunkByMut").field("slice", &self.slice).finish()
     }
+}
+
+/// Verify the safety of the code implemented in this module (including generated code from macros).
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig_slice: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    fn any_iter<'a, T>(orig_slice: &'a [T]) -> Iter<'a, T> {
+        let slice = any_slice(orig_slice);
+        Iter::new(slice)
+    }
+
+    /// Macro that generates a harness for a given `Iter` method.
+    ///
+    /// Takes the name of the harness, the element type, and an expression to check.
+    macro_rules! check_safe_abstraction {
+        ($harness:ident, $elem_ty:ty, $call:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut iter = any_iter::<$elem_ty>(&array);
+                let target = $call;
+                target(&mut iter);
+                kani::assert(iter.is_safe(), "Iter is safe");
+            }
+        };
+    }
+
+    /// Macro that generates a harness for a given unsafe `Iter` method.
+    ///
+    /// Takes:
+    /// 1. The name of the harness
+    /// 2. the element type
+    /// 3. the target function
+    /// 4. the optional arguments.
+    macro_rules! check_unsafe_contracts {
+        ($harness:ident, $elem_ty:ty, $func:ident($($args:expr),*)) => {
+            #[kani::proof_for_contract(Iter::$func)]
+            fn $harness() {
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut iter = any_iter::<$elem_ty>(&array);
+                let _ = unsafe { iter.$func($($args),*) };
+            }
+        };
+    }
+
+    macro_rules! check_iter_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                fn check_new_iter() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let mut iter = Iter::new(slice);
+                    kani::assert(iter.is_safe(), "Iter is safe");
+                }
+
+                /// Count consumes the value, thus, invoke it directly.
+                #[kani::proof]
+                fn check_count() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter::<$ty>(&array);
+                    iter.count();
+                }
+
+                #[kani::proof]
+                fn check_default() {
+                    let iter: Iter<'_, $ty> = Iter::default();
+                    kani::assert(iter.is_safe(), "Iter is safe");
+                }
+
+                check_unsafe_contracts!(check_next_back_unchecked, $ty, next_back_unchecked());
+                //check_unsafe_contracts!(check_post_inc_start, $ty, post_inc_start(kani::any()));
+                //check_unsafe_contracts!(check_pre_dec_end, $ty, pre_dec_end(kani::any()));
+
+                // FIXME: The functions that are commented out are currently failing verification.
+                // Debugging the issue is currently blocked by:
+                // https://github.com/model-checking/kani/issues/3670
+                //
+                // Public functions that call safe abstraction `make_slice`.
+                // check_safe_abstraction!(check_as_slice, $ty, as_slice);
+                // check_safe_abstraction!(check_as_ref, $ty, as_ref);
+
+                // check_safe_abstraction!(check_advance_back_by, $ty, advance_back_by, kani::any());
+
+                check_safe_abstraction!(check_is_empty, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.is_empty();
+                });
+                check_safe_abstraction!(check_len, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.len();
+                });
+                check_safe_abstraction!(check_size_hint, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.size_hint();
+                });
+                //check_safe_abstraction!(check_nth, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth(kani::any()); });
+                //check_safe_abstraction!(check_advance_by, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.advance_by(kani::any()); });
+                check_safe_abstraction!(check_next_back, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.next_back();
+                });
+                //check_safe_abstraction!(check_nth_back, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth_back(kani::any()); });
+                check_safe_abstraction!(check_next, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.next();
+                });
+
+                // Ensure that clone always generates a safe object.
+                check_safe_abstraction!(check_clone, $ty, |iter: &mut Iter<'_, $ty>| {
+                    kani::assert(iter.clone().is_safe(), "Clone is safe");
+                });
+            }
+        };
+    }
+
+    // FIXME: Add harnesses for ZST with alignment > 1.
+    check_iter_with_ty!(verify_unit, (), isize::MAX as usize);
+    check_iter_with_ty!(verify_u8, u8, u32::MAX as usize);
+    check_iter_with_ty!(verify_char, char, 50);
+    check_iter_with_ty!(verify_tup, (char, u8), 50);
 }
