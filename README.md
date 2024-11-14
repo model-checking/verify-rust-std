@@ -47,4 +47,4 @@ See [the Rust repository](https://github.com/rust-lang/rust) for details.
 
 ## Introducing a New Tool
 
-Please use the [template available in this repository](.github/TOOL_REQUEST_TEMPLATE.md) to introduce a new verification tool.
+Please use the [template available in this repository](./doc/src/tool_template.md) to introduce a new verification tool.

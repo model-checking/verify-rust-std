@@ -3,6 +3,9 @@
 use super::Utf8Error;
 use crate::mem;
 
+#[cfg(kani)]
+use crate::kani;
+
 /// Returns the initial codepoint accumulator for the first byte.
 /// The first byte is special, only want bottom 5 bits for width 2, 4 bits
 /// for width 3, and 3 bits for width 4.
@@ -132,6 +135,7 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
     let blocks_end = if len >= ascii_block_size { len - ascii_block_size + 1 } else { 0 };
     let align = v.as_ptr().align_offset(usize_bytes);
 
+    #[safety::loop_invariant(index <= len + ascii_block_size)]
     while index < len {
         let old_offset = index;
         macro_rules! err {
@@ -211,6 +215,7 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
             // until we find a word containing a non-ascii byte.
             if align != usize::MAX && align.wrapping_sub(index) % usize_bytes == 0 {
                 let ptr = v.as_ptr();
+                #[safety::loop_invariant(index <= blocks_end + ascii_block_size && align.wrapping_sub(index) % usize_bytes == 0)]
                 while index < blocks_end {
                     // SAFETY: since `align - index` and `ascii_block_size` are
                     // multiples of `usize_bytes`, `block = ptr.add(index)` is
@@ -228,6 +233,7 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
                     index += ascii_block_size;
                 }
                 // step from the point where the wordwise loop stopped
+                #[safety::loop_invariant(index <= len)]
                 while index < len && v[index] < 128 {
                     index += 1;
                 }
@@ -271,3 +277,27 @@ pub const fn utf8_char_width(b: u8) -> usize {
 
 /// Mask of the value bits of a continuation byte.
 const CONT_MASK: u8 = 0b0011_1111;
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+
+    #[kani::proof]
+    pub fn check_run_utf8_validation() {
+        if kani::any() {
+            // TODO: ARR_SIZE can be much larger with cbmc argument
+            // `--arrays-uf-always`
+            const ARR_SIZE: usize = 1000;
+            let mut x: [u8; ARR_SIZE] = kani::any();
+            let mut xs = kani::slice::any_slice_of_array_mut(&mut x);
+            run_utf8_validation(xs);
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
+            kani::assume(ptr.is_aligned());
+            unsafe{
+                run_utf8_validation(crate::slice::from_raw_parts(ptr, 0));
+            }
+        }
+    }
+}

@@ -1,6 +1,5 @@
-# This workflow is responsible for verifying the standard library with Kani.
-
 name: Kani
+
 on:
   workflow_dispatch:
   pull_request:
@@ -9,18 +8,18 @@ on:
     paths:
       - 'library/**'
       - '.github/workflows/kani.yml'
-      - 'scripts/check_kani.sh'
+      - 'scripts/run-kani.sh'
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  build:
+  check-kani-on-std:
+    name: Verify std library
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # Kani does not support windows.
         os: [ubuntu-latest, macos-latest]
         include:
           - os: ubuntu-latest
@@ -28,11 +27,41 @@ jobs:
           - os: macos-latest
             base: macos
     steps:
-      - name: Checkout Library
+      # Step 1: Check out the repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           path: head
           submodules: true
 
-      - name: Run Kani Script
-        run: bash ./head/scripts/check_kani.sh ${{github.workspace}}/head
+      # Step 2: Run Kani on the std library (default configuration)
+      - name: Run Kani Verification
+        run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
+
+  test-kani-script:
+    name: Test Kani script
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          path: head
+          submodules: true
+
+      # Step 2: Test Kani verification script with specific arguments
+      - name: Test Kani script (Custom Args)
+        run: head/scripts/run-kani.sh -p ${{github.workspace}}/head --kani-args --harness ptr --output-format=terse
+
+      # Step 3: Test Kani verification script in the repository directory
+      - name: Test Kani script (In Repo Directory)
+        working-directory: ${{github.workspace}}/head
+        run: scripts/run-kani.sh --kani-args --harness ptr::verify::check_read_u128 --harness ptr --output-format=terse
