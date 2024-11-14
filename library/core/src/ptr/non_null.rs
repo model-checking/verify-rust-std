@@ -502,11 +502,11 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::requires(
+    #[requires(
         (self.as_ptr().addr() as isize).checked_add(count).is_some() &&
         kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_offset(count) as *const())
     )]
-    #[kani::ensures(|result: &Self| result.as_ptr() == self.as_ptr().byte_offset(count))]
+    #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_byte_offset(count))]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset` and `byte_offset` has
         // the same safety contract.
@@ -584,11 +584,12 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_allow_const_fn_unstable(set_ptr_value)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::requires(
+    #[requires(
+        count <= (isize::MAX as usize) &&
         self.as_ptr().addr().checked_add(count).is_some() &&
         kani::mem::same_allocation(self.as_ptr() as *const(),((self.as_ptr().addr()) + count) as *const())
     )]
-    #[kani::ensures(
+    #[ensures(
         |result: &NonNull<T>|
         result.as_ptr().addr() == (self.as_ptr().addr() + count)
     )]
@@ -796,8 +797,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::requires(kani::mem::same_allocation(self.as_ptr() as *const(), origin.as_ptr() as *const()))]
-    #[kani::ensures(
+    #[requires(kani::mem::same_allocation(self.as_ptr() as *const(), origin.as_ptr() as *const()))]
+    #[ensures(
         |result: &isize|
         *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
     )]
@@ -1826,35 +1827,35 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::byte_add)]
     pub fn non_null_byte_add_proof() {
-        const ARR_SIZE: usize = 100000;
-        let arr: [i32; ARR_SIZE] = kani::any();
-        let offset = kani::any_where(|x| *x <= ARR_SIZE);
-        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;
-        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
+        const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
+        let mut generator = PointerGenerator::<ARR_SIZE>::new();
+
         let count: usize = kani::any();
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
 
         unsafe {
+            let ptr = NonNull::new(raw_ptr).unwrap();
             let result = ptr.byte_add(count);
         }
     }
 
     #[kani::proof_for_contract(NonNull::byte_offset)]
     pub fn non_null_byte_offset_proof() {
-        const ARR_SIZE: usize = 100000;
-        let arr: [i32; ARR_SIZE] = kani::any();
-        let offset = kani::any_where(|x| *x <= ARR_SIZE);
-        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;
-        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
+        const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
+        let mut generator = PointerGenerator::<ARR_SIZE>::new();
+
         let count: isize = kani::any();
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
 
         unsafe {
+            let ptr = NonNull::new(raw_ptr).unwrap();
             let result = ptr.byte_offset(count);
         }
     }
 
     #[kani::proof_for_contract(NonNull::byte_offset_from)]
     pub fn non_null_byte_offset_from_proof() {
-        const SIZE: usize = mem::size_of::<i32>() * 10;
+        const SIZE: usize = mem::size_of::<i32>() * 1000;
         let mut generator1 = PointerGenerator::<SIZE>::new();
         let mut generator2 = PointerGenerator::<SIZE>::new();
 
