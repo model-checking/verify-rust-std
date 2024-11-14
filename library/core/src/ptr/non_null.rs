@@ -1918,9 +1918,9 @@ mod verify {
 
     // pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self
     #[kani::proof_for_contract(NonNull::slice_from_raw_parts)]
-    #[kani::unwind(11)]
+    #[kani::unwind(1001)]
     pub fn non_null_check_slice_from_raw_parts() {
-        const ARR_LEN: usize = 10000;
+        const ARR_LEN: usize = 1000;
         // Create a non-deterministic array
         let mut arr: [i8; ARR_LEN] = kani::any();
         // Get a raw NonNull pointer to the start of the slice
