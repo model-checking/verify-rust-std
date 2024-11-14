@@ -183,7 +183,7 @@ main() {
 
     echo "Running Kani verify-std command..."
 
-    "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse $command_args
+    "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates -Z loop-contracts --output-format=terse $command_args --enable-unstable --cbmc-args --object-bits 12
 }
 
 main
