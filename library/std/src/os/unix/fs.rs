@@ -153,7 +153,7 @@ pub trait FileExt {
     ///
     /// It is possible to inadvertently set this flag, like in the example below.
     /// Therefore, it is important to be vigilant while changing options to mitigate
-    /// unexpected behaviour.
+    /// unexpected behavior.
     ///
     /// ```no_run
     /// use std::fs::File;
@@ -334,6 +334,7 @@ pub trait PermissionsExt {
     /// assert_eq!(permissions.mode(), 0o644);
     /// ```
     #[stable(feature = "fs_ext", since = "1.1.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "permissions_from_mode")]
     fn from_mode(mode: u32) -> Self;
 }
 
