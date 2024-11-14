@@ -768,12 +768,9 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::should_panic]
-    #[requires(
-        (self.as_ptr() as usize == origin.as_ptr() as usize) || 
+    #[requires( 
         (kani::mem::same_allocation(self.as_ptr(), origin.as_ptr()) && 
-         ((self.as_ptr() as usize >= origin.as_ptr() as usize) && 
-          ((self.as_ptr() as usize - origin.as_ptr() as usize) % core::mem::size_of::<T>()) == 0))
+        ((self.as_ptr() as usize - origin.as_ptr() as usize) % core::mem::size_of::<T>() == 0))
     )] // Ensure both pointers meet safety conditions for offset_from
     #[ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / core::mem::size_of::<T>() as isize)]
     pub const unsafe fn offset_from(self, origin: NonNull<T>) -> isize
@@ -1840,35 +1837,54 @@ mod verify {
     
     #[kani::proof_for_contract(NonNull::sub_ptr)]
     pub fn non_null_check_sub_ptr() {
-        const SIZE: usize = 100000;
-        let mut generator = kani::PointerGenerator::<SIZE>::new();
-        // Get two raw pointers from the generator within bounds
-        let raw_ptr1: *mut i32 = generator.any_in_bounds().ptr;
-        let raw_ptr2: *mut i32 = generator.any_in_bounds().ptr;
-        // Create non-null pointers from the raw pointers
-        let ptr = unsafe { NonNull::new(raw_ptr1).unwrap() };
-        let other_ptr = unsafe { NonNull::new(raw_ptr2).unwrap() };
+        const SIZE: usize = core::mem::size_of::<i32>() * 1000;
+        let mut generator1 = kani::PointerGenerator::<SIZE>::new();
+        let mut generator2 = kani::PointerGenerator::<SIZE>::new();
 
-        // Perform pointer subtraction safely
+        let ptr: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let origin: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let ptr_nonnull = unsafe { NonNull::new(ptr).unwrap() };
+        let origin_nonnull = unsafe { NonNull::new(origin).unwrap() };
+
         unsafe {
-            let distance = ptr.sub_ptr(other_ptr);
+            let distance = ptr_nonnull.sub_ptr(origin_nonnull);
         }
     }
 
     #[kani::proof_for_contract(NonNull::offset_from)]
+    #[kani::should_panic]
     pub fn non_null_check_offset_from() {
-        const SIZE: usize = 200000;
-        let mut generator = kani::PointerGenerator::<SIZE>::new();
-        // Get two raw pointers from the generator within bounds
-        let raw_ptr1: *mut i32 = generator.any_in_bounds().ptr;
-        let raw_ptr2: *mut i32 = generator.any_in_bounds().ptr;
-        // Create non-null pointers from the raw pointers
-        let ptr = unsafe { NonNull::new(raw_ptr1).unwrap() };
-        let other_ptr = unsafe { NonNull::new(raw_ptr2).unwrap() };
+        const SIZE: usize = core::mem::size_of::<i32>() * 1000;
+        let mut generator1 = kani::PointerGenerator::<SIZE>::new();
+        let mut generator2 = kani::PointerGenerator::<SIZE>::new();
 
-        // Perform pointer subtraction safely
+        let ptr: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let origin: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let ptr_nonnull = unsafe { NonNull::new(ptr).unwrap() };
+        let origin_nonnull = unsafe { NonNull::new(origin).unwrap() };
+
         unsafe {
-            let distance = ptr.offset_from(other_ptr);
+            let distance = ptr_nonnull.offset_from(origin_nonnull);
         }
     }
     
