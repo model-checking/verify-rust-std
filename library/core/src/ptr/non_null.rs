@@ -898,9 +898,7 @@ impl<T: ?Sized> NonNull<T> {
     /// memory in `self` unchanged.
     ///
     /// See [`ptr::read`] for safety concerns and examples.
-    /// src must be valid for reads.
-    /// src must be properly aligned. Use read_unaligned if this is not the case.
-    /// src must point to a properly initialized value of type T.
+    ///
     /// [`ptr::read`]: crate::ptr::read()
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
@@ -1890,7 +1888,7 @@ mod verify {
         const SIZE: usize = 1000;
         // cast a random offset of an u8 array to usize
         let offset: usize = kani::any();
-        kani::assume(offset >= 0 && offset < SIZE - core::mem::size_of::<usize>());
+        kani::assume(offset < SIZE - core::mem::size_of::<usize>());
         let arr: [u8; SIZE] = kani::any();  
         let unaligned_ptr = &arr[offset] as *const u8 as *const usize;
         // create a NonNull pointer from the unaligned pointer
