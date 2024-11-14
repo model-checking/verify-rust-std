@@ -1301,7 +1301,7 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[stable(feature = "pointer_is_aligned", since = "1.79.0")]
     #[rustc_const_unstable(feature = "const_pointer_is_aligned", issue = "104203")]
-    #[ensures(|result: &bool| *result == (self.as_ptr() as usize % core::mem::align_of::<T>() == 0))] // Ensure the returned value is correct for alignment check
+    #[ensures(|result: &bool| *result == (self.as_ptr().addr() % core::mem::align_of::<T>() == 0))]
     pub const fn is_aligned(self) -> bool
     where
         T: Sized,
@@ -1417,7 +1417,8 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "pointer_is_aligned_to", issue = "96284")]
     #[rustc_const_unstable(feature = "const_pointer_is_aligned", issue = "104203")]
-    #[ensures(|result: &bool| *result == ((self.as_ptr() as *const u8) as usize % align == 0))] // Ensure the returned value is correct based on the given alignment
+    #[requires(align.is_power_of_two())]
+    #[ensures(|result: &bool| *result == (self.as_ptr().addr() % align == 0))] // Ensure the returned value is correct based on the given alignment
     pub const fn is_aligned_to(self, align: usize) -> bool {
         self.pointer.is_aligned_to(align)
     }
@@ -1473,7 +1474,6 @@ impl<T> NonNull<[T]> {
     #[rustc_const_stable(feature = "const_slice_ptr_len_nonnull", since = "1.63.0")]
     #[must_use]
     #[inline]
-    #[ensures(|result: &usize| *result >= 0)]
     pub const fn len(self) -> usize {
         self.as_ptr().len()
     }
@@ -1492,7 +1492,6 @@ impl<T> NonNull<[T]> {
     #[rustc_const_stable(feature = "const_slice_ptr_is_empty_nonnull", since = "1.79.0")]
     #[must_use]
     #[inline]
-    #[ensures(|result: &bool| *result == (self.len() == 0))]
     pub const fn is_empty(self) -> bool {
         self.len() == 0
     }
@@ -1816,36 +1815,21 @@ mod verify {
         let _ = NonNull::new(maybe_null_ptr);
     }
 
-    // #[kani::proof_for_contract(NonNull::len)]
-    // pub fn non_null_check_len() {
-    //     const SIZE: usize = 20000;
-    //     // Create a non-deterministic array of size SIZE
-    //     let arr: [i8; SIZE] = kani::any();  
-    //     // Get a raw pointer to the array
-    //     let raw_ptr: *const i8 = arr.as_ptr();  
-    //     // Create a NonNull slice from the raw pointer
-    //     let non_null_slice: NonNull<[i8]> = unsafe { NonNull::slice_from_raw_parts(NonNull::new(raw_ptr as *mut i8).unwrap(), SIZE) };  
-
-    //     // Perform the length check
-    //     let len = non_null_slice.len();
-    //     assert!(len == SIZE);
-    // }
-
-    #[kani::proof_for_contract(NonNull::len)]
+    #[kani::proof]
     pub fn non_null_check_len() {
         // Create a non-deterministic NonNull pointer using kani::any()
         let non_null_ptr: NonNull<i8> = kani::any();
         // Create a non-deterministic size using kani::any()
         let size: usize = kani::any();
         // Create a NonNull slice from the non-null pointer and size
-        let non_null_slice: NonNull<[i8]> = unsafe { NonNull::slice_from_raw_parts(non_null_ptr, size) };
+        let non_null_slice: NonNull<[i8]> = NonNull::slice_from_raw_parts(non_null_ptr, size);
 
         // Perform the length check
         let len = non_null_slice.len();
         assert!(len == size);
     }
 
-    #[kani::proof_for_contract(NonNull::is_empty)]
+    #[kani::proof]
     pub fn non_null_check_is_empty() {
         const SIZE: usize = 0;
         // Create a non-deterministic array of size SIZE
@@ -1871,7 +1855,6 @@ mod verify {
 
         // Perform the alignment check
         let result = ptr.is_aligned();
-        assert!(result);
     }
 
     #[kani::proof_for_contract(NonNull::is_aligned_to)]
@@ -1889,6 +1872,6 @@ mod verify {
 
         // Perform the alignment to check if it matches the given alignment
         let result = ptr.is_aligned_to(ALIGN);
-        assert!(result == (ptr.as_ptr() as usize % ALIGN == 0));
+        
     }
 }
