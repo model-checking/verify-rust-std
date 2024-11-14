@@ -7,7 +7,7 @@ use crate::pin::PinCoerceUnsized;
 use crate::ptr::Unique;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
-use crate::{fmt, hash, intrinsics, ptr, ub_checks};
+use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
 
 
