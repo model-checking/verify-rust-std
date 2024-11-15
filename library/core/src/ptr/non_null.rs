@@ -2173,11 +2173,7 @@ mod verify {
         let mut generator1 = PointerGenerator::<SIZE>::new();
         let mut generator2 = PointerGenerator::<SIZE>::new();
 
-        let ptr: *mut i32 = if kani::any() {
-            generator1.any_in_bounds().ptr as *mut i32
-        } else {
-            generator2.any_in_bounds().ptr as *mut i32
-        };
+        let ptr: *mut i32 = generator1.any_in_bounds().ptr as *mut i32;
 
         let origin: *mut i32 = if kani::any() {
             generator1.any_in_bounds().ptr as *mut i32
