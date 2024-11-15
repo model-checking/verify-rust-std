@@ -1482,7 +1482,6 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[inline]
     #[requires(data.pointer.is_aligned() 
-        //&& len as isize * core::mem::size_of::<T>() as isize <= isize::MAX
         && (len as isize).checked_mul(core::mem::size_of::<T>() as isize).is_some()
         && (data.pointer as isize).checked_add(len as isize * core::mem::size_of::<T>() as isize).is_some() // adding len must not “wrap around” the address space
         && unsafe { kani::mem::same_allocation(data.pointer, data.pointer.add(len))
@@ -1823,7 +1822,6 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
-    // use crate::boxed::Box;  // failed to import
 
     trait SampleTrait {
         fn get_value(&self) -> i32;
@@ -1882,21 +1880,28 @@ mod verify {
 
     // pub const fn from_raw_parts(data_pointer: NonNull<()>, metadata: <T as super::Pointee>::Metadata,) -> NonNull<T>
     #[kani::proof_for_contract(NonNull::from_raw_parts)]
+    #[kani::unwind(101)]
     pub fn non_null_check_from_raw_parts() {
-
-        const ARR_LEN: usize = 10000;
+        const ARR_LEN: usize = 100;
         // Create a non-deterministic array and its slice
         let arr: [i8; ARR_LEN] = kani::any();
-        let arr_slice = &arr[..];  
+        let arr_slice = kani::slice::any_slice_of_array(&arr);
         // Get a raw NonNull pointer to the start of the slice
         let arr_slice_raw_ptr = NonNull::new(arr_slice.as_ptr() as *mut ()).unwrap();  
         // Create NonNull pointer from the start pointer and the length of the slice
-        let nonnull_slice = NonNull::<[i8]>::from_raw_parts(arr_slice_raw_ptr, ARR_LEN);
+        let nonnull_slice = NonNull::<[i8]>::from_raw_parts(arr_slice_raw_ptr, arr_slice.len());
         // Ensure slice content is preserved, runtime at this step is proportional to ARR_LEN
         unsafe {
             kani::assert( arr_slice == nonnull_slice.as_ref(), "slice content must preserve" );
         }
-            
+
+        // zero-length dangling pointer example
+        let dangling_ptr = NonNull::<()>::dangling();
+        let zero_length = NonNull::<[()]>::from_raw_parts(dangling_ptr, 0);
+    }
+
+    #[kani::proof_for_contract(NonNull::from_raw_parts)]
+    pub fn non_null_check_from_raw_part_trait() {
         // Create a SampleTrait object from SampleStruct
         let sample_struct = SampleStruct { value: kani::any() };
         let trait_object: &dyn SampleTrait = &sample_struct;
@@ -1913,7 +1918,6 @@ mod verify {
             // Ensure trait method and member is preserved
             kani::assert( trait_object.get_value() == nonnull_trait_object.as_ref().get_value(), "trait method and member must correctly preserve");
         }
-
     }
 
     // pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self
@@ -1934,6 +1938,10 @@ mod verify {
         unsafe {
             kani::assert( &arr[..slice_len] == nonnull_slice.as_ref(), "slice content must preserve" );
         }
+
+        // TODO: zero-length example blocked by kani issue [#3670](https://github.com/model-checking/kani/issues/3670)
+        //let dangling_ptr = NonNull::<()>::dangling();
+        //let zero_length = NonNull::<[()]>::slice_from_raw_parts(dangling_ptr, 0);
     }
 
     
