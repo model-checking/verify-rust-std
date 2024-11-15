@@ -1932,27 +1932,32 @@ mod verify {
         let mut x: i32 = kani::any();
         let mut y: i32 = kani::any();
 
-        if let nonnull_origin_ptr = NonNull::new(&mut x as *mut i32) {
-            let origin_ptr = nonnull_origin_ptr.unwrap();
-            unsafe {
-                let captured_original = ptr::read(origin_ptr.as_ptr());
-                let replaced = origin_ptr.replace(y);
-                let after_replace = ptr::read(origin_ptr.as_ptr());
+        let origin_ptr = NonNull::new(&mut x as *mut i32).unwrap();
+        unsafe {
+            let captured_original = ptr::read(origin_ptr.as_ptr());
+            let replaced = origin_ptr.replace(y);
+            let after_replace = ptr::read(origin_ptr.as_ptr());
 
-                assert_eq!(captured_original, replaced);
-                assert_eq!(after_replace, y)
-            }
+            assert_eq!(captured_original, replaced);
+            assert_eq!(after_replace, y)
         }
     }
 
     #[kani::proof_for_contract(NonNull::drop_in_place)]
     pub fn non_null_check_drop_in_place() {
-        let mut x: i32 = kani::any();
-        if let nonnull_ptr = NonNull::new(&mut x as *mut i32) {
-            let ptr = nonnull_ptr.unwrap();
-            unsafe {
-                ptr.drop_in_place();
+        struct Droppable {
+            value: i32,
+        }
+        
+        impl Drop for Droppable {
+            fn drop(&mut self) {
             }
+        }
+
+        let mut droppable = Droppable { value: kani::any() };
+        let ptr = NonNull::new(&mut droppable as *mut Droppable).unwrap();
+        unsafe {
+            ptr.drop_in_place();
         }
     }
 
