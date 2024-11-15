@@ -1885,26 +1885,13 @@ mod verify {
     // pub const unsafe fn read_unaligned(self) -> T where T: Sized
     #[kani::proof_for_contract(NonNull::read_unaligned)]
     pub fn non_null_check_read_unaligned() {
-        const SIZE: usize = 1000;
-        // cast a random offset of an u8 array to usize
-        let offset: usize = kani::any();
-        kani::assume(offset < SIZE - core::mem::size_of::<usize>());
-        let arr: [u8; SIZE] = kani::any();  
-        let unaligned_ptr = &arr[offset] as *const u8 as *const usize;
-        // create a NonNull pointer from the unaligned pointer
-        let nonnull_ptr = NonNull::new(unaligned_ptr as *mut usize).unwrap();
+        // unaligned pointer
+        let mut generator = PointerGenerator::<10000>::new();
+        let unaligned_ptr: *mut u8 = generator.any_in_bounds().ptr;
+        let unaligned_nonnull_ptr = NonNull::new(unaligned_ptr).unwrap();
         unsafe { 
-            let result = nonnull_ptr.read_unaligned();
-            
-            let raw_result_ptr = &result as *const usize as *const u8;
-            let raw_original_ptr = &arr[offset] as *const u8;
-            for i in 0..core::mem::size_of::<usize>() {
-                unsafe {
-                    // Dereference and compare each byte
-                    assert_eq!(*raw_original_ptr.add(i), *raw_result_ptr.add(i));
-                }
-                
-            }
+            let result = unaligned_nonnull_ptr.read_unaligned();
+            kani::assert( *unaligned_nonnull_ptr.as_ptr() == result, "read returns the correct value");     
         }
 
         // read an unaligned value from a packed struct
