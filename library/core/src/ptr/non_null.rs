@@ -1932,8 +1932,8 @@ mod verify {
         let mut x: i32 = kani::any();
         let mut y: i32 = kani::any();
 
-        if let Some(origin_ptr) = NonNull::new(&mut x as *mut i32) {
-            // let origin_ptr = NonNull::new(x as *mut i32).unwrap();
+        if let nonnull_origin_ptr = NonNull::new(&mut x as *mut i32) {
+            let origin_ptr = nonnull_origin_ptr.unwrap();
             unsafe {
                 let captured_original = ptr::read(origin_ptr.as_ptr());
                 let replaced = origin_ptr.replace(y);
@@ -1948,7 +1948,8 @@ mod verify {
     #[kani::proof_for_contract(NonNull::drop_in_place)]
     pub fn non_null_check_drop_in_place() {
         let mut x: i32 = kani::any();
-        if let Some(ptr) = NonNull::new(&mut x as *mut i32) {
+        if let nonnull_ptr = NonNull::new(&mut x as *mut i32) {
+            let ptr = nonnull_ptr.unwrap();
             unsafe {
                 ptr.drop_in_place();
             }
