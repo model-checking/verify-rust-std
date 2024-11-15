@@ -689,8 +689,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
      #[requires(
-        count <= (isize::MAX as usize) && // Prevent count from exceeding maximum
-        self.as_ptr().addr().checked_sub(count).is_some() && // Ensure subtraction does not overflow
+        count <= (isize::MAX as usize) && 
+        self.as_ptr().addr().checked_sub(count).is_some() && 
         kani::mem::same_allocation(self.as_ptr() as *const (), (self.as_ptr().addr() - count) as *const ())
      )]
     #[ensures(
