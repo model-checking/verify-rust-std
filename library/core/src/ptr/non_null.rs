@@ -1889,7 +1889,7 @@ mod verify {
         const SIZE: usize = mem::size_of::<i32>() * 100;
         let mut generator = PointerGenerator::<SIZE>::new();
         let ptr = generator.any_in_bounds().ptr as *mut i32;
-        let ptr_nonnull = unsafe { NonNull::new(ptr).unwrap() };
+        let ptr_nonnull = NonNull::new(ptr).unwrap();
         let new_offset: usize = kani::any_where(|&x| x < SIZE);
         let f = |addr: NonZeroUsize| -> NonZeroUsize {
         unsafe {NonZeroUsize::new_unchecked(addr.get().wrapping_add(new_offset)) 
