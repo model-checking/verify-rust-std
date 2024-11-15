@@ -9,7 +9,6 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-use crate::ub_checks;
 
 #[cfg(kani)]
 use crate::kani;
@@ -139,6 +138,8 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]  // Ensure the pointer is valid to create a reference.
+    #[ensures(|result: &&MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))]  // Ensure returned reference points to the correct memory location.
     pub const unsafe fn as_uninit_ref<'a>(self) -> &'a MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -163,6 +164,8 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]  // Ensure pointer is valid to create a mutable reference.
+    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))]  // Ensure the returned reference points to the correct memory.
     pub const unsafe fn as_uninit_mut<'a>(self) -> &'a mut MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -386,6 +389,8 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_as_ref", since = "1.73.0")]
     #[must_use]
     #[inline(always)]
+    #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure input is convertible to a reference
+    #[ensures(|result: &&T| core::ptr::eq(*result, self.as_ptr()))]  // Ensure returned reference matches pointer
     pub const unsafe fn as_ref<'a>(&self) -> &'a T {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -424,6 +429,9 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "const_ptr_as_ref", since = "1.83.0")]
     #[must_use]
     #[inline(always)]
+    #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))]
+    // verify result (a mutable reference) is still associated with the same memory address as the raw pointer stored in self
+    #[ensures(|result: &&mut T| core::ptr::eq(*result, self.as_ptr()))]
     pub const unsafe fn as_mut<'a>(&mut self) -> &'a mut T {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a mutable reference.
@@ -1650,6 +1658,11 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
+    #[requires(self.as_ptr().cast::<T>().align_offset(core::mem::align_of::<T>()) == 0)] // Ensure the pointer is properly aligned
+    #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)] // Ensure the slice size does not exceed isize::MAX
+    #[requires(kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_add(self.len() * core::mem::size_of::<T>()) as *const()))] // Ensure the slice is contained within a single allocation
+    #[ensures(|result: &&[MaybeUninit<T>]| result.len() == self.len())] // Length check
+    #[ensures(|result: &&[MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))] // Ensure the memory addresses match.
     pub const unsafe fn as_uninit_slice<'a>(self) -> &'a [MaybeUninit<T>] {
         // SAFETY: the caller must uphold the safety contract for `as_uninit_slice`.
         unsafe { slice::from_raw_parts(self.cast().as_ptr(), self.len()) }
@@ -1715,6 +1728,11 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
+    #[requires(self.as_ptr().cast::<T>().align_offset(core::mem::align_of::<T>()) == 0)] // Ensure the pointer is properly aligned
+    #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)] // Ensure the slice size does not exceed isize::MAX
+    #[requires(kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_add(self.len() * core::mem::size_of::<T>()) as *const()))] // Ensure the slice is contained within a single allocation
+    #[ensures(|result: &&mut [MaybeUninit<T>]| result.len() == self.len())] // Length check
+    #[ensures(|result: &&mut [MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))]  // Address check
     pub const unsafe fn as_uninit_slice_mut<'a>(self) -> &'a mut [MaybeUninit<T>] {
         // SAFETY: the caller must uphold the safety contract for `as_uninit_slice_mut`.
         unsafe { slice::from_raw_parts_mut(self.cast().as_ptr(), self.len()) }
@@ -1743,6 +1761,7 @@ impl<T> NonNull<[T]> {
     /// ```
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[inline]
+    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self can be dereferenced
     pub unsafe fn get_unchecked_mut<I>(self, index: I) -> NonNull<I::Output>
     where
         I: SliceIndex<[T]>,
@@ -1879,7 +1898,7 @@ mod verify {
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
-
+    
     // pub const unsafe fn read(self) -> T where T: Sized
     #[kani::proof_for_contract(NonNull::read)]
     pub fn non_null_check_read() {
@@ -2003,6 +2022,108 @@ mod verify {
 
         // Trigger panic
         let offset = nonnull_xptr.align_offset(invalid_align);
+    }
+
+    #[kani::proof_for_contract(NonNull::as_mut)]
+    pub fn non_null_check_as_mut() {
+        let mut x: i32 = kani::any();
+        if let Some(mut ptr) = NonNull::new(&mut x as *mut i32) {
+            unsafe {
+                let result = ptr.as_mut();
+            }
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::as_ref)]
+    pub fn non_null_check_as_ref() {
+        let mut x: i32 = kani::any();
+        if let Some(ptr) = NonNull::new(&mut x as *mut i32) {
+            unsafe {
+                let _ = ptr.as_ref();
+            }
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::as_uninit_mut)]
+    pub fn non_null_check_as_uninit_mut() {
+        use core::mem::MaybeUninit;
+
+        // Create an uninitialized MaybeUninit value
+        let mut uninit: MaybeUninit<i32> = MaybeUninit::uninit();
+        let mut ptr = NonNull::new(uninit.as_mut_ptr()).unwrap();
+
+        unsafe {
+            let _ = ptr.as_uninit_mut();
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::as_uninit_ref)]
+    pub fn non_null_check_as_uninit_ref() {
+        use core::mem::MaybeUninit;
+
+        // Create an uninitialized MaybeUninit value
+        let mut uninit: MaybeUninit<i32> = MaybeUninit::uninit();
+        let ptr = NonNull::new(uninit.as_mut_ptr()).unwrap();
+
+        unsafe {
+            let uninit_ref = ptr.as_uninit_ref();
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::as_uninit_slice)]
+    pub fn non_null_check_as_uninit_slice() {
+        use core::mem::MaybeUninit;
+
+        const SIZE: usize = 100000;
+        let arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let slice: &[MaybeUninit<i32>] = kani::slice::any_slice_of_array(&arr);
+        let ptr = NonNull::slice_from_raw_parts(
+            NonNull::new(slice.as_ptr() as *mut MaybeUninit<i32>).unwrap(),
+            slice.len(),
+        );
+
+        unsafe {
+            let _ = ptr.as_uninit_slice();
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::as_uninit_slice_mut)]
+    pub fn non_null_check_as_uninit_slice_mut() {
+        use core::mem::MaybeUninit;
+
+        const SIZE: usize = 100000;
+        let mut arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let slice: &[MaybeUninit<i32>] = kani::slice::any_slice_of_array(&mut arr);
+        let ptr = NonNull::slice_from_raw_parts(
+            NonNull::new(slice.as_ptr() as *mut MaybeUninit<i32>).unwrap(),
+            SIZE,
+        );
+
+        unsafe {
+            let _ = ptr.as_uninit_slice_mut();
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::get_unchecked_mut)]
+    pub fn non_null_check_get_unchecked_mut() {
+        const ARR_SIZE: usize = 100000;
+        let mut arr: [i32; ARR_SIZE] = kani::any();
+        let raw_ptr = arr.as_mut_ptr();
+        let ptr = NonNull::slice_from_raw_parts(
+            NonNull::new(raw_ptr).unwrap(),
+            ARR_SIZE,
+        );
+        let lower = kani::any_where(|x| *x < ARR_SIZE);
+        let upper = kani::any_where(|x| *x < ARR_SIZE && *x >= lower);
+        unsafe {
+            // NOTE: The `index` parameter cannot be used in the function contracts without being moved.
+            // Since the `SliceIndex` trait does not guarantee that `index` implements `Clone` or `Copy`,
+            // it cannot be reused after being consumed in the precondition. To comply with Rust's ownership
+            // rules and ensure `index` is only used once, the in-bounds check is moved to the proof harness
+            // as a workaround.
+            kani::assume(ptr.as_ref().get(lower..upper).is_some());
+            let _ = ptr.get_unchecked_mut(lower..upper);
+        }
     }
 
     #[kani::proof_for_contract(NonNull::replace)]
