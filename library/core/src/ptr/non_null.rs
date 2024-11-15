@@ -1025,10 +1025,6 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_ptr_write", issue = "86302")]
-    // #[requires(core::mem::size_of::<T>() > 0)]
-    // can_write
-    //#[requires(self.as_ptr() as usize % core::mem::align_of::<T>() == 0)] // Ensure the pointer is properly aligned
-    //#[requires(self.as_ptr() as usize % core::mem::size_of::<T>() == 0)]
     pub const unsafe fn write(self, val: T)
     where
         T: Sized,
@@ -1072,7 +1068,6 @@ impl<T: ?Sized> NonNull<T> {
     #[kani::modifies(self.as_ptr())]
     #[requires(ub_checks::can_write(self.as_ptr()))]
     #[requires(self.as_ptr() as usize % core::mem::size_of::<T>() == 0)]
-    
     pub unsafe fn write_volatile(self, val: T)
     where
         T: Sized,
@@ -1794,41 +1789,6 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
-
-    // // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
-    // #[kani::proof_for_contract(NonNull::new_unchecked)]
-    // pub fn non_null_check_new_unchecked() {
-    //     let raw_ptr = kani::any::<usize>() as *mut i32;
-    //     unsafe {
-    //         let _ = NonNull::new_unchecked(raw_ptr);
-    //     }
-    // }
-
-    // // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
-    // #[kani::proof_for_contract(NonNull::new)]
-    // pub fn non_null_check_new() {
-    //     let mut x: i32 = kani::any();
-    //     let xptr = &mut x;
-    //     let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
-    //     let _ = NonNull::new(maybe_null_ptr);
-    // }
-
-    // #[kani::proof_for_contract(NonNull::write)]
-    // pub fn non_null_check_write() {
-    //     let mut data: i32 = kani::any();
-    //     let ptr = unsafe { NonNull::new(&mut data as *mut i32).unwrap() };
-    //     let new_value: i32 = kani::any();
-
-    //     unsafe {
-    //         // Perform the write operation
-    //         ptr.write(new_value);
-    //         // let dummy_closure = || {
-    //         //     let _dummy_val = new_value;
-    //         // };
-    //         //kani::assume(*ptr.as_ptr() == new_value);
-    //         //assert_eq!(ptr::read(ptr.as_ptr()), new_value);
-    //     }
-    // }
 
     #[kani::proof_for_contract(NonNull::write_volatile)]
     pub fn non_null_check_write_volatile() {
