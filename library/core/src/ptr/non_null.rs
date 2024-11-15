@@ -1939,10 +1939,11 @@ mod verify {
         use core::mem::MaybeUninit;
 
         const SIZE: usize = 100000;
-        let mut arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let slice: &[MaybeUninit<i32>] = kani::slice::any_slice_of_array(&arr);
         let ptr = NonNull::slice_from_raw_parts(
-            NonNull::new(arr.as_mut_ptr()).unwrap(),
-            SIZE,
+            NonNull::new(slice.as_ptr() as *mut MaybeUninit<i32>).unwrap(),
+            slice.len(),
         );
 
         unsafe {
@@ -1956,8 +1957,9 @@ mod verify {
 
         const SIZE: usize = 100000;
         let mut arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let slice: &[MaybeUninit<i32>] = kani::slice::any_slice_of_array(&mut arr);
         let ptr = NonNull::slice_from_raw_parts(
-            NonNull::new(arr.as_mut_ptr()).unwrap(),
+            NonNull::new(slice.as_ptr() as *mut MaybeUninit<i32>).unwrap(),
             SIZE,
         );
 
