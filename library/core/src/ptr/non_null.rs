@@ -9,11 +9,12 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-use crate::ub_checks;
 
 
 #[cfg(kani)]
 use crate::kani;
+#[cfg(kani)]
+use crate::ub_checks;
 
 /// `*mut T` but non-zero and [covariant].
 ///
@@ -578,7 +579,7 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some() 
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some()
         && count * core::mem::size_of::<T>() <= isize::MAX as usize
         && (self.pointer as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some() // check wrapping add
         && kani::mem::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize)))]
@@ -920,6 +921,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(ub_checks::can_dereference(self.pointer))]
     pub const unsafe fn read(self) -> T
     where
         T: Sized,
@@ -941,6 +943,7 @@ impl<T: ?Sized> NonNull<T> {
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(ub_checks::can_dereference(self.pointer))]
     pub unsafe fn read_volatile(self) -> T
     where
         T: Sized,
@@ -961,6 +964,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(ub_checks::can_read_unaligned(self.pointer))]
     pub const unsafe fn read_unaligned(self) -> T
     where
         T: Sized,
@@ -1229,9 +1233,9 @@ impl<T: ?Sized> NonNull<T> {
         let stride = crate::mem::size_of::<T>();
         // ZSTs
         if stride == 0 {
-            if self.pointer.addr() % align == 0 { 
+            if self.pointer.addr() % align == 0 {
                 return *result == 0;
-            } else { 
+            } else {
                 return *result == usize::MAX;
             }
         }
@@ -1243,8 +1247,8 @@ impl<T: ?Sized> NonNull<T> {
         // requires computing gcd(a, stride), which is too expensive without
         // quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html).
         // This should be updated once quantifiers are available.
-        if (align % stride != 0 && *result == usize::MAX) { 
-            return true; 
+        if (align % stride != 0 && *result == usize::MAX) {
+            return true;
         }
         // If we reach this case, either:
         //  - align % stride == 0 and self.pointer.addr() % stride == 0, so it is definitely possible to align the pointer
@@ -1887,6 +1891,131 @@ mod verify {
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
+    
+    // pub const unsafe fn read(self) -> T where T: Sized
+    #[kani::proof_for_contract(NonNull::read)]
+    pub fn non_null_check_read() {
+        let ptr_u8: *mut u8 = &mut kani::any();
+        let nonnull_ptr_u8 = NonNull::new(ptr_u8).unwrap();
+        unsafe {
+            let result = nonnull_ptr_u8.read();
+            kani::assert(*ptr_u8 == result, "read returns the correct value");
+        }
+
+        // array example
+        const ARR_LEN: usize = 10000;
+        let mut generator = PointerGenerator::<ARR_LEN>::new();
+        let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
+        let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
+        unsafe {
+            let result = nonnull_ptr.read();
+            kani::assert( *nonnull_ptr.as_ptr() == result, "read returns the correct value");
+        }
+    }
+
+    // pub unsafe fn read_volatile(self) -> T where T: Sized
+    #[kani::proof_for_contract(NonNull::read_volatile)]
+    pub fn non_null_check_read_volatile() {
+        let ptr_u8: *mut u8 = &mut kani::any();
+        let nonnull_ptr_u8 = NonNull::new(ptr_u8).unwrap();
+        unsafe {
+            let result = nonnull_ptr_u8.read_volatile();
+            kani::assert(*ptr_u8 == result, "read returns the correct value");
+        }
+
+        // array example
+        const ARR_LEN: usize = 10000;
+        let mut generator = PointerGenerator::<ARR_LEN>::new();
+        let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
+        let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
+        unsafe {
+            let result = nonnull_ptr.read_volatile();
+            kani::assert( *nonnull_ptr.as_ptr() == result, "read returns the correct value");
+        }
+    }
+
+    #[repr(packed, C)]
+    struct Packed {
+        _padding: u8,
+        unaligned: u32,
+    }
+
+    // pub const unsafe fn read_unaligned(self) -> T where T: Sized
+    #[kani::proof_for_contract(NonNull::read_unaligned)]
+    pub fn non_null_check_read_unaligned() {
+        // unaligned pointer
+        let mut generator = PointerGenerator::<10000>::new();
+        let unaligned_ptr: *mut u8 = generator.any_in_bounds().ptr;
+        let unaligned_nonnull_ptr = NonNull::new(unaligned_ptr).unwrap();
+        unsafe {
+            let result = unaligned_nonnull_ptr.read_unaligned();
+            kani::assert( *unaligned_nonnull_ptr.as_ptr() == result, "read returns the correct value");
+        }
+
+        // read an unaligned value from a packed struct
+        let unaligned_value: u32 = kani::any();
+        let packed = Packed {
+            _padding: kani::any::<u8>(),
+            unaligned: unaligned_value,
+        };
+
+        let unaligned_ptr = ptr::addr_of!(packed.unaligned);
+        let nonnull_packed_ptr = NonNull::new(unaligned_ptr as *mut u32).unwrap();
+        let v = unsafe { nonnull_packed_ptr.read_unaligned() };
+        assert_eq!(v, unaligned_value);
+    }
+
+    // pub const unsafe fn add(self, count: usize) -> Self
+    #[kani::proof_for_contract(NonNull::add)]
+    pub fn non_null_check_add() {
+        const SIZE: usize = 100000;
+        let mut generator = PointerGenerator::<100000>::new();
+        let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
+        let ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
+        // Create a non-deterministic count value
+        let count: usize = kani::any();
+
+        unsafe {
+            let result = ptr.add(count);
+        }
+    }
+
+    // pub fn addr(self) -> NonZero<usize>
+    #[kani::proof_for_contract(NonNull::addr)]
+    pub fn non_null_check_addr() {
+        // Create NonNull pointer & get pointer address
+        let x = kani::any::<usize>() as *mut i32;
+        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
+        let address = nonnull_xptr.addr();
+    }
+
+    // pub fn align_offset(self, align: usize) -> usize
+    #[kani::proof_for_contract(NonNull::align_offset)]
+    pub fn non_null_check_align_offset() {
+        // Create NonNull pointer
+        let x = kani::any::<usize>() as *mut i32;
+        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
+
+        // Call align_offset with valid align value
+        let align: usize = kani::any();
+        kani::assume(align.is_power_of_two());
+        nonnull_xptr.align_offset(align);
+    }
+
+    // pub fn align_offset(self, align: usize) -> usize
+    #[kani::should_panic]
+    #[kani::proof_for_contract(NonNull::align_offset)]
+    pub fn non_null_check_align_offset_negative() {
+        // Create NonNull pointer
+        let x = kani::any::<usize>() as *mut i8;
+        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
+
+        // Generate align value that is not necessarily a power of two
+        let invalid_align: usize = kani::any();
+
+        // Trigger panic
+        let offset = nonnull_xptr.align_offset(invalid_align);
+    }
 
     #[kani::proof_for_contract(NonNull::as_mut)]
     pub fn non_null_check_as_mut() {
@@ -1988,57 +2117,5 @@ mod verify {
             kani::assume(ptr.as_ref().get(lower..upper).is_some());
             let _ = ptr.get_unchecked_mut(lower..upper);
         }
-    }
-    
-    // pub const unsafe fn add(self, count: usize) -> Self
-    #[kani::proof_for_contract(NonNull::add)]
-    pub fn non_null_check_add() {
-        const SIZE: usize = 100000;
-        let mut generator = PointerGenerator::<100000>::new();
-        let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
-        let ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
-        // Create a non-deterministic count value
-        let count: usize = kani::any();  
-        
-        unsafe {
-            let result = ptr.add(count);
-        }
-    }
-
-    // pub fn addr(self) -> NonZero<usize>
-    #[kani::proof_for_contract(NonNull::addr)]
-    pub fn non_null_check_addr() {  
-        // Create NonNull pointer & get pointer address
-        let x = kani::any::<usize>() as *mut i32;
-        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
-        let address = nonnull_xptr.addr();
-    }
-
-    // pub fn align_offset(self, align: usize) -> usize
-    #[kani::proof_for_contract(NonNull::align_offset)]
-    pub fn non_null_check_align_offset() {
-        // Create NonNull pointer
-        let x = kani::any::<usize>() as *mut i32;
-        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
-    
-        // Call align_offset with valid align value
-        let align: usize = kani::any();
-        kani::assume(align.is_power_of_two());
-        nonnull_xptr.align_offset(align);
-    }
-
-    // pub fn align_offset(self, align: usize) -> usize
-    #[kani::should_panic]
-    #[kani::proof_for_contract(NonNull::align_offset)]
-    pub fn non_null_check_align_offset_negative() {
-        // Create NonNull pointer
-        let x = kani::any::<usize>() as *mut i8;
-        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
-
-        // Generate align value that is not necessarily a power of two
-        let invalid_align: usize = kani::any();
-    
-        // Trigger panic
-        let offset = nonnull_xptr.align_offset(invalid_align);
     }
 }
