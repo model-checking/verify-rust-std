@@ -433,9 +433,7 @@ impl<T: ?Sized> NonNull<T> {
                   without modifying the original"]
     #[inline]
     // Address preservation
-    #[ensures(|result: &NonNull<U>| result.as_ptr() as *const () as usize == self.as_ptr() as *const () as usize )]
-    // Ensures pointer is properly aligned for new type 'U'
-    #[ensures(|result: &NonNull<U>| (self.as_ptr() as *const () as usize) % core::mem::align_of::<U>() == 0)]
+    #[ensures(|result: &NonNull<U>| result.as_ptr().addr() == self.as_ptr().addr())]
     pub const fn cast<U>(self) -> NonNull<U> {
         // SAFETY: `self` is a `NonNull` pointer which is necessarily non-null
         unsafe { NonNull { pointer: self.as_ptr() as *mut U } }
@@ -1515,7 +1513,7 @@ impl<T> NonNull<[T]> {
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_const_unstable(feature = "slice_ptr_get", issue = "74265")]
     // Address preservation
-    #[ensures(|result: &NonNull<T>| result.as_ptr() as *const () as usize == self.pointer as *const () as usize)]
+    #[ensures(|result: &NonNull<T>| result.as_ptr().addr() == self.as_ptr().addr())]
     pub const fn as_non_null_ptr(self) -> NonNull<T> {
         self.cast()
     }
