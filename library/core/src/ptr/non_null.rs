@@ -1818,7 +1818,7 @@ mod verify {
         let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
         if let Some(ptr) = NonNull::new(non_null_ptr){
         // Call as_ptr
-            let raw_ptr = ptr.as_ptr();}
+        let raw_ptr = ptr.as_ptr();}
     
     }
     #[kani::proof_for_contract(NonNull::<[T]>::as_mut_ptr)]
@@ -1829,9 +1829,9 @@ mod verify {
         let mut values: [i32; ARR_LEN] = [0; ARR_LEN];
         let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
         if let Some(ptr) = NonNull::new(raw_ptr){
-            let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
-            // Call as_mut_ptr
-            let raw_ptr = slice_ptr.as_mut_ptr();
+        let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
+        // Call as_mut_ptr
+        let raw_ptr = slice_ptr.as_mut_ptr();
     }}
     #[kani::proof_for_contract(NonNull::<T>::cast)]
     pub fn non_null_check_cast() {
@@ -1839,7 +1839,7 @@ mod verify {
         let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
         if let Some(ptr) = NonNull::new(non_null_ptr){
         // Perform the cast
-            let casted_ptr: NonNull<u8> = ptr.cast();
+        let casted_ptr: NonNull<u8> = ptr.cast();
     }}
     #[kani::proof_for_contract(NonNull::<[T]>::as_non_null_ptr)]
     pub fn non_null_check_as_non_null_ptr() {
@@ -1848,8 +1848,8 @@ mod verify {
         let mut values: [i32; ARR_LEN] = [0; ARR_LEN];
         let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
         if let Some(ptr) = NonNull::new(raw_ptr){
-            let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
-            let result = slice_ptr.as_non_null_ptr();
+        let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
+        let result = slice_ptr.as_non_null_ptr();
     }}
     
 }
