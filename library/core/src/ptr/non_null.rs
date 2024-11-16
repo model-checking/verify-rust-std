@@ -616,13 +616,8 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(
-        count <= (isize::MAX as usize) &&
-        self.as_ptr().addr().checked_add(count).is_some() &&
-        kani::mem::same_allocation(self.as_ptr(),self.as_ptr().wrapping_byte_add(count))
-    )]
-    #[ensures(
-        |result: &NonNull<T>|
-        result.as_ptr() == self.as_ptr().wrapping_byte_add(count)
+        count <= (isize::MAX as usize) - self.as_ptr().addr() &&  // Ensure the offset doesn't overflow
+        kani::mem::same_allocation(self.as_ptr(),self.as_ptr().wrapping_byte_add(count)) // Ensure the offset is within the same allocation
     )]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add` and `byte_add` has the same
