@@ -1831,13 +1831,13 @@ mod verify {
 
     #[kani::proof]
     pub fn non_null_check_is_empty() {
-        const SIZE: usize = 0;
-        // Create a non-deterministic array of size SIZE
-        let arr: [i8; SIZE] = kani::any();  
-        // Get a raw pointer to the array
-        let raw_ptr: *const i8 = arr.as_ptr();  
-        // Create a NonNull slice from the raw pointer
-        let non_null_slice: NonNull<[i8]> = unsafe { NonNull::slice_from_raw_parts(NonNull::new(raw_ptr as *mut i8).unwrap(), SIZE) };  
+        // Create a non-deterministic NonNull pointer using kani::any()
+        let non_null_ptr: NonNull<i8> = kani::any();
+        // Create a non-deterministic size using kani::any(), constrained to zero
+        let size: usize = 0;
+
+        // Create a NonNull slice from the non-null pointer and size
+        let non_null_slice: NonNull<[i8]> = unsafe { NonNull::slice_from_raw_parts(non_null_ptr, size) };
 
         // Perform the is_empty check
         let is_empty = non_null_slice.is_empty();
@@ -1846,32 +1846,25 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::is_aligned)]
     pub fn non_null_slice_is_aligned_check() {
-        // Create a non-deterministic integer
-        let mut data: i32 = kani::any();  
-        // Get a raw pointer to the integer
-        let raw_ptr: *mut i32 = &mut data;
-        // NonNull pointer to the integer
-        let ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
+        // Create a non-deterministic NonNull pointer using kani::any()
+        let non_null_ptr: NonNull<i32> = kani::any();
 
         // Perform the alignment check
-        let result = ptr.is_aligned();
+        let result = non_null_ptr.is_aligned();
+
     }
 
     #[kani::proof_for_contract(NonNull::is_aligned_to)]
     pub fn non_null_check_is_aligned_to() {
-        const SIZE: usize = 10;
-        const ALIGN: usize = 4;
-        // Create a non-deterministic array of size SIZE
-        let arr: [i32; SIZE] = kani::any();  
-        // Get a raw pointer to the array
-        let raw_ptr: *mut i32 = arr.as_ptr() as *mut i32;
-        // Randomize pointer offset within array bounds
-        let offset = kani::any_where(|x| *x <= SIZE);
-        // NonNull pointer to the random offset
-        let ptr = unsafe { NonNull::new(raw_ptr.add(offset)).unwrap() };
+        // Create a non-deterministic NonNull pointer using kani::any()
+        let non_null_ptr: NonNull<i32> = kani::any();
 
-        // Perform the alignment to check if it matches the given alignment
-        let result = ptr.is_aligned_to(ALIGN);
-        
+        // Create a non-deterministic alignment using kani::any()
+        let align: usize = kani::any();
+        kani::assume(align > 0); // Ensure alignment is greater than zero
+
+        // Perform the alignment check
+        let result = non_null_ptr.is_aligned_to(align);
+            
     }
 }
