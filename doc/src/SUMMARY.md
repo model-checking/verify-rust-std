@@ -25,5 +25,5 @@
   - [10: Memory safety of String](./challenges/0010-string.md)
   - [11: Safety of Methods for Numeric Primitive Types](./challenges/0011-floats-ints.md)
   - [12: Safety of `NonZero`](./challenges/0012-nonzero.md)
-
+  - [13: Safety of `CStr`](./challenges/0013-cstr.md)
 

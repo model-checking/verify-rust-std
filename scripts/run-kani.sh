@@ -195,7 +195,14 @@ main() {
 
     if [[ "$run_command" == "verify-std" ]]; then
         echo "Running Kani verify-std command..."
-        "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates --output-format=terse $command_args
+        "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" \
+            -Z function-contracts \
+            -Z mem-predicates \
+            -Z loop-contracts \
+            --output-format=terse \
+            $command_args \
+            --enable-unstable \
+            --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         "$kani_path" list -Z list -Z function-contracts -Z mem-predicates ./library --std > $path/kani_list.txt
