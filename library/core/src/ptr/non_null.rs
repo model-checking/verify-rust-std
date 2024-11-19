@@ -1889,15 +1889,11 @@ mod verify {
     pub fn non_null_check_with_addr() {
         const SIZE: usize = 100;
         let arr: [i32; SIZE] = kani::any();
-     // Create a NonNull pointer to the beginning of the array
         let ptr = NonNull::new(arr.as_ptr() as *mut i32).unwrap();
-        // Generate a new offset within the array bounds
         let new_offset: usize = kani::any_where(|&x| x <= SIZE);
-        // Calculate the new address within the array bounds
         let new_addr = unsafe {
         NonZeroUsize::new_unchecked(ptr_nonnull.as_ptr() as usize + new_offset)
          };  
-        // Use with_addr to create a new NonNull pointer
         let result = ptr.with_addr(new_addr);
     }
 }
