@@ -309,7 +309,6 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[stable(feature = "strict_provenance", since = "CURRENT_RUSTC_VERSION")]
-   // #[requires(addr.get() != 0)]
     #[ensures(|result: &Self| 
         !result.as_ptr().is_null() &&
         result.addr() == addr )]
