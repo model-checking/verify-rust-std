@@ -1152,7 +1152,7 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::replace`]: crate::ptr::replace()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::modifies(self.as_ptr())]
+    #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self is aligned, initialized, and valid for read
     #[requires(ub_checks::can_write(self.as_ptr()))] // Ensure self is valid for write
     pub unsafe fn replace(self, src: T) -> T
@@ -1173,7 +1173,7 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_swap", issue = "83163")]
-    #[kani::modifies(self.as_ptr(), with.as_ptr())]
+    #[cfg_attr(kani, kani::modifies(self.as_ptr(), with.as_ptr()))]
     #[requires(ub_checks::can_dereference(self.as_ptr()) && ub_checks::can_write(self.as_ptr()))]
     #[requires(ub_checks::can_dereference(with.as_ptr()) && ub_checks::can_write(with.as_ptr()))]
     pub const unsafe fn swap(self, with: NonNull<T>)
