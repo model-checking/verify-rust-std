@@ -9,7 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-use crate::ub_checks;
+
 
 #[cfg(kani)]
 use crate::kani;
@@ -1895,7 +1895,6 @@ mod verify {
     use core::ptr::NonNull;
     use core::num::NonZeroUsize;
     use crate::mem;
-    use kani::PointerGenerator;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(NonNull::new_unchecked)]
@@ -2141,7 +2140,6 @@ mod verify {
             let _ = ptr.get_unchecked_mut(lower..upper);
         }
     }
-}
   
     #[kani::proof_for_contract(NonNull::byte_sub)]
     pub fn non_null_check_byte_sub() {
@@ -2161,8 +2159,9 @@ mod verify {
         let ptr_nonnull =  NonNull::new(start_ptr).unwrap();
         let count: isize = kani::any();
         unsafe { let result = ptr_nonnull.offset(count);
-       }
-}
+        }
+    }
+    
     #[kani::proof_for_contract(NonNull::map_addr)]
     pub fn non_null_check_map_addr() {
         const SIZE: usize = 100;
