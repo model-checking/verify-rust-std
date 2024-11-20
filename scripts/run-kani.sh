@@ -92,15 +92,26 @@ read_commit_from_toml() {
     echo "$commit"
 }
 
-clone_kani_repo() {
+setup_kani_repo() {
     local repo_url="$1"
     local directory="$2"
     local branch="$3"
     local commit="$4"
-    git clone "$repo_url" "$directory"
-    pushd "$directory"
-    git checkout "$commit"
-    popd
+
+    if [[ ! -d "${directory}" ]]; then
+        mkdir -p "${directory}"
+        pushd "${directory}" > /dev/null
+
+        git init . >& /dev/null
+        git remote add origin "${repo_url}" >& /dev/null
+    else
+        pushd "${directory}" > /dev/null
+    fi
+
+    git fetch --depth 1 origin "$commit" --quiet
+    git checkout "$commit" --quiet
+    git submodule update --init --recursive --depth 1 --quiet
+    popd > /dev/null
 }
 
 get_current_commit() {
@@ -115,17 +126,22 @@ get_current_commit() {
 build_kani() {
     local directory="$1"
     pushd "$directory"
-    os_name=$(uname -s)
-
-    if [[ "$os_name" == "Linux" ]]; then
-        ./scripts/setup/ubuntu/install_deps.sh
-    elif [[ "$os_name" == "Darwin" ]]; then
-        ./scripts/setup/macos/install_deps.sh
+    source "kani-dependencies"
+    # Check if installed versions are correct.
+    if ./scripts/check-cbmc-version.py --major ${CBMC_MAJOR} --minor ${CBMC_MINOR} && ./scripts/check_kissat_version.sh; then
+        echo "Dependencies are up-to-date"
     else
-        echo "Unknown operating system"
+        os_name=$(uname -s)
+
+        if [[ "$os_name" == "Linux" ]]; then
+            ./scripts/setup/ubuntu/install_deps.sh
+        elif [[ "$os_name" == "Darwin" ]]; then
+            ./scripts/setup/macos/install_deps.sh
+        else
+            echo "Unknown operating system"
+        fi
     fi
 
-    git submodule update --init --recursive
     cargo build-dev --release
     popd
 }
@@ -147,11 +163,15 @@ check_binary_exists() {
     local expected_commit="$2"
     local kani_path=$(get_kani_path "$build_dir")
 
-    if [[ -f "$kani_path" ]]; then
+    if [[ -d "${build_dir}" ]]; then
         local current_commit=$(get_current_commit "$build_dir")
         if [[ "$current_commit" = "$expected_commit" ]]; then
             return 0
+        else
+            echo "Kani repository is out of date. Rebuilding..."
         fi
+    else
+        echo "Kani repository not found. Creating..."
     fi
     return 1
 }
@@ -159,7 +179,6 @@ check_binary_exists() {
 
 main() {
     local build_dir="$WORK_DIR/kani_build"
-    local temp_dir_target=$(mktemp -d)
 
     echo "Using TOML file: $TOML_FILE"
     echo "Using repository URL: $REPO_URL"
@@ -173,12 +192,8 @@ main() {
     else
         echo "Building Kani from commit: $commit"
 
-        # Remove old build directory if it exists
-        rm -rf "$build_dir"
-        mkdir -p "$build_dir"
-
         # Clone repository and checkout specific commit
-        clone_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit"
+        setup_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit"
 
         # Build project
         build_kani "$build_dir"
@@ -195,7 +210,7 @@ main() {
 
     if [[ "$run_command" == "verify-std" ]]; then
         echo "Running Kani verify-std command..."
-        "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" \
+        "$kani_path" verify-std -Z unstable-options ./library \
             -Z function-contracts \
             -Z mem-predicates \
             -Z loop-contracts \
@@ -211,9 +226,3 @@ main() {
 
 main
 
-cleanup()
-{
-  rm -rf "$temp_dir_target"
-}
-
-trap cleanup EXIT
