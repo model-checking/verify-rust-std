@@ -9,7 +9,7 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-use crate::{ub_checks};
+use crate::ub_checks;
 
 
 #[cfg(kani)]
@@ -1067,7 +1067,6 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[kani::modifies(self.as_ptr())]
     #[requires(ub_checks::can_write(self.as_ptr()))]
-    #[requires(self.as_ptr() as usize % core::mem::size_of::<T>() == 0)]
     pub unsafe fn write_volatile(self, val: T)
     where
         T: Sized,
@@ -1790,17 +1789,44 @@ mod verify {
     use super::*;
     use crate::ptr::null_mut;
 
+    // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
+    #[kani::proof_for_contract(NonNull::new_unchecked)]
+    pub fn non_null_check_new_unchecked() {
+        let raw_ptr = kani::any::<usize>() as *mut i32;
+        unsafe {
+            let _ = NonNull::new_unchecked(raw_ptr);
+        }
+    }
+
+    // pub const unsafe fn new(ptr: *mut T) -> Option<Self>
+    #[kani::proof_for_contract(NonNull::new)]
+    pub fn non_null_check_new() {
+        let mut x: i32 = kani::any();
+        let xptr = &mut x;
+        let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
+        let _ = NonNull::new(maybe_null_ptr);
+    }
+
     #[kani::proof_for_contract(NonNull::write_volatile)]
     pub fn non_null_check_write_volatile() {
-        let mut data: i32 = kani::any();
-        let ptr = unsafe { NonNull::new(&mut data as *mut i32).unwrap() };
+        // Create a pointer generator for a single integer
+        let mut generator = kani::PointerGenerator::<4>::new();
+
+        // Get a raw pointer from the generator
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
+
+        // Create a non-null pointer from the raw pointer
+        let ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
+
+        // Create a non-deterministic value to write
         let new_value: i32 = kani::any();
 
         unsafe {
             // Perform the volatile write operation
             ptr.write_volatile(new_value);
 
-            assert_eq!(ptr::read(ptr.as_ptr()), new_value);
+            // Read back the value and assert it's correct
+            assert_eq!(ptr.as_ptr().read_volatile(), new_value);
         }
     }
 
