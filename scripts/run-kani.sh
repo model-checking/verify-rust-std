@@ -3,10 +3,11 @@
 set -e
 
 usage() {
-    echo "Usage: $0 [options] [-p <path>] [--kani-args <command arguments>]"
+    echo "Usage: $0 [options] [-p <path>] [--run <verify-std|list>] [--kani-args <command arguments>]"
     echo "Options:"
     echo "  -h, --help         Show this help message"
     echo "  -p, --path <path>  Optional: Specify a path to a copy of the std library. For example, if you want to run the script from an outside directory."
+    echo "  --run <verify-std|list>  Optional: Specify whether to run 'verify-std' or 'list' command. Defaults to 'verify-std' if not specified."
     echo "  --kani-args  <command arguments to kani>  Optional: Arguments to pass to the command. Simply pass them in the same way you would to the Kani binary. This should be the last argument."
     exit 1
 }
@@ -14,6 +15,7 @@ usage() {
 # Initialize variables
 command_args=""
 path=""
+run_command="verify-std"
 
 # Parse command line arguments
 # TODO: Improve parsing with getopts
@@ -31,13 +33,23 @@ while [[ $# -gt 0 ]]; do
                 usage
             fi
             ;;
+        --run)
+            if [[ -n $2 && ($2 == "verify-std" || $2 == "list") ]]; then
+                run_command=$2
+                shift 2
+            else
+                echo "Error: Invalid run command. Must be 'verify-std' or 'list'."
+                usage
+            fi
+            ;;
         --kani-args)
             shift
             command_args="$@"
             break
             ;;
         *)
-            break
+            echo "Error: Unknown option $1"
+            usage
             ;;
     esac
 done
@@ -181,9 +193,20 @@ main() {
     echo "Running Kani command..."
     "$kani_path" --version
 
-    echo "Running Kani verify-std command..."
-
-    "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" -Z function-contracts -Z mem-predicates -Z loop-contracts --output-format=terse $command_args --enable-unstable --cbmc-args --object-bits 12
+    if [[ "$run_command" == "verify-std" ]]; then
+        echo "Running Kani verify-std command..."
+        "$kani_path" verify-std -Z unstable-options ./library --target-dir "$temp_dir_target" \
+            -Z function-contracts \
+            -Z mem-predicates \
+            -Z loop-contracts \
+            --output-format=terse \
+            $command_args \
+            --enable-unstable \
+            --cbmc-args --object-bits 12
+    elif [[ "$run_command" == "list" ]]; then
+        echo "Running Kani list command..."
+        "$kani_path" list -Z list -Z function-contracts -Z mem-predicates ./library --std > $path/kani_list.txt
+    fi
 }
 
 main
