@@ -1867,4 +1867,18 @@ mod verify {
         let result = non_null_ptr.is_aligned_to(align);
             
     }
+
+    #[kani::proof]
+    #[kani::should_panic] // Add this if we expect a panic when the alignment is invalid
+    pub fn non_null_check_is_aligned_to_no_power_two() {
+        // Create a non-deterministic NonNull pointer using kani::any()
+        let non_null_ptr: NonNull<i32> = kani::any();
+
+        // Create a non-deterministic alignment value using kani::any()
+        let align: usize = kani::any();
+
+        // Perform the alignment check
+        let result = non_null_ptr.is_aligned_to(align);
+
+    }
 }
