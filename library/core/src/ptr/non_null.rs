@@ -459,9 +459,7 @@ impl<T: ?Sized> NonNull<T> {
                   without modifying the original"]
     #[inline]
     // Address preservation
-    #[ensures(|result: &NonNull<U>| result.as_ptr() as *const () as usize == self.as_ptr() as *const () as usize )]
-    // Ensures pointer is properly aligned for new type 'U'
-    #[ensures(|result: &NonNull<U>| (self.as_ptr() as *const () as usize) % core::mem::align_of::<U>() == 0)]
+    #[ensures(|result: &NonNull<U>| result.as_ptr().addr() == self.as_ptr().addr())]
     pub const fn cast<U>(self) -> NonNull<U> {
         // SAFETY: `self` is a `NonNull` pointer which is necessarily non-null
         unsafe { NonNull { pointer: self.as_ptr() as *mut U } }
@@ -1601,7 +1599,7 @@ impl<T> NonNull<[T]> {
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_const_unstable(feature = "slice_ptr_get", issue = "74265")]
     // Address preservation
-    #[ensures(|result: &NonNull<T>| result.as_ptr() as *const () as usize == self.pointer as *const () as usize)]
+    #[ensures(|result: &NonNull<T>| result.as_ptr().addr() == self.as_ptr().addr())]
     pub const fn as_non_null_ptr(self) -> NonNull<T> {
         self.cast()
     }
@@ -2198,20 +2196,19 @@ mod verify {
         let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
         if let Some(ptr) = NonNull::new(non_null_ptr){
         // Call as_ptr
-            let raw_ptr = ptr.as_ptr();}
+        let raw_ptr = ptr.as_ptr();}
     
     }
     #[kani::proof_for_contract(NonNull::<[T]>::as_mut_ptr)]
     pub fn non_null_check_as_mut_ptr() {
-        // Create a non-null slice pointer
         const ARR_LEN: usize = 100;
         let mut generator = kani::PointerGenerator::<ARR_LEN>::new();
-        let mut values: [i32; ARR_LEN] = [0; ARR_LEN];
-        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
-        if let Some(ptr) = NonNull::new(raw_ptr){
-            let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
-            // Call as_mut_ptr
-            let raw_ptr = slice_ptr.as_mut_ptr();
+        let alloc_status = generator.any_alloc_status();
+        let raw_ptr: *mut i32 = alloc_status.ptr as *mut i32;
+        let values: [i32; ARR_LEN] = kani::any();
+        if let Some(non_null_ptr) = NonNull::new(raw_ptr) {
+        let slice_ptr = NonNull::slice_from_raw_parts(non_null_ptr, values.len());
+        let raw_ptr = slice_ptr.as_mut_ptr();
     }}
     #[kani::proof_for_contract(NonNull::<T>::cast)]
     pub fn non_null_check_cast() {
@@ -2219,17 +2216,18 @@ mod verify {
         let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
         if let Some(ptr) = NonNull::new(non_null_ptr){
         // Perform the cast
-            let casted_ptr: NonNull<u8> = ptr.cast();
+        let casted_ptr: NonNull<u8> = ptr.cast();
     }}
     #[kani::proof_for_contract(NonNull::<[T]>::as_non_null_ptr)]
     pub fn non_null_check_as_non_null_ptr() {
         const ARR_LEN: usize = 100;
         let mut generator = kani::PointerGenerator::<ARR_LEN>::new();
+        let alloc_status = generator.any_alloc_status();
+        let raw_ptr: *mut i32 = alloc_status.ptr as *mut i32;
         let mut values: [i32; ARR_LEN] = [0; ARR_LEN];
-        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
         if let Some(ptr) = NonNull::new(raw_ptr){
-            let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
-            let result = slice_ptr.as_non_null_ptr();
+        let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
+        let result = slice_ptr.as_non_null_ptr();
     }}
     
 
