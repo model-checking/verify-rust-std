@@ -11,21 +11,23 @@
 
 ## Goal
 
-A number of Rust projects rely on the SIMD intrinsics provided
+A number of Rust projects rely on the SIMD intrinsics provided by
 [core::arch](https://doc.rust-lang.org/beta/core/arch/) for
 performance. This includes cryptographic libraries like libcrux and
 Dalek that are used in mainstream software projects.
 
-The goal of this project is to provide formal testable specification
+The goal of this project is to provide testable formal specifications
 for the 100 most commonly used intrinsics for x86_64 and aarch64
 platforms, chosen specifically to cover all the intrinsics used in
 libcrux for these platforms.
 
-For each intrinsic, we will provide contracts in the form of pre- and
-post-conditions. We will show how these intrinsics and their contracts
-can be translated to F* and Coq. We will test the contracts for these
-intrinsics in both Rust and by execution in F* via the
-[hax](https://github.com/hacspec/hax) toolchain. 
+For each intrinsic, the main goal is to provide contracts in the form of pre- and
+post-conditions, and to provide extensive tests that can check whether
+these contracts hold when the intrinsics are executed in Rust. 
+A secondary goal is to use these contracts as formal specifications
+of the intrinsics API when doing proofs of Rust programs in proof
+assistants like F* and Coq. 
+
 
 ## Motivation
 
@@ -101,9 +103,9 @@ pub unsafe fn _mm_blend_epi16(
 This contract is then used to automatically generate randomized tests
 for the intrinsic, which can be put on CI.
 
-We also use the [hax](https://github.com/hacspec/hax) toolchain to
-compile this contract to F* where it can act as an interface to the
-intrinsics library.
+We can also use the [hax](https://github.com/hacspec/hax) toolchain to
+compile this contract to F* where it can act as an interface to a model
+of the intrinsics library.
 
 ```
 val _mm_blend_epi16: __m128i -> __m128i -> i32 ->
@@ -135,10 +137,12 @@ underlying `Z3` solver.
 
 ### Success Criteria
 
-We will annotate >= 100 intrinsics in `core::arch::x86_64` and
+The goal is to annotate >= 100 intrinsics in `core::arch::x86_64` and
 `core::arch::aarch64` with contracts, and all these contracts will be
 tested both in Rust and in F*. These functions will include all the
-intrinsics currently used in libcrux.
+intrinsics currently used in libcrux and in standard libraries like
+[hashbrown](https://github.com/rust-lang/hashbrown) (the basis
+of the Rust [HashMap](https://doc.rust-lang.org/std/collections/struct.HashMap.html) implementation.)
 
 For a subset of these intrinsics, we will also provide F* models and
 prove that the contracts hold for the models. Finally, we will show
