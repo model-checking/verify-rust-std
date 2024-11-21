@@ -1515,17 +1515,13 @@ impl<T> NonNull<[T]> {
     ///
     /// (Note that this example artificially demonstrates a use of this method,
     /// but `let slice = NonNull::from(&x[..]);` would be a better way to write code like this.)
-    // Safety: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
     #[stable(feature = "nonnull_slice_from_raw_parts", since = "1.70.0")]
     #[rustc_const_stable(feature = "const_slice_from_raw_parts_mut", since = "1.83.0")]
     #[must_use]
     #[inline]
-    #[requires(data.pointer.is_aligned() 
-        && (len as isize).checked_mul(core::mem::size_of::<T>() as isize).is_some()
-        && (data.pointer as isize).checked_add(len as isize * core::mem::size_of::<T>() as isize).is_some() // adding len must not “wrap around” the address space
-        && unsafe { kani::mem::same_allocation(data.pointer, data.pointer.add(len))
-        && ub_checks::can_dereference(data.pointer) })] 
-    #[ensures(|result| !result.pointer.is_null())] //TODO: compare byte by byte between data and result uptill len * size_of::<T>()
+    #[ensures(|result| !result.pointer.is_null() 
+        && result.pointer as *const T == data.pointer
+        && unsafe { result.as_ref() }.len() == len)]
     pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self {
         // SAFETY: `data` is a `NonNull` pointer which is necessarily non-null
         unsafe { Self::new_unchecked(super::slice_from_raw_parts_mut(data.as_ptr(), len)) }
@@ -2057,7 +2053,7 @@ mod verify {
         let nonnull_slice = NonNull::<[i8]>::from_raw_parts(arr_slice_raw_ptr, arr_slice.len());
         // Ensure slice content is preserved, runtime at this step is proportional to ARR_LEN
         unsafe {
-            kani::assert( arr_slice == nonnull_slice.as_ref(), "slice content must preserve" );
+            kani::assert(arr_slice == nonnull_slice.as_ref(), "slice content must be preserve");
         }
 
         // zero-length dangling pointer example
@@ -2101,7 +2097,7 @@ mod verify {
         let nonnull_slice = NonNull::<[i8]>::slice_from_raw_parts(arr_raw_ptr, slice_len);
         // Ensure slice content is preserved, runtime at this step is proportional to ARR_LEN
         unsafe {
-            kani::assert( &arr[..slice_len] == nonnull_slice.as_ref(), "slice content must preserve" );
+            kani::assert(&arr[..slice_len] == nonnull_slice.as_ref(), "slice content must be preserve");
         }
 
         // TODO: zero-length example blocked by kani issue [#3670](https://github.com/model-checking/kani/issues/3670)
