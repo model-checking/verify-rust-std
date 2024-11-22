@@ -2178,9 +2178,7 @@ mod verify {
         let arr: [i32; SIZE] = kani::any();
         let ptr = NonNull::new(arr.as_ptr() as *mut i32).unwrap();
         let new_offset: usize = kani::any_where(|&x| x <= SIZE);
-        let new_addr = unsafe {
-        NonZeroUsize::new_unchecked(ptr_nonnull.as_ptr() as usize + new_offset)
-         };  
+        let new_addr = NonZeroUsize::new(ptr.as_ptr().addr() + new_offset).unwrap(); 
         let result = ptr.with_addr(new_addr);
     }
 }
