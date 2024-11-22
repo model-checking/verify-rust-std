@@ -770,7 +770,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires( 
         (kani::mem::same_allocation(self.as_ptr(), origin.as_ptr()) && 
-        ((self.as_ptr() as usize - origin.as_ptr() as usize) % core::mem::size_of::<T>() == 0))
+        ((self.as_ptr().addr() - origin.as_ptr().addr()) % core::mem::size_of::<T>() == 0))
     )] // Ensure both pointers meet safety conditions for offset_from
     #[ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / core::mem::size_of::<T>() as isize)]
     pub const unsafe fn offset_from(self, origin: NonNull<T>) -> isize
