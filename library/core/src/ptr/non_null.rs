@@ -1831,7 +1831,6 @@ mod verify {
         let count: usize = kani::any();
 
         unsafe {
-            // Perform the pointer subtraction from the last element
             let result = ptr.sub(count);
         }
     }
