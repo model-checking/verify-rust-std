@@ -23,7 +23,7 @@ The memory safety of the following public functions that iterating over the inte
 
 | Function | Location |
 |---------|---------|
-|clearn | alloc::collections::linked_list |
+|clear | alloc::collections::linked_list |
 |contains| alloc::collections::linked_list |
 |split_off| alloc::collections::linked_list |
 |remove| alloc::collections::linked_list |
