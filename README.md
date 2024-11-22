@@ -17,10 +17,10 @@ The goal is to have a verified [Rust standard library](https://doc.rust-lang.org
 
 For that we are launching a contest that includes a series of challenges that focus on verifying
 memory safety and a subset of undefined behaviors in the Rust standard library.
-Each challenge describes the goal, the success criteria, and whether it has a financial award to awarded upon its
+Each challenge describes the goal, the success criteria, and whether it has a financial award to be awarded upon its
 successful completion.
 
-See [our book](https://model-checking.github.io/verify-rust-std/intro.html) more details on the challenge rules
+See [our book](https://model-checking.github.io/verify-rust-std/intro.html) for more details on the challenge rules
 and the list of existing challenges.
 
 We welcome everyone to participate!

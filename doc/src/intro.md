@@ -9,7 +9,7 @@ given Rust standard library implementation is safe.
 Verifying the Rust libraries is difficult because:
 1. Lack of a specification,
 2. Lack of an existing verification mechanism in the Rust ecosystem,
-3. Lhe large size of the verification problem,
+3. The large size of the verification problem,
 4. The unknowns of scalable verification.
 
 Given the magnitude and scope of the effort, we believe this should be a community owned effort.
