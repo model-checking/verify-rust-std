@@ -2188,47 +2188,42 @@ mod verify {
             assert_eq!(old_b, new_a);
         }
     }
-}
+
 
     #[kani::proof_for_contract(NonNull::as_ptr)]
     pub fn non_null_check_as_ptr() {
         // Create a non-null pointer to a random value
         let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
         if let Some(ptr) = NonNull::new(non_null_ptr){
-        // Call as_ptr
-        let raw_ptr = ptr.as_ptr();}
+            let result = ptr.as_ptr();
+        }
     
     }
     #[kani::proof_for_contract(NonNull::<[T]>::as_mut_ptr)]
     pub fn non_null_check_as_mut_ptr() {
         const ARR_LEN: usize = 100;
-        let mut generator = kani::PointerGenerator::<ARR_LEN>::new();
-        let alloc_status = generator.any_alloc_status();
-        let raw_ptr: *mut i32 = alloc_status.ptr as *mut i32;
-        let values: [i32; ARR_LEN] = kani::any();
-        if let Some(non_null_ptr) = NonNull::new(raw_ptr) {
-        let slice_ptr = NonNull::slice_from_raw_parts(non_null_ptr, values.len());
-        let raw_ptr = slice_ptr.as_mut_ptr();
-    }}
+        let mut values: [i32; ARR_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut values);
+        let non_null_ptr = NonNull::new(slice as *mut [i32]).unwrap();
+        let result = non_null_ptr.as_mut_ptr();
+    }
     #[kani::proof_for_contract(NonNull::<T>::cast)]
     pub fn non_null_check_cast() {
         // Create a non-null pointer to a random value
         let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
         if let Some(ptr) = NonNull::new(non_null_ptr){
-        // Perform the cast
-        let casted_ptr: NonNull<u8> = ptr.cast();
-    }}
+            let result: NonNull<u8> = ptr.cast();
+        }
+    }
     #[kani::proof_for_contract(NonNull::<[T]>::as_non_null_ptr)]
     pub fn non_null_check_as_non_null_ptr() {
         const ARR_LEN: usize = 100;
-        let mut generator = kani::PointerGenerator::<ARR_LEN>::new();
-        let alloc_status = generator.any_alloc_status();
-        let raw_ptr: *mut i32 = alloc_status.ptr as *mut i32;
-        let mut values: [i32; ARR_LEN] = [0; ARR_LEN];
-        if let Some(ptr) = NonNull::new(raw_ptr){
-        let slice_ptr = NonNull::slice_from_raw_parts(ptr, values.len());
+        let mut values: [i32; ARR_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut values);
+        let non_null_ptr = NonNull::new(slice as *mut [i32]).unwrap();
         let result = slice_ptr.as_non_null_ptr();
-    }}
+    }
+}
     
 
 
