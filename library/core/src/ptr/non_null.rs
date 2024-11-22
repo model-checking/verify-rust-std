@@ -316,9 +316,7 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[stable(feature = "strict_provenance", since = "CURRENT_RUSTC_VERSION")]
-    #[ensures(|result: &Self| 
-        !result.as_ptr().is_null() &&
-        result.addr() == addr )]
+    #[ensures(|result: &Self| !result.as_ptr().is_null() && result.addr() == addr)]
     pub fn with_addr(self, addr: NonZero<usize>) -> Self {
         // SAFETY: The result of `ptr::from::with_addr` is non-null because `addr` is guaranteed to be non-zero.
         unsafe { NonNull::new_unchecked(self.pointer.with_addr(addr.get()) as *mut _) }
