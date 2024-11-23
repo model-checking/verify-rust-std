@@ -10,7 +10,6 @@ use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
 
-
 #[cfg(kani)]
 use crate::kani;
 #[cfg(kani)]
