@@ -1,10 +1,10 @@
 # Challenge 3: Verifying Raw Pointer Arithmetic Operations
 
 - **Status:** Open
-- **Solution:**
 - **Tracking Issue:** [#76](https://github.com/model-checking/verify-rust-std/issues/76)
-- **Start date:** 24/06/24
-- **End date:** 24/12/10
+- **Start date:** *2024/06/24*
+- **End date:** *2025/04/10*
+- **Reward:** *N/A*
 
 -------------------
 
