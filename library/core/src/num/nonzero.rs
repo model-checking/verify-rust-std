@@ -1009,6 +1009,15 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
+            #[requires({
+                let (result, overflow) = self.get().overflowing_mul(other.get());
+                !overflow // Precondition to ensure no overflow occurs during multiplication
+            })]
+            #[ensures(|result: &Self| {
+                // Ensure the resulting value is the expected product
+                let (expected_result, _) = self.get().overflowing_mul(other.get());
+                result.get() == expected_result
+            })]
             pub const unsafe fn unchecked_mul(self, other: Self) -> Self {
                 // SAFETY: The caller ensures there is no overflow.
                 unsafe { Self::new_unchecked(self.get().unchecked_mul(other.get())) }
@@ -1371,6 +1380,15 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[requires({
+            let (result, overflow) = self.get().overflowing_add(other);
+            !overflow // Precondition: no overflow can occur
+        })]
+        #[ensures(|result: &Self| {
+            // Postcondition: the result matches the expected addition
+            let (expected_result, _) = self.get().overflowing_add(other);
+            result.get() == expected_result
+        })]
         pub const unsafe fn unchecked_add(self, other: $Int) -> Self {
             // SAFETY: The caller ensures there is no overflow.
             unsafe { Self::new_unchecked(self.get().unchecked_add(other)) }
@@ -2214,4 +2232,28 @@ mod verify {
     nonzero_check!(u64, core::num::NonZeroU64, nonzero_check_new_unchecked_for_u64);
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
+
+    #[kani::proof_for_contract(i8::unchecked_mul)]
+    fn nonzero_unchecked_mul() {
+        let x: NonZeroI8 = kani::any();
+        let y: NonZeroI8 = kani::any();
+
+        // Check the precondition to assume no overflow
+        let (result, overflow) = x.get().overflowing_mul(y.get());
+        kani::assume(!overflow); // Ensure the multiplication does not overflow
+
+        unsafe {
+            let _ = x.unchecked_mul(y); 
+        }
+    }
+
+    #[kani::proof_for_contract(i8::unchecked_add)]
+    fn nonzero_unchecked_add() {
+        let x: i8 = kani::any();
+        let y: i8 = kani::any();
+        unsafe {
+            let _ = x.unchecked_add(y); // Call the unchecked function
+        }
+    }
+
 }
