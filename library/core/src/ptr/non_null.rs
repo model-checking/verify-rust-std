@@ -734,8 +734,7 @@ impl<T: ?Sized> NonNull<T> {
         kani::mem::same_allocation(self.as_ptr() as *const (), (self.as_ptr().addr() - count) as *const ())
      )]
     #[ensures(
-        |result: &NonNull<T>|
-        result.as_ptr().addr() == (self.as_ptr().addr() - count)
+        |result: &NonNull<T>| result.as_ptr().addr() == (self.as_ptr().addr() - count)
     )]
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `sub` and `byte_sub` has the same
