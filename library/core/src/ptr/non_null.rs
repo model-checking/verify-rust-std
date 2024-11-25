@@ -7,11 +7,13 @@ use crate::pin::PinCoerceUnsized;
 use crate::ptr::Unique;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
-use crate::{fmt, hash, intrinsics, ptr, ub_checks};
+use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
 
 #[cfg(kani)]
 use crate::kani;
+#[cfg(kani)]
+use crate::ub_checks;
 
 /// `*mut T` but non-zero and [covariant].
 ///
@@ -1538,7 +1540,7 @@ impl<T> NonNull<[T]> {
     #[rustc_const_stable(feature = "const_slice_from_raw_parts_mut", since = "1.83.0")]
     #[must_use]
     #[inline]
-    #[ensures(|result| !result.pointer.is_null() 
+    #[ensures(|result| !result.pointer.is_null()
         && result.pointer as *const T == data.pointer
         && unsafe { result.as_ref() }.len() == len)]
     pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self {
@@ -1892,17 +1894,17 @@ mod verify {
     trait SampleTrait {
         fn get_value(&self) -> i32;
     }
-    
+
     struct SampleStruct {
         value: i32,
     }
-    
+
     impl SampleTrait for SampleStruct {
         fn get_value(&self) -> i32 {
             self.value
         }
     }
-    
+
     impl<T> kani::Arbitrary for NonNull<T> {
         fn any() -> Self {
             let ptr: *mut T = kani::any::<usize>() as *mut T;
@@ -2086,7 +2088,7 @@ mod verify {
         let arr: [i8; ARR_LEN] = kani::any();
         let arr_slice = kani::slice::any_slice_of_array(&arr);
         // Get a raw NonNull pointer to the start of the slice
-        let arr_slice_raw_ptr = NonNull::new(arr_slice.as_ptr() as *mut ()).unwrap();  
+        let arr_slice_raw_ptr = NonNull::new(arr_slice.as_ptr() as *mut ()).unwrap();
         // Create NonNull pointer from the start pointer and the length of the slice
         let nonnull_slice = NonNull::<[i8]>::from_raw_parts(arr_slice_raw_ptr, arr_slice.len());
         // Ensure slice content is preserved, runtime at this step is proportional to ARR_LEN
@@ -2127,7 +2129,7 @@ mod verify {
         // Create a non-deterministic array
         let mut arr: [i8; ARR_LEN] = kani::any();
         // Get a raw NonNull pointer to the start of the slice
-        let arr_raw_ptr = NonNull::new(arr.as_mut_ptr()).unwrap();  
+        let arr_raw_ptr = NonNull::new(arr.as_mut_ptr()).unwrap();
         // Create NonNull slice from the start pointer and ends at random slice_len
         // Safety: https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
         let slice_len: usize = kani::any();
@@ -2143,7 +2145,7 @@ mod verify {
         //let zero_length = NonNull::<[()]>::slice_from_raw_parts(dangling_ptr, 0);
     }
 
-    
+
     // pub const fn to_raw_parts(self) -> (NonNull<()>, <T as super::Pointee>::Metadata)
     #[kani::proof_for_contract(NonNull::to_raw_parts)]
     pub fn non_null_check_to_raw_parts() {
@@ -2159,7 +2161,7 @@ mod verify {
 
         // Create NonNull<dyn MyTrait> from the data pointer and metadata
         let nonnull_trait_object: NonNull<dyn SampleTrait> = NonNull::from_raw_parts(trait_ptr, metadata);
-        let (decomposed_data_ptr, decomposed_metadata) = NonNull::to_raw_parts(nonnull_trait_object);                
+        let (decomposed_data_ptr, decomposed_metadata) = NonNull::to_raw_parts(nonnull_trait_object);
     }
 
 
