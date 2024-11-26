@@ -802,7 +802,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires( 
         (kani::mem::same_allocation(self.as_ptr(), origin.as_ptr()) && 
-        ((self.as_ptr() as usize - origin.as_ptr() as usize) % core::mem::size_of::<T>() == 0))
+        ((self.as_ptr().addr() - origin.as_ptr().addr()) % core::mem::size_of::<T>() == 0))
     )] // Ensure both pointers meet safety conditions for offset_from
     #[ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / core::mem::size_of::<T>() as isize)]
     pub const unsafe fn offset_from(self, origin: NonNull<T>) -> isize
@@ -899,7 +899,8 @@ impl<T: ?Sized> NonNull<T> {
     #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
     #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
     #[requires(kani::mem::same_allocation(self.as_ptr(), subtracted.as_ptr()))] // Ensure both pointers are in the same allocation
-    #[requires((self.as_ptr() as usize) >= (subtracted.as_ptr() as usize))] // Ensure distance between pointers is non-negative
+    #[requires((self.as_ptr().addr()) >= (subtracted.as_ptr().addr()))] // Ensure distance between pointers is non-negative
+     #[requires((self.as_ptr().addr() - origin.as_ptr().addr()) % core::mem::size_of::<T>() == 0)]
     #[ensures(|result: &usize| *result == self.as_ptr().offset_from(subtracted.as_ptr()) as usize)]
     pub const unsafe fn sub_ptr(self, subtracted: NonNull<T>) -> usize
     where
