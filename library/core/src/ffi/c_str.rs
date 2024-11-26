@@ -9,7 +9,6 @@ use crate::ptr::NonNull;
 use crate::slice::memchr;
 use crate::{fmt, intrinsics, ops, slice, str};
 
-// use safety::{requires, ensures};
 use crate::ub_checks::Invariant;
 
 #[cfg(kani)]
@@ -217,7 +216,7 @@ impl fmt::Display for FromBytesWithNulError {
 impl Invariant for &CStr {
     /**
      * Safety invariant of a valid CStr:
-     * 1. An empty CStr should has a null byte.
+     * 1. An empty CStr should have a null byte.
      * 2. A valid CStr should end with a null-terminator and contains
      *    no intermediate null bytes.
      */
@@ -225,11 +224,7 @@ impl Invariant for &CStr {
         let bytes: &[c_char] = &self.inner;
         let len = bytes.len();
 
-        if bytes.is_empty() || bytes[len - 1] != 0 || bytes[..len-1].contains(&0) {
-            return false;
-        }
-
-        true
+        return !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len-1].contains(&0);
     }
 }
 
