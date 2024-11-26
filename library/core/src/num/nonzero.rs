@@ -1010,13 +1010,10 @@ macro_rules! nonzero_integer {
                           without modifying the original"]
             #[inline]
             #[requires({
-                let (result, overflow) = self.get().overflowing_mul(other.get());
-                !overflow // Precondition to ensure no overflow occurs during multiplication
+                !self.get().checked_mul(other.get()).is_some()
             })]
             #[ensures(|result: &Self| {
-                // Ensure the resulting value is the expected product
-                let (expected_result, _) = self.get().overflowing_mul(other.get());
-                result.get() == expected_result
+                self.get().checked_mul(other.get()).unwrap() == result.get()
             })]
             pub const unsafe fn unchecked_mul(self, other: Self) -> Self {
                 // SAFETY: The caller ensures there is no overflow.
@@ -1381,13 +1378,11 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
                       without modifying the original"]
         #[inline]
         #[requires({
-            let (result, overflow) = self.get().overflowing_add(other);
-            !overflow // Precondition: no overflow can occur
+            !self.get().checked_add(other).is_some()
         })]
         #[ensures(|result: &Self| {
             // Postcondition: the result matches the expected addition
-            let (expected_result, _) = self.get().overflowing_add(other);
-            result.get() == expected_result
+            self.get().checked_add(other).unwrap() == result.get()
         })]
         pub const unsafe fn unchecked_add(self, other: $Int) -> Self {
             // SAFETY: The caller ensures there is no overflow.
@@ -2233,27 +2228,57 @@ mod verify {
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 
-    #[kani::proof_for_contract(i8::unchecked_mul)]
-    fn nonzero_unchecked_mul() {
-        let x: NonZeroI8 = kani::any();
-        let y: NonZeroI8 = kani::any();
-
-        // Check the precondition to assume no overflow
-        let (result, overflow) = x.get().overflowing_mul(y.get());
-        kani::assume(!overflow); // Ensure the multiplication does not overflow
-
-        unsafe {
-            let _ = x.unchecked_mul(y); 
-        }
+    macro_rules! nonzero_check_mul {
+        ($t:ty, $nonzero_type:ty, $nonzero_unchecked_mul:ident) => {
+            #[kani::proof_for_contract(NonZero::unchecked_mul)]
+            pub fn $nonzero_unchecked_mul_for() {
+                let x: NonZeroI8 = kani::any();
+                let y: NonZeroI8 = kani::any();
+                unsafe {
+                    let _ = x.unchecked_mul(y); 
+                }
+            }
+        };
     }
+    
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check!(i8, core::num::NonZeroI8, nonzero_unchecked_mul_for_i8);
+    nonzero_check!(i16, core::num::NonZeroI16, nonzero_unchecked_mul_for_16);
+    nonzero_check!(i32, core::num::NonZeroI32, nonzero_unchecked_mul_for_32);
+    nonzero_check!(i64, core::num::NonZeroI64, nonzero_unchecked_mul_for_64);
+    nonzero_check!(i128, core::num::NonZeroI128, nonzero_unchecked_mul_for_128);
+    nonzero_check!(isize, core::num::NonZeroIsize, nonzero_unchecked_mul_for_isize);
+    nonzero_check!(u8, core::num::NonZeroU8, nonzero_unchecked_mul_for_u8);
+    nonzero_check!(u16, core::num::NonZeroU16, nonzero_unchecked_mul_for_u16);
+    nonzero_check!(u32, core::num::NonZeroU32, nonzero_unchecked_mul_for_u32);
+    nonzero_check!(u64, core::num::NonZeroU64, nonzero_unchecked_mul_for_u64);
+    nonzero_check!(u128, core::num::NonZeroU128, nonzero_unchecked_mul_for_u128);
+    nonzero_check!(usize, core::num::NonZeroUsize, nonzero_unchecked_mul_for_usize);
 
-    #[kani::proof_for_contract(i8::unchecked_add)]
-    fn nonzero_unchecked_add() {
-        let x: i8 = kani::any();
-        let y: i8 = kani::any();
-        unsafe {
-            let _ = x.unchecked_add(y); // Call the unchecked function
-        }
+    macro_rules! nonzero_check_add {
+        ($t:ty, $nonzero_type:ty, $nonzero_unchecked_add:ident) => {
+            #[kani::proof_for_contract(NonZero::unchecked_add)]
+                pub fn $nonzero_unchecked_add_for() {
+                let x: i8 = kani::any();
+                let y: i8 = kani::any();
+                unsafe {
+                    let _ = x.unchecked_add(y); // Call the unchecked function
+                }
+            }
+        };
     }
-
+    
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check!(i8, core::num::NonZeroI8, nonzero_unchecked_add_for_i8);
+    nonzero_check!(i16, core::num::NonZeroI16, nonzero_unchecked_add_for_16);
+    nonzero_check!(i32, core::num::NonZeroI32, nonzero_unchecked_add_for_32);
+    nonzero_check!(i64, core::num::NonZeroI64, nonzero_unchecked_add_for_64);
+    nonzero_check!(i128, core::num::NonZeroI128, nonzero_unchecked_add_for_128);
+    nonzero_check!(isize, core::num::NonZeroIsize, nonzero_unchecked_add_for_isize);
+    nonzero_check!(u8, core::num::NonZeroU8, nonzero_unchecked_add_for_u8);
+    nonzero_check!(u16, core::num::NonZeroU16, nonzero_unchecked_add_for_u16);
+    nonzero_check!(u32, core::num::NonZeroU32, nonzero_unchecked_add_for_u32);
+    nonzero_check!(u64, core::num::NonZeroU64, nonzero_unchecked_add_for_u64);
+    nonzero_check!(u128, core::num::NonZeroU128, nonzero_unchecked_add_for_u128);
+    nonzero_check!(usize, core::num::NonZeroUsize, nonzero_unchecked_add_for_usize);
 }
