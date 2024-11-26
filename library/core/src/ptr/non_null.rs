@@ -2216,6 +2216,7 @@ mod verify {
             let result: NonNull<u8> = ptr.cast();
         }
     }
+    
     #[kani::proof_for_contract(NonNull::<[T]>::as_non_null_ptr)]
     pub fn non_null_check_as_non_null_ptr() {
         const ARR_LEN: usize = 100;
