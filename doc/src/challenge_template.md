@@ -3,8 +3,9 @@
 - **Status:** *One of the following: \[Open | Resolved | Expired\]*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
 - **Tracking Issue:** *Link to issue*
-- **Start date:** *YY/MM/DD*
-- **End date:** *YY/MM/DD*
+- **Start date:** *YYYY/MM/DD*
+- **End date:** *YYYY/MM/DD*
+- **Reward:** *TBD*[^reward]
 
 -------------------
 
@@ -49,3 +50,4 @@ Note: All solutions to verification challenges need to satisfy the criteria esta
 in addition to the ones listed above.
 
 [^challenge_id]: The number of the challenge sorted by publication date.
+[^reward]: Leave it as TBD when creating a new challenge. This should only be filled by the reward committee.
