@@ -224,7 +224,7 @@ impl Invariant for &CStr {
         let bytes: &[c_char] = &self.inner;
         let len = bytes.len();
 
-        return !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len-1].contains(&0);
+        !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len-1].contains(&0)
     }
 }
 
