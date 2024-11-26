@@ -2212,7 +2212,7 @@ mod verify {
     pub fn non_null_check_cast() {
         // Create a non-null pointer to a random value
         let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
-        if let Some(ptr) = NonNull::new(non_null_ptr){
+        if let Some(ptr) = NonNull::new(non_null_ptr) {
             let result: NonNull<u8> = ptr.cast();
         }
     }
