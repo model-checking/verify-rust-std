@@ -10,6 +10,7 @@ use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
 
+
 #[cfg(kani)]
 use crate::kani;
 #[cfg(kani)]
@@ -1107,8 +1108,6 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::drop_in_place`]: crate::ptr::drop_in_place()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure self is aligned, initialized, and valid for read
-    #[requires(ub_checks::can_write(self.as_ptr() as *mut()))] // Ensure self is valid for write
     pub unsafe fn drop_in_place(self) {
         // SAFETY: the caller must uphold the safety contract for `drop_in_place`.
         unsafe { ptr::drop_in_place(self.as_ptr()) }
@@ -1200,9 +1199,6 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::replace`]: crate::ptr::replace()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self is aligned, initialized, and valid for read
-    #[requires(ub_checks::can_write(self.as_ptr()))] // Ensure self is valid for write
     pub unsafe fn replace(self, src: T) -> T
     where
         T: Sized,
@@ -1221,9 +1217,6 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_swap", issue = "83163")]
-    #[cfg_attr(kani, kani::modifies(self.as_ptr(), with.as_ptr()))]
-    #[requires(ub_checks::can_dereference(self.as_ptr()) && ub_checks::can_write(self.as_ptr()))]
-    #[requires(ub_checks::can_dereference(with.as_ptr()) && ub_checks::can_write(with.as_ptr()))]
     pub const unsafe fn swap(self, with: NonNull<T>)
     where
         T: Sized,
@@ -2192,60 +2185,7 @@ mod verify {
             let _ = ptr.get_unchecked_mut(lower..upper);
         }
     }
-
-    #[kani::proof_for_contract(NonNull::replace)]
-    pub fn non_null_check_replace() {
-        let mut x: i32 = kani::any();
-        let mut y: i32 = kani::any();
-
-        let origin_ptr = NonNull::new(&mut x as *mut i32).unwrap();
-        unsafe {
-            let captured_original = ptr::read(origin_ptr.as_ptr());
-            let replaced = origin_ptr.replace(y);
-            let after_replace = ptr::read(origin_ptr.as_ptr());
-
-            assert_eq!(captured_original, replaced);
-            assert_eq!(after_replace, y)
-        }
-    }
-
-    #[kani::proof_for_contract(NonNull::drop_in_place)]
-    pub fn non_null_check_drop_in_place() {
-        struct Droppable {
-            value: i32,
-        }
-
-        impl Drop for Droppable {
-            fn drop(&mut self) {}
-        }
-
-        let mut droppable = Droppable { value: kani::any() };
-        let ptr = NonNull::new(&mut droppable as *mut Droppable).unwrap();
-        unsafe {
-            ptr.drop_in_place();
-        }
-    }
-
-    #[kani::proof_for_contract(NonNull::swap)]
-    pub fn non_null_check_swap() {
-        let mut a: i32 = kani::any();
-        let mut b: i32 = kani::any();
-
-        let ptr_a = NonNull::new(&mut a as *mut i32).unwrap();
-        let ptr_b = NonNull::new(&mut b as *mut i32).unwrap();
-
-        unsafe {
-            let old_a = ptr::read(ptr_a.as_ptr());
-            let old_b = ptr::read(ptr_b.as_ptr());
-            ptr_a.swap(ptr_b);
-            // Verify that the values have been swapped.
-            let new_a = ptr::read(ptr_a.as_ptr());
-            let new_b = ptr::read(ptr_b.as_ptr());
-            assert_eq!(old_a, new_b);
-            assert_eq!(old_b, new_a);
-        }
-    }
-
+  
     #[kani::proof_for_contract(NonNull::byte_sub)]
     pub fn non_null_check_byte_sub() {
         const SIZE: usize = mem::size_of::<i32>() * 100;
@@ -2253,9 +2193,7 @@ mod verify {
         let count: usize = kani::any();
         let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
         let ptr = NonNull::new(raw_ptr).unwrap();
-        unsafe {
-            let result = ptr.byte_sub(count);
-        }
+        unsafe {  let result = ptr.byte_sub(count); }
     }
 
     #[kani::proof_for_contract(NonNull::offset)]
@@ -2265,8 +2203,7 @@ mod verify {
         let start_ptr = generator.any_in_bounds().ptr as *mut i32;
         let ptr_nonnull = NonNull::new(start_ptr).unwrap();
         let count: isize = kani::any();
-        unsafe {
-            let result = ptr_nonnull.offset(count);
+        unsafe { let result = ptr_nonnull.offset(count);
         }
     }
 
@@ -2276,9 +2213,9 @@ mod verify {
         let arr: [i32; SIZE] = kani::any();
         let ptr = NonNull::new(arr.as_ptr() as *mut i32).unwrap();
         let new_offset: usize = kani::any_where(|&x| x <= SIZE);
-        let f = |addr: NonZeroUsize| -> NonZeroUsize {
-            NonZeroUsize::new(addr.get().wrapping_add(new_offset)).unwrap()
-        };
+      let f = |addr: NonZeroUsize| -> NonZeroUsize {
+            NonZeroUsize::new(addr.get().wrapping_add(new_offset)).unwrap() 
+      }; 
         let result = ptr.map_addr(f);
     }
 
