@@ -7,7 +7,7 @@
 This repository is a fork of the official Rust programming
 language repository, created solely to verify the Rust standard
 library. It should not be used as an alternative to the official
-Rust releases. The repository is tool agnostic and welcomes the addition of 
+Rust releases. The repository is tool agnostic and welcomes the addition of
 new tools.
 
 The goal is to have a verified [Rust standard library](https://doc.rust-lang.org/std/) and prove that it is safe.
@@ -15,16 +15,15 @@ The goal is to have a verified [Rust standard library](https://doc.rust-lang.org
 2. Creating new techniques to perform scalable verification
 3. Apply techniques to verify previously unverified parts of the standard library.
 
-## [Kani](https://github.com/model-checking/kani)
+For that we are launching a contest that includes a series of challenges that focus on verifying
+memory safety and a subset of undefined behaviors in the Rust standard library.
+Each challenge describes the goal, the success criteria, and whether it has a financial award to be awarded upon its
+successful completion.
 
-The Kani Rust Verifier is a bit-precise model checker for Rust.
-Kani verifies:
-* Memory safety (e.g., null pointer dereferences)
-* User-specified assertions (i.e `assert!(...)`)
-* The absence of panics (eg., `unwrap()` on `None` values)
-* The absence of some types of unexpected behavior (e.g., arithmetic overflows).
+See [our book](https://model-checking.github.io/verify-rust-std/intro.html) for more details on the challenge rules
+and the list of existing challenges.
 
-You can find out more about Kani from the [Kani book](https://model-checking.github.io/kani/) or the [Kani repository on Github](https://github.com/model-checking/kani).
+We welcome everyone to participate!
 
 ## Contact
 
@@ -40,7 +39,7 @@ See [SECURITY](https://github.com/model-checking/kani/security/policy) for more 
 Kani is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
 See [LICENSE-APACHE](https://github.com/model-checking/kani/blob/main/LICENSE-APACHE) and [LICENSE-MIT](https://github.com/model-checking/kani/blob/main/LICENSE-MIT) for details.
 
-## Rust
+### Rust
 Rust is primarily distributed under the terms of both the MIT license and the Apache License (Version 2.0), with portions covered by various BSD-like licenses.
 
 See [the Rust repository](https://github.com/rust-lang/rust) for details.
