@@ -898,9 +898,12 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
     #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
-    #[requires(kani::mem::same_allocation(self.as_ptr(), subtracted.as_ptr()))] // Ensure both pointers are in the same allocation
-    #[requires((self.as_ptr().addr()) >= (subtracted.as_ptr().addr()))] // Ensure distance between pointers is non-negative
-     #[requires((self.as_ptr().addr() - origin.as_ptr().addr()) % core::mem::size_of::<T>() == 0)]
+    #[requires(
+        self.as_ptr().addr().checked_sub(subtracted.as_ptr().addr()).is_some() &&
+        kani::mem::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
+        (self.as_ptr().addr()) >= (subtracted.as_ptr().addr()) &&
+        (self.as_ptr().addr() - subtracted.as_ptr().addr()) % core::mem::size_of::<T>() == 0
+    )]
     #[ensures(|result: &usize| *result == self.as_ptr().offset_from(subtracted.as_ptr()) as usize)]
     pub const unsafe fn sub_ptr(self, subtracted: NonNull<T>) -> usize
     where
