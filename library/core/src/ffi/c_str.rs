@@ -215,13 +215,16 @@ impl fmt::Display for FromBytesWithNulError {
 
 #[unstable(feature = "ub_checks", issue = "none")]
 impl Invariant for &CStr {
+    /**
+     * Safety invariant of a valid CStr:
+     * 1. An empty CStr should has a null byte.
+     * 2. A valid CStr should end with a null-terminator and contains
+     *    no intermediate null bytes.
+     */
     fn is_safe(&self) -> bool {
         let bytes: &[c_char] = &self.inner;
         let len = bytes.len();
 
-        // An empty CStr should has a null byte.
-        // A valid CStr should end with a null-terminator and contains
-        // no intermediate null bytes.
         if bytes.is_empty() || bytes[len - 1] != 0 || bytes[..len-1].contains(&0) {
             return false;
         }
@@ -864,17 +867,16 @@ mod verify {
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
     #[kani::proof]
-    #[kani::unwind(16)] // 7.3 seconds when 16; 33.1 seconds when 32
+    #[kani::unwind(32)] // 7.3 seconds when 16; 33.1 seconds when 32
     fn check_from_bytes_until_nul() {
-        const MAX_SIZE: usize = 16;
+        const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
         // Covers the case of a single null byte at the end, no null bytes, as
         // well as intermediate null bytes
         let slice = kani::slice::any_slice_of_array(&string);
 
         let result = CStr::from_bytes_until_nul(slice);
-        if result.is_ok() {
-            let c_str = result.unwrap();
+        if let Ok(c_str) = result {
             assert!(c_str.is_safe());
         }
     }
