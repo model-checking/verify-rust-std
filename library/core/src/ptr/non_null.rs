@@ -2199,6 +2199,7 @@ mod verify {
         }
     
     }
+    
     #[kani::proof_for_contract(NonNull::<[T]>::as_mut_ptr)]
     pub fn non_null_check_as_mut_ptr() {
         const ARR_LEN: usize = 100;
