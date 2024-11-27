@@ -25,8 +25,7 @@ For each intrinsic, the main goal is to provide contracts in the form of pre- an
 post-conditions, and to provide extensive tests that can check whether
 these contracts hold when the intrinsics are executed in Rust. 
 A secondary goal is to use these contracts as formal specifications
-of the intrinsics API when doing proofs of Rust programs in proof
-assistants like F* and Coq. 
+of the intrinsics API when doing proofs of Rust programs.
 
 
 ## Motivation
@@ -34,23 +33,24 @@ assistants like F* and Coq.
 Rust is the language of choice for new security-critical and
 performance-sensitive projects, and consequently a number of new
 cryptographic projects use Rust to build their infrastructure and
-trusted computing base. However, the SIMD intrinsics in Rust are badly
-documented and easy to misuse, and so even the best Rust programmers
+trusted computing base. However, the SIMD intrinsics in Rust lack
+documentation and are easy to misuse, and so even the best Rust programmers
 need to wade through Intel or Arm assembly documentation to understand
 the functional behavior of these intrinsics.
 
 Separately, when formally verifying cryptographic libraries, each
-project needs to define its own semantics for SIMD instructions in
-EasyCrypt, F*, or Coq. This work is both time-consuming and
-error-prone, there is also no guarantee of consistency between the
-instruction semantics used in these different tools.
+project needs to define its own semantics for SIMD instructions.
+Indeed such SIMD specifications have currently been defined for
+cryptographic verification projects in F*, EasyCrypt, Coq, and HOL
+Light. This specification work is both time-consuming and error-prone,
+there is also no guarantee of consistency between the instruction
+semantics used in these different tools.
 
 Consequently, we believe there is a strong need for a consistent,
 formal, testable specification of the SIMD intrinsics that can aid
-Rust crypto developers. Furthermore, we believe that this
-specification is written in a way that can be used to aid formal
-verification of cryptography in various backend tools, including F*,
-Coq, EasyCrypt, and Lean. 
+Rust developers. Furthermore, we believe that this
+specification should written in a way that can be used to aid formal
+verification of Rust programs using various proof assistants. 
 
 ## Description
 
@@ -120,7 +120,7 @@ val _mm_blend_epi16: __m128i -> __m128i -> i32 ->
 ```
 
 We then prove that this contract is consistent with the model of the
-SIMD intrinsic in F* (i.e. our F* implementation of `mm_blen_epi16`)
+SIMD intrinsic in F* (i.e. our F* implementation of `mm_blend_epi16`)
 and also run the same tests we ran in Rust against this model in F* to
 gain more confidence in our translation from Rust.
 
@@ -131,22 +131,33 @@ contruction.
 
 ### Assumptions
 
-Users must trust the semantics of Rust encoded within the `hax`
-toolchain, the implementation of the `F*` typechecker, and the
-underlying `Z3` solver.  
+The contracts we write for the SIMD intrinsics will be well tested
+but, in the end, are hand-written based on the documentation
+of the intrinsics provided by Intel and ARM. Consequently, the
+user must trust that these semantics are correctly written.
+
+When using the contracts within a formal verification project,
+the user will, as usual, have to trust that the verification
+tool correctly encodes the semantics of Rust and performs
+a sound analysis. For example, when using hax with F* or Coq as 
+a proof backend, the user must trust that the compilation
+of Rust to the input languages for these provers correctly
+reflects the Rust semantics. 
 
 ### Success Criteria
 
 The goal is to annotate >= 100 intrinsics in `core::arch::x86_64` and
 `core::arch::aarch64` with contracts, and all these contracts will be
-tested both in Rust and in F*. These functions will include all the
+tested comprehensively in Rust. These functions will include all the
 intrinsics currently used in libcrux and in standard libraries like
 [hashbrown](https://github.com/rust-lang/hashbrown) (the basis
 of the Rust [HashMap](https://doc.rust-lang.org/std/collections/struct.HashMap.html) implementation.)
 
-For a subset of these intrinsics, we will also provide F* models and
-prove that the contracts hold for the models. Finally, we will show
-how these contracts are used in libcrux, a verified crypto library.
+We will also show how these contracts can be compiled to F* and to Coq
+using the hax toolchain. For a subset of these intrinsics, we will
+also provide F* models and prove that the contracts hold for the
+models. Finally, we will show how these contracts are used in libcrux,
+a verified crypto library.
 
 
 
