@@ -701,6 +701,12 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(unchecked_neg))]
+    #[requires(
+        count.checked_mul(core::mem::size_of::<T>()).is_some() &&
+        count * core::mem::size_of::<T>() <= isize::MAX as usize && 
+        kani::mem::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
+    )]
+    #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -842,6 +848,11 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires( 
+        (kani::mem::same_allocation(self.as_ptr(), origin.as_ptr()) && 
+        ((self.as_ptr().addr() - origin.as_ptr().addr()) % core::mem::size_of::<T>() == 0))
+    )] // Ensure both pointers meet safety conditions for offset_from
+    #[ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / core::mem::size_of::<T>() as isize)]
     pub const unsafe fn offset_from(self, origin: NonNull<T>) -> isize
     where
         T: Sized,
@@ -935,6 +946,13 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
     #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
+    #[requires(
+        self.as_ptr().addr().checked_sub(subtracted.as_ptr().addr()).is_some() &&
+        kani::mem::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
+        (self.as_ptr().addr()) >= (subtracted.as_ptr().addr()) &&
+        (self.as_ptr().addr() - subtracted.as_ptr().addr()) % core::mem::size_of::<T>() == 0
+    )]
+    #[ensures(|result: &usize| *result == self.as_ptr().offset_from(subtracted.as_ptr()) as usize)]
     pub const unsafe fn sub_ptr(self, subtracted: NonNull<T>) -> usize
     where
         T: Sized,
@@ -2497,5 +2515,74 @@ mod verify {
         let new_offset: usize = kani::any_where(|&x| x <= SIZE);
         let new_addr = NonZeroUsize::new(ptr.as_ptr().addr() + new_offset).unwrap();
         let result = ptr.with_addr(new_addr);
+    }
+  
+    #[kani::proof_for_contract(NonNull::sub)]
+    pub fn non_null_check_sub() {
+        const SIZE: usize = 10000;
+        let mut generator = kani::PointerGenerator::<SIZE>::new();
+        // Get a raw pointer from the generator within bounds
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr;
+        // Create a non-null pointer from the raw pointer
+        let ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
+        // Create a non-deterministic count value
+        let count: usize = kani::any();
+
+        unsafe {
+            let result = ptr.sub(count);
+        }
+    }
+    
+    #[kani::proof_for_contract(NonNull::sub_ptr)]
+    pub fn non_null_check_sub_ptr() {
+        const SIZE: usize = core::mem::size_of::<i32>() * 1000;
+        let mut generator1 = kani::PointerGenerator::<SIZE>::new();
+        let mut generator2 = kani::PointerGenerator::<SIZE>::new();
+
+        let ptr: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let origin: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let ptr_nonnull = unsafe { NonNull::new(ptr).unwrap() };
+        let origin_nonnull = unsafe { NonNull::new(origin).unwrap() };
+
+        unsafe {
+            let distance = ptr_nonnull.sub_ptr(origin_nonnull);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::offset_from)]
+    #[kani::should_panic]
+    pub fn non_null_check_offset_from() {
+        const SIZE: usize = core::mem::size_of::<i32>() * 1000;
+        let mut generator1 = kani::PointerGenerator::<SIZE>::new();
+        let mut generator2 = kani::PointerGenerator::<SIZE>::new();
+
+        let ptr: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let origin: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let ptr_nonnull = unsafe { NonNull::new(ptr).unwrap() };
+        let origin_nonnull = unsafe { NonNull::new(origin).unwrap() };
+
+        unsafe {
+            let distance = ptr_nonnull.offset_from(origin_nonnull);
+        }
     }
 }
