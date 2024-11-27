@@ -101,7 +101,7 @@ pub unsafe fn _mm_blend_epi16(
 ```
 
 This contract is then used to automatically generate randomized tests
-for the intrinsic, which can be put on CI.
+for the intrinsic, which can be put in CI.
 
 We can also use the [hax](https://github.com/hacspec/hax) toolchain to
 compile this contract to F* where it can act as an interface to a model
