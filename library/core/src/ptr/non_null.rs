@@ -139,8 +139,8 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure the pointer is valid to create a reference.
-    #[ensures(|result: &&MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))] // Ensure returned reference points to the correct memory location.
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]  // Ensure the pointer is valid to create a reference.
+    #[ensures(|result: &&MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))]  // Ensure returned reference points to the correct memory location.
     pub const unsafe fn as_uninit_ref<'a>(self) -> &'a MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -165,8 +165,8 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[rustc_const_unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure pointer is valid to create a mutable reference.
-    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))] // Ensure the returned reference points to the correct memory.
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]  // Ensure pointer is valid to create a mutable reference.
+    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))]  // Ensure the returned reference points to the correct memory.
     pub const unsafe fn as_uninit_mut<'a>(self) -> &'a mut MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
