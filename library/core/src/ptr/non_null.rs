@@ -2381,7 +2381,7 @@ mod verify {
         let mut values: [i32; ARR_LEN] = kani::any();
         let slice = kani::slice::any_slice_of_array_mut(&mut values);
         let non_null_ptr = NonNull::new(slice as *mut [i32]).unwrap();
-        let result = slice_ptr.as_non_null_ptr();
+        let result = non_null_ptr.as_non_null_ptr();
      } 
   
     #[kani::proof]
