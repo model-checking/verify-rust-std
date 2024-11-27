@@ -2286,11 +2286,10 @@ mod verify {
         const ARR_SIZE: usize = 100000;
         let mut arr: [i32; ARR_SIZE] = kani::any();
         let raw_ptr = arr.as_mut_ptr();
-        let ptr = NonNull::slice_from_raw_parts(	        
-            NonNull::new(raw_ptr).unwrap(),	
-            ARR_SIZE,	
+        let ptr = NonNull::slice_from_raw_parts(
+            NonNull::new(raw_ptr).unwrap(),
+            ARR_SIZE,
         );
-        let ptr = NonNull::slice_from_raw_parts(NonNull::new(raw_ptr).unwrap(), ARR_SIZE);
         let lower = kani::any_where(|x| *x < ARR_SIZE);
         let upper = kani::any_where(|x| *x < ARR_SIZE && *x >= lower);
         unsafe {
