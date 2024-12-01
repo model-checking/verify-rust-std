@@ -2265,3 +2265,89 @@ mod verify {
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 }
+
+#[cfg(kani)]
+mod macro_nonzero_check_max {
+    use super::*;
+    macro_rules! nonzero_check_max {
+        ($t:ty, $nonzero_type:ty, $nonzero_check_max_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_max_for() {
+                let x: $t = kani::any();
+                kani::assume(x != 0);
+                let y: $t = kani::any();
+                kani::assume(y != 0);
+            
+                unsafe {
+                    let x = <$nonzero_type>::new_unchecked(x);
+                    let y = <$nonzero_type>::new_unchecked(y);
+                }
+            
+                // Use the max function and check the result
+                let result = x.max(y);
+                if x > y {
+                    assert!(result == x);
+                } else {
+                    assert!(result == y);
+                }
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_max!(i8, core::num::NonZeroI8, nonzero_check_max_for_i8);
+    nonzero_check_max!(i16, core::num::NonZeroI16, nonzero_check_max_for_16);
+    nonzero_check_max!(i32, core::num::NonZeroI32, nonzero_check_max_for_32);
+    nonzero_check_max!(i64, core::num::NonZeroI64, nonzero_check_max_for_64);
+    nonzero_check_max!(i128, core::num::NonZeroI128, nonzero_check_max_for_128);
+    nonzero_check_max!(isize, core::num::NonZeroIsize, nonzero_check_max_for_isize);
+    nonzero_check_max!(u8, core::num::NonZeroU8, nonzero_check_max_for_u8);
+    nonzero_check_max!(u16, core::num::NonZeroU16, nonzero_check_max_for_u16);
+    nonzero_check_max!(u32, core::num::NonZeroU32, nonzero_check_max_for_u32);
+    nonzero_check_max!(u64, core::num::NonZeroU64, nonzero_check_max_for_u64);
+    nonzero_check_max!(u128, core::num::NonZeroU128, nonzero_check_max_for_u128);
+    nonzero_check_max!(usize, core::num::NonZeroUsize, nonzero_check_max_for_usize);
+}
+
+#[cfg(kani)]
+mod macro_nonzero_check_min {
+    use super::*;
+    macro_rules! nonzero_check_min {
+        ($t:ty, $nonzero_type:ty, $nonzero_check_min_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_min_for() {
+                let x: $t = kani::any();
+                kani::assume(x != 0);
+                let y: $t = kani::any();
+                kani::assume(y != 0);
+            
+                unsafe {
+                    let x = <$nonzero_type>::new_unchecked(x);
+                    let y = <$nonzero_type>::new_unchecked(y);
+                }
+            
+                // Use the min function and check the result
+                let result = x.min(y);
+                if x < y {
+                    assert!(result == x);
+                } else {
+                    assert!(result == y);
+                }
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_min!(i8, core::num::NonZeroI8, nonzero_check_min_for_i8);
+    nonzero_check_min!(i16, core::num::NonZeroI16, nonzero_check_min_for_16);
+    nonzero_check_min!(i32, core::num::NonZeroI32, nonzero_check_min_for_32);
+    nonzero_check_min!(i64, core::num::NonZeroI64, nonzero_check_min_for_64);
+    nonzero_check_min!(i128, core::num::NonZeroI128, nonzero_check_min_for_128);
+    nonzero_check_min!(isize, core::num::NonZeroIsize, nonzero_check_min_for_isize);
+    nonzero_check_min!(u8, core::num::NonZeroU8, nonzero_check_min_for_u8);
+    nonzero_check_min!(u16, core::num::NonZeroU16, nonzero_check_min_for_u16);
+    nonzero_check_min!(u32, core::num::NonZeroU32, nonzero_check_min_for_u32);
+    nonzero_check_min!(u64, core::num::NonZeroU64, nonzero_check_min_for_u64);
+    nonzero_check_min!(u128, core::num::NonZeroU128, nonzero_check_min_for_u128);
+    nonzero_check_min!(usize, core::num::NonZeroUsize, nonzero_check_min_for_usize);
+}
