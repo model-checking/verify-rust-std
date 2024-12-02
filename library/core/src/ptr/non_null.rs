@@ -9,7 +9,6 @@ use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{fmt, hash, intrinsics, ptr};
 use safety::{ensures, requires};
-use crate::ub_checks;
 
 #[cfg(kani)]
 use crate::kani;
