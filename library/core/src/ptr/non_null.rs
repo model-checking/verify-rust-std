@@ -1132,7 +1132,7 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[kani::modifies(self.as_ptr())]
+    #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
     #[requires(ub_checks::can_write(self.as_ptr()))]
     pub unsafe fn write_volatile(self, val: T)
     where
