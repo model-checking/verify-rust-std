@@ -2309,20 +2309,20 @@ mod verify {
             pub fn $harness_name() {
                 // Create a pointer generator for the given type with appropriate byte size
                 let mut generator = kani::PointerGenerator::<$byte_size>::new();
-    
+
                 // Get a raw pointer from the generator
                 let raw_ptr: *mut $type = generator.any_in_bounds().ptr;
-    
+
                 // Create a non-null pointer from the raw pointer
                 let ptr = NonNull::new(raw_ptr).unwrap();
-    
+
                 // Create a non-deterministic value to write
                 let new_value: $type = kani::any();
-    
+
                 unsafe {
                     // Perform the volatile write operation
                     ptr.write_volatile(new_value);
-    
+
                     // Read back the value and assert it's correct
                     assert_eq!(ptr.as_ptr().read_volatile(), new_value);
                 }
