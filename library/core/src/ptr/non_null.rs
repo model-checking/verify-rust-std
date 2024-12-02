@@ -1847,6 +1847,6 @@ mod verify {
     generate_write_volatile_harness!(u64, 8, non_null_check_write_volatile_u64);
     generate_write_volatile_harness!(u128, 16, non_null_check_write_volatile_u128);
     generate_write_volatile_harness!(usize, {core::mem::size_of::<usize>()}, non_null_check_write_volatile_usize);
-    //generate_write_volatile_harness!((), 0, non_null_check_write_volatile_unit);
+    generate_write_volatile_harness!((), 1, non_null_check_write_volatile_unit);
 
 }
