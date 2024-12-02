@@ -5,7 +5,9 @@
 **Verification Target:** [Our repository](https://github.com/model-checking/verify-rust-std) is a fork of the original Rust repository,
 and we kept a copy of the Rust standard library inside the `library/` folder that shall be used as the verification target for all our challenges.
 We will periodically update the `library/` folder to track newer versions of the [official Rust standard library](https://github.com/rust-lang/rust/).
-NOTE: This work is not officially affiliated, or endorsed by the Rust project or Rust Foundation.
+
+**NOTE:** This work is not officially affiliated, or endorsed by the Rust project or Rust Foundation.
+
 **Challenges:** Each individual verification effort will have a
 tracking issue where contributors can add comments and ask clarification questions.
 You can find the list of [open challenges here](https://github.com/model-checking/verify-rust-std/labels/Challenge).

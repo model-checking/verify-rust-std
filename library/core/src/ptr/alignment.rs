@@ -1,10 +1,13 @@
-use safety::{ensures, requires};
+use safety::{ensures, invariant, requires};
 use crate::num::NonZero;
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{cmp, fmt, hash, mem, num};
 
 #[cfg(kani)]
 use crate::kani;
+
+#[cfg(kani)]
+use crate::ub_checks::Invariant;
 
 /// A type storing a `usize` which is a power of two, and thus
 /// represents a possible alignment in the Rust abstract machine.
@@ -14,6 +17,7 @@ use crate::kani;
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
+#[invariant(self.as_usize().is_power_of_two())]
 pub struct Alignment(AlignmentEnum);
 
 // Alignment is `repr(usize)`, but via extra steps.
@@ -45,7 +49,7 @@ impl Alignment {
     /// This provides the same numerical value as [`mem::align_of`],
     /// but in an `Alignment` instead of a `usize`.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
+    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[requires(mem::align_of::<T>().is_power_of_two())]
     #[ensures(|result| result.as_usize().is_power_of_two())]
@@ -59,7 +63,7 @@ impl Alignment {
     ///
     /// Note that `0` is not a power of two, nor a valid alignment.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
+    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[ensures(|result| align.is_power_of_two() == result.is_some())]
     #[ensures(|result| result.is_none() || result.unwrap().as_usize() == align)]
@@ -81,7 +85,7 @@ impl Alignment {
     /// Equivalently, it must be `1 << exp` for some `exp` in `0..usize::BITS`.
     /// It must *not* be zero.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
+    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[requires(align > 0 && (align & (align - 1)) == 0)]
     #[ensures(|result| result.as_usize() == align)]
@@ -100,7 +104,7 @@ impl Alignment {
 
     /// Returns the alignment as a [`usize`].
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
+    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[ensures(|result| result.is_power_of_two())]
     pub const fn as_usize(self) -> usize {
@@ -109,7 +113,7 @@ impl Alignment {
 
     /// Returns the alignment as a <code>[NonZero]<[usize]></code>.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
+    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[ensures(|result| result.get().is_power_of_two())]
     #[ensures(|result| result.get() == self.as_usize())]
@@ -132,7 +136,7 @@ impl Alignment {
     /// assert_eq!(Alignment::new(1024).unwrap().log2(), 10);
     /// ```
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
+    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[requires(self.as_usize().is_power_of_two())]
     #[ensures(|result| (*result as usize) < mem::size_of::<usize>() * 8)]
@@ -165,7 +169,7 @@ impl Alignment {
     /// assert_ne!(one.mask(Alignment::of::<Align4>().mask()), one);
     /// ```
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070")]
+    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[ensures(|result| *result > 0)]
     #[ensures(|result| *result == !(self.as_usize() -1))]
@@ -173,6 +177,11 @@ impl Alignment {
     pub const fn mask(self) -> usize {
         // SAFETY: The alignment is always nonzero, and therefore decrementing won't overflow.
         !(unsafe { self.as_usize().unchecked_sub(1) })
+    }
+
+    // FIXME(const-hack) Remove me once `Ord::max` is usable in const
+    pub(crate) const fn max(a: Self, b: Self) -> Self {
+        if a.as_usize() > b.as_usize() { a } else { b }
     }
 }
 
@@ -219,7 +228,6 @@ impl From<Alignment> for usize {
     }
 }
 
-#[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 impl cmp::Ord for Alignment {
     #[inline]
@@ -228,7 +236,6 @@ impl cmp::Ord for Alignment {
     }
 }
 
-#[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 impl cmp::PartialOrd for Alignment {
     #[inline]
@@ -256,6 +263,7 @@ impl Default for Alignment {
 #[cfg(target_pointer_width = "16")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u16)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -278,6 +286,7 @@ enum AlignmentEnum {
 #[cfg(target_pointer_width = "32")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u32)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -316,6 +325,7 @@ enum AlignmentEnum {
 #[cfg(target_pointer_width = "64")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u64)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -390,8 +400,9 @@ mod verify {
 
     impl kani::Arbitrary for Alignment {
         fn any() -> Self {
-            let align = kani::any_where(|a: &usize| a.is_power_of_two());
-            unsafe { mem::transmute::<usize, Alignment>(align) }
+            let obj = Self { 0: kani::any() };
+            kani::assume(obj.is_safe());
+            obj
         }
     }
 

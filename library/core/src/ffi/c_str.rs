@@ -5,9 +5,14 @@ use crate::error::Error;
 use crate::ffi::c_char;
 use crate::iter::FusedIterator;
 use crate::marker::PhantomData;
-use crate::ptr::{addr_of, NonNull};
+use crate::ptr::NonNull;
 use crate::slice::memchr;
 use crate::{fmt, intrinsics, ops, slice, str};
+
+use crate::ub_checks::Invariant;
+
+#[cfg(kani)]
+use crate::kani;
 
 // FIXME: because this is doc(inline)d, we *have* to use intra-doc links because the actual link
 //   depends on where the item is being documented. however, since this is libcore, we can't
@@ -137,11 +142,11 @@ enum FromBytesWithNulErrorKind {
 
 // FIXME: const stability attributes should not be required here, I think
 impl FromBytesWithNulError {
-    #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    #[cfg_attr(bootstrap, rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0"))]
     const fn interior_nul(pos: usize) -> FromBytesWithNulError {
         FromBytesWithNulError { kind: FromBytesWithNulErrorKind::InteriorNul(pos) }
     }
-    #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    #[cfg_attr(bootstrap, rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0"))]
     const fn not_nul_terminated() -> FromBytesWithNulError {
         FromBytesWithNulError { kind: FromBytesWithNulErrorKind::NotNulTerminated }
     }
@@ -204,6 +209,22 @@ impl fmt::Display for FromBytesWithNulError {
             write!(f, " at byte pos {pos}")?;
         }
         Ok(())
+    }
+}
+
+#[unstable(feature = "ub_checks", issue = "none")]
+impl Invariant for &CStr {
+    /**
+     * Safety invariant of a valid CStr:
+     * 1. An empty CStr should have a null byte.
+     * 2. A valid CStr should end with a null-terminator and contains
+     *    no intermediate null bytes.
+     */
+    fn is_safe(&self) -> bool {
+        let bytes: &[c_char] = &self.inner;
+        let len = bytes.len();
+
+        !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len-1].contains(&0)
     }
 }
 
@@ -464,7 +485,9 @@ impl CStr {
     /// behavior when `ptr` is used inside the `unsafe` block:
     ///
     /// ```no_run
-    /// # #![allow(unused_must_use)] #![allow(temporary_cstring_as_ptr)]
+    /// # #![allow(unused_must_use)]
+    /// # #![cfg_attr(bootstrap, expect(temporary_cstring_as_ptr))]
+    /// # #![cfg_attr(not(bootstrap), expect(dangling_pointers_from_temporaries))]
     /// use std::ffi::CString;
     ///
     /// // Do not do this:
@@ -623,7 +646,7 @@ impl CStr {
     pub const fn to_bytes_with_nul(&self) -> &[u8] {
         // SAFETY: Transmuting a slice of `c_char`s to a slice of `u8`s
         // is safe on all supported targets.
-        unsafe { &*(addr_of!(self.inner) as *const [u8]) }
+        unsafe { &*((&raw const self.inner) as *const [u8]) }
     }
 
     /// Iterates over the bytes in this C string.
@@ -730,7 +753,7 @@ impl AsRef<CStr> for CStr {
 /// located within `isize::MAX` from `ptr`.
 #[inline]
 #[unstable(feature = "cstr_internals", issue = "none")]
-#[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
+#[cfg_attr(bootstrap, rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0"))]
 #[rustc_allow_const_fn_unstable(const_eval_select)]
 const unsafe fn strlen(ptr: *const c_char) -> usize {
     const fn strlen_ct(s: *const c_char) -> usize {
@@ -831,3 +854,25 @@ impl Iterator for Bytes<'_> {
 
 #[unstable(feature = "cstr_bytes", issue = "112115")]
 impl FusedIterator for Bytes<'_> {}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
+    #[kani::proof]
+    #[kani::unwind(32)] // 7.3 seconds when 16; 33.1 seconds when 32
+    fn check_from_bytes_until_nul() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        // Covers the case of a single null byte at the end, no null bytes, as
+        // well as intermediate null bytes
+        let slice = kani::slice::any_slice_of_array(&string);
+
+        let result = CStr::from_bytes_until_nul(slice);
+        if let Ok(c_str) = result {
+            assert!(c_str.is_safe());
+        }
+    }
+}

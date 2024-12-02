@@ -5,6 +5,9 @@ use core::ascii::EscapeDefault;
 use crate::fmt::{self, Write};
 use crate::{ascii, iter, mem, ops};
 
+#[cfg(kani)]
+use crate::kani;
+
 #[cfg(not(test))]
 impl [u8] {
     /// Checks if all bytes in this slice are within the ASCII range.
@@ -67,10 +70,15 @@ impl [u8] {
     ///
     /// [`to_ascii_uppercase`]: #method.to_ascii_uppercase
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
+    #[rustc_const_stable(feature = "const_make_ascii", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn make_ascii_uppercase(&mut self) {
-        for byte in self {
+    pub const fn make_ascii_uppercase(&mut self) {
+        // FIXME(const-hack): We would like to simply iterate using `for` loops but this isn't currently allowed in constant expressions.
+        let mut i = 0;
+        while i < self.len() {
+            let byte = &mut self[i];
             byte.make_ascii_uppercase();
+            i += 1;
         }
     }
 
@@ -84,10 +92,15 @@ impl [u8] {
     ///
     /// [`to_ascii_lowercase`]: #method.to_ascii_lowercase
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
+    #[rustc_const_stable(feature = "const_make_ascii", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn make_ascii_lowercase(&mut self) {
-        for byte in self {
+    pub const fn make_ascii_lowercase(&mut self) {
+        // FIXME(const-hack): We would like to simply iterate using `for` loops but this isn't currently allowed in constant expressions.
+        let mut i = 0;
+        while i < self.len() {
+            let byte = &mut self[i];
             byte.make_ascii_lowercase();
+            i += 1;
         }
     }
 
@@ -336,6 +349,8 @@ pub const fn is_ascii_simple(mut bytes: &[u8]) -> bool {
 /// If any of these loads produces something for which `contains_nonascii`
 /// (above) returns true, then we know the answer is false.
 #[inline]
+#[rustc_allow_const_fn_unstable(const_raw_ptr_comparison, const_pointer_is_aligned)] // only in a debug assertion
+#[rustc_allow_const_fn_unstable(const_align_offset)] // behavior does not change when `align_offset` fails
 const fn is_ascii(s: &[u8]) -> bool {
     const USIZE_SIZE: usize = mem::size_of::<usize>();
 
@@ -386,6 +401,10 @@ const fn is_ascii(s: &[u8]) -> bool {
     // Read subsequent words until the last aligned word, excluding the last
     // aligned word by itself to be done in tail check later, to ensure that
     // tail is always one `usize` at most to extra branch `byte_pos == len`.
+    #[safety::loop_invariant(byte_pos <= len 
+                            && byte_pos >= offset_to_aligned
+                            && word_ptr.addr() >= start.addr() + offset_to_aligned
+                            && byte_pos == word_ptr.addr() - start.addr())]
     while byte_pos < len - USIZE_SIZE {
         // Sanity check that the read is in bounds
         debug_assert!(byte_pos + USIZE_SIZE <= len);
@@ -419,4 +438,29 @@ const fn is_ascii(s: &[u8]) -> bool {
     let last_word = unsafe { (start.add(len - USIZE_SIZE) as *const usize).read_unaligned() };
 
     !contains_nonascii(last_word)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    pub fn check_is_ascii() {
+        if kani::any() {
+            // TODO: ARR_SIZE can be much larger with cbmc argument
+            // `--arrays-uf-always`
+            const ARR_SIZE: usize = 1000;
+            let mut x: [u8; ARR_SIZE] = kani::any();
+            let mut xs = kani::slice::any_slice_of_array_mut(&mut x);
+            is_ascii(xs);
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
+            kani::assume(ptr.is_aligned());
+            unsafe{
+                assert_eq!(is_ascii(crate::slice::from_raw_parts(ptr, 0)), true);
+            }
+        }
+    }
 }
