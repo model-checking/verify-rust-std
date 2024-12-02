@@ -620,7 +620,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(
         count <= (isize::MAX as usize) - self.as_ptr().addr() &&  // Ensure the offset doesn't overflow
-        kani::mem::same_allocation(self.as_ptr(),self.as_ptr().wrapping_byte_add(count)) // Ensure the offset is within the same allocation
+        (count == 0 || kani::mem::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_add(count))) // Ensure the offset is within the same allocation
     )]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add` and `byte_add` has the same
@@ -835,7 +835,10 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(kani::mem::same_allocation(self.as_ptr() as *const(), origin.as_ptr() as *const()))]
+    #[requires(
+        self.as_ptr().addr() == origin.as_ptr().addr() ||
+        kani::mem::same_allocation(self.as_ptr() as *const(), origin.as_ptr() as *const())
+    )]
     #[ensures(
         |result: &isize|
         *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
@@ -2503,6 +2506,14 @@ mod verify {
         }
     }
 
+    #[kani::proof_for_contract(NonNull::byte_add)]
+    pub fn non_null_byte_add_dangling_proof() {
+        let ptr = NonNull::<i32>::dangling();
+        unsafe {
+            let _ = ptr.byte_add(0);
+        }
+    }
+
     #[kani::proof_for_contract(NonNull::byte_offset)]
     pub fn non_null_byte_offset_proof() {
         const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
@@ -2536,6 +2547,15 @@ mod verify {
 
         unsafe {
             let result = ptr_nonnull.byte_offset_from(origin_nonnull);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::byte_offset_from)]
+    pub fn non_null_byte_offset_from_dangling_proof() {
+        let origin = NonNull::<i32>::dangling();
+        let ptr = origin;
+        unsafe {
+            let _ = ptr.byte_offset_from(origin);
         }
     }
 }
