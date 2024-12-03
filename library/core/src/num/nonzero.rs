@@ -2273,23 +2273,20 @@ mod macro_nonzero_check_max {
         ($t:ty, $nonzero_type:ty, $nonzero_check_max_for:ident) => {
             #[kani::proof]
             pub fn $nonzero_check_max_for() {
-                let x: $t = kani::any();
-                kani::assume(x != 0);
-                let y: $t = kani::any();
-                kani::assume(y != 0);
-            
+                let int_x: $t = kani::any();
+                kani::assume(int_x != 0);
+                let int_y: $t = kani::any();
+                kani::assume(int_y != 0);   
                 unsafe {
-                    let x = <$nonzero_type>::new_unchecked(x);
-                    let y = <$nonzero_type>::new_unchecked(y);
-                }
-            
-                // Use the max function and check the result
-                let result = x.max(y);
-                if x > y {
-                    assert!(result == x);
-                } else {
-                    assert!(result == y);
-                }
+                    let x = <$nonzero_type>::new_unchecked(int_x);
+                    let y = <$nonzero_type>::new_unchecked(int_y);
+                    let result = x.max(y);
+                    if x > y {
+                        assert!(result == x);
+                    } else {
+                        assert!(result == y);
+                    }
+                }      
             }
         };
     }
@@ -2316,22 +2313,19 @@ mod macro_nonzero_check_min {
         ($t:ty, $nonzero_type:ty, $nonzero_check_min_for:ident) => {
             #[kani::proof]
             pub fn $nonzero_check_min_for() {
-                let x: $t = kani::any();
-                kani::assume(x != 0);
-                let y: $t = kani::any();
-                kani::assume(y != 0);
-            
+                let int_x: $t = kani::any();
+                kani::assume(int_x != 0);
+                let int_y: $t = kani::any();
+                kani::assume(int_y != 0);
                 unsafe {
-                    let x = <$nonzero_type>::new_unchecked(x);
-                    let y = <$nonzero_type>::new_unchecked(y);
-                }
-            
-                // Use the min function and check the result
-                let result = x.min(y);
-                if x < y {
-                    assert!(result == x);
-                } else {
-                    assert!(result == y);
+                    let x = <$nonzero_type>::new_unchecked(int_x);
+                    let y = <$nonzero_type>::new_unchecked(int_y);
+                    let result = x.min(y);
+                    if x < y {
+                        assert!(result == x);
+                    } else {
+                        assert!(result == y);
+                    }
                 }
             }
         };
