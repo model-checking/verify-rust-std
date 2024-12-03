@@ -2273,18 +2273,14 @@ mod macro_nonzero_check_count_ones {
         ($t:ty, $nonzero_type:ty, $nonzero_check_count_ones_for:ident) => {
             #[kani::proof]
             pub fn $nonzero_check_count_ones_for() {
-                let x: $t = kani::any();
-                kani::assume(x != 0);
-            
+                let int_x: $t = kani::any();
+                kani::assume(int_x != 0);
                 unsafe {
-                    let x = <$nonzero_type>::new_unchecked(x);
+                    let x = <$nonzero_type>::new_unchecked(int_x);
+                    let result = x.count_ones();
+                    // Since x is non-zero, count_ones should never return 0
+                    assert!(result.get() > 0);
                 }
-            
-                // Use the count_ones function and check the result
-                let result = x.count_ones();
-                
-                // Since x is non-zero, count_ones should never return 0
-                assert!(result > 0);
             }
         };
     }
