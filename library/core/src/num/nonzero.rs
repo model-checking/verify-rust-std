@@ -2273,9 +2273,9 @@ mod macro_nonzero_check_rotate_left {
         ($t:ty, $nonzero_type:ty, $nonzero_check_rotate_left_for:ident) => {
             #[kani::proof]
             pub fn $nonzero_check_rotate_left_for() {
-                let x: $t = kani::any();
+                let int_x: $t = kani::any();
                 let n: u32 = kani::any();
-                kani::assume(x != 0); // x must be non-zero
+                kani::assume(int_x != 0); // x must be non-zero
 
                 // Ensure that n is within a valid range for rotating
                 // kani::assume(n < (std::mem::size_of::<$t>() as u32 * 8));
@@ -2284,14 +2284,13 @@ mod macro_nonzero_check_rotate_left {
                 kani::assume(n >= 0);
                 
                 unsafe {
-                    let x = <$nonzero_type>::new_unchecked(x);
+                    let x = <$nonzero_type>::new_unchecked(int_x);
+                    // Perform rotate_left
+                    let result = x.rotate_left(n);
+                    
+                    // Ensure the result is still non-zero
+                    assert!(result.get() != 0);
                 }
-
-                // Perform rotate_left
-                let result = x.rotate_left(n);
-                
-                // Ensure the result is still non-zero
-                assert!(result != 0);
             }
         };
     }
