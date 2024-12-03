@@ -1132,6 +1132,8 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
+    #[requires(ub_checks::can_write(self.as_ptr()))]
     pub unsafe fn write_volatile(self, val: T)
     where
         T: Sized,
@@ -1775,7 +1777,7 @@ mod verify {
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
-    
+
     // pub const unsafe fn read(self) -> T where T: Sized
     #[kani::proof_for_contract(NonNull::read)]
     pub fn non_null_check_read() {
@@ -2300,4 +2302,47 @@ mod verify {
             let distance = ptr_nonnull.offset_from(origin_nonnull);
         }
     }
+
+    macro_rules! generate_write_volatile_harness {
+        ($type:ty, $byte_size:expr, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonNull::write_volatile)]
+            pub fn $harness_name() {
+                // Create a pointer generator for the given type with appropriate byte size
+                let mut generator = kani::PointerGenerator::<$byte_size>::new();
+
+                // Get a raw pointer from the generator
+                let raw_ptr: *mut $type = generator.any_in_bounds().ptr;
+
+                // Create a non-null pointer from the raw pointer
+                let ptr = NonNull::new(raw_ptr).unwrap();
+
+                // Create a non-deterministic value to write
+                let new_value: $type = kani::any();
+
+                unsafe {
+                    // Perform the volatile write operation
+                    ptr.write_volatile(new_value);
+
+                    // Read back the value and assert it's correct
+                    assert_eq!(ptr.as_ptr().read_volatile(), new_value);
+                }
+            }
+        };
+    }
+
+    // Generate proof harnesses for multiple types with appropriate byte sizes
+    generate_write_volatile_harness!(i8, 1, non_null_check_write_volatile_i8);
+    generate_write_volatile_harness!(i16, 2, non_null_check_write_volatile_i16);
+    generate_write_volatile_harness!(i32, 4, non_null_check_write_volatile_i32);
+    generate_write_volatile_harness!(i64, 8, non_null_check_write_volatile_i64);
+    generate_write_volatile_harness!(i128, 16, non_null_check_write_volatile_i128);
+    generate_write_volatile_harness!(isize, {core::mem::size_of::<isize>()}, non_null_check_write_volatile_isize);
+    generate_write_volatile_harness!(u8, 1, non_null_check_write_volatile_u8);
+    generate_write_volatile_harness!(u16, 2, non_null_check_write_volatile_u16);
+    generate_write_volatile_harness!(u32, 4, non_null_check_write_volatile_u32);
+    generate_write_volatile_harness!(u64, 8, non_null_check_write_volatile_u64);
+    generate_write_volatile_harness!(u128, 16, non_null_check_write_volatile_u128);
+    generate_write_volatile_harness!(usize, {core::mem::size_of::<usize>()}, non_null_check_write_volatile_usize);
+    generate_write_volatile_harness!((), 1, non_null_check_write_volatile_unit);
+
 }
