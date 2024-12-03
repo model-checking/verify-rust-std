@@ -2276,7 +2276,6 @@ mod macro_nonzero_check_rotate_left_and_right {
                 let int_x: $t = kani::any();
                 let n: u32 = kani::any();
                 kani::assume(int_x != 0);
-                kani::assume(n < (core::mem::size_of::<$t>() as u32 * 8));
                 unsafe {
                     let x = <$nonzero_type>::new_unchecked(int_x);
                     let result = x.rotate_left(n).rotate_right(n);
