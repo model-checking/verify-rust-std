@@ -2321,6 +2321,8 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::byte_add)]
     pub fn non_null_byte_add_proof() {
+        // Make size as 1000 to ensure the array is large enough to cover various senarios
+        // while maintaining a reasonable proof runtime
         const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
         let mut generator = PointerGenerator::<ARR_SIZE>::new();
 
