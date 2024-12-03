@@ -885,7 +885,20 @@ mod verify {
             assert!(c_str.is_safe());
         }
     }
-  
+
+    #[kani::proof]
+    #[kani::unwind(17)] 
+    fn check_from_bytes_with_nul() {
+        const MAX_SIZE: usize = 16;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+
+        let result = CStr::from_bytes_with_nul(slice);
+        if let Ok(c_str) = result {
+            assert!(c_str.is_safe());
+        }
+    }
+
     // pub const fn count_bytes(&self) -> usize
     #[kani::proof]
     #[kani::unwind(32)]
