@@ -1857,11 +1857,11 @@ pub mod duration_verify {
         let _ = d0.checked_mul(amt);
     }
 
-    /* 
+    
     #[kani::proof_for_contract(Duration::checked_div)]
     fn duration_checked_div() {
         let d0 = kani::any::<Duration>();
         let amt = kani::any::<u32>();
         let _ = d0.checked_div(amt);
-    } */
+    }
 }
