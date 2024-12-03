@@ -526,6 +526,11 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(
+        (self.as_ptr().addr() as isize).checked_add(count).is_some() &&
+        kani::mem::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_offset(count))
+    )]
+    #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_byte_offset(count))]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset` and `byte_offset` has
         // the same safety contract.
@@ -607,6 +612,10 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(
+        count <= (isize::MAX as usize) - self.as_ptr().addr() &&  // Ensure the offset doesn't overflow
+        (count == 0 || kani::mem::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_add(count))) // Ensure the offset is within the same allocation
+    )]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add` and `byte_add` has the same
         // safety contract.
@@ -820,6 +829,14 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[requires(
+        self.as_ptr().addr() == origin.as_ptr().addr() ||
+        kani::mem::same_allocation(self.as_ptr() as *const(), origin.as_ptr() as *const())
+    )]
+    #[ensures(
+        |result: &isize|
+        *result == (self.as_ptr() as *const u8).offset_from(origin.as_ptr() as *const u8)
+    )]
     pub const unsafe fn byte_offset_from<U: ?Sized>(self, origin: NonNull<U>) -> isize {
         // SAFETY: the caller must uphold the safety contract for `byte_offset_from`.
         unsafe { self.pointer.byte_offset_from(origin.pointer) }
@@ -1132,6 +1149,8 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
+    #[requires(ub_checks::can_write(self.as_ptr()))]
     pub unsafe fn write_volatile(self, val: T)
     where
         T: Sized,
@@ -1734,6 +1753,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 mod verify {
     use super::*;
     use crate::ptr::null_mut;
+    use crate::mem;
     use kani::PointerGenerator;
 
     trait SampleTrait {
@@ -1775,7 +1795,7 @@ mod verify {
         let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
-    
+
     // pub const unsafe fn read(self) -> T where T: Sized
     #[kani::proof_for_contract(NonNull::read)]
     pub fn non_null_check_read() {
@@ -2298,6 +2318,117 @@ mod verify {
 
         unsafe {
             let distance = ptr_nonnull.offset_from(origin_nonnull);
+        }
+    }
+
+    macro_rules! generate_write_volatile_harness {
+        ($type:ty, $byte_size:expr, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonNull::write_volatile)]
+            pub fn $harness_name() {
+                // Create a pointer generator for the given type with appropriate byte size
+                let mut generator = kani::PointerGenerator::<$byte_size>::new();
+
+                // Get a raw pointer from the generator
+                let raw_ptr: *mut $type = generator.any_in_bounds().ptr;
+
+                // Create a non-null pointer from the raw pointer
+                let ptr = NonNull::new(raw_ptr).unwrap();
+
+                // Create a non-deterministic value to write
+                let new_value: $type = kani::any();
+
+                unsafe {
+                    // Perform the volatile write operation
+                    ptr.write_volatile(new_value);
+
+                    // Read back the value and assert it's correct
+                    assert_eq!(ptr.as_ptr().read_volatile(), new_value);
+                }
+            }
+        };
+    }
+
+    // Generate proof harnesses for multiple types with appropriate byte sizes
+    generate_write_volatile_harness!(i8, 1, non_null_check_write_volatile_i8);
+    generate_write_volatile_harness!(i16, 2, non_null_check_write_volatile_i16);
+    generate_write_volatile_harness!(i32, 4, non_null_check_write_volatile_i32);
+    generate_write_volatile_harness!(i64, 8, non_null_check_write_volatile_i64);
+    generate_write_volatile_harness!(i128, 16, non_null_check_write_volatile_i128);
+    generate_write_volatile_harness!(isize, {core::mem::size_of::<isize>()}, non_null_check_write_volatile_isize);
+    generate_write_volatile_harness!(u8, 1, non_null_check_write_volatile_u8);
+    generate_write_volatile_harness!(u16, 2, non_null_check_write_volatile_u16);
+    generate_write_volatile_harness!(u32, 4, non_null_check_write_volatile_u32);
+    generate_write_volatile_harness!(u64, 8, non_null_check_write_volatile_u64);
+    generate_write_volatile_harness!(u128, 16, non_null_check_write_volatile_u128);
+    generate_write_volatile_harness!(usize, {core::mem::size_of::<usize>()}, non_null_check_write_volatile_usize);
+    generate_write_volatile_harness!((), 1, non_null_check_write_volatile_unit);
+
+    #[kani::proof_for_contract(NonNull::byte_add)]
+    pub fn non_null_byte_add_proof() {
+        // Make size as 1000 to ensure the array is large enough to cover various senarios
+        // while maintaining a reasonable proof runtime
+        const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
+        let mut generator = PointerGenerator::<ARR_SIZE>::new();
+
+        let count: usize = kani::any();
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
+
+        unsafe {
+            let ptr = NonNull::new(raw_ptr).unwrap();
+            let result = ptr.byte_add(count);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::byte_add)]
+    pub fn non_null_byte_add_dangling_proof() {
+        let ptr = NonNull::<i32>::dangling();
+        unsafe {
+            let _ = ptr.byte_add(0);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::byte_offset)]
+    pub fn non_null_byte_offset_proof() {
+        const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
+        let mut generator = PointerGenerator::<ARR_SIZE>::new();
+
+        let count: isize = kani::any();
+        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
+
+        unsafe {
+            let ptr = NonNull::new(raw_ptr).unwrap();
+            let result = ptr.byte_offset(count);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::byte_offset_from)]
+    pub fn non_null_byte_offset_from_proof() {
+        const SIZE: usize = mem::size_of::<i32>() * 1000;
+        let mut generator1 = PointerGenerator::<SIZE>::new();
+        let mut generator2 = PointerGenerator::<SIZE>::new();
+
+        let ptr: *mut i32 = generator1.any_in_bounds().ptr as *mut i32;
+
+        let origin: *mut i32 = if kani::any() {
+            generator1.any_in_bounds().ptr as *mut i32
+        } else {
+            generator2.any_in_bounds().ptr as *mut i32
+        };
+
+        let ptr_nonnull = unsafe { NonNull::new(ptr).unwrap() };
+        let origin_nonnull = unsafe { NonNull::new(origin).unwrap() };
+
+        unsafe {
+            let result = ptr_nonnull.byte_offset_from(origin_nonnull);
+        }
+    }
+
+    #[kani::proof_for_contract(NonNull::byte_offset_from)]
+    pub fn non_null_byte_offset_from_dangling_proof() {
+        let origin = NonNull::<i32>::dangling();
+        let ptr = origin;
+        unsafe {
+            let _ = ptr.byte_offset_from(origin);
         }
     }
 }
