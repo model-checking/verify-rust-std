@@ -2307,23 +2307,20 @@ mod macro_nonzero_check_cmp {
         ($t:ty, $nonzero_type:ty, $nonzero_check_cmp_for:ident) => {
             #[kani::proof]
             pub fn $nonzero_check_cmp_for() {
-                let x: $t = kani::any();
-                kani::assume(x != 0);
-                let y: $t = kani::any();
-                kani::assume(y != 0);
-            
+                let int_x: $t = kani::any();
+                kani::assume(int_x != 0);
+                let int_y: $t = kani::any();
+                kani::assume(int_y != 0);
                 unsafe {
-                    let x = <$nonzero_type>::new_unchecked(x);
-                    let y = <$nonzero_type>::new_unchecked(y);
-                }
-            
-            
-                if (x < y) {
-                    assert!(x.cmp(&y) == core::cmp::Ordering::Less);
-                } else if (x > y) {
-                    assert!(x.cmp(&y) == core::cmp::Ordering::Greater);
-                } else {
-                    assert!(x.cmp(&y) == core::cmp::Ordering::Equal);
+                    let x = <$nonzero_type>::new_unchecked(int_x);
+                    let y = <$nonzero_type>::new_unchecked(int_y);
+                    if (x < y) {
+                        assert!(x.cmp(&y) == core::cmp::Ordering::Less);
+                    } else if (x > y) {
+                        assert!(x.cmp(&y) == core::cmp::Ordering::Greater);
+                    } else {
+                        assert!(x.cmp(&y) == core::cmp::Ordering::Equal);
+                    }
                 }
             }
         };
