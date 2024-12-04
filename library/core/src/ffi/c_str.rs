@@ -886,6 +886,68 @@ mod verify {
         }
     }
 
+    // pub fn bytes(&self) -> Bytes<'_>
+    #[kani::proof]
+    #[kani::unwind(32)]
+    fn check_bytes() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let bytes_iterator = c_str.bytes();
+        let bytes_expected = c_str.to_bytes();
+
+        // Compare the bytes obtained from the iterator and the slice
+        // bytes_expected.iter().copied() converts the slice into an iterator over u8
+        assert!(bytes_iterator.eq(bytes_expected.iter().copied()));
+        assert!(c_str.is_safe());
+    }
+
+    // pub const fn to_str(&self) -> Result<&str, str::Utf8Error>
+    #[kani::proof]
+    #[kani::unwind(32)]
+    fn check_to_str() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        // a double conversion here and assertion, if the bytes are still the same, function is valid
+        let str_result = c_str.to_str();
+        if let Ok(s) = str_result {
+            assert_eq!(s.as_bytes(), c_str.to_bytes());
+        }
+        assert!(c_str.is_safe());
+    }
+
+    // pub const fn as_ptr(&self) -> *const c_char
+    #[kani::proof]
+    #[kani::unwind(33)] 
+    fn check_as_ptr() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let ptr = c_str.as_ptr();
+        let bytes_with_nul = c_str.to_bytes_with_nul();
+        let len = bytes_with_nul.len();
+
+        // We ensure that `ptr` is valid for reads of `len` bytes
+        unsafe {
+            for i in 0..len {
+                // Iterate and get each byte in the C string from our raw ptr
+                let byte_at_ptr = *ptr.add(i);
+                // Get the byte at every pos
+                let byte_in_cstr = bytes_with_nul[i];
+                // Compare the two bytes to ensure they are equal
+                assert_eq!(byte_at_ptr as u8, byte_in_cstr);
+            }
+        }
+        assert!(c_str.is_safe());
+    }
+  
     #[kani::proof]
     #[kani::unwind(17)] 
     fn check_from_bytes_with_nul() {

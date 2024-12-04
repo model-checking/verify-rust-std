@@ -405,10 +405,11 @@ impl<T: ?Sized> *mut T {
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
-        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`
-        count.checked_mul(core::mem::size_of::<T>() as isize).is_some() &&
-        // Precondition 2: adding the computed offset to `self` does not cause overflow
-        (self as isize).checked_add((count * core::mem::size_of::<T>() as isize)).is_some() &&
+        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
+        // Precondition 2: adding the computed offset to `self` does not cause overflow.
+        // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
+        count.checked_mul(core::mem::size_of::<T>() as isize)
+        .map_or(false, |computed_offset| (self as isize).checked_add(computed_offset).is_some()) &&
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_offset(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
@@ -1016,11 +1017,13 @@ impl<T: ?Sized> *mut T {
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
-        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`
-        count.checked_mul(core::mem::size_of::<T>()).is_some() &&
-        count * core::mem::size_of::<T>() <= isize::MAX as usize &&
-        // Precondition 2: adding the computed offset to `self` does not cause overflow
-        (self as isize).checked_add((count * core::mem::size_of::<T>()) as isize).is_some() &&
+        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
+        // Precondition 2: adding the computed offset to `self` does not cause overflow.
+        // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani. 
+        count.checked_mul(core::mem::size_of::<T>())
+        .map_or(false, |computed_offset| {
+            computed_offset <= isize::MAX as usize && (self as isize).checked_add(computed_offset as isize).is_some()
+        }) &&
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_add(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
@@ -1140,11 +1143,13 @@ impl<T: ?Sized> *mut T {
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
-        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`
-        count.checked_mul(core::mem::size_of::<T>()).is_some() &&
-        count * core::mem::size_of::<T>() <= isize::MAX as usize &&
-        // Precondition 2: subtracting the computed offset from `self` does not cause overflow
-        (self as isize).checked_sub((count * core::mem::size_of::<T>()) as isize).is_some() &&
+        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
+        // Precondition 2: substracting the computed offset from `self` does not cause overflow.
+        // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
+        count.checked_mul(core::mem::size_of::<T>())
+        .map_or(false, |computed_offset| {
+            computed_offset <= isize::MAX as usize && (self as isize).checked_sub(computed_offset as isize).is_some()
+        }) &&
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_sub(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
@@ -2173,120 +2178,143 @@ impl<T: ?Sized> PartialOrd for *mut T {
 mod verify {
     use crate::kani;
 
-    /// This macro generates proofs for contracts on `add`, `sub`, and `offset`
-    /// operations for pointers to integer, composite, and unit types.
-    /// - `$type`: Specifies the pointee type.
-    /// - `$proof_name`: Specifies the name of the generated proof for contract.
-    macro_rules! generate_mut_arithmetic_harness {
-        ($type:ty, $proof_name:ident, add) => {
-            #[kani::proof_for_contract(<*mut $type>::add)]
+    /// This macro generates a single verification harness for the `offset`, `add`, or `sub`
+    /// pointer operations, supporting integer, composite, or unit types.
+    /// - `$ty`: The type of the slice's elements (e.g., `i32`, `u32`, tuples).
+    /// - `$fn_name`: The name of the function being checked (`add`, `sub`, or `offset`).
+    /// - `$proof_name`: The name assigned to the generated proof for the contract.
+    /// - `$count_ty:ty`: The type of the input variable passed to the method being invoked.
+    ///
+    /// Note: This macro is intended for internal use only and should be invoked exclusively
+    /// by the `generate_arithmetic_harnesses` macro. Its purpose is to reduce code duplication,
+    /// and it is not meant to be used directly elsewhere in the codebase.
+    macro_rules! generate_single_arithmetic_harness {
+        ($ty:ty, $proof_name:ident, $fn_name:ident, $count_ty:ty) => {
+            #[kani::proof_for_contract(<*mut $ty>::$fn_name)]
             pub fn $proof_name() {
                 // 200 bytes are large enough to cover all pointee types used for testing
                 const BUF_SIZE: usize = 200;
                 let mut generator = kani::PointerGenerator::<BUF_SIZE>::new();
-                let test_ptr: *mut $type = generator.any_in_bounds().ptr;
-                let count: usize = kani::any();
+                let test_ptr: *mut $ty = generator.any_in_bounds().ptr;
+                let count: $count_ty = kani::any();
                 unsafe {
-                    test_ptr.add(count);
-                }
-            }
-        };
-        ($type:ty, $proof_name:ident, sub) => {
-            #[kani::proof_for_contract(<*mut $type>::sub)]
-            pub fn $proof_name() {
-                // 200 bytes are large enough to cover all pointee types used for testing
-                const BUF_SIZE: usize = 200;
-                let mut generator = kani::PointerGenerator::<BUF_SIZE>::new();
-                let test_ptr: *mut $type = generator.any_in_bounds().ptr;
-                let count: usize = kani::any();
-                unsafe {
-                    test_ptr.sub(count);
-                }
-            }
-        };
-        ($type:ty, $proof_name:ident, offset) => {
-            #[kani::proof_for_contract(<*mut $type>::offset)]
-            pub fn $proof_name() {
-                // 200 bytes are large enough to cover all pointee types used for testing
-                const BUF_SIZE: usize = 200;
-                let mut generator = kani::PointerGenerator::<BUF_SIZE>::new();
-                let test_ptr: *mut $type = generator.any_in_bounds().ptr;
-                let count: isize = kani::any();
-                unsafe {
-                    test_ptr.offset(count);
+                    test_ptr.$fn_name(count);
                 }
             }
         };
     }
 
-    // <*mut T>:: add() integer types verification
-    generate_mut_arithmetic_harness!(i8, check_mut_add_i8, add);
-    generate_mut_arithmetic_harness!(i16, check_mut_add_i16, add);
-    generate_mut_arithmetic_harness!(i32, check_mut_add_i32, add);
-    generate_mut_arithmetic_harness!(i64, check_mut_add_i64, add);
-    generate_mut_arithmetic_harness!(i128, check_mut_add_i128, add);
-    generate_mut_arithmetic_harness!(isize, check_mut_add_isize, add);
-    // Due to a bug of kani this test case is malfunctioning for now.
+    /// This macro generates verification harnesses for the `offset`, `add`, and `sub`
+    /// pointer operations, supporting integer, composite, and unit types.
+    /// - `$ty`: The pointee type (e.g., i32, u32, tuples).
+    /// - `$offset_fn_name`: The name for the `offset` proof for contract.
+    /// - `$add_fn_name`: The name for the `add` proof for contract.
+    /// - `$sub_fn_name`: The name for the `sub` proof for contract.
+    macro_rules! generate_arithmetic_harnesses {
+        ($ty:ty, $add_fn_name:ident, $sub_fn_name:ident, $offset_fn_name:ident) => {
+            generate_single_arithmetic_harness!($ty, $add_fn_name, add, usize);
+            generate_single_arithmetic_harness!($ty, $sub_fn_name, sub, usize);
+            generate_single_arithmetic_harness!($ty, $offset_fn_name, offset, isize);
+        };
+    }
+
+    // Generate harnesses for unit type (add, sub, offset)
+    generate_arithmetic_harnesses!(
+        (),
+        check_mut_add_unit,
+        check_mut_sub_unit,
+        check_mut_offset_unit
+    );
+
+    // Generate harnesses for integer types (add, sub, offset)
+    generate_arithmetic_harnesses!(i8, check_mut_add_i8, check_mut_sub_i8, check_mut_offset_i8);
+    generate_arithmetic_harnesses!(
+        i16,
+        check_mut_add_i16,
+        check_mut_sub_i16,
+        check_mut_offset_i16
+    );
+    generate_arithmetic_harnesses!(
+        i32,
+        check_mut_add_i32,
+        check_mut_sub_i32,
+        check_mut_offset_i32
+    );
+    generate_arithmetic_harnesses!(
+        i64,
+        check_mut_add_i64,
+        check_mut_sub_i64,
+        check_mut_offset_i64
+    );
+    generate_arithmetic_harnesses!(
+        i128,
+        check_mut_add_i128,
+        check_mut_sub_i128,
+        check_mut_offset_i128
+    );
+    generate_arithmetic_harnesses!(
+        isize,
+        check_mut_add_isize,
+        check_mut_sub_isize,
+        check_mut_offset_isize
+    );
+    // Due to a bug of kani the test `check_mut_add_u8` is malfunctioning for now.
     // Tracking issue: https://github.com/model-checking/kani/issues/3743
-    // generate_mut_arithmetic_harness!(u8, check_mut_add_u8, add);
-    generate_mut_arithmetic_harness!(u16, check_mut_add_u16, add);
-    generate_mut_arithmetic_harness!(u32, check_mut_add_u32, add);
-    generate_mut_arithmetic_harness!(u64, check_mut_add_u64, add);
-    generate_mut_arithmetic_harness!(u128, check_mut_add_u128, add);
-    generate_mut_arithmetic_harness!(usize, check_mut_add_usize, add);
+    // generate_arithmetic_harnesses!(u8, check_mut_add_u8, check_mut_sub_u8, check_mut_offset_u8);
+    generate_arithmetic_harnesses!(
+        u16,
+        check_mut_add_u16,
+        check_mut_sub_u16,
+        check_mut_offset_u16
+    );
+    generate_arithmetic_harnesses!(
+        u32,
+        check_mut_add_u32,
+        check_mut_sub_u32,
+        check_mut_offset_u32
+    );
+    generate_arithmetic_harnesses!(
+        u64,
+        check_mut_add_u64,
+        check_mut_sub_u64,
+        check_mut_offset_u64
+    );
+    generate_arithmetic_harnesses!(
+        u128,
+        check_mut_add_u128,
+        check_mut_sub_u128,
+        check_mut_offset_u128
+    );
+    generate_arithmetic_harnesses!(
+        usize,
+        check_mut_add_usize,
+        check_mut_sub_usize,
+        check_mut_offset_usize
+    );
 
-    // <*mut T>:: add() unit type verification
-    generate_mut_arithmetic_harness!((), check_mut_add_unit, add);
-
-    // <*mut T>:: add() composite types verification
-    generate_mut_arithmetic_harness!((i8, i8), check_mut_add_tuple_1, add);
-    generate_mut_arithmetic_harness!((f64, bool), check_mut_add_tuple_2, add);
-    generate_mut_arithmetic_harness!((i32, f64, bool), check_mut_add_tuple_3, add);
-    generate_mut_arithmetic_harness!((i8, u16, i32, u64, isize), check_mut_add_tuple_4, add);
-
-    // <*mut T>:: sub() integer types verification
-    generate_mut_arithmetic_harness!(i8, check_mut_sub_i8, sub);
-    generate_mut_arithmetic_harness!(i16, check_mut_sub_i16, sub);
-    generate_mut_arithmetic_harness!(i32, check_mut_sub_i32, sub);
-    generate_mut_arithmetic_harness!(i64, check_mut_sub_i64, sub);
-    generate_mut_arithmetic_harness!(i128, check_mut_sub_i128, sub);
-    generate_mut_arithmetic_harness!(isize, check_mut_sub_isize, sub);
-    generate_mut_arithmetic_harness!(u8, check_mut_sub_u8, sub);
-    generate_mut_arithmetic_harness!(u16, check_mut_sub_u16, sub);
-    generate_mut_arithmetic_harness!(u32, check_mut_sub_u32, sub);
-    generate_mut_arithmetic_harness!(u64, check_mut_sub_u64, sub);
-    generate_mut_arithmetic_harness!(u128, check_mut_sub_u128, sub);
-    generate_mut_arithmetic_harness!(usize, check_mut_sub_usize, sub);
-
-    // <*mut T>:: sub() unit type verification
-    generate_mut_arithmetic_harness!((), check_mut_sub_unit, sub);
-
-    // <*mut T>:: sub() composite types verification
-    generate_mut_arithmetic_harness!((i8, i8), check_mut_sub_tuple_1, sub);
-    generate_mut_arithmetic_harness!((f64, bool), check_mut_sub_tuple_2, sub);
-    generate_mut_arithmetic_harness!((i32, f64, bool), check_mut_sub_tuple_3, sub);
-    generate_mut_arithmetic_harness!((i8, u16, i32, u64, isize), check_mut_sub_tuple_4, sub);
-
-    // fn <*mut T>::offset() integer types verification
-    generate_mut_arithmetic_harness!(i8, check_mut_offset_i8, offset);
-    generate_mut_arithmetic_harness!(i16, check_mut_offset_i16, offset);
-    generate_mut_arithmetic_harness!(i32, check_mut_offset_i32, offset);
-    generate_mut_arithmetic_harness!(i64, check_mut_offset_i64, offset);
-    generate_mut_arithmetic_harness!(i128, check_mut_offset_i128, offset);
-    generate_mut_arithmetic_harness!(isize, check_mut_offset_isize, offset);
-    generate_mut_arithmetic_harness!(u8, check_mut_offset_u8, offset);
-    generate_mut_arithmetic_harness!(u16, check_mut_offset_u16, offset);
-    generate_mut_arithmetic_harness!(u32, check_mut_offset_u32, offset);
-    generate_mut_arithmetic_harness!(u64, check_mut_offset_u64, offset);
-    generate_mut_arithmetic_harness!(u128, check_mut_offset_u128, offset);
-    generate_mut_arithmetic_harness!(usize, check_mut_offset_usize, offset);
-
-    // fn <*mut T>::offset() unit type verification
-    generate_mut_arithmetic_harness!((), check_mut_offset_unit, offset);
-
-    // fn <*mut T>::offset() composite type verification
-    generate_mut_arithmetic_harness!((i8, i8), check_mut_offset_tuple_1, offset);
-    generate_mut_arithmetic_harness!((f64, bool), check_mut_offset_tuple_2, offset);
-    generate_mut_arithmetic_harness!((i32, f64, bool), check_mut_offset_tuple_3, offset);
-    generate_mut_arithmetic_harness!((i8, u16, i32, u64, isize), check_mut_offset_tuple_4, offset);
+    // Generte harnesses for composite types (add, sub, offset)
+    generate_arithmetic_harnesses!(
+        (i8, i8),
+        check_mut_add_tuple_1,
+        check_mut_sub_tuple_1,
+        check_mut_offset_tuple_1
+    );
+    generate_arithmetic_harnesses!(
+        (f64, bool),
+        check_mut_add_tuple_2,
+        check_mut_sub_tuple_2,
+        check_mut_offset_tuple_2
+    );
+    generate_arithmetic_harnesses!(
+        (i32, f64, bool),
+        check_mut_add_tuple_3,
+        check_mut_sub_tuple_3,
+        check_mut_offset_tuple_3
+    );
+    generate_arithmetic_harnesses!(
+        (i8, u16, i32, u64, isize),
+        check_mut_add_tuple_4,
+        check_mut_sub_tuple_4,
+        check_mut_offset_tuple_4
+    );
 }
