@@ -1018,12 +1018,11 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
-        && ub_checks::can_dereference(self.as_ptr() as *const MaybeUninit<T>)
-        && ub_checks::can_write(dest.as_ptr())
-        && ub_checks::can_write(dest.as_ptr().add(count)))]
+        && ub_checks::can_dereference(NonNull::slice_from_raw_parts(self, count).as_ptr())
+        && ub_checks::can_write(NonNull::slice_from_raw_parts(dest, count).as_ptr()))]
     #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
         && ub_checks::can_dereference(dest.as_ptr() as *const u8))]
-    #[kani::modifies(dest.as_ptr())]
+    #[kani::modifies(NonNull::slice_from_raw_parts(dest, count).as_ptr())]
     pub const unsafe fn copy_to(self, dest: NonNull<T>, count: usize)
     where
         T: Sized,
