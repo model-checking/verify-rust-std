@@ -1,16 +1,17 @@
 //! Definitions of integer that is known not to equal zero.
 
+use safety::{ensures, requires};
+
 use super::{IntErrorKind, ParseIntError};
 use crate::cmp::Ordering;
 use crate::hash::{Hash, Hasher};
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::{Freeze, StructuralPartialEq};
 use crate::ops::{BitOr, BitOrAssign, Div, DivAssign, Neg, Rem, RemAssign};
 use crate::panic::{RefUnwindSafe, UnwindSafe};
 use crate::str::FromStr;
 use crate::{fmt, intrinsics, ptr, ub_checks};
-use safety::{ensures, requires};
-#[cfg(kani)]
-use crate::kani;
 /// A marker trait for primitive types which can be zero.
 ///
 /// This is an implementation detail for <code>[NonZero]\<T></code> which may disappear or be replaced at any time.
@@ -366,9 +367,9 @@ where
     #[rustc_const_stable(feature = "nonzero", since = "1.28.0")]
     #[must_use]
     #[inline]
-    // #[rustc_allow_const_fn_unstable(const_refs_to_cell)] enables byte-level 
-    // comparisons within const functions. This is needed here to validate the 
-    // contents of `T` by converting a pointer to a `u8` slice for our `requires` 
+    // #[rustc_allow_const_fn_unstable(const_refs_to_cell)] enables byte-level
+    // comparisons within const functions. This is needed here to validate the
+    // contents of `T` by converting a pointer to a `u8` slice for our `requires`
     // and `ensures` checks.
     #[rustc_allow_const_fn_unstable(const_refs_to_cell)]
     #[requires({
@@ -384,7 +385,6 @@ where
         let result_ptr: *const T = &result_inner;
         let n_slice = unsafe { core::slice::from_raw_parts(n_ptr as *const u8, size) };
         let result_slice = unsafe { core::slice::from_raw_parts(result_ptr as *const u8, size) };
-    
         n_slice == result_slice
     })]
     pub const unsafe fn new_unchecked(n: T) -> Self {
@@ -2183,24 +2183,24 @@ nonzero_integer! {
     reversed = "0x6a2c48091e6a2c48",
 }
 
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 #[cfg(kani)]
 mod verify {
-      use super::*;
+    use super::*;
 
     macro_rules! nonzero_check {
         ($t:ty, $nonzero_type:ty, $nonzero_check_new_unchecked_for:ident) => {
             #[kani::proof_for_contract(NonZero::new_unchecked)]
             pub fn $nonzero_check_new_unchecked_for() {
-                let x: $t = kani::any();  // Generates a symbolic value of the provided type
+                let x: $t = kani::any(); // Generates a symbolic value of the provided type
 
                 unsafe {
-                    <$nonzero_type>::new_unchecked(x);  // Calls NonZero::new_unchecked for the specified NonZero type
+                    <$nonzero_type>::new_unchecked(x); // Calls NonZero::new_unchecked for the specified NonZero type
                 }
             }
         };
     }
-    
+
     // Use the macro to generate different versions of the function for multiple types
     nonzero_check!(i8, core::num::NonZeroI8, nonzero_check_new_unchecked_for_i8);
     nonzero_check!(i16, core::num::NonZeroI16, nonzero_check_new_unchecked_for_16);

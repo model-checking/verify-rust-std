@@ -1,12 +1,12 @@
+use safety::{ensures, requires};
+
 use super::*;
 use crate::cmp::Ordering::{Equal, Greater, Less};
 use crate::intrinsics::const_eval_select;
-use crate::mem::SizedTypeProperties;
-use crate::slice::{self, SliceIndex};
-use safety::{ensures, requires};
-
 #[cfg(kani)]
 use crate::kani;
+use crate::mem::SizedTypeProperties;
+use crate::slice::{self, SliceIndex};
 
 impl<T: ?Sized> *const T {
     /// Returns `true` if the pointer is null.
@@ -1917,9 +1917,11 @@ impl<T: ?Sized> PartialOrd for *const T {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use crate::kani;
     use core::mem;
+
     use kani::PointerGenerator;
+
+    use crate::kani;
 
     // Proof for unit size will panic as offset_from needs the pointee size to be greater then 0
     #[kani::proof_for_contract(<*const ()>::offset_from)]
@@ -1976,11 +1978,7 @@ mod verify {
         };
     }
 
-    generate_offset_from_harness!(
-        u8,
-        check_const_offset_from_u8,
-        check_const_offset_from_u8_arr
-    );
+    generate_offset_from_harness!(u8, check_const_offset_from_u8, check_const_offset_from_u8_arr);
     generate_offset_from_harness!(
         u16,
         check_const_offset_from_u16,
@@ -2007,11 +2005,7 @@ mod verify {
         check_const_offset_from_usize_arr
     );
 
-    generate_offset_from_harness!(
-        i8,
-        check_const_offset_from_i8,
-        check_const_offset_from_i8_arr
-    );
+    generate_offset_from_harness!(i8, check_const_offset_from_i8, check_const_offset_from_i8_arr);
     generate_offset_from_harness!(
         i16,
         check_const_offset_from_i16,

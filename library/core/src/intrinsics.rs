@@ -65,12 +65,12 @@
 #![allow(missing_docs)]
 
 use safety::requires;
-use crate::marker::{DiscriminantKind, Tuple};
-use crate::mem::SizedTypeProperties;
-use crate::{ptr, ub_checks};
 
 #[cfg(kani)]
 use crate::kani;
+use crate::marker::{DiscriminantKind, Tuple};
+use crate::mem::SizedTypeProperties;
+use crate::{ptr, ub_checks};
 
 pub mod mir;
 pub mod simd;
@@ -3757,9 +3757,10 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use core::{cmp, fmt};
+
     use super::*;
     use crate::kani;
 

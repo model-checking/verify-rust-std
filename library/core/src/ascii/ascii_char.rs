@@ -4,11 +4,11 @@
 //! helps with clarity as we're also referring to `char` intentionally in here.
 
 use safety::{ensures, requires};
-use crate::mem::transmute;
-use crate::{assert_unsafe_precondition, fmt};
 
 #[cfg(kani)]
 use crate::kani;
+use crate::mem::transmute;
+use crate::{assert_unsafe_precondition, fmt};
 
 /// One of the 128 Unicode characters from U+0000 through U+007F,
 /// often known as the [ASCII] subset.
@@ -623,10 +623,11 @@ impl fmt::Debug for AsciiChar {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use super::*;
     use AsciiChar;
+
+    use super::*;
 
     #[kani::proof_for_contract(AsciiChar::from_u8)]
     fn check_from_u8() {

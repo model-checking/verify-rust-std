@@ -4,15 +4,13 @@ use crate::cmp::Ordering;
 use crate::error::Error;
 use crate::ffi::c_char;
 use crate::iter::FusedIterator;
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::PhantomData;
 use crate::ptr::NonNull;
 use crate::slice::memchr;
-use crate::{fmt, intrinsics, ops, slice, str};
-
 use crate::ub_checks::Invariant;
-
-#[cfg(kani)]
-use crate::kani;
+use crate::{fmt, intrinsics, ops, slice, str};
 
 // FIXME: because this is doc(inline)d, we *have* to use intra-doc links because the actual link
 //   depends on where the item is being documented. however, since this is libcore, we can't
@@ -224,7 +222,7 @@ impl Invariant for &CStr {
         let bytes: &[c_char] = &self.inner;
         let len = bytes.len();
 
-        !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len-1].contains(&0)
+        !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len - 1].contains(&0)
     }
 }
 
@@ -859,7 +857,7 @@ impl FusedIterator for Bytes<'_> {}
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
-    
+
     // Helper function
     fn arbitrary_cstr(slice: &[u8]) -> &CStr {
         let result = CStr::from_bytes_until_nul(&slice);
@@ -884,17 +882,17 @@ mod verify {
             assert!(c_str.is_safe());
         }
     }
-  
+
     // pub const fn count_bytes(&self) -> usize
     #[kani::proof]
     #[kani::unwind(32)]
     fn check_count_bytes() {
         const MAX_SIZE: usize = 32;
         let mut bytes: [u8; MAX_SIZE] = kani::any();
-        
+
         // Non-deterministically generate a length within the valid range [0, MAX_SIZE]
         let mut len: usize = kani::any_where(|&x| x < MAX_SIZE);
-        
+
         // If a null byte exists before the generated length
         // adjust len to its position
         if let Some(pos) = bytes[..len].iter().position(|&x| x == 0) {
@@ -903,7 +901,7 @@ mod verify {
             // If no null byte, insert one at the chosen length
             bytes[len] = 0;
         }
-    
+
         let c_str = CStr::from_bytes_until_nul(&bytes).unwrap();
         // Verify that count_bytes matches the adjusted length
         assert_eq!(c_str.count_bytes(), len);

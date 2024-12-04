@@ -218,8 +218,9 @@ mod predicates {
 
 #[cfg(kani)]
 mod predicates {
-    pub use crate::kani::mem::{can_dereference, can_write, can_read_unaligned, can_write_unaligned,
-    same_allocation};
+    pub use crate::kani::mem::{
+        can_dereference, can_read_unaligned, can_write, can_write_unaligned, same_allocation,
+    };
 }
 
 /// This trait should be used to specify and check type safety invariants for a
@@ -238,7 +239,7 @@ mod predicates {
 /// Therefore, validity invariants must be upheld at all times, while safety
 /// invariants only need to be upheld at the boundaries to safe code.
 pub trait Invariant {
-    /// Specify the type's safety invariants 
+    /// Specify the type's safety invariants
     fn is_safe(&self) -> bool;
 }
 
