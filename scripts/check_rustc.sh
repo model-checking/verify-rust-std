@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs the Rust bootstrap script in order to ensure the changes to this repo
-# is compliant with the Rust repository tests.
+# are compliant with the Rust repository tests.
 #
 # TODO: Need to enable full tidy run.
 
