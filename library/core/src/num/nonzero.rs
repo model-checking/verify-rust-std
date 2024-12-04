@@ -2270,34 +2270,30 @@ mod verify {
 mod macro_nonzero_check_count_ones {
     use super::*;
     macro_rules! nonzero_check_count_ones {
-        ($t:ty, $nonzero_type:ty, $nonzero_check_count_ones_for:ident) => {
+        ($nonzero_type:ty, $nonzero_check_count_ones_for:ident) => {
             #[kani::proof]
             pub fn $nonzero_check_count_ones_for() {
-                let int_x: $t = kani::any();
-                kani::assume(int_x != 0);
-                unsafe {
-                    let x = <$nonzero_type>::new_unchecked(int_x);
-                    let result = x.count_ones();
-                    // Since x is non-zero, count_ones should never return 0
-                    assert!(result.get() > 0);
-                }
+                let x: $nonzero_type = kani::any();
+                let result = x.count_ones();
+                // Since x is non-zero, count_ones should never return 0
+                assert!(result.get() > 0);
             }
         };
     }
 
     // Use the macro to generate different versions of the function for multiple types
-    nonzero_check_count_ones!(i8, core::num::NonZeroI8, nonzero_check_count_ones_for_i8);
-    nonzero_check_count_ones!(i16, core::num::NonZeroI16, nonzero_check_count_ones_for_16);
-    nonzero_check_count_ones!(i32, core::num::NonZeroI32, nonzero_check_count_ones_for_32);
-    nonzero_check_count_ones!(i64, core::num::NonZeroI64, nonzero_check_count_ones_for_64);
-    nonzero_check_count_ones!(i128, core::num::NonZeroI128, nonzero_check_count_ones_for_128);
-    nonzero_check_count_ones!(isize, core::num::NonZeroIsize, nonzero_check_count_ones_for_isize);
-    nonzero_check_count_ones!(u8, core::num::NonZeroU8, nonzero_check_count_ones_for_u8);
-    nonzero_check_count_ones!(u16, core::num::NonZeroU16, nonzero_check_count_ones_for_u16);
-    nonzero_check_count_ones!(u32, core::num::NonZeroU32, nonzero_check_count_ones_for_u32);
-    nonzero_check_count_ones!(u64, core::num::NonZeroU64, nonzero_check_count_ones_for_u64);
-    nonzero_check_count_ones!(u128, core::num::NonZeroU128, nonzero_check_count_ones_for_u128);
-    nonzero_check_count_ones!(usize, core::num::NonZeroUsize, nonzero_check_count_ones_for_usize);
+    nonzero_check_count_ones!(core::num::NonZeroI8, nonzero_check_count_ones_for_i8);
+    nonzero_check_count_ones!(core::num::NonZeroI16, nonzero_check_count_ones_for_i16);
+    nonzero_check_count_ones!(core::num::NonZeroI32, nonzero_check_count_ones_for_i32);
+    nonzero_check_count_ones!(core::num::NonZeroI64, nonzero_check_count_ones_for_i64);
+    nonzero_check_count_ones!(core::num::NonZeroI128, nonzero_check_count_ones_for_i128);
+    nonzero_check_count_ones!(core::num::NonZeroIsize, nonzero_check_count_ones_for_isize);
+    nonzero_check_count_ones!(core::num::NonZeroU8, nonzero_check_count_ones_for_u8);
+    nonzero_check_count_ones!(core::num::NonZeroU16, nonzero_check_count_ones_for_u16);
+    nonzero_check_count_ones!(core::num::NonZeroU32, nonzero_check_count_ones_for_u32);
+    nonzero_check_count_ones!(core::num::NonZeroU64, nonzero_check_count_ones_for_u64);
+    nonzero_check_count_ones!(core::num::NonZeroU128, nonzero_check_count_ones_for_u128);
+    nonzero_check_count_ones!(core::num::NonZeroUsize, nonzero_check_count_ones_for_usize);
 }
 
 #[cfg(kani)]
