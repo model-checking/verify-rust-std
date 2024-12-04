@@ -1474,7 +1474,6 @@ impl<T> NonNull<[T]> {
     #[inline]
     #[must_use]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
-    #[rustc_const_unstable(feature = "slice_ptr_get", issue = "74265")]
     // Address preservation
     #[ensures(|result: &NonNull<T>| result.as_ptr().addr() == self.as_ptr().addr())]
     pub const fn as_non_null_ptr(self) -> NonNull<T> {
