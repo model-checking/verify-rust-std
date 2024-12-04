@@ -2305,3 +2305,44 @@ mod macro_nonzero_check_clamp {
     nonzero_check_clamp!(core::num::NonZeroU128, nonzero_check_clamp_for_u128);
     nonzero_check_clamp!(core::num::NonZeroUsize, nonzero_check_clamp_for_usize);
 }
+
+#[cfg(kani)]
+mod macro_nonzero_check_clamp_panic {
+    use super::*;
+    macro_rules! nonzero_check_clamp_panic {
+        ($nonzero_type:ty, $nonzero_check_clamp_for:ident) => {
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $nonzero_check_clamp_for() {
+                let x: $nonzero_type = kani::any();
+                let min: $nonzero_type = kani::any();
+                let max: $nonzero_type = kani::any();
+                // Ensure min > max, so the function should panic
+                kani::assume(min > max);
+                // Use the clamp function and check the result
+                let result = x.clamp(min, max);
+                if x < min {
+                    assert!(result == min);
+                } else if x > max {
+                    assert!(result == max);
+                } else {
+                    assert!(result == x);
+                }
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_clamp_panic!(core::num::NonZeroI8, nonzero_check_clamp_panic_for_i8);
+    nonzero_check_clamp_panic!(core::num::NonZeroI16, nonzero_check_clamp_panic_for_16);
+    nonzero_check_clamp_panic!(core::num::NonZeroI32, nonzero_check_clamp_panic_for_32);
+    nonzero_check_clamp_panic!(core::num::NonZeroI64, nonzero_check_clamp_panic_for_64);
+    nonzero_check_clamp_panic!(core::num::NonZeroI128, nonzero_check_clamp_panic_for_128);
+    nonzero_check_clamp_panic!(core::num::NonZeroIsize, nonzero_check_clamp_panic_for_isize);
+    nonzero_check_clamp_panic!(core::num::NonZeroU8, nonzero_check_clamp_panic_for_u8);
+    nonzero_check_clamp_panic!(core::num::NonZeroU16, nonzero_check_clamp_panic_for_u16);
+    nonzero_check_clamp_panic!(core::num::NonZeroU32, nonzero_check_clamp_panic_for_u32);
+    nonzero_check_clamp_panic!(core::num::NonZeroU64, nonzero_check_clamp_panic_for_u64);
+    nonzero_check_clamp_panic!(core::num::NonZeroU128, nonzero_check_clamp_panic_for_u128);
+    nonzero_check_clamp_panic!(core::num::NonZeroUsize, nonzero_check_clamp_panic_for_usize);
+}
