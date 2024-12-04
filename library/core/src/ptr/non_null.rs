@@ -511,7 +511,7 @@ impl<T: ?Sized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>() as isize).is_some() &&
        (self.as_ptr() as isize).checked_add(count.wrapping_mul(core::mem::size_of::<T>() as isize)).is_some() &&
-        kani::mem::same_allocation(self.as_ptr() as *const (), self.as_ptr().wrapping_offset(count) as *const ())
+        (count == 0 || kani::mem::same_allocation(self.as_ptr() as *const (), self.as_ptr().wrapping_offset(count) as *const ()))
     )]
     #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_offset(count))]
     pub const unsafe fn offset(self, count: isize) -> Self
@@ -2424,7 +2424,7 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::byte_sub)]
     pub fn non_null_check_byte_sub() {
-        const SIZE: usize = mem::size_of::<i32>() * 100;
+        const SIZE: usize = mem::size_of::<i32>() * 10000;
         let mut generator = PointerGenerator::<SIZE>::new();
         let count: usize = kani::any();
         let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
@@ -2436,7 +2436,7 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::offset)]
     pub fn non_null_check_offset() {
-        const SIZE: usize = mem::size_of::<i32>() * 100;
+        const SIZE: usize = mem::size_of::<i32>() * 10000;
         let mut generator = PointerGenerator::<SIZE>::new();
         let start_ptr = generator.any_in_bounds().ptr as *mut i32;
         let ptr_nonnull = NonNull::new(start_ptr).unwrap();
@@ -2448,7 +2448,7 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::map_addr)]
     pub fn non_null_check_map_addr() {
-        const SIZE: usize = 100;
+        const SIZE: usize = 10000;
         let arr: [i32; SIZE] = kani::any();
         let ptr = NonNull::new(arr.as_ptr() as *mut i32).unwrap();
         let new_offset: usize = kani::any_where(|&x| x <= SIZE);
@@ -2460,7 +2460,7 @@ mod verify {
 
     #[kani::proof_for_contract(NonNull::with_addr)]
     pub fn non_null_check_with_addr() {
-        const SIZE: usize = 100;
+        const SIZE: usize = 10000;
         let arr: [i32; SIZE] = kani::any();
         let ptr = NonNull::new(arr.as_ptr() as *mut i32).unwrap();
         let new_offset: usize = kani::any_where(|&x| x <= SIZE);
