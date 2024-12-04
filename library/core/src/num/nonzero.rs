@@ -2270,32 +2270,28 @@ mod verify {
 mod macro_nonzero_check_rotate_left_and_right {
     use super::*;
     macro_rules! nonzero_check_rotate_left_and_right {
-        ($t:ty, $nonzero_type:ty, $nonzero_check_rotate_right_for:ident) => {
+        ($nonzero_type:ty, $nonzero_check_rotate_for:ident) => {
             #[kani::proof]
-            pub fn $nonzero_check_rotate_right_for() {
-                let int_x: $t = kani::any();
+            pub fn $nonzero_check_rotate_for() {
+                let x: $nonzero_type = kani::any();
                 let n: u32 = kani::any();
-                kani::assume(int_x != 0);
-                unsafe {
-                    let x = <$nonzero_type>::new_unchecked(int_x);
-                    let result = x.rotate_left(n).rotate_right(n);
-                    assert!(result == x);
-                } 
+                let result = x.rotate_left(n).rotate_right(n);
+                assert!(result == x);
             }
         };
     }
 
-    // Use the macro to generate different versions of the function for multiple types
-    nonzero_check_rotate_left_and_right!(i8, core::num::NonZeroI8, nonzero_check_rotate_for_i8);
-    nonzero_check_rotate_left_and_right!(i16, core::num::NonZeroI16, nonzero_check_rotate_for_16);
-    nonzero_check_rotate_left_and_right!(i32, core::num::NonZeroI32, nonzero_check_rotate_for_32);
-    nonzero_check_rotate_left_and_right!(i64, core::num::NonZeroI64, nonzero_check_rotate_for_64);
-    nonzero_check_rotate_left_and_right!(i128, core::num::NonZeroI128, nonzero_check_rotate_for_128);
-    nonzero_check_rotate_left_and_right!(isize, core::num::NonZeroIsize, nonzero_check_rotate_for_isize);
-    nonzero_check_rotate_left_and_right!(u8, core::num::NonZeroU8, nonzero_check_rotate_for_u8);
-    nonzero_check_rotate_left_and_right!(u16, core::num::NonZeroU16, nonzero_check_rotate_for_u16);
-    nonzero_check_rotate_left_and_right!(u32, core::num::NonZeroU32, nonzero_check_rotate_for_u32);
-    nonzero_check_rotate_left_and_right!(u64, core::num::NonZeroU64, nonzero_check_rotate_for_u64);
-    nonzero_check_rotate_left_and_right!(u128, core::num::NonZeroU128, nonzero_check_rotate_for_u128);
-    nonzero_check_rotate_left_and_right!(usize, core::num::NonZeroUsize, nonzero_check_rotate_for_usize);
+    // 为多种类型生成不同的函数版本
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI8, nonzero_check_rotate_for_i8);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI16, nonzero_check_rotate_for_i16);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI32, nonzero_check_rotate_for_i32);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI64, nonzero_check_rotate_for_i64);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI128, nonzero_check_rotate_for_i128);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroIsize, nonzero_check_rotate_for_isize);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU8, nonzero_check_rotate_for_u8);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU16, nonzero_check_rotate_for_u16);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU32, nonzero_check_rotate_for_u32);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU64, nonzero_check_rotate_for_u64);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU128, nonzero_check_rotate_for_u128);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroUsize, nonzero_check_rotate_for_usize);
 }
