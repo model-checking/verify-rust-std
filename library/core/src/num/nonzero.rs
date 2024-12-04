@@ -2270,25 +2270,14 @@ mod verify {
 mod macro_nonzero_check_clamp {
     use super::*;
     macro_rules! nonzero_check_clamp {
-        ($t:ty, $nonzero_type:ty, $nonzero_check_clamp_for:ident) => {
+        ($nonzero_type:ty, $nonzero_check_clamp_for:ident) => {
             #[kani::proof]
             pub fn $nonzero_check_clamp_for() {
-                let x: $t = kani::any();
-                kani::assume(x != 0);
-                let min: $t = kani::any();
-                kani::assume(min != 0);
-                let max: $t = kani::any();
-                kani::assume(max != 0);
-                
-                // Ensure min <= max
+                let x: $nonzero_type = kani::any();
+                let min: $nonzero_type = kani::any();
+                let max: $nonzero_type = kani::any();
+                // Ensure min <= max, so the function should no panic
                 kani::assume(min <= max);
-            
-                unsafe {
-                    let x = <$nonzero_type>::new_unchecked(x);
-                    let min = <$nonzero_type>::new_unchecked(min);
-                    let max = <$nonzero_type>::new_unchecked(max);
-                }
-            
                 // Use the clamp function and check the result
                 let result = x.clamp(min, max);
                 if x < min {
@@ -2303,16 +2292,16 @@ mod macro_nonzero_check_clamp {
     }
 
     // Use the macro to generate different versions of the function for multiple types
-    nonzero_check_clamp!(i8, core::num::NonZeroI8, nonzero_check_clamp_for_i8);
-    nonzero_check_clamp!(i16, core::num::NonZeroI16, nonzero_check_clamp_for_16);
-    nonzero_check_clamp!(i32, core::num::NonZeroI32, nonzero_check_clamp_for_32);
-    nonzero_check_clamp!(i64, core::num::NonZeroI64, nonzero_check_clamp_for_64);
-    nonzero_check_clamp!(i128, core::num::NonZeroI128, nonzero_check_clamp_for_128);
-    nonzero_check_clamp!(isize, core::num::NonZeroIsize, nonzero_check_clamp_for_isize);
-    nonzero_check_clamp!(u8, core::num::NonZeroU8, nonzero_check_clamp_for_u8);
-    nonzero_check_clamp!(u16, core::num::NonZeroU16, nonzero_check_clamp_for_u16);
-    nonzero_check_clamp!(u32, core::num::NonZeroU32, nonzero_check_clamp_for_u32);
-    nonzero_check_clamp!(u64, core::num::NonZeroU64, nonzero_check_clamp_for_u64);
-    nonzero_check_clamp!(u128, core::num::NonZeroU128, nonzero_check_clamp_for_u128);
-    nonzero_check_clamp!(usize, core::num::NonZeroUsize, nonzero_check_clamp_for_usize);
+    nonzero_check_clamp!(core::num::NonZeroI8, nonzero_check_clamp_for_i8);
+    nonzero_check_clamp!(core::num::NonZeroI16, nonzero_check_clamp_for_16);
+    nonzero_check_clamp!(core::num::NonZeroI32, nonzero_check_clamp_for_32);
+    nonzero_check_clamp!(core::num::NonZeroI64, nonzero_check_clamp_for_64);
+    nonzero_check_clamp!(core::num::NonZeroI128, nonzero_check_clamp_for_128);
+    nonzero_check_clamp!(core::num::NonZeroIsize, nonzero_check_clamp_for_isize);
+    nonzero_check_clamp!(core::num::NonZeroU8, nonzero_check_clamp_for_u8);
+    nonzero_check_clamp!(core::num::NonZeroU16, nonzero_check_clamp_for_u16);
+    nonzero_check_clamp!(core::num::NonZeroU32, nonzero_check_clamp_for_u32);
+    nonzero_check_clamp!(core::num::NonZeroU64, nonzero_check_clamp_for_u64);
+    nonzero_check_clamp!(core::num::NonZeroU128, nonzero_check_clamp_for_u128);
+    nonzero_check_clamp!(core::num::NonZeroUsize, nonzero_check_clamp_for_usize);
 }
