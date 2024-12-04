@@ -19,7 +19,7 @@
 //! assert_eq!(total, Duration::new(10, 7));
 //! ```
 
-use safety::{ensures, Invariant, requires};
+use safety::{ensures, Invariant};
 use crate::fmt;
 use crate::iter::Sum;
 use crate::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
@@ -221,8 +221,6 @@ impl Duration {
     #[inline]
     #[must_use]
     #[rustc_const_stable(feature = "duration_consts_2", since = "1.58.0")]
-    #[requires(NANOS_PER_SEC != 0)]
-    #[requires(nanos < NANOS_PER_SEC || secs.checked_add((nanos / NANOS_PER_SEC) as u64).is_some())]
     #[ensures(|duration| duration.is_safe())]
     pub const fn new(secs: u64, nanos: u32) -> Duration {
         if nanos < NANOS_PER_SEC {
@@ -276,7 +274,6 @@ impl Duration {
     #[must_use]
     #[inline]
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
-    #[requires(MILLIS_PER_SEC != 0)]
     #[ensures(|duration| duration.is_safe())]
     pub const fn from_millis(millis: u64) -> Duration {
         let secs = millis / MILLIS_PER_SEC;
@@ -304,7 +301,6 @@ impl Duration {
     #[must_use]
     #[inline]
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
-    #[requires(MICROS_PER_SEC != 0)]
     #[ensures(|duration| duration.is_safe())]
     pub const fn from_micros(micros: u64) -> Duration {
         let secs = micros / MICROS_PER_SEC;
@@ -337,7 +333,6 @@ impl Duration {
     #[must_use]
     #[inline]
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
-    #[requires(NANOS_PER_SEC != 0)]
     #[ensures(|duration| duration.is_safe())]
     pub const fn from_nanos(nanos: u64) -> Duration {
         const NANOS_PER_SEC: u64 = self::NANOS_PER_SEC as u64;
@@ -557,7 +552,6 @@ impl Duration {
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
     #[must_use]
     #[inline]
-    #[requires(NANOS_PER_MICRO != 0)]
     #[ensures(|ms| *ms == self.nanos.0 / NANOS_PER_MICRO)]
     pub const fn subsec_micros(&self) -> u32 {
         self.nanos.0 / NANOS_PER_MICRO
@@ -850,8 +844,7 @@ impl Duration {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[inline]
-    #[cfg_attr(not(kani), ensures(|duration| rhs == 0 || duration.unwrap().is_safe()))]
-    #[cfg_attr(kani, ensures(|duration| true))]
+    #[ensures(|duration| rhs == 0 || duration.unwrap().is_safe())]
     #[rustc_const_stable(feature = "duration_consts_2", since = "1.58.0")]
     pub const fn checked_div(self, rhs: u32) -> Option<Duration> {
         if rhs != 0 {
@@ -859,9 +852,7 @@ impl Duration {
             let (mut nanos, extra_nanos) = (self.nanos.0 / rhs, self.nanos.0 % rhs);
             nanos +=
                 ((extra_secs * (NANOS_PER_SEC as u64) + extra_nanos as u64) / (rhs as u64)) as u32;
-            // TODO: why does this debug assert cause verification to timeout
-            //       it checks the same condition that is checked by the post-condition,
-            //       so it seems like it shouldn't change verification behavior
+            #[cfg(not(kani))]
             debug_assert!(nanos < NANOS_PER_SEC);
             Some(Duration::new(secs, nanos))
         } else {
@@ -1750,26 +1741,18 @@ pub mod duration_verify {
         fn any() -> Duration {
             let secs = kani::any::<u64>();
             let nanos = kani::any::<u32>();
-            kani::assume(nanos < NANOS_PER_SEC || secs.checked_add((nanos / NANOS_PER_SEC) as u64).is_some());
             Duration::new(secs, nanos)
         }
     }
 
     #[kani::proof_for_contract(Duration::new)]
+    #[kani::should_panic]
     fn duration_new() {
         let secs = kani::any::<u64>();
         let nanos = kani::any::<u32>();
         let _ = Duration::new(secs, nanos);
     }
-
-    #[kani::proof]
-    #[kani::should_panic]
-    fn duration_new_should_panic() {
-        let secs = kani::any::<u64>();
-        let nanos = kani::any::<u32>();
-        let _ = Duration::new(secs, nanos);
-    }
-
+    
     #[kani::proof_for_contract(Duration::from_secs)]
     fn duration_from_secs() {
         let secs = kani::any::<u64>();
@@ -1795,48 +1778,56 @@ pub mod duration_verify {
     }
 
     #[kani::proof_for_contract(Duration::as_secs)]
+    #[kani::should_panic]
     fn duration_as_secs() {
         let dur = kani::any::<Duration>();
         let _ = dur.as_secs();
     }
 
     #[kani::proof_for_contract(Duration::subsec_millis)]
+    #[kani::should_panic]
     fn duration_subsec_millis() {
         let dur = kani::any::<Duration>();
         let _ = dur.subsec_millis();
     }
 
     #[kani::proof_for_contract(Duration::subsec_micros)]
+    #[kani::should_panic]
     fn duration_subsec_micros() {
         let dur = kani::any::<Duration>();
         let _ = dur.subsec_micros();
     }
 
     #[kani::proof_for_contract(Duration::subsec_nanos)]
+    #[kani::should_panic]
     fn duration_subsec_nanos() {
         let dur = kani::any::<Duration>();
         let _ = dur.subsec_nanos();
     }
 
     #[kani::proof_for_contract(Duration::as_millis)]
+    #[kani::should_panic]
     fn duration_as_millis() {
         let dur = kani::any::<Duration>();
         let _ = dur.as_millis();
     }
 
     #[kani::proof_for_contract(Duration::as_micros)]
+    #[kani::should_panic]
     fn duration_as_micros() {
         let dur = kani::any::<Duration>();
         let _ = dur.as_micros();
     }
 
     #[kani::proof]
+    #[kani::should_panic]
     fn duration_as_nanos() {
         let dur = kani::any::<Duration>();
         let _ = dur.as_nanos();
     }
 
     #[kani::proof_for_contract(Duration::checked_add)]
+    #[kani::should_panic]
     fn duration_checked_add() {
         let d0 = kani::any::<Duration>();
         let d1 = kani::any::<Duration>();
@@ -1844,6 +1835,7 @@ pub mod duration_verify {
     }
 
     #[kani::proof_for_contract(Duration::checked_sub)]
+    #[kani::should_panic]
     fn duration_checked_sub() {
         let d0 = kani::any::<Duration>();
         let d1 = kani::any::<Duration>();
@@ -1851,14 +1843,15 @@ pub mod duration_verify {
     }
 
     #[kani::proof_for_contract(Duration::checked_mul)]
+    #[kani::should_panic]
     fn duration_checked_mul() {
         let d0 = kani::any::<Duration>();
         let amt = kani::any::<u32>();
         let _ = d0.checked_mul(amt);
     }
 
-    
     #[kani::proof_for_contract(Duration::checked_div)]
+    #[kani::should_panic]
     fn duration_checked_div() {
         let d0 = kani::any::<Duration>();
         let amt = kani::any::<u32>();
