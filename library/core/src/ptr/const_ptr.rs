@@ -33,30 +33,29 @@ impl<T: ?Sized> *const T {
     /// assert!(!ptr.is_null());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_ptr_is_null", issue = "74939")]
+    #[rustc_const_stable(feature = "const_ptr_is_null", since = "CURRENT_RUSTC_VERSION")]
     #[rustc_diagnostic_item = "ptr_const_is_null"]
     #[inline]
+    #[rustc_allow_const_fn_unstable(const_eval_select)]
     pub const fn is_null(self) -> bool {
-        #[inline]
-        fn runtime_impl(ptr: *const u8) -> bool {
-            ptr.addr() == 0
-        }
-
-        #[inline]
-        #[rustc_const_unstable(feature = "const_ptr_is_null", issue = "74939")]
-        const fn const_impl(ptr: *const u8) -> bool {
-            match (ptr).guaranteed_eq(null_mut()) {
-                Some(res) => res,
-                // To remain maximally convervative, we stop execution when we don't
-                // know whether the pointer is null or not.
-                // We can *not* return `false` here, that would be unsound in `NonNull::new`!
-                None => panic!("null-ness of this pointer cannot be determined in const context"),
-            }
-        }
-
         // Compare via a cast to a thin pointer, so fat pointers are only
         // considering their "data" part for null-ness.
-        const_eval_select((self as *const u8,), const_impl, runtime_impl)
+        let ptr = self as *const u8;
+        const_eval_select!(
+            @capture { ptr: *const u8 } -> bool:
+            // This use of `const_raw_ptr_comparison` has been explicitly blessed by t-lang.
+            if const #[rustc_allow_const_fn_unstable(const_raw_ptr_comparison)] {
+                match (ptr).guaranteed_eq(null_mut()) {
+                    Some(res) => res,
+                    // To remain maximally convervative, we stop execution when we don't
+                    // know whether the pointer is null or not.
+                    // We can *not* return `false` here, that would be unsound in `NonNull::new`!
+                    None => panic!("null-ness of this pointer cannot be determined in const context"),
+                }
+            } else {
+                ptr.addr() == 0
+            }
+        )
     }
 
     /// Casts to a pointer of another type.
@@ -244,7 +243,6 @@ impl<T: ?Sized> *const T {
     ///
     /// The pointer can be later reconstructed with [`from_raw_parts`].
     #[unstable(feature = "ptr_metadata", issue = "81513")]
-    #[rustc_const_unstable(feature = "ptr_metadata", issue = "81513")]
     #[inline]
     pub const fn to_raw_parts(self) -> (*const (), <T as super::Pointee>::Metadata) {
         (self.cast(), metadata(self))
@@ -288,7 +286,7 @@ impl<T: ?Sized> *const T {
     /// }
     /// ```
     #[stable(feature = "ptr_as_ref", since = "1.9.0")]
-    #[rustc_const_unstable(feature = "const_ptr_is_null", issue = "74939")]
+    #[rustc_const_stable(feature = "const_ptr_is_null", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
     pub const unsafe fn as_ref<'a>(self) -> Option<&'a T> {
         // SAFETY: the caller must guarantee that `self` is valid
@@ -320,7 +318,6 @@ impl<T: ?Sized> *const T {
     /// ```
     // FIXME: mention it in the docs for `as_ref` and `as_uninit_ref` once stabilized.
     #[unstable(feature = "ptr_as_ref_unchecked", issue = "122034")]
-    #[rustc_const_unstable(feature = "ptr_as_ref_unchecked", issue = "122034")]
     #[inline]
     #[must_use]
     pub const unsafe fn as_ref_unchecked<'a>(self) -> &'a T {
@@ -409,6 +406,21 @@ impl<T: ?Sized> *const T {
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(
+        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
+        // Precondition 2: adding the computed offset to `self` does not cause overflow.
+        // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
+        count.checked_mul(core::mem::size_of::<T>() as isize)
+        .map_or(false, |computed_offset| (self as isize).checked_add(computed_offset).is_some()) &&
+        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        // Otherwise, for non-unit types, `self` and `self.wrapping_offset(count)` should point to the same allocated object,
+        // restricting `count` to prevent crossing allocation boundaries.
+        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_offset(count))))
+    )]
+    // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
+    // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
+    // verifying that the result remains within the same allocation as `self`.
+    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self, *result as *const T))]
     pub const unsafe fn offset(self, count: isize) -> *const T
     where
         T: Sized,
@@ -416,22 +428,21 @@ impl<T: ?Sized> *const T {
         #[inline]
         #[rustc_allow_const_fn_unstable(const_eval_select)]
         const fn runtime_offset_nowrap(this: *const (), count: isize, size: usize) -> bool {
-            #[inline]
-            fn runtime(this: *const (), count: isize, size: usize) -> bool {
-                // We know `size <= isize::MAX` so the `as` cast here is not lossy.
-                let Some(byte_offset) = count.checked_mul(size as isize) else {
-                    return false;
-                };
-                let (_, overflow) = this.addr().overflowing_add_signed(byte_offset);
-                !overflow
-            }
-
-            const fn comptime(_: *const (), _: isize, _: usize) -> bool {
-                true
-            }
-
             // We can use const_eval_select here because this is only for UB checks.
-            intrinsics::const_eval_select((this, count, size), comptime, runtime)
+            const_eval_select!(
+                @capture { this: *const (), count: isize, size: usize } -> bool:
+                if const {
+                    true
+                } else {
+                    // `size` is the size of a Rust type, so we know that
+                    // `size <= isize::MAX` and thus `as` cast here is not lossy.
+                    let Some(byte_offset) = count.checked_mul(size as isize) else {
+                        return false;
+                    };
+                    let (_, overflow) = this.addr().overflowing_add_signed(byte_offset);
+                    !overflow
+                }
+            )
         }
 
         ub_checks::assert_unsafe_precondition!(
@@ -677,7 +688,7 @@ impl<T: ?Sized> *const T {
         // Ensure the distance between `self` and `origin` is aligned to `T`
         (self as isize - origin as isize) % (mem::size_of::<T>() as isize) == 0 &&
         // Ensure both pointers are in the same allocation or are pointing to the same address
-        (self as isize == origin as isize || kani::mem::same_allocation(self, origin))
+        (self as isize == origin as isize || core::ub_checks::same_allocation(self, origin))
     )]
     // The result should equal the distance in terms of elements of type `T` as per the documentation above
     #[ensures(|result| *result == (self as isize - origin as isize) / (mem::size_of::<T>() as isize))]
@@ -779,14 +790,14 @@ impl<T: ?Sized> *const T {
     {
         #[rustc_allow_const_fn_unstable(const_eval_select)]
         const fn runtime_ptr_ge(this: *const (), origin: *const ()) -> bool {
-            fn runtime(this: *const (), origin: *const ()) -> bool {
-                this >= origin
-            }
-            const fn comptime(_: *const (), _: *const ()) -> bool {
-                true
-            }
-
-            intrinsics::const_eval_select((this, origin), comptime, runtime)
+            const_eval_select!(
+                @capture { this: *const (), origin: *const () } -> bool:
+                if const {
+                    true
+                } else {
+                    this >= origin
+                }
+            )
         }
 
         ub_checks::assert_unsafe_precondition!(
@@ -932,6 +943,23 @@ impl<T: ?Sized> *const T {
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(
+        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
+        // Precondition 2: adding the computed offset to `self` does not cause overflow.
+        // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani. 
+        count.checked_mul(core::mem::size_of::<T>())
+        .map_or(false, |computed_offset| {
+            computed_offset <= isize::MAX as usize && (self as isize).checked_add(computed_offset as isize).is_some()
+        }) &&
+        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        // Otherwise, for non-unit types, `self` and `self.wrapping_add(count)` should point to the same allocated object,
+        // restricting `count` to prevent crossing allocation boundaries.
+        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_add(count))))
+    )]
+    // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
+    // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
+    // verifying that the result remains within the same allocation as `self`.
+    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self, *result as *const T))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
@@ -940,20 +968,18 @@ impl<T: ?Sized> *const T {
         #[inline]
         #[rustc_allow_const_fn_unstable(const_eval_select)]
         const fn runtime_add_nowrap(this: *const (), count: usize, size: usize) -> bool {
-            #[inline]
-            fn runtime(this: *const (), count: usize, size: usize) -> bool {
-                let Some(byte_offset) = count.checked_mul(size) else {
-                    return false;
-                };
-                let (_, overflow) = this.addr().overflowing_add(byte_offset);
-                byte_offset <= (isize::MAX as usize) && !overflow
-            }
-
-            const fn comptime(_: *const (), _: usize, _: usize) -> bool {
-                true
-            }
-
-            intrinsics::const_eval_select((this, count, size), comptime, runtime)
+            const_eval_select!(
+                @capture { this: *const (), count: usize, size: usize } -> bool:
+                if const {
+                    true
+                } else {
+                    let Some(byte_offset) = count.checked_mul(size) else {
+                        return false;
+                    };
+                    let (_, overflow) = this.addr().overflowing_add(byte_offset);
+                    byte_offset <= (isize::MAX as usize) && !overflow
+                }
+            )
         }
 
         #[cfg(debug_assertions)] // Expensive, and doesn't catch much in the wild.
@@ -1041,6 +1067,23 @@ impl<T: ?Sized> *const T {
     #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(unchecked_neg))]
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(
+        // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
+        // Precondition 2: substracting the computed offset from `self` does not cause overflow.
+        // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
+        count.checked_mul(core::mem::size_of::<T>())
+        .map_or(false, |computed_offset| {
+            computed_offset <= isize::MAX as usize && (self as isize).checked_sub(computed_offset as isize).is_some()
+        }) &&
+        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        // Otherwise, for non-unit types, `self` and `self.wrapping_sub(count)` should point to the same allocated object,
+        // restricting `count` to prevent crossing allocation boundaries.
+        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_sub(count))))
+    )]
+    // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
+    // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
+    // verifying that the result remains within the same allocation as `self`.
+    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self, *result as *const T))]
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -1049,19 +1092,17 @@ impl<T: ?Sized> *const T {
         #[inline]
         #[rustc_allow_const_fn_unstable(const_eval_select)]
         const fn runtime_sub_nowrap(this: *const (), count: usize, size: usize) -> bool {
-            #[inline]
-            fn runtime(this: *const (), count: usize, size: usize) -> bool {
-                let Some(byte_offset) = count.checked_mul(size) else {
-                    return false;
-                };
-                byte_offset <= (isize::MAX as usize) && this.addr() >= byte_offset
-            }
-
-            const fn comptime(_: *const (), _: usize, _: usize) -> bool {
-                true
-            }
-
-            intrinsics::const_eval_select((this, count, size), comptime, runtime)
+            const_eval_select!(
+                @capture { this: *const (), count: usize, size: usize } -> bool:
+                if const {
+                    true
+                } else {
+                    let Some(byte_offset) = count.checked_mul(size) else {
+                        return false;
+                    };
+                    byte_offset <= (isize::MAX as usize) && this.addr() >= byte_offset
+                }
+            )
         }
 
         #[cfg(debug_assertions)] // Expensive, and doesn't catch much in the wild.
@@ -1374,15 +1415,6 @@ impl<T: ?Sized> *const T {
     /// beyond the allocation that the pointer points into. It is up to the caller to ensure that
     /// the returned offset is correct in all terms other than alignment.
     ///
-    /// When this is called during compile-time evaluation (which is unstable), the implementation
-    /// may return `usize::MAX` in cases where that can never happen at runtime. This is because the
-    /// actual alignment of pointers is not known yet during compile-time, so an offset with
-    /// guaranteed alignment can sometimes not be computed. For example, a buffer declared as `[u8;
-    /// N]` might be allocated at an odd or an even address, but at compile-time this is not yet
-    /// known, so the execution has to be correct for either choice. It is therefore impossible to
-    /// find an offset that is guaranteed to be 2-aligned. (This behavior is subject to change, as usual
-    /// for unstable APIs.)
-    ///
     /// # Panics
     ///
     /// The function panics if `align` is not a power-of-two.
@@ -1411,8 +1443,7 @@ impl<T: ?Sized> *const T {
     #[must_use]
     #[inline]
     #[stable(feature = "align_offset", since = "1.36.0")]
-    #[rustc_const_unstable(feature = "const_align_offset", issue = "90962")]
-    pub const fn align_offset(self, align: usize) -> usize
+    pub fn align_offset(self, align: usize) -> usize
     where
         T: Sized,
     {
@@ -1447,94 +1478,10 @@ impl<T: ?Sized> *const T {
     /// assert!(ptr.is_aligned());
     /// assert!(!ptr.wrapping_byte_add(1).is_aligned());
     /// ```
-    ///
-    /// # At compiletime
-    /// **Note: Alignment at compiletime is experimental and subject to change. See the
-    /// [tracking issue] for details.**
-    ///
-    /// At compiletime, the compiler may not know where a value will end up in memory.
-    /// Calling this function on a pointer created from a reference at compiletime will only
-    /// return `true` if the pointer is guaranteed to be aligned. This means that the pointer
-    /// is never aligned if cast to a type with a stricter alignment than the reference's
-    /// underlying allocation.
-    ///
-    /// ```
-    /// #![feature(const_pointer_is_aligned)]
-    ///
-    /// // On some platforms, the alignment of primitives is less than their size.
-    /// #[repr(align(4))]
-    /// struct AlignedI32(i32);
-    /// #[repr(align(8))]
-    /// struct AlignedI64(i64);
-    ///
-    /// const _: () = {
-    ///     let data = AlignedI32(42);
-    ///     let ptr = &data as *const AlignedI32;
-    ///     assert!(ptr.is_aligned());
-    ///
-    ///     // At runtime either `ptr1` or `ptr2` would be aligned, but at compiletime neither is aligned.
-    ///     let ptr1 = ptr.cast::<AlignedI64>();
-    ///     let ptr2 = ptr.wrapping_add(1).cast::<AlignedI64>();
-    ///     assert!(!ptr1.is_aligned());
-    ///     assert!(!ptr2.is_aligned());
-    /// };
-    /// ```
-    ///
-    /// Due to this behavior, it is possible that a runtime pointer derived from a compiletime
-    /// pointer is aligned, even if the compiletime pointer wasn't aligned.
-    ///
-    /// ```
-    /// #![feature(const_pointer_is_aligned)]
-    ///
-    /// // On some platforms, the alignment of primitives is less than their size.
-    /// #[repr(align(4))]
-    /// struct AlignedI32(i32);
-    /// #[repr(align(8))]
-    /// struct AlignedI64(i64);
-    ///
-    /// // At compiletime, neither `COMPTIME_PTR` nor `COMPTIME_PTR + 1` is aligned.
-    /// const COMPTIME_PTR: *const AlignedI32 = &AlignedI32(42);
-    /// const _: () = assert!(!COMPTIME_PTR.cast::<AlignedI64>().is_aligned());
-    /// const _: () = assert!(!COMPTIME_PTR.wrapping_add(1).cast::<AlignedI64>().is_aligned());
-    ///
-    /// // At runtime, either `runtime_ptr` or `runtime_ptr + 1` is aligned.
-    /// let runtime_ptr = COMPTIME_PTR;
-    /// assert_ne!(
-    ///     runtime_ptr.cast::<AlignedI64>().is_aligned(),
-    ///     runtime_ptr.wrapping_add(1).cast::<AlignedI64>().is_aligned(),
-    /// );
-    /// ```
-    ///
-    /// If a pointer is created from a fixed address, this function behaves the same during
-    /// runtime and compiletime.
-    ///
-    /// ```
-    /// #![feature(const_pointer_is_aligned)]
-    ///
-    /// // On some platforms, the alignment of primitives is less than their size.
-    /// #[repr(align(4))]
-    /// struct AlignedI32(i32);
-    /// #[repr(align(8))]
-    /// struct AlignedI64(i64);
-    ///
-    /// const _: () = {
-    ///     let ptr = 40 as *const AlignedI32;
-    ///     assert!(ptr.is_aligned());
-    ///
-    ///     // For pointers with a known address, runtime and compiletime behavior are identical.
-    ///     let ptr1 = ptr.cast::<AlignedI64>();
-    ///     let ptr2 = ptr.wrapping_add(1).cast::<AlignedI64>();
-    ///     assert!(ptr1.is_aligned());
-    ///     assert!(!ptr2.is_aligned());
-    /// };
-    /// ```
-    ///
-    /// [tracking issue]: https://github.com/rust-lang/rust/issues/104203
     #[must_use]
     #[inline]
     #[stable(feature = "pointer_is_aligned", since = "1.79.0")]
-    #[rustc_const_unstable(feature = "const_pointer_is_aligned", issue = "104203")]
-    pub const fn is_aligned(self) -> bool
+    pub fn is_aligned(self) -> bool
     where
         T: Sized,
     {
@@ -1571,105 +1518,15 @@ impl<T: ?Sized> *const T {
     ///
     /// assert_ne!(ptr.is_aligned_to(8), ptr.wrapping_add(1).is_aligned_to(8));
     /// ```
-    ///
-    /// # At compiletime
-    /// **Note: Alignment at compiletime is experimental and subject to change. See the
-    /// [tracking issue] for details.**
-    ///
-    /// At compiletime, the compiler may not know where a value will end up in memory.
-    /// Calling this function on a pointer created from a reference at compiletime will only
-    /// return `true` if the pointer is guaranteed to be aligned. This means that the pointer
-    /// cannot be stricter aligned than the reference's underlying allocation.
-    ///
-    /// ```
-    /// #![feature(pointer_is_aligned_to)]
-    /// #![feature(const_pointer_is_aligned)]
-    ///
-    /// // On some platforms, the alignment of i32 is less than 4.
-    /// #[repr(align(4))]
-    /// struct AlignedI32(i32);
-    ///
-    /// const _: () = {
-    ///     let data = AlignedI32(42);
-    ///     let ptr = &data as *const AlignedI32;
-    ///
-    ///     assert!(ptr.is_aligned_to(1));
-    ///     assert!(ptr.is_aligned_to(2));
-    ///     assert!(ptr.is_aligned_to(4));
-    ///
-    ///     // At compiletime, we know for sure that the pointer isn't aligned to 8.
-    ///     assert!(!ptr.is_aligned_to(8));
-    ///     assert!(!ptr.wrapping_add(1).is_aligned_to(8));
-    /// };
-    /// ```
-    ///
-    /// Due to this behavior, it is possible that a runtime pointer derived from a compiletime
-    /// pointer is aligned, even if the compiletime pointer wasn't aligned.
-    ///
-    /// ```
-    /// #![feature(pointer_is_aligned_to)]
-    /// #![feature(const_pointer_is_aligned)]
-    ///
-    /// // On some platforms, the alignment of i32 is less than 4.
-    /// #[repr(align(4))]
-    /// struct AlignedI32(i32);
-    ///
-    /// // At compiletime, neither `COMPTIME_PTR` nor `COMPTIME_PTR + 1` is aligned.
-    /// const COMPTIME_PTR: *const AlignedI32 = &AlignedI32(42);
-    /// const _: () = assert!(!COMPTIME_PTR.is_aligned_to(8));
-    /// const _: () = assert!(!COMPTIME_PTR.wrapping_add(1).is_aligned_to(8));
-    ///
-    /// // At runtime, either `runtime_ptr` or `runtime_ptr + 1` is aligned.
-    /// let runtime_ptr = COMPTIME_PTR;
-    /// assert_ne!(
-    ///     runtime_ptr.is_aligned_to(8),
-    ///     runtime_ptr.wrapping_add(1).is_aligned_to(8),
-    /// );
-    /// ```
-    ///
-    /// If a pointer is created from a fixed address, this function behaves the same during
-    /// runtime and compiletime.
-    ///
-    /// ```
-    /// #![feature(pointer_is_aligned_to)]
-    /// #![feature(const_pointer_is_aligned)]
-    ///
-    /// const _: () = {
-    ///     let ptr = 40 as *const u8;
-    ///     assert!(ptr.is_aligned_to(1));
-    ///     assert!(ptr.is_aligned_to(2));
-    ///     assert!(ptr.is_aligned_to(4));
-    ///     assert!(ptr.is_aligned_to(8));
-    ///     assert!(!ptr.is_aligned_to(16));
-    /// };
-    /// ```
-    ///
-    /// [tracking issue]: https://github.com/rust-lang/rust/issues/104203
     #[must_use]
     #[inline]
     #[unstable(feature = "pointer_is_aligned_to", issue = "96284")]
-    #[rustc_const_unstable(feature = "const_pointer_is_aligned", issue = "104203")]
-    pub const fn is_aligned_to(self, align: usize) -> bool {
+    pub fn is_aligned_to(self, align: usize) -> bool {
         if !align.is_power_of_two() {
             panic!("is_aligned_to: align is not a power-of-two");
         }
 
-        #[inline]
-        fn runtime_impl(ptr: *const (), align: usize) -> bool {
-            ptr.addr() & (align - 1) == 0
-        }
-
-        #[inline]
-        #[rustc_const_unstable(feature = "const_pointer_is_aligned", issue = "104203")]
-        const fn const_impl(ptr: *const (), align: usize) -> bool {
-            // We can't use the address of `self` in a `const fn`, so we use `align_offset` instead.
-            ptr.align_offset(align) == 0
-        }
-
-        // The cast to `()` is used to
-        //   1. deal with fat pointers; and
-        //   2. ensure that `align_offset` (in `const_impl`) doesn't actually try to compute an offset.
-        const_eval_select((self.cast::<()>(), align), const_impl, runtime_impl)
+        self.addr() & (align - 1) == 0
     }
 }
 
@@ -1728,7 +1585,6 @@ impl<T> *const [T] {
     /// ```
     #[inline]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
-    #[rustc_const_unstable(feature = "slice_ptr_get", issue = "74265")]
     pub const fn as_ptr(self) -> *const T {
         self as *const T
     }
@@ -1828,7 +1684,6 @@ impl<T, const N: usize> *const [T; N] {
     /// ```
     #[inline]
     #[unstable(feature = "array_ptr_get", issue = "119834")]
-    #[rustc_const_unstable(feature = "array_ptr_get", issue = "119834")]
     pub const fn as_ptr(self) -> *const T {
         self as *const T
     }
@@ -1846,7 +1701,6 @@ impl<T, const N: usize> *const [T; N] {
     /// ```
     #[inline]
     #[unstable(feature = "array_ptr_get", issue = "119834")]
-    #[rustc_const_unstable(feature = "array_ptr_get", issue = "119834")]
     pub const fn as_slice(self) -> *const [T] {
         self
     }
@@ -1921,19 +1775,300 @@ mod verify {
     use core::mem;
     use kani::PointerGenerator;
 
-    // Proof for unit size will panic as offset_from needs the pointee size to be greater then 0
-    #[kani::proof_for_contract(<*const ()>::offset_from)]
-    #[kani::should_panic]
-    pub fn check_const_offset_from_unit() {
-        let val: () = ();
-        let src_ptr: *const () = &val;
-        let dest_ptr: *const () = &val;
-        unsafe {
-            dest_ptr.offset_from(src_ptr);
-        }
+    /// This macro generates a single verification harness for the `offset`, `add`, or `sub`
+    /// pointer operations, supporting integer, composite, or unit types.
+    /// - `$ty`: The type of the slice's elements (e.g., `i32`, `u32`, tuples).
+    /// - `$fn_name`: The name of the function being checked (`add`, `sub`, or `offset`).
+    /// - `$proof_name`: The name assigned to the generated proof for the contract.
+    /// - `$count_ty:ty`: The type of the input variable passed to the method being invoked.
+    ///
+    /// Note: This macro is intended for internal use only and should be invoked exclusively
+    /// by the `generate_arithmetic_harnesses` macro. Its purpose is to reduce code duplication,
+    /// and it is not meant to be used directly elsewhere in the codebase.
+    macro_rules! generate_single_arithmetic_harness {
+        ($ty:ty, $proof_name:ident, $fn_name:ident, $count_ty:ty) => {
+            #[kani::proof_for_contract(<*const $ty>::$fn_name)]
+            pub fn $proof_name() {
+                // 200 bytes are large enough to cover all pointee types used for testing
+                const BUF_SIZE: usize = 200;
+                let mut generator = kani::PointerGenerator::<BUF_SIZE>::new();
+                let test_ptr: *const $ty = generator.any_in_bounds().ptr;
+                let count: $count_ty = kani::any();
+                unsafe {
+                    test_ptr.$fn_name(count);
+                }
+            }
+        };
     }
 
-    // Array size bound for kani::any_array
+    /// This macro generates verification harnesses for the `offset`, `add`, and `sub`
+    /// pointer operations, supporting integer, composite, or unit types.
+    /// - `$ty`: The pointee type (e.g., i32, u32, tuples).
+    /// - `$offset_fn_name`: The name for the `offset` proof for contract.
+    /// - `$add_fn_name`: The name for the `add` proof for contract.
+    /// - `$sub_fn_name`: The name for the `sub` proof for contract.
+    macro_rules! generate_arithmetic_harnesses {
+        ($ty:ty, $add_fn_name:ident, $sub_fn_name:ident, $offset_fn_name:ident) => {
+            generate_single_arithmetic_harness!($ty, $add_fn_name, add, usize);
+            generate_single_arithmetic_harness!($ty, $sub_fn_name, sub, usize);
+            generate_single_arithmetic_harness!($ty, $offset_fn_name, offset, isize);
+        };
+    }
+
+    // Generate harnesses for unit type (add, sub, offset)
+    generate_arithmetic_harnesses!(
+        (),
+        check_const_add_unit,
+        check_const_sub_unit,
+        check_const_offset_unit
+    );
+
+    // Generate harnesses for integer types (add, sub, offset)
+    generate_arithmetic_harnesses!(
+        i8,
+        check_const_add_i8,
+        check_const_sub_i8,
+        check_const_offset_i8
+    );
+    generate_arithmetic_harnesses!(
+        i16,
+        check_const_add_i16,
+        check_const_sub_i16,
+        check_const_offset_i16
+    );
+    generate_arithmetic_harnesses!(
+        i32,
+        check_const_add_i32,
+        check_const_sub_i32,
+        check_const_offset_i32
+    );
+    generate_arithmetic_harnesses!(
+        i64,
+        check_const_add_i64,
+        check_const_sub_i64,
+        check_const_offset_i64
+    );
+    generate_arithmetic_harnesses!(
+        i128,
+        check_const_add_i128,
+        check_const_sub_i128,
+        check_const_offset_i128
+    );
+    generate_arithmetic_harnesses!(
+        isize,
+        check_const_add_isize,
+        check_const_sub_isize,
+        check_const_offset_isize
+    );
+    generate_arithmetic_harnesses!(
+        u8,
+        check_const_add_u8,
+        check_const_sub_u8,
+        check_const_offset_u8
+    );
+    generate_arithmetic_harnesses!(
+        u16,
+        check_const_add_u16,
+        check_const_sub_u16,
+        check_const_offset_u16
+    );
+    generate_arithmetic_harnesses!(
+        u32,
+        check_const_add_u32,
+        check_const_sub_u32,
+        check_const_offset_u32
+    );
+    generate_arithmetic_harnesses!(
+        u64,
+        check_const_add_u64,
+        check_const_sub_u64,
+        check_const_offset_u64
+    );
+    generate_arithmetic_harnesses!(
+        u128,
+        check_const_add_u128,
+        check_const_sub_u128,
+        check_const_offset_u128
+    );
+    generate_arithmetic_harnesses!(
+        usize,
+        check_const_add_usize,
+        check_const_sub_usize,
+        check_const_offset_usize
+    );
+
+    // Generte harnesses for composite types (add, sub, offset)
+    generate_arithmetic_harnesses!(
+        (i8, i8),
+        check_const_add_tuple_1,
+        check_const_sub_tuple_1,
+        check_const_offset_tuple_1
+    );
+    generate_arithmetic_harnesses!(
+        (f64, bool),
+        check_const_add_tuple_2,
+        check_const_sub_tuple_2,
+        check_const_offset_tuple_2
+    );
+    generate_arithmetic_harnesses!(
+        (i32, f64, bool),
+        check_const_add_tuple_3,
+        check_const_sub_tuple_3,
+        check_const_offset_tuple_3
+    );
+    generate_arithmetic_harnesses!(
+        (i8, u16, i32, u64, isize),
+        check_const_add_tuple_4,
+        check_const_sub_tuple_4,
+        check_const_offset_tuple_4
+    );
+
+    // Constant for array size used in all tests
+    const ARRAY_SIZE: usize = 5;
+
+    /// This macro generates a single verification harness for the `offset`, `add`, or `sub`
+    /// pointer operations for a slice type.
+    /// - `$ty`: The type of the array's elements (e.g., `i32`, `u32`, tuples).
+    /// - `$fn_name`: The name of the function being checked (`add`, `sub`, or `offset`).
+    /// - `$proof_name`: The name assigned to the generated proof for the contract.
+    /// - `$count_ty:ty`: The type of the input variable passed to the method being invoked.
+    ///
+    /// Note: This macro is intended for internal use only and should be invoked exclusively
+    /// by the `generate_slice_harnesses` macro. Its purpose is to reduce code duplication,
+    /// and it is not meant to be used directly elsewhere in the codebase.
+    macro_rules! generate_single_slice_harness {
+        ($ty:ty, $proof_name:ident, $fn_name:ident, $count_ty:ty) => {
+            #[kani::proof_for_contract(<*const $ty>::$fn_name)]
+            fn $proof_name() {
+                let arr: [$ty; ARRAY_SIZE] = kani::Arbitrary::any_array();
+                let test_ptr: *const $ty = arr.as_ptr();
+                let offset: usize = kani::any();
+                kani::assume(offset <= ARRAY_SIZE * mem::size_of::<$ty>());
+                let ptr_with_offset: *const $ty = test_ptr.wrapping_byte_add(offset);
+
+                let count: $count_ty = kani::any();
+                unsafe {
+                    ptr_with_offset.$fn_name(count);
+                }
+            }
+        };
+    }
+
+    /// This macro generates verification harnesses for the `offset`, `add`, and `sub`
+    /// pointer operations for a slice type.
+    /// - `$ty`: The type of the array (e.g., i32, u32, tuples).
+    /// - `$offset_fn_name`: The name for the `offset` proof for contract.
+    /// - `$add_fn_name`: The name for the `add` proof for contract.
+    /// - `$sub_fn_name`: The name for the `sub` proof for contract.
+    macro_rules! generate_slice_harnesses {
+        ($ty:ty, $add_fn_name:ident, $sub_fn_name:ident, $offset_fn_name:ident) => {
+            generate_single_slice_harness!($ty, $add_fn_name, add, usize);
+            generate_single_slice_harness!($ty, $sub_fn_name, sub, usize);
+            generate_single_slice_harness!($ty, $offset_fn_name, offset, isize);
+        };
+    }
+
+    // Generate slice harnesses for various types (add, sub, offset)
+    generate_slice_harnesses!(
+        i8,
+        check_const_add_slice_i8,
+        check_const_sub_slice_i8,
+        check_const_offset_slice_i8
+    );
+    generate_slice_harnesses!(
+        i16,
+        check_const_add_slice_i16,
+        check_const_sub_slice_i16,
+        check_const_offset_slice_i16
+    );
+    generate_slice_harnesses!(
+        i32,
+        check_const_add_slice_i32,
+        check_const_sub_slice_i32,
+        check_const_offset_slice_i32
+    );
+    generate_slice_harnesses!(
+        i64,
+        check_const_add_slice_i64,
+        check_const_sub_slice_i64,
+        check_const_offset_slice_i64
+    );
+    generate_slice_harnesses!(
+        i128,
+        check_const_add_slice_i128,
+        check_const_sub_slice_i128,
+        check_const_offset_slice_i128
+    );
+    generate_slice_harnesses!(
+        isize,
+        check_const_add_slice_isize,
+        check_const_sub_slice_isize,
+        check_const_offset_slice_isize
+    );
+    generate_slice_harnesses!(
+        u8,
+        check_const_add_slice_u8,
+        check_const_sub_slice_u8,
+        check_const_offset_slice_u8
+    );
+    generate_slice_harnesses!(
+        u16,
+        check_const_add_slice_u16,
+        check_const_sub_slice_u16,
+        check_const_offset_slice_u16
+    );
+    generate_slice_harnesses!(
+        u32,
+        check_const_add_slice_u32,
+        check_const_sub_slice_u32,
+        check_const_offset_slice_u32
+    );
+    generate_slice_harnesses!(
+        u64,
+        check_const_add_slice_u64,
+        check_const_sub_slice_u64,
+        check_const_offset_slice_u64
+    );
+    generate_slice_harnesses!(
+        u128,
+        check_const_add_slice_u128,
+        check_const_sub_slice_u128,
+        check_const_offset_slice_u128
+    );
+    generate_slice_harnesses!(
+        usize,
+        check_const_add_slice_usize,
+        check_const_sub_slice_usize,
+        check_const_offset_slice_usize
+    );
+
+    // Generate slice harnesses for tuples (add, sub, offset)
+    generate_slice_harnesses!(
+        (i8, i8),
+        check_const_add_slice_tuple_1,
+        check_const_sub_slice_tuple_1,
+        check_const_offset_slice_tuple_1
+    );
+    generate_slice_harnesses!(
+        (f64, bool),
+        check_const_add_slice_tuple_2,
+        check_const_sub_slice_tuple_2,
+        check_const_offset_slice_tuple_2
+    );
+    generate_slice_harnesses!(
+        (i32, f64, bool),
+        check_const_add_slice_tuple_3,
+        check_const_sub_slice_tuple_3,
+        check_const_offset_slice_tuple_3
+    );
+    generate_slice_harnesses!(
+        (i8, u16, i32, u64, isize),
+        check_const_add_slice_tuple_4,
+        check_const_sub_slice_tuple_4,
+        check_const_offset_slice_tuple_4
+    );
+
+    // Array size bound for kani::any_array for `offset_from` verification
     const ARRAY_LEN: usize = 40;
 
     macro_rules! generate_offset_from_harness {
@@ -1976,6 +2111,19 @@ mod verify {
         };
     }
 
+    // Proof for unit size will panic as offset_from needs the pointee size to be greater then 0
+    #[kani::proof_for_contract(<*const ()>::offset_from)]
+    #[kani::should_panic]
+    pub fn check_const_offset_from_unit() {
+        let val: () = ();
+        let src_ptr: *const () = &val;
+        let dest_ptr: *const () = &val;
+        unsafe {
+            dest_ptr.offset_from(src_ptr);
+        }
+    }
+
+    // fn <*const T>::offset_from() integer and integer slice types verification
     generate_offset_from_harness!(
         u8,
         check_const_offset_from_u8,
@@ -2006,7 +2154,6 @@ mod verify {
         check_const_offset_from_usize,
         check_const_offset_from_usize_arr
     );
-
     generate_offset_from_harness!(
         i8,
         check_const_offset_from_i8,
@@ -2038,6 +2185,7 @@ mod verify {
         check_const_offset_from_isize_arr
     );
 
+    // fn <*const T>::offset_from() tuple and tuple slice types verification
     generate_offset_from_harness!(
         (i8, i8),
         check_const_offset_from_tuple_1,
