@@ -1099,7 +1099,7 @@ impl<T: ?Sized> NonNull<T> {
     #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
         && ub_checks::can_dereference(NonNull::slice_from_raw_parts(src, count).as_ptr())
         && ub_checks::can_write(NonNull::slice_from_raw_parts(self, count).as_ptr())
-        && (self.as_ptr() as usize).abs_diff(dest.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
+        && (self.as_ptr() as usize).abs_diff(self.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
     #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
         && ub_checks::can_dereference(self.as_ptr() as *const u8))]
     #[kani::modifies(NonNull::slice_from_raw_parts(self, count).as_ptr())]
