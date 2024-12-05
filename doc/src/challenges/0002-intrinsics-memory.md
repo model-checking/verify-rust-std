@@ -61,7 +61,7 @@ All the following usages of intrinsics were proven safe:
 
 
 
-Annotate and verify all the functions that below that expose intrinsics with safety contracts
+Annotate and verify all the functions below that expose intrinsics with safety contracts
 
 | Function | Location |
 |---------|---------|
