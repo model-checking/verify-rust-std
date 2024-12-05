@@ -353,6 +353,8 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_never_returns_null_ptr]
     #[must_use]
     #[inline(always)]
+    //Ensures address of resulting pointer is same as original
+    #[ensures(|result: &*mut T| *result == self.pointer as *mut T)]
     pub const fn as_ptr(self) -> *mut T {
         self.pointer as *mut T
     }
@@ -454,6 +456,8 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[inline]
+    // Address preservation
+    #[ensures(|result: &NonNull<U>| result.as_ptr().addr() == self.as_ptr().addr())]
     pub const fn cast<U>(self) -> NonNull<U> {
         // SAFETY: `self` is a `NonNull` pointer which is necessarily non-null
         unsafe { NonNull { pointer: self.as_ptr() as *mut U } }
@@ -1470,6 +1474,8 @@ impl<T> NonNull<[T]> {
     #[inline]
     #[must_use]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
+    // Address preservation
+    #[ensures(|result: &NonNull<T>| result.as_ptr().addr() == self.as_ptr().addr())]
     pub const fn as_non_null_ptr(self) -> NonNull<T> {
         self.cast()
     }
@@ -1489,6 +1495,8 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_never_returns_null_ptr]
+    // Address preservation
+    #[ensures(|result: &*mut T| *result == self.pointer as *mut T)]
     pub const fn as_mut_ptr(self) -> *mut T {
         self.as_non_null_ptr().as_ptr()
     }
@@ -2186,6 +2194,42 @@ mod verify {
         }
     }
 
+    #[kani::proof_for_contract(NonNull::as_ptr)]
+    pub fn non_null_check_as_ptr() {
+        // Create a non-null pointer to a random value
+        let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
+        if let Some(ptr) = NonNull::new(non_null_ptr) {
+            let result = ptr.as_ptr();
+        }
+    
+    }
+    
+    #[kani::proof_for_contract(NonNull::<[T]>::as_mut_ptr)]
+    pub fn non_null_check_as_mut_ptr() {
+        const ARR_LEN: usize = 100;
+        let mut values: [i32; ARR_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut values);
+        let non_null_ptr = NonNull::new(slice as *mut [i32]).unwrap();
+        let result = non_null_ptr.as_mut_ptr();
+    }
+    #[kani::proof_for_contract(NonNull::<T>::cast)]
+    pub fn non_null_check_cast() {
+        // Create a non-null pointer to a random value
+        let non_null_ptr: *mut i32 = kani::any::<usize>() as *mut i32;
+        if let Some(ptr) = NonNull::new(non_null_ptr) {
+            let result: NonNull<u8> = ptr.cast();
+        }
+    }
+    
+    #[kani::proof_for_contract(NonNull::<[T]>::as_non_null_ptr)]
+    pub fn non_null_check_as_non_null_ptr() {
+        const ARR_LEN: usize = 100;
+        let mut values: [i32; ARR_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut values);
+        let non_null_ptr = NonNull::new(slice as *mut [i32]).unwrap();
+        let result = non_null_ptr.as_non_null_ptr();
+     } 
+  
     #[kani::proof]
     pub fn non_null_check_len() {
         // Create a non-deterministic NonNull pointer using kani::any()

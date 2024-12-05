@@ -17,6 +17,13 @@ use crate::intrinsics;
 use crate::mem;
 use crate::num::FpCategory;
 use crate::panic::const_assert;
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
+
+#[allow(unused_imports)]
+use crate::ub_checks::float_to_int_in_range;
 
 /// The radix or base of the internal representation of `f64`.
 /// Use [`f64::RADIX`] instead.
@@ -1055,6 +1062,8 @@ impl f64 {
                   without modifying the original"]
     #[stable(feature = "float_approx_unchecked_to", since = "1.44.0")]
     #[inline]
+    // is_finite() checks if the given float is neither infinite nor NaN.
+    #[requires(self.is_finite() && float_to_int_in_range::<Self, Int>(self))]
     pub unsafe fn to_int_unchecked<Int>(self) -> Int
     where
         Self: FloatToInt<Int>,
