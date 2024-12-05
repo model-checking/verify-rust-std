@@ -1017,7 +1017,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
-    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or_else(|| false, |size| size <= isize::MAX as usize)
         && ub_checks::can_dereference(NonNull::slice_from_raw_parts(self, count).as_ptr())
         && ub_checks::can_write(NonNull::slice_from_raw_parts(dest, count).as_ptr()))]
     #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
@@ -1043,10 +1043,10 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
-    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or_else(|| false, |size| size <= isize::MAX as usize)
         && ub_checks::can_dereference(NonNull::slice_from_raw_parts(self, count).as_ptr())
         && ub_checks::can_write(NonNull::slice_from_raw_parts(dest, count).as_ptr())
-        && (self.as_ptr() as usize).abs_diff(dest.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
+        && ub_checks::maybe_is_nonoverlapping(self.as_ptr() as *const (), dest.as_ptr() as *const (), count, core::mem::size_of::<T>()))]
         #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
         && ub_checks::can_dereference(dest.as_ptr() as *const u8))]
     #[kani::modifies(NonNull::slice_from_raw_parts(dest, count).as_ptr())]
@@ -1070,7 +1070,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
-    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or_else(|| false, |size| size <= isize::MAX as usize)
         && ub_checks::can_dereference(NonNull::slice_from_raw_parts(src, count).as_ptr())
         && ub_checks::can_write(NonNull::slice_from_raw_parts(self, count).as_ptr()))]
     #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
@@ -1096,10 +1096,10 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
-    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or_else(|| false, |size| size <= isize::MAX as usize)
         && ub_checks::can_dereference(NonNull::slice_from_raw_parts(src, count).as_ptr())
         && ub_checks::can_write(NonNull::slice_from_raw_parts(self, count).as_ptr())
-        && (self.as_ptr() as usize).abs_diff(self.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
+        && ub_checks::maybe_is_nonoverlapping(src.as_ptr() as *const (), self.as_ptr() as *const (), count, core::mem::size_of::<T>()))]
     #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
         && ub_checks::can_dereference(self.as_ptr() as *const u8))]
     #[kani::modifies(NonNull::slice_from_raw_parts(self, count).as_ptr())]
