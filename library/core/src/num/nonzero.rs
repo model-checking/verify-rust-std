@@ -2281,7 +2281,7 @@ mod macro_nonzero_check_rotate_left_and_right {
         };
     }
 
-    // 为多种类型生成不同的函数版本
+    // Use the macro to generate different versions of the function for multiple types
     nonzero_check_rotate_left_and_right!(core::num::NonZeroI8, nonzero_check_rotate_for_i8);
     nonzero_check_rotate_left_and_right!(core::num::NonZeroI16, nonzero_check_rotate_for_i16);
     nonzero_check_rotate_left_and_right!(core::num::NonZeroI32, nonzero_check_rotate_for_i32);
