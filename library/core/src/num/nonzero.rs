@@ -2276,7 +2276,7 @@ mod macro_nonzero_check_clamp {
                 let x: $nonzero_type = kani::any();
                 let min: $nonzero_type = kani::any();
                 let max: $nonzero_type = kani::any();
-                // Ensure min <= max, so the function should no panic
+                // Ensure min <= max, so the function should not panic
                 kani::assume(min <= max);
                 // Use the clamp function and check the result
                 let result = x.clamp(min, max);
