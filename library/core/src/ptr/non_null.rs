@@ -1044,13 +1044,12 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
-        && ub_checks::can_dereference(self.as_ptr() as *const MaybeUninit<T>)
-        && ub_checks::can_write(dest.as_ptr())
-        && ub_checks::can_write(dest.as_ptr().add(count))
+        && ub_checks::can_dereference(NonNull::slice_from_raw_parts(self, count).as_ptr())
+        && ub_checks::can_write(NonNull::slice_from_raw_parts(dest, count).as_ptr())
         && (self.as_ptr() as usize).abs_diff(dest.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
         #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
         && ub_checks::can_dereference(dest.as_ptr() as *const u8))]
-    #[kani::modifies(dest.as_ptr())]
+    #[kani::modifies(NonNull::slice_from_raw_parts(dest, count).as_ptr())]
     pub const unsafe fn copy_to_nonoverlapping(self, dest: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -1071,14 +1070,12 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
-    #[requires (count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize
-        && ub_checks::can_dereference(src.as_ptr() as *const MaybeUninit<T>) 
-        && ub_checks::can_write(self.as_ptr())
-        && ub_checks::can_write (self.as_ptr().add(count)))
-        && (src.as_ptr() as usize).abs_diff(self.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
-    #[ensures (|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
-        && ub_checks::can_dereference(self.as_ptr()))]
-    #[kani::modifies(self.as_ptr())]
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
+        && ub_checks::can_dereference(NonNull::slice_from_raw_parts(src, count).as_ptr())
+        && ub_checks::can_write(NonNull::slice_from_raw_parts(self, count).as_ptr()))]
+    #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
+        && ub_checks::can_dereference(self.as_ptr() as *const u8))]
+    #[kani::modifies(NonNull::slice_from_raw_parts(self, count).as_ptr())]
     pub const unsafe fn copy_from(self, src: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -1099,14 +1096,13 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
-    #[requires (count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize
-        && ub_checks::can_dereference(src.as_ptr() as *const MaybeUninit<T>) 
-        && ub_checks::can_write(self.as_ptr())
-        && ub_checks::can_write(self.as_ptr().add(count)))
-        && (self.as_ptr() as usize).abs_diff(src.as_ptr() as usize) >= count * core::mem::size_of::<T>())]//The source and destination regions do not overlap.
-        #[ensures (|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
-            && ub_checks::can_dereference(self.as_ptr()))]
-    #[kani::modifies(self.as_ptr())]
+    #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or(false, |size| size <= isize::MAX as usize)
+        && ub_checks::can_dereference(NonNull::slice_from_raw_parts(src, count).as_ptr())
+        && ub_checks::can_write(NonNull::slice_from_raw_parts(self, count).as_ptr())
+        && (self.as_ptr() as usize).abs_diff(dest.as_ptr() as usize) >= count * core::mem::size_of::<T>())]
+    #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
+        && ub_checks::can_dereference(self.as_ptr() as *const u8))]
+    #[kani::modifies(NonNull::slice_from_raw_parts(self, count).as_ptr())]
     pub const unsafe fn copy_from_nonoverlapping(self, src: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -2475,51 +2471,48 @@ mod verify {
         // Generate an arbitrary count using kani::any
         let count: usize = kani::any();
         unsafe { src.copy_to(dest, count);}
-}
+    }
 
     #[kani::proof_for_contract(NonNull::<T>::copy_from)]
     pub fn non_null_check_copy_from() {
-        // Create source and destination values
-        let mut src_value: i32 = kani::any();
-        let mut dest_value: i32 = 0;
-
-        // Create NonNull pointers
-        let src = NonNull::new(&mut src_value as *mut i32).unwrap();
-        let dest = NonNull::new(&mut dest_value as *mut i32).unwrap();
-        
-        //count is 1 as working with single i32 value
-        let count = 1;
-        unsafe {
-            src.copy_from(dest, count);
-        }
+       // PointerGenerator instance
+       let mut generator = PointerGenerator::<16>::new();
+       // Generate arbitrary pointers for src and dest
+       let src_ptr = generator.any_in_bounds::<i32>().ptr;
+       let dest_ptr = generator.any_in_bounds::<i32>().ptr;
+        // Wrap the raw pointers in NonNull
+       let src = NonNull::new(src_ptr).unwrap();
+       let dest = NonNull::new(dest_ptr).unwrap();
+       // Generate an arbitrary count using kani::any
+       let count: usize = kani::any();
+       unsafe { src.copy_from(dest, count);}
     }
     #[kani::proof_for_contract(NonNull::<T>::copy_to_nonoverlapping)]
     pub fn non_null_check_copy_to_nonoverlapping() {
-        let mut src_value: i32 = kani::any();
-        let mut dest_value: i32 = 0;
-
-        let src = NonNull::new(&mut src_value as *mut i32).unwrap();
-        let dest = NonNull::new(&mut dest_value as *mut i32).unwrap();
-       
-        //count represents no of elements to copy
-        let count = 1;
-        unsafe {
-            src.copy_to_nonoverlapping(dest, count);
-        }
+       // PointerGenerator instance
+       let mut generator = PointerGenerator::<16>::new();
+       // Generate arbitrary pointers for src and dest
+       let src_ptr = generator.any_in_bounds::<i32>().ptr;
+       let dest_ptr = generator.any_in_bounds::<i32>().ptr;
+        // Wrap the raw pointers in NonNull
+       let src = NonNull::new(src_ptr).unwrap();
+       let dest = NonNull::new(dest_ptr).unwrap();
+       // Generate an arbitrary count using kani::any
+       let count: usize = kani::any();
+       unsafe { src.copy_to_nonoverlapping(dest, count);}
     }
     #[kani::proof_for_contract(NonNull::<T>::copy_from_nonoverlapping)]
     pub fn non_null_check_copy_from_nonoverlapping() {
-        let mut src_value: i32 = kani::any();
-        let mut dest_value: i32 = 0;
-
-        let src = NonNull::new(&mut src_value as *mut i32).unwrap();
-        let dest = NonNull::new(&mut dest_value as *mut i32).unwrap();
-    
-        //count represents no of elements to copy
-        let count = 1;
-
-        unsafe {
-            dest.copy_from_nonoverlapping(src, count);
-        }
+         // PointerGenerator instance
+         let mut generator = PointerGenerator::<16>::new();
+         // Generate arbitrary pointers for src and dest
+         let src_ptr = generator.any_in_bounds::<i32>().ptr;
+         let dest_ptr = generator.any_in_bounds::<i32>().ptr;
+          // Wrap the raw pointers in NonNull
+         let src = NonNull::new(src_ptr).unwrap();
+         let dest = NonNull::new(dest_ptr).unwrap();
+         // Generate an arbitrary count using kani::any
+         let count: usize = kani::any();
+         unsafe { src.copy_from_nonoverlapping(dest, count);}
     }
 }
