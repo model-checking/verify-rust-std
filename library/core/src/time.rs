@@ -1745,14 +1745,26 @@ pub mod duration_verify {
         }
     }
 
+    fn safe_duration() -> Duration {
+        let secs = kani::any::<u64>();
+        let nanos = kani::any::<u32>();
+        kani::assume(nanos < NANOS_PER_SEC || secs.checked_add((nanos / NANOS_PER_SEC) as u64).is_some());
+        Duration::new(secs, nanos)
+    }
+
+    #[kani::proof_for_contract(Duration::new)]
+    fn duration_new() {
+        let _ = safe_duration();
+    }
+
     #[kani::proof_for_contract(Duration::new)]
     #[kani::should_panic]
-    fn duration_new() {
+    fn duration_new_panics() {
         let secs = kani::any::<u64>();
         let nanos = kani::any::<u32>();
         let _ = Duration::new(secs, nanos);
     }
-    
+
     #[kani::proof_for_contract(Duration::from_secs)]
     fn duration_from_secs() {
         let secs = kani::any::<u64>();
@@ -1778,81 +1790,151 @@ pub mod duration_verify {
     }
 
     #[kani::proof_for_contract(Duration::as_secs)]
-    #[kani::should_panic]
     fn duration_as_secs() {
+        let dur = safe_duration();
+        let _ = dur.as_secs();
+    }
+
+    #[kani::proof_for_contract(Duration::as_secs)]
+    #[kani::should_panic]
+    fn duration_as_secs_panics() {
         let dur = kani::any::<Duration>();
         let _ = dur.as_secs();
     }
 
     #[kani::proof_for_contract(Duration::subsec_millis)]
-    #[kani::should_panic]
     fn duration_subsec_millis() {
+        let dur = safe_duration();
+        let _ = dur.subsec_millis();
+    }
+
+    #[kani::proof_for_contract(Duration::subsec_millis)]
+    #[kani::should_panic]
+    fn duration_subsec_millis_panics() {
         let dur = kani::any::<Duration>();
         let _ = dur.subsec_millis();
     }
 
     #[kani::proof_for_contract(Duration::subsec_micros)]
-    #[kani::should_panic]
     fn duration_subsec_micros() {
+        let dur = safe_duration();
+        let _ = dur.subsec_micros();
+    }
+
+    #[kani::proof_for_contract(Duration::subsec_micros)]
+    #[kani::should_panic]
+    fn duration_subsec_micros_panics() {
         let dur = kani::any::<Duration>();
         let _ = dur.subsec_micros();
     }
 
     #[kani::proof_for_contract(Duration::subsec_nanos)]
-    #[kani::should_panic]
     fn duration_subsec_nanos() {
+        let dur = safe_duration();
+        let _ = dur.subsec_nanos();
+    }
+
+    #[kani::proof_for_contract(Duration::subsec_nanos)]
+    #[kani::should_panic]
+    fn duration_subsec_nanos_panics() {
         let dur = kani::any::<Duration>();
         let _ = dur.subsec_nanos();
     }
 
     #[kani::proof_for_contract(Duration::as_millis)]
-    #[kani::should_panic]
     fn duration_as_millis() {
+        let dur = safe_duration();
+        let _ = dur.as_millis();
+    }
+
+    #[kani::proof_for_contract(Duration::as_millis)]
+    #[kani::should_panic]
+    fn duration_as_millis_panics() {
         let dur = kani::any::<Duration>();
         let _ = dur.as_millis();
     }
 
     #[kani::proof_for_contract(Duration::as_micros)]
-    #[kani::should_panic]
     fn duration_as_micros() {
+        let dur = safe_duration();
+        let _ = dur.as_micros();
+    }
+
+    #[kani::proof_for_contract(Duration::as_micros)]
+    #[kani::should_panic]
+    fn duration_as_micros_panics() {
         let dur = kani::any::<Duration>();
         let _ = dur.as_micros();
     }
 
     #[kani::proof]
-    #[kani::should_panic]
     fn duration_as_nanos() {
+        let dur = safe_duration();
+        let _ = dur.as_nanos();
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn duration_as_nanos_panics() {
         let dur = kani::any::<Duration>();
         let _ = dur.as_nanos();
     }
 
     #[kani::proof_for_contract(Duration::checked_add)]
-    #[kani::should_panic]
     fn duration_checked_add() {
+        let d0 = safe_duration();
+        let d1 = safe_duration();
+        let _ = d0.checked_add(d1);
+    }
+
+    #[kani::proof_for_contract(Duration::checked_add)]
+    #[kani::should_panic]
+    fn duration_checked_add_panics() {
         let d0 = kani::any::<Duration>();
         let d1 = kani::any::<Duration>();
         let _ = d0.checked_add(d1);
     }
 
     #[kani::proof_for_contract(Duration::checked_sub)]
-    #[kani::should_panic]
     fn duration_checked_sub() {
+        let d0 = safe_duration();
+        let d1 = safe_duration();
+        let _ = d0.checked_sub(d1);
+    }
+
+    #[kani::proof_for_contract(Duration::checked_sub)]
+    #[kani::should_panic]
+    fn duration_checked_sub_panics() {
         let d0 = kani::any::<Duration>();
         let d1 = kani::any::<Duration>();
         let _ = d0.checked_sub(d1);
     }
 
     #[kani::proof_for_contract(Duration::checked_mul)]
-    #[kani::should_panic]
     fn duration_checked_mul() {
+        let d0 = safe_duration();
+        let amt = kani::any::<u32>();
+        let _ = d0.checked_mul(amt);
+    }
+
+    #[kani::proof_for_contract(Duration::checked_mul)]
+    #[kani::should_panic]
+    fn duration_checked_mul_panics() {
         let d0 = kani::any::<Duration>();
         let amt = kani::any::<u32>();
         let _ = d0.checked_mul(amt);
     }
 
     #[kani::proof_for_contract(Duration::checked_div)]
-    #[kani::should_panic]
     fn duration_checked_div() {
+        let d0 = safe_duration();
+        let amt = kani::any::<u32>();
+        let _ = d0.checked_div(amt);
+    }
+
+    #[kani::proof_for_contract(Duration::checked_div)]
+    #[kani::should_panic]
+    fn duration_checked_div_panics() {
         let d0 = kani::any::<Duration>();
         let amt = kani::any::<u32>();
         let _ = d0.checked_div(amt);
