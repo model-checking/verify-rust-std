@@ -2,7 +2,7 @@
 
 use crate::any::Any;
 use crate::marker::PhantomData;
-use crate::mem::{transmute, ManuallyDrop};
+use crate::mem::{ManuallyDrop, transmute};
 use crate::panic::AssertUnwindSafe;
 use crate::{fmt, ptr};
 
@@ -253,7 +253,6 @@ impl<'a> Context<'a> {
     /// Returns a reference to the [`LocalWaker`] for the current task.
     #[inline]
     #[unstable(feature = "local_waker", issue = "118959")]
-    #[rustc_const_unstable(feature = "local_waker", issue = "118959")]
     pub const fn local_waker(&self) -> &'a LocalWaker {
         &self.local_waker
     }
@@ -261,7 +260,6 @@ impl<'a> Context<'a> {
     /// Returns a reference to the extension data for the current task.
     #[inline]
     #[unstable(feature = "context_ext", issue = "123392")]
-    #[rustc_const_unstable(feature = "context_ext", issue = "123392")]
     pub const fn ext(&mut self) -> &mut dyn Any {
         // FIXME: this field makes Context extra-weird about unwind safety
         // can we justify AssertUnwindSafe if we stabilize this? do we care?
@@ -321,7 +319,7 @@ impl<'a> ContextBuilder<'a> {
     /// Creates a ContextBuilder from a Waker.
     #[inline]
     #[unstable(feature = "local_waker", issue = "118959")]
-    #[rustc_const_stable(feature = "const_waker", since = "1.82.0")]
+    #[cfg_attr(bootstrap, rustc_const_stable(feature = "const_waker", since = "1.82.0"))]
     pub const fn from_waker(waker: &'a Waker) -> Self {
         // SAFETY: LocalWaker is just Waker without thread safety
         let local_waker = unsafe { transmute(waker) };
@@ -337,7 +335,6 @@ impl<'a> ContextBuilder<'a> {
     /// Creates a ContextBuilder from an existing Context.
     #[inline]
     #[unstable(feature = "context_ext", issue = "123392")]
-    #[rustc_const_unstable(feature = "context_ext", issue = "123392")]
     pub const fn from(cx: &'a mut Context<'_>) -> Self {
         let ext = match &mut cx.ext.0 {
             ExtData::Some(ext) => ExtData::Some(*ext),
@@ -355,7 +352,6 @@ impl<'a> ContextBuilder<'a> {
     /// Sets the value for the waker on `Context`.
     #[inline]
     #[unstable(feature = "context_ext", issue = "123392")]
-    #[rustc_const_unstable(feature = "context_ext", issue = "123392")]
     pub const fn waker(self, waker: &'a Waker) -> Self {
         Self { waker, ..self }
     }
@@ -363,7 +359,6 @@ impl<'a> ContextBuilder<'a> {
     /// Sets the value for the local waker on `Context`.
     #[inline]
     #[unstable(feature = "local_waker", issue = "118959")]
-    #[rustc_const_unstable(feature = "local_waker", issue = "118959")]
     pub const fn local_waker(self, local_waker: &'a LocalWaker) -> Self {
         Self { local_waker, ..self }
     }
@@ -371,7 +366,6 @@ impl<'a> ContextBuilder<'a> {
     /// Sets the value for the extension data on `Context`.
     #[inline]
     #[unstable(feature = "context_ext", issue = "123392")]
-    #[rustc_const_unstable(feature = "context_ext", issue = "123392")]
     pub const fn ext(self, data: &'a mut dyn Any) -> Self {
         Self { ext: ExtData::Some(data), ..self }
     }
@@ -379,7 +373,7 @@ impl<'a> ContextBuilder<'a> {
     /// Builds the `Context`.
     #[inline]
     #[unstable(feature = "local_waker", issue = "118959")]
-    #[rustc_const_stable(feature = "const_waker", since = "1.82.0")]
+    #[cfg_attr(bootstrap, rustc_const_stable(feature = "const_waker", since = "1.82.0"))]
     pub const fn build(self) -> Context<'a> {
         let ContextBuilder { waker, local_waker, ext, _marker, _marker2 } = self;
         Context { waker, local_waker, ext: AssertUnwindSafe(ext), _marker, _marker2 }
@@ -414,6 +408,7 @@ impl<'a> ContextBuilder<'a> {
 /// [`Wake`]: ../../alloc/task/trait.Wake.html
 #[repr(transparent)]
 #[stable(feature = "futures_api", since = "1.36.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "Waker")]
 pub struct Waker {
     waker: RawWaker,
 }
@@ -518,8 +513,8 @@ impl Waker {
     /// [`Wake`]: ../../alloc/task/trait.Wake.html
     #[inline]
     #[must_use]
-    #[stable(feature = "waker_getters", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "waker_getters", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "waker_getters", since = "1.83.0")]
+    #[rustc_const_stable(feature = "waker_getters", since = "1.83.0")]
     pub const unsafe fn new(data: *const (), vtable: &'static RawWakerVTable) -> Self {
         Waker { waker: RawWaker { data, vtable } }
     }
@@ -583,7 +578,7 @@ impl Waker {
     /// Gets the `data` pointer used to create this `Waker`.
     #[inline]
     #[must_use]
-    #[stable(feature = "waker_getters", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "waker_getters", since = "1.83.0")]
     pub fn data(&self) -> *const () {
         self.waker.data
     }
@@ -591,7 +586,7 @@ impl Waker {
     /// Gets the `vtable` pointer used to create this `Waker`.
     #[inline]
     #[must_use]
-    #[stable(feature = "waker_getters", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "waker_getters", since = "1.83.0")]
     pub fn vtable(&self) -> &'static RawWakerVTable {
         self.waker.vtable
     }
@@ -833,7 +828,6 @@ impl LocalWaker {
     #[inline]
     #[must_use]
     #[unstable(feature = "local_waker", issue = "118959")]
-    #[rustc_const_unstable(feature = "local_waker", issue = "118959")]
     pub const unsafe fn from_raw(waker: RawWaker) -> LocalWaker {
         Self { waker }
     }

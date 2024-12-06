@@ -102,7 +102,7 @@ impl<T: FreezeMarker> UnstableSmallSortTypeImpl for T {
     }
 }
 
-/// FIXME(effects) use original ipnsort approach with choose_unstable_small_sort,
+/// FIXME(const_trait_impl) use original ipnsort approach with choose_unstable_small_sort,
 /// as found here <https://github.com/Voultapher/sort-research-rs/blob/438fad5d0495f65d4b72aa87f0b62fc96611dff3/ipnsort/src/smallsort.rs#L83C10-L83C36>.
 pub(crate) trait UnstableSmallSortFreezeTypeImpl: Sized + FreezeMarker {
     fn small_sort_threshold() -> usize;
@@ -378,7 +378,12 @@ where
 
 /// Swap two values in the slice pointed to by `v_base` at the position `a_pos` and `b_pos` if the
 /// value at position `b_pos` is less than the one at position `a_pos`.
-pub unsafe fn swap_if_less<T, F>(v_base: *mut T, a_pos: usize, b_pos: usize, is_less: &mut F)
+///
+/// Purposefully not marked `#[inline]`, despite us wanting it to be inlined for integers like
+/// types. `is_less` could be a huge function and we want to give the compiler an option to
+/// not inline this function. For the same reasons that this function is very perf critical
+/// it should be in the same module as the functions that use it.
+unsafe fn swap_if_less<T, F>(v_base: *mut T, a_pos: usize, b_pos: usize, is_less: &mut F)
 where
     F: FnMut(&T, &T) -> bool,
 {

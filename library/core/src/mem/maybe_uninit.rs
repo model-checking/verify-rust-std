@@ -338,7 +338,6 @@ impl<T> MaybeUninit<T> {
     /// let data = read(&mut buf);
     /// ```
     #[unstable(feature = "maybe_uninit_uninit_array", issue = "96097")]
-    #[rustc_const_unstable(feature = "const_maybe_uninit_uninit_array", issue = "96097")]
     #[must_use]
     #[inline(always)]
     pub const fn uninit_array<const N: usize>() -> [Self; N] {
@@ -350,6 +349,9 @@ impl<T> MaybeUninit<T> {
     /// proper initialization. For example, `MaybeUninit<usize>::zeroed()` is initialized,
     /// but `MaybeUninit<&'static i32>::zeroed()` is not because references must not
     /// be null.
+    ///
+    /// Note that if `T` has padding bytes, those bytes are *not* preserved when the
+    /// `MaybeUninit<T>` value is returned from this function, so those bytes will *not* be zeroed.
     ///
     /// Note that dropping a `MaybeUninit<T>` will never call `T`'s drop code.
     /// It is your responsibility to make sure `T` gets dropped if it got initialized.
@@ -387,10 +389,6 @@ impl<T> MaybeUninit<T> {
     #[must_use]
     #[rustc_diagnostic_item = "maybe_uninit_zeroed"]
     #[stable(feature = "maybe_uninit", since = "1.36.0")]
-    // These are OK to allow since we do not leak &mut to user-visible API
-    #[rustc_allow_const_fn_unstable(const_mut_refs)]
-    #[rustc_allow_const_fn_unstable(const_ptr_write)]
-    #[rustc_allow_const_fn_unstable(const_maybe_uninit_as_mut_ptr)]
     #[rustc_const_stable(feature = "const_maybe_uninit_zeroed", since = "1.75.0")]
     pub const fn zeroed() -> MaybeUninit<T> {
         let mut u = MaybeUninit::<T>::uninit();
@@ -527,6 +525,7 @@ impl<T> MaybeUninit<T> {
     /// until they are, it is advisable to avoid them.)
     #[stable(feature = "maybe_uninit", since = "1.36.0")]
     #[rustc_const_stable(feature = "const_maybe_uninit_as_ptr", since = "1.59.0")]
+    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
     #[inline(always)]
     pub const fn as_ptr(&self) -> *const T {
         // `MaybeUninit` and `ManuallyDrop` are both `repr(transparent)` so we can cast the pointer.
@@ -567,7 +566,8 @@ impl<T> MaybeUninit<T> {
     /// (Notice that the rules around references to uninitialized data are not finalized yet, but
     /// until they are, it is advisable to avoid them.)
     #[stable(feature = "maybe_uninit", since = "1.36.0")]
-    #[rustc_const_unstable(feature = "const_maybe_uninit_as_mut_ptr", issue = "75251")]
+    #[rustc_const_stable(feature = "const_maybe_uninit_as_mut_ptr", since = "1.83.0")]
+    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
     #[inline(always)]
     pub const fn as_mut_ptr(&mut self) -> *mut T {
         // `MaybeUninit` and `ManuallyDrop` are both `repr(transparent)` so we can cast the pointer.
@@ -721,7 +721,7 @@ impl<T> MaybeUninit<T> {
     /// this does not constitute a stable guarantee), because the only
     /// requirement the compiler knows about it is that the data pointer must be
     /// non-null. Dropping such a `Vec<T>` however will cause undefined
-    /// behaviour.
+    /// behavior.
     ///
     /// [`assume_init`]: MaybeUninit::assume_init
     /// [`Vec<T>`]: ../../std/vec/struct.Vec.html
@@ -907,7 +907,10 @@ impl<T> MaybeUninit<T> {
     /// };
     /// ```
     #[stable(feature = "maybe_uninit_ref", since = "1.55.0")]
-    #[rustc_const_unstable(feature = "const_maybe_uninit_assume_init", issue = "none")]
+    #[rustc_const_stable(
+        feature = "const_maybe_uninit_assume_init",
+        since = "CURRENT_RUSTC_VERSION"
+    )]
     #[inline(always)]
     pub const unsafe fn assume_init_mut(&mut self) -> &mut T {
         // SAFETY: the caller must guarantee that `self` is initialized.
@@ -944,7 +947,6 @@ impl<T> MaybeUninit<T> {
     /// assert_eq!(array, [0, 1, 2]);
     /// ```
     #[unstable(feature = "maybe_uninit_array_assume_init", issue = "96097")]
-    #[rustc_const_unstable(feature = "const_maybe_uninit_array_assume_init", issue = "96097")]
     #[inline(always)]
     #[track_caller]
     pub const unsafe fn array_assume_init<const N: usize>(array: [Self; N]) -> [T; N] {
@@ -971,7 +973,6 @@ impl<T> MaybeUninit<T> {
     ///
     /// [`assume_init_ref`]: MaybeUninit::assume_init_ref
     #[unstable(feature = "maybe_uninit_slice", issue = "63569")]
-    #[rustc_const_unstable(feature = "maybe_uninit_slice", issue = "63569")]
     #[inline(always)]
     pub const unsafe fn slice_assume_init_ref(slice: &[Self]) -> &[T] {
         // SAFETY: casting `slice` to a `*const [T]` is safe since the caller guarantees that
@@ -993,7 +994,6 @@ impl<T> MaybeUninit<T> {
     ///
     /// [`assume_init_mut`]: MaybeUninit::assume_init_mut
     #[unstable(feature = "maybe_uninit_slice", issue = "63569")]
-    #[rustc_const_unstable(feature = "const_maybe_uninit_assume_init", issue = "none")]
     #[inline(always)]
     pub const unsafe fn slice_assume_init_mut(slice: &mut [Self]) -> &mut [T] {
         // SAFETY: similar to safety notes for `slice_get_ref`, but we have a
@@ -1003,7 +1003,6 @@ impl<T> MaybeUninit<T> {
 
     /// Gets a pointer to the first element of the array.
     #[unstable(feature = "maybe_uninit_slice", issue = "63569")]
-    #[rustc_const_unstable(feature = "maybe_uninit_slice", issue = "63569")]
     #[inline(always)]
     pub const fn slice_as_ptr(this: &[MaybeUninit<T>]) -> *const T {
         this.as_ptr() as *const T
@@ -1011,7 +1010,6 @@ impl<T> MaybeUninit<T> {
 
     /// Gets a mutable pointer to the first element of the array.
     #[unstable(feature = "maybe_uninit_slice", issue = "63569")]
-    #[rustc_const_unstable(feature = "maybe_uninit_slice", issue = "63569")]
     #[inline(always)]
     pub const fn slice_as_mut_ptr(this: &mut [MaybeUninit<T>]) -> *mut T {
         this.as_mut_ptr() as *mut T

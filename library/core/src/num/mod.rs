@@ -2,6 +2,7 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use crate::panic::const_panic;
 use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{ascii, intrinsics, mem};
@@ -10,7 +11,7 @@ use safety::{requires, ensures};
 #[cfg(kani)]
 use crate::kani;
 
-// Used because the `?` operator is not allowed in a const context.
+// FIXME(const-hack): Used because the `?` operator is not allowed in a const context.
 macro_rules! try_opt {
     ($e:expr) => {
         match $e {
@@ -20,10 +21,13 @@ macro_rules! try_opt {
     };
 }
 
-#[allow_internal_unstable(const_likely)]
-macro_rules! unlikely {
-    ($e: expr) => {
-        intrinsics::unlikely($e)
+// Use this when the generated code should differ between signed and unsigned types.
+macro_rules! sign_dependent_expr {
+    (signed ? if signed { $signed_case:expr } if unsigned { $unsigned_case:expr } ) => {
+        $signed_case
+    };
+    (unsigned ? if signed { $signed_case:expr } if unsigned { $unsigned_case:expr } ) => {
+        $unsigned_case
     };
 }
 
@@ -69,9 +73,9 @@ pub use nonzero::NonZero;
 )]
 pub use nonzero::ZeroablePrimitive;
 #[stable(feature = "signed_nonzero", since = "1.34.0")]
-pub use nonzero::{NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize};
+pub use nonzero::{NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroIsize};
 #[stable(feature = "nonzero", since = "1.28.0")]
-pub use nonzero::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize};
+pub use nonzero::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize};
 #[stable(feature = "saturating_int_impl", since = "1.74.0")]
 pub use saturating::Saturating;
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -115,7 +119,6 @@ macro_rules! midpoint_impl {
         #[doc = concat!("assert_eq!(1", stringify!($SelfT), ".midpoint(4), 2);")]
         /// ```
         #[unstable(feature = "num_midpoint", issue = "110840")]
-        #[rustc_const_unstable(feature = "const_num_midpoint", issue = "110840")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -123,6 +126,36 @@ macro_rules! midpoint_impl {
             // Use the well known branchless algorithm from Hacker's Delight to compute
             // `(a + b) / 2` without overflowing: `((a ^ b) >> 1) + (a & b)`.
             ((self ^ rhs) >> 1) + (self & rhs)
+        }
+    };
+    ($SelfT:ty, signed) => {
+        /// Calculates the middle point of `self` and `rhs`.
+        ///
+        /// `midpoint(a, b)` is `(a + b) / 2` as if it were performed in a
+        /// sufficiently-large signed integral type. This implies that the result is
+        /// always rounded towards zero and that no overflow will ever occur.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// #![feature(num_midpoint)]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(4), 2);")]
+        #[doc = concat!("assert_eq!((-1", stringify!($SelfT), ").midpoint(2), 0);")]
+        #[doc = concat!("assert_eq!((-7", stringify!($SelfT), ").midpoint(0), -3);")]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(-7), -3);")]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(7), 3);")]
+        /// ```
+        #[unstable(feature = "num_midpoint", issue = "110840")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn midpoint(self, rhs: Self) -> Self {
+            // Use the well known branchless algorithm from Hacker's Delight to compute
+            // `(a + b) / 2` without overflowing: `((a ^ b) >> 1) + (a & b)`.
+            let t = ((self ^ rhs) >> 1) + (self & rhs);
+            // Except that it fails for integers whose sum is an odd negative number as
+            // their floor is one less than their average. So we adjust the result.
+            t + (if t < 0 { 1 } else { 0 } & (self ^ rhs))
         }
     };
     ($SelfT:ty, $WideT:ty, unsigned) => {
@@ -140,7 +173,31 @@ macro_rules! midpoint_impl {
         #[doc = concat!("assert_eq!(1", stringify!($SelfT), ".midpoint(4), 2);")]
         /// ```
         #[unstable(feature = "num_midpoint", issue = "110840")]
-        #[rustc_const_unstable(feature = "const_num_midpoint", issue = "110840")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn midpoint(self, rhs: $SelfT) -> $SelfT {
+            ((self as $WideT + rhs as $WideT) / 2) as $SelfT
+        }
+    };
+    ($SelfT:ty, $WideT:ty, signed) => {
+        /// Calculates the middle point of `self` and `rhs`.
+        ///
+        /// `midpoint(a, b)` is `(a + b) / 2` as if it were performed in a
+        /// sufficiently-large signed integral type. This implies that the result is
+        /// always rounded towards zero and that no overflow will ever occur.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// #![feature(num_midpoint)]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(4), 2);")]
+        #[doc = concat!("assert_eq!((-1", stringify!($SelfT), ").midpoint(2), 0);")]
+        #[doc = concat!("assert_eq!((-7", stringify!($SelfT), ").midpoint(0), -3);")]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(-7), -3);")]
+        #[doc = concat!("assert_eq!(0", stringify!($SelfT), ".midpoint(7), 3);")]
+        /// ```
+        #[unstable(feature = "num_midpoint", issue = "110840")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -173,7 +230,6 @@ macro_rules! widening_impl {
         /// assert_eq!(1_000_000_000u32.widening_mul(10), (1410065408, 2));
         /// ```
         #[unstable(feature = "bigint_helper_methods", issue = "85532")]
-        #[rustc_const_unstable(feature = "const_bigint_helper_methods", issue = "85532")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -264,7 +320,6 @@ macro_rules! widening_impl {
         /// );
         /// ```
         #[unstable(feature = "bigint_helper_methods", issue = "85532")]
-        #[rustc_const_unstable(feature = "bigint_helper_methods", issue = "85532")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -301,6 +356,7 @@ impl i8 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i8, i16, signed }
 }
 
 impl i16 {
@@ -324,6 +380,7 @@ impl i16 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i16, i32, signed }
 }
 
 impl i32 {
@@ -347,6 +404,7 @@ impl i32 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i32, i64, signed }
 }
 
 impl i64 {
@@ -370,6 +428,7 @@ impl i64 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i64, signed }
 }
 
 impl i128 {
@@ -395,6 +454,7 @@ impl i128 {
         from_xe_bytes_doc = "",
         bound_condition = "",
     }
+    midpoint_impl! { i128, signed }
 }
 
 #[cfg(target_pointer_width = "16")]
@@ -419,6 +479,7 @@ impl isize {
         from_xe_bytes_doc = usize_isize_from_xe_bytes_doc!(),
         bound_condition = " on 16-bit targets",
     }
+    midpoint_impl! { isize, i32, signed }
 }
 
 #[cfg(target_pointer_width = "32")]
@@ -443,6 +504,7 @@ impl isize {
         from_xe_bytes_doc = usize_isize_from_xe_bytes_doc!(),
         bound_condition = " on 32-bit targets",
     }
+    midpoint_impl! { isize, i64, signed }
 }
 
 #[cfg(target_pointer_width = "64")]
@@ -467,9 +529,10 @@ impl isize {
         from_xe_bytes_doc = usize_isize_from_xe_bytes_doc!(),
         bound_condition = " on 64-bit targets",
     }
+    midpoint_impl! { isize, signed }
 }
 
-/// If the 6th bit is set ascii is lower case.
+/// If the bit selected by this mask is set, ascii is lower case.
 const ASCII_CASE_MASK: u8 = 0b0010_0000;
 
 impl u8 {
@@ -618,8 +681,9 @@ impl u8 {
     ///
     /// [`to_ascii_uppercase`]: Self::to_ascii_uppercase
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
+    #[rustc_const_stable(feature = "const_make_ascii", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn make_ascii_uppercase(&mut self) {
+    pub const fn make_ascii_uppercase(&mut self) {
         *self = self.to_ascii_uppercase();
     }
 
@@ -643,8 +707,9 @@ impl u8 {
     ///
     /// [`to_ascii_lowercase`]: Self::to_ascii_lowercase
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
+    #[rustc_const_stable(feature = "const_make_ascii", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn make_ascii_lowercase(&mut self) {
+    pub const fn make_ascii_lowercase(&mut self) {
         *self = self.to_ascii_lowercase();
     }
 
@@ -849,7 +914,6 @@ impl u8 {
     /// ```
     #[must_use]
     #[unstable(feature = "is_ascii_octdigit", issue = "101288")]
-    #[rustc_const_unstable(feature = "is_ascii_octdigit", issue = "101288")]
     #[inline]
     pub const fn is_ascii_octdigit(&self) -> bool {
         matches!(*self, b'0'..=b'7')
@@ -1129,7 +1193,6 @@ impl u16 {
     /// ```
     #[must_use]
     #[unstable(feature = "utf16_extra", issue = "94919")]
-    #[rustc_const_unstable(feature = "utf16_extra_const", issue = "94919")]
     #[inline]
     pub const fn is_utf16_surrogate(self) -> bool {
         matches!(self, 0xD800..=0xDFFF)
@@ -1374,6 +1437,7 @@ macro_rules! from_str_radix_int_impl {
         #[stable(feature = "rust1", since = "1.0.0")]
         impl FromStr for $t {
             type Err = ParseIntError;
+            #[inline]
             fn from_str(src: &str) -> Result<Self, ParseIntError> {
                 <$t>::from_str_radix(src, 10)
             }
@@ -1389,40 +1453,43 @@ from_str_radix_int_impl! { isize i8 i16 i32 i64 i128 usize u8 u16 u32 u64 u128 }
 #[doc(hidden)]
 #[inline(always)]
 #[unstable(issue = "none", feature = "std_internals")]
-#[rustc_const_stable(feature = "const_int_from_str", since = "1.82.0")]
+#[cfg_attr(bootstrap, rustc_const_stable(feature = "const_int_from_str", since = "1.82.0"))]
 pub const fn can_not_overflow<T>(radix: u32, is_signed_ty: bool, digits: &[u8]) -> bool {
     radix <= 16 && digits.len() <= mem::size_of::<T>() * 2 - is_signed_ty as usize
-}
-
-#[track_caller]
-const fn from_str_radix_panic_ct(_radix: u32) -> ! {
-    panic!("from_str_radix_int: must lie in the range `[2, 36]`");
-}
-
-#[track_caller]
-fn from_str_radix_panic_rt(radix: u32) -> ! {
-    panic!("from_str_radix_int: must lie in the range `[2, 36]` - found {}", radix);
 }
 
 #[cfg_attr(not(feature = "panic_immediate_abort"), inline(never))]
 #[cfg_attr(feature = "panic_immediate_abort", inline)]
 #[cold]
 #[track_caller]
-const fn from_str_radix_panic(radix: u32) {
-    // The only difference between these two functions is their panic message.
-    intrinsics::const_eval_select((radix,), from_str_radix_panic_ct, from_str_radix_panic_rt);
+const fn from_str_radix_panic(radix: u32) -> ! {
+    const_panic!(
+        "from_str_radix_int: must lie in the range `[2, 36]`",
+        "from_str_radix_int: must lie in the range `[2, 36]` - found {radix}",
+        radix: u32 = radix,
+    )
 }
 
 macro_rules! from_str_radix {
-    ($($int_ty:ty)+) => {$(
+    ($signedness:ident $($int_ty:ty)+) => {$(
         impl $int_ty {
             /// Converts a string slice in a given base to an integer.
             ///
-            /// The string is expected to be an optional `+` sign
-            /// followed by digits.
-            /// Leading and trailing whitespace represent an error.
-            /// Digits are a subset of these characters, depending on `radix`:
+            /// The string is expected to be an optional
+            #[doc = sign_dependent_expr!{
+                $signedness ?
+                if signed {
+                    " `+` or `-` "
+                }
+                if unsigned {
+                    " `+` "
+                }
+            }]
+            /// sign followed by only digits. Leading and trailing non-digit characters (including
+            /// whitespace) represent an error. Underscores (which are accepted in rust literals)
+            /// also represent an error.
             ///
+            /// Digits are a subset of these characters, depending on `radix`:
             /// * `0-9`
             /// * `a-z`
             /// * `A-Z`
@@ -1434,12 +1501,16 @@ macro_rules! from_str_radix {
             /// # Examples
             ///
             /// Basic usage:
-            ///
             /// ```
             #[doc = concat!("assert_eq!(", stringify!($int_ty), "::from_str_radix(\"A\", 16), Ok(10));")]
             /// ```
+            /// Trailing space returns error:
+            /// ```
+            #[doc = concat!("assert!(", stringify!($int_ty), "::from_str_radix(\"1 \", 10).is_err());")]
+            /// ```
             #[stable(feature = "rust1", since = "1.0.0")]
             #[rustc_const_stable(feature = "const_int_from_str", since = "1.82.0")]
+            #[inline]
             pub const fn from_str_radix(src: &str, radix: u32) -> Result<$int_ty, ParseIntError> {
                 use self::IntErrorKind::*;
                 use self::ParseIntError as PIE;
@@ -1539,20 +1610,31 @@ macro_rules! from_str_radix {
     )+}
 }
 
-from_str_radix! { i8 u8 i16 u16 i32 u32 i64 u64 i128 u128 }
+from_str_radix! { unsigned u8 u16 u32 u64 u128 }
+from_str_radix! { signed i8 i16 i32 i64 i128 }
 
 // Re-use the relevant implementation of from_str_radix for isize and usize to avoid outputting two
 // identical functions.
 macro_rules! from_str_radix_size_impl {
-    ($($t:ident $size:ty),*) => {$(
+    ($($signedness:ident $t:ident $size:ty),*) => {$(
     impl $size {
         /// Converts a string slice in a given base to an integer.
         ///
-        /// The string is expected to be an optional `+` sign
-        /// followed by digits.
-        /// Leading and trailing whitespace represent an error.
-        /// Digits are a subset of these characters, depending on `radix`:
+        /// The string is expected to be an optional
+        #[doc = sign_dependent_expr!{
+            $signedness ?
+            if signed {
+                " `+` or `-` "
+            }
+            if unsigned {
+                " `+` "
+            }
+        }]
+        /// sign followed by only digits. Leading and trailing non-digit characters (including
+        /// whitespace) represent an error. Underscores (which are accepted in rust literals)
+        /// also represent an error.
         ///
+        /// Digits are a subset of these characters, depending on `radix`:
         /// * `0-9`
         /// * `a-z`
         /// * `A-Z`
@@ -1564,12 +1646,16 @@ macro_rules! from_str_radix_size_impl {
         /// # Examples
         ///
         /// Basic usage:
-        ///
         /// ```
         #[doc = concat!("assert_eq!(", stringify!($size), "::from_str_radix(\"A\", 16), Ok(10));")]
         /// ```
+        /// Trailing space returns error:
+        /// ```
+        #[doc = concat!("assert!(", stringify!($size), "::from_str_radix(\"1 \", 10).is_err());")]
+        /// ```
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_stable(feature = "const_int_from_str", since = "1.82.0")]
+        #[inline]
         pub const fn from_str_radix(src: &str, radix: u32) -> Result<$size, ParseIntError> {
             match <$t>::from_str_radix(src, radix) {
                 Ok(x) => Ok(x as $size),
@@ -1580,11 +1666,11 @@ macro_rules! from_str_radix_size_impl {
 }
 
 #[cfg(target_pointer_width = "16")]
-from_str_radix_size_impl! { i16 isize, u16 usize }
+from_str_radix_size_impl! { signed i16 isize, unsigned u16 usize }
 #[cfg(target_pointer_width = "32")]
-from_str_radix_size_impl! { i32 isize, u32 usize }
+from_str_radix_size_impl! { signed i32 isize, unsigned u32 usize }
 #[cfg(target_pointer_width = "64")]
-from_str_radix_size_impl! { i64 isize, u64 usize }
+from_str_radix_size_impl! { signed i64 isize, unsigned u64 usize }
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -1742,6 +1828,21 @@ mod verify {
 
                 let _ = num1.$method(num2);
             }
+        }
+    }
+
+    // Part 3: Float to Integer Conversion function Harness Generation Macro
+    macro_rules! generate_to_int_unchecked_harness {
+        ($floatType:ty, $($intType:ty, $harness_name:ident),+) => {
+            $(
+                #[kani::proof_for_contract($floatType::to_int_unchecked)]
+                pub fn $harness_name() {
+                    let num1: $floatType = kani::any::<$floatType>();
+                    let result = unsafe { num1.to_int_unchecked::<$intType>() };
+
+                    assert_eq!(result, num1 as $intType);
+                }
+            )+
         }
     }
 
@@ -2042,5 +2143,76 @@ mod verify {
     generate_wrapping_shift_harness!(u128, wrapping_shr, checked_wrapping_shr_u128);
     generate_wrapping_shift_harness!(usize, wrapping_shr, checked_wrapping_shr_usize);
 
-}
+    // `f{16,32,64,128}::to_int_unchecked` proofs
+    //
+    // Target integer types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // 1. Float is not `NaN` and infinite
+    // 2. Float is representable in the return type `Int`, after truncating
+    //    off its fractional part
+    // [requires(self.is_finite() && kani::float::float_to_int_in_range::<Self, Int>(self))]
+    //
+    // Target function:
+    // pub unsafe fn to_int_unchecked<Int>(self) -> Int where Self: FloatToInt<Int>
+    generate_to_int_unchecked_harness!(f32,
+        i8, checked_f32_to_int_unchecked_i8,
+        i16, checked_f32_to_int_unchecked_i16,
+        i32, checked_f32_to_int_unchecked_i32,
+        i64, checked_f32_to_int_unchecked_i64,
+        i128, checked_f32_to_int_unchecked_i128,
+        isize, checked_f32_to_int_unchecked_isize,
+        u8, checked_f32_to_int_unchecked_u8,
+        u16, checked_f32_to_int_unchecked_u16,
+        u32, checked_f32_to_int_unchecked_u32,
+        u64, checked_f32_to_int_unchecked_u64,
+        u128, checked_f32_to_int_unchecked_u128,
+        usize, checked_f32_to_int_unchecked_usize
+    );
 
+    generate_to_int_unchecked_harness!(f64,
+        i8, checked_f64_to_int_unchecked_i8,
+        i16, checked_f64_to_int_unchecked_i16,
+        i32, checked_f64_to_int_unchecked_i32,
+        i64, checked_f64_to_int_unchecked_i64,
+        i128, checked_f64_to_int_unchecked_i128,
+        isize, checked_f64_to_int_unchecked_isize,
+        u8, checked_f64_to_int_unchecked_u8,
+        u16, checked_f64_to_int_unchecked_u16,
+        u32, checked_f64_to_int_unchecked_u32,
+        u64, checked_f64_to_int_unchecked_u64,
+        u128, checked_f64_to_int_unchecked_u128,
+        usize, checked_f64_to_int_unchecked_usize
+    );
+      
+    generate_to_int_unchecked_harness!(f16,
+        i8, checked_f16_to_int_unchecked_i8,
+        i16, checked_f16_to_int_unchecked_i16,
+        i32, checked_f16_to_int_unchecked_i32,
+        i64, checked_f16_to_int_unchecked_i64,
+        i128, checked_f16_to_int_unchecked_i128,
+        isize, checked_f16_to_int_unchecked_isize,
+        u8, checked_f16_to_int_unchecked_u8,
+        u16, checked_f16_to_int_unchecked_u16,
+        u32, checked_f16_to_int_unchecked_u32,
+        u64, checked_f16_to_int_unchecked_u64,
+        u128, checked_f16_to_int_unchecked_u128,
+        usize, checked_f16_to_int_unchecked_usize
+    );
+  
+    generate_to_int_unchecked_harness!(f128,
+        i8, checked_f128_to_int_unchecked_i8,
+        i16, checked_f128_to_int_unchecked_i16,
+        i32, checked_f128_to_int_unchecked_i32,
+        i64, checked_f128_to_int_unchecked_i64,
+        i128, checked_f128_to_int_unchecked_i128,
+        isize, checked_f128_to_int_unchecked_isize,
+        u8, checked_f128_to_int_unchecked_u8,
+        u16, checked_f128_to_int_unchecked_u16,
+        u32, checked_f128_to_int_unchecked_u32,
+        u64, checked_f128_to_int_unchecked_u64,
+        u128, checked_f128_to_int_unchecked_u128,
+        usize, checked_f128_to_int_unchecked_usize
+    );
+}

@@ -143,7 +143,7 @@ pub trait CommandExt: Sealed {
     ///
     /// This function, unlike `spawn`, will **not** `fork` the process to create
     /// a new child. Like spawn, however, the default behavior for the stdio
-    /// descriptors will be to inherited from the current process.
+    /// descriptors will be to inherit them from the current process.
     ///
     /// # Notes
     ///
@@ -154,6 +154,7 @@ pub trait CommandExt: Sealed {
     /// required to gracefully handle errors it is recommended to use the
     /// cross-platform `spawn` instead.
     #[stable(feature = "process_exec2", since = "1.9.0")]
+    #[must_use]
     fn exec(&mut self) -> io::Error;
 
     /// Set executable argument

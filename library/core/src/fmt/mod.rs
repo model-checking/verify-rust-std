@@ -33,10 +33,10 @@ pub enum Alignment {
     Center,
 }
 
-#[unstable(feature = "debug_closure_helpers", issue = "117729")]
-pub use self::builders::{from_fn, FromFn};
 #[stable(feature = "debug_builders", since = "1.2.0")]
 pub use self::builders::{DebugList, DebugMap, DebugSet, DebugStruct, DebugTuple};
+#[unstable(feature = "debug_closure_helpers", issue = "117729")]
+pub use self::builders::{FromFn, from_fn};
 
 /// The type returned by formatter methods.
 ///
@@ -333,7 +333,10 @@ pub struct Arguments<'a> {
 #[unstable(feature = "fmt_internals", issue = "none")]
 impl<'a> Arguments<'a> {
     #[inline]
-    #[rustc_const_unstable(feature = "const_fmt_arguments_new", issue = "none")]
+    #[cfg_attr(
+        bootstrap,
+        rustc_const_unstable(feature = "const_fmt_arguments_new", issue = "none")
+    )]
     pub const fn new_const<const N: usize>(pieces: &'a [&'static str; N]) -> Self {
         const { assert!(N <= 1) };
         Arguments { pieces, fmt: None, args: &[] }
@@ -435,7 +438,7 @@ impl<'a> Arguments<'a> {
     /// assert_eq!(format_args!("{:?}", std::env::current_dir()).as_str(), None);
     /// ```
     #[stable(feature = "fmt_as_str", since = "1.52.0")]
-    #[rustc_const_unstable(feature = "const_arguments_as_str", issue = "103900")]
+    #[rustc_const_stable(feature = "const_arguments_as_str", since = "CURRENT_RUSTC_VERSION")]
     #[must_use]
     #[inline]
     pub const fn as_str(&self) -> Option<&'static str> {
@@ -975,9 +978,17 @@ pub trait UpperHex {
 /// `p` formatting.
 ///
 /// The `Pointer` trait should format its output as a memory location. This is commonly presented
-/// as hexadecimal.
+/// as hexadecimal. For more information on formatters, see [the module-level documentation][module].
 ///
-/// For more information on formatters, see [the module-level documentation][module].
+/// Printing of pointers is not a reliable way to discover how Rust programs are implemented.
+/// The act of reading an address changes the program itself, and may change how the data is represented
+/// in memory, and may affect which optimizations are applied to the code.
+///
+/// The printed pointer values are not guaranteed to be stable nor unique identifiers of objects.
+/// Rust allows moving values to different memory locations, and may reuse the same memory locations
+/// for different purposes.
+///
+/// There is no guarantee that the printed value can be converted back to a pointer.
 ///
 /// [module]: ../../std/fmt/index.html
 ///

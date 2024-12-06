@@ -26,7 +26,7 @@ windows_targets::link!("kernel32.dll" "system" fn DeviceIoControl(hdevice : HAND
 windows_targets::link!("kernel32.dll" "system" fn DuplicateHandle(hsourceprocesshandle : HANDLE, hsourcehandle : HANDLE, htargetprocesshandle : HANDLE, lptargethandle : *mut HANDLE, dwdesiredaccess : u32, binherithandle : BOOL, dwoptions : DUPLICATE_HANDLE_OPTIONS) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn ExitProcess(uexitcode : u32) -> !);
 windows_targets::link!("kernel32.dll" "system" fn FindClose(hfindfile : HANDLE) -> BOOL);
-windows_targets::link!("kernel32.dll" "system" fn FindFirstFileW(lpfilename : PCWSTR, lpfindfiledata : *mut WIN32_FIND_DATAW) -> HANDLE);
+windows_targets::link!("kernel32.dll" "system" fn FindFirstFileExW(lpfilename : PCWSTR, finfolevelid : FINDEX_INFO_LEVELS, lpfindfiledata : *mut core::ffi::c_void, fsearchop : FINDEX_SEARCH_OPS, lpsearchfilter : *const core::ffi::c_void, dwadditionalflags : FIND_FIRST_EX_FLAGS) -> HANDLE);
 windows_targets::link!("kernel32.dll" "system" fn FindNextFileW(hfindfile : HANDLE, lpfindfiledata : *mut WIN32_FIND_DATAW) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn FlushFileBuffers(hfile : HANDLE) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn FormatMessageW(dwflags : FORMAT_MESSAGE_OPTIONS, lpsource : *const core::ffi::c_void, dwmessageid : u32, dwlanguageid : u32, lpbuffer : PWSTR, nsize : u32, arguments : *const *const i8) -> u32);
@@ -65,6 +65,7 @@ windows_targets::link!("kernel32.dll" "system" fn InitOnceBeginInitialize(lpinit
 windows_targets::link!("kernel32.dll" "system" fn InitOnceComplete(lpinitonce : *mut INIT_ONCE, dwflags : u32, lpcontext : *const core::ffi::c_void) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn InitializeProcThreadAttributeList(lpattributelist : LPPROC_THREAD_ATTRIBUTE_LIST, dwattributecount : u32, dwflags : u32, lpsize : *mut usize) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn LocalFree(hmem : HLOCAL) -> HLOCAL);
+windows_targets::link!("kernel32.dll" "system" fn LockFileEx(hfile : HANDLE, dwflags : LOCK_FILE_FLAGS, dwreserved : u32, nnumberofbytestolocklow : u32, nnumberofbytestolockhigh : u32, lpoverlapped : *mut OVERLAPPED) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn MoveFileExW(lpexistingfilename : PCWSTR, lpnewfilename : PCWSTR, dwflags : MOVE_FILE_FLAGS) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn MultiByteToWideChar(codepage : u32, dwflags : MULTI_BYTE_TO_WIDE_CHAR_FLAGS, lpmultibytestr : PCSTR, cbmultibyte : i32, lpwidecharstr : PWSTR, cchwidechar : i32) -> i32);
 windows_targets::link!("kernel32.dll" "system" fn QueryPerformanceCounter(lpperformancecount : *mut i64) -> BOOL);
@@ -96,6 +97,7 @@ windows_targets::link!("kernel32.dll" "system" fn TlsGetValue(dwtlsindex : u32) 
 windows_targets::link!("kernel32.dll" "system" fn TlsSetValue(dwtlsindex : u32, lptlsvalue : *const core::ffi::c_void) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn TryAcquireSRWLockExclusive(srwlock : *mut SRWLOCK) -> BOOLEAN);
 windows_targets::link!("kernel32.dll" "system" fn TryAcquireSRWLockShared(srwlock : *mut SRWLOCK) -> BOOLEAN);
+windows_targets::link!("kernel32.dll" "system" fn UnlockFile(hfile : HANDLE, dwfileoffsetlow : u32, dwfileoffsethigh : u32, nnumberofbytestounlocklow : u32, nnumberofbytestounlockhigh : u32) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn UpdateProcThreadAttribute(lpattributelist : LPPROC_THREAD_ATTRIBUTE_LIST, dwflags : u32, attribute : usize, lpvalue : *const core::ffi::c_void, cbsize : usize, lppreviousvalue : *mut core::ffi::c_void, lpreturnsize : *const usize) -> BOOL);
 windows_targets::link!("kernel32.dll" "system" fn WaitForMultipleObjects(ncount : u32, lphandles : *const HANDLE, bwaitall : BOOL, dwmilliseconds : u32) -> WAIT_EVENT);
 windows_targets::link!("kernel32.dll" "system" fn WaitForSingleObject(hhandle : HANDLE, dwmilliseconds : u32) -> WAIT_EVENT);
@@ -2501,6 +2503,9 @@ pub const FILE_WRITE_ATTRIBUTES: FILE_ACCESS_RIGHTS = 256u32;
 pub const FILE_WRITE_DATA: FILE_ACCESS_RIGHTS = 2u32;
 pub const FILE_WRITE_EA: FILE_ACCESS_RIGHTS = 16u32;
 pub const FILE_WRITE_THROUGH: NTCREATEFILE_CREATE_OPTIONS = 2u32;
+pub type FINDEX_INFO_LEVELS = i32;
+pub type FINDEX_SEARCH_OPS = i32;
+pub type FIND_FIRST_EX_FLAGS = u32;
 pub const FIONBIO: i32 = -2147195266i32;
 #[repr(C)]
 #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec", target_arch = "x86_64"))]
@@ -2565,6 +2570,8 @@ pub const FileRenameInfoEx: FILE_INFO_BY_HANDLE_CLASS = 22i32;
 pub const FileStandardInfo: FILE_INFO_BY_HANDLE_CLASS = 1i32;
 pub const FileStorageInfo: FILE_INFO_BY_HANDLE_CLASS = 16i32;
 pub const FileStreamInfo: FILE_INFO_BY_HANDLE_CLASS = 7i32;
+pub const FindExInfoBasic: FINDEX_INFO_LEVELS = 1i32;
+pub const FindExSearchNameMatch: FINDEX_SEARCH_OPS = 0i32;
 pub type GENERIC_ACCESS_RIGHTS = u32;
 pub const GENERIC_ALL: GENERIC_ACCESS_RIGHTS = 268435456u32;
 pub const GENERIC_EXECUTE: GENERIC_ACCESS_RIGHTS = 536870912u32;
@@ -2725,6 +2732,9 @@ pub struct LINGER {
     pub l_onoff: u16,
     pub l_linger: u16,
 }
+pub const LOCKFILE_EXCLUSIVE_LOCK: LOCK_FILE_FLAGS = 2u32;
+pub const LOCKFILE_FAIL_IMMEDIATELY: LOCK_FILE_FLAGS = 1u32;
+pub type LOCK_FILE_FLAGS = u32;
 pub type LPOVERLAPPED_COMPLETION_ROUTINE = Option<
     unsafe extern "system" fn(
         dwerrorcode: u32,
@@ -3307,7 +3317,6 @@ pub struct XSAVE_FORMAT {
     pub XmmRegisters: [M128A; 8],
     pub Reserved4: [u8; 224],
 }
-
 #[cfg(target_arch = "arm")]
 #[repr(C)]
 pub struct WSADATA {

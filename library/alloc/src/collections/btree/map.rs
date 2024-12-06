@@ -13,7 +13,7 @@ use super::borrow::DormantMutRef;
 use super::dedup_sorted_iter::DedupSortedIter;
 use super::navigate::{LazyLeafRange, LeafRange};
 use super::node::ForceResult::*;
-use super::node::{self, marker, Handle, NodeRef, Root};
+use super::node::{self, Handle, NodeRef, Root, marker};
 use super::search::SearchBound;
 use super::search::SearchResult::*;
 use super::set_val::SetValZST;
@@ -22,9 +22,9 @@ use crate::vec::Vec;
 
 mod entry;
 
+use Entry::*;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use entry::{Entry, OccupiedEntry, OccupiedError, VacantEntry};
-use Entry::*;
 
 /// Minimum number of elements in a node that is not a root.
 /// We might temporarily have fewer elements during methods.
@@ -289,40 +289,12 @@ impl<K: Clone, V: Clone, A: Allocator + Clone> Clone for BTreeMap<K, V, A> {
     }
 }
 
-impl<K, Q: ?Sized, A: Allocator + Clone> super::Recover<Q> for BTreeMap<K, SetValZST, A>
-where
-    K: Borrow<Q> + Ord,
-    Q: Ord,
-{
-    type Key = K;
-
-    fn get(&self, key: &Q) -> Option<&K> {
-        let root_node = self.root.as_ref()?.reborrow();
-        match root_node.search_tree(key) {
-            Found(handle) => Some(handle.into_kv().0),
-            GoDown(_) => None,
-        }
-    }
-
-    fn take(&mut self, key: &Q) -> Option<K> {
-        let (map, dormant_map) = DormantMutRef::new(self);
-        let root_node = map.root.as_mut()?.borrow_mut();
-        match root_node.search_tree(key) {
-            Found(handle) => Some(
-                OccupiedEntry {
-                    handle,
-                    dormant_map,
-                    alloc: (*map.alloc).clone(),
-                    _marker: PhantomData,
-                }
-                .remove_kv()
-                .0,
-            ),
-            GoDown(_) => None,
-        }
-    }
-
-    fn replace(&mut self, key: K) -> Option<K> {
+/// Internal functionality for `BTreeSet`.
+impl<K, A: Allocator + Clone> BTreeMap<K, SetValZST, A> {
+    pub(super) fn replace(&mut self, key: K) -> Option<K>
+    where
+        K: Ord,
+    {
         let (map, dormant_map) = DormantMutRef::new(self);
         let root_node =
             map.root.get_or_insert_with(|| Root::new((*map.alloc).clone())).borrow_mut();
@@ -705,7 +677,11 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
         }
     }
 
-    /// Returns the key-value pair corresponding to the supplied key.
+    /// Returns the key-value pair corresponding to the supplied key. This is
+    /// potentially useful:
+    /// - for key types where non-identical keys can be considered equal;
+    /// - for getting the `&K` stored key value from a borrowed `&Q` lookup key; or
+    /// - for getting a reference to a key with the same lifetime as the collection.
     ///
     /// The supplied key may be any borrowed form of the map's key type, but the ordering
     /// on the borrowed form *must* match the ordering on the key type.
@@ -713,12 +689,46 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
     /// # Examples
     ///
     /// ```
+    /// use std::cmp::Ordering;
     /// use std::collections::BTreeMap;
     ///
+    /// #[derive(Clone, Copy, Debug)]
+    /// struct S {
+    ///     id: u32,
+    /// #   #[allow(unused)] // prevents a "field `name` is never read" error
+    ///     name: &'static str, // ignored by equality and ordering operations
+    /// }
+    ///
+    /// impl PartialEq for S {
+    ///     fn eq(&self, other: &S) -> bool {
+    ///         self.id == other.id
+    ///     }
+    /// }
+    ///
+    /// impl Eq for S {}
+    ///
+    /// impl PartialOrd for S {
+    ///     fn partial_cmp(&self, other: &S) -> Option<Ordering> {
+    ///         self.id.partial_cmp(&other.id)
+    ///     }
+    /// }
+    ///
+    /// impl Ord for S {
+    ///     fn cmp(&self, other: &S) -> Ordering {
+    ///         self.id.cmp(&other.id)
+    ///     }
+    /// }
+    ///
+    /// let j_a = S { id: 1, name: "Jessica" };
+    /// let j_b = S { id: 1, name: "Jess" };
+    /// let p = S { id: 2, name: "Paul" };
+    /// assert_eq!(j_a, j_b);
+    ///
     /// let mut map = BTreeMap::new();
-    /// map.insert(1, "a");
-    /// assert_eq!(map.get_key_value(&1), Some((&1, &"a")));
-    /// assert_eq!(map.get_key_value(&2), None);
+    /// map.insert(j_a, "Paris");
+    /// assert_eq!(map.get_key_value(&j_a), Some((&j_a, &"Paris")));
+    /// assert_eq!(map.get_key_value(&j_b), Some((&j_a, &"Paris"))); // the notable case
+    /// assert_eq!(map.get_key_value(&p), None);
     /// ```
     #[stable(feature = "map_get_key_value", since = "1.40.0")]
     pub fn get_key_value<Q: ?Sized>(&self, k: &Q) -> Option<(&K, &V)>
@@ -916,6 +926,7 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
     /// assert_eq!(map.contains_key(&2), false);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "btreemap_contains_key")]
     pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
     where
         K: Borrow<Q> + Ord,
@@ -981,6 +992,7 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_confusables("push", "put", "set")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "btreemap_insert")]
     pub fn insert(&mut self, key: K, value: V) -> Option<V>
     where
         K: Ord,

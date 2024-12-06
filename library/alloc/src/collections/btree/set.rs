@@ -10,7 +10,6 @@ use core::ops::{BitAnd, BitOr, BitXor, Bound, RangeBounds, Sub};
 use super::map::{BTreeMap, Keys};
 use super::merge_iter::MergeIterInner;
 use super::set_val::SetValZST;
-use super::Recover;
 use crate::alloc::{Allocator, Global};
 use crate::vec::Vec;
 
@@ -635,7 +634,7 @@ impl<T, A: Allocator + Clone> BTreeSet<T, A> {
         T: Borrow<Q> + Ord,
         Q: Ord,
     {
-        Recover::get(&self.map, value)
+        self.map.get_key_value(value).map(|(k, _)| k)
     }
 
     /// Returns `true` if `self` has no elements in common with `other`.
@@ -926,7 +925,7 @@ impl<T, A: Allocator + Clone> BTreeSet<T, A> {
     where
         T: Ord,
     {
-        Recover::replace(&mut self.map, value)
+        self.map.replace(value)
     }
 
     /// If the set contains an element equal to the value, removes it from the
@@ -978,7 +977,7 @@ impl<T, A: Allocator + Clone> BTreeSet<T, A> {
         T: Borrow<Q> + Ord,
         Q: Ord,
     {
-        Recover::take(&mut self.map, value)
+        self.map.remove_entry(value).map(|(k, _)| k)
     }
 
     /// Retains only the elements specified by the predicate.
@@ -1132,6 +1131,7 @@ impl<T, A: Allocator + Clone> BTreeSet<T, A> {
     /// assert_eq!(set_iter.next(), None);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "btreeset_iter")]
     pub fn iter(&self) -> Iter<'_, T> {
         Iter { iter: self.map.keys() }
     }

@@ -16,6 +16,14 @@ use crate::convert::FloatToInt;
 use crate::intrinsics;
 use crate::mem;
 use crate::num::FpCategory;
+use crate::panic::const_assert;
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
+
+#[allow(unused_imports)]
+use crate::ub_checks::float_to_int_in_range;
 
 /// The radix or base of the internal representation of `f64`.
 /// Use [`f64::RADIX`] instead.
@@ -414,6 +422,7 @@ impl f64 {
     /// [Machine epsilon]: https://en.wikipedia.org/wiki/Machine_epsilon
     /// [`MANTISSA_DIGITS`]: f64::MANTISSA_DIGITS
     #[stable(feature = "assoc_int_consts", since = "1.43.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "f64_epsilon")]
     pub const EPSILON: f64 = 2.2204460492503131e-16_f64;
 
     /// Smallest finite `f64` value.
@@ -515,21 +524,11 @@ impl f64 {
     /// ```
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
+    #[rustc_const_stable(feature = "const_float_classify", since = "1.83.0")]
     #[inline]
     #[allow(clippy::eq_op)] // > if you intended to check if the operand is NaN, use `.is_nan()` instead :)
     pub const fn is_nan(self) -> bool {
         self != self
-    }
-
-    // FIXME(#50145): `abs` is publicly unavailable in core due to
-    // concerns about portability, so this implementation is for
-    // private use internally.
-    #[inline]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
-    pub(crate) const fn abs_private(self) -> f64 {
-        // SAFETY: This transmutation is fine just like in `to_bits`/`from_bits`.
-        unsafe { mem::transmute::<u64, f64>(mem::transmute::<f64, u64>(self) & !Self::SIGN_MASK) }
     }
 
     /// Returns `true` if this value is positive infinity or negative infinity, and
@@ -549,7 +548,7 @@ impl f64 {
     /// ```
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
+    #[rustc_const_stable(feature = "const_float_classify", since = "1.83.0")]
     #[inline]
     pub const fn is_infinite(self) -> bool {
         // Getting clever with transmutation can result in incorrect answers on some FPUs
@@ -574,12 +573,12 @@ impl f64 {
     /// ```
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
+    #[rustc_const_stable(feature = "const_float_classify", since = "1.83.0")]
     #[inline]
     pub const fn is_finite(self) -> bool {
         // There's no need to handle NaN separately: if self is NaN,
         // the comparison is not true, exactly as desired.
-        self.abs_private() < Self::INFINITY
+        self.abs() < Self::INFINITY
     }
 
     /// Returns `true` if the number is [subnormal].
@@ -602,7 +601,7 @@ impl f64 {
     /// [subnormal]: https://en.wikipedia.org/wiki/Denormal_number
     #[must_use]
     #[stable(feature = "is_subnormal", since = "1.53.0")]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
+    #[rustc_const_stable(feature = "const_float_classify", since = "1.83.0")]
     #[inline]
     pub const fn is_subnormal(self) -> bool {
         matches!(self.classify(), FpCategory::Subnormal)
@@ -629,7 +628,7 @@ impl f64 {
     /// [subnormal]: https://en.wikipedia.org/wiki/Denormal_number
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
+    #[rustc_const_stable(feature = "const_float_classify", since = "1.83.0")]
     #[inline]
     pub const fn is_normal(self) -> bool {
         matches!(self.classify(), FpCategory::Normal)
@@ -649,43 +648,20 @@ impl f64 {
     /// assert_eq!(inf.classify(), FpCategory::Infinite);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
+    #[rustc_const_stable(feature = "const_float_classify", since = "1.83.0")]
     pub const fn classify(self) -> FpCategory {
-        // A previous implementation tried to only use bitmask-based checks,
-        // using f64::to_bits to transmute the float to its bit repr and match on that.
-        // If we only cared about being "technically" correct, that's an entirely legit
-        // implementation.
-        //
-        // Unfortunately, there is hardware out there that does not correctly implement the IEEE
-        // float semantics Rust relies on: x87 uses a too-large exponent, and some hardware flushes
-        // subnormals to zero. These are platforms bugs, and Rust will misbehave on such hardware,
-        // but we can at least try to make things seem as sane as possible by being careful here.
-        //
-        // FIXME(jubilee): Using x87 operations is never necessary in order to function
-        // on x86 processors for Rust-to-Rust calls, so this issue should not happen.
-        // Code generation should be adjusted to use non-C calling conventions, avoiding this.
-        //
-        // Thus, a value may compare unequal to infinity, despite having a "full" exponent mask.
-        // And it may not be NaN, as it can simply be an "overextended" finite value.
-        if self.is_nan() {
-            FpCategory::Nan
-        } else {
-            // However, std can't simply compare to zero to check for zero, either,
-            // as correctness requires avoiding equality tests that may be Subnormal == -0.0
-            // because it may be wrong under "denormals are zero" and "flush to zero" modes.
-            // Most of std's targets don't use those, but they are used for thumbv7neon.
-            // So, this does use bitpattern matching for the rest. On x87, due to the incorrect
-            // float codegen on this hardware, this doesn't actually return a right answer for NaN
-            // because it cannot correctly discern between a floating point NaN, and some normal
-            // floating point numbers truncated from an x87 FPU -- but we took care of NaN above, so
-            // we are fine.
-            let b = self.to_bits();
-            match (b & Self::MAN_MASK, b & Self::EXP_MASK) {
-                (0, Self::EXP_MASK) => FpCategory::Infinite,
-                (0, 0) => FpCategory::Zero,
-                (_, 0) => FpCategory::Subnormal,
-                _ => FpCategory::Normal,
-            }
+        // We used to have complicated logic here that avoids the simple bit-based tests to work
+        // around buggy codegen for x87 targets (see
+        // https://github.com/rust-lang/rust/issues/114479). However, some LLVM versions later, none
+        // of our tests is able to find any difference between the complicated and the naive
+        // version, so now we are back to the naive version.
+        let b = self.to_bits();
+        match (b & Self::MAN_MASK, b & Self::EXP_MASK) {
+            (0, Self::EXP_MASK) => FpCategory::Infinite,
+            (_, Self::EXP_MASK) => FpCategory::Nan,
+            (0, 0) => FpCategory::Zero,
+            (_, 0) => FpCategory::Subnormal,
+            _ => FpCategory::Normal,
         }
     }
 
@@ -708,7 +684,7 @@ impl f64 {
     /// ```
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
+    #[rustc_const_stable(feature = "const_float_classify", since = "1.83.0")]
     #[inline]
     pub const fn is_sign_positive(self) -> bool {
         !self.is_sign_negative()
@@ -742,7 +718,7 @@ impl f64 {
     /// ```
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_float_classify", issue = "72505")]
+    #[rustc_const_stable(feature = "const_float_classify", since = "1.83.0")]
     #[inline]
     pub const fn is_sign_negative(self) -> bool {
         // IEEE754 says: isSignMinus(x) is true if and only if x has negative sign. isSignMinus
@@ -788,7 +764,6 @@ impl f64 {
     /// [`MAX`]: Self::MAX
     #[inline]
     #[unstable(feature = "float_next_up_down", issue = "91399")]
-    #[rustc_const_unstable(feature = "float_next_up_down", issue = "91399")]
     pub const fn next_up(self) -> Self {
         // Some targets violate Rust's assumption of IEEE semantics, e.g. by flushing
         // denormals to zero. This is in general unsound and unsupported, but here
@@ -837,7 +812,6 @@ impl f64 {
     /// [`MAX`]: Self::MAX
     #[inline]
     #[unstable(feature = "float_next_up_down", issue = "91399")]
-    #[rustc_const_unstable(feature = "float_next_up_down", issue = "91399")]
     pub const fn next_down(self) -> Self {
         // Some targets violate Rust's assumption of IEEE semantics, e.g. by flushing
         // denormals to zero. This is in general unsound and unsupported, but here
@@ -868,8 +842,9 @@ impl f64 {
     /// ```
     #[must_use = "this returns the result of the operation, without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn recip(self) -> f64 {
+    pub const fn recip(self) -> f64 {
         1.0 / self
     }
 
@@ -885,8 +860,9 @@ impl f64 {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn to_degrees(self) -> f64 {
+    pub const fn to_degrees(self) -> f64 {
         // The division here is correctly rounded with respect to the true
         // value of 180/π. (This differs from f32, where a constant must be
         // used to ensure a correctly rounded result.)
@@ -905,8 +881,9 @@ impl f64 {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn to_radians(self) -> f64 {
+    pub const fn to_radians(self) -> f64 {
         const RADS_PER_DEG: f64 = consts::PI / 180.0;
         self * RADS_PER_DEG
     }
@@ -926,8 +903,9 @@ impl f64 {
     /// ```
     #[must_use = "this returns the result of the comparison, without modifying either input"]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn max(self, other: f64) -> f64 {
+    pub const fn max(self, other: f64) -> f64 {
         intrinsics::maxnumf64(self, other)
     }
 
@@ -946,8 +924,9 @@ impl f64 {
     /// ```
     #[must_use = "this returns the result of the comparison, without modifying either input"]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn min(self, other: f64) -> f64 {
+    pub const fn min(self, other: f64) -> f64 {
         intrinsics::minnumf64(self, other)
     }
 
@@ -974,7 +953,7 @@ impl f64 {
     #[must_use = "this returns the result of the comparison, without modifying either input"]
     #[unstable(feature = "float_minimum_maximum", issue = "91079")]
     #[inline]
-    pub fn maximum(self, other: f64) -> f64 {
+    pub const fn maximum(self, other: f64) -> f64 {
         if self > other {
             self
         } else if other > self {
@@ -1009,7 +988,7 @@ impl f64 {
     #[must_use = "this returns the result of the comparison, without modifying either input"]
     #[unstable(feature = "float_minimum_maximum", issue = "91079")]
     #[inline]
-    pub fn minimum(self, other: f64) -> f64 {
+    pub const fn minimum(self, other: f64) -> f64 {
         if self < other {
             self
         } else if other < self {
@@ -1041,8 +1020,8 @@ impl f64 {
         const HI: f64 = f64::MAX / 2.;
 
         let (a, b) = (self, other);
-        let abs_a = a.abs_private();
-        let abs_b = b.abs_private();
+        let abs_a = a.abs();
+        let abs_b = b.abs();
 
         if abs_a <= HI && abs_b <= HI {
             // Overflow is impossible
@@ -1083,6 +1062,8 @@ impl f64 {
                   without modifying the original"]
     #[stable(feature = "float_approx_unchecked_to", since = "1.44.0")]
     #[inline]
+    // is_finite() checks if the given float is neither infinite nor NaN.
+    #[requires(self.is_finite() && float_to_int_in_range::<Self, Int>(self))]
     pub unsafe fn to_int_unchecked<Int>(self) -> Int
     where
         Self: FloatToInt<Int>,
@@ -1111,7 +1092,7 @@ impl f64 {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[stable(feature = "float_bits_conv", since = "1.20.0")]
-    #[rustc_const_unstable(feature = "const_float_bits_conv", issue = "72447")]
+    #[rustc_const_stable(feature = "const_float_bits_conv", since = "1.83.0")]
     #[inline]
     pub const fn to_bits(self) -> u64 {
         // SAFETY: `u64` is a plain old datatype so we can always transmute to it.
@@ -1155,7 +1136,7 @@ impl f64 {
     /// assert_eq!(v, 12.5);
     /// ```
     #[stable(feature = "float_bits_conv", since = "1.20.0")]
-    #[rustc_const_unstable(feature = "const_float_bits_conv", issue = "72447")]
+    #[rustc_const_stable(feature = "const_float_bits_conv", since = "1.83.0")]
     #[must_use]
     #[inline]
     pub const fn from_bits(v: u64) -> Self {
@@ -1179,7 +1160,7 @@ impl f64 {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
-    #[rustc_const_unstable(feature = "const_float_bits_conv", issue = "72447")]
+    #[rustc_const_stable(feature = "const_float_bits_conv", since = "1.83.0")]
     #[inline]
     pub const fn to_be_bytes(self) -> [u8; 8] {
         self.to_bits().to_be_bytes()
@@ -1200,7 +1181,7 @@ impl f64 {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
-    #[rustc_const_unstable(feature = "const_float_bits_conv", issue = "72447")]
+    #[rustc_const_stable(feature = "const_float_bits_conv", since = "1.83.0")]
     #[inline]
     pub const fn to_le_bytes(self) -> [u8; 8] {
         self.to_bits().to_le_bytes()
@@ -1234,7 +1215,7 @@ impl f64 {
     #[must_use = "this returns the result of the operation, \
                   without modifying the original"]
     #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
-    #[rustc_const_unstable(feature = "const_float_bits_conv", issue = "72447")]
+    #[rustc_const_stable(feature = "const_float_bits_conv", since = "1.83.0")]
     #[inline]
     pub const fn to_ne_bytes(self) -> [u8; 8] {
         self.to_bits().to_ne_bytes()
@@ -1252,7 +1233,7 @@ impl f64 {
     /// assert_eq!(value, 12.5);
     /// ```
     #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
-    #[rustc_const_unstable(feature = "const_float_bits_conv", issue = "72447")]
+    #[rustc_const_stable(feature = "const_float_bits_conv", since = "1.83.0")]
     #[must_use]
     #[inline]
     pub const fn from_be_bytes(bytes: [u8; 8]) -> Self {
@@ -1271,7 +1252,7 @@ impl f64 {
     /// assert_eq!(value, 12.5);
     /// ```
     #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
-    #[rustc_const_unstable(feature = "const_float_bits_conv", issue = "72447")]
+    #[rustc_const_stable(feature = "const_float_bits_conv", since = "1.83.0")]
     #[must_use]
     #[inline]
     pub const fn from_le_bytes(bytes: [u8; 8]) -> Self {
@@ -1301,7 +1282,7 @@ impl f64 {
     /// assert_eq!(value, 12.5);
     /// ```
     #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
-    #[rustc_const_unstable(feature = "const_float_bits_conv", issue = "72447")]
+    #[rustc_const_stable(feature = "const_float_bits_conv", since = "1.83.0")]
     #[must_use]
     #[inline]
     pub const fn from_ne_bytes(bytes: [u8; 8]) -> Self {
@@ -1424,9 +1405,17 @@ impl f64 {
     /// ```
     #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "clamp", since = "1.50.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    pub fn clamp(mut self, min: f64, max: f64) -> f64 {
-        assert!(min <= max, "min > max, or either was NaN. min = {min:?}, max = {max:?}");
+    pub const fn clamp(mut self, min: f64, max: f64) -> f64 {
+        const_assert!(
+            min <= max,
+            "min > max, or either was NaN",
+            "min > max, or either was NaN. min = {min:?}, max = {max:?}",
+            min: f64,
+            max: f64,
+        );
+
         if self < min {
             self = min;
         }
@@ -1434,5 +1423,88 @@ impl f64 {
             self = max;
         }
         self
+    }
+
+    /// Computes the absolute value of `self`.
+    ///
+    /// This function always returns the precise result.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = 3.5_f64;
+    /// let y = -3.5_f64;
+    ///
+    /// assert_eq!(x.abs(), x);
+    /// assert_eq!(y.abs(), -y);
+    ///
+    /// assert!(f64::NAN.abs().is_nan());
+    /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
+    #[inline]
+    pub const fn abs(self) -> f64 {
+        // SAFETY: this is actually a safe intrinsic
+        unsafe { intrinsics::fabsf64(self) }
+    }
+
+    /// Returns a number that represents the sign of `self`.
+    ///
+    /// - `1.0` if the number is positive, `+0.0` or `INFINITY`
+    /// - `-1.0` if the number is negative, `-0.0` or `NEG_INFINITY`
+    /// - NaN if the number is NaN
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let f = 3.5_f64;
+    ///
+    /// assert_eq!(f.signum(), 1.0);
+    /// assert_eq!(f64::NEG_INFINITY.signum(), -1.0);
+    ///
+    /// assert!(f64::NAN.signum().is_nan());
+    /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
+    #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
+    #[inline]
+    pub const fn signum(self) -> f64 {
+        if self.is_nan() { Self::NAN } else { 1.0_f64.copysign(self) }
+    }
+
+    /// Returns a number composed of the magnitude of `self` and the sign of
+    /// `sign`.
+    ///
+    /// Equal to `self` if the sign of `self` and `sign` are the same, otherwise equal to `-self`.
+    /// If `self` is a NaN, then a NaN with the same payload as `self` and the sign bit of `sign` is
+    /// returned.
+    ///
+    /// If `sign` is a NaN, then this operation will still carry over its sign into the result. Note
+    /// that IEEE 754 doesn't assign any meaning to the sign bit in case of a NaN, and as Rust
+    /// doesn't guarantee that the bit pattern of NaNs are conserved over arithmetic operations, the
+    /// result of `copysign` with `sign` being a NaN might produce an unexpected or non-portable
+    /// result. See the [specification of NaN bit patterns](primitive@f32#nan-bit-patterns) for more
+    /// info.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let f = 3.5_f64;
+    ///
+    /// assert_eq!(f.copysign(0.42), 3.5_f64);
+    /// assert_eq!(f.copysign(-0.42), -3.5_f64);
+    /// assert_eq!((-f).copysign(0.42), 3.5_f64);
+    /// assert_eq!((-f).copysign(-0.42), -3.5_f64);
+    ///
+    /// assert!(f64::NAN.copysign(1.0).is_nan());
+    /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
+    #[stable(feature = "copysign", since = "1.35.0")]
+    #[rustc_const_stable(feature = "const_float_methods", since = "CURRENT_RUSTC_VERSION")]
+    #[inline]
+    pub const fn copysign(self, sign: f64) -> f64 {
+        // SAFETY: this is actually a safe intrinsic
+        unsafe { intrinsics::copysignf64(self, sign) }
     }
 }
