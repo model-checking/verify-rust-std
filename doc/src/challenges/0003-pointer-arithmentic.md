@@ -88,7 +88,7 @@ At least 3 of the following usages were proven safe:
 
 | Function          | Location      |
 |-------------------|---------------|
-| \[u8\]::is_asc_ii | core::slice   |
+| \[u8\]::is_ascii | core::slice   |
 | String::remove    | alloc::string |
  | Vec::swap_remove | alloc::vec |
  | Option::as_slice | core::option |
