@@ -4,6 +4,9 @@ use crate::fmt;
 use crate::fmt::{Formatter, Write};
 use crate::iter::FusedIterator;
 
+#[cfg(kani)]
+use crate::kani;
+
 impl [u8] {
     /// Creates an iterator over the contiguous valid UTF-8 ranges of this
     /// slice, and the non-UTF-8 fragments in between.
@@ -204,6 +207,12 @@ impl<'a> Iterator for Utf8Chunks<'a> {
 
         let mut i = 0;
         let mut valid_up_to = 0;
+        // TODO: remove `LEN` and use `self.source.len()` directly once
+        // fix the issue that Kani loop contracts doesn't support `self`.
+        // Tracked in https://github.com/model-checking/kani/issues/3700
+        #[cfg(kani)]
+        let LEN = self.source.len();
+        #[safety::loop_invariant(i <= LEN && valid_up_to == i)]
         while i < self.source.len() {
             // SAFETY: `i < self.source.len()` per previous line.
             // For some reason the following are both significantly slower:
@@ -294,5 +303,33 @@ impl FusedIterator for Utf8Chunks<'_> {}
 impl fmt::Debug for Utf8Chunks<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("Utf8Chunks").field("source", &self.debug()).finish()
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+
+    #[kani::proof]
+    pub fn check_next() {
+        if kani::any() {
+            // TODO: ARR_SIZE can be `std::usize::MAX` with cbmc argument
+            // `--arrays-uf-always`
+            const ARR_SIZE: usize = 1000;
+            let mut x: [u8; ARR_SIZE] = kani::any();
+            let mut xs = kani::slice::any_slice_of_array_mut(&mut x);
+            let mut chunks = xs.utf8_chunks();
+            unsafe {
+                chunks.next();
+            }
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
+            kani::assume(ptr.is_aligned());
+            unsafe {
+                let mut chunks = crate::slice::from_raw_parts(ptr, 0).utf8_chunks();
+                chunks.next();
+            }
+        }
     }
 }
