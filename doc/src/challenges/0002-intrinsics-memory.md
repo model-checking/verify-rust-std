@@ -24,8 +24,8 @@ Annotate Rust core::intrinsics functions that manipulate raw pointers with their
 
 Intrinsic functions to be annotated with safety contracts
 
-| Function                            | Location |
-|-------------------------------------|---------|
+| Function                            | Location        |
+|-------------------------------------|-----------------|
 | typed_swap                          | core::intrisics |
 | vtable_size                         | core::intrisics |
 | vtable_align                        | core::intrisics |
