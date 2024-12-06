@@ -505,7 +505,7 @@ impl<T: ?Sized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>() as isize).is_some() &&
        (self.as_ptr() as isize).checked_add(count.wrapping_mul(core::mem::size_of::<T>() as isize)).is_some() &&
-        (count == 0 || kani::mem::same_allocation(self.as_ptr() as *const (), self.as_ptr().wrapping_offset(count) as *const ()))
+        (count == 0 || ub_checks::same_allocation(self.as_ptr() as *const (), self.as_ptr().wrapping_offset(count) as *const ()))
     )]
     #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_offset(count))]
     pub const unsafe fn offset(self, count: isize) -> Self
@@ -716,7 +716,7 @@ impl<T: ?Sized> NonNull<T> {
     #[requires(
         count <= (isize::MAX as usize) &&
         self.as_ptr().addr().checked_sub(count).is_some() &&
-        kani::mem::same_allocation(self.as_ptr() as *const (), (self.as_ptr().addr() - count) as *const ())
+        ub_checks::same_allocation(self.as_ptr() as *const (), (self.as_ptr().addr() - count) as *const ())
      )]
     #[ensures(
         |result: &NonNull<T>| result.as_ptr().addr() == (self.as_ptr().addr() - count)
