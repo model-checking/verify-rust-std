@@ -1,6 +1,6 @@
-# This workflow checks that the PR has been approved by 2+  members of the committee listed in `pull_requests.toml`.
+# This workflow checks that the PR has been approved by 2+ members of the committee listed in `pull_requests.toml`.
 #
-# Run this pull request when a request review is submitted / dismissed.
+# Run this action when a pull request review is submitted / dismissed.
 # Note that an approval can be dismissed, and this can affect the job status.
 # We currently trust that contributors won't make significant changes to their PRs after approval, so we accept
 # changes after approval.
@@ -10,7 +10,6 @@
 name: Check PR Approvals
 on:
   merge_group:
-  pull_request:
   pull_request_review:
     types: [submitted, dismissed]
 
