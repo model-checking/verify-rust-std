@@ -2112,7 +2112,7 @@ mod verify {
     );
 
     // The array's length is set to an arbitrary value, which defines its size.
-    // In this case, implementing a dynamic array is not possible, because 
+    // In this case, implementing a dynamic array is not possible, because
     // PointerGenerator does not support dynamic sized arrays.
     const ARRAY_LEN: usize = 40;
 
@@ -2508,4 +2508,62 @@ mod verify {
         byte_offset,
         check_const_byte_offset_usize_slice
     );
+
+    // Trait used exclusively for implementing proofs for contracts for `dyn Trait` type.
+    trait TestTrait {}
+
+    // Struct used exclusively for implementing proofs for contracts for `dyn Trait` type.
+    struct TestStruct {
+        value: i64,
+    }
+
+    impl TestTrait for TestStruct {}
+
+    // generate `dyn Trait` proof for contracts for byte_add, byte_sub and byte_offset.
+    // - `$fn_name`: function for which the contract must be verified
+    // - `$proof_name`: name of the harness generated
+    macro_rules! gen_const_byte_arith_harness_for_dyn {
+        (byte_offset, $proof_name:ident) => {
+            // tracking issue: https://github.com/model-checking/kani/issues/3763
+            // Workaround: Directly verifying the method `<*const dyn TestTrait>::byte_offset`
+            // causes a compilation error. As a workaround, the proof is annotated with the
+            // underlying struct type instead.
+            #[kani::proof_for_contract(<*const TestStruct>::byte_offset)]
+            pub fn $proof_name() {
+                let test_struct = TestStruct { value: 42 };
+                let trait_object: &dyn TestTrait = &test_struct;
+                let test_ptr: *const dyn TestTrait = trait_object;
+
+                let count: isize = kani::any();
+
+                unsafe {
+                    test_ptr.byte_offset(count);
+                }
+            }
+        };
+
+        ($fn_name: ident, $proof_name:ident) => {
+            //tracking issue: https://github.com/model-checking/kani/issues/3763
+            // Workaround: Directly verifying the method `<*const dyn TestTrait>::$fn_name`
+            // causes a compilation error. As a workaround, the proof is annotated with the
+            // underlying struct type instead.
+            #[kani::proof_for_contract(<*const TestStruct>::$fn_name)]
+            pub fn $proof_name() {
+                let test_struct = TestStruct { value: 42 };
+                let trait_object: &dyn TestTrait = &test_struct;
+                let test_ptr: *const dyn TestTrait = trait_object;
+
+                //byte_add and byte_sub need count to be usize unlike byte_offset
+                let count: usize = kani::any();
+
+                unsafe {
+                    test_ptr.$fn_name(count);
+                }
+            }
+        };
+    }
+
+    gen_const_byte_arith_harness_for_dyn!(byte_add, check_const_byte_add_dyn);
+    gen_const_byte_arith_harness_for_dyn!(byte_sub, check_const_byte_sub_dyn);
+    gen_const_byte_arith_harness_for_dyn!(byte_offset, check_const_byte_offset_dyn);
 }
