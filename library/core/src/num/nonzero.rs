@@ -2265,3 +2265,69 @@ mod verify {
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 }
+
+#[cfg(kani)]
+mod macro_nonzero_check_max {
+    use super::*;
+    macro_rules! nonzero_check_max {
+        ($nonzero_type:ty, $nonzero_check_max_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_max_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x.max(y);
+                if x > y {
+                    assert!(result == x);
+                } else {
+                    assert!(result == y);
+                }
+            }
+        };
+    }
+
+    nonzero_check_max!(core::num::NonZeroI8, nonzero_check_max_for_i8);
+    nonzero_check_max!(core::num::NonZeroI16, nonzero_check_max_for_i16);
+    nonzero_check_max!(core::num::NonZeroI32, nonzero_check_max_for_i32);
+    nonzero_check_max!(core::num::NonZeroI64, nonzero_check_max_for_i64);
+    nonzero_check_max!(core::num::NonZeroI128, nonzero_check_max_for_i128);
+    nonzero_check_max!(core::num::NonZeroIsize, nonzero_check_max_for_isize);
+    nonzero_check_max!(core::num::NonZeroU8, nonzero_check_max_for_u8);
+    nonzero_check_max!(core::num::NonZeroU16, nonzero_check_max_for_u16);
+    nonzero_check_max!(core::num::NonZeroU32, nonzero_check_max_for_u32);
+    nonzero_check_max!(core::num::NonZeroU64, nonzero_check_max_for_u64);
+    nonzero_check_max!(core::num::NonZeroU128, nonzero_check_max_for_u128);
+    nonzero_check_max!(core::num::NonZeroUsize, nonzero_check_max_for_usize);
+}
+
+#[cfg(kani)]
+mod macro_nonzero_check_min {
+    use super::*;
+    macro_rules! nonzero_check_min {
+        ($nonzero_type:ty, $nonzero_check_min_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_min_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x.min(y);
+                if x < y {
+                    assert!(result == x);
+                } else {
+                    assert!(result == y);
+                }
+            }
+        };
+    }
+
+    nonzero_check_min!(core::num::NonZeroI8, nonzero_check_min_for_i8);
+    nonzero_check_min!(core::num::NonZeroI16, nonzero_check_min_for_i16);
+    nonzero_check_min!(core::num::NonZeroI32, nonzero_check_min_for_i32);
+    nonzero_check_min!(core::num::NonZeroI64, nonzero_check_min_for_i64);
+    nonzero_check_min!(core::num::NonZeroI128, nonzero_check_min_for_i128);
+    nonzero_check_min!(core::num::NonZeroIsize, nonzero_check_min_for_isize);
+    nonzero_check_min!(core::num::NonZeroU8, nonzero_check_min_for_u8);
+    nonzero_check_min!(core::num::NonZeroU16, nonzero_check_min_for_u16);
+    nonzero_check_min!(core::num::NonZeroU32, nonzero_check_min_for_u32);
+    nonzero_check_min!(core::num::NonZeroU64, nonzero_check_min_for_u64);
+    nonzero_check_min!(core::num::NonZeroU128, nonzero_check_min_for_u128);
+    nonzero_check_min!(core::num::NonZeroUsize, nonzero_check_min_for_usize);
+}
