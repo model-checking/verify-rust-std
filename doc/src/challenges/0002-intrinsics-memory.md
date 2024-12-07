@@ -24,29 +24,29 @@ Annotate Rust core::intrinsics functions that manipulate raw pointers with their
 
 Intrinsic functions to be annotated with safety contracts
 
-| Function | Location |
-|---------|---------|
-|typed_swap | core::intrisics |
-|vtable_size| core::intrisics |
-|vtable_align| core::intrisics |
-|copy_nonoverlapping| core::intrisics |
-|copy| core::intrisics |
-|write_bytes| core::intrisics |
-|size_of_val| core::intrisics |
-|arith_offset| core::intrisics |
-|volatile_copy_nonoverlapping_memory| core::intrisics |
-|volatile_copy_memory| core::intrisics |
-|volatile_set_memory| core::intrisics |
-|volatile_load| core::intrisics |
-|volatile_store| core::intrisics |
-|unaligned_volatile_load| core::intrisics |
-|unaligned_volatile_store| core::intrisics |
-|compare_bytes| core::intrisics |
-|min_align_of_val| core::intrisics |
-|ptr_offset_from| core::intrisics |
-|ptr_offset_from_unsigned| core::intrisics |
-|read_via_copy| core::intrisics |
-|write_via_move| core::intrisics |
+| Function                            | Location        |
+|-------------------------------------|-----------------|
+| typed_swap                          | core::intrisics |
+| vtable_size                         | core::intrisics |
+| vtable_align                        | core::intrisics |
+| copy_nonoverlapping                 | core::intrisics |
+| copy                                | core::intrisics |
+| write_bytes                         | core::intrisics |
+| size_of_val                         | core::intrisics |
+| arith_offset                        | core::intrisics |
+| volatile_copy_nonoverlapping_memory | core::intrisics |
+| volatile_copy_memory                | core::intrisics |
+| volatile_set_memory                 | core::intrisics |
+| volatile_load                       | core::intrisics |
+| volatile_store                      | core::intrisics |
+| unaligned_volatile_load             | core::intrisics |
+| unaligned_volatile_store            | core::intrisics |
+| compare_bytes                       | core::intrisics |
+| min_align_of_val                    | core::intrisics |
+| ptr_offset_from                     | core::intrisics |
+| ptr_offset_from_unsigned            | core::intrisics |
+| read_via_copy                       | core::intrisics |
+| write_via_move                      | core::intrisics |
 
 
 All the following usages of intrinsics were proven safe:
