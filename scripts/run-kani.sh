@@ -215,7 +215,9 @@ main() {
             -Z mem-predicates \
             -Z loop-contracts \
             -Z float-lib \
-            --output-format=terse \
+            -Z c-ffi \
+            --output-format=old \
+            --no-assertion-reach-checks \
             $command_args \
             --enable-unstable \
             --cbmc-args --object-bits 12
