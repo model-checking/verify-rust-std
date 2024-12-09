@@ -3604,18 +3604,24 @@ mod verify {
                 }
 
                 check_unsafe_contracts!(check_next_back_unchecked, $ty, next_back_unchecked());
-                //check_unsafe_contracts!(check_post_inc_start, $ty, post_inc_start(kani::any()));
-                //check_unsafe_contracts!(check_pre_dec_end, $ty, pre_dec_end(kani::any()));
+                check_unsafe_contracts!(check_post_inc_start, $ty, post_inc_start(kani::any()));
+                check_unsafe_contracts!(check_pre_dec_end, $ty, pre_dec_end(kani::any()));
 
                 // FIXME: The functions that are commented out are currently failing verification.
                 // Debugging the issue is currently blocked by:
                 // https://github.com/model-checking/kani/issues/3670
                 //
                 // Public functions that call safe abstraction `make_slice`.
-                // check_safe_abstraction!(check_as_slice, $ty, as_slice);
-                // check_safe_abstraction!(check_as_ref, $ty, as_ref);
+                check_safe_abstraction!(check_as_slice, $ty, |iter: &mut Iter<'_, $ty>| {
+                    iter.as_slice();
+                });
+                check_safe_abstraction!(check_as_ref, $ty, |iter: &mut Iter<'_, $ty>| {
+                    iter.as_ref();
+                });
 
-                // check_safe_abstraction!(check_advance_back_by, $ty, advance_back_by, kani::any());
+                check_safe_abstraction!(check_advance_back_by, $ty, |iter: &mut Iter<'_, $ty>| {
+                    iter.advance_back_by(kani::any());
+                });
 
                 check_safe_abstraction!(check_is_empty, $ty, |iter: &mut Iter<'_, $ty>| {
                     let _ = iter.is_empty();
@@ -3626,12 +3632,12 @@ mod verify {
                 check_safe_abstraction!(check_size_hint, $ty, |iter: &mut Iter<'_, $ty>| {
                     let _ = iter.size_hint();
                 });
-                //check_safe_abstraction!(check_nth, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth(kani::any()); });
-                //check_safe_abstraction!(check_advance_by, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.advance_by(kani::any()); });
+                check_safe_abstraction!(check_nth, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth(kani::any()); });
+                check_safe_abstraction!(check_advance_by, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.advance_by(kani::any()); });
                 check_safe_abstraction!(check_next_back, $ty, |iter: &mut Iter<'_, $ty>| {
                     let _ = iter.next_back();
                 });
-                //check_safe_abstraction!(check_nth_back, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth_back(kani::any()); });
+                check_safe_abstraction!(check_nth_back, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth_back(kani::any()); });
                 check_safe_abstraction!(check_next, $ty, |iter: &mut Iter<'_, $ty>| {
                     let _ = iter.next();
                 });
