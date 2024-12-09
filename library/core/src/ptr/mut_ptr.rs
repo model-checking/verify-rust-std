@@ -414,12 +414,12 @@ impl<T: ?Sized> *mut T {
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_offset(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
-        ((core::mem::size_of::<T>() == 0) || (kani::mem::same_allocation(self, self.wrapping_offset(count))))
+        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_offset(count))))
     )]
     // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
-    #[ensures(|result| (core::mem::size_of::<T>() == 0) || kani::mem::same_allocation(self as *const T, *result as *const T))]
+    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
     pub const unsafe fn offset(self, count: isize) -> *mut T
     where
         T: Sized,
@@ -480,7 +480,7 @@ impl<T: ?Sized> *mut T {
         (count == 0) ||
         // Else if count is not zero, then ensure that subtracting `count` doesn't 
         // cause overflow and that both pointers `self` and the result are in the 
-        // same allocation 
+        // same allocation.
         ((self.addr() as isize).checked_add(count).is_some() &&
             core::ub_checks::same_allocation(self, self.wrapping_byte_offset(count)))
     )]
@@ -1063,12 +1063,12 @@ impl<T: ?Sized> *mut T {
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_add(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
-        ((core::mem::size_of::<T>() == 0) || (kani::mem::same_allocation(self, self.wrapping_add(count))))
+        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_add(count))))
     )]
     // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
-    #[ensures(|result| (core::mem::size_of::<T>() == 0) || kani::mem::same_allocation(self as *const T, *result as *const T))]
+    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
@@ -1126,7 +1126,7 @@ impl<T: ?Sized> *mut T {
         (count == 0) ||
         // Else if count is not zero, then ensure that subtracting `count` doesn't 
         // cause overflow and that both pointers `self` and the result are in the 
-        // same allocation 
+        // same allocation.
         ((self.addr() as isize).checked_add(count as isize).is_some() &&
             core::ub_checks::same_allocation(self, self.wrapping_byte_add(count)))
     )]
@@ -1203,12 +1203,12 @@ impl<T: ?Sized> *mut T {
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_sub(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
-        ((core::mem::size_of::<T>() == 0) || (kani::mem::same_allocation(self, self.wrapping_sub(count))))
+        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_sub(count))))
     )]
     // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
-    #[ensures(|result| (core::mem::size_of::<T>() == 0) || kani::mem::same_allocation(self as *const T, *result as *const T))]
+    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -1272,7 +1272,7 @@ impl<T: ?Sized> *mut T {
         (count == 0) ||
         // Else if count is not zero, then ensure that subtracting `count` doesn't 
         // cause overflow and that both pointers `self` and the result are in the 
-        // same allocation 
+        // same allocation.
         ((self.addr() as isize).checked_sub(count as isize).is_some() &&
             core::ub_checks::same_allocation(self, self.wrapping_byte_sub(count)))
     )]
@@ -2244,42 +2244,155 @@ mod verify {
     use core::mem;
     use kani::PointerGenerator;
 
+    /// This macro generates a single verification harness for the `offset`, `add`, or `sub`
+    /// pointer operations, supporting integer, composite, or unit types.
+    /// - `$ty`: The type of the slice's elements (e.g., `i32`, `u32`, tuples).
+    /// - `$fn_name`: The name of the function being checked (`add`, `sub`, or `offset`).
+    /// - `$proof_name`: The name assigned to the generated proof for the contract.
+    /// - `$count_ty:ty`: The type of the input variable passed to the method being invoked.
+    ///
+    /// Note: This macro is intended for internal use only and should be invoked exclusively
+    /// by the `generate_arithmetic_harnesses` macro. Its purpose is to reduce code duplication,
+    /// and it is not meant to be used directly elsewhere in the codebase.
+    macro_rules! generate_single_arithmetic_harness {
+        ($ty:ty, $proof_name:ident, $fn_name:ident, $count_ty:ty) => {
+            #[kani::proof_for_contract(<*mut $ty>::$fn_name)]
+            pub fn $proof_name() {
+                // 200 bytes are large enough to cover all pointee types used for testing
+                const BUF_SIZE: usize = 200;
+                let mut generator = kani::PointerGenerator::<BUF_SIZE>::new();
+                let test_ptr: *mut $ty = generator.any_in_bounds().ptr;
+                let count: $count_ty = kani::any();
+                unsafe {
+                    test_ptr.$fn_name(count);
+                }
+            }
+        };
+    }
+
+    /// This macro generates verification harnesses for the `offset`, `add`, and `sub`
+    /// pointer operations, supporting integer, composite, and unit types.
+    /// - `$ty`: The pointee type (e.g., i32, u32, tuples).
+    /// - `$offset_fn_name`: The name for the `offset` proof for contract.
+    /// - `$add_fn_name`: The name for the `add` proof for contract.
+    /// - `$sub_fn_name`: The name for the `sub` proof for contract.
+    macro_rules! generate_arithmetic_harnesses {
+        ($ty:ty, $add_fn_name:ident, $sub_fn_name:ident, $offset_fn_name:ident) => {
+            generate_single_arithmetic_harness!($ty, $add_fn_name, add, usize);
+            generate_single_arithmetic_harness!($ty, $sub_fn_name, sub, usize);
+            generate_single_arithmetic_harness!($ty, $offset_fn_name, offset, isize);
+        };
+    }
+
+    // Generate harnesses for unit type (add, sub, offset)
+    generate_arithmetic_harnesses!(
+        (),
+        check_mut_add_unit,
+        check_mut_sub_unit,
+        check_mut_offset_unit
+    );
+
+    // Generate harnesses for integer types (add, sub, offset)
+    generate_arithmetic_harnesses!(i8, check_mut_add_i8, check_mut_sub_i8, check_mut_offset_i8);
+    generate_arithmetic_harnesses!(
+        i16,
+        check_mut_add_i16,
+        check_mut_sub_i16,
+        check_mut_offset_i16
+    );
+    generate_arithmetic_harnesses!(
+        i32,
+        check_mut_add_i32,
+        check_mut_sub_i32,
+        check_mut_offset_i32
+    );
+    generate_arithmetic_harnesses!(
+        i64,
+        check_mut_add_i64,
+        check_mut_sub_i64,
+        check_mut_offset_i64
+    );
+    generate_arithmetic_harnesses!(
+        i128,
+        check_mut_add_i128,
+        check_mut_sub_i128,
+        check_mut_offset_i128
+    );
+    generate_arithmetic_harnesses!(
+        isize,
+        check_mut_add_isize,
+        check_mut_sub_isize,
+        check_mut_offset_isize
+    );
+    // Due to a bug of kani the test `check_mut_add_u8` is malfunctioning for now.
+    // Tracking issue: https://github.com/model-checking/kani/issues/3743
+    // generate_arithmetic_harnesses!(u8, check_mut_add_u8, check_mut_sub_u8, check_mut_offset_u8);
+    generate_arithmetic_harnesses!(
+        u16,
+        check_mut_add_u16,
+        check_mut_sub_u16,
+        check_mut_offset_u16
+    );
+    generate_arithmetic_harnesses!(
+        u32,
+        check_mut_add_u32,
+        check_mut_sub_u32,
+        check_mut_offset_u32
+    );
+    generate_arithmetic_harnesses!(
+        u64,
+        check_mut_add_u64,
+        check_mut_sub_u64,
+        check_mut_offset_u64
+    );
+    generate_arithmetic_harnesses!(
+        u128,
+        check_mut_add_u128,
+        check_mut_sub_u128,
+        check_mut_offset_u128
+    );
+    generate_arithmetic_harnesses!(
+        usize,
+        check_mut_add_usize,
+        check_mut_sub_usize,
+        check_mut_offset_usize
+    );
+
+    // Generte harnesses for composite types (add, sub, offset)
+    generate_arithmetic_harnesses!(
+        (i8, i8),
+        check_mut_add_tuple_1,
+        check_mut_sub_tuple_1,
+        check_mut_offset_tuple_1
+    );
+    generate_arithmetic_harnesses!(
+        (f64, bool),
+        check_mut_add_tuple_2,
+        check_mut_sub_tuple_2,
+        check_mut_offset_tuple_2
+    );
+    generate_arithmetic_harnesses!(
+        (i32, f64, bool),
+        check_mut_add_tuple_3,
+        check_mut_sub_tuple_3,
+        check_mut_offset_tuple_3
+    );
+    generate_arithmetic_harnesses!(
+        (i8, u16, i32, u64, isize),
+        check_mut_add_tuple_4,
+        check_mut_sub_tuple_4,
+        check_mut_offset_tuple_4
+    );
+
     // The array's length is set to an arbitrary value, which defines its size.
-    // In this case, implementing a dynamic array is not possible, because 
-    // PointerGenerator or any_array() do not support dynamic sized arrays.
+    // In this case, implementing a dynamic array is not possible, because
+    // PointerGenerator does not support dynamic sized arrays.
     const ARRAY_LEN: usize = 40;
 
-    #[kani::proof]
-    pub fn check_mut_byte_offset_from_fixed_offset() {
-        let mut arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
-        let offset: usize = kani::any_where(|&x| x <= ARRAY_LEN);
-        let origin_ptr: *mut u32 = arr.as_mut_ptr();
-        let self_ptr: *mut u32 = unsafe { origin_ptr.byte_offset(offset as isize) };
-        let result: isize = unsafe { self_ptr.byte_offset_from(origin_ptr) };
-        assert_eq!(result, offset as isize);
-        assert_eq!(result, (self_ptr.addr() as isize - origin_ptr.addr() as isize));
-    }
-
-    // Proof for unit size
-    #[kani::proof_for_contract(<*mut ()>::byte_offset_from)]
-    pub fn check_mut_byte_offset_from_unit() {
-        let mut val: () = ();
-        let src_ptr: *mut () = &mut val;
-        let dest_ptr: *mut () = &mut val;
-        unsafe {
-            dest_ptr.byte_offset_from(src_ptr);
-        }
-    }
-
-    // generate proofs for contracts for byte_offset_from to verify int and composite
-    // types
-    // - `$type`: pointee type
-    // - `$proof_name1`: name of the harness for single element
-    // - `$proof_name2`: name of the harness for array of elements
-    macro_rules! generate_mut_byte_offset_from_harness {
+    macro_rules! generate_offset_from_harness {
         ($type: ty, $proof_name1: ident, $proof_name2: ident) => {
-            // Proof for a single element
-            #[kani::proof_for_contract(<*mut $type>::byte_offset_from)]
+            #[kani::proof_for_contract(<*mut $type>::offset_from)]
+            // Below function is for a single element.
             pub fn $proof_name1() {
                 const gen_size: usize = mem::size_of::<$type>();
                 let mut generator1 = PointerGenerator::<gen_size>::new();
@@ -2292,12 +2405,11 @@ mod verify {
                 };
 
                 unsafe {
-                    ptr1.byte_offset_from(ptr2);
+                    ptr1.offset_from(ptr2);
                 }
             }
 
-            // Proof for large arrays
-            #[kani::proof_for_contract(<*mut $type>::byte_offset_from)]
+            // Below function is for large arrays
             pub fn $proof_name2() {
                 const gen_size: usize = mem::size_of::<$type>();
                 let mut generator1 = PointerGenerator::<{ gen_size * ARRAY_LEN }>::new();
@@ -2310,137 +2422,98 @@ mod verify {
                 };
 
                 unsafe {
-                    ptr1.byte_offset_from(ptr2);
+                    ptr1.offset_from(ptr2);
                 }
             }
         };
     }
 
-    generate_mut_byte_offset_from_harness!(
-        u8,
-        check_mut_byte_offset_from_u8,
-        check_mut_byte_offset_from_u8_arr
-    );
-    generate_mut_byte_offset_from_harness!(
+    // The proof for a unit type panics as offset_from needs the pointee size > 0
+    #[kani::proof_for_contract(<*mut ()>::offset_from)]
+    #[kani::should_panic]
+    pub fn check_mut_offset_from_unit() {
+        let mut val: () = ();
+        let src_ptr: *mut () = &mut val;
+        let dest_ptr: *mut () = &mut val;
+        unsafe {
+            dest_ptr.offset_from(src_ptr);
+        }
+    }
+
+    generate_offset_from_harness!(u8, check_mut_offset_from_u8, check_mut_offset_from_u8_array);
+    generate_offset_from_harness!(
         u16,
-        check_mut_byte_offset_from_u16,
-        check_mut_byte_offset_from_u16_arr
+        check_mut_offset_from_u16,
+        check_mut_offset_from_u16_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         u32,
-        check_mut_byte_offset_from_u32,
-        check_mut_byte_offset_from_u32_arr
+        check_mut_offset_from_u32,
+        check_mut_offset_from_u32_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         u64,
-        check_mut_byte_offset_from_u64,
-        check_mut_byte_offset_from_u64_arr
+        check_mut_offset_from_u64,
+        check_mut_offset_from_u64_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         u128,
-        check_mut_byte_offset_from_u128,
-        check_mut_byte_offset_from_u128_arr
+        check_mut_offset_from_u128,
+        check_mut_offset_from_u128_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         usize,
-        check_mut_byte_offset_from_usize,
-        check_mut_byte_offset_from_usize_arr
+        check_mut_offset_from_usize,
+        check_mut_offset_from_usize_array
     );
 
-    generate_mut_byte_offset_from_harness!(
-        i8,
-        check_mut_byte_offset_from_i8,
-        check_mut_byte_offset_from_i8_arr
-    );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(i8, check_mut_offset_from_i8, check_mut_offset_from_i8_array);
+    generate_offset_from_harness!(
         i16,
-        check_mut_byte_offset_from_i16,
-        check_mut_byte_offset_from_i16_arr
+        check_mut_offset_from_i16,
+        check_mut_offset_from_i16_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         i32,
-        check_mut_byte_offset_from_i32,
-        check_mut_byte_offset_from_i32_arr
+        check_mut_offset_from_i32,
+        check_mut_offset_from_i32_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         i64,
-        check_mut_byte_offset_from_i64,
-        check_mut_byte_offset_from_i64_arr
+        check_mut_offset_from_i64,
+        check_mut_offset_from_i64_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         i128,
-        check_mut_byte_offset_from_i128,
-        check_mut_byte_offset_from_i128_arr
+        check_mut_offset_from_i128,
+        check_mut_offset_from_i128_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         isize,
-        check_mut_byte_offset_from_isize,
-        check_mut_byte_offset_from_isize_arr
+        check_mut_offset_from_isize,
+        check_mut_offset_from_isize_array
     );
 
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         (i8, i8),
-        check_mut_byte_offset_from_tuple_1,
-        check_mut_byte_offset_from_tuple_1_arr
+        check_mut_offset_from_tuple_1,
+        check_mut_offset_from_tuple_1_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         (f64, bool),
-        check_mut_byte_offset_from_tuple_2,
-        check_mut_byte_offset_from_tuple_2_arr
+        check_mut_offset_from_tuple_2,
+        check_mut_offset_from_tuple_2_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         (u32, i16, f32),
-        check_mut_byte_offset_from_tuple_3,
-        check_mut_byte_offset_from_tuple_3_arr
+        check_mut_offset_from_tuple_3,
+        check_mut_offset_from_tuple_3_array
     );
-    generate_mut_byte_offset_from_harness!(
+    generate_offset_from_harness!(
         ((), bool, u8, u16, i32, f64, i128, usize),
-        check_mut_byte_offset_from_tuple_4,
-        check_mut_byte_offset_from_tuple_4_arr
+        check_mut_offset_from_tuple_4,
+        check_mut_offset_from_tuple_4_array
     );
-
-    // The length of a slice is set to an arbitrary value, which defines its size.
-    // In this case, implementing a slice with a dynamic size set using kani::any() 
-    // is not possible, because PointerGenerator does not support non-deterministic 
-    // slice pointers.
-    const SLICE_LEN: usize = 10;
-
-    // generate proofs for contracts for byte_offset_from to verify slices
-    // - `$type`: type of the underlyign element within the slice pointer
-    // - `$proof_name`: name of the harness
-    macro_rules! generate_mut_byte_offset_from_slice_harness {
-        ($type: ty, $proof_name: ident) => {
-            #[kani::proof_for_contract(<*mut [$type]>::byte_offset_from)]
-            pub fn $proof_name() {
-                const gen_size: usize = mem::size_of::<$type>();
-                let mut generator1 = PointerGenerator::<{ gen_size * ARRAY_LEN }>::new();
-                let mut generator2 = PointerGenerator::<{ gen_size * ARRAY_LEN }>::new();
-                let ptr1: *mut [$type] = generator1.any_in_bounds().ptr as *mut [$type; SLICE_LEN];
-                let ptr2: *mut [$type] = if kani::any() {
-                    generator1.any_alloc_status().ptr as *mut [$type; SLICE_LEN]
-                } else {
-                    generator2.any_alloc_status().ptr as *mut [$type; SLICE_LEN]
-                };
-
-                unsafe {
-                    ptr1.byte_offset_from(ptr2);
-                }
-            }
-        };
-    }
-
-    generate_mut_byte_offset_from_slice_harness!(u8, check_mut_byte_offset_from_u8_slice);
-    generate_mut_byte_offset_from_slice_harness!(u16, check_mut_byte_offset_from_u16_slice);
-    generate_mut_byte_offset_from_slice_harness!(u32, check_mut_byte_offset_from_u32_slice);
-    generate_mut_byte_offset_from_slice_harness!(u64, check_mut_byte_offset_from_u64_slice);
-    generate_mut_byte_offset_from_slice_harness!(u128, check_mut_byte_offset_from_u128_slice);
-    generate_mut_byte_offset_from_slice_harness!(usize, check_mut_byte_offset_from_usize_slice);
-    generate_mut_byte_offset_from_slice_harness!(i8, check_mut_byte_offset_from_i8_slice);
-    generate_mut_byte_offset_from_slice_harness!(i16, check_mut_byte_offset_from_i16_slice);
-    generate_mut_byte_offset_from_slice_harness!(i32, check_mut_byte_offset_from_i32_slice);
-    generate_mut_byte_offset_from_slice_harness!(i64, check_mut_byte_offset_from_i64_slice);
-    generate_mut_byte_offset_from_slice_harness!(i128, check_mut_byte_offset_from_i128_slice);
-    generate_mut_byte_offset_from_slice_harness!(isize, check_mut_byte_offset_from_isize_slice);
 
     #[kani::proof_for_contract(<*mut ()>::byte_offset)]
     #[kani::should_panic]
@@ -2465,7 +2538,7 @@ mod verify {
     }
 
     // generate proof for contracts of byte_add, byte_sub and byte_offset to verify
-    // unit pointee type
+    // unit pointee type.
     // - `$fn_name`: function for which the contract must be verified
     // - `$proof_name`: name of the harness generated
     macro_rules! gen_mut_byte_arith_harness_for_unit {
@@ -2686,22 +2759,99 @@ mod verify {
     gen_mut_byte_arith_harness_for_slice!(u128, byte_offset, check_mut_byte_offset_u128_slice);
     gen_mut_byte_arith_harness_for_slice!(usize, byte_offset, check_mut_byte_offset_usize_slice);
 
-    // The proof for a unit type panics as offset_from needs the pointee size > 0
-    #[kani::proof_for_contract(<*mut ()>::offset_from)]
-    #[kani::should_panic]
-    pub fn check_mut_offset_from_unit() {
+    // Trait used exclusively for implementing proofs for contracts for `dyn Trait` type.
+    trait TestTrait {}
+
+    // Struct used exclusively for implementing proofs for contracts for `dyn Trait` type.
+    struct TestStruct {
+        value: i64,
+    }
+
+    impl TestTrait for TestStruct {}
+
+    /// This macro generates proofs for contracts on `byte_add`, `byte_sub`, and `byte_offset`
+    /// operations for pointers to dyn Trait.
+    /// - `$fn_name`: Specifies the arithmetic operation to verify.
+    /// - `$proof_name`: Specifies the name of the generated proof for contract.
+    macro_rules! gen_mut_byte_arith_harness_for_dyn {
+        (byte_offset, $proof_name:ident) => {
+            //tracking issue: https://github.com/model-checking/kani/issues/3763
+            // Workaround: Directly verifying the method `<*mut dyn TestTrait>::byte_offset`
+            // causes a compilation error. As a workaround, the proof is annotated with the
+            // underlying struct type instead.
+            #[kani::proof_for_contract(<*mut TestStruct>::byte_offset)]
+            pub fn $proof_name() {
+                let mut test_struct = TestStruct { value: 42 };
+                let trait_object: &mut dyn TestTrait = &mut test_struct;
+                let test_ptr: *mut dyn TestTrait = trait_object;
+
+                let count: isize = kani::any();
+
+                unsafe {
+                    test_ptr.byte_offset(count);
+                }
+            }
+        };
+        ($fn_name: ident, $proof_name:ident) => {
+            //tracking issue: https://github.com/model-checking/kani/issues/3763
+            // Workaround: Directly verifying the method `<*mut dyn TestTrait>::$fn_name`
+            // causes a compilation error. As a workaround, the proof is annotated with the
+            // underlying struct type instead.
+            #[kani::proof_for_contract(<*mut TestStruct>::$fn_name)]
+            pub fn $proof_name() {
+                let mut test_struct = TestStruct { value: 42 };
+                let trait_object: &mut dyn TestTrait = &mut test_struct;
+                let test_ptr: *mut dyn TestTrait = trait_object;
+
+                //byte_add and byte_sub need count to be usize unlike byte_offset
+                let count: usize = kani::any();
+
+                unsafe {
+                    test_ptr.$fn_name(count);
+                }
+            }
+        };
+    }
+
+    // fn <*mut T>::add(), <*mut T>::sub() and <*mut T>::offset() dyn Trait verification
+    gen_mut_byte_arith_harness_for_dyn!(byte_add, check_mut_byte_add_dyn);
+    gen_mut_byte_arith_harness_for_dyn!(byte_sub, check_mut_byte_sub_dyn);
+    gen_mut_byte_arith_harness_for_dyn!(byte_offset, check_mut_byte_offset_dyn);
+
+    #[kani::proof]
+    pub fn check_mut_byte_offset_from_fixed_offset() {
+        let mut arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let offset: usize = kani::any_where(|&x| x <= ARRAY_LEN);
+        let origin_ptr: *mut u32 = arr.as_mut_ptr();
+        let self_ptr: *mut u32 = unsafe { origin_ptr.byte_offset(offset as isize) };
+        let result: isize = unsafe { self_ptr.byte_offset_from(origin_ptr) };
+        assert_eq!(result, offset as isize);
+        assert_eq!(
+            result,
+            (self_ptr.addr() as isize - origin_ptr.addr() as isize)
+        );
+    }
+
+    // Proof for unit size
+    #[kani::proof_for_contract(<*mut ()>::byte_offset_from)]
+    pub fn check_mut_byte_offset_from_unit() {
         let mut val: () = ();
         let src_ptr: *mut () = &mut val;
         let dest_ptr: *mut () = &mut val;
         unsafe {
-            dest_ptr.offset_from(src_ptr);
+            dest_ptr.byte_offset_from(src_ptr);
         }
     }
 
-    macro_rules! generate_offset_from_harness {
+    // Generate proofs for contracts for byte_offset_from to verify pointer to int
+    // and composite types.
+    // - `$type`: pointee type.
+    // - `$proof_name1`: name of the harness for single element.
+    // - `$proof_name2`: name of the harness for array of elements.
+    macro_rules! generate_mut_byte_offset_from_harness {
         ($type: ty, $proof_name1: ident, $proof_name2: ident) => {
-            #[kani::proof_for_contract(<*mut $type>::offset_from)]
-            // Below function is for a single element
+            // Proof for a single element
+            #[kani::proof_for_contract(<*mut $type>::byte_offset_from)]
             pub fn $proof_name1() {
                 const gen_size: usize = mem::size_of::<$type>();
                 let mut generator1 = PointerGenerator::<gen_size>::new();
@@ -2712,13 +2862,14 @@ mod verify {
                 } else {
                     generator2.any_alloc_status().ptr
                 };
-                
+
                 unsafe {
-                    ptr1.offset_from(ptr2);
+                    ptr1.byte_offset_from(ptr2);
                 }
             }
 
-            // Below function is for large arrays
+            // Proof for large arrays
+            #[kani::proof_for_contract(<*mut $type>::byte_offset_from)]
             pub fn $proof_name2() {
                 const gen_size: usize = mem::size_of::<$type>();
                 let mut generator1 = PointerGenerator::<{ gen_size * ARRAY_LEN }>::new();
@@ -2729,36 +2880,137 @@ mod verify {
                 } else {
                     generator2.any_alloc_status().ptr
                 };
-                
+
                 unsafe {
-                    ptr1.offset_from(ptr2);
+                    ptr1.byte_offset_from(ptr2);
                 }
             }
-
         };
     }
 
-    generate_offset_from_harness!(u8, check_mut_offset_from_u8, check_mut_offset_from_u8_array);
-    generate_offset_from_harness!(u16, check_mut_offset_from_u16, check_mut_offset_from_u16_array);
-    generate_offset_from_harness!(u32, check_mut_offset_from_u32, check_mut_offset_from_u32_array);
-    generate_offset_from_harness!(u64, check_mut_offset_from_u64, check_mut_offset_from_u64_array);
-    generate_offset_from_harness!(u128, check_mut_offset_from_u128, check_mut_offset_from_u128_array);
-    generate_offset_from_harness!(usize, check_mut_offset_from_usize, check_mut_offset_from_usize_array);
-
-    generate_offset_from_harness!(i8, check_mut_offset_from_i8, check_mut_offset_from_i8_array);
-    generate_offset_from_harness!(i16, check_mut_offset_from_i16, check_mut_offset_from_i16_array);
-    generate_offset_from_harness!(i32, check_mut_offset_from_i32, check_mut_offset_from_i32_array);
-    generate_offset_from_harness!(i64, check_mut_offset_from_i64, check_mut_offset_from_i64_array);
-    generate_offset_from_harness!(i128, check_mut_offset_from_i128, check_mut_offset_from_i128_array);
-    generate_offset_from_harness!(isize, check_mut_offset_from_isize, check_mut_offset_from_isize_array);
-
-    generate_offset_from_harness!((i8, i8), check_mut_offset_from_tuple_1, check_mut_offset_from_tuple_1_array);
-    generate_offset_from_harness!((f64, bool), check_mut_offset_from_tuple_2, check_mut_offset_from_tuple_2_array);
-    generate_offset_from_harness!((u32, i16, f32), check_mut_offset_from_tuple_3, check_mut_offset_from_tuple_3_array);
-    generate_offset_from_harness!(
-        ((), bool, u8, u16, i32, f64, i128, usize),
-        check_mut_offset_from_tuple_4,
-        check_mut_offset_from_tuple_4_array
+    generate_mut_byte_offset_from_harness!(
+        u8,
+        check_mut_byte_offset_from_u8,
+        check_mut_byte_offset_from_u8_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        u16,
+        check_mut_byte_offset_from_u16,
+        check_mut_byte_offset_from_u16_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        u32,
+        check_mut_byte_offset_from_u32,
+        check_mut_byte_offset_from_u32_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        u64,
+        check_mut_byte_offset_from_u64,
+        check_mut_byte_offset_from_u64_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        u128,
+        check_mut_byte_offset_from_u128,
+        check_mut_byte_offset_from_u128_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        usize,
+        check_mut_byte_offset_from_usize,
+        check_mut_byte_offset_from_usize_arr
     );
 
+    generate_mut_byte_offset_from_harness!(
+        i8,
+        check_mut_byte_offset_from_i8,
+        check_mut_byte_offset_from_i8_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        i16,
+        check_mut_byte_offset_from_i16,
+        check_mut_byte_offset_from_i16_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        i32,
+        check_mut_byte_offset_from_i32,
+        check_mut_byte_offset_from_i32_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        i64,
+        check_mut_byte_offset_from_i64,
+        check_mut_byte_offset_from_i64_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        i128,
+        check_mut_byte_offset_from_i128,
+        check_mut_byte_offset_from_i128_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        isize,
+        check_mut_byte_offset_from_isize,
+        check_mut_byte_offset_from_isize_arr
+    );
+
+    generate_mut_byte_offset_from_harness!(
+        (i8, i8),
+        check_mut_byte_offset_from_tuple_1,
+        check_mut_byte_offset_from_tuple_1_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        (f64, bool),
+        check_mut_byte_offset_from_tuple_2,
+        check_mut_byte_offset_from_tuple_2_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        (u32, i16, f32),
+        check_mut_byte_offset_from_tuple_3,
+        check_mut_byte_offset_from_tuple_3_arr
+    );
+    generate_mut_byte_offset_from_harness!(
+        ((), bool, u8, u16, i32, f64, i128, usize),
+        check_mut_byte_offset_from_tuple_4,
+        check_mut_byte_offset_from_tuple_4_arr
+    );
+
+    // The length of a slice is set to an arbitrary value, which defines its size.
+    // In this case, implementing a slice with a dynamic size set using kani::any()
+    // is not possible, because PointerGenerator does not support non-deterministic
+    // slice pointers.
+    const SLICE_LEN: usize = 10;
+
+    // Generate proofs for contracts for byte_offset_from to verify pointers to slices
+    // - `$type`: type of the underlyign element within the slice pointer.
+    // - `$proof_name`: name of the harness.
+    macro_rules! generate_mut_byte_offset_from_slice_harness {
+        ($type: ty, $proof_name: ident) => {
+            #[kani::proof_for_contract(<*mut [$type]>::byte_offset_from)]
+            pub fn $proof_name() {
+                const gen_size: usize = mem::size_of::<$type>();
+                let mut generator1 = PointerGenerator::<{ gen_size * ARRAY_LEN }>::new();
+                let mut generator2 = PointerGenerator::<{ gen_size * ARRAY_LEN }>::new();
+                let ptr1: *mut [$type] = generator1.any_in_bounds().ptr as *mut [$type; SLICE_LEN];
+                let ptr2: *mut [$type] = if kani::any() {
+                    generator1.any_alloc_status().ptr as *mut [$type; SLICE_LEN]
+                } else {
+                    generator2.any_alloc_status().ptr as *mut [$type; SLICE_LEN]
+                };
+
+                unsafe {
+                    ptr1.byte_offset_from(ptr2);
+                }
+            }
+        };
+    }
+
+    generate_mut_byte_offset_from_slice_harness!(u8, check_mut_byte_offset_from_u8_slice);
+    generate_mut_byte_offset_from_slice_harness!(u16, check_mut_byte_offset_from_u16_slice);
+    generate_mut_byte_offset_from_slice_harness!(u32, check_mut_byte_offset_from_u32_slice);
+    generate_mut_byte_offset_from_slice_harness!(u64, check_mut_byte_offset_from_u64_slice);
+    generate_mut_byte_offset_from_slice_harness!(u128, check_mut_byte_offset_from_u128_slice);
+    generate_mut_byte_offset_from_slice_harness!(usize, check_mut_byte_offset_from_usize_slice);
+    generate_mut_byte_offset_from_slice_harness!(i8, check_mut_byte_offset_from_i8_slice);
+    generate_mut_byte_offset_from_slice_harness!(i16, check_mut_byte_offset_from_i16_slice);
+    generate_mut_byte_offset_from_slice_harness!(i32, check_mut_byte_offset_from_i32_slice);
+    generate_mut_byte_offset_from_slice_harness!(i64, check_mut_byte_offset_from_i64_slice);
+    generate_mut_byte_offset_from_slice_harness!(i128, check_mut_byte_offset_from_i128_slice);
+    generate_mut_byte_offset_from_slice_harness!(isize, check_mut_byte_offset_from_isize_slice);
 }
