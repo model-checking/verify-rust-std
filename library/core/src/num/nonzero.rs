@@ -1010,7 +1010,7 @@ macro_rules! nonzero_integer {
                           without modifying the original"]
             #[inline]
             #[requires({
-                !self.get().checked_mul(other.get()).is_some()
+                self.get().checked_mul(other.get()).is_some()
             })]
             #[ensures(|result: &Self| {
                 self.get().checked_mul(other.get()).unwrap() == result.get()
@@ -1378,7 +1378,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
                       without modifying the original"]
         #[inline]
         #[requires({
-            !self.get().checked_add(other).is_some()
+            self.get().checked_add(other).is_some()
         })]
         #[ensures(|result: &Self| {
             // Postcondition: the result matches the expected addition
@@ -2228,57 +2228,151 @@ mod verify {
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 
-    macro_rules! nonzero_check_mul {
-        ($t:ty, $nonzero_type:ty, $nonzero_unchecked_mul:ident) => {
-            #[kani::proof_for_contract(NonZero::unchecked_mul)]
-            pub fn $nonzero_unchecked_mul_for() {
-                let x: NonZeroI8 = kani::any();
-                let y: NonZeroI8 = kani::any();
+
+    macro_rules! nonzero_check_from_mut_unchecked {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let mut x: $t = kani::any();
+                kani::assume(x != 0);
                 unsafe {
-                    let _ = x.unchecked_mul(y); 
+                    <$nonzero_type>::from_mut_unchecked(&mut x);
                 }
             }
         };
     }
     
-    // Use the macro to generate different versions of the function for multiple types
-    nonzero_check!(i8, core::num::NonZeroI8, nonzero_unchecked_mul_for_i8);
-    nonzero_check!(i16, core::num::NonZeroI16, nonzero_unchecked_mul_for_16);
-    nonzero_check!(i32, core::num::NonZeroI32, nonzero_unchecked_mul_for_32);
-    nonzero_check!(i64, core::num::NonZeroI64, nonzero_unchecked_mul_for_64);
-    nonzero_check!(i128, core::num::NonZeroI128, nonzero_unchecked_mul_for_128);
-    nonzero_check!(isize, core::num::NonZeroIsize, nonzero_unchecked_mul_for_isize);
-    nonzero_check!(u8, core::num::NonZeroU8, nonzero_unchecked_mul_for_u8);
-    nonzero_check!(u16, core::num::NonZeroU16, nonzero_unchecked_mul_for_u16);
-    nonzero_check!(u32, core::num::NonZeroU32, nonzero_unchecked_mul_for_u32);
-    nonzero_check!(u64, core::num::NonZeroU64, nonzero_unchecked_mul_for_u64);
-    nonzero_check!(u128, core::num::NonZeroU128, nonzero_unchecked_mul_for_u128);
-    nonzero_check!(usize, core::num::NonZeroUsize, nonzero_unchecked_mul_for_usize);
+    // Generate harnesses for multiple types
+    nonzero_check_from_mut_unchecked!(i8, core::num::NonZeroI8, nonzero_check_from_mut_unchecked_i8);
+    nonzero_check_from_mut_unchecked!(i16, core::num::NonZeroI16, nonzero_check_from_mut_unchecked_i16);
+    nonzero_check_from_mut_unchecked!(i32, core::num::NonZeroI32, nonzero_check_from_mut_unchecked_i32);
+    nonzero_check_from_mut_unchecked!(i64, core::num::NonZeroI64, nonzero_check_from_mut_unchecked_i64);
+    nonzero_check_from_mut_unchecked!(i128, core::num::NonZeroI128, nonzero_check_from_mut_unchecked_i128);
+    nonzero_check_from_mut_unchecked!(isize, core::num::NonZeroIsize, nonzero_check_from_mut_unchecked_isize);
+    nonzero_check_from_mut_unchecked!(u8, core::num::NonZeroU8, nonzero_check_from_mut_unchecked_u8);
+    nonzero_check_from_mut_unchecked!(u16, core::num::NonZeroU16, nonzero_check_from_mut_unchecked_u16);
+    nonzero_check_from_mut_unchecked!(u32, core::num::NonZeroU32, nonzero_check_from_mut_unchecked_u32);
+    nonzero_check_from_mut_unchecked!(u64, core::num::NonZeroU64, nonzero_check_from_mut_unchecked_u64);
+    nonzero_check_from_mut_unchecked!(u128, core::num::NonZeroU128, nonzero_check_from_mut_unchecked_u128);
+    nonzero_check_from_mut_unchecked!(usize, core::num::NonZeroUsize, nonzero_check_from_mut_unchecked_usize);
+                 
+
+
+    macro_rules! check_mul_unchecked_small{
+        ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident) => {
+            #[kani::proof_for_contract(<$t>::unchecked_mul)]
+            pub fn $nonzero_check_mul_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+
+                unsafe {
+                    x.unchecked_mul(y);
+                }
+            }
+        };
+    }
+
+    macro_rules! check_mul_unchecked_intervals{
+        ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident, $min:expr, $max:expr) => {
+            #[kani::proof_for_contract(<$t>::unchecked_mul)]
+            pub fn $nonzero_check_mul_for() {
+                let x = kani::any::<$t>();
+            let y = kani::any::<$t>();
+
+            kani::assume(x != 0 && x >= $min && x <= $max);
+            kani::assume(y != 0 && y >= $min && y <= $max);
+
+            let x = <$nonzero_type>::new(x).unwrap();
+            let y = <$nonzero_type>::new(y).unwrap();
+
+                unsafe {
+                    x.unchecked_mul(y);
+                }
+            }
+        };
+    }
+
+    //Calls for i32
+    check_mul_unchecked_intervals!(i32, NonZeroI32, check_mul_i32_small, NonZeroI32::new(-10i32).unwrap().into(), NonZeroI32::new(10i32).unwrap().into());
+    check_mul_unchecked_intervals!(i32, NonZeroI32, check_mul_i32_large_pos, NonZeroI32::new(i32::MAX - 1000i32).unwrap().into(), NonZeroI32::new(i32::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(i32, NonZeroI32, check_mul_i32_large_neg, NonZeroI32::new(i32::MIN + 1000i32).unwrap().into(), NonZeroI32::new(i32::MIN + 1).unwrap().into());
+    check_mul_unchecked_intervals!(i32, NonZeroI32, check_mul_i32_edge_pos, NonZeroI32::new(i32::MAX / 2).unwrap().into(), NonZeroI32::new(i32::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(i32, NonZeroI32, check_mul_i32_edge_neg, NonZeroI32::new(i32::MIN / 2).unwrap().into(), NonZeroI32::new(i32::MIN + 1).unwrap().into());
+
+    //Calls for i64
+    check_mul_unchecked_intervals!(i64, NonZeroI64, check_mul_i64_small, NonZeroI64::new(-10i64).unwrap().into(), NonZeroI64::new(10i64).unwrap().into());
+    check_mul_unchecked_intervals!(i64, NonZeroI64, check_mul_i64_large_pos, NonZeroI64::new(i64::MAX - 1000i64).unwrap().into(), NonZeroI64::new(i64::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(i64, NonZeroI64, check_mul_i64_large_neg, NonZeroI64::new(i64::MIN + 1000i64).unwrap().into(), NonZeroI64::new(i64::MIN + 1).unwrap().into());
+    check_mul_unchecked_intervals!(i64, NonZeroI64, check_mul_i64_edge_pos, NonZeroI64::new(i64::MAX / 2).unwrap().into(), NonZeroI64::new(i64::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(i64, NonZeroI64, check_mul_i64_edge_neg, NonZeroI64::new(i64::MIN / 2).unwrap().into(), NonZeroI64::new(i64::MIN + 1).unwrap().into());
+
+    //calls for i128
+    check_mul_unchecked_intervals!(i128, NonZeroI128, check_mul_i128_small, NonZeroI128::new(-10i128).unwrap().into(), NonZeroI128::new(10i128).unwrap().into());
+    check_mul_unchecked_intervals!(i128, NonZeroI128, check_mul_i128_large_pos, NonZeroI128::new(i128::MAX - 1000i128).unwrap().into(), NonZeroI128::new(i128::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(i128, NonZeroI128, check_mul_i128_large_neg, NonZeroI128::new(i128::MIN + 1000i128).unwrap().into(), NonZeroI128::new(i128::MIN + 1).unwrap().into());
+    check_mul_unchecked_intervals!(i128, NonZeroI128, check_mul_i128_edge_pos, NonZeroI128::new(i128::MAX / 2).unwrap().into(), NonZeroI128::new(i128::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(i128, NonZeroI128, check_mul_i128_edge_neg, NonZeroI128::new(i128::MIN / 2).unwrap().into(), NonZeroI128::new(i128::MIN + 1).unwrap().into());
+
+    //calls for isize
+    check_mul_unchecked_intervals!(isize, NonZeroIsize, check_mul_isize_small, NonZeroIsize::new(-10isize).unwrap().into(), NonZeroIsize::new(10isize).unwrap().into());
+    check_mul_unchecked_intervals!(isize, NonZeroIsize, check_mul_isize_large_pos, NonZeroIsize::new(isize::MAX - 1000isize).unwrap().into(), NonZeroIsize::new(isize::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(isize, NonZeroIsize, check_mul_isize_large_neg, NonZeroIsize::new(isize::MIN + 1000isize).unwrap().into(), NonZeroIsize::new(isize::MIN + 1).unwrap().into());
+    check_mul_unchecked_intervals!(isize, NonZeroIsize, check_mul_isize_edge_pos, NonZeroIsize::new(isize::MAX / 2).unwrap().into(), NonZeroIsize::new(isize::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(isize, NonZeroIsize, check_mul_isize_edge_neg, NonZeroIsize::new(isize::MIN / 2).unwrap().into(), NonZeroIsize::new(isize::MIN + 1).unwrap().into());
+
+    //calls for u32
+    check_mul_unchecked_intervals!(u32, NonZeroU32, check_mul_u32_small, NonZeroU32::new(1u32).unwrap().into(), NonZeroU32::new(10u32).unwrap().into());
+    check_mul_unchecked_intervals!(u32, NonZeroU32, check_mul_u32_large, NonZeroU32::new(u32::MAX - 1000u32).unwrap().into(), NonZeroU32::new(u32::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(u32, NonZeroU32, check_mul_u32_edge, NonZeroU32::new(u32::MAX / 2).unwrap().into(), NonZeroU32::new(u32::MAX).unwrap().into());
+
+    //calls for u64
+    check_mul_unchecked_intervals!(u64, NonZeroU64, check_mul_u64_small, NonZeroU64::new(1u64).unwrap().into(), NonZeroU64::new(10u64).unwrap().into());
+    check_mul_unchecked_intervals!(u64, NonZeroU64, check_mul_u64_large, NonZeroU64::new(u64::MAX - 1000u64).unwrap().into(), NonZeroU64::new(u64::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(u64, NonZeroU64, check_mul_u64_edge, NonZeroU64::new(u64::MAX / 2).unwrap().into(), NonZeroU64::new(u64::MAX).unwrap().into());
+
+    //calls for u128
+    check_mul_unchecked_intervals!(u128, NonZeroU128, check_mul_u128_small, NonZeroU128::new(1u128).unwrap().into(), NonZeroU128::new(10u128).unwrap().into());
+    check_mul_unchecked_intervals!(u128, NonZeroU128, check_mul_u128_large, NonZeroU128::new(u128::MAX - 1000u128).unwrap().into(), NonZeroU128::new(u128::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(u128, NonZeroU128, check_mul_u128_edge, NonZeroU128::new(u128::MAX / 2).unwrap().into(), NonZeroU128::new(u128::MAX).unwrap().into());
+
+    //calls for usize
+    check_mul_unchecked_intervals!(usize, NonZeroUsize, check_mul_usize_small, NonZeroUsize::new(1usize).unwrap().into(), NonZeroUsize::new(10usize).unwrap().into());
+    check_mul_unchecked_intervals!(usize, NonZeroUsize, check_mul_usize_large, NonZeroUsize::new(usize::MAX - 1000usize).unwrap().into(), NonZeroUsize::new(usize::MAX).unwrap().into());
+    check_mul_unchecked_intervals!(usize, NonZeroUsize, check_mul_usize_edge, NonZeroUsize::new(usize::MAX / 2).unwrap().into(), NonZeroUsize::new(usize::MAX).unwrap().into());
+
+    //calls for i8, i16, u8, u16
+    check_mul_unchecked_small!(i8, NonZeroI8, nonzero_check_mul_for_i8);
+    check_mul_unchecked_small!(i16, NonZeroI16, nonzero_check_mul_for_i16);
+    check_mul_unchecked_small!(u8, NonZeroU8, nonzero_check_mul_for_u8);
+    check_mul_unchecked_small!(u16, NonZeroU16, nonzero_check_mul_for_u16);
+
+    //check_mul_unchecked_large!(i16, NonZeroU16, nonzero_check_mul_for_u16);
 
     macro_rules! nonzero_check_add {
-        ($t:ty, $nonzero_type:ty, $nonzero_unchecked_add:ident) => {
-            #[kani::proof_for_contract(NonZero::unchecked_add)]
-                pub fn $nonzero_unchecked_add_for() {
-                let x: i8 = kani::any();
-                let y: i8 = kani::any();
+        ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_add_for:ident) => {
+            #[kani::proof_for_contract(<$t>::unchecked_add)]
+            pub fn $nonzero_check_unchecked_add_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+    
                 unsafe {
-                    let _ = x.unchecked_add(y); // Call the unchecked function
+                    x.get().unchecked_add(y.get());
                 }
             }
         };
     }
     
-    // Use the macro to generate different versions of the function for multiple types
-    nonzero_check!(i8, core::num::NonZeroI8, nonzero_unchecked_add_for_i8);
-    nonzero_check!(i16, core::num::NonZeroI16, nonzero_unchecked_add_for_16);
-    nonzero_check!(i32, core::num::NonZeroI32, nonzero_unchecked_add_for_32);
-    nonzero_check!(i64, core::num::NonZeroI64, nonzero_unchecked_add_for_64);
-    nonzero_check!(i128, core::num::NonZeroI128, nonzero_unchecked_add_for_128);
-    nonzero_check!(isize, core::num::NonZeroIsize, nonzero_unchecked_add_for_isize);
-    nonzero_check!(u8, core::num::NonZeroU8, nonzero_unchecked_add_for_u8);
-    nonzero_check!(u16, core::num::NonZeroU16, nonzero_unchecked_add_for_u16);
-    nonzero_check!(u32, core::num::NonZeroU32, nonzero_unchecked_add_for_u32);
-    nonzero_check!(u64, core::num::NonZeroU64, nonzero_unchecked_add_for_u64);
-    nonzero_check!(u128, core::num::NonZeroU128, nonzero_unchecked_add_for_u128);
-    nonzero_check!(usize, core::num::NonZeroUsize, nonzero_unchecked_add_for_usize);
+    // Generate proofs for all NonZero types
+    nonzero_check_add!(i8, core::num::NonZeroI8, nonzero_check_unchecked_add_for_i8);
+    nonzero_check_add!(i16, core::num::NonZeroI16, nonzero_check_unchecked_add_for_i16);
+    nonzero_check_add!(i32, core::num::NonZeroI32, nonzero_check_unchecked_add_for_i32);
+    nonzero_check_add!(i64, core::num::NonZeroI64, nonzero_check_unchecked_add_for_i64);
+    nonzero_check_add!(i128, core::num::NonZeroI128, nonzero_check_unchecked_add_for_i128);
+    nonzero_check_add!(isize, core::num::NonZeroIsize, nonzero_check_unchecked_add_for_isize);
+    nonzero_check_add!(u8, core::num::NonZeroU8, nonzero_check_unchecked_add_for_u8);
+    nonzero_check_add!(u16, core::num::NonZeroU16, nonzero_check_unchecked_add_for_u16);
+    nonzero_check_add!(u32, core::num::NonZeroU32, nonzero_check_unchecked_add_for_u32);
+    nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
+    nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
+    nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
 }
