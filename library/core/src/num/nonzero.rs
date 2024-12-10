@@ -2265,3 +2265,68 @@ mod verify {
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 }
+
+#[cfg(kani)]
+mod macro_nonzero_check_count_ones {
+    use super::*;
+    macro_rules! nonzero_check_count_ones {
+        ($nonzero_type:ty, $nonzero_check_count_ones_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_count_ones_for() {
+                let x: $nonzero_type = kani::any();
+                let result = x.count_ones();
+                // Since x is non-zero, count_ones should never return 0
+                assert!(result.get() > 0);
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_count_ones!(core::num::NonZeroI8, nonzero_check_count_ones_for_i8);
+    nonzero_check_count_ones!(core::num::NonZeroI16, nonzero_check_count_ones_for_i16);
+    nonzero_check_count_ones!(core::num::NonZeroI32, nonzero_check_count_ones_for_i32);
+    nonzero_check_count_ones!(core::num::NonZeroI64, nonzero_check_count_ones_for_i64);
+    nonzero_check_count_ones!(core::num::NonZeroI128, nonzero_check_count_ones_for_i128);
+    nonzero_check_count_ones!(core::num::NonZeroIsize, nonzero_check_count_ones_for_isize);
+    nonzero_check_count_ones!(core::num::NonZeroU8, nonzero_check_count_ones_for_u8);
+    nonzero_check_count_ones!(core::num::NonZeroU16, nonzero_check_count_ones_for_u16);
+    nonzero_check_count_ones!(core::num::NonZeroU32, nonzero_check_count_ones_for_u32);
+    nonzero_check_count_ones!(core::num::NonZeroU64, nonzero_check_count_ones_for_u64);
+    nonzero_check_count_ones!(core::num::NonZeroU128, nonzero_check_count_ones_for_u128);
+    nonzero_check_count_ones!(core::num::NonZeroUsize, nonzero_check_count_ones_for_usize);
+}
+
+#[cfg(kani)]
+mod macro_nonzero_check_cmp {
+    use super::*;
+    macro_rules! nonzero_check_cmp {
+        ($nonzero_type:ty, $nonzero_check_cmp_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_cmp_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                if x < y {
+                    assert!(x.cmp(&y) == core::cmp::Ordering::Less);
+                } else if x > y {
+                    assert!(x.cmp(&y) == core::cmp::Ordering::Greater);
+                } else {
+                    assert!(x.cmp(&y) == core::cmp::Ordering::Equal);
+                }
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_cmp!(core::num::NonZeroI8, nonzero_check_cmp_for_i8);
+    nonzero_check_cmp!(core::num::NonZeroI16, nonzero_check_cmp_for_i16);
+    nonzero_check_cmp!(core::num::NonZeroI32, nonzero_check_cmp_for_i32);
+    nonzero_check_cmp!(core::num::NonZeroI64, nonzero_check_cmp_for_i64);
+    nonzero_check_cmp!(core::num::NonZeroI128, nonzero_check_cmp_for_i128);
+    nonzero_check_cmp!(core::num::NonZeroIsize, nonzero_check_cmp_for_isize);
+    nonzero_check_cmp!(core::num::NonZeroU8, nonzero_check_cmp_for_u8);
+    nonzero_check_cmp!(core::num::NonZeroU16, nonzero_check_cmp_for_u16);
+    nonzero_check_cmp!(core::num::NonZeroU32, nonzero_check_cmp_for_u32);
+    nonzero_check_cmp!(core::num::NonZeroU64, nonzero_check_cmp_for_u64);
+    nonzero_check_cmp!(core::num::NonZeroU128, nonzero_check_cmp_for_u128);
+    nonzero_check_cmp!(core::num::NonZeroUsize, nonzero_check_cmp_for_usize);
+}
