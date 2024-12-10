@@ -221,7 +221,7 @@ main() {
             --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
-        "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib ./library --std > $path/kani_list.txt
+        "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib ./library --std --format markdown
     fi
 }
 

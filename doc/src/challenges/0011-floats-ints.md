@@ -1,11 +1,12 @@
 # Challenge 11: Safety of Methods for Numeric Primitive Types
 
 
-- **Status:** Open
+- **Status:** Resolved
 - **Tracking Issue:** [#59](https://github.com/model-checking/verify-rust-std/issues/59)
 - **Start date:** *2024/08/20*
-- **End date:** *2025/04/10*
+- **End date:** *2024/12/04*
 - **Reward:** *N/A*
+- **Contributors**: [Rajath M Kotyal](https://github.com/rajathkotyal), [Yen-Yun Wu](https://github.com/Yenyun035), [Lanfei Ma](https://github.com/lanfeima), [Junfeng Jin](https://github.com/MWDZ)
 
 -------------------
 
