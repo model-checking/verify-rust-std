@@ -5,4 +5,6 @@ title: "[Tool Application] "
 labels: Tool Application
 ---
 
-{% include_relative ../doc/src/tool_template.md %}
+<!--
+Please see https://model-checking.github.io/verify-rust-std/tool_template.html for the application template.
+-->
