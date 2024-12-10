@@ -2,6 +2,7 @@ name: Kani
 
 on:
   workflow_dispatch:
+  merge_group:
   pull_request:
     branches: [ main ]
   push:
@@ -37,18 +38,10 @@ jobs:
       # Step 2: Run Kani on the std library (default configuration)
       - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
-
-  test-kani-script:
-    name: Test Kani script
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        include:
-          - os: ubuntu-latest
-            base: ubuntu
-          - os: macos-latest
-            base: macos
+   
+  run-kani-list:
+    name: Kani List
+    runs-on: ubuntu-latest
     steps:
       # Step 1: Check out the repository
       - name: Checkout Repository
@@ -57,25 +50,18 @@ jobs:
           path: head
           submodules: true
 
-      # Step 2: Test Kani verification script with specific arguments
-      - name: Test Kani script (Custom Args)
-        run: head/scripts/run-kani.sh -p ${{github.workspace}}/head --kani-args --harness ptr --output-format=terse
-
-      # Step 3: Test Kani verification script in the repository directory
-      - name: Test Kani script (In Repo Directory)
-        working-directory: ${{github.workspace}}/head
-        run: scripts/run-kani.sh --kani-args --harness ptr::verify::check_read_u128 --harness ptr --output-format=terse
-      
-      # Step 4: Run list on the std library and add output to job summary
+      # Step 2: Run list on the std library
       - name: Run Kani List
         run: head/scripts/run-kani.sh --run list --path ${{github.workspace}}/head
-
+      
+      # Step 3: Add output to job summary
       - name: Add Kani List output to job summary
         uses: actions/github-script@v6
         with:
           script: |
             const fs = require('fs');
-            const kaniOutput = fs.readFileSync('${{github.workspace}}/head/kani_list.txt', 'utf8');
+            const kaniOutput = fs.readFileSync('${{github.workspace}}/head/kani-list.md', 'utf8');
             await core.summary
-              .addRaw(kaniOutput)
+              .addHeading('Kani List Output', 2)
+              .addRaw(kaniOutput, false)
               .write();
