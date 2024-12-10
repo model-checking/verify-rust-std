@@ -163,5 +163,3 @@ used by verification tools to prove properties about example code that
 uses them. Of particular interest is code used in cryptographic
 libraries, but even other standalone examples using simd intrinsics
 would be considered valuable. 
-
-
