@@ -13,19 +13,24 @@
 
 A number of Rust projects rely on the SIMD intrinsics provided by
 [core::arch](https://doc.rust-lang.org/beta/core/arch/) for
-performance. This includes cryptographic libraries like libcrux and
-Dalek that are used in mainstream software projects.
+performance. This includes libraries like [hashbrown]() that are used
+in
+[HashMap](https://doc.rust-lang.org/std/collections/struct.HashMap.html),
+as well as third-party cryptographic libraries like
+[libcrux](https://github.com/cryspen/libcrux) and
+[Dalek](https://github.com/dalek-cryptography/curve25519-dalek) that
+are used in mainstream software projects. 
 
 The goal of this project is to provide testable formal specifications
 for the 100 most commonly used intrinsics for x86_64 and aarch64
 platforms, chosen specifically to cover all the intrinsics used in
-libcrux for these platforms.
+hashbrown and in popular cryptographic libraries.
 
-For each intrinsic, the main goal is to provide contracts in the form of pre- and
-post-conditions, and to provide extensive tests that can check whether
-these contracts hold when the intrinsics are executed in Rust. 
-A secondary goal is to use these contracts as formal specifications
-of the intrinsics API when doing proofs of Rust programs.
+For each intrinsic, the main goal is to provide contracts in the form
+of pre- and post-conditions, and to verify whether these contracts
+hold when the intrinsics are executed in Rust.  A secondary goal is to
+use these contracts as formal specifications of the intrinsics API
+when doing proofs of Rust programs.
 
 
 ## Motivation
@@ -41,8 +46,9 @@ the functional behavior of these intrinsics.
 Separately, when formally verifying cryptographic libraries, each
 project needs to define its own semantics for SIMD instructions.
 Indeed such SIMD specifications have currently been defined for
-cryptographic verification projects in F*, EasyCrypt, Coq, and HOL
-Light. This specification work is both time-consuming and error-prone,
+cryptographic verification projects in [F*](https://github.com/hacl-star/hacl-star), 
+[EasyCrypt](https://github.com/jasmin-lang/jasmin), and [HOL Light](https://github.com/awslabs/s2n-bignum/tree/main).
+This specification work is both time-consuming and error-prone,
 there is also no guarantee of consistency between the instruction
 semantics used in these different tools.
 
@@ -54,7 +60,9 @@ verification of Rust programs using various proof assistants.
 
 ## Description
 
-Consider the function `_mm_blend_epi16` in core::arch::x86_64.
+Consider the function [`_mm_blend_epi16`](https://doc.rust-lang.org/beta/core/arch/x86_64/fn._mm_blend_epi16.html)
+in [core::arch::x86_64](https://doc.rust-lang.org/beta/core/arch/x86_64/index.html):
+
 ```
 pub unsafe fn _mm_blend_epi16(
     a: __m128i,
@@ -131,7 +139,7 @@ contruction.
 
 ### Assumptions
 
-The contracts we write for the SIMD intrinsics will be well tested
+The contracts we write for the SIMD intrinsics should be well tested
 but, in the end, are hand-written based on the documentation
 of the intrinsics provided by Intel and ARM. Consequently, the
 user must trust that these semantics are correctly written.
@@ -139,25 +147,21 @@ user must trust that these semantics are correctly written.
 When using the contracts within a formal verification project,
 the user will, as usual, have to trust that the verification
 tool correctly encodes the semantics of Rust and performs
-a sound analysis. For example, when using hax with F* or Coq as 
-a proof backend, the user must trust that the compilation
-of Rust to the input languages for these provers correctly
-reflects the Rust semantics. 
+a sound analysis within a clearly documented model.
 
 ### Success Criteria
 
 The goal is to annotate >= 100 intrinsics in `core::arch::x86_64` and
 `core::arch::aarch64` with contracts, and all these contracts will be
-tested comprehensively in Rust. These functions will include all the
-intrinsics currently used in libcrux and in standard libraries like
+tested comprehensively in Rust. These functions should include all the
+intrinsics currently used in standard libraries like
 [hashbrown](https://github.com/rust-lang/hashbrown) (the basis
-of the Rust [HashMap](https://doc.rust-lang.org/std/collections/struct.HashMap.html) implementation.)
+of the Rust [HashMap](https://doc.rust-lang.org/std/collections/struct.HashMap.html) implementation).
 
-We will also show how these contracts can be compiled to F* and to Coq
-using the hax toolchain. For a subset of these intrinsics, we will
-also provide F* models and prove that the contracts hold for the
-models. Finally, we will show how these contracts are used in libcrux,
-a verified crypto library.
-
+An additional success criterion is to show that these contracts can be
+used by verification tools to prove properties about example code that
+uses them. Of particular interest is code used in cryptographic
+libraries, but even other standalone examples using simd intrinsics
+would be considered valuable. 
 
 
