@@ -1,12 +1,17 @@
+# This workflow checks that the PR has been approved by 2+ members of the committee listed in `pull_requests.toml`.
+#
+# Run this action when a pull request review is submitted / dismissed.
+# Note that an approval can be dismissed, and this can affect the job status.
+# We currently trust that contributors won't make significant changes to their PRs after approval, so we accept
+# changes after approval.
+#
+# We still need to run this in the case of a merge group, since it is a required step. In that case, the workflow
+# is a NOP.
 name: Check PR Approvals
-
-# For now, the workflow gets triggered only when a review is submitted
-# This technically means, a PR with zero approvals can be merged by the rules of this workflow alone
-# To protect against that scenario, we can turn on number of approvals required to 2 in the github settings
-# of the repository
 on:
+  merge_group:
   pull_request_review:
-    types: [submitted]
+    types: [submitted, dismissed]
 
 jobs:
   check-approvals:
@@ -14,12 +19,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+        if: ${{ github.event_name != 'merge_group' }}
 
       - name: Install TOML parser
         run: npm install @iarna/toml
+        if: ${{ github.event_name != 'merge_group' }}
 
       - name: Check PR Relevance and Approvals
         uses: actions/github-script@v6
+        if: ${{ github.event_name != 'merge_group' }}
         with:
           script: |
             const fs = require('fs');
