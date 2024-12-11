@@ -3607,10 +3607,6 @@ mod verify {
                 check_unsafe_contracts!(check_post_inc_start, $ty, post_inc_start(kani::any()));
                 check_unsafe_contracts!(check_pre_dec_end, $ty, pre_dec_end(kani::any()));
 
-                // FIXME: The functions that are commented out are currently failing verification.
-                // Debugging the issue is currently blocked by:
-                // https://github.com/model-checking/kani/issues/3670
-                //
                 // Public functions that call safe abstraction `make_slice`.
                 check_safe_abstraction!(check_as_slice, $ty, |iter: &mut Iter<'_, $ty>| {
                     iter.as_slice();

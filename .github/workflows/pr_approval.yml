@@ -52,8 +52,11 @@ jobs:
               pull_number = context.issue.number;
             }
 
+            console.log(`owner is ${owner}`);
+            console.log(`pull_number is ${pull_number}`);
 
             // Get parsed data
+            let requiredApprovers;
             try {
               const tomlContent = fs.readFileSync('.github/pull_requests.toml', 'utf8');
               console.log('TOML content:', tomlContent);
@@ -85,23 +88,22 @@ jobs:
             );
 
             const requiredApprovals = 2;
-            const currentCountfromCommittee = Array.from(approvers)
-              .filter(approver => requiredApprovers.includes(approver))
-              .length;
-
-            // TODO: Improve logging and messaging to the user
-            console.log('PR Approvers:', Array.from(approvers));
-            console.log('Required Approvers:', requiredApprovals);
+            const committeeApprovers = Array.from(approvers)
+              .filter(approver => requiredApprovers.includes(approver));
+            const currentCountfromCommittee = committeeApprovers.length;
 
             // Core logic that checks if the approvers are in the committee
-            const checkName = 'PR Approval Status';
-            const conclusion = (approvers.size >= requiredApprovals && currentCountfromCommittee >= 2) ? 'success' : 'failure';
-            const output = {
-              title: checkName,
-              summary: `PR has ${approvers.size} total approvals and ${requiredApprovals} required approvals.`,
-              text: `Approvers: ${Array.from(approvers).join(', ')}\nRequired Approvers: ${requiredApprovers.join(', ')}`
-            };
+            const conclusion = (currentCountfromCommittee >= 2) ? 'success' : 'failure';
 
+            console.log('PR Approval Status');
+            console.log(`PR has ${approvers.size} total approvals and ${currentCountfromCommittee} required approvals from the committee.`);
+            
+            console.log(`Committee Members: [${requiredApprovers.join(', ')}]`);
+            console.log(`Committee Approvers: ${committeeApprovers.length === 0 ? 'NONE' : `[${committeeApprovers.join(', ')}]`}`);
+            console.log(`All Approvers: ${approvers.size === 0 ? 'NONE' : `[${Array.from(approvers).join(', ')}]`}`);
+            
             if (conclusion === 'failure') {
-              core.setFailed(`PR needs at least ${requiredApprovals} total approvals and 2 required approvals. Current approvals: ${approvers.size}, Required approvals: ${requiredApprovals}`);
+              core.setFailed(`PR needs 2 approvals from committee members, but it has ${currentCountfromCommittee}`);
+            } else {
+              core.info('PR approval check passed successfully.');
             }
