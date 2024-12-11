@@ -1019,6 +1019,7 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::copy`]: crate::ptr::copy()
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[cfg_attr(kani, kani::modifies(NonNull::slice_from_raw_parts(dest, count).as_ptr()))]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or_else(|| false, |size| size <= isize::MAX as usize)
@@ -1026,7 +1027,6 @@ impl<T: ?Sized> NonNull<T> {
         && ub_checks::can_write(NonNull::slice_from_raw_parts(dest, count).as_ptr()))]
     #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
         && ub_checks::can_dereference(dest.as_ptr() as *const u8))]
-    #[kani::modifies(NonNull::slice_from_raw_parts(dest, count).as_ptr())]
     pub const unsafe fn copy_to(self, dest: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -1045,6 +1045,7 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::copy_nonoverlapping`]: crate::ptr::copy_nonoverlapping()
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[cfg_attr(kani, kani::modifies(NonNull::slice_from_raw_parts(dest, count).as_ptr()))]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or_else(|| false, |size| size <= isize::MAX as usize)
@@ -1053,7 +1054,6 @@ impl<T: ?Sized> NonNull<T> {
         && ub_checks::maybe_is_nonoverlapping(self.as_ptr() as *const (), dest.as_ptr() as *const (), count, core::mem::size_of::<T>()))]
         #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
         && ub_checks::can_dereference(dest.as_ptr() as *const u8))]
-    #[kani::modifies(NonNull::slice_from_raw_parts(dest, count).as_ptr())]
     pub const unsafe fn copy_to_nonoverlapping(self, dest: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -1072,6 +1072,7 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::copy`]: crate::ptr::copy()
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[cfg_attr(kani, kani::modifies(NonNull::slice_from_raw_parts(self, count).as_ptr()))]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or_else(|| false, |size| size <= isize::MAX as usize)
@@ -1079,7 +1080,6 @@ impl<T: ?Sized> NonNull<T> {
         && ub_checks::can_write(NonNull::slice_from_raw_parts(self, count).as_ptr()))]
     #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
         && ub_checks::can_dereference(self.as_ptr() as *const u8))]
-    #[kani::modifies(NonNull::slice_from_raw_parts(self, count).as_ptr())]
     pub const unsafe fn copy_from(self, src: NonNull<T>, count: usize)
     where
         T: Sized,
@@ -1098,6 +1098,7 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::copy_nonoverlapping`]: crate::ptr::copy_nonoverlapping()
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[cfg_attr(kani, kani::modifies(NonNull::slice_from_raw_parts(self, count).as_ptr()))]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).map_or_else(|| false, |size| size <= isize::MAX as usize)
@@ -1106,7 +1107,6 @@ impl<T: ?Sized> NonNull<T> {
         && ub_checks::maybe_is_nonoverlapping(src.as_ptr() as *const (), self.as_ptr() as *const (), count, core::mem::size_of::<T>()))]
     #[ensures(|result: &()| ub_checks::can_dereference(src.as_ptr() as *const u8)
         && ub_checks::can_dereference(self.as_ptr() as *const u8))]
-    #[kani::modifies(NonNull::slice_from_raw_parts(self, count).as_ptr())]
     pub const unsafe fn copy_from_nonoverlapping(self, src: NonNull<T>, count: usize)
     where
         T: Sized,
