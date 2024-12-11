@@ -215,13 +215,13 @@ main() {
             -Z mem-predicates \
             -Z loop-contracts \
             -Z float-lib \
-            --output-format=terse \
+            -Z c-ffi \
             $command_args \
             --enable-unstable \
             --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
-        "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib ./library --std --format markdown
+        "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format markdown
     fi
 }
 
