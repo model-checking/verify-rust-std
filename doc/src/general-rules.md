@@ -79,7 +79,7 @@ To use a new tool, participants must first submit an application for it.
 * Once this PR is merged, the tool is considered integrated, and the tool application issue will be closed.
 
 The repository will be updated periodically, which can impact a tool's capacity to analyze the new version of the repository (i.e., the workflow may no longer pass after an update).
-This will not impact the approval status of the tool, however, new solutions that want to employ the tool may need to ensure the workflow is passing first.
+If it is determined that the tool requires changes and such changes cannot be provided in a timely fashion the tool's approval may be revoked.
 
 ## Committee Applications
 
