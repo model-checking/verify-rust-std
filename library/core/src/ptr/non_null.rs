@@ -1068,7 +1068,7 @@ impl<T: ?Sized> NonNull<T> {
         && ub_checks::can_dereference(NonNull::slice_from_raw_parts(self, count).as_ptr())
         && ub_checks::can_write(NonNull::slice_from_raw_parts(dest, count).as_ptr())
         && ub_checks::maybe_is_nonoverlapping(self.as_ptr() as *const (), dest.as_ptr() as *const (), count, core::mem::size_of::<T>()))]
-        #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
+    #[ensures(|result: &()| ub_checks::can_dereference(self.as_ptr() as *const u8)
         && ub_checks::can_dereference(dest.as_ptr() as *const u8))]
     pub const unsafe fn copy_to_nonoverlapping(self, dest: NonNull<T>, count: usize)
     where
