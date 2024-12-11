@@ -73,16 +73,42 @@ jobs:
               return;
             }
 
-            // Get all reviews
-            const reviews = await github.rest.pulls.listReviews({
-              owner,
-              repo,
-              pull_number
-            });
+            // Get all reviews with pagination
+            async function getAllReviews() {
+              let allReviews = [];
+              let page = 1;
+              let page_limit = 100;
+              
+              while (page < page_limit) {
+                const response = await github.rest.pulls.listReviews({
+                  owner,
+                  repo,
+                  pull_number,
+                  per_page: 100,
+                  page
+                });
+                
+                allReviews = allReviews.concat(response.data);
+                
+                if (response.data.length < 100) {
+                  break;
+                }
+                
+                page++;
+              }
+
+              if (page == page_limit) {
+                console.log(`WARNING: Reached page limit of ${page_limit} while fetching reviews data; approvals count may be less than the real total.`)
+              }
+              
+              return allReviews;
+            }
+
+            const reviews = await getAllReviews();
 
             // Example: approvers = ["celina", "zyad"]
             const approvers = new Set(
-              reviews.data
+              reviews
                 .filter(review => review.state === 'APPROVED')
                 .map(review => review.user.login)
             );
