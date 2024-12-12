@@ -456,6 +456,10 @@ impl CStr {
     #[stable(feature = "cstr_from_bytes", since = "1.10.0")]
     #[rustc_const_stable(feature = "const_cstr_unchecked", since = "1.59.0")]
     #[rustc_allow_const_fn_unstable(const_eval_select)]
+    // Preconditions: Null-terminated and no intermediate null bytes
+    #[requires(!bytes.is_empty() && bytes[bytes.len() - 1] == 0 && !bytes[..bytes.len()-1].contains(&0))]
+    // Postcondition: The resulting CStr satisfies the same conditions as preconditions
+    #[ensures(|result| result.is_safe())]
     pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr {
         const_eval_select!(
             @capture { bytes: &[u8] } -> &CStr:
@@ -779,6 +783,8 @@ impl AsRef<CStr> for CStr {
 #[unstable(feature = "cstr_internals", issue = "none")]
 #[cfg_attr(bootstrap, rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0"))]
 #[rustc_allow_const_fn_unstable(const_eval_select)]
+#[requires(is_null_terminated(ptr))]
+#[ensures(|&result| result < isize::MAX as usize && unsafe { *ptr.add(result) } == 0)]
 const unsafe fn strlen(ptr: *const c_char) -> usize {
     const_eval_select!(
         @capture { s: *const c_char = ptr } -> usize:
@@ -910,6 +916,25 @@ mod verify {
         }
     }
 
+    //  pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr
+    #[kani::proof_for_contract(CStr::from_bytes_with_nul_unchecked)]
+    #[kani::unwind(33)]
+    fn check_from_bytes_with_nul_unchecked() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+
+        // Kani assumes that the input slice is null-terminated and contains
+        // no intermediate null bytes
+        let c_str = unsafe { CStr::from_bytes_with_nul_unchecked(slice) };
+        // Kani ensures that the output CStr holds the CStr safety invariant
+
+        // Correctness check
+        let bytes = c_str.to_bytes();
+        let len = bytes.len();
+        assert_eq!(bytes, &slice[..len]);
+    }
+      
     // pub fn bytes(&self) -> Bytes<'_>
     #[kani::proof]
     #[kani::unwind(32)]
@@ -972,6 +997,7 @@ mod verify {
         assert!(c_str.is_safe());
     }
   
+    // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
     #[kani::proof]
     #[kani::unwind(17)] 
     fn check_from_bytes_with_nul() {
@@ -1042,6 +1068,18 @@ mod verify {
         assert!(c_str.is_safe());
     }
 
+    // const unsafe fn strlen(ptr: *const c_char) -> usize
+    #[kani::proof_for_contract(super::strlen)]
+    #[kani::unwind(33)]
+    fn check_strlen_contract() {
+        const MAX_SIZE: usize = 32;
+        let mut string: [u8; MAX_SIZE] = kani::any();
+        let ptr = string.as_ptr() as *const c_char;
+
+        unsafe { super::strlen(ptr); }
+    }
+
+    // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr
     #[kani::proof_for_contract(CStr::from_ptr)]
     #[kani::unwind(33)]
     fn check_from_ptr_contract() {
@@ -1052,6 +1090,7 @@ mod verify {
         unsafe { CStr::from_ptr(ptr); }
     }
   
+    // pub const fn is_empty(&self) -> bool
     #[kani::proof]
     #[kani::unwind(33)]
     fn check_is_empty() {
@@ -1064,5 +1103,5 @@ mod verify {
         let expected_is_empty = bytes.len() == 0;
         assert_eq!(expected_is_empty, c_str.is_empty());
         assert!(c_str.is_safe());
-  }
+    }
 }
