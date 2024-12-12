@@ -2572,3 +2572,30 @@ impl<T, const N: usize> [Option<T>; N] {
         self.try_map(core::convert::identity)
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use crate::kani;
+    use crate::option::Option;
+
+    #[kani::proof]
+    fn verify_as_slice() {
+        if kani::any() {
+            // Case 1: Option is Some
+            let value: u32 = kani::any();
+            let some_option: Option<u32> = Some(value);
+
+            let slice = some_option.as_slice();
+            assert_eq!(slice.len(), 1); // The slice should have exactly one element
+            assert_eq!(slice[0], value); // The value in the slice should match
+        } else {
+            // Case 2: Option is None
+            let none_option: Option<u32> = None;
+
+            let empty_slice = none_option.as_slice();
+            assert_eq!(empty_slice.len(), 0); // The slice should be empty
+            assert!(empty_slice.is_empty()); // Explicit check for emptiness
+        }
+    }
+}
