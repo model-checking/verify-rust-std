@@ -3087,6 +3087,7 @@ impl<T, const N: usize> From<[T; N]> for VecDeque<T> {
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use core::kani;
+
     use crate::collections::VecDeque;
 
     #[kani::proof]
@@ -3120,5 +3121,4 @@ mod verify {
             assert!(deque[k] == arr[k]);
         }
     }
-
 }

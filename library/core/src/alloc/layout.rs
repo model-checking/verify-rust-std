@@ -4,21 +4,20 @@
 // collections, resulting in having to optimize down excess IR multiple times.
 // Your performance intuition is useless. Run perf.
 
-use safety::{ensures, Invariant, requires};
-use crate::error::Error;
-use crate::intrinsics::{unchecked_add, unchecked_mul, unchecked_sub};
-use crate::mem::SizedTypeProperties;
-use crate::ptr::{Alignment, NonNull};
-use crate::{assert_unsafe_precondition, fmt, mem};
+use safety::{Invariant, ensures, requires};
 
-#[cfg(kani)]
-use crate::kani;
 #[cfg(kani)]
 use crate::cmp;
-
+use crate::error::Error;
+use crate::intrinsics::{unchecked_add, unchecked_mul, unchecked_sub};
+#[cfg(kani)]
+use crate::kani;
+use crate::mem::SizedTypeProperties;
+use crate::ptr::{Alignment, NonNull};
 // Used only for contract verification.
 #[allow(unused_imports)]
 use crate::ub_checks::Invariant;
+use crate::{assert_unsafe_precondition, fmt, mem};
 
 // While this function is used in one place and its implementation
 // could be inlined, the previous attempts to do so made rustc
@@ -624,14 +623,15 @@ impl fmt::Display for LayoutError {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
 
     impl kani::Arbitrary for Layout {
         fn any() -> Self {
             let align = kani::any::<Alignment>();
-            let size = kani::any_where(|s: &usize| *s <= isize::MAX as usize - (align.as_usize() - 1));
+            let size =
+                kani::any_where(|s: &usize| *s <= isize::MAX as usize - (align.as_usize() - 1));
             unsafe { Layout { size, align } }
         }
     }
@@ -684,8 +684,8 @@ mod verify {
     pub fn check_for_value_i32() {
         let x = kani::any::<i32>();
         let _ = Layout::for_value::<i32>(&x);
-        let array : [i32; 2] = [1, 2];
-        let _ = Layout::for_value::<[i32]>(&array[1 .. 1]);
+        let array: [i32; 2] = [1, 2];
+        let _ = Layout::for_value::<[i32]>(&array[1..1]);
         let trait_ref: &dyn core::fmt::Debug = &x;
         let _ = Layout::for_value::<dyn core::fmt::Debug>(trait_ref);
         // TODO: the case of an extern type as unsized tail is not yet covered
@@ -724,7 +724,7 @@ mod verify {
     pub fn check_padding_needed_for() {
         let layout = kani::any::<Layout>();
         let a2 = kani::any::<usize>();
-        if(a2.is_power_of_two() && a2 <= layout.align()) {
+        if (a2.is_power_of_two() && a2 <= layout.align()) {
             let _ = layout.padding_needed_for(a2);
         }
     }

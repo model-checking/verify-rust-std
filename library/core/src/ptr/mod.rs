@@ -394,12 +394,11 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use crate::cmp::Ordering;
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::FnPtr;
 use crate::mem::{self, MaybeUninit, SizedTypeProperties};
 use crate::{fmt, hash, intrinsics, ub_checks};
-
-#[cfg(kani)]
-use crate::kani;
 
 mod alignment;
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
@@ -1860,9 +1859,9 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
     let stride = mem::size_of::<T>();
     // ZSTs
     if stride == 0 {
-        if p.addr() % a == 0 { 
+        if p.addr() % a == 0 {
             return *result == 0;
-        } else { 
+        } else {
             return *result == usize::MAX;
         }
     }
@@ -1876,8 +1875,8 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
     // requires computing gcd(a, stride), which is too expensive without
     // quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html).
     // This should be updated once quantifiers are available.
-    if (a % stride != 0 && *result == usize::MAX) { 
-        return true; 
+    if (a % stride != 0 && *result == usize::MAX) {
+        return true;
     }
 
     // If we reach this case, either:
@@ -2442,14 +2441,13 @@ pub macro addr_of_mut($place:expr) {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use crate::fmt::Debug;
+    use intrinsics::{mul_with_overflow, unchecked_sub, wrapping_mul, wrapping_sub};
+
     use super::*;
+    use crate::fmt::Debug;
     use crate::kani;
-    use intrinsics::{
-        mul_with_overflow, unchecked_sub, wrapping_mul, wrapping_sub
-    };
 
     #[kani::proof_for_contract(read_volatile)]
     pub fn check_read_u128() {

@@ -11,18 +11,16 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::requires;
+
 use crate::convert::FloatToInt;
 #[cfg(not(test))]
 use crate::intrinsics;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem;
 use crate::num::FpCategory;
 use crate::panic::const_assert;
-
-use safety::requires;
-
-#[cfg(kani)]
-use crate::kani;
-
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;
 
