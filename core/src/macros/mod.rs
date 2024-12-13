@@ -1836,8 +1836,7 @@ pub(crate) mod builtin {
     #[rustc_builtin_macro]
     #[unstable(
         feature = "rustc_encodable_decodable",
-        issue = "none",
-        soft,
+        issue = "134301",
         reason = "derive macro for `rustc-serialize`; should not be used in new code"
     )]
     #[deprecated(since = "1.52.0", note = "rustc-serialize is deprecated and no longer supported")]
@@ -1850,8 +1849,7 @@ pub(crate) mod builtin {
     #[rustc_builtin_macro]
     #[unstable(
         feature = "rustc_encodable_decodable",
-        issue = "none",
-        soft,
+        issue = "134301",
         reason = "derive macro for `rustc-serialize`; should not be used in new code"
     )]
     #[deprecated(since = "1.52.0", note = "rustc-serialize is deprecated and no longer supported")]
