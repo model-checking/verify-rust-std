@@ -96,6 +96,8 @@ else
 fi
 
 # Run tests
+# TODO this line causes the script to fail locally, but is required for the action to run properly -- why?
+cd "$RUST_DIR/upstream"
 echo "Running tests..."
 ./x test --stage 0 library/std
 
