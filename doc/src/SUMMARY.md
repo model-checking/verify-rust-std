@@ -14,7 +14,7 @@
 
 - [Challenges](./challenges.md)
   - [1: Verify core transmuting methods](./challenges/0001-core-transmutation.md)
-  - [2: Verify the memory safery of core intrinsics using raw pointers](./challenges/0002-intrinsics-memory.md)
+  - [2: Verify the memory safety of core intrinsics using raw pointers](./challenges/0002-intrinsics-memory.md)
   - [3: Verifying Raw Pointer Arithmetic Operations](./challenges/0003-pointer-arithmentic.md)
   - [4: Memory safety of BTreeMap's `btree::node` module](./challenges/0004-btree-node.md)
   - [5: Verify functions iterating over inductive data type: `linked_list`](./challenges/0005-linked-list.md)
