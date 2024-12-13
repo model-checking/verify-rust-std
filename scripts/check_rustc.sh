@@ -87,7 +87,13 @@ else
     # TODO: This should be:
     # ./x test tidy
     echo "Check format"
-    ./x fmt --check
+    if ! ./x fmt --check; then
+        echo "Format check failed. Run $0 --bless to fix the failures."
+        # Clean up the temporary directory
+        popd
+        rm -rf "$RUST_DIR"
+        exit 1
+    fi
 fi
 
 # Run tests
