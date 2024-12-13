@@ -37,7 +37,8 @@ done
 HEAD_DIR=$(git rev-parse --show-toplevel)
 
 # Temporary directory for upstream repository
-RUST_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'rustrepo')
+RUST_DIR=$(mktemp -d --suffix ".rust")
+
 # Checkout your local repository
 echo "Checking out local repository..."
 cd "$HEAD_DIR"
@@ -96,7 +97,6 @@ else
 fi
 
 # Run tests
-# TODO this line causes the script to fail locally, but is required for the action to run properly -- why?
 cd "$RUST_DIR/upstream"
 echo "Running tests..."
 ./x test --stage 0 library/std
@@ -104,5 +104,4 @@ echo "Running tests..."
 echo "Tests completed."
 
 # Clean up the temporary directory
-popd
 rm -rf "$RUST_DIR"
