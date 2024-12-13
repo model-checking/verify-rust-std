@@ -37,8 +37,7 @@ done
 HEAD_DIR=$(git rev-parse --show-toplevel)
 
 # Temporary directory for upstream repository
-RUST_DIR=$(mktemp -d --suffix ".rust")
-
+RUST_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'rustrepo')
 # Checkout your local repository
 echo "Checking out local repository..."
 cd "$HEAD_DIR"
@@ -97,11 +96,11 @@ else
 fi
 
 # Run tests
-cd "$RUST_DIR/upstream"
 echo "Running tests..."
 ./x test --stage 0 library/std
 
 echo "Tests completed."
 
 # Clean up the temporary directory
+popd
 rm -rf "$RUST_DIR"
