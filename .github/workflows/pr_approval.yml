@@ -1,12 +1,17 @@
+# This workflow checks that the PR has been approved by 2+ members of the committee listed in `pull_requests.toml`.
+#
+# Run this action when a pull request review is submitted / dismissed.
+# Note that an approval can be dismissed, and this can affect the job status.
+# We currently trust that contributors won't make significant changes to their PRs after approval, so we accept
+# changes after approval.
+#
+# We still need to run this in the case of a merge group, since it is a required step. In that case, the workflow
+# is a NOP.
 name: Check PR Approvals
-
-# For now, the workflow gets triggered only when a review is submitted
-# This technically means, a PR with zero approvals can be merged by the rules of this workflow alone
-# To protect against that scenario, we can turn on number of approvals required to 2 in the github settings
-# of the repository
 on:
+  merge_group:
   pull_request_review:
-    types: [submitted]
+    types: [submitted, dismissed]
 
 jobs:
   check-approvals:
@@ -14,12 +19,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+        if: ${{ github.event_name != 'merge_group' }}
 
       - name: Install TOML parser
         run: npm install @iarna/toml
+        if: ${{ github.event_name != 'merge_group' }}
 
       - name: Check PR Relevance and Approvals
         uses: actions/github-script@v6
+        if: ${{ github.event_name != 'merge_group' }}
         with:
           script: |
             const fs = require('fs');
@@ -44,8 +52,11 @@ jobs:
               pull_number = context.issue.number;
             }
 
+            console.log(`owner is ${owner}`);
+            console.log(`pull_number is ${pull_number}`);
 
             // Get parsed data
+            let requiredApprovers;
             try {
               const tomlContent = fs.readFileSync('.github/pull_requests.toml', 'utf8');
               console.log('TOML content:', tomlContent);
@@ -62,38 +73,63 @@ jobs:
               return;
             }
 
-            // Get all reviews
-            const reviews = await github.rest.pulls.listReviews({
-              owner,
-              repo,
-              pull_number
-            });
+            // Get all reviews with pagination
+            async function getAllReviews() {
+              let allReviews = [];
+              let page = 1;
+              let page_limit = 100;
+              
+              while (page < page_limit) {
+                const response = await github.rest.pulls.listReviews({
+                  owner,
+                  repo,
+                  pull_number,
+                  per_page: 100,
+                  page
+                });
+                
+                allReviews = allReviews.concat(response.data);
+                
+                if (response.data.length < 100) {
+                  break;
+                }
+                
+                page++;
+              }
+
+              if (page == page_limit) {
+                console.log(`WARNING: Reached page limit of ${page_limit} while fetching reviews data; approvals count may be less than the real total.`)
+              }
+              
+              return allReviews;
+            }
+
+            const reviews = await getAllReviews();
 
             // Example: approvers = ["celina", "zyad"]
             const approvers = new Set(
-              reviews.data
+              reviews
                 .filter(review => review.state === 'APPROVED')
                 .map(review => review.user.login)
             );
 
             const requiredApprovals = 2;
-            const currentCountfromCommittee = Array.from(approvers)
-              .filter(approver => requiredApprovers.includes(approver))
-              .length;
-
-            // TODO: Improve logging and messaging to the user
-            console.log('PR Approvers:', Array.from(approvers));
-            console.log('Required Approvers:', requiredApprovals);
+            const committeeApprovers = Array.from(approvers)
+              .filter(approver => requiredApprovers.includes(approver));
+            const currentCountfromCommittee = committeeApprovers.length;
 
             // Core logic that checks if the approvers are in the committee
-            const checkName = 'PR Approval Status';
-            const conclusion = (approvers.size >= requiredApprovals && currentCountfromCommittee >= 2) ? 'success' : 'failure';
-            const output = {
-              title: checkName,
-              summary: `PR has ${approvers.size} total approvals and ${requiredApprovals} required approvals.`,
-              text: `Approvers: ${Array.from(approvers).join(', ')}\nRequired Approvers: ${requiredApprovers.join(', ')}`
-            };
+            const conclusion = (currentCountfromCommittee >= 2) ? 'success' : 'failure';
 
+            console.log('PR Approval Status');
+            console.log(`PR has ${approvers.size} total approvals and ${currentCountfromCommittee} required approvals from the committee.`);
+            
+            console.log(`Committee Members: [${requiredApprovers.join(', ')}]`);
+            console.log(`Committee Approvers: ${committeeApprovers.length === 0 ? 'NONE' : `[${committeeApprovers.join(', ')}]`}`);
+            console.log(`All Approvers: ${approvers.size === 0 ? 'NONE' : `[${Array.from(approvers).join(', ')}]`}`);
+            
             if (conclusion === 'failure') {
-              core.setFailed(`PR needs at least ${requiredApprovals} total approvals and 2 required approvals. Current approvals: ${approvers.size}, Required approvals: ${requiredApprovals}`);
+              core.setFailed(`PR needs 2 approvals from committee members, but it has ${currentCountfromCommittee}`);
+            } else {
+              core.info('PR approval check passed successfully.');
             }

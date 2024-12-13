@@ -69,20 +69,17 @@ Follow the following steps to create a new proposal:
 
 ## Tool Applications
 
-Solutions must be automated using one of the tools previously approved and listed [here](tools.md#approved-tools):
+Solutions must be automated using one of the tools previously approved and listed [here](tools.md#approved-tools).
+To use a new tool, participants must first submit an application for it.
 
-* Any new tool that participants want to enable will require an application using the [tool application template](./tool_template.md).
-* The tool will be analyzed by an independent committee consisting of members from the Rust open-source developers and AWS
-* A new tool application should clearly specify the differences to existing techniques and provide sufficient background
-  of why this is needed.
-* The tool application should also include mechanisms to audit its implementation and correctness.
-* Once the tool is approved, the participant needs to create a PR that creates a new action that runs the
-  std library verification using the new tool, as well as an entry to the “Approved Tools” section of this book.
-* Once the PR is merged, the tool is considered integrated.
-* The repository will be updated periodically, which can impact the tool capacity to analyze the new version of the repository.
-  I.e., the action may no longer pass after an update.
-  This will not impact the approval status of the tool, however,
-  new solutions that want to employ the tool may need to ensure the action is passing first.
+* To submit a tool application, open a new issue in this repository using the "Tool Application" issue template.
+* The committee will review the application. Once a committee member approves the application, the participant needs to create a PR with:
+  * A new workflow that runs the tool against the standard library.
+  * A new entry to the “Approved Tools” section of this book.
+* Once this PR is merged, the tool is considered integrated, and the tool application issue will be closed.
+
+The repository will be updated periodically, which can impact a tool's capacity to analyze the new version of the repository (i.e., the workflow may no longer pass after an update).
+If it is determined that the tool requires changes and such changes cannot be provided in a timely fashion the tool's approval may be revoked.
 
 ## Committee Applications
 

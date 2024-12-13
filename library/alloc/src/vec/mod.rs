@@ -1662,6 +1662,7 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "vec_as_ptr", since = "1.37.0")]
     #[rustc_const_unstable(feature = "const_vec_string_slice", issue = "129041")]
     #[rustc_never_returns_null_ptr]
+    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
     #[inline]
     pub const fn as_ptr(&self) -> *const T {
         // We shadow the slice method of the same name to avoid going through
@@ -1724,6 +1725,7 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "vec_as_ptr", since = "1.37.0")]
     #[rustc_const_unstable(feature = "const_vec_string_slice", issue = "129041")]
     #[rustc_never_returns_null_ptr]
+    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
     #[inline]
     pub const fn as_mut_ptr(&mut self) -> *mut T {
         // We shadow the slice method of the same name to avoid going through
@@ -4028,5 +4030,51 @@ impl<T, A: Allocator, const N: usize> TryFrom<Vec<T, A>> for [T; N] {
         // tells the `Vec` not to also drop them.
         let array = unsafe { ptr::read(vec.as_ptr() as *const [T; N]) };
         Ok(array)
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+    use crate::vec::Vec;
+    
+    // Size chosen for testing the empty vector (0), middle element removal (1) 
+    // and last element removal (2) cases while keeping verification tractable 
+    const ARRAY_LEN: usize = 3;
+
+    #[kani::proof]
+    pub fn verify_swap_remove() {
+
+        // Creating a vector directly from a fixed length arbitrary array
+        let mut arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut vect = Vec::from(&arr);
+
+        // Recording the original length and a copy of the vector for validation
+        let original_len = vect.len();
+        let original_vec = vect.clone();
+
+        // Generating a nondeterministic index which is guaranteed to be within bounds
+        let index: usize = kani::any_where(|x| *x < original_len);
+
+        let removed = vect.swap_remove(index);
+
+        // Verifying that the length of the vector decreases by one after the operation is performed
+        assert!(vect.len() == original_len - 1, "Length should decrease by 1");
+
+        // Verifying that the removed element matches the original element at the index
+        assert!(removed == original_vec[index], "Removed element should match original");
+
+        // Verifying that the removed index now contains the element originally at the vector's last index if applicable
+        if index < original_len - 1 {
+            assert!(vect[index] == original_vec[original_len - 1], "Index should contain last element");
+        }
+
+        // Check that all other unaffected elements remain unchanged
+        let k = kani::any_where(|&x: &usize| x < original_len - 1);
+        if k != index {
+            assert!(vect[k] == arr[k]);
+        }
+
     }
 }
