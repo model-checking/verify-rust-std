@@ -151,10 +151,39 @@ get_kani_path() {
     echo "$(realpath "$build_dir/scripts/kani")"
 }
 
-run_kani_command() {
+get_harnesses() {
     local kani_path="$1"
-    shift
-    "$kani_path" "$@"
+    # Run kani list with JSON format and process with jq to extract all harness names
+    # Note: This code is based on `kani list` JSON version 0.1 -- if the version changes, this logic may need to change as well.
+    "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format json \
+    jq -r '
+        ([.["standard-harnesses"] | to_entries | .[] | .value[]] + 
+         [.["contract-harnesses"] | to_entries | .[] | .value[]]) | 
+        .[]
+    '
+}
+
+run_verification_subset() {
+    local kani_path="$1"
+    local harnesses=("${@:2}")  # All arguments after kani_path are harness names
+    
+    # Build the --harness arguments
+    local harness_args=""
+    for harness in "${harnesses[@]}"; do
+        harness_args="$harness_args --harness $harness"
+    done
+
+    echo "Running verification for harnesses: ${harnesses[*]}"
+    "$kani_path" verify-std -Z unstable-options ./library \
+        -Z function-contracts \
+        -Z mem-predicates \
+        -Z loop-contracts \
+        -Z float-lib \
+        -Z c-ffi \
+        $harness_args -- exact \
+        $command_args \
+        --enable-unstable \
+        --cbmc-args --object-bits 12
 }
 
 # Check if binary exists and is up to date
@@ -175,7 +204,6 @@ check_binary_exists() {
     fi
     return 1
 }
-
 
 main() {
     local build_dir="$WORK_DIR/kani_build"
@@ -209,16 +237,37 @@ main() {
     "$kani_path" --version
 
     if [[ "$run_command" == "verify-std" ]]; then
-        echo "Running Kani verify-std command..."
-        "$kani_path" verify-std -Z unstable-options ./library \
-            -Z function-contracts \
-            -Z mem-predicates \
-            -Z loop-contracts \
-            -Z float-lib \
-            -Z c-ffi \
-            $command_args \
-            --enable-unstable \
-            --cbmc-args --object-bits 12
+        if [[ -n "$PARALLEL_INDEX" && -n "$PARALLEL_TOTAL" ]]; then
+            echo "Running as parallel worker $PARALLEL_INDEX of $PARALLEL_TOTAL"
+            
+            # Get all harnesses
+            readarray -t all_harnesses < <(get_harnesses "$kani_path")
+            total_harnesses=${#all_harnesses[@]}
+            
+            # Calculate this worker's portion
+            chunk_size=$(( (total_harnesses + PARALLEL_TOTAL - 1) / PARALLEL_TOTAL ))
+            start_idx=$(( (PARALLEL_INDEX - 1) * chunk_size ))
+            end_idx=$(( start_idx + chunk_size ))
+            [[ $end_idx -gt $total_harnesses ]] && end_idx=$total_harnesses
+            
+            # Extract this worker's harnesses
+            worker_harnesses=("${all_harnesses[@]:$start_idx:$chunk_size}")
+            
+            # Run verification for this subset
+            run_verification_subset "$kani_path" "${worker_harnesses[@]}"
+        else
+            # Run verification for all harnesses (not in parallel)
+            echo "Running Kani verify-std command..."
+            "$kani_path" verify-std -Z unstable-options ./library \
+                -Z function-contracts \
+                -Z mem-predicates \
+                -Z loop-contracts \
+                -Z float-lib \
+                -Z c-ffi \
+                $command_args \
+                --enable-unstable \
+                --cbmc-args --object-bits 12
+        fi
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format markdown
