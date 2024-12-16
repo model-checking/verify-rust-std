@@ -1,10 +1,11 @@
 # Challenge 3: Verifying Raw Pointer Arithmetic Operations
 
-- **Status:** Open
+- **Status:** Resolved
 - **Tracking Issue:** [#76](https://github.com/model-checking/verify-rust-std/issues/76)
 - **Start date:** *2024/06/24*
-- **End date:** *2025/04/10*
+- **End date:** *2024/12/11*
 - **Reward:** *N/A*
+- **Contributors:** [Surya Togaru](https://github.com/stogaru), [Yifei Wang](https://github.com/xsxszab), [Szu-Yu Lee](https://github.com/szlee118), [Mayuresh Joshi](https://github.com/MayureshJoshi25)
 
 -------------------
 
