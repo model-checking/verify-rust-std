@@ -178,7 +178,8 @@ run_verification_subset() {
         harness_args="$harness_args --harness $harness"
     done
 
-    echo "Running verification for harnesses: ${harnesses[*]}"
+    echo "Running verification for harnesses:"
+    printf '%s\n' "${harnesses[@]}"
     "$kani_path" verify-std -Z unstable-options ./library \
         -Z function-contracts \
         -Z mem-predicates \
@@ -245,12 +246,22 @@ main() {
         if [[ -n "$PARALLEL_INDEX" && -n "$PARALLEL_TOTAL" ]]; then
             echo "Running as parallel worker $PARALLEL_INDEX of $PARALLEL_TOTAL"
             get_harnesses "$kani_path"
+
+            echo "All harnesses:"
+            printf '%s\n' "${ALL_HARNESSES[@]}"
+            echo "Total number of harnesses: $HARNESS_COUNT"
             
             # Calculate this worker's portion
             chunk_size=$(( (HARNESS_COUNT + PARALLEL_TOTAL - 1) / PARALLEL_TOTAL ))
+            echo "Number of harnesses this worker will run: $chunk_size"
+            
             start_idx=$(( (PARALLEL_INDEX - 1) * chunk_size ))
             end_idx=$(( start_idx + chunk_size ))
+            # If end_idx > HARNESS_COUNT, truncate it to $HARNESS_COUNT
             [[ $end_idx -gt $HARNESS_COUNT ]] && end_idx=$HARNESS_COUNT
+
+            echo "Start index into ALL_HARNESSES is $start_idx"
+            echo "End index into ALL_HARNESSES is $end_idx"
             
             # Extract this worker's harnesses
             worker_harnesses=("${ALL_HARNESSES[@]:$start_idx:$chunk_size}")
