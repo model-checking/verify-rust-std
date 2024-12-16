@@ -155,8 +155,9 @@ get_kani_path() {
     echo "$(realpath "$build_dir/scripts/kani")"
 }
 
-# Run kani list with JSON format and process with jq to extract all harness names
-# Note: This code is based on `kani list` JSON version 0.1 -- if the version changes, this logic may need to change as well.
+# Run kani list with JSON format and process with jq to extract harness names and total number of harnesses.
+# Note: The code to extract ALL_HARNESSES is dependent on `kani list --format json` FILE_VERSION 0.1.
+# If FILE_VERSION changes, this logic may need to change as well.
 get_harnesses() {
     local kani_path="$1"
     "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format json
@@ -168,6 +169,7 @@ get_harnesses() {
     HARNESS_COUNT=${#ALL_HARNESSES[@]}
 }
 
+# Given an array of harness names, run verification for those harnesses
 run_verification_subset() {
     local kani_path="$1"
     local harnesses=("${@:2}")  # All arguments after kani_path are harness names
