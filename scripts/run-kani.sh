@@ -77,6 +77,10 @@ TOML_FILE=${KANI_TOML_FILE:-$DEFAULT_TOML_FILE}
 REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
+# Kani list related variables, set in get_harnesses(); these are only used to parallelize harness verification
+declare -a ALL_HARNESSES
+declare -i HARNESS_COUNT
+
 # Function to read commit ID from TOML file
 read_commit_from_toml() {
     local file="$1"
@@ -151,16 +155,17 @@ get_kani_path() {
     echo "$(realpath "$build_dir/scripts/kani")"
 }
 
+# Run kani list with JSON format and process with jq to extract all harness names
+# Note: This code is based on `kani list` JSON version 0.1 -- if the version changes, this logic may need to change as well.
 get_harnesses() {
     local kani_path="$1"
-    # Run kani list with JSON format and process with jq to extract all harness names
-    # Note: This code is based on `kani list` JSON version 0.1 -- if the version changes, this logic may need to change as well.
-    "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format json \
-    jq -r '
+    "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format json
+    ALL_HARNESSES=($(jq -r '
         ([.["standard-harnesses"] | to_entries | .[] | .value[]] + 
-         [.["contract-harnesses"] | to_entries | .[] | .value[]]) | 
+            [.["contract-harnesses"] | to_entries | .[] | .value[]]) | 
         .[]
-    '
+    ' $WORK_DIR/kani-list.json))
+    HARNESS_COUNT=${#ALL_HARNESSES[@]}
 }
 
 run_verification_subset() {
@@ -180,7 +185,7 @@ run_verification_subset() {
         -Z loop-contracts \
         -Z float-lib \
         -Z c-ffi \
-        $harness_args -- exact \
+        $harness_args --exact \
         $command_args \
         --enable-unstable \
         --cbmc-args --object-bits 12
@@ -239,19 +244,16 @@ main() {
     if [[ "$run_command" == "verify-std" ]]; then
         if [[ -n "$PARALLEL_INDEX" && -n "$PARALLEL_TOTAL" ]]; then
             echo "Running as parallel worker $PARALLEL_INDEX of $PARALLEL_TOTAL"
-            
-            # Get all harnesses
-            readarray -t all_harnesses < <(get_harnesses "$kani_path")
-            total_harnesses=${#all_harnesses[@]}
+            get_harnesses "$kani_path"
             
             # Calculate this worker's portion
-            chunk_size=$(( (total_harnesses + PARALLEL_TOTAL - 1) / PARALLEL_TOTAL ))
+            chunk_size=$(( (HARNESS_COUNT + PARALLEL_TOTAL - 1) / PARALLEL_TOTAL ))
             start_idx=$(( (PARALLEL_INDEX - 1) * chunk_size ))
             end_idx=$(( start_idx + chunk_size ))
-            [[ $end_idx -gt $total_harnesses ]] && end_idx=$total_harnesses
+            [[ $end_idx -gt $HARNESS_COUNT ]] && end_idx=$HARNESS_COUNT
             
             # Extract this worker's harnesses
-            worker_harnesses=("${all_harnesses[@]:$start_idx:$chunk_size}")
+            worker_harnesses=("${ALL_HARNESSES[@]:$start_idx:$chunk_size}")
             
             # Run verification for this subset
             run_verification_subset "$kani_path" "${worker_harnesses[@]}"
