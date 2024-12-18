@@ -31,8 +31,10 @@ jobs:
       fail-fast: false
     
     env:
-      PARALLEL_INDEX: ${{ matrix.partition }}
-      PARALLEL_TOTAL: 4
+      # Define the index of this particular worker [1-WORKER_TOTAL]
+      WORKER_INDEX: ${{ matrix.partition }}
+      # Total number of workers running this step
+      WORKER_TOTAL: 4
     
     steps:
       # Step 1: Check out the repository
