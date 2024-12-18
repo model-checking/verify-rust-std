@@ -17,16 +17,25 @@ defaults:
 
 jobs:
   check-kani-on-std:
-    name: Verify std library
+    name: Verify std library (partition ${{ matrix.partition }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
+        partition: [1, 2, 3, 4]
         include:
           - os: ubuntu-latest
             base: ubuntu
           - os: macos-latest
             base: macos
+      fail-fast: false
+    
+    env:
+      # Define the index of this particular worker [1-WORKER_TOTAL]
+      WORKER_INDEX: ${{ matrix.partition }}
+      # Total number of workers running this step
+      WORKER_TOTAL: 4
+    
     steps:
       # Step 1: Check out the repository
       - name: Checkout Repository
@@ -34,8 +43,13 @@ jobs:
         with:
           path: head
           submodules: true
-
-      # Step 2: Run Kani on the std library (default configuration)
+      
+      # Step 2: Install jq
+      - name: Install jq
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y jq
+      
+      # Step 3: Run Kani on the std library (default configuration)
       - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
    
