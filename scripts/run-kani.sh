@@ -157,10 +157,16 @@ get_kani_path() {
 
 # Run kani list with JSON format and process with jq to extract harness names and total number of harnesses.
 # Note: The code to extract ALL_HARNESSES is dependent on `kani list --format json` FILE_VERSION 0.1.
-# If FILE_VERSION changes, this logic may need to change as well.
+# If FILE_VERSION changes, first update the ALL_HARNESSES extraction logic to work with the new format, if necessary,
+# then update the FILE_VERSION check to check for the new version.
 get_harnesses() {
     local kani_path="$1"
     "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format json
+    local json_file_version = $(jq -r '.["file-version"]' $WORK_DIR/kani-list.json)
+    if [[ $json_file_version != "0.1" ]]; then
+        echo "Error: The JSON file-version in kani-list.json does not equal 0.1."
+        exit 1
+    fi
     ALL_HARNESSES=($(jq -r '
         ([.["standard-harnesses"] | to_entries | .[] | .value[]] + 
             [.["contract-harnesses"] | to_entries | .[] | .value[]]) | 
@@ -260,7 +266,9 @@ main() {
             start_idx=$(( (PARALLEL_INDEX - 1) * chunk_size ))
             end_idx=$(( start_idx + chunk_size ))
             # If end_idx > HARNESS_COUNT, truncate it to $HARNESS_COUNT
-            [[ $end_idx -gt $HARNESS_COUNT ]] && end_idx=$HARNESS_COUNT
+            if [[ $end_idx > $HARNESS_COUNT ]]; then
+                end_idx=$HARNESS_COUNT
+            fi
 
             echo "Start index into ALL_HARNESSES is $start_idx"
             echo "End index into ALL_HARNESSES is $end_idx"
