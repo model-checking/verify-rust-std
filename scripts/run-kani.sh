@@ -81,16 +81,12 @@ BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 # When we say "parallel," we mean two dimensions of parallelization:
 #   1. Sharding verification across multiple workers. The Kani workflow that calls this script defines WORKER_INDEX and WORKER_TOTAL for this purpose: 
 #   we shard verification across WORKER_TOTAL workers, where each worker has a unique WORKER_INDEX that it uses to derive its share of ALL_HARNESSES to verify.
-#   2. Within a single worker, we parallelize verification between multiple cores by invoking kani with -j VERIFICATION_THREAD_COUNT.
-#   For now, VERIFICATION_THREAD_COUNT=4 since the Kani workflow runs on standard Github runners, which have 3-4 cores.
-#   TODO: If we move to larger runners, we should increase this number.
+#   2. Within a single worker, we parallelize verification between multiple cores by invoking kani with -j.
 
 # Array of all of the harnesses in the repository, set in get_harnesses()
 declare -a ALL_HARNESSES
 # Length of ALL_HARNESSES, set in get_harnesses()
 declare -i HARNESS_COUNT
-# Number of threads to spawn within a single worker to run Kani.
-declare -i VERIFICATION_THREAD_COUNT=4
 
 # Function to read commit ID from TOML file
 read_commit_from_toml() {
@@ -206,7 +202,7 @@ run_verification_subset() {
         -Z float-lib \
         -Z c-ffi \
         $harness_args --exact \
-        -j $VERIFICATION_THREAD_COUNT \
+        -j \
         --output-format=terse \
         $command_args \
         --enable-unstable \
