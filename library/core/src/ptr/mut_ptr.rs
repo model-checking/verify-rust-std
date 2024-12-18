@@ -1,13 +1,14 @@
+use core::mem;
+
+use safety::{ensures, requires};
+
 use super::*;
 use crate::cmp::Ordering::{Equal, Greater, Less};
 use crate::intrinsics::const_eval_select;
-use crate::mem::SizedTypeProperties;
-use crate::slice::{self, SliceIndex};
-use safety::{ensures, requires};
-
 #[cfg(kani)]
 use crate::kani;
-use core::mem;
+use crate::mem::SizedTypeProperties;
+use crate::slice::{self, SliceIndex};
 
 impl<T: ?Sized> *mut T {
     /// Returns `true` if the pointer is null.
@@ -402,7 +403,8 @@ impl<T: ?Sized> *mut T {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[cfg_attr(miri, track_caller)]
+    // even without panics, this helps for Miri backtraces
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
@@ -1049,7 +1051,8 @@ impl<T: ?Sized> *mut T {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[cfg_attr(miri, track_caller)]
+    // even without panics, this helps for Miri backtraces
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
@@ -1189,7 +1192,8 @@ impl<T: ?Sized> *mut T {
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(unchecked_neg))]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[cfg_attr(miri, track_caller)]
+    // even without panics, this helps for Miri backtraces
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
@@ -2240,13 +2244,14 @@ impl<T: ?Sized> PartialOrd for *mut T {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use crate::kani;
     use core::mem;
+
+    use crate::kani;
 
     // Chosen for simplicity and sufficient size to test edge cases effectively
     // Represents the number of elements in the slice or array being tested.
-    // Doesn't need to be large because all possible values for the slice are explored, 
-    // including edge cases like pointers at the start, middle, and end of the slice. 
+    // Doesn't need to be large because all possible values for the slice are explored,
+    // including edge cases like pointers at the start, middle, and end of the slice.
     // Symbolic execution generalizes across all possible elements, regardless of the actual array size.
     const ARRAY_SIZE: usize = 5;
 
@@ -2262,7 +2267,7 @@ mod verify {
                 let offset: usize = kani::any();
                 let count: isize = kani::any();
                 kani::assume(offset <= ARRAY_SIZE * mem::size_of::<$ty>());
-                let ptr_with_offset: *mut $ty = test_ptr.wrapping_byte_add(offset);                
+                let ptr_with_offset: *mut $ty = test_ptr.wrapping_byte_add(offset);
                 unsafe {
                     ptr_with_offset.offset(count);
                 }
@@ -2276,7 +2281,7 @@ mod verify {
                 let offset: usize = kani::any();
                 let count: usize = kani::any();
                 kani::assume(offset <= ARRAY_SIZE * mem::size_of::<$ty>());
-                let ptr_with_offset: *mut $ty = test_ptr.wrapping_byte_add(offset);                
+                let ptr_with_offset: *mut $ty = test_ptr.wrapping_byte_add(offset);
                 unsafe {
                     ptr_with_offset.add(count);
                 }
@@ -2290,7 +2295,7 @@ mod verify {
                 let offset: usize = kani::any();
                 let count: usize = kani::any();
                 kani::assume(offset <= ARRAY_SIZE * mem::size_of::<$ty>());
-                let ptr_with_offset: *mut $ty = test_ptr.wrapping_byte_add(offset);                
+                let ptr_with_offset: *mut $ty = test_ptr.wrapping_byte_add(offset);
                 unsafe {
                     ptr_with_offset.sub(count);
                 }
@@ -2299,24 +2304,104 @@ mod verify {
     }
 
     // Generate pointer harnesses for various types (offset, add, sub)
-    generate_mut_slice_harnesses!(i8, check_mut_offset_slice_i8, check_mut_add_slice_i8, check_mut_sub_slice_i8);
-    generate_mut_slice_harnesses!(i16, check_mut_offset_slice_i16, check_mut_add_slice_i16, check_mut_sub_slice_i16);
-    generate_mut_slice_harnesses!(i32, check_mut_offset_slice_i32, check_mut_add_slice_i32, check_mut_sub_slice_i32);
-    generate_mut_slice_harnesses!(i64, check_mut_offset_slice_i64, check_mut_add_slice_i64, check_mut_sub_slice_i64);
-    generate_mut_slice_harnesses!(i128, check_mut_offset_slice_i128, check_mut_add_slice_i128, check_mut_sub_slice_i128);
-    generate_mut_slice_harnesses!(isize, check_mut_offset_slice_isize, check_mut_add_slice_isize, check_mut_sub_slice_isize);
-    generate_mut_slice_harnesses!(u8, check_mut_offset_slice_u8, check_mut_add_slice_u8, check_mut_sub_slice_u8);
-    generate_mut_slice_harnesses!(u16, check_mut_offset_slice_u16, check_mut_add_slice_u16, check_mut_sub_slice_u16);
-    generate_mut_slice_harnesses!(u32, check_mut_offset_slice_u32, check_mut_add_slice_u32, check_mut_sub_slice_u32);
-    generate_mut_slice_harnesses!(u64, check_mut_offset_slice_u64, check_mut_add_slice_u64, check_mut_sub_slice_u64);
-    generate_mut_slice_harnesses!(u128, check_mut_offset_slice_u128, check_mut_add_slice_u128, check_mut_sub_slice_u128);
-    generate_mut_slice_harnesses!(usize, check_mut_offset_slice_usize, check_mut_add_slice_usize, check_mut_sub_slice_usize);
+    generate_mut_slice_harnesses!(
+        i8,
+        check_mut_offset_slice_i8,
+        check_mut_add_slice_i8,
+        check_mut_sub_slice_i8
+    );
+    generate_mut_slice_harnesses!(
+        i16,
+        check_mut_offset_slice_i16,
+        check_mut_add_slice_i16,
+        check_mut_sub_slice_i16
+    );
+    generate_mut_slice_harnesses!(
+        i32,
+        check_mut_offset_slice_i32,
+        check_mut_add_slice_i32,
+        check_mut_sub_slice_i32
+    );
+    generate_mut_slice_harnesses!(
+        i64,
+        check_mut_offset_slice_i64,
+        check_mut_add_slice_i64,
+        check_mut_sub_slice_i64
+    );
+    generate_mut_slice_harnesses!(
+        i128,
+        check_mut_offset_slice_i128,
+        check_mut_add_slice_i128,
+        check_mut_sub_slice_i128
+    );
+    generate_mut_slice_harnesses!(
+        isize,
+        check_mut_offset_slice_isize,
+        check_mut_add_slice_isize,
+        check_mut_sub_slice_isize
+    );
+    generate_mut_slice_harnesses!(
+        u8,
+        check_mut_offset_slice_u8,
+        check_mut_add_slice_u8,
+        check_mut_sub_slice_u8
+    );
+    generate_mut_slice_harnesses!(
+        u16,
+        check_mut_offset_slice_u16,
+        check_mut_add_slice_u16,
+        check_mut_sub_slice_u16
+    );
+    generate_mut_slice_harnesses!(
+        u32,
+        check_mut_offset_slice_u32,
+        check_mut_add_slice_u32,
+        check_mut_sub_slice_u32
+    );
+    generate_mut_slice_harnesses!(
+        u64,
+        check_mut_offset_slice_u64,
+        check_mut_add_slice_u64,
+        check_mut_sub_slice_u64
+    );
+    generate_mut_slice_harnesses!(
+        u128,
+        check_mut_offset_slice_u128,
+        check_mut_add_slice_u128,
+        check_mut_sub_slice_u128
+    );
+    generate_mut_slice_harnesses!(
+        usize,
+        check_mut_offset_slice_usize,
+        check_mut_add_slice_usize,
+        check_mut_sub_slice_usize
+    );
 
     // Generate pointer harnesses for tuples (offset, add, sub)
-    generate_mut_slice_harnesses!((i8, i8), check_mut_offset_slice_tuple_1, check_mut_add_slice_tuple_1, check_mut_sub_slice_tuple_1);
-    generate_mut_slice_harnesses!((f64, bool), check_mut_offset_slice_tuple_2, check_mut_add_slice_tuple_2, check_mut_sub_slice_tuple_2);
-    generate_mut_slice_harnesses!((i32, f64, bool), check_mut_offset_slice_tuple_3, check_mut_add_slice_tuple_3, check_mut_sub_slice_tuple_3);
-    generate_mut_slice_harnesses!((i8, u16, i32, u64, isize), check_mut_offset_slice_tuple_4, check_mut_add_slice_tuple_4, check_mut_sub_slice_tuple_4);
+    generate_mut_slice_harnesses!(
+        (i8, i8),
+        check_mut_offset_slice_tuple_1,
+        check_mut_add_slice_tuple_1,
+        check_mut_sub_slice_tuple_1
+    );
+    generate_mut_slice_harnesses!(
+        (f64, bool),
+        check_mut_offset_slice_tuple_2,
+        check_mut_add_slice_tuple_2,
+        check_mut_sub_slice_tuple_2
+    );
+    generate_mut_slice_harnesses!(
+        (i32, f64, bool),
+        check_mut_offset_slice_tuple_3,
+        check_mut_add_slice_tuple_3,
+        check_mut_sub_slice_tuple_3
+    );
+    generate_mut_slice_harnesses!(
+        (i8, u16, i32, u64, isize),
+        check_mut_offset_slice_tuple_4,
+        check_mut_add_slice_tuple_4,
+        check_mut_sub_slice_tuple_4
+    );
 
     use kani::PointerGenerator;
 
@@ -2370,24 +2455,9 @@ mod verify {
 
     // Generate harnesses for integer types (add, sub, offset)
     generate_arithmetic_harnesses!(i8, check_mut_add_i8, check_mut_sub_i8, check_mut_offset_i8);
-    generate_arithmetic_harnesses!(
-        i16,
-        check_mut_add_i16,
-        check_mut_sub_i16,
-        check_mut_offset_i16
-    );
-    generate_arithmetic_harnesses!(
-        i32,
-        check_mut_add_i32,
-        check_mut_sub_i32,
-        check_mut_offset_i32
-    );
-    generate_arithmetic_harnesses!(
-        i64,
-        check_mut_add_i64,
-        check_mut_sub_i64,
-        check_mut_offset_i64
-    );
+    generate_arithmetic_harnesses!(i16, check_mut_add_i16, check_mut_sub_i16, check_mut_offset_i16);
+    generate_arithmetic_harnesses!(i32, check_mut_add_i32, check_mut_sub_i32, check_mut_offset_i32);
+    generate_arithmetic_harnesses!(i64, check_mut_add_i64, check_mut_sub_i64, check_mut_offset_i64);
     generate_arithmetic_harnesses!(
         i128,
         check_mut_add_i128,
@@ -2403,24 +2473,9 @@ mod verify {
     // Due to a bug of kani the test `check_mut_add_u8` is malfunctioning for now.
     // Tracking issue: https://github.com/model-checking/kani/issues/3743
     // generate_arithmetic_harnesses!(u8, check_mut_add_u8, check_mut_sub_u8, check_mut_offset_u8);
-    generate_arithmetic_harnesses!(
-        u16,
-        check_mut_add_u16,
-        check_mut_sub_u16,
-        check_mut_offset_u16
-    );
-    generate_arithmetic_harnesses!(
-        u32,
-        check_mut_add_u32,
-        check_mut_sub_u32,
-        check_mut_offset_u32
-    );
-    generate_arithmetic_harnesses!(
-        u64,
-        check_mut_add_u64,
-        check_mut_sub_u64,
-        check_mut_offset_u64
-    );
+    generate_arithmetic_harnesses!(u16, check_mut_add_u16, check_mut_sub_u16, check_mut_offset_u16);
+    generate_arithmetic_harnesses!(u32, check_mut_add_u32, check_mut_sub_u32, check_mut_offset_u32);
+    generate_arithmetic_harnesses!(u64, check_mut_add_u64, check_mut_sub_u64, check_mut_offset_u64);
     generate_arithmetic_harnesses!(
         u128,
         check_mut_add_u128,
@@ -2517,21 +2572,9 @@ mod verify {
     }
 
     generate_offset_from_harness!(u8, check_mut_offset_from_u8, check_mut_offset_from_u8_array);
-    generate_offset_from_harness!(
-        u16,
-        check_mut_offset_from_u16,
-        check_mut_offset_from_u16_array
-    );
-    generate_offset_from_harness!(
-        u32,
-        check_mut_offset_from_u32,
-        check_mut_offset_from_u32_array
-    );
-    generate_offset_from_harness!(
-        u64,
-        check_mut_offset_from_u64,
-        check_mut_offset_from_u64_array
-    );
+    generate_offset_from_harness!(u16, check_mut_offset_from_u16, check_mut_offset_from_u16_array);
+    generate_offset_from_harness!(u32, check_mut_offset_from_u32, check_mut_offset_from_u32_array);
+    generate_offset_from_harness!(u64, check_mut_offset_from_u64, check_mut_offset_from_u64_array);
     generate_offset_from_harness!(
         u128,
         check_mut_offset_from_u128,
@@ -2544,21 +2587,9 @@ mod verify {
     );
 
     generate_offset_from_harness!(i8, check_mut_offset_from_i8, check_mut_offset_from_i8_array);
-    generate_offset_from_harness!(
-        i16,
-        check_mut_offset_from_i16,
-        check_mut_offset_from_i16_array
-    );
-    generate_offset_from_harness!(
-        i32,
-        check_mut_offset_from_i32,
-        check_mut_offset_from_i32_array
-    );
-    generate_offset_from_harness!(
-        i64,
-        check_mut_offset_from_i64,
-        check_mut_offset_from_i64_array
-    );
+    generate_offset_from_harness!(i16, check_mut_offset_from_i16, check_mut_offset_from_i16_array);
+    generate_offset_from_harness!(i32, check_mut_offset_from_i32, check_mut_offset_from_i32_array);
+    generate_offset_from_harness!(i64, check_mut_offset_from_i64, check_mut_offset_from_i64_array);
     generate_offset_from_harness!(
         i128,
         check_mut_offset_from_i128,
@@ -2715,11 +2746,7 @@ mod verify {
     gen_mut_byte_arith_harness!((i8, i8), byte_add, check_mut_byte_add_tuple_1);
     gen_mut_byte_arith_harness!((f64, bool), byte_add, check_mut_byte_add_tuple_2);
     gen_mut_byte_arith_harness!((i32, f64, bool), byte_add, check_mut_byte_add_tuple_3);
-    gen_mut_byte_arith_harness!(
-        (i8, u16, i32, u64, isize),
-        byte_add,
-        check_mut_byte_add_tuple_4
-    );
+    gen_mut_byte_arith_harness!((i8, u16, i32, u64, isize), byte_add, check_mut_byte_add_tuple_4);
 
     gen_mut_byte_arith_harness!(i8, byte_sub, check_mut_byte_sub_i8);
     gen_mut_byte_arith_harness!(i16, byte_sub, check_mut_byte_sub_i16);
@@ -2736,11 +2763,7 @@ mod verify {
     gen_mut_byte_arith_harness!((i8, i8), byte_sub, check_mut_byte_sub_tuple_1);
     gen_mut_byte_arith_harness!((f64, bool), byte_sub, check_mut_byte_sub_tuple_2);
     gen_mut_byte_arith_harness!((i32, f64, bool), byte_sub, check_mut_byte_sub_tuple_3);
-    gen_mut_byte_arith_harness!(
-        (i8, u16, i32, u64, isize),
-        byte_sub,
-        check_mut_byte_sub_tuple_4
-    );
+    gen_mut_byte_arith_harness!((i8, u16, i32, u64, isize), byte_sub, check_mut_byte_sub_tuple_4);
 
     gen_mut_byte_arith_harness!(i8, byte_offset, check_mut_byte_offset_i8);
     gen_mut_byte_arith_harness!(i16, byte_offset, check_mut_byte_offset_i16);
@@ -2903,10 +2926,7 @@ mod verify {
         let self_ptr: *mut u32 = unsafe { origin_ptr.byte_offset(offset as isize) };
         let result: isize = unsafe { self_ptr.byte_offset_from(origin_ptr) };
         assert_eq!(result, offset as isize);
-        assert_eq!(
-            result,
-            (self_ptr.addr() as isize - origin_ptr.addr() as isize)
-        );
+        assert_eq!(result, (self_ptr.addr() as isize - origin_ptr.addr() as isize));
     }
 
     // Proof for unit size

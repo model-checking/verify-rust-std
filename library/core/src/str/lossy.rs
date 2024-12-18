@@ -3,7 +3,6 @@ use super::validations::utf8_char_width;
 use crate::fmt;
 use crate::fmt::{Formatter, Write};
 use crate::iter::FusedIterator;
-
 #[cfg(kani)]
 use crate::kani;
 

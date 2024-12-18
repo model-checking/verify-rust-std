@@ -1,13 +1,12 @@
 use safety::{ensures, invariant, requires};
-use crate::num::NonZero;
-use crate::ub_checks::assert_unsafe_precondition;
-use crate::{cmp, fmt, hash, mem, num};
 
 #[cfg(kani)]
 use crate::kani;
-
+use crate::num::NonZero;
 #[cfg(kani)]
 use crate::ub_checks::Invariant;
+use crate::ub_checks::assert_unsafe_precondition;
+use crate::{cmp, fmt, hash, mem, num};
 
 /// A type storing a `usize` which is a power of two, and thus
 /// represents a possible alignment in the Rust abstract machine.
@@ -394,7 +393,7 @@ enum AlignmentEnum {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
 

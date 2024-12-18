@@ -4037,15 +4037,15 @@ impl<T, A: Allocator, const N: usize> TryFrom<Vec<T, A>> for [T; N] {
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use core::kani;
+
     use crate::vec::Vec;
-    
-    // Size chosen for testing the empty vector (0), middle element removal (1) 
-    // and last element removal (2) cases while keeping verification tractable 
+
+    // Size chosen for testing the empty vector (0), middle element removal (1)
+    // and last element removal (2) cases while keeping verification tractable
     const ARRAY_LEN: usize = 3;
 
     #[kani::proof]
     pub fn verify_swap_remove() {
-
         // Creating a vector directly from a fixed length arbitrary array
         let mut arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
         let mut vect = Vec::from(&arr);
@@ -4067,7 +4067,10 @@ mod verify {
 
         // Verifying that the removed index now contains the element originally at the vector's last index if applicable
         if index < original_len - 1 {
-            assert!(vect[index] == original_vec[original_len - 1], "Index should contain last element");
+            assert!(
+                vect[index] == original_vec[original_len - 1],
+                "Index should contain last element"
+            );
         }
 
         // Check that all other unaffected elements remain unchanged
@@ -4075,6 +4078,5 @@ mod verify {
         if k != index {
             assert!(vect[k] == arr[k]);
         }
-
     }
 }

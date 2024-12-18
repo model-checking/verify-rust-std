@@ -19,14 +19,13 @@
 //! assert_eq!(total, Duration::new(10, 7));
 //! ```
 
-use safety::{ensures, Invariant};
+use safety::{Invariant, ensures};
+
 use crate::fmt;
 use crate::iter::Sum;
-use crate::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
-
 #[cfg(kani)]
 use crate::kani;
-
+use crate::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 use crate::ub_checks::Invariant;
 
 const NANOS_PER_SEC: u32 = 1_000_000_000;
@@ -1732,8 +1731,8 @@ impl Duration {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 pub mod duration_verify {
-    use crate::kani;
     use super::*;
+    use crate::kani;
 
     impl kani::Arbitrary for Duration {
         fn any() -> Duration {
@@ -1746,7 +1745,9 @@ pub mod duration_verify {
     fn safe_duration() -> Duration {
         let secs = kani::any::<u64>();
         let nanos = kani::any::<u32>();
-        kani::assume(nanos < NANOS_PER_SEC || secs.checked_add((nanos / NANOS_PER_SEC) as u64).is_some());
+        kani::assume(
+            nanos < NANOS_PER_SEC || secs.checked_add((nanos / NANOS_PER_SEC) as u64).is_some(),
+        );
         Duration::new(secs, nanos)
     }
 
