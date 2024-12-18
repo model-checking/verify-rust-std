@@ -195,6 +195,8 @@ run_verification_subset() {
         -Z float-lib \
         -Z c-ffi \
         $harness_args --exact \
+        -j $VERIFICATION_THREAD_COUNT \
+        --output-format=terse \
         $command_args \
         --enable-unstable \
         --cbmc-args --object-bits 12
