@@ -1759,6 +1759,7 @@ mod verify {
         ($type:ty, $wide_type:ty, $($harness_name:ident, $min:expr, $max:expr),+) => {
             $(
                 #[kani::proof]
+                #[kani::solver(kissat)]
                 pub fn $harness_name() {
                     let lhs: $type = kani::any::<$type>();
                     let rhs: $type = kani::any::<$type>();
@@ -2049,9 +2050,7 @@ mod verify {
 
     // ====================== u16 Harnesses ======================
     generate_carrying_mul_intervals!(u16, u32,
-        carrying_mul_u16_small, 0u16, 10u16,
-        carrying_mul_u16_large, u16::MAX - 10u16, u16::MAX,
-        carrying_mul_u16_mid_edge, (u16::MAX / 2) - 10u16, (u16::MAX / 2) + 10u16
+        carrying_mul_u16_full_range, 0u16, u16::MAX
     );
 
     // ====================== u32 Harnesses ======================
