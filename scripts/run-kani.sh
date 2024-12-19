@@ -77,6 +77,9 @@ TOML_FILE=${KANI_TOML_FILE:-$DEFAULT_TOML_FILE}
 REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
+# Unstable arguments to pass to Kani
+unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts"
+
 # Variables used for parallel harness verification
 # When we say "parallel," we mean two dimensions of parallelization:
 #   1. Sharding verification across multiple workers. The Kani workflow that calls this script defines WORKER_INDEX and WORKER_TOTAL for this purpose: 
@@ -87,6 +90,8 @@ BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 declare -a ALL_HARNESSES
 # Length of ALL_HARNESSES, set in get_harnesses()
 declare -i HARNESS_COUNT
+# `kani list` JSON FILE_VERSION that the parallel verification command expects
+EXPECTED_JSON_FILE_VERSION="0.1"
 
 # Function to read commit ID from TOML file
 read_commit_from_toml() {
@@ -164,16 +169,19 @@ get_kani_path() {
 
 # Run kani list with JSON format and process with jq to extract harness names and total number of harnesses.
 # Note: The code to extract ALL_HARNESSES is dependent on `kani list --format json` FILE_VERSION 0.1.
+# (The FILE_VERSION variable is defined in Kani in the list module's output code, current path kani-driver/src/list/output.rs)
 # If FILE_VERSION changes, first update the ALL_HARNESSES extraction logic to work with the new format, if necessary,
-# then update the FILE_VERSION check to check for the new version.
+# then update EXPECTED_JSON_FILE_VERSION.
 get_harnesses() {
     local kani_path="$1"
-    "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format json
+    "$kani_path" list -Z list $unstable_args ./library --std --format json
     local json_file_version=$(jq -r '.["file-version"]' "$WORK_DIR/kani-list.json")
-    if [[ $json_file_version != "0.1" ]]; then
-        echo "Error: The JSON file-version in kani-list.json does not equal 0.1."
+    if [[ $json_file_version != $EXPECTED_JSON_FILE_VERSION ]]; then
+        echo "Error: The JSON file-version in kani-list.json does not equal $EXPECTED_JSON_FILE_VERSION"
         exit 1
     fi
+    # Extract the harnesses inside "standard-harnesses" and "contract-harnesses" 
+    # into an array called ALL_HARNESSES and the length of that array into HARNESS_COUNT
     ALL_HARNESSES=($(jq -r '
         ([.["standard-harnesses"] | to_entries | .[] | .value[]] + 
             [.["contract-harnesses"] | to_entries | .[] | .value[]]) | 
@@ -196,11 +204,7 @@ run_verification_subset() {
     echo "Running verification for harnesses:"
     printf '%s\n' "${harnesses[@]}"
     "$kani_path" verify-std -Z unstable-options ./library \
-        -Z function-contracts \
-        -Z mem-predicates \
-        -Z loop-contracts \
-        -Z float-lib \
-        -Z c-ffi \
+        $unstable_args \
         $harness_args --exact \
         -j \
         --output-format=terse \
@@ -284,18 +288,14 @@ main() {
             # Run verification for all harnesses (not in parallel)
             echo "Running Kani verify-std command..."
             "$kani_path" verify-std -Z unstable-options ./library \
-                -Z function-contracts \
-                -Z mem-predicates \
-                -Z loop-contracts \
-                -Z float-lib \
-                -Z c-ffi \
+                $unstable_args
                 $command_args \
                 --enable-unstable \
                 --cbmc-args --object-bits 12
         fi
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
-        "$kani_path" list -Z list -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi ./library --std --format markdown
+        "$kani_path" list -Z list $unstable_flags ./library --std --format markdown
     fi
 }
 
