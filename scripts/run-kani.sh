@@ -295,7 +295,7 @@ main() {
         fi
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
-        "$kani_path" list -Z list $unstable_flags ./library --std --format markdown
+        "$kani_path" list -Z list $unstable_args ./library --std --format markdown
     fi
 }
 
