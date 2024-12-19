@@ -1,14 +1,13 @@
 //! impl char {}
 
 use super::*;
+#[cfg(kani)]
+use crate::kani;
 use crate::panic::const_panic;
 use crate::slice;
 use crate::str::from_utf8_unchecked_mut;
 use crate::unicode::printable::is_printable;
 use crate::unicode::{self, conversions};
-
-#[cfg(kani)]
-use crate::kani;
 
 impl char {
     /// The lowest valid code point a `char` can have, `'\0'`.
@@ -1871,10 +1870,11 @@ pub const fn encode_utf16_raw(mut code: u32, dst: &mut [u16]) -> &mut [u16] {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use super::*;
     use safety::ensures;
+
+    use super::*;
 
     #[ensures(|result| c.is_ascii() == (result.is_some() && (result.unwrap() as u8 as char == *c)))]
     fn as_ascii_clone(c: &char) -> Option<ascii::Char> {
@@ -1883,7 +1883,7 @@ mod verify {
 
     #[kani::proof_for_contract(as_ascii_clone)]
     fn check_as_ascii_ascii_char() {
-        let ascii: char = kani::any_where(|c : &char| c.is_ascii());
+        let ascii: char = kani::any_where(|c: &char| c.is_ascii());
         as_ascii_clone(&ascii);
     }
 

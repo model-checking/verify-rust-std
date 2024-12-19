@@ -144,7 +144,9 @@ build_kani() {
     pushd "$directory"
     source "kani-dependencies"
     # Check if installed versions are correct.
-    if ./scripts/check-cbmc-version.py --major ${CBMC_MAJOR} --minor ${CBMC_MINOR} && ./scripts/check_kissat_version.sh; then
+    if ./scripts/check-cbmc-version.py \
+            --major ${CBMC_MAJOR} --minor ${CBMC_MINOR} --patch ${CBMC_PATCH} \
+            && ./scripts/check_kissat_version.sh; then
         echo "Dependencies are up-to-date"
     else
         os_name=$(uname -s)

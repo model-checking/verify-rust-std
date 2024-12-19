@@ -1,4 +1,8 @@
+use safety::{ensures, requires};
+
 use crate::cmp::Ordering;
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::Unsize;
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
@@ -6,14 +10,10 @@ use crate::ops::{CoerceUnsized, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
 use crate::ptr::Unique;
 use crate::slice::{self, SliceIndex};
-use crate::ub_checks::assert_unsafe_precondition;
-use crate::{fmt, hash, intrinsics, ptr};
-use safety::{ensures, requires};
-
-#[cfg(kani)]
-use crate::kani;
 #[cfg(kani)]
 use crate::ub_checks;
+use crate::ub_checks::assert_unsafe_precondition;
+use crate::{fmt, hash, intrinsics, ptr};
 
 /// `*mut T` but non-zero and [covariant].
 ///
@@ -138,8 +138,8 @@ impl<T: Sized> NonNull<T> {
     #[inline]
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))]  // Ensure the pointer is valid to create a reference.
-    #[ensures(|result: &&MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))]  // Ensure returned reference points to the correct memory location.
+    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure the pointer is valid to create a reference.
+    #[ensures(|result: &&MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))] // Ensure returned reference points to the correct memory location.
     pub const unsafe fn as_uninit_ref<'a>(self) -> &'a MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -163,8 +163,8 @@ impl<T: Sized> NonNull<T> {
     #[inline]
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))]  // Ensure pointer is valid to create a mutable reference.
-    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))]  // Ensure the returned reference points to the correct memory.
+    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure pointer is valid to create a mutable reference.
+    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))] // Ensure the returned reference points to the correct memory.
     pub const unsafe fn as_uninit_mut<'a>(self) -> &'a mut MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -392,7 +392,7 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline(always)]
     #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure input is convertible to a reference
-    #[ensures(|result: &&T| core::ptr::eq(*result, self.as_ptr()))]  // Ensure returned reference matches pointer
+    #[ensures(|result: &&T| core::ptr::eq(*result, self.as_ptr()))] // Ensure returned reference matches pointer
     pub const unsafe fn as_ref<'a>(&self) -> &'a T {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -682,7 +682,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(unchecked_neg))]
     #[requires(
         count.checked_mul(core::mem::size_of::<T>()).is_some() &&
-        count * core::mem::size_of::<T>() <= isize::MAX as usize && 
+        count * core::mem::size_of::<T>() <= isize::MAX as usize &&
         kani::mem::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
     )]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
@@ -823,8 +823,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires( 
-        (kani::mem::same_allocation(self.as_ptr(), origin.as_ptr()) && 
+    #[requires(
+        (kani::mem::same_allocation(self.as_ptr(), origin.as_ptr()) &&
         ((self.as_ptr().addr() - origin.as_ptr().addr()) % core::mem::size_of::<T>() == 0))
     )] // Ensure both pointers meet safety conditions for offset_from
     #[ensures(|result: &isize| *result == (self.as_ptr() as isize - origin.as_ptr() as isize) / core::mem::size_of::<T>() as isize)]
@@ -1656,7 +1656,7 @@ impl<T> NonNull<[T]> {
     #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)] // Ensure the slice size does not exceed isize::MAX
     #[requires(kani::mem::same_allocation(self.as_ptr() as *const(), self.as_ptr().byte_add(self.len() * core::mem::size_of::<T>()) as *const()))] // Ensure the slice is contained within a single allocation
     #[ensures(|result: &&mut [MaybeUninit<T>]| result.len() == self.len())] // Length check
-    #[ensures(|result: &&mut [MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))]  // Address check
+    #[ensures(|result: &&mut [MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))] // Address check
     pub const unsafe fn as_uninit_slice_mut<'a>(self) -> &'a mut [MaybeUninit<T>] {
         // SAFETY: the caller must uphold the safety contract for `as_uninit_slice_mut`.
         unsafe { slice::from_raw_parts_mut(self.cast().as_ptr(), self.len()) }
@@ -1799,14 +1799,16 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
+    use core::num::NonZeroUsize;
+    use core::ptr::NonNull;
+
+    use kani::PointerGenerator;
+
     use super::*;
     use crate::mem;
     use crate::ptr::null_mut;
-    use core::num::NonZeroUsize;
-    use core::ptr::NonNull;
-    use kani::PointerGenerator;
 
     trait SampleTrait {
         fn get_value(&self) -> i32;
@@ -1844,7 +1846,7 @@ mod verify {
     pub fn non_null_check_new() {
         let mut x: i32 = kani::any();
         let xptr = &mut x;
-        let maybe_null_ptr =  if kani::any() { xptr as *mut i32 } else { null_mut() };
+        let maybe_null_ptr = if kani::any() { xptr as *mut i32 } else { null_mut() };
         let _ = NonNull::new(maybe_null_ptr);
     }
 
@@ -1862,10 +1864,10 @@ mod verify {
         const ARR_LEN: usize = 10000;
         let mut generator = PointerGenerator::<ARR_LEN>::new();
         let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
-        let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
+        let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
         unsafe {
             let result = nonnull_ptr.read();
-            kani::assert( *nonnull_ptr.as_ptr() == result, "read returns the correct value");
+            kani::assert(*nonnull_ptr.as_ptr() == result, "read returns the correct value");
         }
     }
 
@@ -1883,10 +1885,10 @@ mod verify {
         const ARR_LEN: usize = 10000;
         let mut generator = PointerGenerator::<ARR_LEN>::new();
         let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
-        let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
+        let nonnull_ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
         unsafe {
             let result = nonnull_ptr.read_volatile();
-            kani::assert( *nonnull_ptr.as_ptr() == result, "read returns the correct value");
+            kani::assert(*nonnull_ptr.as_ptr() == result, "read returns the correct value");
         }
     }
 
@@ -1905,15 +1907,15 @@ mod verify {
         let unaligned_nonnull_ptr = NonNull::new(unaligned_ptr).unwrap();
         unsafe {
             let result = unaligned_nonnull_ptr.read_unaligned();
-            kani::assert( *unaligned_nonnull_ptr.as_ptr() == result, "read returns the correct value");
+            kani::assert(
+                *unaligned_nonnull_ptr.as_ptr() == result,
+                "read returns the correct value",
+            );
         }
 
         // read an unaligned value from a packed struct
         let unaligned_value: u32 = kani::any();
-        let packed = Packed {
-            _padding: kani::any::<u8>(),
-            unaligned: unaligned_value,
-        };
+        let packed = Packed { _padding: kani::any::<u8>(), unaligned: unaligned_value };
 
         let unaligned_ptr = ptr::addr_of!(packed.unaligned);
         let nonnull_packed_ptr = NonNull::new(unaligned_ptr as *mut u32).unwrap();
@@ -1927,7 +1929,7 @@ mod verify {
         const SIZE: usize = 100000;
         let mut generator = PointerGenerator::<100000>::new();
         let raw_ptr: *mut i8 = generator.any_in_bounds().ptr;
-        let ptr = unsafe { NonNull::new(raw_ptr).unwrap()};
+        let ptr = unsafe { NonNull::new(raw_ptr).unwrap() };
         // Create a non-deterministic count value
         let count: usize = kani::any();
 
@@ -1941,7 +1943,9 @@ mod verify {
     pub fn non_null_check_addr() {
         // Create NonNull pointer & get pointer address
         let x = kani::any::<usize>() as *mut i32;
-        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
+        let Some(nonnull_xptr) = NonNull::new(x) else {
+            return;
+        };
         let address = nonnull_xptr.addr();
     }
 
@@ -1950,7 +1954,9 @@ mod verify {
     pub fn non_null_check_align_offset() {
         // Create NonNull pointer
         let x = kani::any::<usize>() as *mut i32;
-        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
+        let Some(nonnull_xptr) = NonNull::new(x) else {
+            return;
+        };
 
         // Call align_offset with valid align value
         let align: usize = kani::any();
@@ -1964,7 +1970,9 @@ mod verify {
     pub fn non_null_check_align_offset_negative() {
         // Create NonNull pointer
         let x = kani::any::<usize>() as *mut i8;
-        let Some(nonnull_xptr) = NonNull::new(x) else { return; };
+        let Some(nonnull_xptr) = NonNull::new(x) else {
+            return;
+        };
 
         // Generate align value that is not necessarily a power of two
         let invalid_align: usize = kani::any();
@@ -1993,7 +2001,7 @@ mod verify {
         // unit type
         let ptr_unit = NonNull::<()>::dangling();
         // zero length slice from dangling unit pointer
-        let zero_len_slice =  NonNull::slice_from_raw_parts(ptr_unit, 0);
+        let zero_len_slice = NonNull::slice_from_raw_parts(ptr_unit, 0);
     }
 
     // pub const fn from_raw_parts(data_pointer: NonNull<()>, metadata: <T as super::Pointee>::Metadata,) -> NonNull<T>
@@ -2030,11 +2038,15 @@ mod verify {
         let metadata = core::ptr::metadata(trait_object);
 
         // Create NonNull<dyn MyTrait> from the data pointer and metadata
-        let nonnull_trait_object: NonNull<dyn SampleTrait> = NonNull::from_raw_parts(trait_ptr, metadata);
+        let nonnull_trait_object: NonNull<dyn SampleTrait> =
+            NonNull::from_raw_parts(trait_ptr, metadata);
 
         unsafe {
             // Ensure trait method and member is preserved
-            kani::assert( trait_object.get_value() == nonnull_trait_object.as_ref().get_value(), "trait method and member must correctly preserve");
+            kani::assert(
+                trait_object.get_value() == nonnull_trait_object.as_ref().get_value(),
+                "trait method and member must correctly preserve",
+            );
         }
     }
 
@@ -2054,14 +2066,16 @@ mod verify {
         let nonnull_slice = NonNull::<[i8]>::slice_from_raw_parts(arr_raw_ptr, slice_len);
         // Ensure slice content is preserved, runtime at this step is proportional to ARR_LEN
         unsafe {
-            kani::assert(&arr[..slice_len] == nonnull_slice.as_ref(), "slice content must be preserve");
+            kani::assert(
+                &arr[..slice_len] == nonnull_slice.as_ref(),
+                "slice content must be preserve",
+            );
         }
 
         // TODO: zero-length example blocked by kani issue [#3670](https://github.com/model-checking/kani/issues/3670)
         //let dangling_ptr = NonNull::<()>::dangling();
         //let zero_length = NonNull::<[()]>::slice_from_raw_parts(dangling_ptr, 0);
     }
-
 
     // pub const fn to_raw_parts(self) -> (NonNull<()>, <T as super::Pointee>::Metadata)
     #[kani::proof_for_contract(NonNull::to_raw_parts)]
@@ -2077,10 +2091,11 @@ mod verify {
         let metadata = core::ptr::metadata(trait_object);
 
         // Create NonNull<dyn MyTrait> from the data pointer and metadata
-        let nonnull_trait_object: NonNull<dyn SampleTrait> = NonNull::from_raw_parts(trait_ptr, metadata);
-        let (decomposed_data_ptr, decomposed_metadata) = NonNull::to_raw_parts(nonnull_trait_object);
+        let nonnull_trait_object: NonNull<dyn SampleTrait> =
+            NonNull::from_raw_parts(trait_ptr, metadata);
+        let (decomposed_data_ptr, decomposed_metadata) =
+            NonNull::to_raw_parts(nonnull_trait_object);
     }
-
 
     #[kani::proof_for_contract(NonNull::as_mut)]
     pub fn non_null_check_as_mut() {
@@ -2167,10 +2182,7 @@ mod verify {
         const ARR_SIZE: usize = 100000;
         let mut arr: [i32; ARR_SIZE] = kani::any();
         let raw_ptr = arr.as_mut_ptr();
-        let ptr = NonNull::slice_from_raw_parts(
-            NonNull::new(raw_ptr).unwrap(),
-            ARR_SIZE,
-        );
+        let ptr = NonNull::slice_from_raw_parts(NonNull::new(raw_ptr).unwrap(), ARR_SIZE);
         let lower = kani::any_where(|x| *x < ARR_SIZE);
         let upper = kani::any_where(|x| *x < ARR_SIZE && *x >= lower);
         unsafe {
@@ -2206,8 +2218,7 @@ mod verify {
             value: i32,
         }
         impl Drop for Droppable {
-            fn drop(&mut self) {
-            }
+            fn drop(&mut self) {}
         }
 
         let mut droppable = Droppable { value: kani::any() };
@@ -2244,9 +2255,8 @@ mod verify {
         if let Some(ptr) = NonNull::new(non_null_ptr) {
             let result = ptr.as_ptr();
         }
-    
     }
-    
+
     #[kani::proof_for_contract(NonNull::<[T]>::as_mut_ptr)]
     pub fn non_null_check_as_mut_ptr() {
         const ARR_LEN: usize = 100;
@@ -2263,7 +2273,7 @@ mod verify {
             let result: NonNull<u8> = ptr.cast();
         }
     }
-    
+
     #[kani::proof_for_contract(NonNull::<[T]>::as_non_null_ptr)]
     pub fn non_null_check_as_non_null_ptr() {
         const ARR_LEN: usize = 100;
@@ -2271,8 +2281,8 @@ mod verify {
         let slice = kani::slice::any_slice_of_array_mut(&mut values);
         let non_null_ptr = NonNull::new(slice as *mut [i32]).unwrap();
         let result = non_null_ptr.as_non_null_ptr();
-     } 
-  
+    }
+
     #[kani::proof]
     pub fn non_null_check_len() {
         // Create a non-deterministic NonNull pointer using kani::any()
@@ -2295,7 +2305,8 @@ mod verify {
         let size: usize = 0;
 
         // Create a NonNull slice from the non-null pointer and size
-        let non_null_slice: NonNull<[i8]> = unsafe { NonNull::slice_from_raw_parts(non_null_ptr, size) };
+        let non_null_slice: NonNull<[i8]> =
+            unsafe { NonNull::slice_from_raw_parts(non_null_ptr, size) };
 
         // Perform the is_empty check
         let is_empty = non_null_slice.is_empty();
@@ -2309,7 +2320,6 @@ mod verify {
 
         // Perform the alignment check
         let result = non_null_ptr.is_aligned();
-
     }
 
     #[kani::proof_for_contract(NonNull::is_aligned_to)]
@@ -2323,7 +2333,6 @@ mod verify {
 
         // Perform the alignment check
         let result = non_null_ptr.is_aligned_to(align);
-            
     }
 
     #[kani::proof]
@@ -2384,7 +2393,7 @@ mod verify {
         let new_addr = NonZeroUsize::new(ptr.as_ptr().addr() + new_offset).unwrap();
         let result = ptr.with_addr(new_addr);
     }
-  
+
     #[kani::proof_for_contract(NonNull::sub)]
     pub fn non_null_check_sub() {
         const SIZE: usize = 10000;
@@ -2400,7 +2409,7 @@ mod verify {
             let result = ptr.sub(count);
         }
     }
-    
+
     #[kani::proof_for_contract(NonNull::sub_ptr)]
     pub fn non_null_check_sub_ptr() {
         const SIZE: usize = core::mem::size_of::<i32>() * 1000;
@@ -2487,13 +2496,21 @@ mod verify {
     generate_write_volatile_harness!(i32, 4, non_null_check_write_volatile_i32);
     generate_write_volatile_harness!(i64, 8, non_null_check_write_volatile_i64);
     generate_write_volatile_harness!(i128, 16, non_null_check_write_volatile_i128);
-    generate_write_volatile_harness!(isize, {core::mem::size_of::<isize>()}, non_null_check_write_volatile_isize);
+    generate_write_volatile_harness!(
+        isize,
+        { core::mem::size_of::<isize>() },
+        non_null_check_write_volatile_isize
+    );
     generate_write_volatile_harness!(u8, 1, non_null_check_write_volatile_u8);
     generate_write_volatile_harness!(u16, 2, non_null_check_write_volatile_u16);
     generate_write_volatile_harness!(u32, 4, non_null_check_write_volatile_u32);
     generate_write_volatile_harness!(u64, 8, non_null_check_write_volatile_u64);
     generate_write_volatile_harness!(u128, 16, non_null_check_write_volatile_u128);
-    generate_write_volatile_harness!(usize, {core::mem::size_of::<usize>()}, non_null_check_write_volatile_usize);
+    generate_write_volatile_harness!(
+        usize,
+        { core::mem::size_of::<usize>() },
+        non_null_check_write_volatile_usize
+    );
     generate_write_volatile_harness!((), 1, non_null_check_write_volatile_unit);
 
     #[kani::proof_for_contract(NonNull::byte_add)]
@@ -2572,54 +2589,62 @@ mod verify {
         // Generate arbitrary pointers for src and dest
         let src_ptr = generator.any_in_bounds::<i32>().ptr;
         let dest_ptr = generator.any_in_bounds::<i32>().ptr;
-         // Wrap the raw pointers in NonNull
+        // Wrap the raw pointers in NonNull
         let src = NonNull::new(src_ptr).unwrap();
         let dest = NonNull::new(dest_ptr).unwrap();
         // Generate an arbitrary count using kani::any
         let count: usize = kani::any();
-        unsafe { src.copy_to(dest, count);}
+        unsafe {
+            src.copy_to(dest, count);
+        }
     }
 
     #[kani::proof_for_contract(NonNull::<T>::copy_from)]
     pub fn non_null_check_copy_from() {
-       // PointerGenerator instance
-       let mut generator = PointerGenerator::<16>::new();
-       // Generate arbitrary pointers for src and dest
-       let src_ptr = generator.any_in_bounds::<i32>().ptr;
-       let dest_ptr = generator.any_in_bounds::<i32>().ptr;
+        // PointerGenerator instance
+        let mut generator = PointerGenerator::<16>::new();
+        // Generate arbitrary pointers for src and dest
+        let src_ptr = generator.any_in_bounds::<i32>().ptr;
+        let dest_ptr = generator.any_in_bounds::<i32>().ptr;
         // Wrap the raw pointers in NonNull
-       let src = NonNull::new(src_ptr).unwrap();
-       let dest = NonNull::new(dest_ptr).unwrap();
-       // Generate an arbitrary count using kani::any
-       let count: usize = kani::any();
-       unsafe { src.copy_from(dest, count);}
+        let src = NonNull::new(src_ptr).unwrap();
+        let dest = NonNull::new(dest_ptr).unwrap();
+        // Generate an arbitrary count using kani::any
+        let count: usize = kani::any();
+        unsafe {
+            src.copy_from(dest, count);
+        }
     }
     #[kani::proof_for_contract(NonNull::<T>::copy_to_nonoverlapping)]
     pub fn non_null_check_copy_to_nonoverlapping() {
-       // PointerGenerator instance
-       let mut generator = PointerGenerator::<16>::new();
-       // Generate arbitrary pointers for src and dest
-       let src_ptr = generator.any_in_bounds::<i32>().ptr;
-       let dest_ptr = generator.any_in_bounds::<i32>().ptr;
+        // PointerGenerator instance
+        let mut generator = PointerGenerator::<16>::new();
+        // Generate arbitrary pointers for src and dest
+        let src_ptr = generator.any_in_bounds::<i32>().ptr;
+        let dest_ptr = generator.any_in_bounds::<i32>().ptr;
         // Wrap the raw pointers in NonNull
-       let src = NonNull::new(src_ptr).unwrap();
-       let dest = NonNull::new(dest_ptr).unwrap();
-       // Generate an arbitrary count using kani::any
-       let count: usize = kani::any();
-       unsafe { src.copy_to_nonoverlapping(dest, count);}
+        let src = NonNull::new(src_ptr).unwrap();
+        let dest = NonNull::new(dest_ptr).unwrap();
+        // Generate an arbitrary count using kani::any
+        let count: usize = kani::any();
+        unsafe {
+            src.copy_to_nonoverlapping(dest, count);
+        }
     }
     #[kani::proof_for_contract(NonNull::<T>::copy_from_nonoverlapping)]
     pub fn non_null_check_copy_from_nonoverlapping() {
-         // PointerGenerator instance
-         let mut generator = PointerGenerator::<16>::new();
-         // Generate arbitrary pointers for src and dest
-         let src_ptr = generator.any_in_bounds::<i32>().ptr;
-         let dest_ptr = generator.any_in_bounds::<i32>().ptr;
-          // Wrap the raw pointers in NonNull
-         let src = NonNull::new(src_ptr).unwrap();
-         let dest = NonNull::new(dest_ptr).unwrap();
-         // Generate an arbitrary count using kani::any
-         let count: usize = kani::any();
-         unsafe { src.copy_from_nonoverlapping(dest, count);}
+        // PointerGenerator instance
+        let mut generator = PointerGenerator::<16>::new();
+        // Generate arbitrary pointers for src and dest
+        let src_ptr = generator.any_in_bounds::<i32>().ptr;
+        let dest_ptr = generator.any_in_bounds::<i32>().ptr;
+        // Wrap the raw pointers in NonNull
+        let src = NonNull::new(src_ptr).unwrap();
+        let dest = NonNull::new(dest_ptr).unwrap();
+        // Generate an arbitrary count using kani::any
+        let count: usize = kani::any();
+        unsafe {
+            src.copy_from_nonoverlapping(dest, count);
+        }
     }
 }

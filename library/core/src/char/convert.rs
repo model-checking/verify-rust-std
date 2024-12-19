@@ -1,15 +1,15 @@
 //! Character conversions.
 
-use safety::{requires, ensures};
+use safety::{ensures, requires};
+
 use crate::char::TryFromCharError;
 use crate::error::Error;
 use crate::fmt;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::transmute;
 use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;
-
-#[cfg(kani)]
-use crate::kani;
 
 /// Converts a `u32` to a `char`. See [`char::from_u32`].
 #[must_use]
@@ -298,7 +298,7 @@ pub(super) const fn from_digit(num: u32, radix: u32) -> Option<char> {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
 

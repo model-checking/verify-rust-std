@@ -2,10 +2,9 @@
 
 use super::Utf8Error;
 use crate::intrinsics::const_eval_select;
-use crate::mem;
-
 #[cfg(kani)]
 use crate::kani;
+use crate::mem;
 
 /// Returns the initial codepoint accumulator for the first byte.
 /// The first byte is special, only want bottom 5 bits for width 2, 4 bits
@@ -306,7 +305,7 @@ pub mod verify {
         } else {
             let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
             kani::assume(ptr.is_aligned());
-            unsafe{
+            unsafe {
                 run_utf8_validation(crate::slice::from_raw_parts(ptr, 0));
             }
         }

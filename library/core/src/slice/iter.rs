@@ -14,8 +14,8 @@ use crate::marker::PhantomData;
 use crate::mem::{self, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ptr::{NonNull, without_provenance, without_provenance_mut};
-use crate::{cmp, fmt};
 use crate::ub_checks::Invariant;
+use crate::{cmp, fmt};
 
 #[stable(feature = "boxed_slice_into_iter", since = "1.80.0")]
 impl<T> !Iterator for [T] {}
@@ -3628,12 +3628,18 @@ mod verify {
                 check_safe_abstraction!(check_size_hint, $ty, |iter: &mut Iter<'_, $ty>| {
                     let _ = iter.size_hint();
                 });
-                check_safe_abstraction!(check_nth, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth(kani::any()); });
-                check_safe_abstraction!(check_advance_by, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.advance_by(kani::any()); });
+                check_safe_abstraction!(check_nth, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.nth(kani::any());
+                });
+                check_safe_abstraction!(check_advance_by, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.advance_by(kani::any());
+                });
                 check_safe_abstraction!(check_next_back, $ty, |iter: &mut Iter<'_, $ty>| {
                     let _ = iter.next_back();
                 });
-                check_safe_abstraction!(check_nth_back, $ty, |iter: &mut Iter<'_, $ty>| { let _ = iter.nth_back(kani::any()); });
+                check_safe_abstraction!(check_nth_back, $ty, |iter: &mut Iter<'_, $ty>| {
+                    let _ = iter.nth_back(kani::any());
+                });
                 check_safe_abstraction!(check_next, $ty, |iter: &mut Iter<'_, $ty>| {
                     let _ = iter.next();
                 });
