@@ -2049,6 +2049,7 @@ mod verify {
     );
 
     // ====================== u16 Harnesses ======================
+    /// Kani proof harness for `carrying_mul` on `u16` type with full range of values.
     generate_carrying_mul_intervals!(u16, u32,
         carrying_mul_u16_full_range, 0u16, u16::MAX
     );
