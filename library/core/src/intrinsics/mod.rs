@@ -4592,6 +4592,13 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
     )
 }
 
+//We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does not currently support contracts
+#[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
+#[ensures(|ret: &U| (ub_checks::can_dereference(ret as *const U)))] //output can be deref'd as value of type U
+unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
+    unsafe { transmute_unchecked(input) }
+}
+
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
@@ -4688,4 +4695,115 @@ mod verify {
     fn supported_status(status: AllocationStatus) -> bool {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
+
+    //this unexpectedly doesn't compile due to different sized inputs
+    //Normally, transmute_unchecked should be fine as long as output is not larger
+    /*#[kani::proof_for_contract(transmute_unchecked_wrapper)]
+      fn transmute_different_sizes() {
+      let large_value: u64 = kani::any();
+      unsafe {
+      let truncated_value: u32 = transmute_unchecked_wrapper(large_value);
+    //assert!((truncated_value as u32) == 64);
+    }
+    }*/
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_zero_size() {
+        let empty_arr: [u8;0] = [];
+        let unit_val: () = unsafe { transmute_unchecked_wrapper(empty_arr) };
+        assert!(unit_val == ());
+    }
+    
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_u32_to_char() {
+        let num: u32 = kani::any();
+        kani::assume((num <= 0xD7FF) || (num >= 0xE000 && num <= 0x10FFFF));
+        let c: char = unsafe {transmute_unchecked_wrapper(num)};
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn transmute_invalid_u32_to_char() {
+        let num: u32 = kani::any();
+        let c: char = unsafe {transmute_unchecked_wrapper(num)};
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_u8_to_bool() {
+        let num: u8 = kani::any();
+        kani::assume(num == 0 || num == 1);
+        let b: bool = unsafe {transmute_unchecked_wrapper(num)};
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn transmute_invalid_u8_to_bool() {
+        let num: u8 = kani::any();
+        let b: bool =  unsafe {transmute_unchecked_wrapper(num)};
+    }
+
+    #[repr(C)]
+    struct A {
+        x: u8,
+        y: u16,
+        z: u8,
+    }
+
+    #[repr(C)]
+    struct B {
+        x: u8,
+        y: u8,
+        z: u16,
+    }
+
+    #[repr(C)]
+    struct C {
+        x: u16,
+        y: u16,
+        z: u16,
+    }
+
+    //this doesn't compile, A and B have different sizes due to padding
+    /*#[kani::proof_for_contract(transmute_unchecked_wrapper)]
+      fn transmute_unchecked_padding() {
+      let a = A {x: kani::any(), y: kani::any(), z: kani::any()};
+      let x = a.x;
+
+      let b: B = unsafe { transmute_unchecked_wrapper(a) };
+      assert!(b.x == x);
+    }*/
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_padding() {
+        let a = A {x: kani::any(), y: kani::any(), z: kani::any()};
+        let x = a.x;
+
+        let c: C = unsafe { transmute_unchecked_wrapper(a) };
+        assert!(c.x as u8 == x);
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_2ways_i64_u64() {
+        let a: i64 = kani::any();
+        let b: u64 = unsafe { transmute_unchecked_wrapper(a) };
+        let c: i64 = unsafe { transmute_unchecked_wrapper(b) };
+        assert_eq!(a,c);
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_2ways_i32_u32() {
+        let a: i32 = kani::any();
+        let b: u32 = unsafe { transmute_unchecked_wrapper(a) };
+        let c: i32 = unsafe { transmute_unchecked_wrapper(b) };
+        assert_eq!(a,c);
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_2ways_i8_u8() {
+        let a: i8 = kani::any();
+        let b: u8 = unsafe { transmute_unchecked_wrapper(a) };
+        let c: i8 = unsafe { transmute_unchecked_wrapper(b) };
+        assert_eq!(a,c);
+    }
+
 }
