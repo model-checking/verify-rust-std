@@ -4595,6 +4595,7 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
 //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does not currently support contracts
 #[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
 #[ensures(|ret: &U| (ub_checks::can_dereference(ret as *const U)))] //output can be deref'd as value of type U
+#[allow(dead_code)]
 unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
     unsafe { transmute_unchecked(input) }
 }
