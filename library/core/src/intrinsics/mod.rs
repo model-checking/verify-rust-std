@@ -4650,52 +4650,6 @@ mod verify {
         unsafe { copy_nonoverlapping(src, dst, kani::any()) }
     }
 
-    // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
-    // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
-    // which is a safe operation.
-    #[cfg(not(kani))]
-    #[kani::proof_for_contract(write_bytes)]
-    fn check_write_bytes() {
-        let mut generator = PointerGenerator::<100>::new();
-        let ArbitraryPointer {
-            ptr,
-            status,
-            ..
-        } = generator.any_alloc_status::<char>();
-        kani::assume(supported_status(status));
-        unsafe { write_bytes(ptr, kani::any(), kani::any()) };
-    }
-
-    fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
-        let mut generator1 = PointerGenerator::<100>::new();
-        let mut generator2 = PointerGenerator::<100>::new();
-        let ArbitraryPointer {
-            ptr: src,
-            status: src_status,
-            ..
-        } = generator1.any_alloc_status::<T>();
-        let ArbitraryPointer {
-            ptr: dst,
-            status: dst_status,
-            ..
-        } = if kani::any() {
-            generator1.any_alloc_status::<T>()
-        } else {
-            generator2.any_alloc_status::<T>()
-        };
-        kani::assume(supported_status(src_status));
-        kani::assume(supported_status(dst_status));
-        harness(src, dst);
-    }
-
-    /// Return whether the current status is supported by Kani's contract.
-    ///
-    /// Kani memory predicates currently doesn't support pointers to dangling or dead allocations.
-    /// Thus, we have to explicitly exclude those cases.
-    fn supported_status(status: AllocationStatus) -> bool {
-        status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
-    }
-
     //this unexpectedly doesn't compile due to different sized inputs
     //Normally, transmute_unchecked should be fine as long as output is not larger
     /*#[kani::proof_for_contract(transmute_unchecked_wrapper)]
@@ -4804,6 +4758,51 @@ mod verify {
         let b: u8 = unsafe { transmute_unchecked_wrapper(a) };
         let c: i8 = unsafe { transmute_unchecked_wrapper(b) };
         assert_eq!(a,c);
+    }	
+
+    // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
+    // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
+    // which is a safe operation.
+    #[cfg(not(kani))]
+    #[kani::proof_for_contract(write_bytes)]
+    fn check_write_bytes() {
+        let mut generator = PointerGenerator::<100>::new();
+        let ArbitraryPointer {
+            ptr,
+            status,
+            ..
+        } = generator.any_alloc_status::<char>();
+        kani::assume(supported_status(status));
+        unsafe { write_bytes(ptr, kani::any(), kani::any()) };
     }
 
+    fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
+        let mut generator1 = PointerGenerator::<100>::new();
+        let mut generator2 = PointerGenerator::<100>::new();
+        let ArbitraryPointer {
+            ptr: src,
+            status: src_status,
+            ..
+        } = generator1.any_alloc_status::<T>();
+        let ArbitraryPointer {
+            ptr: dst,
+            status: dst_status,
+            ..
+        } = if kani::any() {
+            generator1.any_alloc_status::<T>()
+        } else {
+            generator2.any_alloc_status::<T>()
+        };
+        kani::assume(supported_status(src_status));
+        kani::assume(supported_status(dst_status));
+        harness(src, dst);
+    }
+
+    /// Return whether the current status is supported by Kani's contract.
+    ///
+    /// Kani memory predicates currently doesn't support pointers to dangling or dead allocations.
+    /// Thus, we have to explicitly exclude those cases.
+    fn supported_status(status: AllocationStatus) -> bool {
+        status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
+    }
 }
