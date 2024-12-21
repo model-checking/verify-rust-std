@@ -1,4 +1,8 @@
 use crate::num::TryFromIntError;
+use safety::{ensures, requires};
+
+#[cfg(kani)]
+use crate::kani;
 
 mod private {
     /// This trait being unreachable from outside the crate
@@ -25,6 +29,22 @@ macro_rules! impl_float_to_int {
             #[unstable(feature = "convert_float_to_int", issue = "67057")]
             impl FloatToInt<$Int> for $Float {
                 #[inline]
+                #[requires(
+                    !self.is_nan() &&
+                    !self.is_infinite() &&
+                    // Even if <$Int>::MIN < <$Float>::MIN or <$Int>::MAX > <$Float>::MAX,
+                    // the bounds would be -Inf or Inf, so they'll work anyways
+                    self > <$Int>::MIN as $Float - 1.0 &&
+                    self < <$Int>::MAX as $Float + 1.0
+                )]
+                #[ensures(|&result|{
+                    let fract = self - result as $Float;
+                    if self > 0.0 {
+                        fract >= 0.0 && fract < 1.0
+                    } else {
+                        fract <= 0.0 && fract > -1.0
+                    }
+                })]
                 unsafe fn to_int_unchecked(self) -> $Int {
                     // SAFETY: the safety contract must be upheld by the caller.
                     unsafe { crate::intrinsics::float_to_int_unchecked(self) }
@@ -540,3 +560,239 @@ impl_nonzero_int_try_from_nonzero_int!(i32 => u8, u16, u32, u64, u128, usize);
 impl_nonzero_int_try_from_nonzero_int!(i64 => u8, u16, u32, u64, u128, usize);
 impl_nonzero_int_try_from_nonzero_int!(i128 => u8, u16, u32, u64, u128, usize);
 impl_nonzero_int_try_from_nonzero_int!(isize => u8, u16, u32, u64, u128, usize);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    macro_rules! generate_nonzero_int_from_nonzero_int_harness {
+        ($Small:ty => $Large:ty, $harness:ident) => {
+            #[kani::proof]
+            pub fn $harness() {
+                let x_inner: $Small = kani::any();
+                kani::assume(x_inner != 0);
+
+                let x = NonZero::new(x_inner).unwrap();
+                let y = NonZero::<$Large>::from(x);
+
+                assert_eq!(x_inner as $Large, <$Large>::from(y));
+            }
+        };
+    }
+
+    // non-zero unsigned integer -> non-zero unsigned integer
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => u16, check_nonzero_u16_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => u32, check_nonzero_u32_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => u64, check_nonzero_u64_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => u128, check_nonzero_u128_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => usize, check_nonzero_usize_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u16 => u32, check_nonzero_u32_from_nonzero_u16);
+    generate_nonzero_int_from_nonzero_int_harness!(u16 => u64, check_nonzero_u64_from_nonzero_u16);
+    generate_nonzero_int_from_nonzero_int_harness!(u16 => u128, check_nonzero_u128_from_nonzero_u16);
+    generate_nonzero_int_from_nonzero_int_harness!(u16 => usize, check_nonzero_usize_from_nonzero_u16);
+    generate_nonzero_int_from_nonzero_int_harness!(u32 => u64, check_nonzero_u64_from_nonzero_u32);
+    generate_nonzero_int_from_nonzero_int_harness!(u32 => u128, check_nonzero_u128_from_nonzero_u32);
+    generate_nonzero_int_from_nonzero_int_harness!(u64 => u128, check_nonzero_u128_from_nonzero_u64);
+
+    // non-zero signed integer -> non-zero signed integer
+    generate_nonzero_int_from_nonzero_int_harness!(i8 => i16, check_nonzero_i16_from_nonzero_i8);
+    generate_nonzero_int_from_nonzero_int_harness!(i8 => i32, check_nonzero_i32_from_nonzero_i8);
+    generate_nonzero_int_from_nonzero_int_harness!(i8 => i64, check_nonzero_i64_from_nonzero_i8);
+    generate_nonzero_int_from_nonzero_int_harness!(i8 => i128, check_nonzero_i128_from_nonzero_i8);
+    generate_nonzero_int_from_nonzero_int_harness!(i8 => isize, check_nonzero_isize_from_nonzero_i8);
+    generate_nonzero_int_from_nonzero_int_harness!(i16 => i32, check_nonzero_i32_from_nonzero_i16);
+    generate_nonzero_int_from_nonzero_int_harness!(i16 => i64, check_nonzero_i64_from_nonzero_i16);
+    generate_nonzero_int_from_nonzero_int_harness!(i16 => i128, check_nonzero_i128_from_nonzero_i16);
+    generate_nonzero_int_from_nonzero_int_harness!(i16 => isize, check_nonzero_isize_from_nonzero_i16);
+    generate_nonzero_int_from_nonzero_int_harness!(i32 => i64, check_nonzero_i64_from_nonzero_i32);
+    generate_nonzero_int_from_nonzero_int_harness!(i32 => i128, check_nonzero_i128_from_nonzero_i32);
+    generate_nonzero_int_from_nonzero_int_harness!(i64 => i128, check_nonzero_i128_from_nonzero_i64);
+
+    // non-zero unsigned integer -> non-zero signed integer
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => i16, check_nonzero_i16_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => i32, check_nonzero_i32_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => i64, check_nonzero_i64_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => i128, check_nonzero_i128_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u8 => isize, check_nonzero_isize_from_nonzero_u8);
+    generate_nonzero_int_from_nonzero_int_harness!(u16 => i32, check_nonzero_i32_from_nonzero_u16);
+    generate_nonzero_int_from_nonzero_int_harness!(u16 => i64, check_nonzero_i64_from_nonzero_u16);
+    generate_nonzero_int_from_nonzero_int_harness!(u16 => i128, check_nonzero_i128_from_nonzero_u16);
+    generate_nonzero_int_from_nonzero_int_harness!(u32 => i64, check_nonzero_i64_from_nonzero_u32);
+    generate_nonzero_int_from_nonzero_int_harness!(u32 => i128, check_nonzero_i128_from_nonzero_u32);
+    generate_nonzero_int_from_nonzero_int_harness!(u64 => i128, check_nonzero_i128_from_nonzero_u64);
+
+    macro_rules! generate_nonzero_int_try_from_nonzero_int_harness {
+        ($source:ty => $target:ty, $harness:ident) => {
+            #[kani::proof]
+            pub fn $harness() {
+                let x_inner: $source = kani::any();
+                kani::assume(x_inner != 0);
+
+                let x = NonZero::new(x_inner).unwrap();
+                let y = NonZero::<$target>::try_from(x);
+
+                let y_inner = <$target>::try_from(x_inner);
+                if let Ok(y_inner) = y_inner {
+                    assert!(y.is_ok_and(|y| <$target>::from(y) == y_inner));
+                } else {
+                    assert!(y.is_err());
+                }
+            }
+        };
+    }
+
+    // unsigned non-zero integer -> unsigned non-zero integer fallible
+    generate_nonzero_int_try_from_nonzero_int_harness!(u16 => u8, check_nonzero_u8_try_from_nonzero_u16);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u32 => u8, check_nonzero_u8_try_from_nonzero_u32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u32 => u16, check_nonzero_u16_try_from_nonzero_u32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u32 => usize, check_nonzero_usize_try_from_nonzero_u32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => u8, check_nonzero_u8_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => u16, check_nonzero_u16_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => u32, check_nonzero_u32_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => usize, check_nonzero_usize_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => u8, check_nonzero_u8_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => u16, check_nonzero_u16_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => u32, check_nonzero_u32_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => u64, check_nonzero_u64_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => usize, check_nonzero_usize_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => u8, check_nonzero_u8_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => u16, check_nonzero_u16_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => u32, check_nonzero_u32_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => u64, check_nonzero_u64_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => u128, check_nonzero_u128_try_from_nonzero_usize);
+
+    // signed non-zero integer -> signed non-zero integer fallible
+    generate_nonzero_int_try_from_nonzero_int_harness!(i16 => i8, check_nonzero_i8_try_from_nonzero_i16);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i32 => i8, check_nonzero_i8_try_from_nonzero_i32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i32 => i16, check_nonzero_i16_try_from_nonzero_i32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i32 => isize, check_nonzero_isize_try_from_nonzero_i32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => i8, check_nonzero_i8_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => i16, check_nonzero_i16_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => i32, check_nonzero_i32_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => isize, check_nonzero_isize_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => i8, check_nonzero_i8_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => i16, check_nonzero_i16_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => i32, check_nonzero_i32_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => i64, check_nonzero_i64_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => isize, check_nonzero_isize_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => i8, check_nonzero_i8_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => i16, check_nonzero_i16_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => i32, check_nonzero_i32_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => i64, check_nonzero_i64_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => i128, check_nonzero_i128_try_from_nonzero_isize);
+
+    // unsigned non-zero integer -> signed non-zero integer fallible
+    generate_nonzero_int_try_from_nonzero_int_harness!(u8 => i8, check_nonzero_i8_try_from_nonzero_u8);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u16 => i8, check_nonzero_i8_try_from_nonzero_u16);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u16 => i16, check_nonzero_i16_try_from_nonzero_u16);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u16 => isize, check_nonzero_isize_try_from_nonzero_u16);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u32 => i8, check_nonzero_i8_try_from_nonzero_u32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u32 => i16, check_nonzero_i16_try_from_nonzero_u32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u32 => i32, check_nonzero_i32_try_from_nonzero_u32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u32 => isize, check_nonzero_isize_try_from_nonzero_u32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => i8, check_nonzero_i8_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => i16, check_nonzero_i16_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => i32, check_nonzero_i32_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => u64, check_nonzero_u64_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u64 => isize, check_nonzero_isize_try_from_nonzero_u64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => i8, check_nonzero_i8_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => i16, check_nonzero_i16_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => i32, check_nonzero_i32_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => i64, check_nonzero_i64_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => i128, check_nonzero_i128_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(u128 => isize, check_nonzero_isize_try_from_nonzero_u128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => i8, check_nonzero_i8_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => i16, check_nonzero_i16_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => i32, check_nonzero_i32_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => i64, check_nonzero_i64_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => i128, check_nonzero_i128_try_from_nonzero_usize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(usize => isize, check_nonzero_isize_try_from_nonzero_usize);
+
+    // signed non-zero integer -> unsigned non-zero integer fallible
+    generate_nonzero_int_try_from_nonzero_int_harness!(i8 => u8, check_nonzero_u8_try_from_nonzero_i8);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i16 => u8, check_nonzero_u8_try_from_nonzero_i16);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i16 => u16, check_nonzero_u16_try_from_nonzero_i16);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i16 => usize, check_nonzero_usize_try_from_nonzero_i16);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i32 => u8, check_nonzero_u8_try_from_nonzero_i32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i32 => u16, check_nonzero_u16_try_from_nonzero_i32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i32 => u32, check_nonzero_u32_try_from_nonzero_i32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i32 => usize, check_nonzero_usize_try_from_nonzero_i32);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => u8, check_nonzero_u8_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => u16, check_nonzero_u16_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => u32, check_nonzero_u32_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => u64, check_nonzero_u64_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i64 => usize, check_nonzero_usize_try_from_nonzero_i64);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => u8, check_nonzero_u8_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => u16, check_nonzero_u16_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => u32, check_nonzero_u32_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => u64, check_nonzero_u64_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => u128, check_nonzero_u128_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(i128 => usize, check_nonzero_usize_try_from_nonzero_i128);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => u8, check_nonzero_u8_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => u16, check_nonzero_u16_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => u32, check_nonzero_u32_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => u64, check_nonzero_u64_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => u128, check_nonzero_u128_try_from_nonzero_isize);
+    generate_nonzero_int_try_from_nonzero_int_harness!(isize => usize, check_nonzero_usize_try_from_nonzero_isize);
+
+    macro_rules! generate_float_to_int_harness {
+        ($Float:ty => $Int:ty, $harness:ident) => {
+            #[kani::proof_for_contract(<$Float>::to_int_unchecked)]
+            pub fn $harness() {
+                let x: $Float = kani::any();
+                let _: $Int = unsafe { x.to_int_unchecked() };
+            }
+        };
+    }
+
+    // float -> integer unchecked
+    generate_float_to_int_harness!(f16 => u8, check_u8_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => u16, check_u16_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => u32, check_u32_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => u64, check_u64_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => u128, check_u128_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => usize, check_usize_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => i8, check_i8_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => i16, check_i16_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => i32, check_i32_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => i64, check_i64_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => i128, check_i128_from_f16_unchecked);
+    generate_float_to_int_harness!(f16 => isize, check_isize_from_f16_unchecked);
+    generate_float_to_int_harness!(f32 => u8, check_u8_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => u16, check_u16_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => u32, check_u32_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => u64, check_u64_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => u128, check_u128_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => usize, check_usize_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => i8, check_i8_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => i16, check_i16_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => i32, check_i32_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => i64, check_i64_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => i128, check_i128_from_f32_unchecked);
+    generate_float_to_int_harness!(f32 => isize, check_isize_from_f32_unchecked);
+    generate_float_to_int_harness!(f64 => u8, check_u8_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => u16, check_u16_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => u32, check_u32_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => u64, check_u64_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => u128, check_u128_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => usize, check_usize_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => i8, check_i8_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => i16, check_i16_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => i32, check_i32_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => i64, check_i64_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => i128, check_i128_from_f64_unchecked);
+    generate_float_to_int_harness!(f64 => isize, check_isize_from_f64_unchecked);
+    generate_float_to_int_harness!(f128 => u8, check_u8_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => u16, check_u16_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => u32, check_u32_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => u64, check_u64_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => u128, check_u128_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => usize, check_usize_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => i8, check_i8_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => i16, check_i16_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => i32, check_i32_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => i64, check_i64_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => i128, check_i128_from_f128_unchecked);
+    generate_float_to_int_harness!(f128 => isize, check_isize_from_f128_unchecked);
+}
