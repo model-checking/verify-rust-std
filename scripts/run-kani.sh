@@ -288,7 +288,7 @@ main() {
             # Run verification for all harnesses (not in parallel)
             echo "Running Kani verify-std command..."
             "$kani_path" verify-std -Z unstable-options ./library \
-                $unstable_args
+                $unstable_args \
                 $command_args \
                 --enable-unstable \
                 --cbmc-args --object-bits 12
