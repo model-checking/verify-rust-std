@@ -4,10 +4,9 @@ use core::ascii::EscapeDefault;
 
 use crate::fmt::{self, Write};
 use crate::intrinsics::const_eval_select;
-use crate::{ascii, iter, mem, ops};
-
 #[cfg(kani)]
 use crate::kani;
+use crate::{ascii, iter, mem, ops};
 
 #[cfg(not(test))]
 impl [u8] {
@@ -428,7 +427,7 @@ const fn is_ascii(s: &[u8]) -> bool {
             // Read subsequent words until the last aligned word, excluding the last
             // aligned word by itself to be done in tail check later, to ensure that
             // tail is always one `usize` at most to extra branch `byte_pos == len`.
-            #[safety::loop_invariant(byte_pos <= len 
+            #[safety::loop_invariant(byte_pos <= len
                                     && byte_pos >= offset_to_aligned
                                     && word_ptr.addr() >= start.addr() + offset_to_aligned
                                     && byte_pos == word_ptr.addr() - start.addr())]
@@ -481,7 +480,7 @@ pub mod verify {
         } else {
             let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
             kani::assume(ptr.is_aligned());
-            unsafe{
+            unsafe {
                 assert_eq!(is_ascii(crate::slice::from_raw_parts(ptr, 0)), true);
             }
         }

@@ -6,11 +6,10 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 use crate::alloc::Layout;
-use crate::marker::DiscriminantKind;
-use crate::{clone, cmp, fmt, hash, intrinsics, ptr};
-
 #[cfg(kani)]
 use crate::kani;
+use crate::marker::DiscriminantKind;
+use crate::{clone, cmp, fmt, hash, intrinsics, ptr};
 
 mod manually_drop;
 #[stable(feature = "manually_drop", since = "1.20.0")]
@@ -1372,7 +1371,7 @@ pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
     use crate::kani;
