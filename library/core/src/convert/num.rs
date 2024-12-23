@@ -570,12 +570,10 @@ mod verify {
         ($Small:ty => $Large:ty, $harness:ident) => {
             #[kani::proof]
             pub fn $harness() {
-                let x_inner: $Small = kani::any();
-                kani::assume(x_inner != 0);
-
-                let x = NonZero::new(x_inner).unwrap();
+                let x: NonZero<$Small> = kani::any();
                 let y = NonZero::<$Large>::from(x);
 
+                let x_inner = <$Small>::from(x);
                 assert_eq!(x_inner as $Large, <$Large>::from(y));
             }
         };
@@ -626,14 +624,16 @@ mod verify {
         ($source:ty => $target:ty, $harness:ident) => {
             #[kani::proof]
             pub fn $harness() {
-                let x_inner: $source = kani::any();
-                kani::assume(x_inner != 0);
-
-                let x = NonZero::new(x_inner).unwrap();
+                let x: NonZero<$source> = kani::any();
                 let y = NonZero::<$target>::try_from(x);
 
+                // The conversion must succeed if and only if the inner value of source type
+                // fits into the target type, i.e. inner type conversion succeeds.
+                let x_inner = <$source>::from(x);
                 let y_inner = <$target>::try_from(x_inner);
                 if let Ok(y_inner) = y_inner {
+                    // And the inner value of converted nonzero must be equal to the direct
+                    // conversion result.
                     assert!(y.is_ok_and(|y| <$target>::from(y) == y_inner));
                 } else {
                     assert!(y.is_err());
