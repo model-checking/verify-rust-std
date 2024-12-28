@@ -4,6 +4,9 @@ use safety::{ensures, requires};
 #[cfg(kani)]
 use crate::kani;
 
+#[allow(unused_imports)]
+use crate::ub_checks::float_to_int_in_range;
+
 mod private {
     /// This trait being unreachable from outside the crate
     /// prevents other implementations of the `FloatToInt` trait,
@@ -31,11 +34,8 @@ macro_rules! impl_float_to_int {
                 #[inline]
                 #[requires(
                     !self.is_nan() &&
-                    !self.is_infinite() &&
-                    // Even if <$Int>::MIN < <$Float>::MIN or <$Int>::MAX > <$Float>::MAX,
-                    // the bounds would be -Inf or Inf, so they'll work anyways
-                    self > <$Int>::MIN as $Float - 1.0 &&
-                    self < <$Int>::MAX as $Float + 1.0
+                    self.is_finite() &&
+                    float_to_int_in_range::<$Float, $Int>(self)
                 )]
                 #[ensures(|&result|{
                     let fract = self - result as $Float;
