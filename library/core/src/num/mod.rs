@@ -1759,6 +1759,7 @@ mod verify {
         ($type:ty, $wide_type:ty, $($harness_name:ident, $min:expr, $max:expr),+) => {
             $(
                 #[kani::proof]
+                #[kani::solver(kissat)]
                 pub fn $harness_name() {
                     let lhs: $type = kani::any::<$type>();
                     let rhs: $type = kani::any::<$type>();

@@ -6,8 +6,6 @@
 and we kept a copy of the Rust standard library inside the `library/` folder that shall be used as the verification target for all our challenges.
 We will periodically update the `library/` folder to track newer versions of the [official Rust standard library](https://github.com/rust-lang/rust/).
 
-**NOTE:** This work is not officially affiliated, or endorsed by the Rust project or Rust Foundation.
-
 **Challenges:** Each individual verification effort will have a
 tracking issue where contributors can add comments and ask clarification questions.
 You can find the list of [open challenges here](https://github.com/model-checking/verify-rust-std/labels/Challenge).
@@ -92,3 +90,21 @@ members = [
 +   "rahulku"
 ]
 ```
+
+Committee members are expected to contribute by reviewing pull requests (all
+pull requests review approvals from at least two committee members before they
+can be merged).
+Reviews of solutions towards challenges should consider at least the following aspects:
+
+1. Does the pull request implement a solution that respects/meets the success
+   criteria of the challenge?
+2. Do the contracts and harnesses incorporate the safety conditions stated in
+   the documentation (from comments in the code and the
+   [standard library documentation](https://doc.rust-lang.org/std/index.html))?
+   Note that we currently focus on safety verification. Pre- and post-conditions
+   towards functional correctness are acceptable as long as they do not
+   negatively impact verification of safety, such as over-constraining input
+   values or causing excessive verification run time.
+3. Is the contributed code of adequate quality, idiomatic, and stands a chance
+   to be accepted into the standard library (to the best of the committee
+   member's knowledge)?
