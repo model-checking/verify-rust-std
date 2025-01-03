@@ -34,14 +34,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Set the working directory for your local repository
-HEAD_DIR=$(git rev-parse --show-toplevel)
+REPO_DIR=$(git rev-parse --show-toplevel)
 
 # Temporary directory for upstream repository
-RUST_DIR=$(mktemp -d --suffix ".rust")
+TMP_RUST_DIR=$(mktemp -d -t "check_rustc_XXXXXX")
 
 # Checkout your local repository
 echo "Checking out local repository..."
-cd "$HEAD_DIR"
+cd "$REPO_DIR"
 
 # Get the commit ID from rustc --version
 echo "Retrieving commit ID..."
@@ -49,13 +49,13 @@ COMMIT_ID=$(rustc --version | sed -e "s/.*(\(.*\) .*/\1/")
 echo "$COMMIT_ID for rustc is"
 
 # Get the full commit ID for shallow clone
-curl -H "Connection: close" -o "${RUST_DIR}/output.json" -s --show-error \
+curl -H "Connection: close" -o "${TMP_RUST_DIR}/output.json" -s --show-error \
     "https://api.github.com/repos/rust-lang/rust/commits?sha=${COMMIT_ID}&per_page=1"
-COMMIT_ID=$(jq -r '.[0].sha' "${RUST_DIR}/output.json")
+COMMIT_ID=$(jq -r '.[0].sha' "${TMP_RUST_DIR}/output.json")
 
 # Clone the rust-lang/rust repository
-echo "Cloning rust-lang/rust repository into ${RUST_DIR}..."
-pushd "$RUST_DIR" > /dev/null
+echo "Cloning rust-lang/rust repository into ${TMP_RUST_DIR}..."
+pushd "$TMP_RUST_DIR" > /dev/null
 git init
 git remote add origin https://github.com/rust-lang/rust.git
 git fetch --depth 1 origin $COMMIT_ID
@@ -67,11 +67,11 @@ popd
 
 # Copy your library to the upstream directory
 echo "Copying library to upstream directory..."
-rm -rf "${RUST_DIR}/library"
-cp -r "${HEAD_DIR}/library" "${RUST_DIR}"
+rm -rf "${TMP_RUST_DIR}/library"
+cp -r "${REPO_DIR}/library" "${TMP_RUST_DIR}"
 
 # Configure repository
-pushd "${RUST_DIR}"
+pushd "${TMP_RUST_DIR}"
 ./configure --set=llvm.download-ci-llvm=true
 export RUSTFLAGS="--check-cfg cfg(kani) --check-cfg cfg(feature,values(any()))"
 
@@ -82,7 +82,7 @@ then
     # TODO: This should be:
     # ./x test tidy --bless
     ./x fmt
-    cp -r "${RUST_DIR}/library" "${HEAD_DIR}"
+    cp -r "${TMP_RUST_DIR}/library" "${REPO_DIR}"
 else
     # TODO: This should be:
     # ./x test tidy
@@ -91,17 +91,17 @@ else
         echo "Format check failed. Run $0 --bless to fix the failures."
         # Clean up the temporary directory
         popd
-        rm -rf "$RUST_DIR"
+        rm -rf "$TMP_RUST_DIR"
         exit 1
     fi
 fi
 
 # Run tests
-cd "$RUST_DIR/upstream"
+cd "$TMP_RUST_DIR"
 echo "Running tests..."
 ./x test --stage 0 library/std
 
 echo "Tests completed."
 
 # Clean up the temporary directory
-rm -rf "$RUST_DIR"
+rm -rf "$TMP_RUST_DIR"
