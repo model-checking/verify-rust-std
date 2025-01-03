@@ -43,7 +43,7 @@ TMP_RUST_DIR=$(mktemp -d -t "check_rustc_XXXXXX")
 echo "Checking out local repository..."
 cd "$REPO_DIR"
 
-# Get the commit ID from rustc --version
+# Get the (short hash) commit ID from rustc --version
 echo "Retrieving commit ID..."
 COMMIT_ID=$(rustc --version | sed -e "s/.*(\(.*\) .*/\1/")
 
@@ -85,6 +85,7 @@ cp -r "${REPO_DIR}/library" "${TMP_RUST_DIR}"
 
 # Configure repository
 pushd "${TMP_RUST_DIR}"
+# Download LLVM binaries from Rust's CI instead of building them
 ./configure --set=llvm.download-ci-llvm=true
 export RUSTFLAGS="--check-cfg cfg(kani) --check-cfg cfg(feature,values(any()))"
 export RUST_BACKTRACE=1
