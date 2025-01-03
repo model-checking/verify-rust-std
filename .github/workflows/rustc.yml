@@ -30,4 +30,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run rustc script
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/check_rustc.sh
