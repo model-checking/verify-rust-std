@@ -632,6 +632,13 @@ mod verify {
                 let _ = NonZero::<$target>::try_from(x).unwrap();
             }
         };
+        ($source:ty => $target:ty, $harness_infallible:ident,) => {
+            #[kani::proof]
+            pub fn $harness_infallible() {
+                let x: NonZero::<$source> = kani::any();
+                let _ = NonZero::<$target>::try_from(x).unwrap();
+            }
+        }
     }
 
     // unsigned non-zero integer -> unsigned non-zero integer fallible
@@ -650,11 +657,20 @@ mod verify {
         check_nonzero_u16_try_from_nonzero_u32,
         check_nonzero_u16_try_from_nonzero_u32_should_panic,
     );
+
+    #[cfg(target_pointer_width = "16")]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u32 => usize,
         check_nonzero_usize_try_from_nonzero_u32,
         check_nonzero_usize_try_from_nonzero_u32_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        u32 => usize,
+        check_nonzero_usize_try_from_nonzero_u32_infallible,
+    );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u64 => u8,
         check_nonzero_u8_try_from_nonzero_u64,
@@ -670,11 +686,20 @@ mod verify {
         check_nonzero_u32_try_from_nonzero_u64,
         check_nonzero_u32_try_from_nonzero_u64_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u64 => usize,
         check_nonzero_usize_try_from_nonzero_u64,
         check_nonzero_usize_try_from_nonzero_u64_should_panic,
     );
+
+    #[cfg(target_pointer_width = "64")]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        u64 => usize,
+        check_nonzero_usize_try_from_nonzero_u64_infallible,
+    );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u128 => u8,
         check_nonzero_u8_try_from_nonzero_u128,
@@ -705,25 +730,40 @@ mod verify {
         check_nonzero_u8_try_from_nonzero_usize,
         check_nonzero_u8_try_from_nonzero_usize_should_panic,
     );
+
+    #[cfg(target_pointer_width = "16")]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        usize => u16,
+        check_nonzero_u16_try_from_nonzero_usize_infallible,
+    );
+
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         usize => u16,
         check_nonzero_u16_try_from_nonzero_usize,
         check_nonzero_u16_try_from_nonzero_usize_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        usize => u32,
+        check_nonzero_u32_try_from_nonzero_usize_infallible,
+    );
+
+    #[cfg(target_pointer_width = "64")]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         usize => u32,
         check_nonzero_u32_try_from_nonzero_usize,
         check_nonzero_u32_try_from_nonzero_usize_should_panic,
     );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         usize => u64,
-        check_nonzero_u64_try_from_nonzero_usize,
-        check_nonzero_u64_try_from_nonzero_usize_should_panic,
+        check_nonzero_u64_try_from_nonzero_usize_infallible,
     );
     generate_nonzero_int_try_from_nonzero_int_harness!(
         usize => u128,
-        check_nonzero_u128_try_from_nonzero_usize,
-        check_nonzero_u128_try_from_nonzero_usize_should_panic,
+        check_nonzero_u128_try_from_nonzero_usize_infallible,
     );
 
     // signed non-zero integer -> signed non-zero integer fallible
@@ -742,11 +782,20 @@ mod verify {
         check_nonzero_i16_try_from_nonzero_i32,
         check_nonzero_i16_try_from_nonzero_i32_should_panic,
     );
+
+    #[cfg(target_pointer_width = "16")]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         i32 => isize,
         check_nonzero_isize_try_from_nonzero_i32,
         check_nonzero_isize_try_from_nonzero_i32_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        i32 => isize,
+        check_nonzero_isize_try_from_nonzero_i32_infallible,
+    );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         i64 => i8,
         check_nonzero_i8_try_from_nonzero_i64,
@@ -762,11 +811,20 @@ mod verify {
         check_nonzero_i32_try_from_nonzero_i64,
         check_nonzero_i32_try_from_nonzero_i64_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         i64 => isize,
         check_nonzero_isize_try_from_nonzero_i64,
         check_nonzero_isize_try_from_nonzero_i64_should_panic,
     );
+
+    #[cfg(target_pointer_width = "64")]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        i64 => isize,
+        check_nonzero_isize_try_from_nonzero_i64_infallible,
+    );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         i128 => i8,
         check_nonzero_i8_try_from_nonzero_i128,
@@ -797,25 +855,40 @@ mod verify {
         check_nonzero_i8_try_from_nonzero_isize,
         check_nonzero_i8_try_from_nonzero_isize_should_panic,
     );
+
+    #[cfg(target_pointer_width = "16")]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        isize => i16,
+        check_nonzero_i16_try_from_nonzero_isize_infallible,
+    );
+
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         isize => i16,
         check_nonzero_i16_try_from_nonzero_isize,
         check_nonzero_i16_try_from_nonzero_isize_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        isize => i32,
+        check_nonzero_i32_try_from_nonzero_isize_infallible,
+    );
+
+    #[cfg(target_pointer_width = "64")]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         isize => i32,
         check_nonzero_i32_try_from_nonzero_isize,
         check_nonzero_i32_try_from_nonzero_isize_should_panic,
     );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         isize => i64,
-        check_nonzero_i64_try_from_nonzero_isize,
-        check_nonzero_i64_try_from_nonzero_isize_should_panic,
+        check_nonzero_i64_try_from_nonzero_isize_infallible,
     );
     generate_nonzero_int_try_from_nonzero_int_harness!(
         isize => i128,
-        check_nonzero_i128_try_from_nonzero_isize,
-        check_nonzero_i128_try_from_nonzero_isize_should_panic,
+        check_nonzero_i128_try_from_nonzero_isize_infallible,
     );
 
     // unsigned non-zero integer -> signed non-zero integer fallible
@@ -834,11 +907,20 @@ mod verify {
         check_nonzero_i16_try_from_nonzero_u16,
         check_nonzero_i16_try_from_nonzero_u16_should_panic,
     );
+
+    #[cfg(target_pointer_width = "16")]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u16 => isize,
         check_nonzero_isize_try_from_nonzero_u16,
         check_nonzero_isize_try_from_nonzero_u16_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        u16 => isize,
+        check_nonzero_isize_try_from_nonzero_u16_infallible,
+    );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u32 => i8,
         check_nonzero_i8_try_from_nonzero_u32,
@@ -854,11 +936,20 @@ mod verify {
         check_nonzero_i32_try_from_nonzero_u32,
         check_nonzero_i32_try_from_nonzero_u32_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u32 => isize,
         check_nonzero_isize_try_from_nonzero_u32,
         check_nonzero_isize_try_from_nonzero_u32_should_panic,
     );
+
+    #[cfg(target_pointer_width = "64")]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        u32 => isize,
+        check_nonzero_isize_try_from_nonzero_u32_infallible,
+    );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u64 => i8,
         check_nonzero_i8_try_from_nonzero_u64,
@@ -924,20 +1015,36 @@ mod verify {
         check_nonzero_i16_try_from_nonzero_usize,
         check_nonzero_i16_try_from_nonzero_usize_should_panic,
     );
+
+    #[cfg(target_pointer_width = "16")]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        usize => i32,
+        check_nonzero_i32_try_from_nonzero_usize_infallible,
+    );
+
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         usize => i32,
         check_nonzero_i32_try_from_nonzero_usize,
         check_nonzero_i32_try_from_nonzero_usize_should_panic,
     );
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    generate_nonzero_int_try_from_nonzero_int_harness!(
+        usize => i64,
+        check_nonzero_i64_try_from_nonzero_usize_infallible,
+    );
+
+    #[cfg(target_pointer_width = "64")]
     generate_nonzero_int_try_from_nonzero_int_harness!(
         usize => i64,
         check_nonzero_i64_try_from_nonzero_usize,
         check_nonzero_i64_try_from_nonzero_usize_should_panic,
     );
+
     generate_nonzero_int_try_from_nonzero_int_harness!(
         usize => i128,
-        check_nonzero_i128_try_from_nonzero_usize,
-        check_nonzero_i128_try_from_nonzero_usize_should_panic,
+        check_nonzero_i128_try_from_nonzero_usize_infallible,
     );
     generate_nonzero_int_try_from_nonzero_int_harness!(
         usize => isize,
