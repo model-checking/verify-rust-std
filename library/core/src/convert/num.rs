@@ -1,9 +1,8 @@
-use crate::num::TryFromIntError;
 use safety::requires;
 
 #[cfg(kani)]
 use crate::kani;
-
+use crate::num::TryFromIntError;
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;
 
@@ -966,9 +965,9 @@ mod verify {
         check_nonzero_i32_try_from_nonzero_u64_should_panic,
     );
     generate_nonzero_int_try_from_nonzero_int_harness!(
-        u64 => u64,
-        check_nonzero_u64_try_from_nonzero_u64,
-        check_nonzero_u64_try_from_nonzero_u64_should_panic,
+        u64 => i64,
+        check_nonzero_i64_try_from_nonzero_u64,
+        check_nonzero_i64_try_from_nonzero_u64_should_panic,
     );
     generate_nonzero_int_try_from_nonzero_int_harness!(
         u64 => isize,
