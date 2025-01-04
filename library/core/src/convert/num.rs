@@ -614,8 +614,8 @@ mod verify {
             #[kani::proof]
             pub fn $harness_pass() {
                 let x_inner: $source = kani::any_where(|&v| {
-                     (v > 0 && (v as u128) <= (<$target>::MAX as u128)) ||
-                         (v < 0 && (v as i128) >= (<$target>::MIN as i128))
+                    (v > 0 && (v as u128) <= (<$target>::MAX as u128))
+                        || (v < 0 && (v as i128) >= (<$target>::MIN as i128))
                 });
                 let x = NonZero::new(x_inner).unwrap();
                 let _ = NonZero::<$target>::try_from(x).unwrap();
@@ -625,8 +625,8 @@ mod verify {
             #[kani::should_panic]
             pub fn $harness_panic() {
                 let x_inner: $source = kani::any_where(|&v| {
-                     (v > 0 && (v as u128) > (<$target>::MAX as u128)) ||
-                         (v < 0 && (v as i128) < (<$target>::MIN as i128))
+                    (v > 0 && (v as u128) > (<$target>::MAX as u128))
+                        || (v < 0 && (v as i128) < (<$target>::MIN as i128))
                 });
                 let x = NonZero::new(x_inner).unwrap();
                 let _ = NonZero::<$target>::try_from(x).unwrap();
@@ -635,10 +635,10 @@ mod verify {
         ($source:ty => $target:ty, $harness_infallible:ident,) => {
             #[kani::proof]
             pub fn $harness_infallible() {
-                let x: NonZero::<$source> = kani::any();
+                let x: NonZero<$source> = kani::any();
                 let _ = NonZero::<$target>::try_from(x).unwrap();
             }
-        }
+        };
     }
 
     // unsigned non-zero integer -> unsigned non-zero integer fallible
