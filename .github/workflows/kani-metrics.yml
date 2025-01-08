@@ -16,6 +16,9 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
+      with:
+        path: head
+        submodules: true
     
     # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
     - name: Set up Python
@@ -24,7 +27,7 @@ jobs:
         python-version: '3.x'
 
     - name: Compute Kani Metrics
-      run: head//scripts/run-kani.sh --run metrics
+      run: head/scripts/run-kani.sh --run metrics
 
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v7
