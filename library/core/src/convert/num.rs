@@ -32,9 +32,7 @@ macro_rules! impl_float_to_int {
             impl FloatToInt<$Int> for $Float {
                 #[inline]
                 #[requires(
-                    !self.is_nan() &&
-                    self.is_finite() &&
-                    float_to_int_in_range::<$Float, $Int>(self)
+                    self.is_finite() && float_to_int_in_range::<$Float, $Int>(self)
                 )]
                 unsafe fn to_int_unchecked(self) -> $Int {
                     // SAFETY: the safety contract must be upheld by the caller.
