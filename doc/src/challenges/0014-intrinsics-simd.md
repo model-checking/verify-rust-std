@@ -1,6 +1,7 @@
 # Challenge 14: High-Assurance SIMD Intrinsics for Rust
 
 - **Status:** Open
+- **Reward:** 
 - **Solution:** 
 - **Tracking Issue:** https://github.com/model-checking/verify-rust-std/issues/173
 - **Start date:** 2024/12/01
@@ -108,12 +109,13 @@ pub unsafe fn _mm_blend_epi16(
 ) -> __m128i
 ```
 
-This contract is then used to automatically generate randomized tests
+This contract can then be used to automatically generate tests
 for the intrinsic, which can be put in CI.
 
-We can also use the [hax](https://github.com/hacspec/hax) toolchain to
-compile this contract to F* where it can act as an interface to a model
-of the intrinsics library.
+Rust verification toolchains can also rely on this contract to
+model the intrinsics library within their analyses. For example,
+the [hax toolchain](https://github.com/hacspec/hax) would compile
+this contract to an interface in F* as follows:
 
 ```
 val _mm_blend_epi16: __m128i -> __m128i -> i32 ->
@@ -127,15 +129,8 @@ val _mm_blend_epi16: __m128i -> __m128i -> i32 ->
                 get_lane(result, j) == get_lane(a,j)))
 ```
 
-We then prove that this contract is consistent with the model of the
-SIMD intrinsic in F* (i.e. our F* implementation of `mm_blend_epi16`)
-and also run the same tests we ran in Rust against this model in F* to
-gain more confidence in our translation from Rust.
-
-Finally, we will show how to use this contract in F* in proofs like
-the libcrux proof for the ML-KEM post-quantum cryptographic
-contruction.
-
+Such specifications can then be used in the verification of applications
+that use intrinsics. 
 
 ### Assumptions
 
