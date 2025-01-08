@@ -4,12 +4,13 @@
       "date": "2025-01-01",
       "total_unsafe_fns": 6987,
       "total_safe_abstractions": 1704,
+      "total_safe_fns": 14666,
       "unsafe_fns_under_contract": 144,
       "verified_unsafe_fns_under_contract": 132,
       "safe_abstractions_under_contract": 41,
       "verified_safe_abstractions_under_contract": 41,
-      "safe_fns_under_contract": 39,
-      "verified_safe_fns_under_contract": 38,
+      "safe_fns_under_contract": 80,
+      "verified_safe_fns_under_contract": 79,
       "total_functions_under_contract": 224
     }
   ]

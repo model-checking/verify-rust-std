@@ -26,8 +26,10 @@ class GenericSTDMetrics():
         self.results_directory = "/tmp/std_lib_analysis/results"
         self.unsafe_fns_count = 0
         self.safe_abstractions_count = 0
+        self.safe_fns_count = 0
         self.unsafe_fns = []
         self.safe_abstractions = []
+        self.safe_fns = [] 
 
         self.read_std_analysis()
         
@@ -40,6 +42,7 @@ class GenericSTDMetrics():
             counts = {row[0]: int(row[1]) for row in csv_reader if len(row) >= 2}
         self.unsafe_fns_count = counts.get('unsafe_fns', 0)
         self.safe_abstractions_count = counts.get('safe_abstractions', 0)
+        self.safe_fns_count = counts.get('safe_fns', 0)
 
     # Read {crate}_scan_functions.csv
     # and return an array of the unsafe functions and the safe abstractions
@@ -66,15 +69,18 @@ class GenericSTDMetrics():
                     # An unsafe function is a function for which is_unsafe=true
                     if is_unsafe.strip() == "true":
                         self.unsafe_fns.append(name)
-                    # A safe abstraction is a function that is not unsafe (is_unsafe=false) but has unsafe ops
-                    elif is_unsafe.strip() == "false" and has_unsafe_ops.strip() == "true":
-                        self.safe_abstractions.append(name)
+                    else:
+                        assert is_unsafe.strip() == "false" # sanity check against malformed data
+                        self.safe_fns.append(name)
+                        # A safe abstraction is a safe function with unsafe ops
+                        if has_unsafe_ops.strip() == "true":
+                            self.safe_abstractions.append(name)
 
     def read_std_analysis(self):
         self.read_overall_counts()
         self.read_scan_functions()
 
-        # Sanity checks for the CSV parsing
+        # Sanity checks
         if len(self.unsafe_fns) != self.unsafe_fns_count:
             print(f"Number of unsafe functions does not match core_scan_functions.csv")
             print(f"UNSAFE_FNS_COUNT: {self.unsafe_fns_count}")
@@ -85,6 +91,12 @@ class GenericSTDMetrics():
             print(f"Number of safe abstractions does not match core_scan_functions.csv")
             print(f"SAFE_ABSTRACTIONS_COUNT: {self.safe_abstractions_count}")
             print(f"SAFE_ABSTRACTIONS length: {len(self.safe_abstractions)}")
+            sys.exit(1)
+        
+        if len(self.safe_fns) != self.safe_fns_count:
+            print(f"Number of safe functions does not match core_scan_functions.csv")
+            print(f"SAFE_FNS_COUNT: {self.safe_fns_count}")
+            print(f"SAFE_FNS length: {len(self.safe_fns)}")
             sys.exit(1)
 
 # Process the results of running `kani list` against the standard library,
@@ -124,10 +136,11 @@ class KaniSTDMetricsOverTime():
         self.dates = []
         self.unsafe_metrics = ['total_unsafe_fns', 'unsafe_fns_under_contract', 'verified_unsafe_fns_under_contract']
         self.safe_abstr_metrics = ['total_safe_abstractions', 'safe_abstractions_under_contract', 'verified_safe_abstractions_under_contract']
-        # Generate two plots per crate: one with metrics about unsafe functions, and one with metrics about safe abstractions.
+        self.safe_metrics = ['total_safe_fns', 'safe_fns_under_contract', 'verified_safe_fns_under_contract']
         # The keys in these dictionaries are unsafe_metrics and safe_abstr_metrics, respectively; see update_plot_metrics()
         self.unsafe_plot_data = defaultdict(list)
         self.safe_abstr_plot_data = defaultdict(list)
+        self.safe_plot_data = defaultdict(list)
 
         self.date = datetime.today().date()
         self.metrics_file = metrics_file
@@ -160,6 +173,10 @@ class KaniSTDMetricsOverTime():
             for metric in self.safe_abstr_metrics:
                 if not metric.startswith("verified"):
                     self.safe_abstr_plot_data[metric].append(data[metric])
+            
+            for metric in self.safe_metrics:
+                if not metric.startswith("verified"):
+                    self.safe_plot_data[metric].append(data[metric])
 
     # Read output from kani list and std-analysis.sh, then compare their outputs to compute Kani-specific metrics
     # and write the results to {self.metrics_file}
@@ -179,19 +196,21 @@ class KaniSTDMetricsOverTime():
                 unsafe_fns_under_contract += 1
                 if has_harnesses:
                     verified_unsafe_fns_under_contract += 1
-            elif func_under_contract in generic_metrics.safe_abstractions:
+            if func_under_contract in generic_metrics.safe_abstractions:
                 safe_abstractions_under_contract += 1
                 if has_harnesses:
                     verified_safe_abstractions_under_contract += 1
-            else:
+            if func_under_contract in generic_metrics.safe_fns:
                 safe_fns_under_contract += 1
                 if has_harnesses:
                     verified_safe_fns_under_contract += 1
 
+        # Keep the keys here in sync with unsafe_metrics, safe_metrics, and safe_abstr_metrics
         data = {
             "date": self.date,
             "total_unsafe_fns": generic_metrics.unsafe_fns_count,
             "total_safe_abstractions": generic_metrics.safe_abstractions_count,
+            "total_safe_fns": generic_metrics.safe_fns_count,
             "unsafe_fns_under_contract": unsafe_fns_under_contract,
             "verified_unsafe_fns_under_contract": verified_unsafe_fns_under_contract,
             "safe_abstractions_under_contract": safe_abstractions_under_contract,
@@ -252,8 +271,9 @@ class KaniSTDMetricsOverTime():
         print(f"PNG graph generated: {outfile}")
 
     def plot(self):
-        self.plot_single(self.unsafe_plot_data, title="Contracts on Unsafe Functions in core", outfile="core_unsafe_std_lib_metrics.png")
-        self.plot_single(self.safe_abstr_plot_data, title="Contracts on Safe Abstractions in core", outfile="core_safe_abstractions_std_lib_metrics.png")
+        self.plot_single(self.unsafe_plot_data, title="Contracts on Unsafe Functions in core", outfile="core_unsafe_metrics.png")
+        self.plot_single(self.safe_abstr_plot_data, title="Contracts on Safe Abstractions in core", outfile="core_safe_abstractions_metrics.png")
+        self.plot_single(self.safe_plot_data, title="Contracts on Safe Functions in core", outfile="core_safe_metrics.png")
 
 def main():
     parser = argparse.ArgumentParser(description="Generate metrics about Kani's application to the standard library.")
