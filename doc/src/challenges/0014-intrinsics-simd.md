@@ -112,25 +112,14 @@ pub unsafe fn _mm_blend_epi16(
 This contract can then be used to automatically generate tests
 for the intrinsic, which can be put in CI.
 
-Rust verification toolchains can also rely on this contract to
-model the intrinsics library within their analyses. For example,
-the [hax toolchain](https://github.com/hacspec/hax) would compile
-this contract to an interface in F* as follows:
+As a second layer of assurance, these contracts can be compiled
+to some verification framework and proved to be sound against
+a hand-written model of the intrinsics functions.
 
-```
-val _mm_blend_epi16: __m128i -> __m128i -> i32 ->
-    Pure __m128i
-    (requires (v IMM8 >= 0 && v IMM8 <= 255))\
-    (ensures(fun result ->
-        forall j. j >= 0 && j < 8 ==>
-            if get_bit(IMM8,j) then
-                get_lane(result, j) == get_lane(b,j)
-            else
-                get_lane(result, j) == get_lane(a,j)))
-```
+Finally, Rust verification toolchains can also rely on this contract
+to model the intrinsics library within their analyses. This would
+enable the verification of Rust applications that rely on SIMD intrinsics.
 
-Such specifications can then be used in the verification of applications
-that use intrinsics. 
 
 ### Assumptions
 
