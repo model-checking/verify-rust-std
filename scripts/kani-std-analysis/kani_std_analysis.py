@@ -15,9 +15,16 @@ from matplotlib.ticker import FixedLocator
 #   2. Postprocessing results from std-analysis.sh, which outputs metrics about the standard library unrelated to Kani (e.g., a list of the functions in each crate).
 #   3. Comparing the output of steps #1 and #2 to compare the Kani-verified portion of the standard library to the overall library,
 #      e.g., what fraction of unsafe functions have Kani contracts.
-# Note that this script assumes that std-analysis.sh and `kani list` have already run, since we expect to invoke this script from `run-kani.sh`.
-# Also note that the results are architecture-dependent: the standard library has functions that are only present for certain architectures, 
-# and https://github.com/model-checking/verify-rust-std/pull/122 has Kani harnesses that only run on x86-64.
+
+# Notes:
+# - This script assumes that std-analysis.sh and `kani list` have already run, since we expect to invoke this script from `run-kani.sh`.
+# - The results are architecture-dependent: the standard library has functions that are only present for certain architectures, 
+#   and https://github.com/model-checking/verify-rust-std/pull/122 has Kani harnesses that only run on x86-64.
+# - The total functions under contract are not necessarily equal to the sum of unsafe and safe functions under contract.
+#   We've added a few functions (three, as of writing) with contracts to this fork, e.g. ffi::c_str::is_null_terminated.
+#   Since std-analysis.sh runs on the standard library given a toolchain (not this fork), it doesn't know about this function and therefore can't classify it as safe or unsafe.
+#   But `kani list` runs on this fork, so it can still see it and add it to the total functions under contract.
+# - See #TODOs for known limitations.
 
 # Process the results from Kani's std-analysis.sh script for each crate.
 # TODO For now, we just handle "core", but we should process all crates in the library.

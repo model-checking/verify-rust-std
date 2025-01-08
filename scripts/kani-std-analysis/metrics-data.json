@@ -9,8 +9,8 @@
       "verified_unsafe_fns_under_contract": 132,
       "safe_abstractions_under_contract": 41,
       "verified_safe_abstractions_under_contract": 41,
-      "safe_fns_under_contract": 80,
-      "verified_safe_fns_under_contract": 79,
+      "safe_fns_under_contract": 77,
+      "verified_safe_fns_under_contract": 77,
       "total_functions_under_contract": 224
     }
   ]
