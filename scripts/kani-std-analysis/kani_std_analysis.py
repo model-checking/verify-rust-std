@@ -16,6 +16,8 @@ from matplotlib.ticker import FixedLocator
 #   3. Comparing the output of steps #1 and #2 to compare the Kani-verified portion of the standard library to the overall library,
 #      e.g., what fraction of unsafe functions have Kani contracts.
 # Note that this script assumes that std-analysis.sh and `kani list` have already run, since we expect to invoke this script from `run-kani.sh`.
+# Also note that the results are architecture-dependent: the standard library has functions that are only present for certain architectures, 
+# and https://github.com/model-checking/verify-rust-std/pull/122 has Kani harnesses that only run on x86-64.
 
 # Process the results from Kani's std-analysis.sh script for each crate.
 # TODO For now, we just handle "core", but we should process all crates in the library.
@@ -256,13 +258,13 @@ class KaniSTDMetricsOverTime():
 def main():
     parser = argparse.ArgumentParser(description="Generate metrics about Kani's application to the standard library.")
     parser.add_argument('--metrics-file', 
-                        type=str, 
-                        required=True, 
-                        help="Path to the JSON file containing metrics data")
+                    type=str, 
+                    default="metrics-data.json", 
+                    help="Path to the JSON file containing metrics data (default: metrics-data.json)")
     parser.add_argument('--kani-list-file', 
-                        type=str, 
-                        required=True, 
-                        help="Path to the JSON file containing the Kani list data")
+                    type=str, 
+                    default="kani-list.json", 
+                    help="Path to the JSON file containing the Kani list data (default: kani-list.json)")
     args = parser.parse_args()
 
     metrics = KaniSTDMetricsOverTime(args.metrics_file)
