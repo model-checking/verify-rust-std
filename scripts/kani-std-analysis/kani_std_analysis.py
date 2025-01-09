@@ -29,8 +29,8 @@ from matplotlib.ticker import FixedLocator
 # Process the results from Kani's std-analysis.sh script for each crate.
 # TODO For now, we just handle "core", but we should process all crates in the library.
 class GenericSTDMetrics():
-    def __init__(self):
-        self.results_directory = "/tmp/std_lib_analysis/results"
+    def __init__(self, results_dir):
+        self.results_directory = results_dir
         self.unsafe_fns_count = 0
         self.safe_abstractions_count = 0
         self.safe_fns_count = 0
@@ -187,10 +187,10 @@ class KaniSTDMetricsOverTime():
 
     # Read output from kani list and std-analysis.sh, then compare their outputs to compute Kani-specific metrics
     # and write the results to {self.metrics_file}
-    def compute_metrics(self, kani_list_filepath):
+    def compute_metrics(self, kani_list_filepath, analysis_results_dir):
         # Process the `kani list` and `std-analysis.sh` data
         kani_data = KaniListSTDMetrics(kani_list_filepath)
-        generic_metrics = GenericSTDMetrics()
+        generic_metrics = GenericSTDMetrics(analysis_results_dir)
 
         print("Comparing kani-list output to std-analysis.sh output and computing metrics...")
 
@@ -292,10 +292,15 @@ def main():
                     type=str, 
                     default="kani-list.json", 
                     help="Path to the JSON file containing the Kani list data (default: kani-list.json)")
+    # The default is /tmp/std_lib_analysis/results because, as of writing, that's always where std-analysis.sh outputs its results.
+    parser.add_argument('--analysis-results-dir', 
+                    type=str, 
+                    default="/tmp/std_lib_analysis/results", 
+                    help="Path to the folder file containing the std-analysis.sh results (default: /tmp/std_lib_analysis/results)")
     args = parser.parse_args()
 
     metrics = KaniSTDMetricsOverTime(args.metrics_file)
-    metrics.compute_metrics(args.kani_list_file)
+    metrics.compute_metrics(args.kani_list_file, args.analysis_results_dir)
     metrics.plot()
 
 if __name__ == "__main__":
