@@ -45,7 +45,6 @@ package-lock.json
 # Tools
 ## Kani
 *.out
-kani-list.*
 
 # Added by cargo
 #
