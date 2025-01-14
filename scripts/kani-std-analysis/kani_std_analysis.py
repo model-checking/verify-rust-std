@@ -164,9 +164,6 @@ class KaniSTDMetricsOverTime():
             all_data = {}
         
         self.dates = [datetime.strptime(data["date"], '%Y-%m-%d').date() for data in all_data]
-        self.dates.append(self.date)
-        
-        print(f"Dates are {self.dates}\n")
     
     # TODO For now, we don't plot how many of the contracts have been verified, since the line overlaps with how many are under contract.
     # If we want to plot this data, we should probably generate separate plots.
@@ -188,6 +185,8 @@ class KaniSTDMetricsOverTime():
     # Read output from kani list and std-analysis.sh, then compare their outputs to compute Kani-specific metrics
     # and write the results to {self.metrics_file}
     def compute_metrics(self, kani_list_filepath, analysis_results_dir):
+        self.dates.append(self.date)
+
         # Process the `kani list` and `std-analysis.sh` data
         kani_data = KaniListSTDMetrics(kani_list_filepath)
         generic_metrics = GenericSTDMetrics(analysis_results_dir)
@@ -297,11 +296,17 @@ def main():
                     type=str, 
                     default="/tmp/std_lib_analysis/results", 
                     help="Path to the folder file containing the std-analysis.sh results (default: /tmp/std_lib_analysis/results)")
+    parser.add_argument('--plot-only', 
+                    action='store_true',
+                    help="Instead of computing the metrics, just read existing metrics from --metrics-file and plot the results.")
     args = parser.parse_args()
 
     metrics = KaniSTDMetricsOverTime(args.metrics_file)
-    metrics.compute_metrics(args.kani_list_file, args.analysis_results_dir)
-    metrics.plot()
+
+    if args.plot_only:
+        metrics.plot()
+    else:
+        metrics.compute_metrics(args.kani_list_file, args.analysis_results_dir)
 
 if __name__ == "__main__":
     main()
