@@ -144,7 +144,7 @@ class KaniSTDMetricsOverTime():
         self.unsafe_metrics = ['total_unsafe_fns', 'unsafe_fns_under_contract', 'verified_unsafe_fns_under_contract']
         self.safe_abstr_metrics = ['total_safe_abstractions', 'safe_abstractions_under_contract', 'verified_safe_abstractions_under_contract']
         self.safe_metrics = ['total_safe_fns', 'safe_fns_under_contract', 'verified_safe_fns_under_contract']
-        # The keys in these dictionaries are unsafe_metrics and safe_abstr_metrics, respectively; see update_plot_metrics()
+        # The keys in these dictionaries are unsafe_metrics, safe_abstr_metrics, and safe_metrics, respectively; see update_plot_metrics()
         self.unsafe_plot_data = defaultdict(list)
         self.safe_abstr_plot_data = defaultdict(list)
         self.safe_plot_data = defaultdict(list)
