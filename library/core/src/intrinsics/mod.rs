@@ -4643,13 +4643,13 @@ mod verify {
         unsafe { copy_nonoverlapping(src, dst, kani::any()) }
     }
     
-	//We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does not currently support contracts
-	#[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
-	#[requires(ub_checks::can_dereference(&input as *const T as *const U))] //output can be deref'd as value of type U
-	#[allow(dead_code)]
-	unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
-    	unsafe { transmute_unchecked(input) }
-	}
+    //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does not currently support contracts
+    #[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
+    #[requires(ub_checks::can_dereference(&input as *const T as *const U))] //output can be deref'd as value of type U
+    #[allow(dead_code)]
+    unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
+        unsafe { transmute_unchecked(input) }
+    }
 
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
     fn transmute_zero_size() {
