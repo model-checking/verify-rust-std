@@ -144,7 +144,9 @@ build_kani() {
     pushd "$directory"
     source "kani-dependencies"
     # Check if installed versions are correct.
-    if ./scripts/check-cbmc-version.py --major ${CBMC_MAJOR} --minor ${CBMC_MINOR} && ./scripts/check_kissat_version.sh; then
+    if ./scripts/check-cbmc-version.py \
+            --major ${CBMC_MAJOR} --minor ${CBMC_MINOR} --patch ${CBMC_PATCH} \
+            && ./scripts/check_kissat_version.sh; then
         echo "Dependencies are up-to-date"
     else
         os_name=$(uname -s)
@@ -288,7 +290,7 @@ main() {
             # Run verification for all harnesses (not in parallel)
             echo "Running Kani verify-std command..."
             "$kani_path" verify-std -Z unstable-options ./library \
-                $unstable_args
+                $unstable_args \
                 $command_args \
                 --enable-unstable \
                 --cbmc-args --object-bits 12

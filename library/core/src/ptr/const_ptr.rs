@@ -1,13 +1,14 @@
+use core::mem;
+
+use safety::{ensures, requires};
+
 use super::*;
 use crate::cmp::Ordering::{Equal, Greater, Less};
 use crate::intrinsics::const_eval_select;
-use crate::mem::SizedTypeProperties;
-use crate::slice::{self, SliceIndex};
-use safety::{ensures, requires};
-
 #[cfg(kani)]
 use crate::kani;
-use core::mem;
+use crate::mem::SizedTypeProperties;
+use crate::slice::{self, SliceIndex};
 
 impl<T: ?Sized> *const T {
     /// Returns `true` if the pointer is null.
@@ -1824,9 +1825,11 @@ impl<T: ?Sized> PartialOrd for *const T {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use crate::kani;
     use core::mem;
+
     use kani::PointerGenerator;
+
+    use crate::kani;
 
     /// This macro generates a single verification harness for the `offset`, `add`, or `sub`
     /// pointer operations, supporting integer, composite, or unit types.
@@ -2134,10 +2137,7 @@ mod verify {
         let self_ptr: *const u32 = unsafe { origin_ptr.byte_offset(offset as isize) };
         let result: isize = unsafe { self_ptr.byte_offset_from(origin_ptr) };
         assert_eq!(result, offset as isize);
-        assert_eq!(
-            result,
-            (self_ptr.addr() as isize - origin_ptr.addr() as isize)
-        );
+        assert_eq!(result, (self_ptr.addr() as isize - origin_ptr.addr() as isize));
     }
 
     macro_rules! generate_offset_from_harness {
@@ -2193,11 +2193,7 @@ mod verify {
     }
 
     // fn <*const T>::offset_from() integer and integer slice types verification
-    generate_offset_from_harness!(
-        u8,
-        check_const_offset_from_u8,
-        check_const_offset_from_u8_arr
-    );
+    generate_offset_from_harness!(u8, check_const_offset_from_u8, check_const_offset_from_u8_arr);
     generate_offset_from_harness!(
         u16,
         check_const_offset_from_u16,
@@ -2223,11 +2219,7 @@ mod verify {
         check_const_offset_from_usize,
         check_const_offset_from_usize_arr
     );
-    generate_offset_from_harness!(
-        i8,
-        check_const_offset_from_i8,
-        check_const_offset_from_i8_arr
-    );
+    generate_offset_from_harness!(i8, check_const_offset_from_i8, check_const_offset_from_i8_arr);
     generate_offset_from_harness!(
         i16,
         check_const_offset_from_i16,
@@ -2442,11 +2434,7 @@ mod verify {
     gen_const_byte_arith_harness!(usize, byte_offset, check_const_byte_offset_usize);
     gen_const_byte_arith_harness!((i8, i8), byte_offset, check_const_byte_offset_tuple_1);
     gen_const_byte_arith_harness!((f64, bool), byte_offset, check_const_byte_offset_tuple_2);
-    gen_const_byte_arith_harness!(
-        (i32, f64, bool),
-        byte_offset,
-        check_const_byte_offset_tuple_3
-    );
+    gen_const_byte_arith_harness!((i32, f64, bool), byte_offset, check_const_byte_offset_tuple_3);
     gen_const_byte_arith_harness!(
         (i8, u16, i32, u64, isize),
         byte_offset,

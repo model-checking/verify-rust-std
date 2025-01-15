@@ -34,7 +34,7 @@ pub const UNICODE_VERSION: (u8, u8, u8) = unicode_data::UNICODE_VERSION;
 
 #[cfg(kani)]
 mod verify {
-    use super::conversions::{to_upper, to_lower};
+    use super::conversions::{to_lower, to_upper};
     use crate::kani;
 
     /// Checks that `to_upper` does not trigger UB or panics for all valid characters.
