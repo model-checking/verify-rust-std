@@ -4592,14 +4592,6 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
     )
 }
 
-//We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does not currently support contracts
-#[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
-#[ensures(|ret: &U| (ub_checks::can_dereference(ret as *const U)))] //output can be deref'd as value of type U
-#[allow(dead_code)]
-unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
-    unsafe { transmute_unchecked(input) }
-}
-
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
@@ -4650,17 +4642,14 @@ mod verify {
         let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
         unsafe { copy_nonoverlapping(src, dst, kani::any()) }
     }
-
-    //this unexpectedly doesn't compile due to different sized inputs
-    //Normally, transmute_unchecked should be fine as long as output is not larger
-    /*#[kani::proof_for_contract(transmute_unchecked_wrapper)]
-      fn transmute_different_sizes() {
-      let large_value: u64 = kani::any();
-      unsafe {
-      let truncated_value: u32 = transmute_unchecked_wrapper(large_value);
-    //assert!((truncated_value as u32) == 64);
-    }
-    }*/
+    
+	//We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does not currently support contracts
+	#[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
+	#[requires(ub_checks::can_dereference(&input as *const T as *const U))] //output can be deref'd as value of type U
+	#[allow(dead_code)]
+	unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
+    	unsafe { transmute_unchecked(input) }
+	}
 
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
     fn transmute_zero_size() {
@@ -4672,11 +4661,11 @@ mod verify {
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
     fn transmute_u32_to_char() {
         let num: u32 = kani::any();
-        kani::assume((num <= 0xD7FF) || (num >= 0xE000 && num <= 0x10FFFF));
         let c: char = unsafe {transmute_unchecked_wrapper(num)};
     }
 
-    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    #[kani::proof]
+	#[kani::stub_verified(transmute_unchecked_wrapper)]
     #[kani::should_panic]
     fn transmute_invalid_u32_to_char() {
         let num: u32 = kani::any();
@@ -4686,11 +4675,11 @@ mod verify {
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
     fn transmute_u8_to_bool() {
         let num: u8 = kani::any();
-        kani::assume(num == 0 || num == 1);
         let b: bool = unsafe {transmute_unchecked_wrapper(num)};
     }
 
-    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    #[kani::proof]
+	#[kani::stub_verified(transmute_unchecked_wrapper)]
     #[kani::should_panic]
     fn transmute_invalid_u8_to_bool() {
         let num: u8 = kani::any();
