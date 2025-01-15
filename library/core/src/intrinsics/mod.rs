@@ -4665,7 +4665,7 @@ mod verify {
     }
 
     #[kani::proof]
-	#[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
     #[kani::should_panic]
     fn transmute_invalid_u32_to_char() {
         let num: u32 = kani::any();
@@ -4679,7 +4679,7 @@ mod verify {
     }
 
     #[kani::proof]
-	#[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
     #[kani::should_panic]
     fn transmute_invalid_u8_to_bool() {
         let num: u8 = kani::any();
