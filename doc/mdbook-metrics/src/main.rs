@@ -30,9 +30,9 @@ fn main() {
 fn run_kani_metrics_script() -> Result<(), Error> {
     // This will be the absolute path to the "doc/" folder
     let original_dir = env::current_dir()?;
-    let tools_path = original_dir.join(Path::new("src/tools"));
+    let tools_path = original_dir.join(Path::new("doc/src/tools"));
 
-    let kani_std_analysis_path = Path::new("../scripts/kani-std-analysis");
+    let kani_std_analysis_path = Path::new("scripts/kani-std-analysis");
     env::set_current_dir(kani_std_analysis_path)?;
 
     Command::new("pip")
