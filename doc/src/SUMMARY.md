@@ -9,9 +9,6 @@
 - [Verification Tools](./tools.md)
   - [Kani](./tools/kani.md)
 
-- [Metrics](./metrics.md)
-  - [Kani](./metrics/kani/kani.md)
-
 ---
 
 - [Challenges](./challenges.md)

@@ -10,7 +10,6 @@ on:
     paths:
       - 'doc/**'
       - '.github/workflows/book.yml'
-      - 'scripts/kani-std-analysis/**'
 
 jobs:
   build:
@@ -18,23 +17,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r scripts/kani-std-analysis/requirements.txt
-
-      - name: Generate Metrics Graphs
-        run: |
-          cd scripts/kani-std-analysis/
-          python kani_std_analysis.py --plot-only
-          cd ../..
-          mv scripts/kani-std-analysis/*.png doc/src/metrics/kani/
 
       - name: Install mdbook
         run: |

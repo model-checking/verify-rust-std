@@ -9,6 +9,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.ticker import FixedLocator
+import os
 
 # Output metrics about Kani's application to the standard library by:
 #   1. Postprocessing results from running `kani list`, which collects data about Kani harnesses and contracts.
@@ -239,7 +240,7 @@ class KaniSTDMetricsOverTime():
         print(f"Wrote metrics data for date {self.date} to {self.metrics_file}")    
 
     # Make a single plot with specified data, title, and filename
-    def plot_single(self, data, title, outfile):
+    def plot_single(self, data, title, filename, plot_dir):
         plt.figure(figsize=(14, 8))
 
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#946F7bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
@@ -271,15 +272,17 @@ class KaniSTDMetricsOverTime():
         plt.tight_layout()
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         
+        outfile = os.path.join(plot_dir, filename)
+
         plt.savefig(outfile, bbox_inches='tight', dpi=300)
         plt.close()
 
         print(f"PNG graph generated: {outfile}")
 
-    def plot(self):
-        self.plot_single(self.unsafe_plot_data, title="Contracts on Unsafe Functions in core", outfile="core_unsafe_metrics.png")
-        self.plot_single(self.safe_abstr_plot_data, title="Contracts on Safe Abstractions in core", outfile="core_safe_abstractions_metrics.png")
-        self.plot_single(self.safe_plot_data, title="Contracts on Safe Functions in core", outfile="core_safe_metrics.png")
+    def plot(self, plot_dir):
+        self.plot_single(self.unsafe_plot_data, title="Contracts on Unsafe Functions in core", filename="core_unsafe_metrics.png", plot_dir=plot_dir)
+        self.plot_single(self.safe_abstr_plot_data, title="Contracts on Safe Abstractions in core", filename="core_safe_abstractions_metrics.png", plot_dir=plot_dir)
+        self.plot_single(self.safe_plot_data, title="Contracts on Safe Functions in core", filename="core_safe_metrics.png", plot_dir=plot_dir)
 
 def main():
     parser = argparse.ArgumentParser(description="Generate metrics about Kani's application to the standard library.")
@@ -299,12 +302,16 @@ def main():
     parser.add_argument('--plot-only', 
                     action='store_true',
                     help="Instead of computing the metrics, just read existing metrics from --metrics-file and plot the results.")
+    parser.add_argument('--plot-dir',
+                        default=".",
+                        help="Path to the folder where the plots should be saved (default: current directory). Only used if --plot-only is provided.")
+    
     args = parser.parse_args()
 
     metrics = KaniSTDMetricsOverTime(args.metrics_file)
 
     if args.plot_only:
-        metrics.plot()
+        metrics.plot(args.plot_dir)
     else:
         metrics.compute_metrics(args.kani_list_file, args.analysis_results_dir)
 

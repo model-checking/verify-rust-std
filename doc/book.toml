@@ -19,5 +19,8 @@ runnable = false
 
 [output.linkcheck]
 
+[preprocessor.metrics]
+command = "cargo run --manifest-path=mdbook-metrics/Cargo.toml --locked"
+
 [rust]
 edition = "2021"
