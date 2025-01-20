@@ -1,0 +1,5 @@
+cd alloc
+  cd collections
+    call check-verifast-proofs.mysh
+  cd ..
+cd ..

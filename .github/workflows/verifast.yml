@@ -1,0 +1,41 @@
+name: VeriFast
+
+on:
+  workflow_dispatch:
+  merge_group:
+  pull_request:
+    branches: [ main ]
+  push:
+    paths:
+      - 'library/**'
+      - '.github/workflows/verifast.yml'
+      - 'verifast-proofs/**'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check-verifast-on-std:
+    name: Verify std library
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          path: head
+          submodules: true
+      
+      - name: Install VeriFast
+        run: |
+          cd ~
+          curl -OL https://github.com/verifast/verifast/releases/download/24.12/verifast-24.12-linux.tar.gz
+          echo '51bebf990f31666abcd3675000e7714ef79b417390e930953ef25383e8d59421  verifast-24.12-linux.tar.gz' | shasum -a 256 -c
+          tar xf verifast-24.12-linux.tar.gz
+
+      - name: Run VeriFast Verification
+        run: |
+          export PATH=~/verifast-24.12/bin:$PATH
+          cd verifast-proofs
+          mysh check-verifast-proofs.mysh
