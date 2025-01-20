@@ -1,11 +1,11 @@
 0a1,2
 > // verifast_options{prover:z3v4.5 skip_specless_fns}
 > 
-13c15
+13c15,27
 < #![stable(feature = "rust1", since = "1.0.0")]
 ---
 > // This is a slightly tweaked version of https://github.com/rust-lang/rust/blob/c290e9de32e8ba6a673ef125fde40eadd395d170/library/alloc/src/collections/linked_list.rs
-14a17,28
+> 
 > //#![stable(feature = "rust1", since = "1.0.0")]
 > #![feature(rustc_attrs)]
 > #![feature(dropck_eyepatch)]
@@ -17,7 +17,6 @@
 > #![feature(box_into_inner)]
 > 
 > use std as core;
-> 
 15a30
 > use core::fmt;
 16a32
@@ -26,14 +25,13 @@
 > use core::mem;
 20d36
 < use core::{fmt, mem};
-22,24c38,39
+22,24c38,40
 < use super::SpecExtend;
 < use crate::alloc::{Allocator, Global};
 < use crate::boxed::Box;
 ---
 > use std::alloc::{Allocator, Global};
 > use std::boxed::Box;
-25a41
 > 
 28a45,48
 > trait SpecExtend<I> {
@@ -194,7 +192,7 @@
 ---
 >     unsafe fn pop_front_node<'a>(&'a mut self) -> Option<Box<Node<T>, &'a A>>
 >     {
-197,199c225,229
+197,199c225,235
 <         self.head.map(|node| unsafe {
 <             let node = Box::from_raw_in(node.as_ptr(), &self.alloc);
 <             self.head = node.next;
@@ -204,26 +202,26 @@
 >             Some(node) => unsafe {
 >                 self.head = (*node.as_ptr()).next;
 >                 let node_ = Box::from_raw_in(node.as_ptr(), &self.alloc);
-201,205c231,235
-<             match self.head {
-<                 None => self.tail = None,
-<                 // Not creating new mutable (unique!) references overlapping `element`.
-<                 Some(head) => (*head.as_ptr()).prev = None,
-<             }
----
+> 
 >                 match self.head {
 >                     None => self.tail = None,
 >                     // Not creating new mutable (unique!) references overlapping `element`.
 >                     Some(head) => (*head.as_ptr()).prev = None,
 >                 }
-207,209c237,240
+201,204c237,238
+<             match self.head {
+<                 None => self.tail = None,
+<                 // Not creating new mutable (unique!) references overlapping `element`.
+<                 Some(head) => (*head.as_ptr()).prev = None,
+---
+>                 self.len -= 1;
+>                 Some(node_)
+206,209c240
+< 
 <             self.len -= 1;
 <             node
 <         })
 ---
->                 self.len -= 1;
->                 Some(node_)
->             }
 >         }
 224c255
 <             let node = Some(node);
@@ -241,7 +239,7 @@
 <             self.tail = node;
 ---
 >             self.tail = node_;
-242,244c273,277
+242,244c273,283
 <         self.tail.map(|node| unsafe {
 <             let node = Box::from_raw_in(node.as_ptr(), &self.alloc);
 <             self.tail = node.prev;
@@ -251,26 +249,26 @@
 >             Some(node) => unsafe {
 >                 let node_ = Box::from_raw_in(node.as_ptr(), &self.alloc);
 >                 self.tail = node_.prev;
-246,250c279,283
-<             match self.tail {
-<                 None => self.head = None,
-<                 // Not creating new mutable (unique!) references overlapping `element`.
-<                 Some(tail) => (*tail.as_ptr()).next = None,
-<             }
----
+> 
 >                 match self.tail {
 >                     None => self.head = None,
 >                     // Not creating new mutable (unique!) references overlapping `element`.
 >                     Some(tail) => (*tail.as_ptr()).next = None,
 >                 }
-252,254c285,288
+246,249c285,286
+<             match self.tail {
+<                 None => self.head = None,
+<                 // Not creating new mutable (unique!) references overlapping `element`.
+<                 Some(tail) => (*tail.as_ptr()).next = None,
+---
+>                 self.len -= 1;
+>                 Some(node_)
+251,254c288
+< 
 <             self.len -= 1;
 <             node
 <         })
 ---
->                 self.len -= 1;
->                 Some(node_)
->             }
 >         }
 264,265c298,300
 <     unsafe fn unlink_node(&mut self, mut node: NonNull<Node<T>>) {
@@ -543,7 +541,7 @@
 <     #[stable(feature = "rust1", since = "1.0.0")]
 ---
 >     //#[stable(feature = "rust1", since = "1.0.0")]
-955,971c1036,1044
+955,982c1036,1076
 <         let len = self.len();
 <         assert!(at <= len, "Cannot split off at a nonexistent index");
 <         if at == 0 {
@@ -561,17 +559,7 @@
 <             // depending on implementation details of Skip
 <             for _ in 0..at - 1 {
 <                 iter.next();
----
->         unsafe {
->             let len = self.len;
->             assert!(at <= len, "Cannot split off at a nonexistent index");
->             if at == 0 {
->                 let alloc1 = clone_allocator(&self.alloc);
->                 return mem::replace(self, Self::new_in(alloc1));
->             } else if at == len {
->                 let alloc2 = clone_allocator(&self.alloc);
->                 return Self::new_in(alloc2);
-973,982c1046,1076
+<             }
 <             iter.head
 <         } else {
 <             // better off starting from the end
@@ -583,6 +571,16 @@
 <         };
 <         unsafe { self.split_off_after_node(split_node, at) }
 ---
+>         unsafe {
+>             let len = self.len;
+>             assert!(at <= len, "Cannot split off at a nonexistent index");
+>             if at == 0 {
+>                 let alloc1 = clone_allocator(&self.alloc);
+>                 return mem::replace(self, Self::new_in(alloc1));
+>             } else if at == len {
+>                 let alloc2 = clone_allocator(&self.alloc);
+>                 return Self::new_in(alloc2);
+>             }
 > 
 >             // Below, we iterate towards the `i-1`th node, either from the start or the end,
 >             // depending on which would be faster.
@@ -645,35 +643,29 @@
 ---
 >         let r = ExtractIf { list: self, it, pred: filter, idx: 0, old_len };
 >         r
-1168,1171c1265
+1168,1169c1265,1267
 < #[stable(feature = "rust1", since = "1.0.0")]
 < unsafe impl<#[may_dangle] T, A: Allocator> Drop for LinkedList<T, A> {
-<     fn drop(&mut self) {
-<         struct DropGuard<'a, T, A: Allocator>(&'a mut LinkedList<T, A>);
 ---
 > struct DropGuard<'a, T, A: Allocator>(&'a mut LinkedList<T, A>);
-1173,1178c1267,1272
+> 
+> impl<'a, T, A: Allocator> Drop for DropGuard<'a, T, A> {
+1171c1269,1275
+<         struct DropGuard<'a, T, A: Allocator>(&'a mut LinkedList<T, A>);
+---
+>         unsafe {
+>             // Continue the same loop we do below. This only runs when a destructor has
+>             // panicked. If another one panics this will abort.
+>             while self.0.pop_front_node().is_some() {}
+>         }
+>     }
+> }
+1173,1177c1277,1289
 <         impl<'a, T, A: Allocator> Drop for DropGuard<'a, T, A> {
 <             fn drop(&mut self) {
 <                 // Continue the same loop we do below. This only runs when a destructor has
 <                 // panicked. If another one panics this will abort.
 <                 while self.0.pop_front_node().is_some() {}
-<             }
----
-> impl<'a, T, A: Allocator> Drop for DropGuard<'a, T, A> {
->     fn drop(&mut self) {
->         unsafe {
->             // Continue the same loop we do below. This only runs when a destructor has
->             // panicked. If another one panics this will abort.
->             while self.0.pop_front_node().is_some() {}
-1179a1274,1275
->     }
-> }
-1181,1184c1277,1292
-<         // Wrap self so that if a destructor panics, we can try to keep looping
-<         let guard = DropGuard(self);
-<         while guard.0.pop_front_node().is_some() {}
-<         mem::forget(guard);
 ---
 > //#[stable(feature = "rust1", since = "1.0.0")]
 > unsafe impl<#[may_dangle] T, A: Allocator> Drop for LinkedList<T, A> {
@@ -688,9 +680,14 @@
 >                     Some(element) => {
 >                     }
 >                 }
->             }
+1178a1291
 >             mem::forget(guard);
->         }
+1180,1184d1292
+< 
+<         // Wrap self so that if a destructor panics, we can try to keep looping
+<         let guard = DropGuard(self);
+<         while guard.0.pop_front_node().is_some() {}
+<         mem::forget(guard);
 1188c1296
 < #[stable(feature = "rust1", since = "1.0.0")]
 ---
@@ -901,8 +898,7 @@
 <     #[unstable(feature = "linked_list_cursors", issue = "58533")]
 ---
 >     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
-1614,1625d1740
-<     }
+1615,1626d1741
 < 
 <     /// Provides a read-only reference to the cursor's parent list.
 <     ///
@@ -914,6 +910,7 @@
 <     #[unstable(feature = "linked_list_cursors", issue = "58533")]
 <     pub fn as_list(&self) -> &LinkedList<T, A> {
 <         self.list
+<     }
 1636c1751
 <     #[unstable(feature = "linked_list_cursors", issue = "58533")]
 ---
@@ -1019,12 +1016,17 @@
 > 
 > /*#[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]*/
 > impl<'a, T, F, A: Allocator> Iterator for ExtractIf<'a, T, F, A>
-1959,1963c2087,2095
+1959,1968c2087,2103
 <     fn next(&mut self) -> Option<T> {
 <         while let Some(mut node) = self.it {
 <             unsafe {
 <                 self.it = node.as_ref().next;
 <                 self.idx += 1;
+< 
+<                 if (self.pred)(&mut node.as_mut().element) {
+<                     // `unlink_node` is okay with aliasing `element` references.
+<                     self.list.unlink_node(node);
+<                     return Some(Box::from_raw_in(node.as_ptr(), &self.list.alloc).element);
 ---
 >     fn next(&mut self) -> Option<T>
 >     {
@@ -1035,12 +1037,7 @@
 >                     self.it = (*node.as_ptr()).next; //node.as_ref().next;
 >                     self.idx += 1;
 >                     
-1965,1968c2097,2103
-<                 if (self.pred)(&mut node.as_mut().element) {
-<                     // `unlink_node` is okay with aliasing `element` references.
-<                     self.list.unlink_node(node);
-<                     return Some(Box::from_raw_in(node.as_ptr(), &self.list.alloc).element);
----
+> 
 >                     if call_pred(&mut self.pred, &mut node.as_mut().element) {
 >                         // `unlink_node` is okay with aliasing `element` references.
 >                         self.list.unlink_node(node);
@@ -1130,7 +1127,7 @@
 < #[stable(feature = "std_collections_from_array", since = "1.56.0")]
 ---
 > //#[stable(feature = "std_collections_from_array", since = "1.56.0")]
-2203,2212c2337,2338
+2203,2212c2337,2348
 < fn assert_covariance() {
 <     fn a<'a>(x: LinkedList<&'static str>) -> LinkedList<&'a str> {
 <         x
@@ -1144,9 +1141,8 @@
 ---
 > fn assert_covariance_a<'a>(x: LinkedList<&'static str>) -> LinkedList<&'a str> {
 >     x
-2215c2341,2351
-< #[stable(feature = "rust1", since = "1.0.0")]
----
+> }
+> 
 > #[allow(dead_code)]
 > fn assert_covariance_b<'i, 'a>(x: Iter<'i, &'static str>) -> Iter<'i, &'a str> {
 >     x
@@ -1155,8 +1151,9 @@
 > #[allow(dead_code)]
 > fn assert_covariance_c<'a>(x: IntoIter<&'static str>) -> IntoIter<&'a str> {
 >     x
-> }
-> 
+2215c2351
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
 > //#[stable(feature = "rust1", since = "1.0.0")]
 2218c2354
 < #[stable(feature = "rust1", since = "1.0.0")]
