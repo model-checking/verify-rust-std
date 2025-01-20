@@ -32,7 +32,7 @@ jobs:
           tar xf verifast-24.12-linux.tar.gz
 
       - name: Install the Rust toolchain used by VeriFast
-        run: rustup toolchain install nightly-2024-11-24
+        run: rustup toolchain install nightly-2024-11-23
 
       - name: Run VeriFast Verification
         run: |
