@@ -23,9 +23,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          path: head
-          submodules: true
       
       - name: Install VeriFast
         run: |
@@ -36,7 +33,6 @@ jobs:
 
       - name: Run VeriFast Verification
         run: |
-          pwd
           export PATH=~/verifast-24.12/bin:$PATH
           cd verifast-proofs
           mysh check-verifast-proofs.mysh
