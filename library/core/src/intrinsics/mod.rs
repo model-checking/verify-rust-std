@@ -4707,7 +4707,8 @@ mod verify {
         z: u16,
     }
 
-    //this doesn't compile, A and B have different sizes due to padding
+    //This doesn't compile, A and B have different sizes due to padding
+    //This is likely due to a bug in Kani, see Kani issue 3839
     /*#[kani::proof_for_contract(transmute_unchecked_wrapper)]
       fn transmute_unchecked_padding() {
       let a = A {x: kani::any(), y: kani::any(), z: kani::any()};
