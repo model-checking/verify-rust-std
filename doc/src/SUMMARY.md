@@ -8,6 +8,7 @@
 
 - [Verification Tools](./tools.md)
   - [Kani](./tools/kani.md)
+  - [VeriFast](./tools/verifast.md)
 
 ---
 
