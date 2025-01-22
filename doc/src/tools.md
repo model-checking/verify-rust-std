@@ -13,6 +13,7 @@ please see the [Tool Application](general-rules.md#tool-applications) section.
 |---------------------|-------|
  | Kani Rust Verifier  | [![Kani](https://github.com/model-checking/verify-rust-std/actions/workflows/kani.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/kani.yml)      |
  | GOTO-Transcoder (ESBMC) | [![GOTO-Transcoder](https://github.com/model-checking/verify-rust-std/actions/workflows/goto-transcoder.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/goto-transcoder.yml)      |
+ | VeriFast for Rust   | [![VeriFast](https://github.com/model-checking/verify-rust-std/actions/workflows/verifast.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/verifast.yml)      |
 
 
 
