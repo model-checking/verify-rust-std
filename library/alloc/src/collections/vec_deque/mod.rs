@@ -58,6 +58,9 @@ mod spec_from_iter;
 #[cfg(test)]
 mod tests;
 
+#[cfg(kani)]
+use core::kani;
+
 /// A double-ended queue implemented with a growable ring buffer.
 ///
 /// The "default" usage of this type as a queue is to use [`push_back`] to add to
@@ -3077,5 +3080,45 @@ impl<T, const N: usize> From<[T; N]> for VecDeque<T> {
         deq.head = 0;
         deq.len = N;
         deq
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use crate::collections::VecDeque;
+
+    #[kani::proof]
+    fn check_vecdeque_swap() {
+        // The array's length is set to an arbitrary value, which defines its size.
+        // In this case, implementing a dynamic array is not possible using any_array
+        // The more elements in the array the longer the veification time.
+        const ARRAY_LEN: usize = 40;
+        let mut arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let len = deque.len();
+
+        // Generate valid indices within bounds
+        let i = kani::any_where(|&x: &usize| x < len);
+        let j = kani::any_where(|&x: &usize| x < len);
+
+        // Capture the elements at i and j before the swap
+        let elem_i_before = deque[i];
+        let elem_j_before = deque[j];
+
+        // Perform the swap
+        deque.swap(i, j);
+
+        // Postcondition: Verify elements have swapped places
+        assert_eq!(deque[i], elem_j_before);
+        assert_eq!(deque[j], elem_i_before);
+
+        // Ensure other elements remain unchanged
+        let k = kani::any_where(|&x: &usize| x < len);
+        if k != i && k != j {
+            assert!(deque[k] == arr[k]);
+        }
     }
 }

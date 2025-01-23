@@ -19,5 +19,11 @@ runnable = false
 
 [output.linkcheck]
 
+[preprocessor.metrics]
+# Note that the manifest-path is doc/mdbook-metrics, meaning that to build this book, you need to run "mdbook build doc"
+# rather than "mdbook build" from inside the doc/ directory.
+# We choose the former because our "Build Book" Github workflow runs "mdbook build doc."
+command = "cargo run --manifest-path=doc/mdbook-metrics/Cargo.toml"
+
 [rust]
 edition = "2021"

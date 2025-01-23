@@ -1,10 +1,10 @@
 //! Operations related to UTF-8 validation.
 
 use super::Utf8Error;
-use crate::mem;
-
+use crate::intrinsics::const_eval_select;
 #[cfg(kani)]
 use crate::kani;
+use crate::mem;
 
 /// Returns the initial codepoint accumulator for the first byte.
 /// The first byte is special, only want bottom 5 bits for width 2, 4 bits
@@ -125,15 +125,25 @@ const fn contains_nonascii(x: usize) -> bool {
 /// Walks through `v` checking that it's a valid UTF-8 sequence,
 /// returning `Ok(())` in that case, or, if it is invalid, `Err(err)`.
 #[inline(always)]
-#[rustc_const_unstable(feature = "str_internals", issue = "none")]
+#[rustc_allow_const_fn_unstable(const_eval_select)] // fallback impl has same behavior
 pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
     let mut index = 0;
     let len = v.len();
 
-    let usize_bytes = mem::size_of::<usize>();
-    let ascii_block_size = 2 * usize_bytes;
+    const USIZE_BYTES: usize = mem::size_of::<usize>();
+
+    let ascii_block_size = 2 * USIZE_BYTES;
     let blocks_end = if len >= ascii_block_size { len - ascii_block_size + 1 } else { 0 };
-    let align = v.as_ptr().align_offset(usize_bytes);
+    // Below, we safely fall back to a slower codepath if the offset is `usize::MAX`,
+    // so the end-to-end behavior is the same at compiletime and runtime.
+    let align = const_eval_select!(
+        @capture { v: &[u8] } -> usize:
+        if const {
+            usize::MAX
+        } else {
+            v.as_ptr().align_offset(USIZE_BYTES)
+        }
+    );
 
     #[safety::loop_invariant(index <= len + ascii_block_size)]
     while index < len {
@@ -213,12 +223,12 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
             // Ascii case, try to skip forward quickly.
             // When the pointer is aligned, read 2 words of data per iteration
             // until we find a word containing a non-ascii byte.
-            if align != usize::MAX && align.wrapping_sub(index) % usize_bytes == 0 {
+            if align != usize::MAX && align.wrapping_sub(index) % USIZE_BYTES == 0 {
                 let ptr = v.as_ptr();
-                #[safety::loop_invariant(index <= blocks_end + ascii_block_size && align.wrapping_sub(index) % usize_bytes == 0)]
+                #[safety::loop_invariant(index <= blocks_end + ascii_block_size && align.wrapping_sub(index) % USIZE_BYTES == 0)]
                 while index < blocks_end {
                     // SAFETY: since `align - index` and `ascii_block_size` are
-                    // multiples of `usize_bytes`, `block = ptr.add(index)` is
+                    // multiples of `USIZE_BYTES`, `block = ptr.add(index)` is
                     // always aligned with a `usize` so it's safe to dereference
                     // both `block` and `block.add(1)`.
                     unsafe {
@@ -295,7 +305,7 @@ pub mod verify {
         } else {
             let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
             kani::assume(ptr.is_aligned());
-            unsafe{
+            unsafe {
                 run_utf8_validation(crate::slice::from_raw_parts(ptr, 0));
             }
         }

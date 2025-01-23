@@ -38,16 +38,15 @@
     issue = "27721"
 )]
 
-use crate::cmp::Ordering;
-use crate::convert::TryInto as _;
-use crate::slice::memchr;
-use crate::{cmp, fmt};
-
 #[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
 use safety::{loop_invariant, requires};
 
+use crate::cmp::Ordering;
+use crate::convert::TryInto as _;
 #[cfg(kani)]
 use crate::kani;
+use crate::slice::memchr;
+use crate::{cmp, fmt};
 
 // Pattern
 
@@ -892,8 +891,8 @@ impl<'a, 'b> DoubleEndedSearcher<'a> for CharSliceSearcher<'a, 'b> {}
 /// # Examples
 ///
 /// ```
-/// assert_eq!("Hello world".find(&['l', 'l'] as &[_]), Some(2));
-/// assert_eq!("Hello world".find(&['l', 'l'][..]), Some(2));
+/// assert_eq!("Hello world".find(&['o', 'l'][..]), Some(2));
+/// assert_eq!("Hello world".find(&['h', 'w'][..]), Some(6));
 /// ```
 impl<'b> Pattern for &'b [char] {
     pattern_methods!('a, CharSliceSearcher<'a, 'b>, MultiCharEqPattern, CharSliceSearcher);
@@ -2000,10 +1999,6 @@ pub mod verify {
         }
     }
 
-    /* This harness check `small_slice_eq` with dangling pointer to slice
-       with zero size. Kani finds safety issue of `small_slice_eq` in this
-       harness and hence the proof will fail.
-
     #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
     #[kani::proof]
     #[kani::unwind(4)]
@@ -2022,5 +2017,4 @@ pub mod verify {
             true
         );
     }
-    */
 }

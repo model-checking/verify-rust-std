@@ -1,18 +1,21 @@
 //! [`CStr`] and its related types.
 
+use safety::{ensures, requires};
+
 use crate::cmp::Ordering;
 use crate::error::Error;
 use crate::ffi::c_char;
+use crate::intrinsics::const_eval_select;
 use crate::iter::FusedIterator;
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::PhantomData;
 use crate::ptr::NonNull;
 use crate::slice::memchr;
-use crate::{fmt, intrinsics, ops, slice, str};
-
 use crate::ub_checks::Invariant;
-
-#[cfg(kani)]
-use crate::kani;
+#[allow(unused_imports)]
+use crate::ub_checks::can_dereference;
+use crate::{fmt, ops, slice, str};
 
 // FIXME: because this is doc(inline)d, we *have* to use intra-doc links because the actual link
 //   depends on where the item is being documented. however, since this is libcore, we can't
@@ -224,8 +227,27 @@ impl Invariant for &CStr {
         let bytes: &[c_char] = &self.inner;
         let len = bytes.len();
 
-        !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len-1].contains(&0)
+        !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len - 1].contains(&0)
     }
+}
+
+// Helper function
+#[cfg(kani)]
+#[requires(!ptr.is_null())]
+fn is_null_terminated(ptr: *const c_char) -> bool {
+    let mut next = ptr;
+    let mut found_null = false;
+    while can_dereference(next) {
+        if unsafe { *next == 0 } {
+            found_null = true;
+            break;
+        }
+        next = next.wrapping_add(1);
+    }
+    if (next.addr() - ptr.addr()) >= isize::MAX as usize {
+        return false;
+    }
+    found_null
 }
 
 impl CStr {
@@ -295,6 +317,8 @@ impl CStr {
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
+    #[requires(!ptr.is_null() && is_null_terminated(ptr))]
+    #[ensures(|result: &&CStr| result.is_safe())]
     pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr {
         // SAFETY: The caller has provided a pointer that points to a valid C
         // string with a NUL terminator less than `isize::MAX` from `ptr`.
@@ -431,38 +455,40 @@ impl CStr {
     #[stable(feature = "cstr_from_bytes", since = "1.10.0")]
     #[rustc_const_stable(feature = "const_cstr_unchecked", since = "1.59.0")]
     #[rustc_allow_const_fn_unstable(const_eval_select)]
+    // Preconditions: Null-terminated and no intermediate null bytes
+    #[requires(!bytes.is_empty() && bytes[bytes.len() - 1] == 0 && !bytes[..bytes.len()-1].contains(&0))]
+    // Postcondition: The resulting CStr satisfies the same conditions as preconditions
+    #[ensures(|result| result.is_safe())]
     pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr {
-        #[inline]
-        fn rt_impl(bytes: &[u8]) -> &CStr {
-            // Chance at catching some UB at runtime with debug builds.
-            debug_assert!(!bytes.is_empty() && bytes[bytes.len() - 1] == 0);
+        const_eval_select!(
+            @capture { bytes: &[u8] } -> &CStr:
+            if const {
+                // Saturating so that an empty slice panics in the assert with a good
+                // message, not here due to underflow.
+                let mut i = bytes.len().saturating_sub(1);
+                assert!(!bytes.is_empty() && bytes[i] == 0, "input was not nul-terminated");
 
-            // SAFETY: Casting to CStr is safe because its internal representation
-            // is a [u8] too (safe only inside std).
-            // Dereferencing the obtained pointer is safe because it comes from a
-            // reference. Making a reference is then safe because its lifetime
-            // is bound by the lifetime of the given `bytes`.
-            unsafe { &*(bytes as *const [u8] as *const CStr) }
-        }
+                // Ending nul byte exists, skip to the rest.
+                while i != 0 {
+                    i -= 1;
+                    let byte = bytes[i];
+                    assert!(byte != 0, "input contained interior nul");
+                }
 
-        const fn const_impl(bytes: &[u8]) -> &CStr {
-            // Saturating so that an empty slice panics in the assert with a good
-            // message, not here due to underflow.
-            let mut i = bytes.len().saturating_sub(1);
-            assert!(!bytes.is_empty() && bytes[i] == 0, "input was not nul-terminated");
+                // SAFETY: See runtime cast comment below.
+                unsafe { &*(bytes as *const [u8] as *const CStr) }
+            } else {
+                // Chance at catching some UB at runtime with debug builds.
+                debug_assert!(!bytes.is_empty() && bytes[bytes.len() - 1] == 0);
 
-            // Ending nul byte exists, skip to the rest.
-            while i != 0 {
-                i -= 1;
-                let byte = bytes[i];
-                assert!(byte != 0, "input contained interior nul");
+                // SAFETY: Casting to CStr is safe because its internal representation
+                // is a [u8] too (safe only inside std).
+                // Dereferencing the obtained pointer is safe because it comes from a
+                // reference. Making a reference is then safe because its lifetime
+                // is bound by the lifetime of the given `bytes`.
+                unsafe { &*(bytes as *const [u8] as *const CStr) }
             }
-
-            // SAFETY: See `rt_impl` cast.
-            unsafe { &*(bytes as *const [u8] as *const CStr) }
-        }
-
-        intrinsics::const_eval_select((bytes,), const_impl, rt_impl)
+        )
     }
 
     /// Returns the inner pointer to this C string.
@@ -522,6 +548,7 @@ impl CStr {
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_str_as_ptr", since = "1.32.0")]
+    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
     #[rustc_never_returns_null_ptr]
     pub const fn as_ptr(&self) -> *const c_char {
         self.inner.as_ptr()
@@ -531,7 +558,7 @@ impl CStr {
     #[inline]
     #[must_use]
     const fn as_non_null_ptr(&self) -> NonNull<c_char> {
-        // FIXME(effects) replace with `NonNull::from`
+        // FIXME(const_trait_impl) replace with `NonNull::from`
         // SAFETY: a reference is never null
         unsafe { NonNull::new_unchecked(&self.inner as *const [c_char] as *mut [c_char]) }
             .as_non_null_ptr()
@@ -755,30 +782,30 @@ impl AsRef<CStr> for CStr {
 #[unstable(feature = "cstr_internals", issue = "none")]
 #[cfg_attr(bootstrap, rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0"))]
 #[rustc_allow_const_fn_unstable(const_eval_select)]
+#[requires(is_null_terminated(ptr))]
+#[ensures(|&result| result < isize::MAX as usize && unsafe { *ptr.add(result) } == 0)]
 const unsafe fn strlen(ptr: *const c_char) -> usize {
-    const fn strlen_ct(s: *const c_char) -> usize {
-        let mut len = 0;
+    const_eval_select!(
+        @capture { s: *const c_char = ptr } -> usize:
+        if const {
+            let mut len = 0;
 
-        // SAFETY: Outer caller has provided a pointer to a valid C string.
-        while unsafe { *s.add(len) } != 0 {
-            len += 1;
+            // SAFETY: Outer caller has provided a pointer to a valid C string.
+            while unsafe { *s.add(len) } != 0 {
+                len += 1;
+            }
+
+            len
+        } else {
+            extern "C" {
+                /// Provided by libc or compiler_builtins.
+                fn strlen(s: *const c_char) -> usize;
+            }
+
+            // SAFETY: Outer caller has provided a pointer to a valid C string.
+            unsafe { strlen(s) }
         }
-
-        len
-    }
-
-    #[inline]
-    fn strlen_rt(s: *const c_char) -> usize {
-        extern "C" {
-            /// Provided by libc or compiler_builtins.
-            fn strlen(s: *const c_char) -> usize;
-        }
-
-        // SAFETY: Outer caller has provided a pointer to a valid C string.
-        unsafe { strlen(s) }
-    }
-
-    intrinsics::const_eval_select((ptr,), strlen_ct, strlen_rt)
+    )
 }
 
 /// An iterator over the bytes of a [`CStr`], without the nul terminator.
@@ -860,6 +887,18 @@ impl FusedIterator for Bytes<'_> {}
 mod verify {
     use super::*;
 
+    // Helper function
+    fn arbitrary_cstr(slice: &[u8]) -> &CStr {
+        // At a minimum, the slice has a null terminator to form a valid CStr.
+        kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
+        let result = CStr::from_bytes_until_nul(&slice);
+        // Given the assumption, from_bytes_until_nul should never fail
+        assert!(result.is_ok());
+        let c_str = result.unwrap();
+        assert!(c_str.is_safe());
+        c_str
+    }
+
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
     #[kani::proof]
     #[kani::unwind(32)] // 7.3 seconds when 16; 33.1 seconds when 32
@@ -874,5 +913,198 @@ mod verify {
         if let Ok(c_str) = result {
             assert!(c_str.is_safe());
         }
+    }
+
+    //  pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr
+    #[kani::proof_for_contract(CStr::from_bytes_with_nul_unchecked)]
+    #[kani::unwind(33)]
+    fn check_from_bytes_with_nul_unchecked() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+
+        // Kani assumes that the input slice is null-terminated and contains
+        // no intermediate null bytes
+        let c_str = unsafe { CStr::from_bytes_with_nul_unchecked(slice) };
+        // Kani ensures that the output CStr holds the CStr safety invariant
+
+        // Correctness check
+        let bytes = c_str.to_bytes();
+        let len = bytes.len();
+        assert_eq!(bytes, &slice[..len]);
+    }
+
+    // pub fn bytes(&self) -> Bytes<'_>
+    #[kani::proof]
+    #[kani::unwind(32)]
+    fn check_bytes() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let bytes_iterator = c_str.bytes();
+        let bytes_expected = c_str.to_bytes();
+
+        // Compare the bytes obtained from the iterator and the slice
+        // bytes_expected.iter().copied() converts the slice into an iterator over u8
+        assert!(bytes_iterator.eq(bytes_expected.iter().copied()));
+        assert!(c_str.is_safe());
+    }
+
+    // pub const fn to_str(&self) -> Result<&str, str::Utf8Error>
+    #[kani::proof]
+    #[kani::unwind(32)]
+    fn check_to_str() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        // a double conversion here and assertion, if the bytes are still the same, function is valid
+        let str_result = c_str.to_str();
+        if let Ok(s) = str_result {
+            assert_eq!(s.as_bytes(), c_str.to_bytes());
+        }
+        assert!(c_str.is_safe());
+    }
+
+    // pub const fn as_ptr(&self) -> *const c_char
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_as_ptr() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let ptr = c_str.as_ptr();
+        let bytes_with_nul = c_str.to_bytes_with_nul();
+        let len = bytes_with_nul.len();
+
+        // We ensure that `ptr` is valid for reads of `len` bytes
+        unsafe {
+            for i in 0..len {
+                // Iterate and get each byte in the C string from our raw ptr
+                let byte_at_ptr = *ptr.add(i);
+                // Get the byte at every pos
+                let byte_in_cstr = bytes_with_nul[i];
+                // Compare the two bytes to ensure they are equal
+                assert_eq!(byte_at_ptr as u8, byte_in_cstr);
+            }
+        }
+        assert!(c_str.is_safe());
+    }
+
+    // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn check_from_bytes_with_nul() {
+        const MAX_SIZE: usize = 16;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+
+        let result = CStr::from_bytes_with_nul(slice);
+        if let Ok(c_str) = result {
+            assert!(c_str.is_safe());
+        }
+    }
+
+    // pub const fn count_bytes(&self) -> usize
+    #[kani::proof]
+    #[kani::unwind(32)]
+    fn check_count_bytes() {
+        const MAX_SIZE: usize = 32;
+        let mut bytes: [u8; MAX_SIZE] = kani::any();
+
+        // Non-deterministically generate a length within the valid range [0, MAX_SIZE]
+        let mut len: usize = kani::any_where(|&x| x < MAX_SIZE);
+
+        // If a null byte exists before the generated length
+        // adjust len to its position
+        if let Some(pos) = bytes[..len].iter().position(|&x| x == 0) {
+            len = pos;
+        } else {
+            // If no null byte, insert one at the chosen length
+            bytes[len] = 0;
+        }
+
+        let c_str = CStr::from_bytes_until_nul(&bytes).unwrap();
+        // Verify that count_bytes matches the adjusted length
+        assert_eq!(c_str.count_bytes(), len);
+        assert!(c_str.is_safe());
+    }
+
+    // pub const fn to_bytes(&self) -> &[u8]
+    #[kani::proof]
+    #[kani::unwind(32)]
+    fn check_to_bytes() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let bytes = c_str.to_bytes();
+        let end_idx = bytes.len();
+        // Comparison does not include the null byte
+        assert_eq!(bytes, &slice[..end_idx]);
+        assert!(c_str.is_safe());
+    }
+
+    // pub const fn to_bytes_with_nul(&self) -> &[u8]
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_to_bytes_with_nul() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let bytes = c_str.to_bytes_with_nul();
+        let end_idx = bytes.len();
+        // Comparison includes the null byte
+        assert_eq!(bytes, &slice[..end_idx]);
+        assert!(c_str.is_safe());
+    }
+
+    // const unsafe fn strlen(ptr: *const c_char) -> usize
+    #[kani::proof_for_contract(super::strlen)]
+    #[kani::unwind(33)]
+    fn check_strlen_contract() {
+        const MAX_SIZE: usize = 32;
+        let mut string: [u8; MAX_SIZE] = kani::any();
+        let ptr = string.as_ptr() as *const c_char;
+
+        unsafe {
+            super::strlen(ptr);
+        }
+    }
+
+    // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr
+    #[kani::proof_for_contract(CStr::from_ptr)]
+    #[kani::unwind(33)]
+    fn check_from_ptr_contract() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let ptr = string.as_ptr() as *const c_char;
+
+        unsafe {
+            CStr::from_ptr(ptr);
+        }
+    }
+
+    // pub const fn is_empty(&self) -> bool
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_is_empty() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let bytes = c_str.to_bytes(); // does not include null terminator
+        let expected_is_empty = bytes.len() == 0;
+        assert_eq!(expected_is_empty, c_str.is_empty());
+        assert!(c_str.is_safe());
     }
 }

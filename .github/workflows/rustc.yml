@@ -4,6 +4,7 @@
 name: Rust Tests
 on:
   workflow_dispatch:
+  merge_group:
   pull_request:
     branches: [ main ]
   push:
@@ -18,7 +19,7 @@ defaults:
     shell: bash
 
 jobs:
-  build:
+  upstream_test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -27,8 +28,8 @@ jobs:
     steps:
       - name: Checkout Library
         uses: actions/checkout@v4
-        with:
-          path: head
 
       - name: Run rustc script
-        run: bash ./head/scripts/check_rustc.sh ${{github.workspace}}/head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/check_rustc.sh
