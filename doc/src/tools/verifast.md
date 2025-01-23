@@ -150,10 +150,11 @@ For a function not marked as `unsafe`, VeriFast generates a specification expres
 The generated specification for `replace` is as follows:
 ```rust
 fn replace<T>(dest: &mut T, src: T) -> T
-//@ req thread_token(?_t) &*& *dest |-> ?dest0 &*& <T>.own(_t, dest0) &*& <T>.own(_t, src);
+//@ req thread_token(?_t) &*& *dest |-> ?dest0 &*& <T>.own(_t, dest0) &*& <T>.own(_t, src) &*& _t == currentThread;
 //@ ens thread_token(_t) &*& *dest |-> ?dest1 &*& <T>.own(_t, dest1) &*& <T>.own(_t, result);
 ```
-The thread token serves as a proof that the function is running in thread `_t`, which is the thread that owns the incoming T values. (This matters in case T is not [Send](https://doc.rust-lang.org/nomicon/send-and-sync.html).) `<T>.own(t, v)` expresses ownership of the T value `v` by thread `t`.
+`<T>.own(t, v)` expresses ownership of the T value `v` accessible to thread `t` (in case T is not [Send](https://doc.rust-lang.org/nomicon/send-and-sync.html)).
+`thread_token(t)` represents permission to open *nonatomic invariants* and *nonatomic borrows* at thread `t`; these contain resources shared in a non-thread-safe way at thread `t`.
 
 For more information on how to verify safe abstractions in VeriFast, see the relevant [chapter](https://verifast.github.io/verifast/rust-reference/non-unsafe-funcs.html) in the VeriFast for Rust Reference and the [examples](https://github.com/verifast/verifast/tree/master/tests/rust/safe_abstraction) (in `tests/rust/safe_abstraction` in the VeriFast binary distributions). (See [`testsuite.mysh`](https://github.com/verifast/verifast/blob/master/tests/rust/testsuite.mysh) to learn the command line to use to verify a particular example.)
 
