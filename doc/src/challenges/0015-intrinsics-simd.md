@@ -1,11 +1,11 @@
-# Challenge 14: High-Assurance SIMD Intrinsics for Rust
+# Challenge 14: Contracts and Tests for SIMD Intrinsics
 
 - **Status:** Open
 - **Reward:** 
 - **Solution:** 
 - **Tracking Issue:** https://github.com/model-checking/verify-rust-std/issues/173
-- **Start date:** 2024/12/01
-- **End date:** 2025/06/01
+- **Start date:** 2025/02/01
+- **End date:** 2025/08/01
 
 -------------------
 
@@ -145,5 +145,5 @@ of the Rust [HashMap](https://doc.rust-lang.org/std/collections/struct.HashMap.h
 An additional success criterion is to show that these contracts can be
 used by verification tools to prove properties about example code that
 uses them. Of particular interest is code used in cryptographic
-libraries, but even other standalone examples using simd intrinsics
+libraries, but even other standalone examples using SIMD intrinsics
 would be considered valuable. 
