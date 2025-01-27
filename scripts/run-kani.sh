@@ -7,7 +7,7 @@ usage() {
     echo "Options:"
     echo "  -h, --help         Show this help message"
     echo "  -p, --path <path>  Optional: Specify a path to a copy of the std library. For example, if you want to run the script from an outside directory."
-    echo "  --run <verify-std|list>  Optional: Specify whether to run 'verify-std' or 'list' command. Defaults to 'verify-std' if not specified."
+    echo "  --run <verify-std|list|metrics>  Optional: Specify whether to run the 'kani verify-std' command, 'kani list' command, or collect Kani-specific metrics. Defaults to 'verify-std' if not specified."
     echo "  --kani-args  <command arguments to kani>  Optional: Arguments to pass to the command. Simply pass them in the same way you would to the Kani binary. This should be the last argument."
     exit 1
 }
@@ -34,11 +34,11 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         --run)
-            if [[ -n $2 && ($2 == "verify-std" || $2 == "list") ]]; then
+            if [[ -n $2 && ($2 == "verify-std" || $2 == "list" || $2 == "metrics") ]]; then
                 run_command=$2
                 shift 2
             else
-                echo "Error: Invalid run command. Must be 'verify-std' or 'list'."
+                echo "Error: Invalid run command. Must be 'verify-std', 'list', or 'metrics'."
                 usage
             fi
             ;;
@@ -298,6 +298,20 @@ main() {
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         "$kani_path" list -Z list $unstable_args ./library --std --format markdown
+    elif [[ "$run_command" == "metrics" ]]; then
+        local current_dir=$(pwd)
+        echo "Running Kani list command..."
+        "$kani_path" list -Z list $unstable_args ./library --std --format json
+        echo "Running Kani's std-analysis command..."
+        pushd $build_dir
+        ./scripts/std-analysis.sh
+        popd
+        pushd scripts/kani-std-analysis
+        pip install -r requirements.txt
+        echo "Computing Kani-specific metrics..."
+        ./kani_std_analysis.py --kani-list-file $current_dir/kani-list.json
+        popd
+        rm kani-list.json
     fi
 }
 

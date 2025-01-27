@@ -26,6 +26,8 @@ library/target
 *.rmeta
 *.mir
 Cargo.lock
+/doc/mdbook-metrics/target
+*.png
 
 ## Temporary files
 *~
@@ -48,8 +50,6 @@ package-lock.json
 
 ## GOTO-Transcoder
 goto-transcoder
-
-
 # Added by cargo
 #
 # already existing elements were commented out
