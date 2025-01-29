@@ -4642,6 +4642,114 @@ mod verify {
         let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
         unsafe { copy_nonoverlapping(src, dst, kani::any()) }
     }
+    
+    //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does not currently support contracts
+    #[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
+    #[requires(ub_checks::can_dereference(&input as *const T as *const U))] //output can be deref'd as value of type U
+    #[allow(dead_code)]
+    unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
+        unsafe { transmute_unchecked(input) }
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_zero_size() {
+        let empty_arr: [u8;0] = [];
+        let unit_val: () = unsafe { transmute_unchecked_wrapper(empty_arr) };
+        assert!(unit_val == ());
+    }
+    
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_u32_to_char() {
+        let num: u32 = kani::any();
+        let c: char = unsafe {transmute_unchecked_wrapper(num)};
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn transmute_invalid_u32_to_char() {
+        let num: u32 = kani::any();
+        let c: char = unsafe {transmute_unchecked_wrapper(num)};
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_u8_to_bool() {
+        let num: u8 = kani::any();
+        let b: bool = unsafe {transmute_unchecked_wrapper(num)};
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn transmute_invalid_u8_to_bool() {
+        let num: u8 = kani::any();
+        let b: bool =  unsafe {transmute_unchecked_wrapper(num)};
+    }
+
+    #[repr(C)]
+    struct A {
+        x: u8,
+        y: u16,
+        z: u8,
+    }
+
+    #[repr(C)]
+    struct B {
+        x: u8,
+        y: u8,
+        z: u16,
+    }
+
+    #[repr(C)]
+    struct C {
+        x: u16,
+        y: u16,
+        z: u16,
+    }
+
+    //This doesn't compile, A and B have different sizes due to padding
+    //This is likely due to a bug in Kani, see Kani issue 3839
+    /*#[kani::proof_for_contract(transmute_unchecked_wrapper)]
+      fn transmute_unchecked_padding() {
+      let a = A {x: kani::any(), y: kani::any(), z: kani::any()};
+      let x = a.x;
+
+      let b: B = unsafe { transmute_unchecked_wrapper(a) };
+      assert!(b.x == x);
+    }*/
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_padding() {
+        let a = A {x: kani::any(), y: kani::any(), z: kani::any()};
+        let x = a.x;
+
+        let c: C = unsafe { transmute_unchecked_wrapper(a) };
+        assert!(c.x as u8 == x);
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_2ways_i64_u64() {
+        let a: i64 = kani::any();
+        let b: u64 = unsafe { transmute_unchecked_wrapper(a) };
+        let c: i64 = unsafe { transmute_unchecked_wrapper(b) };
+        assert_eq!(a,c);
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_2ways_i32_u32() {
+        let a: i32 = kani::any();
+        let b: u32 = unsafe { transmute_unchecked_wrapper(a) };
+        let c: i32 = unsafe { transmute_unchecked_wrapper(b) };
+        assert_eq!(a,c);
+    }
+
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_2ways_i8_u8() {
+        let a: i8 = kani::any();
+        let b: u8 = unsafe { transmute_unchecked_wrapper(a) };
+        let c: i8 = unsafe { transmute_unchecked_wrapper(b) };
+        assert_eq!(a,c);
+    }	
 
     // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
     // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
