@@ -10,6 +10,11 @@ use core::hint;
 #[cfg(not(test))]
 use core::ptr::{self, NonNull};
 
+use safety::{ensures,requires};
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+use core::kani;
+
 #[cfg(test)]
 mod tests;
 
@@ -187,6 +192,7 @@ pub unsafe fn alloc_zeroed(layout: Layout) -> *mut u8 {
 impl Global {
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[ensures(|ret| layout.size() != 0 || ret.is_ok())]
     fn alloc_impl(&self, layout: Layout, zeroed: bool) -> Result<NonNull<[u8]>, AllocError> {
         match layout.size() {
             0 => Ok(NonNull::slice_from_raw_parts(layout.dangling(), 0)),
@@ -200,6 +206,10 @@ impl Global {
     }
 
     // SAFETY: Same as `Allocator::grow`
+    #[requires(new_layout.size() >= old_layout.size())]
+    #[requires(old_layout.size() == 0 || old_layout.align() != 0)]
+    #[requires(new_layout.size() == 0 || new_layout.align() != 0)]
+    #[requires(ptr.as_ptr() as usize % old_layout.align() == 0)]
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     unsafe fn grow_impl(
@@ -265,6 +275,8 @@ unsafe impl Allocator for Global {
 
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(layout.size() == 0 || layout.align() != 0)]
+    #[requires(ptr.as_ptr() as usize % layout.align() == 0)]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         if layout.size() != 0 {
             // SAFETY: `layout` is non-zero in size,
@@ -275,6 +287,10 @@ unsafe impl Allocator for Global {
 
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(new_layout.size() >= old_layout.size())]
+    #[requires(old_layout.size() == 0 || old_layout.align() != 0)]
+    #[requires(new_layout.size() == 0 || new_layout.align() != 0)]
+    #[requires(ptr.as_ptr() as usize % old_layout.align() == 0)]
     unsafe fn grow(
         &self,
         ptr: NonNull<u8>,
@@ -287,6 +303,10 @@ unsafe impl Allocator for Global {
 
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(new_layout.size() >= old_layout.size())]
+    #[requires(old_layout.size() == 0 || old_layout.align() != 0)]
+    #[requires(new_layout.size() == 0 || new_layout.align() != 0)]
+    #[requires(ptr.as_ptr() as usize % old_layout.align() == 0)]
     unsafe fn grow_zeroed(
         &self,
         ptr: NonNull<u8>,
@@ -299,6 +319,10 @@ unsafe impl Allocator for Global {
 
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(new_layout.size() <= old_layout.size())]
+    #[requires(old_layout.size() == 0 || old_layout.align() != 0)]
+    #[requires(new_layout.size() == 0 || new_layout.align() != 0)]
+    #[requires(ptr.as_ptr() as usize % old_layout.align() == 0)]
     unsafe fn shrink(
         &self,
         ptr: NonNull<u8>,
@@ -444,4 +468,80 @@ pub mod __alloc_error_handler {
             )
         }
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    // fn alloc_impl(&self, layout: Layout, zeroed: bool) -> Result<NonNull<[u8]>, AllocError>
+    #[kani::proof_for_contract(Global::alloc_impl)]
+    pub fn check_alloc_impl() {
+        let _ = Global.alloc_impl(kani::any(), kani::any());
+    }
+
+    // TODO: Kani correctly detects that the precondition is too weak. We'd need a way to express
+    // that ptr either points to a ZST (we can do this), or else is heap-allocated (we cannot).
+    // // unsafe fn grow_impl(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout, zeroed: bool) -> Result<NonNull<[u8]>, AllocError>
+    // #[kani::proof_for_contract(Global::grow_impl)]
+    // pub fn check_grow_impl() {
+    //     let raw_ptr = kani::any::<usize>() as *mut u8;
+    //     unsafe {
+    //         let n = NonNull::new_unchecked(raw_ptr);
+    //         let _ = Global.grow_impl(n, kani::any(), kani::any(), kani::any());
+    //     }
+    // }
+
+    // TODO: disabled as Kani does not currently support contracts on traits. See
+    // https://github.com/model-checking/kani/issues/1997
+    // // unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout)
+    // #[kani::proof_for_contract(Allocator::deallocate)]
+    // pub fn check_deallocate() {
+    //     let obj : &dyn Allocator = &Global;
+    //     let raw_ptr = kani::any::<usize>() as *mut u8;
+    //     unsafe {
+    //         let n = NonNull::new_unchecked(raw_ptr);
+    //         let _ = obj.deallocate(n, kani::any());
+    //     }
+    // }
+
+    // TODO: disabled as Kani does not currently support contracts on traits. See
+    // https://github.com/model-checking/kani/issues/1997
+    // // unsafe fn grow(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout) -> Result<NonNull<[u8]>, AllocError>
+    // #[kani::proof_for_contract(Allocator::grow)]
+    // pub fn check_grow() {
+    //     let obj : &dyn Allocator = &Global;
+    //     let raw_ptr = kani::any::<usize>() as *mut u8;
+    //     unsafe {
+    //         let n = NonNull::new_unchecked(raw_ptr);
+    //         let _ = obj.grow(n, kani::any(), kani::any());
+    //     }
+    // }
+
+    // TODO: disabled as Kani does not currently support contracts on traits. See
+    // https://github.com/model-checking/kani/issues/1997
+    // // unsafe fn grow_zeroed(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout) -> Result<NonNull<[u8]>, AllocError>
+    // #[kani::proof_for_contract(Allocator::grow_zeroed)]
+    // pub fn check_grow_zeroed() {
+    //     let obj : &dyn Allocator = &Global;
+    //     let raw_ptr = kani::any::<usize>() as *mut u8;
+    //     unsafe {
+    //         let n = NonNull::new_unchecked(raw_ptr);
+    //         let _ = obj.grow_zeroed(n, kani::any(), kani::any());
+    //     }
+    // }
+
+    // TODO: disabled as Kani does not currently support contracts on traits. See
+    // https://github.com/model-checking/kani/issues/1997
+    // // unsafe fn shrink(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout) -> Result<NonNull<[u8]>, AllocError>
+    // #[kani::proof_for_contract(Allocator::shrink)]
+    // pub fn check_shrink() {
+    //     let obj : &dyn Allocator = &Global;
+    //     let raw_ptr = kani::any::<usize>() as *mut u8;
+    //     unsafe {
+    //         let n = NonNull::new_unchecked(raw_ptr);
+    //         let _ = obj.shrink(n, kani::any(), kani::any());
+    //     }
+    // }
 }
