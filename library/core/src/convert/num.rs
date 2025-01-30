@@ -1,4 +1,10 @@
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
 use crate::num::TryFromIntError;
+#[allow(unused_imports)]
+use crate::ub_checks::float_to_int_in_range;
 
 mod private {
     /// This trait being unreachable from outside the crate
@@ -25,6 +31,9 @@ macro_rules! impl_float_to_int {
             #[unstable(feature = "convert_float_to_int", issue = "67057")]
             impl FloatToInt<$Int> for $Float {
                 #[inline]
+                #[requires(
+                    self.is_finite() && float_to_int_in_range::<$Float, $Int>(self)
+                )]
                 unsafe fn to_int_unchecked(self) -> $Int {
                     // SAFETY: the safety contract must be upheld by the caller.
                     unsafe { crate::intrinsics::float_to_int_unchecked(self) }
@@ -540,3 +549,313 @@ impl_nonzero_int_try_from_nonzero_int!(i32 => u8, u16, u32, u64, u128, usize);
 impl_nonzero_int_try_from_nonzero_int!(i64 => u8, u16, u32, u64, u128, usize);
 impl_nonzero_int_try_from_nonzero_int!(i128 => u8, u16, u32, u64, u128, usize);
 impl_nonzero_int_try_from_nonzero_int!(isize => u8, u16, u32, u64, u128, usize);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    macro_rules! generate_nonzero_int_from_nonzero_int_harness {
+        ($Small:ty => $Large:ty, $harness:ident) => {
+            #[kani::proof]
+            pub fn $harness() {
+                let x: NonZero<$Small> = kani::any();
+                let _ = NonZero::<$Large>::from(x);
+            }
+        };
+    }
+
+    macro_rules! generate_nonzero_int_from_nonzero_int_harnesses {
+        ($ns:ident, $Small:ty => $($Large:tt),+ $(,)?) => {
+            mod $ns {
+                use super::*;
+
+                $(
+                    mod $Large {
+                        use super::*;
+
+                        generate_nonzero_int_from_nonzero_int_harness!(
+                            $Small => $Large,
+                            check_nonzero_int_from_nonzero_int
+                        );
+                    }
+                )+
+            }
+        };
+    }
+
+    // non-zero unsigned integer -> non-zero integer, infallible
+    generate_nonzero_int_from_nonzero_int_harnesses!(
+        check_nonzero_int_from_u8,
+        u8 => u16, u32, u64, u128, usize, i16, i32, i64, i128, isize,
+    );
+    generate_nonzero_int_from_nonzero_int_harnesses!(
+        check_nonzero_int_from_u16,
+        u16 => u32, u64, u128, usize, i32, i64, i128,
+    );
+    generate_nonzero_int_from_nonzero_int_harnesses!(
+        check_nonzero_int_from_u32,
+        u32 => u64, u128, i64, i128,
+    );
+    generate_nonzero_int_from_nonzero_int_harnesses!(
+        check_nonzero_int_from_u64,
+        u64 => u128, i128,
+    );
+
+    // non-zero signed integer -> non-zero signed integer, infallible
+    generate_nonzero_int_from_nonzero_int_harnesses!(
+        check_nonzero_int_from_i8,
+        i8 => i16, i32, i64, i128, isize,
+    );
+    generate_nonzero_int_from_nonzero_int_harnesses!(
+        check_nonzero_int_from_i16,
+        i16 => i32, i64, i128, isize,
+    );
+    generate_nonzero_int_from_nonzero_int_harnesses!(
+        check_nonzero_int_from_i32,
+        i32 => i64, i128,
+    );
+    generate_nonzero_int_from_nonzero_int_harnesses!(
+        check_nonzero_int_from_i64,
+        i64 => i128,
+    );
+
+    macro_rules! generate_nonzero_int_try_from_nonzero_int_harness {
+        ($source:ty => $target:ty, $harness_pass:ident, $harness_panic:ident $(,)?) => {
+            #[kani::proof]
+            pub fn $harness_pass() {
+                let x_inner: $source = kani::any_where(|&v| {
+                    (v > 0 && (v as u128) <= (<$target>::MAX as u128))
+                        || (v < 0 && (v as i128) >= (<$target>::MIN as i128))
+                });
+                let x = NonZero::new(x_inner).unwrap();
+                let _ = NonZero::<$target>::try_from(x).unwrap();
+            }
+
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $harness_panic() {
+                let x_inner: $source = kani::any_where(|&v| {
+                    (v > 0 && (v as u128) > (<$target>::MAX as u128))
+                        || (v < 0 && (v as i128) < (<$target>::MIN as i128))
+                });
+                let x = NonZero::new(x_inner).unwrap();
+                let _ = NonZero::<$target>::try_from(x).unwrap();
+            }
+        };
+        ($source:ty => $target:ty, $harness_infallible:ident $(,)?) => {
+            #[kani::proof]
+            pub fn $harness_infallible() {
+                let x: NonZero<$source> = kani::any();
+                let _ = NonZero::<$target>::try_from(x).unwrap();
+            }
+        };
+    }
+
+    macro_rules! generate_nonzero_int_try_from_nonzero_int_harnesses {
+        ($ns:ident, $source:ty => ([$($target:tt),* $(,)?], [$($infallible:tt),* $(,)?] $(,)?)) => {
+            mod $ns {
+                use super::*;
+
+                $(
+                    mod $target {
+                        use super::*;
+
+                        generate_nonzero_int_try_from_nonzero_int_harness!(
+                            $source => $target,
+                            check_nonzero_int_try_from_nonzero_int,
+                            check_nonzero_int_try_from_nonzero_int_should_panic,
+                        );
+                    }
+                )*
+                $(
+                    mod $infallible {
+                        use super::*;
+
+                        generate_nonzero_int_try_from_nonzero_int_harness!(
+                            $source => $infallible,
+                            check_nonzero_int_try_from_nonzero_int_infallible,
+                        );
+                    }
+                )*
+            }
+        };
+    }
+
+    // unsigned non-zero integer -> non-zero integer fallible
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_u16,
+        u16 => (
+            [u8, i8, i16],
+            [isize],
+        )
+    );
+
+    #[cfg(target_pointer_width = "16")]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_u16,
+        u16 => (
+            [u8, i8, i16, isize],
+            [],
+        )
+    );
+
+    #[cfg(target_pointer_width = "64")]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_u32,
+        u32 => (
+            [u8, u16, i8, i16, i32],
+            [usize, isize],
+        )
+    );
+
+    #[cfg(target_pointer_width = "32")]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_u32,
+        u32 => (
+            [u8, u16, usize, i8, i16, i32],
+            [isize],
+        )
+    );
+
+    #[cfg(target_pointer_width = "16")]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_u32,
+        u32 => (
+            [u8, u16, usize, i8, i16, i32, isize],
+            [],
+        )
+    );
+
+    #[cfg(target_pointer_width = "64")]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_u64,
+        u64 => (
+            [u8, u16, u32, i8, i16, i32, i64, isize],
+            [usize],
+        )
+    );
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_u64,
+        u64 => (
+            [u8, u16, u32, usize, i8, i16, i32, i64, isize],
+            [],
+        )
+    );
+
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_u128,
+        u128 => (
+            [u8, u16, u32, u64, usize, i8, i16, i32, i64, i128, isize],
+            [],
+        )
+    );
+
+    // signed non-zero integer -> non-zero integer fallible
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_i8,
+        i8 => (
+            [u8, u16, u32, u64, u128, usize],
+            [],
+        )
+    );
+
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_i16,
+        i16 => (
+            [u8, u16, u32, u64, u128, usize, i8],
+            [],
+        )
+    );
+
+    #[cfg(any(target_pointer_width = "32", target_pointer_width = "64"))]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_i32,
+        i32 => (
+            [u8, u16, u32, u64, u128, usize, i8, i16],
+            [isize],
+        )
+    );
+
+    #[cfg(target_pointer_width = "16")]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_i32,
+        i32 => (
+            [u8, u16, u32, u64, u128, usize, i8, i16, isize],
+            [],
+        )
+    );
+
+    #[cfg(target_pointer_width = "64")]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_i64,
+        i64 => (
+            [u8, u16, u32, u64, u128, usize, i8, i16, i32],
+            [isize],
+        )
+    );
+
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_i64,
+        i64 => (
+            [u8, u16, u32, u64, u128, usize, i8, i16, i32, isize],
+            [],
+        )
+    );
+
+    generate_nonzero_int_try_from_nonzero_int_harnesses!(
+        check_nonzero_int_try_from_i128,
+        i128 => (
+            [u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, isize],
+            [],
+        )
+    );
+
+    macro_rules! generate_float_to_int_harness {
+        ($Float:ty => $Int:ty, $harness:ident) => {
+            #[kani::proof_for_contract(<$Float>::to_int_unchecked)]
+            pub fn $harness() {
+                let x: $Float = kani::any();
+                let _: $Int = unsafe { x.to_int_unchecked() };
+            }
+        };
+    }
+
+    macro_rules! generate_float_to_int_harnesses {
+        ($ns:ident, $(($Float:tt => $($Int:tt),+ $(,)?)),+ $(,)?) => {
+            mod $ns {
+                use super::*;
+
+                $(
+                    mod $Float {
+                        use super::*;
+
+                        $(
+                            mod $Int {
+                                use super::*;
+
+                                generate_float_to_int_harness!(
+                                    $Float => $Int,
+                                    check_float_to_int_unchecked
+                                );
+                            }
+                        )+
+                    }
+                )+
+            }
+        };
+    }
+
+    // float -> integer unchecked
+    generate_float_to_int_harnesses!(
+        check_f16_to_int_unchecked,
+        (f16 => u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize),
+        (f32 => u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize),
+        (f64 => u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize),
+        (f128 => u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize),
+    );
+}
