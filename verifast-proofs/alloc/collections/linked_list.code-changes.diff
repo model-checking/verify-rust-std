@@ -1,0 +1,1209 @@
+0a1,2
+> // verifast_options{prover:z3v4.5 skip_specless_fns}
+> 
+13c15,27
+< #![stable(feature = "rust1", since = "1.0.0")]
+---
+> // This is a slightly tweaked version of https://github.com/rust-lang/rust/blob/c290e9de32e8ba6a673ef125fde40eadd395d170/library/alloc/src/collections/linked_list.rs
+> 
+> //#![stable(feature = "rust1", since = "1.0.0")]
+> #![feature(rustc_attrs)]
+> #![feature(dropck_eyepatch)]
+> #![feature(specialization)]
+> #![feature(allocator_api)]
+> #![feature(extend_one)]
+> #![feature(exact_size_is_empty)]
+> #![feature(hasher_prefixfree_extras)]
+> #![feature(box_into_inner)]
+> 
+> use std as core;
+15a30
+> use core::fmt;
+16a32
+> use core::iter::FromIterator;
+18a35
+> use core::mem;
+20d36
+< use core::{fmt, mem};
+22,24c38,40
+< use super::SpecExtend;
+< use crate::alloc::{Allocator, Global};
+< use crate::boxed::Box;
+---
+> use std::alloc::{Allocator, Global};
+> use std::boxed::Box;
+> 
+28a45,48
+> trait SpecExtend<I> {
+>     fn spec_extend(&mut self, iter: I);
+> }
+> 
+47,48c67,68
+< #[stable(feature = "rust1", since = "1.0.0")]
+< #[cfg_attr(not(test), rustc_diagnostic_item = "LinkedList")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+> //#[cfg_attr(not(test), rustc_diagnostic_item = "LinkedList")]
+52c72
+<     #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+---
+>     /*#[unstable(feature = "allocator_api", issue = "32838")]*/ A: Allocator = Global,
+70c90
+< /// documentation for more.
+---
+> /// documentation for more. 
+72c92
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+80,94c100,114
+< #[stable(feature = "collection_debug", since = "1.17.0")]
+< impl<T: fmt::Debug> fmt::Debug for Iter<'_, T> {
+<     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+<         f.debug_tuple("Iter")
+<             .field(&*mem::ManuallyDrop::new(LinkedList {
+<                 head: self.head,
+<                 tail: self.tail,
+<                 len: self.len,
+<                 alloc: Global,
+<                 marker: PhantomData,
+<             }))
+<             .field(&self.len)
+<             .finish()
+<     }
+< }
+---
+> //#[stable(feature = "collection_debug", since = "1.17.0")]
+> // impl<T: fmt::Debug> fmt::Debug for Iter<'_, T> {
+> //     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+> //         f.debug_tuple("Iter")
+> //             .field(&*mem::ManuallyDrop::new(LinkedList {
+> //                 head: self.head,
+> //                 tail: self.tail,
+> //                 len: self.len,
+> //                 alloc: Global,
+> //                 marker: PhantomData,
+> //             }))
+> //             .field(&self.len)
+> //             .finish()
+> //     }
+> // }
+97c117
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+109c129
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+117,131c137,151
+< #[stable(feature = "collection_debug", since = "1.17.0")]
+< impl<T: fmt::Debug> fmt::Debug for IterMut<'_, T> {
+<     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+<         f.debug_tuple("IterMut")
+<             .field(&*mem::ManuallyDrop::new(LinkedList {
+<                 head: self.head,
+<                 tail: self.tail,
+<                 len: self.len,
+<                 alloc: Global,
+<                 marker: PhantomData,
+<             }))
+<             .field(&self.len)
+<             .finish()
+<     }
+< }
+---
+> //#[stable(feature = "collection_debug", since = "1.17.0")]
+> // impl<T: fmt::Debug> fmt::Debug for IterMut<'_, T> {
+> //     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+> //         f.debug_tuple("IterMut")
+> //             .field(&*mem::ManuallyDrop::new(LinkedList {
+> //                 head: self.head,
+> //                 tail: self.tail,
+> //                 len: self.len,
+> //                 alloc: Global,
+> //                 marker: PhantomData,
+> //             }))
+> //             .field(&self.len)
+> //             .finish()
+> //     }
+> // }
+140c160
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+143c163
+<     #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+---
+>     /*#[unstable(feature = "allocator_api", issue = "32838")]*/ A: Allocator = Global,
+148,153c168,173
+< #[stable(feature = "collection_debug", since = "1.17.0")]
+< impl<T: fmt::Debug, A: Allocator> fmt::Debug for IntoIter<T, A> {
+<     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+<         f.debug_tuple("IntoIter").field(&self.list).finish()
+<     }
+< }
+---
+> //#[stable(feature = "collection_debug", since = "1.17.0")]
+> // impl<T: fmt::Debug, A: Allocator> fmt::Debug for IntoIter<T, A> {
+> //     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+> //         f.debug_tuple("IntoIter").field(&self.list).finish()
+> //     }
+> // }
+156c176,177
+<     fn new(element: T) -> Self {
+---
+>     unsafe fn new(element: T) -> Self
+>     {
+160,161c181,183
+<     fn into_element<A: Allocator>(self: Box<Self, A>) -> T {
+<         self.element
+---
+>     unsafe fn into_element<A: Allocator>(self: Box<Self, A>) -> T
+>     {
+>         Box::into_inner(self).element // self.element
+173c195,196
+<     unsafe fn push_front_node(&mut self, node: NonNull<Node<T>>) {
+---
+>     unsafe fn push_front_node(&mut self, node: NonNull<Node<T>>)
+>     {
+179c202
+<             let node = Some(node);
+---
+>             let node_ = Some(node);
+182c205,207
+<                 None => self.tail = node,
+---
+>                 None => {
+>                     self.tail = node_
+>                 }
+184c209,211
+<                 Some(head) => (*head.as_ptr()).prev = node,
+---
+>                 Some(head) => {
+>                     (*head.as_ptr()).prev = node_;
+>                 }
+187c214
+<             self.head = node;
+---
+>             self.head = node_;
+194c221,222
+<     fn pop_front_node(&mut self) -> Option<Box<Node<T>, &A>> {
+---
+>     unsafe fn pop_front_node<'a>(&'a mut self) -> Option<Box<Node<T>, &'a A>>
+>     {
+197,199c225,235
+<         self.head.map(|node| unsafe {
+<             let node = Box::from_raw_in(node.as_ptr(), &self.alloc);
+<             self.head = node.next;
+---
+>         match self.head {
+>             None => None,
+>             Some(node) => unsafe {
+>                 self.head = (*node.as_ptr()).next;
+>                 let node_ = Box::from_raw_in(node.as_ptr(), &self.alloc);
+> 
+>                 match self.head {
+>                     None => self.tail = None,
+>                     // Not creating new mutable (unique!) references overlapping `element`.
+>                     Some(head) => (*head.as_ptr()).prev = None,
+>                 }
+201,204c237,238
+<             match self.head {
+<                 None => self.tail = None,
+<                 // Not creating new mutable (unique!) references overlapping `element`.
+<                 Some(head) => (*head.as_ptr()).prev = None,
+---
+>                 self.len -= 1;
+>                 Some(node_)
+206,209c240
+< 
+<             self.len -= 1;
+<             node
+<         })
+---
+>         }
+224c255
+<             let node = Some(node);
+---
+>             let node_ = Some(node);
+227c258
+<                 None => self.head = node,
+---
+>                 None => self.head = node_,
+229c260
+<                 Some(tail) => (*tail.as_ptr()).next = node,
+---
+>                 Some(tail) => (*tail.as_ptr()).next = node_,
+232c263
+<             self.tail = node;
+---
+>             self.tail = node_;
+242,244c273,283
+<         self.tail.map(|node| unsafe {
+<             let node = Box::from_raw_in(node.as_ptr(), &self.alloc);
+<             self.tail = node.prev;
+---
+>         match self.tail {
+>             None => None,
+>             Some(node) => unsafe {
+>                 let node_ = Box::from_raw_in(node.as_ptr(), &self.alloc);
+>                 self.tail = node_.prev;
+> 
+>                 match self.tail {
+>                     None => self.head = None,
+>                     // Not creating new mutable (unique!) references overlapping `element`.
+>                     Some(tail) => (*tail.as_ptr()).next = None,
+>                 }
+246,249c285,286
+<             match self.tail {
+<                 None => self.head = None,
+<                 // Not creating new mutable (unique!) references overlapping `element`.
+<                 Some(tail) => (*tail.as_ptr()).next = None,
+---
+>                 self.len -= 1;
+>                 Some(node_)
+251,254c288
+< 
+<             self.len -= 1;
+<             node
+<         })
+---
+>         }
+264,265c298,300
+<     unsafe fn unlink_node(&mut self, mut node: NonNull<Node<T>>) {
+<         let node = unsafe { node.as_mut() }; // this one is ours now, we can create an &mut.
+---
+>     unsafe fn unlink_node(&mut self, mut node: NonNull<Node<T>>)
+>     {
+>         let node_ = unsafe { node.as_mut() }; // this one is ours now, we can create an &mut.
+268,269c303,306
+<         match node.prev {
+<             Some(prev) => unsafe { (*prev.as_ptr()).next = node.next },
+---
+>         match node_.prev {
+>             Some(prev) => unsafe {
+>                 (*prev.as_ptr()).next = node_.next;
+>             },
+271c308,310
+<             None => self.head = node.next,
+---
+>             None => {
+>                 self.head = node_.next
+>             }
+274,275c313,316
+<         match node.next {
+<             Some(next) => unsafe { (*next.as_ptr()).prev = node.prev },
+---
+>         match node_.next {
+>             Some(next) => unsafe {
+>                 (*next.as_ptr()).prev = node_.prev;
+>             },
+277c318,321
+<             None => self.tail = node.prev,
+---
+>             None => {
+>                 self.tail = node_.prev;
+>                 
+>             }
+297c341
+<         if let Some(mut existing_prev) = existing_prev {
+---
+>         if let Some(mut existing_prev_) = existing_prev {
+299c343
+<                 existing_prev.as_mut().next = Some(splice_start);
+---
+>                 existing_prev_.as_mut().next = Some(splice_start);
+304c348
+<         if let Some(mut existing_next) = existing_next {
+---
+>         if let Some(mut existing_next_) = existing_next {
+306c350
+<                 existing_next.as_mut().prev = Some(splice_end);
+---
+>                 existing_next_.as_mut().prev = Some(splice_end);
+390c434
+<         if let Some(mut split_node) = split_node {
+---
+>         if let Some(mut split_node_) = split_node {
+394c438
+<                 second_part_head = split_node.as_mut().next.take();
+---
+>                 second_part_head = split_node_.as_mut().next.take();
+409c453
+<                 alloc: self.alloc.clone(),
+---
+>                 alloc: clone_allocator(&self.alloc),
+414c458
+<             self.tail = Some(split_node);
+---
+>             self.tail = Some(split_node_);
+416d459
+< 
+419c462,464
+<             mem::replace(self, LinkedList::new_in(self.alloc.clone()))
+---
+>             let alloc = clone_allocator(&self.alloc);
+>             let r = LinkedList::new_in(alloc);
+>             mem::replace(self, r)
+424c469,474
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> unsafe fn clone_allocator<'a, A: Allocator + Clone>(alloc: &'a A) -> A
+> {
+>     alloc.clone()      //~allow_dead_code
+> }                      //~allow_dead_code
+> 
+> //#[stable(feature = "rust1", since = "1.0.0")]
+444,445c494,495
+<     #[rustc_const_stable(feature = "const_linked_list_new", since = "1.39.0")]
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     /*#[rustc_const_stable(feature = "const_linked_list_new", since = "1.39.0")]*/
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+447,448c497,500
+<     pub const fn new() -> Self {
+<         LinkedList { head: None, tail: None, len: 0, alloc: Global, marker: PhantomData }
+---
+>     pub const fn new() -> Self
+>     {
+>         let r = LinkedList { head: None, tail: None, len: 0, alloc: Global, marker: PhantomData };
+>         r
+480c532
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+515,517c567,571
+<     #[unstable(feature = "allocator_api", issue = "32838")]
+<     pub const fn new_in(alloc: A) -> Self {
+<         LinkedList { head: None, tail: None, len: 0, alloc, marker: PhantomData }
+---
+>     /*#[unstable(feature = "allocator_api", issue = "32838")]*/
+>     pub const fn new_in(alloc: A) -> Self
+>     {
+>         let r = LinkedList { head: None, tail: None, len: 0, alloc, marker: PhantomData };
+>         r
+539,541c593,597
+<     #[stable(feature = "rust1", since = "1.0.0")]
+<     pub fn iter(&self) -> Iter<'_, T> {
+<         Iter { head: self.head, tail: self.tail, len: self.len, marker: PhantomData }
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+>     pub fn iter<'a>(&'a self) -> Iter<'a, T>
+>     {
+>         let r = Iter { head: self.head, tail: self.tail, len: self.len, marker: PhantomData };
+>         r
+568c624
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+578c634
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+588,590c644,648
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+<     pub fn cursor_front_mut(&mut self) -> CursorMut<'_, T, A> {
+<         CursorMut { index: 0, current: self.head, list: self }
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+>     pub fn cursor_front_mut<'a>(&'a mut self) -> CursorMut<'a, T, A>
+>     {
+>         let r = CursorMut { index: 0, current: self.head, list: self };
+>         r
+598c656
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+608,610c666,670
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+<     pub fn cursor_back_mut(&mut self) -> CursorMut<'_, T, A> {
+<         CursorMut { index: self.len.checked_sub(1).unwrap_or(0), current: self.tail, list: self }
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+>     pub fn cursor_back_mut<'a>(&'a mut self) -> CursorMut<'a, T, A>
+>     {
+>         let r = CursorMut { index: self.len.checked_sub(1).unwrap_or(0), current: self.tail, list: self };
+>         r
+630c690
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+657c717
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+684,685c744,746
+<     #[stable(feature = "rust1", since = "1.0.0")]
+<     pub fn clear(&mut self) {
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+>     pub fn clear(&mut self)
+>     {
+688,694c749,758
+<         drop(LinkedList {
+<             head: self.head.take(),
+<             tail: self.tail.take(),
+<             len: mem::take(&mut self.len),
+<             alloc: &self.alloc,
+<             marker: PhantomData,
+<         });
+---
+>         {
+>             let ll = LinkedList {
+>                 head: self.head.take(),
+>                 tail: self.tail.take(),
+>                 len: mem::replace(&mut self.len, 0), //mem::take(&mut self.len),
+>                 alloc: &self.alloc,
+>                 marker: PhantomData,
+>             };
+>             drop(ll);
+>         }
+716c780
+<     #[stable(feature = "linked_list_contains", since = "1.12.0")]
+---
+>     //#[stable(feature = "linked_list_contains", since = "1.12.0")]
+742c806
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+772c836
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+795c859
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+823c887
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+845,849c909,911
+<     #[stable(feature = "rust1", since = "1.0.0")]
+<     pub fn push_front(&mut self, elt: T) {
+<         let node = Box::new_in(Node::new(elt), &self.alloc);
+<         let node_ptr = NonNull::from(Box::leak(node));
+<         // SAFETY: node_ptr is a unique pointer to a node we boxed with self.alloc and leaked
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+>     pub fn push_front(&mut self, elt: T)
+>     {
+850a913,915
+>             let node = Box::new_in(Node::new(elt), &self.alloc);
+>             let node_ptr = NonNull::new_unchecked(Box::leak(node) as *mut Node<T>); //NonNull::from(Box::leak(node));
+>             // SAFETY: node_ptr is a unique pointer to a node we boxed with self.alloc and leaked
+874,876c939,952
+<     #[stable(feature = "rust1", since = "1.0.0")]
+<     pub fn pop_front(&mut self) -> Option<T> {
+<         self.pop_front_node().map(Node::into_element)
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+>     pub fn pop_front(&mut self) -> Option<T>
+>     {
+>         unsafe {
+>             match self.pop_front_node() { //.map(Node::into_element)
+>                 None => {
+>                     None
+>                 }
+>                 Some(node) => {
+>                     let r = Some(node.into_element());
+>                     r
+>                 }
+>             }
+>         }
+893c969
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+896,898d971
+<         let node = Box::new_in(Node::new(elt), &self.alloc);
+<         let node_ptr = NonNull::from(Box::leak(node));
+<         // SAFETY: node_ptr is a unique pointer to a node we boxed with self.alloc and leaked
+899a973,975
+>             let node = Box::new_in(Node::new(elt), &self.alloc);
+>             let node_ptr = NonNull::from(Box::leak(node));
+>             // SAFETY: node_ptr is a unique pointer to a node we boxed with self.alloc and leaked
+920c996
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+922c998,1003
+<         self.pop_back_node().map(Node::into_element)
+---
+>         unsafe {
+>             match self.pop_back_node() { //.map(Node::into_element)
+>                 None => None,
+>                 Some(node) => Some(node.into_element())
+>             }
+>         }
+950c1031
+<     #[stable(feature = "rust1", since = "1.0.0")]
+---
+>     //#[stable(feature = "rust1", since = "1.0.0")]
+955,982c1036,1076
+<         let len = self.len();
+<         assert!(at <= len, "Cannot split off at a nonexistent index");
+<         if at == 0 {
+<             return mem::replace(self, Self::new_in(self.alloc.clone()));
+<         } else if at == len {
+<             return Self::new_in(self.alloc.clone());
+<         }
+< 
+<         // Below, we iterate towards the `i-1`th node, either from the start or the end,
+<         // depending on which would be faster.
+<         let split_node = if at - 1 <= len - 1 - (at - 1) {
+<             let mut iter = self.iter_mut();
+<             // instead of skipping using .skip() (which creates a new struct),
+<             // we skip manually so we can access the head field without
+<             // depending on implementation details of Skip
+<             for _ in 0..at - 1 {
+<                 iter.next();
+<             }
+<             iter.head
+<         } else {
+<             // better off starting from the end
+<             let mut iter = self.iter_mut();
+<             for _ in 0..len - 1 - (at - 1) {
+<                 iter.next_back();
+<             }
+<             iter.tail
+<         };
+<         unsafe { self.split_off_after_node(split_node, at) }
+---
+>         unsafe {
+>             let len = self.len;
+>             assert!(at <= len, "Cannot split off at a nonexistent index");
+>             if at == 0 {
+>                 let alloc1 = clone_allocator(&self.alloc);
+>                 return mem::replace(self, Self::new_in(alloc1));
+>             } else if at == len {
+>                 let alloc2 = clone_allocator(&self.alloc);
+>                 return Self::new_in(alloc2);
+>             }
+> 
+>             // Below, we iterate towards the `i-1`th node, either from the start or the end,
+>             // depending on which would be faster.
+>             let mut iter;
+>             let mut i;
+>             let split_node = if at - 1 <= len - 1 - (at - 1) {
+>                 iter = self.head;
+>                 i = 0;
+>                 loop {
+>                     if i == at - 1 {
+>                         break;
+>                     }
+>                     iter = (*iter.unwrap_unchecked().as_ptr()).next;
+>                     i += 1;
+>                 }
+>                 iter
+>             } else {
+>                 // better off starting from the end
+>                 iter = self.tail;
+>                 i = 0;
+>                 loop { // for _ in 0..len - 1 - (at - 1) {
+>                     if i == len - 1 - (at - 1) {
+>                         break;
+>                     }
+>                     iter = (*iter.unwrap_unchecked().as_ptr()).prev;
+>                     i += 1;
+>                 }
+>                 iter
+>             };
+>             unsafe { self.split_off_after_node(split_node, at) }
+>         }
+1008c1102
+<     #[unstable(feature = "linked_list_remove", issue = "69210")]
+---
+>     /*#[unstable(feature = "linked_list_remove", issue = "69210")]*/
+1075c1169
+<     #[unstable(feature = "linked_list_retain", issue = "114135")]
+---
+>     /*#[unstable(feature = "linked_list_retain", issue = "114135")]*/
+1085c1179
+<     /// In other words, remove all elements `e` for which `f(&mut e)` returns false.
+---
+>     /// In other words, remove all elements `e` for which `f(&e)` returns false.
+1110c1204
+<     #[unstable(feature = "linked_list_retain", issue = "114135")]
+---
+>     /*#[unstable(feature = "linked_list_retain", issue = "114135")]*/
+1155,1156c1249,1250
+<     #[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]
+<     pub fn extract_if<F>(&mut self, filter: F) -> ExtractIf<'_, T, F, A>
+---
+>     /*#[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]*/
+>     pub fn extract_if<'a, F>(&'a mut self, filter: F) -> ExtractIf<'a, T, F, A>
+1159a1254
+>         
+1162a1258
+>         
+1164c1260,1261
+<         ExtractIf { list: self, it, pred: filter, idx: 0, old_len }
+---
+>         let r = ExtractIf { list: self, it, pred: filter, idx: 0, old_len };
+>         r
+1168,1169c1265,1267
+< #[stable(feature = "rust1", since = "1.0.0")]
+< unsafe impl<#[may_dangle] T, A: Allocator> Drop for LinkedList<T, A> {
+---
+> struct DropGuard<'a, T, A: Allocator>(&'a mut LinkedList<T, A>);
+> 
+> impl<'a, T, A: Allocator> Drop for DropGuard<'a, T, A> {
+1171c1269,1275
+<         struct DropGuard<'a, T, A: Allocator>(&'a mut LinkedList<T, A>);
+---
+>         unsafe {
+>             // Continue the same loop we do below. This only runs when a destructor has
+>             // panicked. If another one panics this will abort.
+>             while self.0.pop_front_node().is_some() {}
+>         }
+>     }
+> }
+1173,1177c1277,1289
+<         impl<'a, T, A: Allocator> Drop for DropGuard<'a, T, A> {
+<             fn drop(&mut self) {
+<                 // Continue the same loop we do below. This only runs when a destructor has
+<                 // panicked. If another one panics this will abort.
+<                 while self.0.pop_front_node().is_some() {}
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+> unsafe impl<#[may_dangle] T, A: Allocator> Drop for LinkedList<T, A> {
+>     fn drop(&mut self)
+>     {
+>         unsafe {
+>             // Wrap self so that if a destructor panics, we can try to keep looping
+>             let guard = DropGuard(self);
+>             loop {
+>                 match guard.0.pop_front() {
+>                     None => { break; }
+>                     Some(element) => {
+>                     }
+>                 }
+1178a1291
+>             mem::forget(guard);
+1180,1184d1292
+< 
+<         // Wrap self so that if a destructor panics, we can try to keep looping
+<         let guard = DropGuard(self);
+<         while guard.0.pop_front_node().is_some() {}
+<         mem::forget(guard);
+1188c1296
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+1193c1301,1302
+<     fn next(&mut self) -> Option<&'a T> {
+---
+>     fn next(&mut self) -> Option<&'a T>
+>     {
+1197,1203c1306,1319
+<             self.head.map(|node| unsafe {
+<                 // Need an unbound lifetime to get 'a
+<                 let node = &*node.as_ptr();
+<                 self.len -= 1;
+<                 self.head = node.next;
+<                 &node.element
+<             })
+---
+>             match self.head { //.map(|node| unsafe {
+>                 None => {
+>                     None
+>                 }
+>                 Some(node_) => unsafe {
+>                     // Need an unbound lifetime to get 'a
+>                     let node = node_.as_ptr(); //&*node_.as_ptr();
+>                     let len = self.len;
+>                     self.len = len - 1;
+>                     self.head = (*node).next;
+>                     let r = &(*node).element;
+>                     Some(r)
+>                 }
+>             }
+1218c1334
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+1236c1352
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+1239c1355
+< #[stable(feature = "fused", since = "1.26.0")]
+---
+> //#[stable(feature = "fused", since = "1.26.0")]
+1242c1358
+< #[stable(feature = "default_iters", since = "1.70.0")]
+---
+> //#[stable(feature = "default_iters", since = "1.70.0")]
+1256c1372
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+1286c1402
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+1304c1420
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+1307c1423
+< #[stable(feature = "fused", since = "1.26.0")]
+---
+> //#[stable(feature = "fused", since = "1.26.0")]
+1310c1426
+< #[stable(feature = "default_iters", since = "1.70.0")]
+---
+> //#[stable(feature = "default_iters", since = "1.70.0")]
+1326c1442
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1330c1446
+<     #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+---
+>     /*#[unstable(feature = "allocator_api", issue = "32838")]*/ A: Allocator = Global,
+1337c1453
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1345c1461
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1362c1478
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1366c1482
+<     #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+---
+>     /*#[unstable(feature = "allocator_api", issue = "32838")]*/ A: Allocator = Global,
+1373c1489
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1386c1502
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1397c1513
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1419c1535
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1441c1557
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1452c1568
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1469c1585
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1483c1599
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1492c1608
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1497,1504d1612
+< 
+<     /// Provides a reference to the cursor's parent list.
+<     #[must_use]
+<     #[inline(always)]
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+<     pub fn as_list(&self) -> &'a LinkedList<T, A> {
+<         self.list
+<     }
+1513c1621
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1524,1525c1632,1634
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+<     pub fn move_next(&mut self) {
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+>     pub fn move_next(&mut self)
+>     {
+1535c1644
+<                 self.current = current.as_ref().next;
+---
+>                 self.current = (*current.as_ptr()).next; //current.as_ref().next;
+1538c1647
+<         }
+---
+>         };
+1546,1547c1655,1657
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+<     pub fn move_prev(&mut self) {
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+>     pub fn move_prev(&mut self)
+>     {
+1552c1662
+<                 self.index = self.list.len().checked_sub(1).unwrap_or(0);
+---
+>                 self.index = self.list.len.checked_sub(1).unwrap_or(0);
+1556,1557c1666,1674
+<                 self.current = current.as_ref().prev;
+<                 self.index = self.index.checked_sub(1).unwrap_or_else(|| self.list.len());
+---
+>                 self.current = (*current.as_ptr()).prev; //current.as_ref().prev;
+>                 match self.index.checked_sub(1) { // self.index = self.index.checked_sub(1).unwrap_or_else(|| self.list.len());
+>                     None => {
+>                         self.index = self.list.len;
+>                     }
+>                     Some(index1) => {
+>                         self.index = index1;
+>                     }
+>                 }
+1568,1570c1685,1697
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+<     pub fn current(&mut self) -> Option<&mut T> {
+<         unsafe { self.current.map(|current| &mut (*current.as_ptr()).element) }
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+>     pub fn current<'b>(&'b mut self) -> Option<&'b mut T>
+>     {
+>         unsafe {
+>             match self.current { //self.current.map(|current| &mut (*current.as_ptr()).element)
+>                 None => {
+>                     None
+>                 }
+>                 Some(current) => {
+>                     Some(&mut (*current.as_ptr()).element)
+>                 }
+>             }
+>         }
+1578c1705
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1594c1721
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1611c1738
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1615,1626d1741
+< 
+<     /// Provides a read-only reference to the cursor's parent list.
+<     ///
+<     /// The lifetime of the returned reference is bound to that of the
+<     /// `CursorMut`, which means it cannot outlive the `CursorMut` and that the
+<     /// `CursorMut` is frozen for the lifetime of the reference.
+<     #[must_use]
+<     #[inline(always)]
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+<     pub fn as_list(&self) -> &LinkedList<T, A> {
+<         self.list
+<     }
+1636c1751
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1659c1774
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1681c1796
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1701c1816
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1721,1728c1836,1851
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+<     pub fn remove_current(&mut self) -> Option<T> {
+<         let unlinked_node = self.current?;
+<         unsafe {
+<             self.current = unlinked_node.as_ref().next;
+<             self.list.unlink_node(unlinked_node);
+<             let unlinked_node = Box::from_raw_in(unlinked_node.as_ptr(), &self.list.alloc);
+<             Some(unlinked_node.element)
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+>     pub fn remove_current(&mut self) -> Option<T>
+>     {
+>         //let unlinked_node = self.current?;
+>         match self.current {
+>             None => {
+>                 None
+>             }
+>             Some(unlinked_node) => unsafe {
+>                 
+>                 self.current = (*unlinked_node.as_ptr()).next; //unlinked_node.as_ref().next;
+>                 self.list.unlink_node(unlinked_node);
+>                 let unlinked_node_ = Box::from_raw_in(unlinked_node.as_ptr(), &self.list.alloc);
+>                 let r = Some(Box::into_inner(unlinked_node_).element); // Some(unlinked_node_.element)
+>                 r
+>             }
+1739c1862
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1767c1890
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1786c1909
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1802c1925
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1815c1938
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1835c1958
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1862c1985
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1883c2006
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1892c2015
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1900c2023
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1928c2051
+<     #[unstable(feature = "linked_list_cursors", issue = "58533")]
+---
+>     /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+1935c2058
+< #[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]
+---
+> /*#[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]*/
+1941c2064
+<     #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+---
+>     /*#[unstable(feature = "allocator_api", issue = "32838")]*/ A: Allocator = Global,
+1952,1953c2075,2081
+< #[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]
+< impl<T, F, A: Allocator> Iterator for ExtractIf<'_, T, F, A>
+---
+> fn call_pred<T, F: FnMut(&mut T) -> bool>(f: &mut F, element: &mut T) -> bool
+> {
+>     f(element) //~allow_dead_code
+> } //~allow_dead_code
+> 
+> /*#[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]*/
+> impl<'a, T, F, A: Allocator> Iterator for ExtractIf<'a, T, F, A>
+1959,1968c2087,2103
+<     fn next(&mut self) -> Option<T> {
+<         while let Some(mut node) = self.it {
+<             unsafe {
+<                 self.it = node.as_ref().next;
+<                 self.idx += 1;
+< 
+<                 if (self.pred)(&mut node.as_mut().element) {
+<                     // `unlink_node` is okay with aliasing `element` references.
+<                     self.list.unlink_node(node);
+<                     return Some(Box::from_raw_in(node.as_ptr(), &self.list.alloc).element);
+---
+>     fn next(&mut self) -> Option<T>
+>     {
+>         loop { //while let Some(mut node) = self.it {
+>             match self.it {
+>                 None => break,
+>                 Some(mut node) => unsafe {
+>                     self.it = (*node.as_ptr()).next; //node.as_ref().next;
+>                     self.idx += 1;
+>                     
+> 
+>                     if call_pred(&mut self.pred, &mut node.as_mut().element) {
+>                         // `unlink_node` is okay with aliasing `element` references.
+>                         self.list.unlink_node(node);
+>                         let r = Some(Box::into_inner(Box::from_raw_in(node.as_ptr(), &self.list.alloc)).element);
+>                         return r
+>                     }
+>                     
+1972d2106
+< 
+1981c2115
+< #[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]
+---
+> /*#[unstable(feature = "extract_if", reason = "recently added", issue = "43244")]*/
+1991c2125
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2006c2140
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2014c2148
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2017c2151
+< #[stable(feature = "fused", since = "1.26.0")]
+---
+> //#[stable(feature = "fused", since = "1.26.0")]
+2020c2154
+< #[stable(feature = "default_iters", since = "1.70.0")]
+---
+> //#[stable(feature = "default_iters", since = "1.70.0")]
+2034c2168
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2043c2177
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2055c2189
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2065c2199
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2075c2209
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2099c2233
+< #[stable(feature = "extend_ref", since = "1.2.0")]
+---
+> //#[stable(feature = "extend_ref", since = "1.2.0")]
+2111c2245
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2122c2256
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2125c2259
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2132c2266
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2140c2274
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2168c2302
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2175c2309
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2185c2319
+< #[stable(feature = "std_collections_from_array", since = "1.56.0")]
+---
+> //#[stable(feature = "std_collections_from_array", since = "1.56.0")]
+2203,2212c2337,2348
+< fn assert_covariance() {
+<     fn a<'a>(x: LinkedList<&'static str>) -> LinkedList<&'a str> {
+<         x
+<     }
+<     fn b<'i, 'a>(x: Iter<'i, &'static str>) -> Iter<'i, &'a str> {
+<         x
+<     }
+<     fn c<'a>(x: IntoIter<&'static str>) -> IntoIter<&'a str> {
+<         x
+<     }
+---
+> fn assert_covariance_a<'a>(x: LinkedList<&'static str>) -> LinkedList<&'a str> {
+>     x
+> }
+> 
+> #[allow(dead_code)]
+> fn assert_covariance_b<'i, 'a>(x: Iter<'i, &'static str>) -> Iter<'i, &'a str> {
+>     x
+> }
+> 
+> #[allow(dead_code)]
+> fn assert_covariance_c<'a>(x: IntoIter<&'static str>) -> IntoIter<&'a str> {
+>     x
+2215c2351
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2218c2354
+< #[stable(feature = "rust1", since = "1.0.0")]
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+2221,2222c2357,2358
+< #[stable(feature = "rust1", since = "1.0.0")]
+< unsafe impl<T: Sync> Send for Iter<'_, T> {}
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+> unsafe impl<'a, T: Sync> Send for Iter<'a, T> {}
+2224,2225c2360,2361
+< #[stable(feature = "rust1", since = "1.0.0")]
+< unsafe impl<T: Sync> Sync for Iter<'_, T> {}
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+> unsafe impl<'a, T: Sync> Sync for Iter<'a, T> {}
+2227,2228c2363,2364
+< #[stable(feature = "rust1", since = "1.0.0")]
+< unsafe impl<T: Send> Send for IterMut<'_, T> {}
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+> unsafe impl<'a, T: Send> Send for IterMut<'a, T> {}
+2230,2231c2366,2367
+< #[stable(feature = "rust1", since = "1.0.0")]
+< unsafe impl<T: Sync> Sync for IterMut<'_, T> {}
+---
+> //#[stable(feature = "rust1", since = "1.0.0")]
+> unsafe impl<'a, T: Sync> Sync for IterMut<'a, T> {}
+2233,2234c2369,2370
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+< unsafe impl<T: Sync, A: Allocator + Sync> Send for Cursor<'_, T, A> {}
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+> unsafe impl<'a, T: Sync, A: Allocator + Sync> Send for Cursor<'a, T, A> {}
+2236,2237c2372,2373
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+< unsafe impl<T: Sync, A: Allocator + Sync> Sync for Cursor<'_, T, A> {}
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+> unsafe impl<'a, T: Sync, A: Allocator + Sync> Sync for Cursor<'a, T, A> {}
+2239,2240c2375,2376
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+< unsafe impl<T: Send, A: Allocator + Send> Send for CursorMut<'_, T, A> {}
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+> unsafe impl<'a, T: Send, A: Allocator + Send> Send for CursorMut<'a, T, A> {}
+2242,2243c2378,2379
+< #[unstable(feature = "linked_list_cursors", issue = "58533")]
+< unsafe impl<T: Sync, A: Allocator + Sync> Sync for CursorMut<'_, T, A> {}
+---
+> /*#[unstable(feature = "linked_list_cursors", issue = "58533")]*/
+> unsafe impl<'a, T: Sync, A: Allocator + Sync> Sync for CursorMut<'a, T, A> {}

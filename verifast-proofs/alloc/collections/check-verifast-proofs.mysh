@@ -1,0 +1,4 @@
+diff linked_list.original.rs ../../../library/alloc/src/collections/linked_list.rs
+vfstrip < linked_list.verifast-proof.rs > linked_list.verifast-proof.stripped.rs
+diff linked_list.original.rs linked_list.verifast-proof.stripped.rs > linked_list.code-changes.computed.diff; diff linked_list.code-changes.diff linked_list.code-changes.computed.diff
+verifast -rustc_arg --crate-name -rustc_arg linked_list -c -prover z3v4.5 -skip_specless_fns linked_list.verifast-proof.rs
