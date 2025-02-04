@@ -4642,6 +4642,106 @@ mod verify {
         let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
         unsafe { copy_nonoverlapping(src, dst, kani::any()) }
     }
+    
+    //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does 
+    //not currently support contracts (https://github.com/model-checking/kani/issues/3345)
+    #[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
+    #[requires(ub_checks::can_dereference(&input as *const T as *const U))] //output can be deref'd as value of type U
+    #[allow(dead_code)]
+    unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
+        unsafe { transmute_unchecked(input) }
+    }
+
+    //generates harness that transmutes arbitrary values of input type to output type
+    //use when you expect all resulting bit patterns of output type to be valid
+    macro_rules! transmute_unchecked_should_succeed {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+            fn $harness() {
+                let src: $src = kani::any();
+                let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
+            }
+        };
+    }
+
+    //generates harness that transmutes arbitrary values of input type to output type
+    //use when you expect some resulting bit patterns of output type to be invalid
+    macro_rules! transmute_unchecked_should_fail {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof]
+            #[kani::stub_verified(transmute_unchecked_wrapper)]
+            #[kani::should_panic]
+            fn $harness() {
+                let src: $src = kani::any();
+                let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
+            }
+        };
+    }
+
+    //transmute between the 4-byte numerical types
+    transmute_unchecked_should_succeed!(transmute_unchecked_i32_to_u32, i32, u32);
+    transmute_unchecked_should_succeed!(transmute_unchecked_u32_to_i32, u32, i32);
+    transmute_unchecked_should_succeed!(transmute_unchecked_i32_to_f32, i32, f32);
+    transmute_unchecked_should_succeed!(transmute_unchecked_f32_to_i32, f32, i32);
+    transmute_unchecked_should_succeed!(transmute_unchecked_u32_to_f32, u32, f32);
+    transmute_unchecked_should_succeed!(transmute_unchecked_f32_to_u32, f32, u32);
+    //transmute between the 8-byte numerical types
+    transmute_unchecked_should_succeed!(transmute_unchecked_i64_to_u64, i64, u64);
+    transmute_unchecked_should_succeed!(transmute_unchecked_u64_to_i64, u64, i64);
+    transmute_unchecked_should_succeed!(transmute_unchecked_i64_to_f64, i64, f64);
+    transmute_unchecked_should_succeed!(transmute_unchecked_f64_to_i64, f64, i64);
+    transmute_unchecked_should_succeed!(transmute_unchecked_u64_to_f64, u64, f64);
+    transmute_unchecked_should_succeed!(transmute_unchecked_f64_to_u64, f64, u64);
+    //transmute between arrays of bytes and numerical types
+    transmute_unchecked_should_succeed!(transmute_unchecked_arr_to_u32, [u8; 4], u32);
+    transmute_unchecked_should_succeed!(transmute_unchecked_u32_to_arr, u32, [u8; 4]);
+    transmute_unchecked_should_succeed!(transmute_unchecked_arr_to_u64, [u8; 8], u64);
+    transmute_unchecked_should_succeed!(transmute_unchecked_u64_to_arr, u64, [u8; 8]);
+    //transmute to type with potentially invalid bit patterns
+    transmute_unchecked_should_fail!(transmute_unchecked_u8_to_bool, u8, bool);
+    transmute_unchecked_should_fail!(transmute_unchecked_u32_to_char, u32, char);
+
+    //tests that transmute works correctly when transmuting something with zero size
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_zero_size() {
+        let empty_arr: [u8;0] = [];
+        let unit_val: () = unsafe { transmute_unchecked_wrapper(empty_arr) };
+        assert!(unit_val == ());
+    }
+
+    //generates harness that transmutes arbitrary values two ways
+    //i.e. (src -> dest) then (dest -> src)
+    //We then check that the output is equal to the input
+    //This tests that transmute does not mutate the bit patterns
+    //Note: this would not catch reversible mutations
+    //e.g., deterministically flipping a bit
+    macro_rules! transmute_unchecked_two_ways {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+            fn $harness() {
+                let src: $src = kani::any();
+                let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
+                let src2: $src = unsafe { transmute_unchecked_wrapper(dst) };
+                assert_eq!(src,src2);
+            }
+        };
+    }
+
+    //transmute 2-ways between the 4-byte numerical types
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_i32_to_u32, i32, u32);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_u32_to_i32, u32, i32);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_i32_to_f32, i32, f32);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_u32_to_f32, u32, f32);
+    //transmute 2-ways between the 8-byte numerical types
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_i64_to_u64, i64, u64);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_u64_to_i64, u64, i64);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_i64_to_f64, i64, f64);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_u64_to_f64, u64, f64);
+    //transmute 2-ways between arrays of bytes and numerical types
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_arr_to_u32, [u8; 4], u32);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_u32_to_arr, u32, [u8; 4]);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_arr_to_u64, [u8; 8], u64);
+    transmute_unchecked_two_ways!(transmute_unchecked_2ways_u64_to_arr, u64, [u8; 8]);
 
     // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
     // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
