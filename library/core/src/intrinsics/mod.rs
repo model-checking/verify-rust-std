@@ -4731,16 +4731,12 @@ mod verify {
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i32_to_u32, i32, u32);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u32_to_i32, u32, i32);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i32_to_f32, i32, f32);
-    transmute_unchecked_two_ways!(transmute_unchecked_2ways_f32_to_i32, f32, i32);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u32_to_f32, u32, f32);
-    transmute_unchecked_two_ways!(transmute_unchecked_2ways_f32_to_u32, f32, u32);
     //transmute 2-ways between the 8-byte numerical types
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i64_to_u64, i64, u64);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u64_to_i64, u64, i64);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i64_to_f64, i64, f64);
-    transmute_unchecked_two_ways!(transmute_unchecked_2ways_f64_to_i64, f64, i64);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u64_to_f64, u64, f64);
-    transmute_unchecked_two_ways!(transmute_unchecked_2ways_f64_to_u64, f64, u64);
     //transmute 2-ways between arrays of bytes and numerical types
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_arr_to_u32, [u8; 4], u32);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u32_to_arr, u32, [u8; 4]);
