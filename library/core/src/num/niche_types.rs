@@ -97,15 +97,11 @@ define_valid_range_type! {
     pub struct Nanoseconds(u32 as u32 in 0..=999_999_999);
 }
 
-impl Invariant for Nanoseconds {
-    fn is_safe(&self) -> bool {
-        self.0 < NANOS_PER_SEC
-    }
-}
-
 impl Nanoseconds {
     // SAFETY: 0 is within the valid range
     pub const ZERO: Self = unsafe { Nanoseconds::new_unchecked(0) };
+    //This function is added to get the value of the private field when using this struct in time.rs
+    pub fn get_zero(&self) -> u32 {self.0}
 }
 
 impl Default for Nanoseconds {

@@ -64,13 +64,13 @@
 )]
 #![allow(missing_docs)]
 
-use crate::marker::{DiscriminantKind, Tuple};
-use crate::mem::SizedTypeProperties;
-use crate::{ptr, ub_checks};
 use safety::{ensures, requires};
 
 #[cfg(kani)]
 use crate::kani;
+use crate::marker::{DiscriminantKind, Tuple};
+use crate::mem::SizedTypeProperties;
+use crate::{ptr, ub_checks};
 
 pub mod fallback;
 pub mod mir;
@@ -4872,10 +4872,12 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
+    use core::mem::MaybeUninit;
+
+    use kani::{AllocationStatus, Arbitrary, ArbitraryPointer, PointerGenerator};
+
     use super::*;
     use crate::kani;
-    use core::mem::MaybeUninit;
-    use kani::{AllocationStatus, Arbitrary, ArbitraryPointer, PointerGenerator};
 
     #[kani::proof_for_contract(typed_swap_nonoverlapping)]
     pub fn check_typed_swap_nonoverlapping_u8() {
@@ -4889,7 +4891,9 @@ mod verify {
 
     #[kani::proof_for_contract(typed_swap_nonoverlapping)]
     pub fn check_typed_swap_nonoverlapping_non_zero() {
-        run_with_arbitrary_ptrs::<core::num::NonZeroI32>(|x, y| unsafe { typed_swap_nonoverlapping(x, y) });
+        run_with_arbitrary_ptrs::<core::num::NonZeroI32>(|x, y| unsafe {
+            typed_swap_nonoverlapping(x, y)
+        });
     }
 
     #[kani::proof_for_contract(copy)]
@@ -4904,7 +4908,7 @@ mod verify {
         // `copy_nonoverlapping`.
         // Kani contract checking would fail due to existing restriction on calls to
         // the function under verification.
-        let gen_any_ptr = |buf:  &mut [MaybeUninit<char>; 100]| -> *mut char {
+        let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
             let base = buf.as_mut_ptr() as *mut u8;
             base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
         };
@@ -4927,11 +4931,7 @@ mod verify {
     #[kani::proof_for_contract(write_bytes)]
     fn check_write_bytes() {
         let mut generator = PointerGenerator::<100>::new();
-        let ArbitraryPointer {
-            ptr,
-            status,
-            ..
-        } = generator.any_alloc_status::<char>();
+        let ArbitraryPointer { ptr, status, .. } = generator.any_alloc_status::<char>();
         kani::assume(supported_status(status));
         unsafe { write_bytes(ptr, kani::any(), kani::any()) };
     }
@@ -4939,16 +4939,9 @@ mod verify {
     fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
         let mut generator1 = PointerGenerator::<100>::new();
         let mut generator2 = PointerGenerator::<100>::new();
-        let ArbitraryPointer {
-            ptr: src,
-            status: src_status,
-            ..
-        } = generator1.any_alloc_status::<T>();
-        let ArbitraryPointer {
-            ptr: dst,
-            status: dst_status,
-            ..
-        } = if kani::any() {
+        let ArbitraryPointer { ptr: src, status: src_status, .. } =
+            generator1.any_alloc_status::<T>();
+        let ArbitraryPointer { ptr: dst, status: dst_status, .. } = if kani::any() {
             generator1.any_alloc_status::<T>()
         } else {
             generator2.any_alloc_status::<T>()
