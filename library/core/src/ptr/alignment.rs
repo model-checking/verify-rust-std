@@ -48,7 +48,6 @@ impl Alignment {
     /// This provides the same numerical value as [`mem::align_of`],
     /// but in an `Alignment` instead of a `usize`.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[requires(mem::align_of::<T>().is_power_of_two())]
     #[ensures(|result| result.as_usize().is_power_of_two())]
@@ -62,7 +61,6 @@ impl Alignment {
     ///
     /// Note that `0` is not a power of two, nor a valid alignment.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[ensures(|result| align.is_power_of_two() == result.is_some())]
     #[ensures(|result| result.is_none() || result.unwrap().as_usize() == align)]
@@ -84,7 +82,6 @@ impl Alignment {
     /// Equivalently, it must be `1 << exp` for some `exp` in `0..usize::BITS`.
     /// It must *not* be zero.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[requires(align > 0 && (align & (align - 1)) == 0)]
     #[ensures(|result| result.as_usize() == align)]
@@ -103,7 +100,6 @@ impl Alignment {
 
     /// Returns the alignment as a [`usize`].
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[ensures(|result| result.is_power_of_two())]
     pub const fn as_usize(self) -> usize {
@@ -112,7 +108,6 @@ impl Alignment {
 
     /// Returns the alignment as a <code>[NonZero]<[usize]></code>.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[ensures(|result| result.get().is_power_of_two())]
     #[ensures(|result| result.get() == self.as_usize())]
@@ -135,7 +130,6 @@ impl Alignment {
     /// assert_eq!(Alignment::new(1024).unwrap().log2(), 10);
     /// ```
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[requires(self.as_usize().is_power_of_two())]
     #[ensures(|result| (*result as usize) < mem::size_of::<usize>() * 8)]
@@ -168,7 +162,6 @@ impl Alignment {
     /// assert_ne!(one.mask(Alignment::of::<Align4>().mask()), one);
     /// ```
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-    #[cfg_attr(bootstrap, rustc_const_unstable(feature = "ptr_alignment_type", issue = "102070"))]
     #[inline]
     #[ensures(|result| *result > 0)]
     #[ensures(|result| *result == !(self.as_usize() -1))]
