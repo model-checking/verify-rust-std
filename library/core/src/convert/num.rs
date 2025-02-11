@@ -638,6 +638,7 @@ mod verify {
                 let x_inner: $source = kani::any_where(|&v| {
                     (v > 0 && (v as u128) > (<$target>::MAX as u128))
                         || (v < 0 && (v as i128) < (<$target>::MIN as i128))
+                        || (v == 0)
                 });
                 let x = NonZero::new(x_inner).unwrap();
                 let _ = NonZero::<$target>::try_from(x).unwrap();
@@ -714,8 +715,8 @@ mod verify {
     generate_nonzero_int_try_from_nonzero_int_harnesses!(
         check_nonzero_int_try_from_u32,
         u32 => (
-            [u8, u16, usize, i8, i16, i32],
-            [isize],
+            [u8, u16, i8, i16, i32, isize],
+            [usize],
         )
     );
 
