@@ -555,6 +555,7 @@ impl_nonzero_int_try_from_nonzero_int!(isize => u8, u16, u32, u64, u128, usize);
 mod verify {
     use super::*;
 
+    // Generate harnesses for `NonZero::<Large>::from(NonZero<Small>)`.
     macro_rules! generate_nonzero_int_from_nonzero_int_harness {
         ($Small:ty => $Large:ty, $harness:ident) => {
             #[kani::proof]
@@ -565,6 +566,8 @@ mod verify {
         };
     }
 
+    // This bundles the calls to `generate_nonzero_int_from_nonzero_int_harness`
+    // macro into segregated namespaces for better organization and usability.
     macro_rules! generate_nonzero_int_from_nonzero_int_harnesses {
         ($ns:ident, $Small:ty => $($Large:tt),+ $(,)?) => {
             mod $ns {
@@ -620,7 +623,12 @@ mod verify {
         i64 => i128,
     );
 
+    // Generates harnesses for `NonZero::<target>::try_from(NonZero<source>)`.
+    // Since the function may be fallible or infallible depending on `source` and `target`,
+    // this macro supports generating both cases.
     macro_rules! generate_nonzero_int_try_from_nonzero_int_harness {
+        // Passing two identities - one for pass and one for panic - generates harnesses
+        // for fallible cases.
         ($source:ty => $target:ty, $harness_pass:ident, $harness_panic:ident $(,)?) => {
             #[kani::proof]
             pub fn $harness_pass() {
@@ -644,6 +652,7 @@ mod verify {
                 let _ = NonZero::<$target>::try_from(x).unwrap();
             }
         };
+        // Passing a single identity generates harnesses for infallible cases.
         ($source:ty => $target:ty, $harness_infallible:ident $(,)?) => {
             #[kani::proof]
             pub fn $harness_infallible() {
@@ -653,6 +662,11 @@ mod verify {
         };
     }
 
+    // This bundles the calls to `generate_nonzero_int_try_from_nonzero_int_harness`
+    // macro into segregated namespaces for better organization and usability.
+    // Conversions from the source type to the target types inside the first pair
+    // of square brackets are fallible, while those to the second pairs are
+    // infallible.
     macro_rules! generate_nonzero_int_try_from_nonzero_int_harnesses {
         ($ns:ident, $source:ty => ([$($target:tt),* $(,)?], [$($infallible:tt),* $(,)?] $(,)?)) => {
             mod $ns {
@@ -816,6 +830,7 @@ mod verify {
         )
     );
 
+    // Generate harnesses for `<Float as FloatToInt<Int>>::to_int_unchecked(self)`.
     macro_rules! generate_float_to_int_harness {
         ($Float:ty => $Int:ty, $harness:ident) => {
             #[kani::proof_for_contract(<$Float>::to_int_unchecked)]
@@ -826,6 +841,8 @@ mod verify {
         };
     }
 
+    // This bundles the calls to `generate_float_to_int_harness` macro into segregated
+    // namespaces for better organization and usability.
     macro_rules! generate_float_to_int_harnesses {
         ($ns:ident, $(($Float:tt => $($Int:tt),+ $(,)?)),+ $(,)?) => {
             mod $ns {
