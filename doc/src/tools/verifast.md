@@ -37,7 +37,7 @@ programs.
 
 ## Verifying `unsafe` functions
 
-Consider, for example, the function `Node::reverse` below that reverses the
+Consider, for example, the function `Node::reverse_in_place` below that reverses the
 given linked list in-place and returns a pointer to the first node (which
 was the originally the last node).
 
@@ -59,7 +59,7 @@ pred Nodes(n: *mut Node; nodes: list<*mut Node>) =
 
 impl Node {
 
-    unsafe fn reverse(mut n: *mut Node) -> *mut Node
+    unsafe fn reverse_in_place(mut n: *mut Node) -> *mut Node
     //@ req Nodes(n, ?nodes);
     //@ ens Nodes(result, reverse(nodes));
     //@ on_unwind_ens false;
