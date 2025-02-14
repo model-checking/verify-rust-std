@@ -101,7 +101,9 @@ impl Nanoseconds {
     // SAFETY: 0 is within the valid range
     pub const ZERO: Self = unsafe { Nanoseconds::new_unchecked(0) };
     //This function is added to get the value of the private field when using this struct in time.rs
-    pub fn get_zero(&self) -> u32 {self.0}
+    pub fn get_zero(&self) -> u32 {
+        self.0
+    }
 }
 
 impl Default for Nanoseconds {
