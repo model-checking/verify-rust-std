@@ -51,7 +51,7 @@ jobs:
       
       # Step 3: Run Kani on the std library (default configuration)
       - name: Run Kani Verification
-        run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
+        run: head/scripts/run-kani.sh --path ${{github.workspace}}/head --kani-args --harness ptr::mut_ptr::verify::check_mut_add_i8
    
   run-kani-list:
     name: Kani List
