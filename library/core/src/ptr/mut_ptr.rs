@@ -436,7 +436,9 @@ impl<T: ?Sized> *mut T {
     // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
-    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
+    #[ensures(|result| 
+        (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T)
+    )]
     pub const unsafe fn offset(self, count: isize) -> *mut T
     where
         T: Sized,
@@ -2854,7 +2856,7 @@ mod verify {
                 let ptr: *mut [$type] = slice;
 
                 //byte_add and byte_sub need count to be usize unlike byte_offset
-                let count: usize = kani::any();
+                let count: usize = kani::any_where(|&x| x <= slice.len());
 
                 unsafe {
                     ptr.$fn_name(count);
@@ -2948,7 +2950,7 @@ mod verify {
                 let test_ptr: *mut dyn TestTrait = trait_object;
 
                 //byte_add and byte_sub need count to be usize unlike byte_offset
-                let count: usize = kani::any();
+                let count: usize = kani::any_where(|&x| x <=  core::mem::size_of_val(&test_struct));
 
                 unsafe {
                     test_ptr.$fn_name(count);

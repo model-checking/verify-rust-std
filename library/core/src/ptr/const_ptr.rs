@@ -2503,7 +2503,7 @@ mod verify {
                 let ptr: *const [$type] = slice;
 
                 //byte_add and byte_sub need count to be usize unlike byte_offset
-                let count: usize = kani::any_where(|&x| x < slice.len());
+                let count: usize = kani::any_where(|&x| x <= slice.len());
 
                 unsafe {
                     ptr.$fn_name(count);
