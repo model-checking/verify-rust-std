@@ -3521,7 +3521,7 @@ impl<'a, T: 'a + fmt::Debug, P> fmt::Debug for ChunkByMut<'a, T, P> {
 }
 
 /// Verify the safety of the code implemented in this module (including generated code from macros).
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;

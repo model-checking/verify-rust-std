@@ -866,7 +866,7 @@ impl Iterator for Bytes<'_> {
 #[unstable(feature = "cstr_bytes", issue = "112115")]
 impl FusedIterator for Bytes<'_> {}
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;

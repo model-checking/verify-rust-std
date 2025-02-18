@@ -32,7 +32,7 @@ mod unicode_data;
 #[stable(feature = "unicode_version", since = "1.45.0")]
 pub const UNICODE_VERSION: (u8, u8, u8) = unicode_data::UNICODE_VERSION;
 
-#[cfg(kani)]
+#[cfg(kanix)]
 mod verify {
     use super::conversions::{to_lower, to_upper};
     use crate::kani;

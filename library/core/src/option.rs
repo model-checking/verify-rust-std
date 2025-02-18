@@ -2579,7 +2579,7 @@ impl<T, const N: usize> [Option<T>; N] {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use crate::kani;

@@ -1565,7 +1565,7 @@ from_str_radix_size_impl! { signed i32 isize, unsigned u32 usize }
 #[cfg(target_pointer_width = "64")]
 from_str_radix_size_impl! { signed i64 isize, unsigned u64 usize }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;

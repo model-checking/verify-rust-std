@@ -297,7 +297,7 @@ pub(super) const fn from_digit(num: u32, radix: u32) -> Option<char> {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;

@@ -216,7 +216,7 @@ impl<T: ?Sized> From<NonNull<T>> for Unique<T> {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;

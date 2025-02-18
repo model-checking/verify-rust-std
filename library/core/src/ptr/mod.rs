@@ -2445,7 +2445,7 @@ pub macro addr_of_mut($place:expr) {
     &raw mut $place
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use intrinsics::{mul_with_overflow, unchecked_sub, wrapping_mul, wrapping_sub};

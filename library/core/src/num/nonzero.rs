@@ -2225,7 +2225,7 @@ nonzero_integer! {
 }
 
 #[unstable(feature = "kani", issue = "none")]
-#[cfg(kani)]
+#[cfg(kanix)]
 mod verify {
     use super::*;
 

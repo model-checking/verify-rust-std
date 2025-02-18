@@ -508,7 +508,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
     is_ascii
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 pub mod verify {
     use super::*;

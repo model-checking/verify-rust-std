@@ -622,7 +622,7 @@ impl fmt::Debug for AsciiChar {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use AsciiChar;

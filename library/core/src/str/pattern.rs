@@ -1977,7 +1977,7 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 pub mod verify {
     use super::*;

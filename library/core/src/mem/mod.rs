@@ -1379,7 +1379,7 @@ pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
     {builtin # offset_of($Container, $($fields)+)}
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;

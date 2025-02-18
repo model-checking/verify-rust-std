@@ -305,7 +305,7 @@ impl fmt::Debug for Utf8Chunks<'_> {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 pub mod verify {
     use super::*;

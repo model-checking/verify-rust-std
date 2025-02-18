@@ -3086,7 +3086,7 @@ impl<T, const N: usize> From<[T; N]> for VecDeque<T> {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use core::kani;

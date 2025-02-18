@@ -615,7 +615,7 @@ impl fmt::Display for LayoutError {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;

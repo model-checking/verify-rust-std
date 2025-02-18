@@ -1868,7 +1868,7 @@ pub const fn encode_utf16_raw(mut code: u32, dst: &mut [u16]) -> &mut [u16] {
     unsafe { slice::from_raw_parts_mut(dst.as_mut_ptr(), len) }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use safety::ensures;

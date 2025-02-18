@@ -1856,7 +1856,7 @@ impl<T: ?Sized> From<&T> for NonNull<T> {
     }
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use core::num::NonZeroUsize;

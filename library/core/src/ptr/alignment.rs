@@ -385,7 +385,7 @@ enum AlignmentEnum {
     _Align1Shl63 = 1 << 63,
 }
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
