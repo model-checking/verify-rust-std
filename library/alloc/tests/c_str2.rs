@@ -1,10 +1,11 @@
+use alloc::ffi::CString;
+use alloc::rc::Rc;
+use alloc::sync::Arc;
 use core::assert_matches::assert_matches;
-use core::ffi::FromBytesUntilNulError;
+use core::ffi::{CStr, FromBytesUntilNulError, c_char};
 #[allow(deprecated)]
 use core::hash::SipHasher13 as DefaultHasher;
 use core::hash::{Hash, Hasher};
-
-use super::*;
 
 #[test]
 fn c_to_rust() {
@@ -159,7 +160,7 @@ fn boxed_default() {
 
 #[test]
 fn test_c_str_clone_into() {
-    let mut c_string = CString::new("lorem").unwrap();
+    let mut c_string = c"lorem".to_owned();
     let c_ptr = c_string.as_ptr();
     let c_str = CStr::from_bytes_with_nul(b"ipsum\0").unwrap();
     c_str.clone_into(&mut c_string);

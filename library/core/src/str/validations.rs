@@ -288,7 +288,7 @@ pub const fn utf8_char_width(b: u8) -> usize {
 /// Mask of the value bits of a continuation byte.
 const CONT_MASK: u8 = 0b0011_1111;
 
-#[cfg(kani)]
+#[cfg(kanix)]
 #[unstable(feature = "kani", issue = "none")]
 pub mod verify {
     use super::*;
