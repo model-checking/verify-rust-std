@@ -92,6 +92,7 @@
 // Library features:
 // tidy-alphabetical-start
 #![cfg_attr(kani, feature(kani))]
+#![cfg_attr(kani, feature(ub_checks))]
 #![cfg_attr(not(no_global_oom_handling), feature(const_alloc_error))]
 #![cfg_attr(not(no_global_oom_handling), feature(const_btree_len))]
 #![cfg_attr(test, feature(str_as_str))]

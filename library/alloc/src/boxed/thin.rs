@@ -2,6 +2,15 @@
 //! <https://github.com/matthieu-m/rfc2580/blob/b58d1d3cba0d4b5e859d3617ea2d0943aaa31329/examples/thin.rs>
 //! by matthieu-m
 
+use safety::requires;
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+use core::kani;
+#[cfg(kani)]
+use core::ub_checks;
+#[cfg(kani)]
+use crate::boxed::Box;
+
 use core::error::Error;
 use core::fmt::{self, Debug, Display, Formatter};
 #[cfg(not(no_global_oom_handling))]
@@ -363,6 +372,8 @@ impl<H> WithHeader<H> {
     // Safety:
     // - Assumes that either `value` can be dereferenced, or is the
     //   `NonNull::dangling()` we use when both `T` and `H` are ZSTs.
+    #[requires((mem::size_of_val_raw(value) == 0 && size_of::<H>() == 0) ||
+        ub_checks::can_dereference(value as *const u8))]
     unsafe fn drop<T: ?Sized>(&self, value: *mut T) {
         struct DropGuard<H> {
             ptr: NonNull<u8>,
@@ -433,5 +444,24 @@ impl<H> WithHeader<H> {
 impl<T: ?Sized + Error> Error for ThinBox<T> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.deref().source()
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+mod verify {
+    use super::*;
+
+    // unsafe fn drop<T: ?Sized>(&self, value: *mut T)
+    #[kani::proof_for_contract(WithHeader<T>::drop)]
+    pub fn check_drop() {
+        let v = Box::<usize>::into_raw(Box::new(kani::any::<usize>()));
+        let w = WithHeader::new(kani::any::<usize>(), v);
+        // TODO: this harness is not the most generic possible as we are currently unable to
+        // express the precondition that the pointer is heap-allocated.
+        let xptr = Box::<usize>::into_raw(Box::new(kani::any::<usize>()));
+        unsafe {
+            let _ = w.drop(xptr);
+        }
     }
 }
