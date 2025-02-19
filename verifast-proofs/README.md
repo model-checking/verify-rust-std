@@ -3,7 +3,9 @@
 This directory contains [VeriFast](../doc/src/tools/verifast.md) proofs for (currently a very, very small) part of the standard library.
 
 VeriFast supports selecting the code to verify on a function-by-function basis. By default, when given a `.rs` file VeriFast will try to verify [semantic well-typedness](https://verifast.github.io/verifast/rust-reference/non-unsafe-funcs.html) of all non-`unsafe` functions in that file (and in any submodules), and will require that the user provide specifications for all `unsafe` functions, which it will then verify against those specifications. However, when given the `-skip_specless_fns` command-line flag, VeriFast will skip all functions for which the user did not provide a specification.
+
 ## Applying VeriFast
+
 To verify a function in a file <code>library/<i>crate</i>/src/<i>mod</i>/<i>file</i>.rs</code>, proceed as follows:
 1. Copy that file to <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/original/<i>file</i>.rs</code> as well as to <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/verified/<i>file</i>.rs</code>.
 2. Create a file <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/original/lib.rs</code> to serve as crate root for verification, and include <code><b>mod</b> <i>file</i>;</code>. (See the existing proofs for examples.) Copy it to <code>verifast-proofs/<i>crate</i>/<i>mod</i>/<i>file</i>.rs/verified/lib.rs</code>.
@@ -13,8 +15,9 @@ To verify a function in a file <code>library/<i>crate</i>/src/<i>mod</i>/<i>file
     2. A `refinement-checker` invocation for checking that the code changes you made in the verified version do not change the meaning of the program. Specifically, this tool checks that the original code *refines* the verified code, i.e. that each behavior of a function in the original version is also a behavior of the corresponding function in the verified version. As a result, if the verified version has been verified to have no bad behaviors, the original version also has no bad behaviors.
     3. A `diff` invocation for checking that the version in `original` is identical to the original version in `library`.
 
-## Example
-Take the VeriFast proof of `linked_list.rs` as an example. The current file structure is:
+### Example
+
+Take the VeriFast proof of `linked_list.rs` as an example. The file structure is:
 
 ```
 linked_list.rs
@@ -30,7 +33,7 @@ linked_list.rs
       tests.rs
 ```
 - The `lib.rs` files are the crate roots we created for verification.
-- The `linked_list.rs` files contain the `LinkedList` implementation code. The `verified/linked_list.rs` adds VeriFast annotations and diverges from the implementation in `original/linked_list.rs` when necessary to make the proof go through.
+- The `linked_list.rs` files contain the `LinkedList` implementation code. `verified/linked_list.rs` adds VeriFast annotations and includes minor code changes with respect to the implementation in `original/linked_list.rs` when necessary to make it possible for annotations to be inserted in the right places and to make the proof go through.
 - Since the original `linked_list.rs` contains a `tests` module, we create empty `tests.rs` files.
 
 We then:
