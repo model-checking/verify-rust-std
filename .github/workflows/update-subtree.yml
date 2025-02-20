@@ -40,31 +40,36 @@ jobs:
         repository: newren/git-filter-repo
         path: git-filter-repo
 
-    - name: Fetch Kani toolchain version
+    - name: Fetch toolchain versions
       run: |
-        cd kani-tmp
-        TOOLCHAIN_DATE=$(grep -oP 'channel = "nightly-\K\d{4}-\d{2}-\d{2}' rust-toolchain.toml)
-        COMMIT_HASH=$(curl https://static.rust-lang.org/dist/$TOOLCHAIN_DATE/channel-rust-nightly-git-commit-hash.txt)
-        if [ -z "$COMMIT_HASH" ]; then
-          echo "Could not find commit hash on static.rust-lang.org"
+        CURRENT_TOOLCHAIN_DATE=$(grep -oP 'channel = "nightly-\K\d{4}-\d{2}-\d{2}' verify-rust-std/rust-toolchain.toml)
+        NEXT_TOOLCHAIN_DATE=$(grep -oP 'channel = "nightly-\K\d{4}-\d{2}-\d{2}' kani-tmp/rust-toolchain.toml)
+        CURRENT_COMMIT_HASH=$(curl https://static.rust-lang.org/dist/$CURRENT_TOOLCHAIN_DATE/channel-rust-nightly-git-commit-hash.txt)
+        NEXT_COMMIT_HASH=$(curl https://static.rust-lang.org/dist/$NEXT_TOOLCHAIN_DATE/channel-rust-nightly-git-commit-hash.txt)
+        if [ -z "$CURRENT_COMMIT_HASH" ]; then
+          echo "Could not find current commit hash on static.rust-lang.org"
           exit 1
         fi
-        echo "Kani toolchain date: ${TOOLCHAIN_DATE}"
-        echo "TOOLCHAIN_DATE=${TOOLCHAIN_DATE}" >> $GITHUB_ENV
-        echo "Kani toolchain hash: ${COMMIT_HASH}"
-        echo "COMMIT_HASH=${COMMIT_HASH}" >> $GITHUB_ENV
+        if [ -z "$NEXT_COMMIT_HASH" ]; then
+          echo "Could not find next commit hash on static.rust-lang.org"
+          exit 1
+        fi
+        echo "CURRENT_TOOLCHAIN_DATE=${CURRENT_TOOLCHAIN_DATE}" >> $GITHUB_ENV
+        echo "NEXT_TOOLCHAIN_DATE=${NEXT_TOOLCHAIN_DATE}" >> $GITHUB_ENV
+        echo "CURRENT_COMMIT_HASH=${CURRENT_COMMIT_HASH}" >> $GITHUB_ENV
+        echo "NEXT_COMMIT_HASH=${NEXT_COMMIT_HASH}" >> $GITHUB_ENV
 
     - name: Update subtree/library locally
       run: |
         cd rust-tmp
 
         # Ensure "upstream/master" branch contains the target commit
-        if ! git show ${COMMIT_HASH} --oneline --no-patch; then
-          echo "Rust commit ${COMMIT_HASH} cannot be found."
+        if ! git show ${NEXT_COMMIT_HASH} --oneline --no-patch; then
+          echo "Rust commit ${NEXT_COMMIT_HASH} cannot be found."
           exit 1
         fi
 
-        git checkout ${COMMIT_HASH}
+        git checkout ${NEXT_COMMIT_HASH}
         ../git-filter-repo/git-filter-repo --subdirectory-filter library --force
         git checkout -b subtree/library
 
@@ -91,7 +96,8 @@ jobs:
         title: 'Update subtree/library'
         body: |
           This is an automated PR to update the subtree/library branch to the changes
-          up to and including ${{ env.COMMIT_HASH }} of ${{ env.TOOLCHAIN_DATE }}.
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (${{ env.NEXT_COMMIT_HASH }}), inclusive.
         branch: update-subtree/library
         delete-branch: true
         base: subtree/library
@@ -108,14 +114,14 @@ jobs:
             -c user.name=gitbot -c user.email=git@bot \
             subtree merge --prefix=library update-subtree/library --squash; then
           echo "MERGE_CONFLICTS=yes" >> $GITHUB_ENV
-          git -c user.name=gitbot -c user.email=git@bot commit -a -m "Merge from $COMMIT_HASH with conflicts"
+          git -c user.name=gitbot -c user.email=git@bot commit -a -m "Merge from $NEXT_COMMIT_HASH with conflicts"
         else
           echo "MERGE_CONFLICTS=no" >> $GITHUB_ENV
         fi
 
-        sed -i "s/^channel = \"nightly-.*\"/channel = \"${TOOLCHAIN_DATE}\"/" rust-toolchain.toml
+        sed -i "s/^channel = \"nightly-.*\"/channel = \"${NEXT_TOOLCHAIN_DATE}\"/" rust-toolchain.toml
         git -c user.name=gitbot -c user.email=git@bot \
-          commit -m "Update toolchain to ${TOOLCHAIN_DATE}" rust-toolchain.toml
+          commit -m "Update toolchain to ${NEXT_TOOLCHAIN_DATE}" rust-toolchain.toml
 
     - name: Create Pull Request without conflicts
       if: ${{ env.MERGE_CONFLICTS == 'no' }}
@@ -124,9 +130,10 @@ jobs:
         title: 'Merge subtree update'
         body: |
           This is an automated PR to merge library subtree updates
-          up to and including ${{ env.COMMIT_HASH }} of ${{ env.TOOLCHAIN_DATE }}
-          into main. This is a clean merge, no conflicts were detected.
-        branch: sync-${{ env.TOOLCHAIN_DATE }}
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (${{ env.NEXT_COMMIT_HASH }}), inclusive.
+          This is a clean merge, no conflicts were detected.
+        branch: sync-${{ env.NEXT_TOOLCHAIN_DATE }}
         delete-branch: true
         base: main
         path: verify-rust-std
@@ -138,10 +145,11 @@ jobs:
         title: 'Merge subtree update'
         body: |
           This is an automated PR to merge library subtree updates
-          up to and including ${{ env.COMMIT_HASH }} of ${{ env.TOOLCHAIN_DATE }}
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (${{ env.NEXT_COMMIT_HASH }}) (inclusive)
           into main. `git merge` resulted in conflicts, which require manual resolution.
           Files were commited with merge conflict markers.
-        branch: sync-${{ env.TOOLCHAIN_DATE }}
+        branch: sync-${{ env.NEXT_TOOLCHAIN_DATE }}
         delete-branch: true
         base: main
         path: verify-rust-std
