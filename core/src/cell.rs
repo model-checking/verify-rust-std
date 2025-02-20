@@ -22,8 +22,8 @@
 //! (mutable via `&T`), in contrast with typical Rust types that exhibit 'inherited mutability'
 //! (mutable only via `&mut T`).
 //!
-//! Cell types come in three flavors: `Cell<T>`, `RefCell<T>`, and `OnceCell<T>`. Each provides
-//! a different way of providing safe interior mutability.
+//! Cell types come in four flavors: `Cell<T>`, `RefCell<T>`, `OnceCell<T>`, and `LazyCell<T>`.
+//! Each provides a different way of providing safe interior mutability.
 //!
 //! ## `Cell<T>`
 //!
@@ -252,7 +252,7 @@
 
 use crate::cmp::Ordering;
 use crate::fmt::{self, Debug, Display};
-use crate::marker::{PhantomData, Unsize};
+use crate::marker::{PhantomData, PointerLike, Unsize};
 use crate::mem;
 use crate::ops::{CoerceUnsized, Deref, DerefMut, DerefPure, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
@@ -587,7 +587,7 @@ impl<T: ?Sized> Cell<T> {
     #[inline]
     #[stable(feature = "cell_as_ptr", since = "1.12.0")]
     #[rustc_const_stable(feature = "const_cell_as_ptr", since = "1.32.0")]
-    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
+    #[rustc_as_ptr]
     #[rustc_never_returns_null_ptr]
     pub const fn as_ptr(&self) -> *mut T {
         self.value.get()
@@ -677,6 +677,9 @@ impl<T: CoerceUnsized<U>, U> CoerceUnsized<Cell<U>> for Cell<T> {}
 #[unstable(feature = "dispatch_from_dyn", issue = "none")]
 impl<T: DispatchFromDyn<U>, U> DispatchFromDyn<Cell<U>> for Cell<T> {}
 
+#[unstable(feature = "pointer_like_trait", issue = "none")]
+impl<T: PointerLike> PointerLike for Cell<T> {}
+
 impl<T> Cell<[T]> {
     /// Returns a `&[Cell<T>]` from a `&Cell<[T]>`
     ///
@@ -713,7 +716,6 @@ impl<T, const N: usize> Cell<[T; N]> {
     /// let array_cell: &[Cell<i32>; 3] = cell_array.as_array_of_cells();
     /// ```
     #[unstable(feature = "as_array_of_cells", issue = "88248")]
-    #[rustc_const_unstable(feature = "as_array_of_cells", issue = "88248")]
     pub const fn as_array_of_cells(&self) -> &[Cell<T>; N] {
         // SAFETY: `Cell<T>` has the same memory layout as `T`.
         unsafe { &*(self as *const Cell<[T; N]> as *const [Cell<T>; N]) }
@@ -1150,7 +1152,7 @@ impl<T: ?Sized> RefCell<T> {
     /// ```
     #[inline]
     #[stable(feature = "cell_as_ptr", since = "1.12.0")]
-    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
+    #[rustc_as_ptr]
     #[rustc_never_returns_null_ptr]
     pub fn as_ptr(&self) -> *mut T {
         self.value.get()
@@ -1588,10 +1590,10 @@ impl<'b, T: ?Sized> Ref<'b, T> {
     {
         let (a, b) = f(&*orig);
         let borrow = orig.borrow.clone();
-        (Ref { value: NonNull::from(a), borrow }, Ref {
-            value: NonNull::from(b),
-            borrow: orig.borrow,
-        })
+        (
+            Ref { value: NonNull::from(a), borrow },
+            Ref { value: NonNull::from(b), borrow: orig.borrow },
+        )
     }
 
     /// Converts into a reference to the underlying data.
@@ -1756,11 +1758,10 @@ impl<'b, T: ?Sized> RefMut<'b, T> {
     {
         let borrow = orig.borrow.clone();
         let (a, b) = f(&mut *orig);
-        (RefMut { value: NonNull::from(a), borrow, marker: PhantomData }, RefMut {
-            value: NonNull::from(b),
-            borrow: orig.borrow,
-            marker: PhantomData,
-        })
+        (
+            RefMut { value: NonNull::from(a), borrow, marker: PhantomData },
+            RefMut { value: NonNull::from(b), borrow: orig.borrow, marker: PhantomData },
+        )
     }
 
     /// Converts into a mutable reference to the underlying data.
@@ -2116,6 +2117,35 @@ impl<T> UnsafeCell<T> {
     pub const fn into_inner(self) -> T {
         self.value
     }
+
+    /// Replace the value in this `UnsafeCell` and return the old value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must take care to avoid aliasing and data races.
+    ///
+    /// - It is Undefined Behavior to allow calls to race with
+    ///   any other access to the wrapped value.
+    /// - It is Undefined Behavior to call this while any other
+    ///   reference(s) to the wrapped value are alive.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(unsafe_cell_access)]
+    /// use std::cell::UnsafeCell;
+    ///
+    /// let uc = UnsafeCell::new(5);
+    ///
+    /// let old = unsafe { uc.replace(10) };
+    /// assert_eq!(old, 5);
+    /// ```
+    #[inline]
+    #[unstable(feature = "unsafe_cell_access", issue = "136327")]
+    pub const unsafe fn replace(&self, value: T) -> T {
+        // SAFETY: pointer comes from `&self` so naturally satisfies invariants.
+        unsafe { ptr::replace(self.get(), value) }
+    }
 }
 
 impl<T: ?Sized> UnsafeCell<T> {
@@ -2133,9 +2163,8 @@ impl<T: ?Sized> UnsafeCell<T> {
     /// assert_eq!(*uc.get_mut(), 41);
     /// ```
     #[inline(always)]
-    #[stable(feature = "unsafe_cell_from_mut", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "unsafe_cell_from_mut", since = "CURRENT_RUSTC_VERSION")]
-    #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(const_mut_refs))]
+    #[stable(feature = "unsafe_cell_from_mut", since = "1.84.0")]
+    #[rustc_const_stable(feature = "unsafe_cell_from_mut", since = "1.84.0")]
     pub const fn from_mut(value: &mut T) -> &mut UnsafeCell<T> {
         // SAFETY: `UnsafeCell<T>` has the same memory layout as `T` due to #[repr(transparent)].
         unsafe { &mut *(value as *mut T as *mut UnsafeCell<T>) }
@@ -2160,7 +2189,7 @@ impl<T: ?Sized> UnsafeCell<T> {
     #[inline(always)]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_unsafecell_get", since = "1.32.0")]
-    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
+    #[rustc_as_ptr]
     #[rustc_never_returns_null_ptr]
     pub const fn get(&self) -> *mut T {
         // We can just cast the pointer from `UnsafeCell<T>` to `T` because of
@@ -2229,6 +2258,61 @@ impl<T: ?Sized> UnsafeCell<T> {
         // no guarantee for user code that this will work in future versions of the compiler!
         this as *const T as *mut T
     }
+
+    /// Get a shared reference to the value within the `UnsafeCell`.
+    ///
+    /// # Safety
+    ///
+    /// - It is Undefined Behavior to call this while any mutable
+    ///   reference to the wrapped value is alive.
+    /// - Mutating the wrapped value while the returned
+    ///   reference is alive is Undefined Behavior.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(unsafe_cell_access)]
+    /// use std::cell::UnsafeCell;
+    ///
+    /// let uc = UnsafeCell::new(5);
+    ///
+    /// let val = unsafe { uc.as_ref_unchecked() };
+    /// assert_eq!(val, &5);
+    /// ```
+    #[inline]
+    #[unstable(feature = "unsafe_cell_access", issue = "136327")]
+    pub const unsafe fn as_ref_unchecked(&self) -> &T {
+        // SAFETY: pointer comes from `&self` so naturally satisfies ptr-to-ref invariants.
+        unsafe { self.get().as_ref_unchecked() }
+    }
+
+    /// Get an exclusive reference to the value within the `UnsafeCell`.
+    ///
+    /// # Safety
+    ///
+    /// - It is Undefined Behavior to call this while any other
+    ///   reference(s) to the wrapped value are alive.
+    /// - Mutating the wrapped value through other means while the
+    ///   returned reference is alive is Undefined Behavior.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(unsafe_cell_access)]
+    /// use std::cell::UnsafeCell;
+    ///
+    /// let uc = UnsafeCell::new(5);
+    ///
+    /// unsafe { *uc.as_mut_unchecked() += 1; }
+    /// assert_eq!(uc.into_inner(), 6);
+    /// ```
+    #[inline]
+    #[unstable(feature = "unsafe_cell_access", issue = "136327")]
+    #[allow(clippy::mut_from_ref)]
+    pub const unsafe fn as_mut_unchecked(&self) -> &mut T {
+        // SAFETY: pointer comes from `&self` so naturally satisfies ptr-to-ref invariants.
+        unsafe { self.get().as_mut_unchecked() }
+    }
 }
 
 #[stable(feature = "unsafe_cell_default", since = "1.10.0")]
@@ -2259,6 +2343,9 @@ impl<T: CoerceUnsized<U>, U> CoerceUnsized<UnsafeCell<U>> for UnsafeCell<T> {}
 // `self: UnsafeCellWrapper<Self>` becomes possible
 #[unstable(feature = "dispatch_from_dyn", issue = "none")]
 impl<T: DispatchFromDyn<U>, U> DispatchFromDyn<UnsafeCell<U>> for UnsafeCell<T> {}
+
+#[unstable(feature = "pointer_like_trait", issue = "none")]
+impl<T: PointerLike> PointerLike for UnsafeCell<T> {}
 
 /// [`UnsafeCell`], but [`Sync`].
 ///
@@ -2308,7 +2395,7 @@ impl<T: ?Sized> SyncUnsafeCell<T> {
     /// when casting to `&mut T`, and ensure that there are no mutations
     /// or mutable aliases going on when casting to `&T`
     #[inline]
-    #[cfg_attr(not(bootstrap), rustc_as_ptr)]
+    #[rustc_as_ptr]
     #[rustc_never_returns_null_ptr]
     pub const fn get(&self) -> *mut T {
         self.value.get()
@@ -2365,6 +2452,9 @@ impl<T: CoerceUnsized<U>, U> CoerceUnsized<SyncUnsafeCell<U>> for SyncUnsafeCell
 #[unstable(feature = "dispatch_from_dyn", issue = "none")]
 //#[unstable(feature = "sync_unsafe_cell", issue = "95439")]
 impl<T: DispatchFromDyn<U>, U> DispatchFromDyn<SyncUnsafeCell<U>> for SyncUnsafeCell<T> {}
+
+#[unstable(feature = "pointer_like_trait", issue = "none")]
+impl<T: PointerLike> PointerLike for SyncUnsafeCell<T> {}
 
 #[allow(unused)]
 fn assert_coerce_unsized(
