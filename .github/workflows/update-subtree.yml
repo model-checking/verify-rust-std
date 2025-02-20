@@ -93,7 +93,7 @@ jobs:
       if: ${{ env.MERGE_CONFLICTS != 'noop' }}
       uses: peter-evans/create-pull-request@v7
       with:
-        title: 'Update subtree/library'
+        title: 'Update subtree/library to ${{ env.NEXT_TOOLCHAIN_DATE }}'
         body: |
           This is an automated PR to update the subtree/library branch to the changes
           from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
@@ -127,7 +127,7 @@ jobs:
       if: ${{ env.MERGE_CONFLICTS == 'no' }}
       uses: peter-evans/create-pull-request@v7
       with:
-        title: 'Merge subtree update'
+        title: 'Merge subtree update for toolchain nightly-${{ env.NEXT_TOOLCHAIN_DATE }}'
         body: |
           This is an automated PR to merge library subtree updates
           from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
@@ -142,7 +142,7 @@ jobs:
       if: ${{ env.MERGE_CONFLICTS == 'yes' }}
       uses: peter-evans/create-pull-request@v7
       with:
-        title: 'Merge subtree update'
+        title: 'Merge subtree update for toolchain nightly-${{ env.NEXT_TOOLCHAIN_DATE }}'
         body: |
           This is an automated PR to merge library subtree updates
           from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
