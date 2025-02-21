@@ -153,7 +153,7 @@ impl<T> Cursor<T> {
     /// let reference = buff.get_mut();
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_mut_cursor", issue = "130801")]
+    #[rustc_const_stable(feature = "const_mut_cursor", since = "CURRENT_RUSTC_VERSION")]
     pub const fn get_mut(&mut self) -> &mut T {
         &mut self.inner
     }
@@ -201,7 +201,7 @@ impl<T> Cursor<T> {
     /// assert_eq!(buff.position(), 4);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_mut_cursor", issue = "130801")]
+    #[rustc_const_stable(feature = "const_mut_cursor", since = "CURRENT_RUSTC_VERSION")]
     pub const fn set_position(&mut self, pos: u64) {
         self.pos = pos;
     }
@@ -304,7 +304,7 @@ where
                 self.pos = n;
                 Ok(self.pos)
             }
-            None => Err(io::const_io_error!(
+            None => Err(io::const_error!(
                 ErrorKind::InvalidInput,
                 "invalid seek to a negative or overflowing position",
             )),
@@ -446,7 +446,7 @@ fn reserve_and_pad<A: Allocator>(
     buf_len: usize,
 ) -> io::Result<usize> {
     let pos: usize = (*pos_mut).try_into().map_err(|_| {
-        io::const_io_error!(
+        io::const_error!(
             ErrorKind::InvalidInput,
             "cursor position exceeds maximum possible vector length",
         )
