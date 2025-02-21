@@ -509,7 +509,6 @@ impl f128 {
     ///
     /// ```rust
     /// #![feature(f128)]
-    /// #![feature(float_next_up_down)]
     /// # // FIXME(f16_f128): remove when `eqtf2` is available
     /// # #[cfg(all(target_arch = "x86_64", target_os = "linux"))] {
     ///
@@ -521,13 +520,15 @@ impl f128 {
     /// # }
     /// ```
     ///
+    /// This operation corresponds to IEEE-754 `nextUp`.
+    ///
     /// [`NEG_INFINITY`]: Self::NEG_INFINITY
     /// [`INFINITY`]: Self::INFINITY
     /// [`MIN`]: Self::MIN
     /// [`MAX`]: Self::MAX
     #[inline]
+    #[doc(alias = "nextUp")]
     #[unstable(feature = "f128", issue = "116909")]
-    // #[unstable(feature = "float_next_up_down", issue = "91399")]
     pub const fn next_up(self) -> Self {
         // Some targets violate Rust's assumption of IEEE semantics, e.g. by flushing
         // denormals to zero. This is in general unsound and unsupported, but here
@@ -563,7 +564,6 @@ impl f128 {
     ///
     /// ```rust
     /// #![feature(f128)]
-    /// #![feature(float_next_up_down)]
     /// # // FIXME(f16_f128): remove when `eqtf2` is available
     /// # #[cfg(all(target_arch = "x86_64", target_os = "linux"))] {
     ///
@@ -575,13 +575,15 @@ impl f128 {
     /// # }
     /// ```
     ///
+    /// This operation corresponds to IEEE-754 `nextDown`.
+    ///
     /// [`NEG_INFINITY`]: Self::NEG_INFINITY
     /// [`INFINITY`]: Self::INFINITY
     /// [`MIN`]: Self::MIN
     /// [`MAX`]: Self::MAX
     #[inline]
+    #[doc(alias = "nextDown")]
     #[unstable(feature = "f128", issue = "116909")]
-    // #[unstable(feature = "float_next_up_down", issue = "91399")]
     pub const fn next_down(self) -> Self {
         // Some targets violate Rust's assumption of IEEE semantics, e.g. by flushing
         // denormals to zero. This is in general unsound and unsupported, but here
@@ -673,7 +675,8 @@ impl f128 {
     /// If one of the arguments is NaN, then the other argument is returned.
     /// This follows the IEEE 754-2008 semantics for maxNum, except for handling of signaling NaNs;
     /// this function handles all NaNs the same way and avoids maxNum's problems with associativity.
-    /// This also matches the behavior of libm’s fmax.
+    /// This also matches the behavior of libm’s fmax. In particular, if the inputs compare equal
+    /// (such as for the case of `+0.0` and `-0.0`), either input may be returned non-deterministically.
     ///
     /// ```
     /// #![feature(f128)]
@@ -699,7 +702,8 @@ impl f128 {
     /// If one of the arguments is NaN, then the other argument is returned.
     /// This follows the IEEE 754-2008 semantics for minNum, except for handling of signaling NaNs;
     /// this function handles all NaNs the same way and avoids minNum's problems with associativity.
-    /// This also matches the behavior of libm’s fmin.
+    /// This also matches the behavior of libm’s fmin. In particular, if the inputs compare equal
+    /// (such as for the case of `+0.0` and `-0.0`), either input may be returned non-deterministically.
     ///
     /// ```
     /// #![feature(f128)]
@@ -812,7 +816,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// #![feature(num_midpoint)]
     /// # // Using aarch64 because `reliable_f128_math` is needed
     /// # #[cfg(all(target_arch = "aarch64", target_os = "linux"))] {
     ///
@@ -822,8 +825,8 @@ impl f128 {
     /// ```
     #[inline]
     #[unstable(feature = "f128", issue = "116909")]
-    // #[unstable(feature = "num_midpoint", issue = "110840")]
-    pub fn midpoint(self, other: f128) -> f128 {
+    #[rustc_const_unstable(feature = "f128", issue = "116909")]
+    pub const fn midpoint(self, other: f128) -> f128 {
         const LO: f128 = f128::MIN_POSITIVE * 2.;
         const HI: f128 = f128::MAX / 2.;
 

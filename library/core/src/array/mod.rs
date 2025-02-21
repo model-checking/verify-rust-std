@@ -156,7 +156,6 @@ pub const fn from_mut<T>(s: &mut T) -> &mut [T; 1] {
 
 /// The error type returned when a conversion from a slice to an array fails.
 #[stable(feature = "try_from", since = "1.34.0")]
-#[rustc_allowed_through_unstable_modules]
 #[derive(Debug, Copy, Clone)]
 pub struct TryFromSliceError(());
 
@@ -214,8 +213,8 @@ impl<T, const N: usize> BorrowMut<[T]> for [T; N] {
     }
 }
 
-/// Tries to create an array `[T; N]` by copying from a slice `&[T]`. Succeeds if
-/// `slice.len() == N`.
+/// Tries to create an array `[T; N]` by copying from a slice `&[T]`.
+/// Succeeds if `slice.len() == N`.
 ///
 /// ```
 /// let bytes: [u8; 3] = [1, 0, 2];
@@ -282,13 +281,7 @@ impl<'a, T, const N: usize> TryFrom<&'a [T]> for &'a [T; N] {
 
     #[inline]
     fn try_from(slice: &'a [T]) -> Result<&'a [T; N], TryFromSliceError> {
-        if slice.len() == N {
-            let ptr = slice.as_ptr() as *const [T; N];
-            // SAFETY: ok because we just checked that the length fits
-            unsafe { Ok(&*ptr) }
-        } else {
-            Err(TryFromSliceError(()))
-        }
+        slice.as_array().ok_or(TryFromSliceError(()))
     }
 }
 
@@ -310,13 +303,7 @@ impl<'a, T, const N: usize> TryFrom<&'a mut [T]> for &'a mut [T; N] {
 
     #[inline]
     fn try_from(slice: &'a mut [T]) -> Result<&'a mut [T; N], TryFromSliceError> {
-        if slice.len() == N {
-            let ptr = slice.as_mut_ptr() as *mut [T; N];
-            // SAFETY: ok because we just checked that the length fits
-            unsafe { Ok(&mut *ptr) }
-        } else {
-            Err(TryFromSliceError(()))
-        }
+        slice.as_mut_array().ok_or(TryFromSliceError(()))
     }
 }
 
@@ -905,7 +892,7 @@ impl<T> Guard<'_, T> {
     ///
     /// No more than N elements must be initialized.
     #[inline]
-    pub unsafe fn push_unchecked(&mut self, item: T) {
+    pub(crate) unsafe fn push_unchecked(&mut self, item: T) {
         // SAFETY: If `initialized` was correct before and the caller does not
         // invoke this method more than N times then writes will be in-bounds
         // and slots will not be initialized more than once.
@@ -923,9 +910,7 @@ impl<T> Drop for Guard<'_, T> {
 
         // SAFETY: this slice will contain only initialized objects.
         unsafe {
-            crate::ptr::drop_in_place(MaybeUninit::slice_assume_init_mut(
-                self.array_mut.get_unchecked_mut(..self.initialized),
-            ));
+            self.array_mut.get_unchecked_mut(..self.initialized).assume_init_drop();
         }
     }
 }

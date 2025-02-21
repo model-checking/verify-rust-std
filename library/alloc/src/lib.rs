@@ -88,12 +88,16 @@
 #![allow(rustdoc::redundant_explicit_links)]
 #![warn(rustdoc::unescaped_backticks)]
 #![deny(ffi_unwind_calls)]
+#![warn(unreachable_pub)]
 //
 // Library features:
 // tidy-alphabetical-start
+<<<<<<< HEAD
 #![cfg_attr(kani, feature(kani))]
 #![cfg_attr(not(no_global_oom_handling), feature(const_alloc_error))]
 #![cfg_attr(not(no_global_oom_handling), feature(const_btree_len))]
+=======
+>>>>>>> 27901437b3c105b874157f70c0904070a904f66e
 #![cfg_attr(test, feature(str_as_str))]
 #![feature(alloc_layout_extra)]
 #![feature(allocator_api)]
@@ -102,19 +106,15 @@
 #![feature(array_windows)]
 #![feature(ascii_char)]
 #![feature(assert_matches)]
-#![feature(async_closure)]
 #![feature(async_fn_traits)]
 #![feature(async_iterator)]
 #![feature(box_uninit_write)]
+#![feature(bstr)]
+#![feature(bstr_internals)]
 #![feature(clone_to_uninit)]
 #![feature(coerce_unsized)]
-#![feature(const_align_of_val)]
-#![feature(const_box)]
 #![feature(const_eval_select)]
 #![feature(const_heap)]
-#![feature(const_maybe_uninit_write)]
-#![feature(const_size_of_val)]
-#![feature(const_vec_string_slice)]
 #![feature(core_intrinsics)]
 #![feature(deprecated_suggestion)]
 #![feature(deref_pure_trait)]
@@ -125,6 +125,7 @@
 #![feature(extend_one_unchecked)]
 #![feature(fmt_internals)]
 #![feature(fn_traits)]
+#![feature(formatting_options)]
 #![feature(hasher_prefixfree_extras)]
 #![feature(inplace_iteration)]
 #![feature(iter_advance_by)]
@@ -134,6 +135,7 @@
 #![feature(local_waker)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_uninit_array_transpose)]
+#![feature(nonnull_provenance)]
 #![feature(panic_internals)]
 #![feature(pattern)]
 #![feature(pin_coerce_unsized_trait)]
@@ -150,6 +152,7 @@
 #![feature(slice_range)]
 #![feature(std_internals)]
 #![feature(str_internals)]
+#![feature(temporary_niche_types)]
 #![feature(trusted_fused)]
 #![feature(trusted_len)]
 #![feature(trusted_random_access)]
@@ -164,8 +167,6 @@
 //
 // Language features:
 // tidy-alphabetical-start
-#![cfg_attr(bootstrap, feature(strict_provenance))]
-#![cfg_attr(not(bootstrap), feature(strict_provenance_lints))]
 #![cfg_attr(not(test), feature(coroutine_trait))]
 #![cfg_attr(test, feature(panic_update_hook))]
 #![cfg_attr(test, feature(test))]
@@ -173,11 +174,11 @@
 #![feature(allow_internal_unstable)]
 #![feature(cfg_sanitize)]
 #![feature(const_precise_live_drops)]
-#![feature(const_try)]
 #![feature(decl_macro)]
 #![feature(dropck_eyepatch)]
 #![feature(fundamental)]
 #![feature(hashmap_internals)]
+#![feature(intrinsics)]
 #![feature(lang_items)]
 #![feature(min_specialization)]
 #![feature(multiple_supertrait_upcastable)]
@@ -189,6 +190,7 @@
 #![feature(slice_internals)]
 #![feature(staged_api)]
 #![feature(stmt_expr_attributes)]
+#![feature(strict_provenance_lints)]
 #![feature(unboxed_closures)]
 #![feature(unsized_fn_params)]
 #![feature(with_negative_coherence)]
@@ -232,9 +234,11 @@ pub mod alloc;
 pub mod boxed;
 #[cfg(test)]
 mod boxed {
-    pub use std::boxed::Box;
+    pub(crate) use std::boxed::Box;
 }
 pub mod borrow;
+#[unstable(feature = "bstr", issue = "134915")]
+pub mod bstr;
 pub mod collections;
 #[cfg(all(not(no_rc), not(no_sync), not(no_global_oom_handling)))]
 pub mod ffi;
@@ -248,8 +252,6 @@ pub mod string;
 pub mod sync;
 #[cfg(all(not(no_global_oom_handling), not(no_rc), not(no_sync)))]
 pub mod task;
-#[cfg(test)]
-mod tests;
 pub mod vec;
 
 #[doc(hidden)]
