@@ -64,13 +64,13 @@
 )]
 #![allow(missing_docs)]
 
-use crate::marker::{DiscriminantKind, Tuple};
-use crate::mem::SizedTypeProperties;
-use crate::{ptr, ub_checks};
 use safety::{ensures, requires};
 
 #[cfg(kani)]
 use crate::kani;
+use crate::marker::{DiscriminantKind, Tuple};
+use crate::mem::SizedTypeProperties;
+use crate::{ptr, ub_checks};
 
 pub mod fallback;
 pub mod mir;
@@ -4944,6 +4944,7 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use core::mem::MaybeUninit;
+
     use kani::{AllocationStatus, Arbitrary, ArbitraryPointer, PointerGenerator};
 
     use super::*;
@@ -4978,7 +4979,7 @@ mod verify {
         // `copy_nonoverlapping`.
         // Kani contract checking would fail due to existing restriction on calls to
         // the function under verification.
-        let gen_any_ptr = |buf:  &mut [MaybeUninit<char>; 100]| -> *mut char {
+        let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
             let base = buf.as_mut_ptr() as *mut u8;
             base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
         };
@@ -4993,13 +4994,13 @@ mod verify {
         let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
         unsafe { copy_nonoverlapping(src, dst, kani::any()) }
     }
-    
-    //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does 
+
+    //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does
     //not currently support contracts (https://github.com/model-checking/kani/issues/3345)
     #[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
     #[requires(ub_checks::can_dereference(&input as *const T as *const U))] //output can be deref'd as value of type U
     #[allow(dead_code)]
-    unsafe fn transmute_unchecked_wrapper<T,U>(input: T) -> U {    
+    unsafe fn transmute_unchecked_wrapper<T, U>(input: T) -> U {
         unsafe { transmute_unchecked(input) }
     }
 
@@ -5055,7 +5056,7 @@ mod verify {
     //tests that transmute works correctly when transmuting something with zero size
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
     fn transmute_zero_size() {
-        let empty_arr: [u8;0] = [];
+        let empty_arr: [u8; 0] = [];
         let unit_val: () = unsafe { transmute_unchecked_wrapper(empty_arr) };
         assert!(unit_val == ());
     }
@@ -5073,7 +5074,7 @@ mod verify {
                 let src: $src = kani::any();
                 let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
                 let src2: $src = unsafe { transmute_unchecked_wrapper(dst) };
-                assert_eq!(src,src2);
+                assert_eq!(src, src2);
             }
         };
     }
@@ -5101,11 +5102,7 @@ mod verify {
     #[kani::proof_for_contract(write_bytes)]
     fn check_write_bytes() {
         let mut generator = PointerGenerator::<100>::new();
-        let ArbitraryPointer {
-            ptr,
-            status,
-            ..
-        } = generator.any_alloc_status::<char>();
+        let ArbitraryPointer { ptr, status, .. } = generator.any_alloc_status::<char>();
         kani::assume(supported_status(status));
         unsafe { write_bytes(ptr, kani::any(), kani::any()) };
     }
@@ -5113,16 +5110,9 @@ mod verify {
     fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
         let mut generator1 = PointerGenerator::<100>::new();
         let mut generator2 = PointerGenerator::<100>::new();
-        let ArbitraryPointer {
-            ptr: src,
-            status: src_status,
-            ..
-        } = generator1.any_alloc_status::<T>();
-        let ArbitraryPointer {
-            ptr: dst,
-            status: dst_status,
-            ..
-        } = if kani::any() {
+        let ArbitraryPointer { ptr: src, status: src_status, .. } =
+            generator1.any_alloc_status::<T>();
+        let ArbitraryPointer { ptr: dst, status: dst_status, .. } = if kani::any() {
             generator1.any_alloc_status::<T>()
         } else {
             generator2.any_alloc_status::<T>()
