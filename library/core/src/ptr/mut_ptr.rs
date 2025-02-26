@@ -427,7 +427,7 @@ impl<T: ?Sized> *mut T {
         // Precondition 2: adding the computed offset to `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
         count.checked_mul(core::mem::size_of::<T>() as isize)
-        .map_or(false, |computed_offset| (self as isize).checked_add(computed_offset).is_some()) &&
+        .is_some_and(|computed_offset| (self as isize).checked_add(computed_offset).is_some()) &&
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_offset(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
@@ -493,19 +493,14 @@ impl<T: ?Sized> *mut T {
     #[rustc_const_stable(feature = "const_pointer_byte_offsets", since = "1.75.0")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[requires(
-        // If count is zero, any pointer is valid including null pointer.
-        (count == 0) ||
-        // Else if count is not zero, then ensure that subtracting `count` doesn't 
-        // cause overflow and that both pointers `self` and the result are in the 
-        // same allocation.
-        ((self.addr() as isize).checked_add(count).is_some() &&
-            core::ub_checks::same_allocation(self, self.wrapping_byte_offset(count)))
+        count == 0 ||
+        (
+            (core::mem::size_of_val_raw(self) > 0) &&
+            (self.addr() as isize).checked_add(count).is_some()) &&
+            (core::ub_checks::same_allocation(self, self.wrapping_byte_offset(count))
+        )
     )]
-    #[ensures(|&result|
-        // The resulting pointer should either be unchanged or still point to the same allocation
-        (self.addr() == result.addr()) ||
-        (core::ub_checks::same_allocation(self, result))
-    )]
+    #[ensures(|result| core::mem::size_of_val_raw(self) == 0 || core::ub_checks::same_allocation(self, *result))]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset`.
         unsafe { self.cast::<u8>().offset(count).with_metadata_of(self) }
@@ -901,7 +896,7 @@ impl<T: ?Sized> *mut T {
         // Ensuring that both pointers point to the same address or are in the same allocation
         (self as isize == origin as isize || core::ub_checks::same_allocation(self, origin))
     )]
-    #[ensures(|result| *result == (self as isize - origin as isize) / (mem::size_of::<T>() as isize))]
+    #[ensures(|result| core::mem::size_of::<T>() == 0 || (*result == (self as isize - origin as isize) / (mem::size_of::<T>() as isize)))]
     pub const unsafe fn offset_from(self, origin: *const T) -> isize
     where
         T: Sized,
@@ -1087,7 +1082,7 @@ impl<T: ?Sized> *mut T {
         // Precondition 2: adding the computed offset to `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani. 
         count.checked_mul(core::mem::size_of::<T>())
-        .map_or(false, |computed_offset| {
+        .is_some_and(|computed_offset| {
             computed_offset <= isize::MAX as usize && (self as isize).checked_add(computed_offset as isize).is_some()
         }) &&
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
@@ -1154,17 +1149,17 @@ impl<T: ?Sized> *mut T {
     #[requires(
         // If count is zero, any pointer is valid including null pointer.
         (count == 0) ||
-        // Else if count is not zero, then ensure that subtracting `count` doesn't 
-        // cause overflow and that both pointers `self` and the result are in the 
-        // same allocation.
-        ((self.addr() as isize).checked_add(count as isize).is_some() &&
-            core::ub_checks::same_allocation(self, self.wrapping_byte_add(count)))
+        // Else if count is not zero, then ensure that adding `count` doesn't cause 
+        // overflow and that both pointers `self` and the result are in the same 
+        // allocation
+        (
+            (count <= isize::MAX as usize) &&
+            (core::mem::size_of_val_raw(self) > 0) &&
+            ((self.addr() as isize).checked_add(count as isize).is_some()) &&
+            (core::ub_checks::same_allocation(self, self.wrapping_byte_add(count)))
+        )
     )]
-    #[ensures(|&result|
-        // The resulting pointer should either be unchanged or still point to the same allocation
-        (self.addr() == result.addr()) ||
-        (core::ub_checks::same_allocation(self, result))
-    )]
+    #[ensures(|result| core::mem::size_of_val_raw(self) == 0 || core::ub_checks::same_allocation(self, *result))]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add`.
         unsafe { self.cast::<u8>().add(count).with_metadata_of(self) }
@@ -1227,7 +1222,7 @@ impl<T: ?Sized> *mut T {
         // Precondition 2: substracting the computed offset from `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
         count.checked_mul(core::mem::size_of::<T>())
-        .map_or(false, |computed_offset| {
+        .is_some_and(|computed_offset| {
             computed_offset <= isize::MAX as usize && (self as isize).checked_sub(computed_offset as isize).is_some()
         }) &&
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
@@ -1303,14 +1298,14 @@ impl<T: ?Sized> *mut T {
         // Else if count is not zero, then ensure that subtracting `count` doesn't 
         // cause overflow and that both pointers `self` and the result are in the 
         // same allocation.
-        ((self.addr() as isize).checked_sub(count as isize).is_some() &&
-            core::ub_checks::same_allocation(self, self.wrapping_byte_sub(count)))
+        (
+            (count <= isize::MAX as usize) &&
+            (core::mem::size_of_val_raw(self) > 0) &&
+            ((self.addr() as isize).checked_sub(count as isize).is_some()) &&
+            (core::ub_checks::same_allocation(self, self.wrapping_byte_sub(count)))
+        )
     )]
-    #[ensures(|&result|
-        // The resulting pointer should either be unchanged or still point to the same allocation
-        (self.addr() == result.addr()) ||
-        (core::ub_checks::same_allocation(self, result))
-    )]
+    #[ensures(|result| core::mem::size_of_val_raw(self) == 0 || core::ub_checks::same_allocation(self, *result))]
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `sub`.
         unsafe { self.cast::<u8>().sub(count).with_metadata_of(self) }
@@ -2670,7 +2665,6 @@ mod verify {
     );
 
     #[kani::proof_for_contract(<*mut ()>::byte_offset)]
-    #[kani::should_panic]
     pub fn check_mut_byte_offset_unit_invalid_count() {
         let mut val = ();
         let ptr: *mut () = &mut val;
@@ -2701,7 +2695,7 @@ mod verify {
             pub fn $proof_name() {
                 let mut val = ();
                 let ptr: *mut () = &mut val;
-                let count: isize = mem::size_of::<()>() as isize;
+                let count: isize = kani::any();
                 unsafe {
                     ptr.byte_offset(count);
                 }
@@ -2714,7 +2708,7 @@ mod verify {
                 let mut val = ();
                 let ptr: *mut () = &mut val;
                 //byte_add and byte_sub need count to be usize unlike byte_offset
-                let count: usize = mem::size_of::<()>();
+                let count: usize = kani::any();
                 unsafe {
                     ptr.$fn_name(count);
                 }

@@ -404,11 +404,12 @@ mod verify {
         }
     }
 
-    // pub const fn of<T>() -> Self
-    #[kani::proof_for_contract(Alignment::of)]
-    pub fn check_of_i32() {
-        let _ = Alignment::of::<i32>();
-    }
+    /// FIXME, c.f. https://github.com/model-checking/kani/issues/3905
+    // // pub const fn of<T>() -> Self
+    // #[kani::proof_for_contract(Alignment::of)]
+    // pub fn check_of_i32() {
+    //     let _ = Alignment::of::<i32>();
+    // }
 
     // pub const fn new(align: usize) -> Option<Self>
     #[kani::proof_for_contract(Alignment::new)]

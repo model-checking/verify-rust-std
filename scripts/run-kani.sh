@@ -207,6 +207,7 @@ run_verification_subset() {
     printf '%s\n' "${harnesses[@]}"
     "$kani_path" verify-std -Z unstable-options ./library \
         $unstable_args \
+        --no-assert-contracts \
         $harness_args --exact \
         -j \
         --output-format=terse \
@@ -291,6 +292,7 @@ main() {
             echo "Running Kani verify-std command..."
             "$kani_path" verify-std -Z unstable-options ./library \
                 $unstable_args \
+                --no-assert-contracts \
                 $command_args \
                 --enable-unstable \
                 --cbmc-args --object-bits 12

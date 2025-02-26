@@ -46,7 +46,7 @@ const DAYS_PER_WEEK: u64 = 7;
 #[unstable(feature = "ub_checks", issue = "none")]
 impl Invariant for Nanoseconds {
     fn is_safe(&self) -> bool {
-        self.0 < NANOS_PER_SEC
+        self.as_inner() < NANOS_PER_SEC
     }
 }
 
@@ -511,7 +511,7 @@ impl Duration {
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
     #[must_use]
     #[inline]
-    #[ensures(|ms| *ms == self.nanos.0 / NANOS_PER_MILLI)]
+    #[ensures(|ms| *ms == self.nanos.as_inner() / NANOS_PER_MILLI)]
     pub const fn subsec_millis(&self) -> u32 {
         self.nanos.as_inner() / NANOS_PER_MILLI
     }
@@ -535,7 +535,7 @@ impl Duration {
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
     #[must_use]
     #[inline]
-    #[ensures(|ms| *ms == self.nanos.0 / NANOS_PER_MICRO)]
+    #[ensures(|ms| *ms == self.nanos.as_inner() / NANOS_PER_MICRO)]
     pub const fn subsec_micros(&self) -> u32 {
         self.nanos.as_inner() / NANOS_PER_MICRO
     }
@@ -559,7 +559,7 @@ impl Duration {
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
     #[must_use]
     #[inline]
-    #[ensures(|nanos| *nanos == self.nanos.0)]
+    #[ensures(|nanos| *nanos == self.nanos.as_inner())]
     pub const fn subsec_nanos(&self) -> u32 {
         self.nanos.as_inner()
     }
@@ -578,7 +578,7 @@ impl Duration {
     #[rustc_const_stable(feature = "duration_as_u128", since = "1.33.0")]
     #[must_use]
     #[inline]
-    #[ensures(|ms| *ms == self.secs as u128 * MILLIS_PER_SEC as u128 + (self.nanos.0 / NANOS_PER_MILLI) as u128)]
+    #[ensures(|ms| *ms == self.secs as u128 * MILLIS_PER_SEC as u128 + (self.nanos.as_inner() / NANOS_PER_MILLI) as u128)]
     pub const fn as_millis(&self) -> u128 {
         self.secs as u128 * MILLIS_PER_SEC as u128
             + (self.nanos.as_inner() / NANOS_PER_MILLI) as u128
@@ -598,7 +598,7 @@ impl Duration {
     #[rustc_const_stable(feature = "duration_as_u128", since = "1.33.0")]
     #[must_use]
     #[inline]
-    #[ensures(|ms| *ms == self.secs as u128 * MICROS_PER_SEC as u128 + (self.nanos.0 / NANOS_PER_MICRO) as u128)]
+    #[ensures(|ms| *ms == self.secs as u128 * MICROS_PER_SEC as u128 + (self.nanos.as_inner() / NANOS_PER_MICRO) as u128)]
     pub const fn as_micros(&self) -> u128 {
         self.secs as u128 * MICROS_PER_SEC as u128
             + (self.nanos.as_inner() / NANOS_PER_MICRO) as u128
