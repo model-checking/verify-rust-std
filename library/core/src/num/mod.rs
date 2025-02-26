@@ -1604,68 +1604,8 @@ macro_rules! from_str_int_impl {
     )*}
 }
 
-<<<<<<< HEAD
-from_str_radix! { unsigned u8 u16 u32 u64 u128 }
-from_str_radix! { signed i8 i16 i32 i64 i128 }
-
-// Re-use the relevant implementation of from_str_radix for isize and usize to avoid outputting two
-// identical functions.
-macro_rules! from_str_radix_size_impl {
-    ($($signedness:ident $t:ident $size:ty),*) => {$(
-    impl $size {
-        /// Converts a string slice in a given base to an integer.
-        ///
-        /// The string is expected to be an optional
-        #[doc = sign_dependent_expr!{
-            $signedness ?
-            if signed {
-                " `+` or `-` "
-            }
-            if unsigned {
-                " `+` "
-            }
-        }]
-        /// sign followed by only digits. Leading and trailing non-digit characters (including
-        /// whitespace) represent an error. Underscores (which are accepted in rust literals)
-        /// also represent an error.
-        ///
-        /// Digits are a subset of these characters, depending on `radix`:
-        /// * `0-9`
-        /// * `a-z`
-        /// * `A-Z`
-        ///
-        /// # Panics
-        ///
-        /// This function panics if `radix` is not in the range from 2 to 36.
-        ///
-        /// # Examples
-        ///
-        /// Basic usage:
-        /// ```
-        #[doc = concat!("assert_eq!(", stringify!($size), "::from_str_radix(\"A\", 16), Ok(10));")]
-        /// ```
-        /// Trailing space returns error:
-        /// ```
-        #[doc = concat!("assert!(", stringify!($size), "::from_str_radix(\"1 \", 10).is_err());")]
-        /// ```
-        #[stable(feature = "rust1", since = "1.0.0")]
-        #[rustc_const_stable(feature = "const_int_from_str", since = "1.82.0")]
-        #[inline]
-        pub const fn from_str_radix(src: &str, radix: u32) -> Result<$size, ParseIntError> {
-            match <$t>::from_str_radix(src, radix) {
-                Ok(x) => Ok(x as $size),
-                Err(e) => Err(e),
-            }
-        }
-    })*}
-}
-
-#[cfg(target_pointer_width = "16")]
-from_str_radix_size_impl! { signed i16 isize, unsigned u16 usize }
-#[cfg(target_pointer_width = "32")]
-from_str_radix_size_impl! { signed i32 isize, unsigned u32 usize }
-#[cfg(target_pointer_width = "64")]
-from_str_radix_size_impl! { signed i64 isize, unsigned u64 usize }
+from_str_int_impl! { signed isize i8 i16 i32 i64 i128 }
+from_str_int_impl! { unsigned usize u8 u16 u32 u64 u128 }
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -2376,7 +2316,3 @@ mod verify {
         checked_f128_to_int_unchecked_usize
     );
 }
-=======
-from_str_int_impl! { signed isize i8 i16 i32 i64 i128 }
-from_str_int_impl! { unsigned usize u8 u16 u32 u64 u128 }
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534

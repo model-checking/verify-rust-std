@@ -5,13 +5,9 @@ use core::ascii::EscapeDefault;
 use crate::fmt::{self, Write};
 #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
 use crate::intrinsics::const_eval_select;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::{ascii, iter, mem, ops};
-=======
 use crate::{ascii, iter, ops};
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
 
 #[cfg(not(test))]
 impl [u8] {
@@ -467,31 +463,6 @@ const fn is_ascii(s: &[u8]) -> bool {
     )
 }
 
-<<<<<<< HEAD
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-pub mod verify {
-    use super::*;
-
-    #[kani::proof]
-    #[kani::unwind(8)]
-    pub fn check_is_ascii() {
-        if kani::any() {
-            // TODO: ARR_SIZE can be much larger with cbmc argument
-            // `--arrays-uf-always`
-            const ARR_SIZE: usize = 1000;
-            let mut x: [u8; ARR_SIZE] = kani::any();
-            let mut xs = kani::slice::any_slice_of_array_mut(&mut x);
-            is_ascii(xs);
-        } else {
-            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
-            kani::assume(ptr.is_aligned());
-            unsafe {
-                assert_eq!(is_ascii(crate::slice::from_raw_parts(ptr, 0)), true);
-            }
-        }
-    }
-=======
 /// ASCII test optimized to use the `pmovmskb` instruction available on `x86-64`
 /// platforms.
 ///
@@ -535,5 +506,29 @@ const fn is_ascii(bytes: &[u8]) -> bool {
     }
 
     is_ascii
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    pub fn check_is_ascii() {
+        if kani::any() {
+            // TODO: ARR_SIZE can be much larger with cbmc argument
+            // `--arrays-uf-always`
+            const ARR_SIZE: usize = 1000;
+            let mut x: [u8; ARR_SIZE] = kani::any();
+            let mut xs = kani::slice::any_slice_of_array_mut(&mut x);
+            is_ascii(xs);
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const u8;
+            kani::assume(ptr.is_aligned());
+            unsafe {
+                assert_eq!(is_ascii(crate::slice::from_raw_parts(ptr, 0)), true);
+            }
+        }
+    }
 }

@@ -49,12 +49,9 @@ impl Alignment {
     /// but in an `Alignment` instead of a `usize`.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
-<<<<<<< HEAD
+    #[must_use]
     #[requires(mem::align_of::<T>().is_power_of_two())]
     #[ensures(|result| result.as_usize().is_power_of_two())]
-=======
-    #[must_use]
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
     pub const fn of<T>() -> Self {
         // This can't actually panic since type alignment is always a power of two.
         const { Alignment::new(mem::align_of::<T>()).unwrap() }

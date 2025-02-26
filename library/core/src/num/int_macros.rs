@@ -2136,11 +2136,7 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-<<<<<<< HEAD
         #[ensures(|result| *result == self << (rhs & (Self::BITS - 1)))]
-        #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(unchecked_shifts))]
-=======
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
         pub const fn wrapping_shl(self, rhs: u32) -> Self {
             // SAFETY: the masking by the bitsize of the type ensures that we do not shift
             // out of bounds
@@ -2170,11 +2166,7 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-<<<<<<< HEAD
         #[ensures(|result| *result == self >> (rhs & (Self::BITS - 1)))]
-        #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(unchecked_shifts))]
-=======
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
         pub const fn wrapping_shr(self, rhs: u32) -> Self {
             // SAFETY: the masking by the bitsize of the type ensures that we do not shift
             // out of bounds

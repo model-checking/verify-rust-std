@@ -23,12 +23,9 @@ use safety::{Invariant, ensures};
 
 use crate::fmt;
 use crate::iter::Sum;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-=======
 use crate::num::niche_types::Nanoseconds;
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
 use crate::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 use crate::ub_checks::Invariant;
 
@@ -46,33 +43,13 @@ const HOURS_PER_DAY: u64 = 24;
 #[unstable(feature = "duration_units", issue = "120301")]
 const DAYS_PER_WEEK: u64 = 7;
 
-<<<<<<< HEAD
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(transparent)]
-#[rustc_layout_scalar_valid_range_start(0)]
-#[rustc_layout_scalar_valid_range_end(999_999_999)]
-struct Nanoseconds(u32);
-
+#[unstable(feature = "ub_checks", issue = "none")]
 impl Invariant for Nanoseconds {
     fn is_safe(&self) -> bool {
         self.0 < NANOS_PER_SEC
     }
 }
 
-impl Nanoseconds {
-    // SAFETY: 0 is within the valid range
-    const ZERO: Self = unsafe { Nanoseconds(0) };
-}
-
-impl Default for Nanoseconds {
-    #[inline]
-    fn default() -> Self {
-        Self::ZERO
-    }
-}
-
-=======
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
 /// A `Duration` type to represent a span of time, typically used for system
 /// timeouts.
 ///

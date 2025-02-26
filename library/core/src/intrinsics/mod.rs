@@ -4003,9 +4003,8 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[rustc_nounwind]
 #[inline]
 #[rustc_intrinsic]
-<<<<<<< HEAD
-// Const-unstable because `swap_nonoverlapping` is const-unstable.
-#[rustc_const_unstable(feature = "const_typed_swap", issue = "none")]
+#[rustc_intrinsic_const_stable_indirect]
+#[rustc_allow_const_fn_unstable(const_swap_nonoverlapping)] // this is anyway not called since CTFE implements the intrinsic
 #[cfg_attr(kani, kani::modifies(x))]
 #[cfg_attr(kani, kani::modifies(y))]
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
@@ -4013,12 +4012,7 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
 #[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), size_of::<T>(), 1))]
 #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
-pub const unsafe fn typed_swap<T>(x: *mut T, y: *mut T) {
-=======
-#[rustc_intrinsic_const_stable_indirect]
-#[rustc_allow_const_fn_unstable(const_swap_nonoverlapping)] // this is anyway not called since CTFE implements the intrinsic
 pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
     // SAFETY: The caller provided single non-overlapping items behind
     // pointers, so swapping them with `count: 1` is fine.
     unsafe { ptr::swap_nonoverlapping(x, y, 1) };
@@ -4949,24 +4943,27 @@ pub(crate) const fn miri_promise_symbolic_alignment(ptr: *const (), align: usize
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use super::*;
-    use crate::kani;
     use core::mem::MaybeUninit;
     use kani::{AllocationStatus, Arbitrary, ArbitraryPointer, PointerGenerator};
 
-    #[kani::proof_for_contract(typed_swap)]
+    use super::*;
+    use crate::kani;
+
+    #[kani::proof_for_contract(typed_swap_nonoverlapping)]
     pub fn check_typed_swap_u8() {
-        run_with_arbitrary_ptrs::<u8>(|x, y| unsafe { typed_swap(x, y) });
+        run_with_arbitrary_ptrs::<u8>(|x, y| unsafe { typed_swap_nonoverlapping(x, y) });
     }
 
-    #[kani::proof_for_contract(typed_swap)]
+    #[kani::proof_for_contract(typed_swap_nonoverlapping)]
     pub fn check_typed_swap_char() {
-        run_with_arbitrary_ptrs::<char>(|x, y| unsafe { typed_swap(x, y) });
+        run_with_arbitrary_ptrs::<char>(|x, y| unsafe { typed_swap_nonoverlapping(x, y) });
     }
 
-    #[kani::proof_for_contract(typed_swap)]
+    #[kani::proof_for_contract(typed_swap_nonoverlapping)]
     pub fn check_typed_swap_non_zero() {
-        run_with_arbitrary_ptrs::<core::num::NonZeroI32>(|x, y| unsafe { typed_swap(x, y) });
+        run_with_arbitrary_ptrs::<core::num::NonZeroI32>(|x, y| unsafe {
+            typed_swap_nonoverlapping(x, y)
+        });
     }
 
     #[kani::proof_for_contract(copy)]

@@ -332,12 +332,8 @@ impl<T: ?Sized> NonNull<T> {
     /// This is a [Strict Provenance][crate::ptr#strict-provenance] API.
     #[must_use]
     #[inline]
-<<<<<<< HEAD
-    #[stable(feature = "strict_provenance", since = "CURRENT_RUSTC_VERSION")]
-    #[ensures(|result| result.get() == self.as_ptr() as *const() as usize)]
-=======
     #[stable(feature = "strict_provenance", since = "1.84.0")]
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
+    #[ensures(|result| result.get() == self.as_ptr() as *const() as usize)]
     pub fn addr(self) -> NonZero<usize> {
         // SAFETY: The pointer is guaranteed by the type to be non-null,
         // meaning that the address will be non-zero.
@@ -365,12 +361,8 @@ impl<T: ?Sized> NonNull<T> {
     /// This is a [Strict Provenance][crate::ptr#strict-provenance] API.
     #[must_use]
     #[inline]
-<<<<<<< HEAD
-    #[stable(feature = "strict_provenance", since = "CURRENT_RUSTC_VERSION")]
-    #[ensures(|result: &Self| !result.as_ptr().is_null() && result.addr() == addr)]
-=======
     #[stable(feature = "strict_provenance", since = "1.84.0")]
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
+    #[ensures(|result: &Self| !result.as_ptr().is_null() && result.addr() == addr)]
     pub fn with_addr(self, addr: NonZero<usize>) -> Self {
         // SAFETY: The result of `ptr::from::with_addr` is non-null because `addr` is guaranteed to be non-zero.
         unsafe { NonNull::new_unchecked(self.as_ptr().with_addr(addr.get()) as *mut _) }
@@ -384,12 +376,8 @@ impl<T: ?Sized> NonNull<T> {
     /// This is a [Strict Provenance][crate::ptr#strict-provenance] API.
     #[must_use]
     #[inline]
-<<<<<<< HEAD
-    #[stable(feature = "strict_provenance", since = "CURRENT_RUSTC_VERSION")]
-    #[ensures(|result: &Self| !result.as_ptr().is_null())]
-=======
     #[stable(feature = "strict_provenance", since = "1.84.0")]
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
+    #[ensures(|result: &Self| !result.as_ptr().is_null())]
     pub fn map_addr(self, f: impl FnOnce(NonZero<usize>) -> NonZero<usize>) -> Self {
         self.with_addr(f(self.addr()))
     }
@@ -745,16 +733,12 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-<<<<<<< HEAD
-    #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(unchecked_neg))]
     #[requires(
         count.checked_mul(core::mem::size_of::<T>()).is_some() &&
         count * core::mem::size_of::<T>() <= isize::MAX as usize &&
-        kani::mem::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
+        ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
     )]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
-=======
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -1322,14 +1306,10 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::swap`]: crate::ptr::swap()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-<<<<<<< HEAD
-    #[rustc_const_unstable(feature = "const_swap", issue = "83163")]
+    #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
     #[cfg_attr(kani, kani::modifies(self.as_ptr(), with.as_ptr()))]
     #[requires(ub_checks::can_dereference(self.as_ptr()) && ub_checks::can_write(self.as_ptr()))]
     #[requires(ub_checks::can_dereference(with.as_ptr()) && ub_checks::can_write(with.as_ptr()))]
-=======
-    #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
->>>>>>> 9c1e515a1356d2d232f1823051c3dc7bd948b534
     pub const unsafe fn swap(self, with: NonNull<T>)
     where
         T: Sized,
