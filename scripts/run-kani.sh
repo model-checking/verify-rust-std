@@ -304,7 +304,7 @@ main() {
         "$kani_path" list -Z list $unstable_args ./library --std --format json
         pushd scripts/kani-std-analysis
         echo "Running Kani's std-analysis command..."
-        ./std-analysis.sh
+        ./std-analysis.sh $build_dir
         pip install -r requirements.txt
         echo "Computing Kani-specific metrics..."
         ./kani_std_analysis.py --kani-list-file $current_dir/kani-list.json

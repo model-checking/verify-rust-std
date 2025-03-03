@@ -42,8 +42,12 @@ else
 fi
 
 # Get Kani root
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-KANI_DIR=$(dirname "$SCRIPT_DIR")
+if [[ $# -ne 1 ]]
+then
+  echo "Required command-line argument <KANI-DIR> missing"
+  exit 1
+fi
+KANI_DIR=$1
 
 echo "-------------------------------------------------------"
 echo "-- Starting analysis of the Rust standard library... --"
