@@ -563,7 +563,7 @@ impl<T: ?Sized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>() as isize).is_some() &&
        (self.as_ptr() as isize).checked_add(count.wrapping_mul(core::mem::size_of::<T>() as isize)).is_some() &&
-        (count == 0 || ub_checks::same_allocation(self.as_ptr() as *const (), self.as_ptr().wrapping_offset(count) as *const ()))
+        (count == 0 || core::ub_checks::same_allocation(self.as_ptr() as *const (), self.as_ptr().wrapping_offset(count) as *const ()))
     )]
     #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_offset(count))]
     pub const unsafe fn offset(self, count: isize) -> Self
@@ -594,7 +594,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(
         (self.as_ptr().addr() as isize).checked_add(count).is_some() &&
-        ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_offset(count))
+        core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_offset(count))
     )]
     #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_byte_offset(count))]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
@@ -650,7 +650,7 @@ impl<T: ?Sized> NonNull<T> {
     #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some()
         && count * core::mem::size_of::<T>() <= isize::MAX as usize
         && (self.pointer as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some() // check wrapping add
-        && ub_checks::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize)))]
+        && core::ub_checks::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize)))]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
@@ -683,7 +683,7 @@ impl<T: ?Sized> NonNull<T> {
             (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
             (count <= (isize::MAX as usize)) &&
             (self.as_ptr().addr().checked_add(count).is_some()) &&
-            (ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_add(count)))
+            (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_add(count)))
         )
     )]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
@@ -740,7 +740,7 @@ impl<T: ?Sized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>()).is_some() &&
         count * core::mem::size_of::<T>() <= isize::MAX as usize &&
-        ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
+        core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
     )]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
@@ -779,7 +779,7 @@ impl<T: ?Sized> NonNull<T> {
             (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
             (count <= (isize::MAX as usize)) &&
             (self.as_ptr().addr().checked_sub(count).is_some()) &&
-            (ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_sub(count)))
+            (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_sub(count)))
         )
     )]
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
@@ -881,7 +881,7 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(
-        ub_checks::same_allocation(self.as_ptr(), origin.as_ptr()) &&
+        core::ub_checks::same_allocation(self.as_ptr(), origin.as_ptr()) &&
         (self.as_ptr().addr().checked_sub(origin.as_ptr().addr()).is_some_and(|distance| distance % core::mem::size_of::<T>() == 0) ||
         origin.as_ptr().addr().checked_sub(self.as_ptr().addr()).is_some_and(|distance| distance % core::mem::size_of::<T>() == 0))
     )] // Ensure both pointers meet safety conditions for offset_from
@@ -909,7 +909,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(
         self.as_ptr().addr() == origin.as_ptr().addr() ||
-        ub_checks::same_allocation(self.as_ptr() as *const(), origin.as_ptr() as *const())
+        core::ub_checks::same_allocation(self.as_ptr() as *const(), origin.as_ptr() as *const())
     )]
     #[ensures(
         |result: &isize|
@@ -989,7 +989,7 @@ impl<T: ?Sized> NonNull<T> {
     #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
     #[requires(
         self.as_ptr().addr().checked_sub(subtracted.as_ptr().addr()).is_some() &&
-        ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
+        core::ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
         (self.as_ptr().addr()) >= (subtracted.as_ptr().addr()) &&
         (self.as_ptr().addr() - subtracted.as_ptr().addr()) % core::mem::size_of::<T>() == 0
     )]
@@ -1641,12 +1641,15 @@ impl<T> NonNull<[T]> {
     #[inline]
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[requires(self.as_ptr().cast::<T>().align_offset(core::mem::align_of::<T>()) == 0)] // Ensure the pointer is properly aligned
-    #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)] // Ensure the slice size does not exceed isize::MAX
+    // Ensure the pointer is properly aligned
+    #[requires(self.as_ptr().cast::<T>().align_offset(core::mem::align_of::<T>()) == 0)]
+    // Ensure the slice size does not exceed isize::MAX
+    #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)]
     #[requires(self.as_ptr().addr().checked_add(self.len() * core::mem::size_of::<T>()).is_some())]
-    #[requires(ub_checks::same_allocation(self.as_ptr() as *const(), self.as_ptr().wrapping_byte_add(self.len() * core::mem::size_of::<T>()) as *const()))] // Ensure the slice is contained within a single allocation
-    #[ensures(|result: &&[MaybeUninit<T>]| result.len() == self.len())] // Length check
-    #[ensures(|result: &&[MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))] // Ensure the memory addresses match.
+    // Ensure the slice is contained within a single allocation
+    #[requires(core::ub_checks::same_allocation(self.as_ptr() as *const(), self.as_ptr().wrapping_byte_add(self.len() * core::mem::size_of::<T>()) as *const()))]
+    #[ensures(|result: &&[MaybeUninit<T>]| result.len() == self.len())]
+    #[ensures(|result: &&[MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))]
     pub const unsafe fn as_uninit_slice<'a>(self) -> &'a [MaybeUninit<T>] {
         // SAFETY: the caller must uphold the safety contract for `as_uninit_slice`.
         unsafe { slice::from_raw_parts(self.cast().as_ptr(), self.len()) }
@@ -1711,10 +1714,13 @@ impl<T> NonNull<[T]> {
     #[inline]
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
-    #[requires(self.as_ptr().cast::<T>().align_offset(core::mem::align_of::<T>()) == 0)] // Ensure the pointer is properly aligned
-    #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)] // Ensure the slice size does not exceed isize::MAX
+    // Ensure the pointer is properly aligned
+    #[requires(self.as_ptr().cast::<T>().align_offset(core::mem::align_of::<T>()) == 0)]
+    // Ensure the slice size does not exceed isize::MAX
+    #[requires(self.len().checked_mul(core::mem::size_of::<T>()).is_some() && self.len() * core::mem::size_of::<T>() <= isize::MAX as usize)]
     #[requires(self.as_ptr().addr().checked_add(self.len() * core::mem::size_of::<T>()).is_some())]
-    #[requires(ub_checks::same_allocation(self.as_ptr() as *const(), self.as_ptr().wrapping_byte_add(self.len() * core::mem::size_of::<T>()) as *const()))] // Ensure the slice is contained within a single allocation
+    // Ensure the slice is contained within a single allocation
+    #[requires(core::ub_checks::same_allocation(self.as_ptr() as *const(), self.as_ptr().wrapping_byte_add(self.len() * core::mem::size_of::<T>()) as *const()))]
     #[ensures(|result: &&mut [MaybeUninit<T>]| result.len() == self.len())] // Length check
     #[ensures(|result: &&mut [MaybeUninit<T>]| core::ptr::eq(result.as_ptr(), self.cast().as_ptr()))] // Address check
     pub const unsafe fn as_uninit_slice_mut<'a>(self) -> &'a mut [MaybeUninit<T>] {
@@ -2044,7 +2050,8 @@ mod verify {
         let offset = nonnull_xptr.align_offset(invalid_align);
     }
 
-    // FIXME -- the postcondition fails.
+    // FIXME -- the postcondition fails, c.f. https://github.com/model-checking/kani/issues/3905
+    // (dangling() calls Alignment::of, and the linked issue tracks the Alignment::of proof)
     // pub const fn dangling() -> Self
     // #[kani::proof_for_contract(NonNull::dangling)]
     // pub fn non_null_check_dangling() {
@@ -2069,7 +2076,8 @@ mod verify {
     // }
 
     // pub const fn from_raw_parts(data_pointer: NonNull<()>, metadata: <T as super::Pointee>::Metadata,) -> NonNull<T>
-    // FIXME the postcondition fails.
+    // FIXME -- the postcondition fails, c.f. https://github.com/model-checking/kani/issues/3905
+    // (dangling() calls Alignment::of, and the linked issue tracks the Alignment::of proof)
     // #[kani::proof_for_contract(NonNull::from_raw_parts)]
     // #[kani::unwind(101)]
     // pub fn non_null_check_from_raw_parts() {
