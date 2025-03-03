@@ -302,11 +302,9 @@ main() {
         local current_dir=$(pwd)
         echo "Running Kani list command..."
         "$kani_path" list -Z list $unstable_args ./library --std --format json
-        echo "Running Kani's std-analysis command..."
-        pushd $build_dir
-        ./scripts/std-analysis.sh
-        popd
         pushd scripts/kani-std-analysis
+        echo "Running Kani's std-analysis command..."
+        ./std-analysis.sh
         pip install -r requirements.txt
         echo "Computing Kani-specific metrics..."
         ./kani_std_analysis.py --kani-list-file $current_dir/kani-list.json
