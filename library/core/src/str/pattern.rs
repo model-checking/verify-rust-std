@@ -38,9 +38,13 @@
     issue = "27721"
 )]
 
+<<<<<<< HEAD
 #[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
 use safety::{loop_invariant, requires};
 
+=======
+use crate::char::MAX_LEN_UTF8;
+>>>>>>> 65c099459a37cfb67f22e0b2425d585be1366b11
 use crate::cmp::Ordering;
 use crate::convert::TryInto as _;
 #[cfg(kani)]
@@ -566,8 +570,8 @@ impl Pattern for char {
     type Searcher<'a> = CharSearcher<'a>;
 
     #[inline]
-    fn into_searcher(self, haystack: &str) -> Self::Searcher<'_> {
-        let mut utf8_encoded = [0; 4];
+    fn into_searcher<'a>(self, haystack: &'a str) -> Self::Searcher<'a> {
+        let mut utf8_encoded = [0; MAX_LEN_UTF8];
         let utf8_size = self
             .encode_utf8(&mut utf8_encoded)
             .len()
