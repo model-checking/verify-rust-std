@@ -71,6 +71,16 @@ impl char {
     #[stable(feature = "assoc_char_consts", since = "1.52.0")]
     pub const MAX: char = '\u{10FFFF}';
 
+    /// The maximum number of bytes required to [encode](char::encode_utf8) a `char` to
+    /// UTF-8 encoding.
+    #[unstable(feature = "char_max_len", issue = "121714")]
+    pub const MAX_LEN_UTF8: usize = 4;
+
+    /// The maximum number of two-byte units required to [encode](char::encode_utf16) a `char`
+    /// to UTF-16 encoding.
+    #[unstable(feature = "char_max_len", issue = "121714")]
+    pub const MAX_LEN_UTF16: usize = 2;
+
     /// `U+FFFD REPLACEMENT CHARACTER` (�) is used in Unicode to represent a
     /// decoding error.
     ///
@@ -92,7 +102,7 @@ impl char {
     #[stable(feature = "assoc_char_consts", since = "1.52.0")]
     pub const UNICODE_VERSION: (u8, u8, u8) = crate::unicode::UNICODE_VERSION;
 
-    /// Creates an iterator over the UTF-16 encoded code points in `iter`,
+    /// Creates an iterator over the native endian UTF-16 encoded code points in `iter`,
     /// returning unpaired surrogates as `Err`s.
     ///
     /// # Examples
@@ -394,17 +404,21 @@ impl char {
         );
         // check radix to remove letter handling code when radix is a known constant
         let value = if self > '9' && radix > 10 {
-            // convert ASCII letters to lowercase
-            let lower = self as u32 | 0x20;
-            // convert an ASCII letter to the corresponding value,
-            // non-letters convert to values > 36
-            lower.wrapping_sub('a' as u32) as u64 + 10
+            // mask to convert ASCII letters to uppercase
+            const TO_UPPERCASE_MASK: u32 = !0b0010_0000;
+            // Converts an ASCII letter to its corresponding integer value:
+            // A-Z => 10-35, a-z => 10-35. Other characters produce values >= 36.
+            //
+            // Add Overflow Safety:
+            // By applying the mask after the subtraction, the first addendum is
+            // constrained such that it never exceeds u32::MAX - 0x20.
+            ((self as u32).wrapping_sub('A' as u32) & TO_UPPERCASE_MASK) + 10
         } else {
             // convert digit to value, non-digits wrap to values > 36
-            (self as u32).wrapping_sub('0' as u32) as u64
+            (self as u32).wrapping_sub('0' as u32)
         };
         // FIXME(const-hack): once then_some is const fn, use it here
-        if value < radix as u64 { Some(value as u32) } else { None }
+        if value < radix { Some(value) } else { None }
     }
 
     /// Returns an iterator that yields the hexadecimal Unicode escape of a
@@ -700,7 +714,7 @@ impl char {
         unsafe { from_utf8_unchecked_mut(encode_utf8_raw(self as u32, dst)) }
     }
 
-    /// Encodes this character as UTF-16 into the provided `u16` buffer,
+    /// Encodes this character as native endian UTF-16 into the provided `u16` buffer,
     /// and then returns the subslice of the buffer that contains the encoded character.
     ///
     /// # Panics
@@ -729,7 +743,7 @@ impl char {
     /// '𝕊'.encode_utf16(&mut b);
     /// ```
     #[stable(feature = "unicode_encode_char", since = "1.15.0")]
-    #[rustc_const_stable(feature = "const_char_encode_utf16", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_char_encode_utf16", since = "1.84.0")]
     #[inline]
     pub const fn encode_utf16(self, dst: &mut [u16]) -> &mut [u16] {
         encode_utf16_raw(self as u32, dst)
@@ -1164,6 +1178,7 @@ impl char {
     #[must_use]
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[rustc_const_stable(feature = "const_char_is_ascii", since = "1.32.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "char_is_ascii")]
     #[inline]
     pub const fn is_ascii(&self) -> bool {
         *self as u32 <= 0x7F
@@ -1299,7 +1314,7 @@ impl char {
     ///
     /// [`to_ascii_uppercase()`]: #method.to_ascii_uppercase
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
-    #[rustc_const_stable(feature = "const_make_ascii", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_make_ascii", since = "1.84.0")]
     #[inline]
     pub const fn make_ascii_uppercase(&mut self) {
         *self = self.to_ascii_uppercase();
@@ -1325,7 +1340,7 @@ impl char {
     ///
     /// [`to_ascii_lowercase()`]: #method.to_ascii_lowercase
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
-    #[rustc_const_stable(feature = "const_make_ascii", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_make_ascii", since = "1.84.0")]
     #[inline]
     pub const fn make_ascii_lowercase(&mut self) {
         *self = self.to_ascii_lowercase();
@@ -1787,7 +1802,6 @@ const fn len_utf16(code: u32) -> usize {
 /// Panics if the buffer is not large enough.
 /// A buffer of length four is large enough to encode any `char`.
 #[unstable(feature = "char_internals", reason = "exposed only for libstd", issue = "none")]
-#[cfg_attr(bootstrap, rustc_const_stable(feature = "const_char_encode_utf8", since = "1.83.0"))]
 #[doc(hidden)]
 #[inline]
 pub const fn encode_utf8_raw(code: u32, dst: &mut [u8]) -> &mut [u8] {
@@ -1825,7 +1839,7 @@ pub const fn encode_utf8_raw(code: u32, dst: &mut [u8]) -> &mut [u8] {
     unsafe { slice::from_raw_parts_mut(dst.as_mut_ptr(), len) }
 }
 
-/// Encodes a raw `u32` value as UTF-16 into the provided `u16` buffer,
+/// Encodes a raw `u32` value as native endian UTF-16 into the provided `u16` buffer,
 /// and then returns the subslice of the buffer that contains the encoded character.
 ///
 /// Unlike `char::encode_utf16`, this method also handles codepoints in the surrogate range.
@@ -1836,10 +1850,6 @@ pub const fn encode_utf8_raw(code: u32, dst: &mut [u8]) -> &mut [u8] {
 /// Panics if the buffer is not large enough.
 /// A buffer of length 2 is large enough to encode any `char`.
 #[unstable(feature = "char_internals", reason = "exposed only for libstd", issue = "none")]
-#[cfg_attr(
-    bootstrap,
-    rustc_const_stable(feature = "const_char_encode_utf16", since = "CURRENT_RUSTC_VERSION")
-)]
 #[doc(hidden)]
 #[inline]
 pub const fn encode_utf16_raw(mut code: u32, dst: &mut [u16]) -> &mut [u16] {
