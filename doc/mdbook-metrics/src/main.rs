@@ -44,6 +44,25 @@ fn run_kani_metrics_script() -> Result<(), Error> {
     Command::new("python")
         .args(&[
             "kani_std_analysis.py",
+            "--crate",
+            "core",
+            "--metrics-file",
+            "metrics-data-core.json",
+            "--plot-only",
+            "--plot-dir",
+            &tools_path.to_string_lossy(),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+
+    Command::new("python")
+        .args(&[
+            "kani_std_analysis.py",
+            "--crate",
+            "std",
+            "--metrics-file",
+            "metrics-data-std.json",
             "--plot-only",
             "--plot-dir",
             &tools_path.to_string_lossy(),
@@ -83,12 +102,19 @@ fn add_graphs(chapter: &mut Chapter) {
 
 Note that these metrics are for x86-64 architectures.
 
-## `core`
+### `core`
 ![Unsafe Metrics](core_unsafe_metrics.png)
 
 ![Safe Abstractions Metrics](core_safe_abstractions_metrics.png)
 
 ![Safe Metrics](core_safe_metrics.png)
+
+### `std`
+![Unsafe Metrics](std_unsafe_metrics.png)
+
+![Safe Abstractions Metrics](std_safe_abstractions_metrics.png)
+
+![Safe Metrics](std_safe_metrics.png)
 "#;
 
     chapter.content.push_str(new_content);
