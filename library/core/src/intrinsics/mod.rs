@@ -5053,6 +5053,37 @@ mod verify {
     transmute_unchecked_should_fail!(transmute_unchecked_u8_to_bool, u8, bool);
     transmute_unchecked_should_fail!(transmute_unchecked_u32_to_char, u32, char);
 
+    //Note: the following harness fails when it in theory should not
+    //The problem is that ub_checks::can_dereference(), used in a validity precondition
+    //for transmute_unchecked_wrapper, doesn't catch references that refer to invalid values.
+    //Thus, this harness transmutes u8's to invalid bool values
+    //Maybe we can augment can_dereference() to handle this
+    /*
+    #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+    fn transmute_unchecked_refs() {
+        let my_int: u8 = kani::any();
+        let int_ref = &my_int;
+        let bool_ref: &bool = unsafe { transmute_unchecked_wrapper(int_ref) };
+        let int_ref2: &u8 = unsafe { transmute_unchecked_wrapper(int_ref) };
+        assert!(*int_ref2 == 0 || *int_ref2 == 1);
+    }*/
+
+    //This is 2-bytes large
+    #[cfg_attr(kani, derive(kani::Arbitrary))]
+    #[repr(C)]
+    struct struct_A {
+        x: u8,
+        y: bool,
+    }
+
+    //These demonstrate that the validity precondition catches invalid fields/members
+    //of more complex types
+    //Note: enumerating these compound types is not currently possible with Kani,
+    //we leave these merely as evidence that our validity precondition works
+    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_struct, u16, struct_A);
+    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_tuple, u16, (u8,bool));
+    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_array, u16, [bool;2]);
+
     //tests that transmute works correctly when transmuting something with zero size
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
     fn transmute_zero_size() {
@@ -5061,20 +5092,17 @@ mod verify {
         assert!(unit_val == ());
     }
 
-    //generates harness that transmutes arbitrary values two ways
+    //generates harness that transmuted (unchecked) values, and casts them back to the original type
     //i.e. (src -> dest) then (dest -> src)
-    //We then check that the output is equal to the input
-    //This tests that transmute does not mutate the bit patterns
-    //Note: this would not catch reversible mutations
-    //e.g., deterministically flipping a bit
+    //we then assert that the resulting value is equal to the initial value
     macro_rules! transmute_unchecked_two_ways {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof_for_contract(transmute_unchecked_wrapper)]
             fn $harness() {
                 let src: $src = kani::any();
                 let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
-                let src2: $src = unsafe { transmute_unchecked_wrapper(dst) };
-                assert_eq!(src, src2);
+                let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
+                assert_eq!(src,src2);
             }
         };
     }
@@ -5094,6 +5122,43 @@ mod verify {
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u32_to_arr, u32, [u8; 4]);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_arr_to_u64, [u8; 8], u64);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u64_to_arr, u64, [u8; 8]);
+
+    //generates harness that transmutes values, and casts them back to the original type
+    //i.e. (src -> dest) then (dest -> src)
+    //we then assert that the resulting value is equal to the initial value
+    macro_rules! transmute_two_ways {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof]
+            fn $harness() {
+                let src: $src = kani::any();
+                kani::assume(ub_checks::can_dereference(&src as *const $src as *const $dst));
+                let dst: $dst = unsafe { transmute(src) };
+                let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
+                assert_eq!(src,src2);
+            }
+        };
+    }
+
+    //transmute 2-ways between the 4-byte numerical types
+    transmute_two_ways!(transmute_2ways_i32_to_u32, i32, u32);
+    transmute_two_ways!(transmute_2ways_u32_to_i32, u32, i32);
+    transmute_two_ways!(transmute_2ways_i32_to_f32, i32, f32);
+    transmute_two_ways!(transmute_2ways_u32_to_f32, u32, f32);
+    //transmute 2-ways between the 8-byte numerical types
+    transmute_two_ways!(transmute_2ways_i64_to_u64, i64, u64);
+    transmute_two_ways!(transmute_2ways_u64_to_i64, u64, i64);
+    transmute_two_ways!(transmute_2ways_i64_to_f64, i64, f64);
+    transmute_two_ways!(transmute_2ways_u64_to_f64, u64, f64);
+    //transmute 2-ways between arrays of bytes and numerical types
+    transmute_two_ways!(transmute_2ways_arr_to_u32, [u8; 4], u32);
+    transmute_two_ways!(transmute_2ways_u32_to_arr, u32, [u8; 4]);
+    transmute_two_ways!(transmute_2ways_arr_to_u64, [u8; 8], u64);
+    transmute_two_ways!(transmute_2ways_u64_to_arr, u64, [u8; 8]);
+    //transmute 2-ways between other non-integer types
+    transmute_two_ways!(transmute_2ways_u8_to_bool, u8, bool);
+    transmute_two_ways!(transmute_2ways_bool_to_u8, bool, u8);
+    transmute_two_ways!(transmute_2ways_u32_to_char, u32, char);
+    transmute_two_ways!(transmute_2ways_char_to_u32, char, u32);
 
     // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
     // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
