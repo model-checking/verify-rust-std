@@ -5081,8 +5081,8 @@ mod verify {
     //Note: enumerating these compound types is not currently possible with Kani,
     //we leave these merely as evidence that our validity precondition works
     transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_struct, u16, struct_A);
-    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_tuple, u16, (u8,bool));
-    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_array, u16, [bool;2]);
+    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_tuple, u16, (u8, bool));
+    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_array, u16, [bool; 2]);
 
     //tests that transmute works correctly when transmuting something with zero size
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
