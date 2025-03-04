@@ -5102,7 +5102,7 @@ mod verify {
                 let src: $src = kani::any();
                 let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
                 let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
-                assert_eq!(src,src2);
+                assert_eq!(src, src2);
             }
         };
     }
@@ -5134,7 +5134,7 @@ mod verify {
                 kani::assume(ub_checks::can_dereference(&src as *const $src as *const $dst));
                 let dst: $dst = unsafe { transmute(src) };
                 let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
-                assert_eq!(src,src2);
+                assert_eq!(src, src2);
             }
         };
     }
