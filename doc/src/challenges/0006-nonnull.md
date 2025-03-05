@@ -1,11 +1,11 @@
 # Challenge 6: Safety of NonNull
 
-- **Status:** Open
+- **Status:** Resolved
 - **Tracking Issue:** [#53](https://github.com/model-checking/verify-rust-std/issues/53)
 - **Start date:** *2024/08/16*
 - **End date:** *2025/04/10*
 - **Reward:** *N/A*
-
+- **Contributors**: [Quinyuan Wu](https://github.com/QinyuanWu), [Daniel Tu](https://github.com/danielhumanmod), [Dhvani Kapadia](https://github.com/Dhvani-Kapadia) and [Jiun Chi Yang](https://github.com/Jimmycreative)
 -------------------
 
 
