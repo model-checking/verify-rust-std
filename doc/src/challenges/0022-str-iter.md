@@ -1,0 +1,60 @@
+# Challenge 22: Verify the safety of `str` iter functions - part 2
+
+- **Status:** Open
+- **Tracking Issue:** [#29](https://github.com/model-checking/verify-rust-std/issues/29)
+- **Start date:** *2025/03/07*
+- **End date:** *2025/10/17*
+- **Reward:** *?*
+
+-------------------
+
+
+## Goal
+
+Verify the safety of [`std::str`] functions that are defined in (library/core/src/str/iter.rs):
+
+IMPORTANT NOTE: for this challenge, you can assume: 
+1. The safety and functional correctness of all functions in `slice` module 
+2. The safety and functional correctness of all functions in (library/core/src/str/pattern.rs)
+3. That all functions in (library/core/src/str/validations.rs) are functionally correct (consistent with the UTF8 encoding description in https://en.wikipedia.org/wiki/UTF-8). 
+4. That all the Iterators in (library/core/src/str/iter.rs) are derived from a valid utf8 string (str) (You can assume any property of valid utf8 encoded string)
+
+
+### Success Criteria
+
+Write and prove the contract for the safety of the following functions:
+
+
+| Function | Impl for |
+|---------| ---------|
+|next| Chars|
+|advance_by| Chars|
+|next_back| Chars|
+|as_str| Chars|
+|get_end| SplitInternal|
+|next| SplitInternal|
+|next_inclusive| SplitInternal|
+|next_match_back| SplitInternal|
+|next_back_inclusive| SplitInternal|
+|remainder| SplitInternal|
+|next| MatchIndicesInternal|
+|next_back| MatchIndicesInternal|
+|next| MatchesInternal|
+|next_back| MatchesInternal|
+|remainder| SplitAsciiWhitespace|
+
+The verification must be unbounded---it must hold for str of arbitrary length.
+
+
+### List of UBs
+
+All proofs must automatically ensure the absence of the following undefined behaviors [ref](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
+
+* Accessing (loading from or storing to) a place that is dangling or based on a misaligned pointer.
+* Reading from uninitialized memory except for padding or unions.
+* Mutating immutable bytes.
+* Producing an invalid value
+
+
+Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](../general-rules.md)
+in addition to the ones listed above.
