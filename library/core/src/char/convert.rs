@@ -46,11 +46,9 @@ impl From<char> for u32 {
     /// # Examples
     ///
     /// ```
-    /// use std::mem;
-    ///
     /// let c = 'c';
     /// let u = u32::from(c);
-    /// assert!(4 == mem::size_of_val(&u))
+    /// assert!(4 == size_of_val(&u))
     /// ```
     #[inline]
     fn from(c: char) -> Self {
@@ -65,11 +63,9 @@ impl From<char> for u64 {
     /// # Examples
     ///
     /// ```
-    /// use std::mem;
-    ///
     /// let c = '👤';
     /// let u = u64::from(c);
-    /// assert!(8 == mem::size_of_val(&u))
+    /// assert!(8 == size_of_val(&u))
     /// ```
     #[inline]
     fn from(c: char) -> Self {
@@ -86,11 +82,9 @@ impl From<char> for u128 {
     /// # Examples
     ///
     /// ```
-    /// use std::mem;
-    ///
     /// let c = '⚙';
     /// let u = u128::from(c);
-    /// assert!(16 == mem::size_of_val(&u))
+    /// assert!(16 == size_of_val(&u))
     /// ```
     #[inline]
     fn from(c: char) -> Self {
@@ -173,11 +167,9 @@ impl From<u8> for char {
     /// # Examples
     ///
     /// ```
-    /// use std::mem;
-    ///
     /// let u = 32 as u8;
     /// let c = char::from(u);
-    /// assert!(4 == mem::size_of_val(&c))
+    /// assert!(4 == size_of_val(&c))
     /// ```
     #[inline]
     fn from(i: u8) -> Self {
