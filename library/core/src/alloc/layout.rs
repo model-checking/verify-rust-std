@@ -203,6 +203,8 @@ impl Layout {
     #[rustc_const_stable(feature = "const_alloc_layout", since = "1.85.0")]
     #[must_use]
     #[inline]
+    #[requires(mem::align_of_val(t).is_power_of_two())]
+    #[ensures(|result| result.align() == mem::align_of_val(t))]
     pub const fn for_value<T: ?Sized>(t: &T) -> Self {
         let (size, align) = (size_of_val(t), align_of_val(t));
         // SAFETY: see rationale in `new` for why this is using the unsafe variant

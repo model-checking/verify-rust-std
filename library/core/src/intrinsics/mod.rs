@@ -3322,7 +3322,6 @@ pub fn contract_check_ensures<'a, Ret, C: Fn(&'a Ret) -> bool>(ret: &'a Ret, con
 #[rustc_nounwind]
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
-#[rustc_intrinsic_must_be_overridden]
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
 #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
@@ -3338,7 +3337,6 @@ pub unsafe fn vtable_size(_ptr: *const ()) -> usize {
 #[rustc_nounwind]
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
-#[rustc_intrinsic_must_be_overridden]
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
 #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]

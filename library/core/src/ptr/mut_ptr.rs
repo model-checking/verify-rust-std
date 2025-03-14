@@ -1,5 +1,3 @@
-use core::mem;
-
 use safety::{ensures, requires};
 
 use super::*;

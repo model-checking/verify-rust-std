@@ -2217,7 +2217,7 @@ mod verify {
         use core::mem::MaybeUninit;
 
         const SIZE: usize = 100000;
-        let arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let arr = [MaybeUninit::uninit(); SIZE];
         let slice: &[MaybeUninit<i32>] = kani::slice::any_slice_of_array(&arr);
         let ptr = NonNull::slice_from_raw_parts(
             NonNull::new(slice.as_ptr() as *mut MaybeUninit<i32>).unwrap(),
@@ -2234,7 +2234,7 @@ mod verify {
         use core::mem::MaybeUninit;
 
         const SIZE: usize = 100000;
-        let mut arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let mut arr = [MaybeUninit::uninit(); SIZE];
         let slice: &[MaybeUninit<i32>] = kani::slice::any_slice_of_array(&mut arr);
         let ptr = NonNull::slice_from_raw_parts(
             NonNull::new(slice.as_ptr() as *mut MaybeUninit<i32>).unwrap(),
@@ -2479,7 +2479,7 @@ mod verify {
         }
     }
 
-    #[kani::proof_for_contract(NonNull::sub_ptr)]
+    #[kani::proof_for_contract(NonNull::offset_from_unsigned)]
     pub fn non_null_check_sub_ptr() {
         const SIZE: usize = core::mem::size_of::<i32>() * 1000;
         let mut generator1 = kani::PointerGenerator::<SIZE>::new();
@@ -2501,7 +2501,7 @@ mod verify {
         let origin_nonnull = unsafe { NonNull::new(origin).unwrap() };
 
         unsafe {
-            let distance = ptr_nonnull.sub_ptr(origin_nonnull);
+            let distance = ptr_nonnull.offset_from_unsigned(origin_nonnull);
         }
     }
 
