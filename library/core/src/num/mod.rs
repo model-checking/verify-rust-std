@@ -1606,6 +1606,7 @@ macro_rules! from_str_int_impl {
 
 from_str_int_impl! { signed isize i8 i16 i32 i64 i128 }
 from_str_int_impl! { unsigned usize u8 u16 u32 u64 u128 }
+<<<<<<< HEAD
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -2316,3 +2317,5 @@ mod verify {
         checked_f128_to_int_unchecked_usize
     );
 }
+=======
+>>>>>>> 16d4ed08dbd3f6db3007def332f925f9ca7e6b78
