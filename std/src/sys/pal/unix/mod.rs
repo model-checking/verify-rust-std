@@ -11,22 +11,16 @@ pub mod env;
 pub mod fd;
 pub mod fs;
 pub mod futex;
-pub mod io;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod kernel_copy;
-#[cfg(target_os = "l4re")]
-mod l4re;
 #[cfg(target_os = "linux")]
 pub mod linux;
-#[cfg(not(target_os = "l4re"))]
-pub mod net;
-#[cfg(target_os = "l4re")]
-pub use self::l4re::net;
 pub mod os;
 pub mod pipe;
 pub mod process;
 pub mod stack_overflow;
 pub mod stdio;
+pub mod sync;
 pub mod thread;
 pub mod thread_parking;
 pub mod time;
@@ -253,7 +247,7 @@ pub fn decode_error_kind(errno: i32) -> ErrorKind {
         libc::ECONNREFUSED => ConnectionRefused,
         libc::ECONNRESET => ConnectionReset,
         libc::EDEADLK => Deadlock,
-        libc::EDQUOT => FilesystemQuotaExceeded,
+        libc::EDQUOT => QuotaExceeded,
         libc::EEXIST => AlreadyExists,
         libc::EFBIG => FileTooLarge,
         libc::EHOSTUNREACH => HostUnreachable,
