@@ -3,6 +3,13 @@
 use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::slice::sort::shared::FreezeMarker;
 use crate::{intrinsics, ptr, slice};
+use safety::{ensures, requires};
+
+#[allow(unused_imports)]
+use crate::ub_checks;
+
+#[cfg(kani)]
+use crate::kani;
 
 // It's important to differentiate between SMALL_SORT_THRESHOLD performance for
 // small slices and small-sort performance sorting small sub-slices as part of
@@ -62,6 +69,26 @@ impl<T: FreezeMarker> StableSmallSortTypeImpl for T {
     }
 }
 
+// This wrapper contract function exists because;
+// - kani contract attribute macros doesnt't work with `default fn`
+// - we cannot specify the trait member function with `proof_for_contract`
+#[cfg(kani)]
+#[kani::modifies(v, scratch)]
+#[ensures(|_| {
+    let mut is_less = is_less.clone();
+    v.is_sorted_by(|a, b| !is_less(b, a))
+})]
+pub(crate) fn _stable_small_sort_type_impl_small_sort<T, F>(
+    v: &mut [T],
+    scratch: &mut [MaybeUninit<T>],
+    is_less: &mut F,
+)
+where
+    F: FnMut(&T, &T) -> bool + Clone,
+{
+    <T as StableSmallSortTypeImpl>::small_sort(v, scratch, is_less);
+}
+
 /// Using a trait allows us to specialize on `Freeze` which in turn allows us to make safe
 /// abstractions.
 pub(crate) trait UnstableSmallSortTypeImpl: Sized {
@@ -100,6 +127,25 @@ impl<T: FreezeMarker> UnstableSmallSortTypeImpl for T {
     {
         <T as UnstableSmallSortFreezeTypeImpl>::small_sort(v, is_less);
     }
+}
+
+// This wrapper contract function exists because;
+// - kani contract attribute macros doesnt't work with `default fn`
+// - we cannot specify the trait member function with `proof_for_contract`
+#[cfg(kani)]
+#[kani::modifies(v)]
+#[ensures(|_| {
+    let mut is_less = is_less.clone();
+    v.is_sorted_by(|a, b| !is_less(b, a))
+})]
+pub(crate) fn _unstable_small_sort_type_impl_small_sort<T, F>(
+    v: &mut [T],
+    is_less: &mut F,
+)
+where
+    F: FnMut(&T, &T) -> bool + Clone,
+{
+    <T as UnstableSmallSortTypeImpl>::small_sort(v, is_less);
 }
 
 /// FIXME(const_trait_impl) use original ipnsort approach with choose_unstable_small_sort,
@@ -168,6 +214,26 @@ impl<T: FreezeMarker + CopyMarker> UnstableSmallSortFreezeTypeImpl for T {
             small_sort_fallback(v, is_less);
         }
     }
+}
+
+// This wrapper contract function exists because;
+// - kani contract attribute macros doesnt't work with `default fn`
+// - we cannot specify the trait member function with `proof_for_contract`
+#[cfg(kani)]
+#[kani::modifies(v)]
+#[ensures(|_| {
+    let mut is_less = is_less.clone();
+    v.is_sorted_by(|a, b| !is_less(b, a))
+})]
+pub(crate) fn _unstable_small_sort_freeze_type_impl_small_sort<T, F>(
+    v: &mut [T],
+    is_less: &mut F,
+)
+where
+    T: FreezeMarker + CopyMarker,
+    F: FnMut(&T, &T) -> bool + Clone,
+{
+    <T as UnstableSmallSortFreezeTypeImpl>::small_sort(v, is_less);
 }
 
 /// Optimal number of comparisons, and good perf.
@@ -539,6 +605,22 @@ where
 ///
 /// # Safety
 /// begin < tail and p must be valid and initialized for all begin <= p <= tail.
+#[cfg_attr(kani, kani::modifies(begin, tail))] // FIXME: This should contain all ptrs [begin, tail]
+#[requires(begin.addr() < tail.addr() && {
+    let len = tail.addr() - begin.addr();
+    let is_less: &mut F = unsafe { mem::transmute(&is_less) };
+    (0..=len).into_iter().all(|i| {
+        let p = begin.add(i);
+        ub_checks::can_dereference(p as *const _) &&
+            ub_checks::can_write(p) &&
+            ub_checks::same_allocation(begin as *const _, p as *const _)
+    }) && (0..(len - 1)).into_iter().all(|i| !is_less(&*begin.add(i + 1), &*begin.add(i)))
+})]
+#[ensures(|_| {
+    let len = tail.addr() - begin.addr();
+    let is_less: &mut F = unsafe { mem::transmute(&is_less) };
+    (0..len).into_iter().all(|i| !is_less(&*begin.add(i + 1), &*begin.add(i)))
+})]
 unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, is_less: &mut F) {
     // SAFETY: see individual comments.
     unsafe {
@@ -557,6 +639,14 @@ unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, 
         let mut gap_guard = CopyOnDrop { src: &*tmp, dst: tail, len: 1 };
 
         loop {
+            // FIXME: This should be loop contract but sadly, making this into
+            // loop invariant takes too much time in verification and causes OOM
+            #[cfg(kani)]
+            kani::assert(
+                sift.addr() >= begin.addr() && sift.addr() < tail.addr(),
+                "loop invariants",
+            );
+
             // SAFETY: we move sift into the gap (which is valid), and point the
             // gap guard destination at sift, ensuring that if a panic occurs the
             // gap is once again filled.
@@ -577,6 +667,16 @@ unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, 
 }
 
 /// Sort `v` assuming `v[..offset]` is already sorted.
+// FIXME: Disabled this due to [model-checking/kani#3682]
+// #[cfg_attr(kani, kani::modifies(v))]
+#[requires(offset != 0 && offset <= v.len() && {
+    let is_less: &mut F = unsafe { mem::transmute(&is_less) };
+    v[..offset].is_sorted_by(|a, b| !is_less(b, a))
+})]
+#[ensures(|_| {
+    let is_less: &mut F = unsafe { mem::transmute(&is_less) };
+    v.is_sorted_by(|a, b| !is_less(b, a))
+})]
 pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
     v: &mut [T],
     offset: usize,
@@ -597,6 +697,14 @@ pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
         let v_end = v_base.add(len);
         let mut tail = v_base.add(offset);
         while tail != v_end {
+            // FIXME: This should be loop contract but sadly, making this into
+            // loop invariant takes too much time in verification and causes OOM
+            #[cfg(kani)]
+            kani::assert(
+                tail.addr() > v_base.addr() && tail.addr() <= v_end.addr(),
+                "loop invariants",
+            );
+
             // SAFETY: v_base and tail are both valid pointers to elements, and
             // v_base < tail since we checked offset != 0.
             insert_tail(v_base, tail, is_less);
@@ -609,6 +717,28 @@ pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
 
 /// SAFETY: The caller MUST guarantee that `v_base` is valid for 4 reads and
 /// `dst` is valid for 4 writes. The result will be stored in `dst[0..4]`.
+#[cfg_attr(kani, kani::modifies(dst, dst.add(1), dst.add(2), dst.add(3)))]
+#[requires(
+    (0..4).into_iter().all(|i| {
+        let p = v_base.add(i);
+        ub_checks::can_dereference(p) &&
+            ub_checks::same_allocation(v_base, p)
+    })
+)]
+#[requires(
+    (0..4).into_iter().all(|i| {
+        let p = dst.add(i);
+        ub_checks::can_write(p) &&
+            ub_checks::same_allocation(dst, p)
+    })
+)]
+#[ensures(|_| {
+    let is_less: &mut F = unsafe { mem::transmute(&is_less) };
+    (0..3).into_iter().all(|i| !is_less(
+        &*dst.add(i + 1),
+        &*dst.add(i),
+    ))
+})]
 pub unsafe fn sort4_stable<T, F: FnMut(&T, &T) -> bool>(
     v_base: *const T,
     dst: *mut T,
@@ -869,4 +999,261 @@ fn panic_on_ord_violation() -> ! {
 pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
     // Heuristic that holds true on all tested 64-bit capable architectures.
     mem::size_of::<T>() <= 8 // mem::size_of::<u64>()
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // The maximum length of the slice that `insertion_sort_shift_left`
+    // is called upon.
+    // The value is from the following line;
+    // https://github.com/model-checking/verify-rust-std/blob/1a38674ad6753e3a78e0181d1fe613f3b25ebacd/library/core/src/slice/sort/shared/smallsort.rs#L330
+    const INSERTION_SORT_MAX_LEN: usize = 17;
+
+    #[kani::proof]
+    pub fn check_swap_if_less() {
+        let mut array: [u8; SMALL_SORT_GENERAL_THRESHOLD] = kani::any();
+        let a_pos = kani::any_where(|x: &usize| *x < SMALL_SORT_GENERAL_THRESHOLD);
+        let b_pos = kani::any_where(|x: &usize| *x < SMALL_SORT_GENERAL_THRESHOLD);
+        let mut is_less = |x: &u8, y: &u8| x < y;
+        let expected = {
+            let mut array = array.clone();
+            let a: u8 = array[a_pos];
+            let b: u8 = array[b_pos];
+            if is_less(&b, &a) {
+                array[a_pos] = b;
+                array[b_pos] = a;
+            }
+            array
+        };
+        unsafe {
+            swap_if_less(array.as_mut_ptr(), a_pos, b_pos, &mut is_less);
+        }
+        kani::assert(
+            array == expected,
+            "swapped slice is different from the expectation"
+        );
+    }
+
+    // FIXME: Ideally, this should be `proof_for_contract(insertion_sort_shift_left)`,
+    // but there is no way to set `kani::modifies` for arbitrary number of pointers
+    // in [begin, tail]
+    #[kani::proof]
+    #[kani::unwind(17)]
+    pub fn check_insert_tail() {
+        let mut is_less = |x: &u8, y: &u8| x < y;
+        let tail = kani::any_where(|x: &usize| *x > 0 && *x < INSERTION_SORT_MAX_LEN);
+        let mut array = kani::any_where(|x: &[u8; INSERTION_SORT_MAX_LEN]| {
+            x[..tail].is_sorted_by(|a, b| !is_less(b, a))
+        });
+        unsafe {
+            let begin = array.as_mut_ptr();
+            let tail = begin.add(tail);
+            insert_tail(begin, tail, &mut is_less);
+        }
+        kani::assert(
+            array[..=tail].is_sorted_by(|a, b| !is_less(b, a)),
+            "slice is not sorted",
+        );
+    }
+
+    // FIXME: Ideally, this should be `proof_for_contract(insertion_sort_shift_left)`,
+    // but this failes with OOM due to `proof_for_contract`'s perf issue.
+    //
+    // See https://github.com/model-checking/kani/issues/3797
+    #[kani::proof]
+    #[kani::stub_verified(insert_tail)]
+    #[kani::unwind(17)]
+    pub fn check_insertion_sort_shift_left() {
+        let slice_len = kani::any_where(|x: &usize| {
+            *x != 0 && *x <= INSERTION_SORT_MAX_LEN
+        });
+        let offset = kani::any_where(|x: &usize| *x != 0 && *x <= slice_len);
+        let mut is_less = |x: &u8, y: &u8| x < y;
+        let mut array = kani::any_where(|x: &[u8; INSERTION_SORT_MAX_LEN]| {
+            x[..offset].is_sorted_by(|a, b| !is_less(b, a))
+        });
+        insertion_sort_shift_left(&mut array[..slice_len], offset, &mut is_less);
+        kani::assert(
+            array[..slice_len].is_sorted_by(|a, b| !is_less(b, a)),
+            "slice is not sorted",
+        );
+    }
+
+    #[kani::proof_for_contract(sort4_stable)]
+    pub fn check_sort4_stable() {
+        let src: [u8; 4] = kani::any();
+        let mut dst = MaybeUninit::<[u8; 4]>::uninit();
+        let mut is_less = |x: &u8, y: &u8| x < y;
+        unsafe {
+            sort4_stable(src.as_ptr(), dst.as_mut_ptr() as *mut _, &mut is_less);
+        }
+    }
+
+    #[kani::proof]
+    pub fn check_sort4_stable_stability() {
+        let src: [(u8, u8); 4] = [
+            (kani::any(), 0),
+            (kani::any(), 1),
+            (kani::any(), 2),
+            (kani::any(), 3),
+        ];
+        let mut dst = MaybeUninit::<[(u8, u8); 4]>::uninit();
+        let mut is_less = |x: &(u8, u8), y: &(u8, u8)| x.0 < y.0;
+        unsafe {
+            sort4_stable(src.as_ptr(), dst.as_mut_ptr() as *mut _, &mut is_less);
+        }
+        let dst = unsafe { dst.assume_init() };
+        let mut is_stably_less = |x: &(u8, u8), y: &(u8, u8)| {
+            if x.0 == y.0 {
+                x.1 < y.1
+            } else {
+                x.0 < y.0
+            }
+        };
+        kani::assert(
+            dst.is_sorted_by(|a, b| !is_stably_less(b, a)),
+            "slice is not stably sorted",
+        );
+    }
+
+    #[kani::proof]
+    pub fn check_has_efficient_in_place_swap() {
+        // There aren't much to verify as the function just calls `mem::size_of`.
+        // So, just brought some tests written by the author of smallsort,
+        // from Voultapher/sort-research-rs
+        //
+        // https://github.com/Voultapher/sort-research-rs/blob/c0cb46214a8d6e10ae5f4e0c363c2dbcbf71966f/ipnsort/src/smallsort.rs#L758-L771
+        assert!(has_efficient_in_place_swap::<i32>());
+        assert!(has_efficient_in_place_swap::<u64>());
+        assert!(!has_efficient_in_place_swap::<u128>());
+    }
+
+    #[kani::proof_for_contract(_stable_small_sort_type_impl_small_sort)]
+    #[kani::stub_verified(insert_tail)]
+    #[kani::unwind(33)]
+    pub fn check_stable_small_sort_type_impl_small_sort() {
+        assert_eq!(
+            <u8 as StableSmallSortTypeImpl>::small_sort_threshold(),
+            SMALL_SORT_GENERAL_THRESHOLD,
+        );
+
+        let mut array: [u8; SMALL_SORT_GENERAL_THRESHOLD] = kani::any();
+        let len = kani::any_where(|x: &usize| *x <= SMALL_SORT_GENERAL_THRESHOLD);
+        let mut scratch: [MaybeUninit<u8>; SMALL_SORT_GENERAL_SCRATCH_LEN]
+            = [const { MaybeUninit::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+        let mut is_less = |x: &u8, y: &u8| x < y;
+        _stable_small_sort_type_impl_small_sort(&mut array[..len], &mut scratch, &mut is_less);
+    }
+
+    struct NonFreeze(u8);
+
+    impl !crate::marker::Freeze for NonFreeze {}
+
+    impl kani::Arbitrary for NonFreeze {
+        fn any() -> NonFreeze {
+            NonFreeze(kani::any())
+        }
+    }
+
+    #[kani::proof_for_contract(_stable_small_sort_type_impl_small_sort)]
+    #[kani::stub_verified(insertion_sort_shift_left)]
+    #[kani::unwind(17)]
+    pub fn check_stable_small_sort_type_impl_small_sort_nonfreeze() {
+        assert_eq!(
+            <NonFreeze as StableSmallSortTypeImpl>::small_sort_threshold(),
+            SMALL_SORT_FALLBACK_THRESHOLD,
+        );
+
+        let mut array: [NonFreeze; SMALL_SORT_FALLBACK_THRESHOLD] = kani::any();
+        let len = kani::any_where(|x: &usize| *x <= SMALL_SORT_FALLBACK_THRESHOLD);
+        let mut scratch: [MaybeUninit<NonFreeze>; SMALL_SORT_GENERAL_SCRATCH_LEN]
+            = [const { MaybeUninit::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+        let mut is_less = |x: &NonFreeze, y: &NonFreeze| x.0 < y.0;
+        _stable_small_sort_type_impl_small_sort(&mut array[..len], &mut scratch, &mut is_less);
+    }
+
+    // Freeze version is same with `_unstable_small_sort_freeze_type_impl_small_sort`
+    #[kani::proof_for_contract(_unstable_small_sort_type_impl_small_sort)]
+    #[kani::stub_verified(insertion_sort_shift_left)]
+    #[kani::unwind(17)]
+    pub fn check_unstable_small_sort_type_impl_small_sort_nonfreeze() {
+        assert_eq!(
+            <NonFreeze as UnstableSmallSortTypeImpl>::small_sort_threshold(),
+            SMALL_SORT_FALLBACK_THRESHOLD,
+        );
+
+        let mut array: [NonFreeze; SMALL_SORT_FALLBACK_THRESHOLD] = kani::any();
+        let len = kani::any_where(|x: &usize| *x <= SMALL_SORT_FALLBACK_THRESHOLD);
+        let mut is_less = |x: &NonFreeze, y: &NonFreeze| x.0 < y.0;
+        _unstable_small_sort_type_impl_small_sort(&mut array[..len], &mut is_less);
+    }
+
+    // This calls `small_sort_network` internally
+    #[kani::proof_for_contract(_unstable_small_sort_freeze_type_impl_small_sort)]
+    #[kani::stub_verified(insertion_sort_shift_left)]
+    #[kani::unwind(17)]
+    pub fn check_unstable_small_sort_freeze_type_impl_small_sort_network() {
+        assert_eq!(
+            <u8 as UnstableSmallSortFreezeTypeImpl>::small_sort_threshold(),
+            SMALL_SORT_NETWORK_THRESHOLD,
+        );
+
+        let mut array: [u8; SMALL_SORT_NETWORK_THRESHOLD] = kani::any();
+        let len = kani::any_where(|x: &usize| *x <= SMALL_SORT_NETWORK_THRESHOLD);
+        let mut is_less = |x: &u8, y: &u8| x < y;
+        _unstable_small_sort_freeze_type_impl_small_sort(&mut array[..len], &mut is_less);
+    }
+
+    // This calls `small_sort_general` internally
+    #[kani::proof_for_contract(_unstable_small_sort_freeze_type_impl_small_sort)]
+    #[kani::stub_verified(insert_tail)]
+    #[kani::unwind(33)]
+    pub fn check_unstable_small_sort_freeze_type_impl_small_sort_general() {
+        #[derive(Clone, Copy)]
+        struct Bigger(u8, MaybeUninit<[u8; 8]>);
+
+        impl kani::Arbitrary for Bigger {
+            fn any() -> Bigger {
+                Bigger(kani::any(), MaybeUninit::uninit())
+            }
+        }
+
+        assert_eq!(
+            <Bigger as UnstableSmallSortFreezeTypeImpl>::small_sort_threshold(),
+            SMALL_SORT_GENERAL_THRESHOLD,
+        );
+
+        let mut array: [Bigger; SMALL_SORT_GENERAL_THRESHOLD] = kani::any();
+        let len = kani::any_where(|x: &usize| *x <= SMALL_SORT_GENERAL_THRESHOLD);
+        let mut is_less = |x: &Bigger, y: &Bigger| x.0 < y.0;
+        _unstable_small_sort_freeze_type_impl_small_sort(&mut array[..len], &mut is_less);
+    }
+
+    // This calls `small_sort_fallback` internally
+    #[kani::proof_for_contract(_unstable_small_sort_freeze_type_impl_small_sort)]
+    #[kani::stub_verified(insertion_sort_shift_left)]
+    #[kani::unwind(17)]
+    pub fn check_unstable_small_sort_freeze_type_impl_small_sort_fallback() {
+        #[derive(Clone, Copy)]
+        struct Biggest(u8, MaybeUninit<[u8; 85]>);
+
+        impl kani::Arbitrary for Biggest {
+            fn any() -> Biggest {
+                Biggest(kani::any(), MaybeUninit::uninit())
+            }
+        }
+
+        assert_eq!(
+            <Biggest as UnstableSmallSortFreezeTypeImpl>::small_sort_threshold(),
+            SMALL_SORT_FALLBACK_THRESHOLD,
+        );
+
+        let mut array: [Biggest; SMALL_SORT_FALLBACK_THRESHOLD] = kani::any();
+        let len = kani::any_where(|x: &usize| *x <= SMALL_SORT_FALLBACK_THRESHOLD);
+        let mut is_less = |x: &Biggest, y: &Biggest| x.0 < y.0;
+        _unstable_small_sort_freeze_type_impl_small_sort(&mut array[..len], &mut is_less);
+    }
 }
