@@ -1692,7 +1692,6 @@ pub(crate) mod builtin {
     /// The attribute carries an argument token-tree which is
     /// eventually parsed as a unary closure expression that is
     /// invoked on a reference to the return value.
-    #[cfg(not(bootstrap))]
     #[unstable(feature = "contracts", issue = "128044")]
     #[allow_internal_unstable(contracts_internals)]
     #[rustc_builtin_macro]
@@ -1705,7 +1704,6 @@ pub(crate) mod builtin {
     /// The attribute carries an argument token-tree which is
     /// eventually parsed as an boolean expression with access to the
     /// function's formal parameters
-    #[cfg(not(bootstrap))]
     #[unstable(feature = "contracts", issue = "128044")]
     #[allow_internal_unstable(contracts_internals)]
     #[rustc_builtin_macro]
