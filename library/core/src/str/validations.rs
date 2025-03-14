@@ -130,7 +130,7 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
     let mut index = 0;
     let len = v.len();
 
-    const USIZE_BYTES: usize = mem::size_of::<usize>();
+    const USIZE_BYTES: usize = size_of::<usize>();
 
     let ascii_block_size = 2 * USIZE_BYTES;
     let blocks_end = if len >= ascii_block_size { len - ascii_block_size + 1 } else { 0 };

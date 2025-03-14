@@ -26,7 +26,7 @@ use crate::{assert_unsafe_precondition, fmt, mem};
 // * https://github.com/rust-lang/rust/pull/72189
 // * https://github.com/rust-lang/rust/pull/79827
 const fn size_align<T>() -> (usize, usize) {
-    (mem::size_of::<T>(), mem::align_of::<T>())
+    (size_of::<T>(), align_of::<T>())
 }
 
 /// Layout of a block of memory.
@@ -203,10 +203,8 @@ impl Layout {
     #[rustc_const_stable(feature = "const_alloc_layout", since = "1.85.0")]
     #[must_use]
     #[inline]
-    #[requires(mem::align_of_val(t).is_power_of_two())]
-    #[ensures(|result| result.align() == mem::align_of_val(t))]
     pub const fn for_value<T: ?Sized>(t: &T) -> Self {
-        let (size, align) = (mem::size_of_val(t), mem::align_of_val(t));
+        let (size, align) = (size_of_val(t), align_of_val(t));
         // SAFETY: see rationale in `new` for why this is using the unsafe variant
         unsafe { Layout::from_size_align_unchecked(size, align) }
     }
