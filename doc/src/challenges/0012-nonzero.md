@@ -1,10 +1,11 @@
 # Challenge 12: Safety of `NonZero`
 
-- **Status:** Open
+- **Status:** Resolved
 - **Tracking Issue:** [#71](https://github.com/model-checking/verify-rust-std/issues/71)
 - **Start date:** *2024/08/23*
 - **End date:** *2025/04/10*
 - **Reward:** *N/A*
+- **Contributors**: [Aaron Lang](https://github.com/lang280), [Shivani Ghuge](https://github.com/SahithiMV) and [Alvaro Luna](https://github.com/aa-luna) 
 
 -------------------
 
@@ -73,7 +74,6 @@ Verify the safety of the following functions and methods (all located within `co
 |  `from_mut`   |
 |  `from_mut_unchecked` |
 
-You are not required to write correctness contracts for these methods (e.g., for `max`, ensuring that the `result` is indeed the maximum of the inputs), but it would be great to do so!
 
 ### List of UBs
 
