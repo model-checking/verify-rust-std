@@ -4005,7 +4005,6 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[rustc_intrinsic]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_allow_const_fn_unstable(const_swap_nonoverlapping)] // this is anyway not called since CTFE implements the intrinsic
-<<<<<<< HEAD
 #[cfg_attr(kani, kani::modifies(x))]
 #[cfg_attr(kani, kani::modifies(y))]
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
@@ -4013,8 +4012,6 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
 #[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), size_of::<T>(), 1))]
 #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
-=======
->>>>>>> 16d4ed08dbd3f6db3007def332f925f9ca7e6b78
 pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
     // pointers, so swapping them with `count: 1` is fine.
