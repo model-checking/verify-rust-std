@@ -103,6 +103,19 @@
       "safe_fns_under_contract": 77,
       "verified_safe_fns_under_contract": 75,
       "total_functions_under_contract": 273
+    },
+    {
+      "date": "2025-03-16",
+      "total_unsafe_fns": 7214,
+      "total_safe_abstractions": 1731,
+      "total_safe_fns": 15197,
+      "unsafe_fns_under_contract": 192,
+      "verified_unsafe_fns_under_contract": 132,
+      "safe_abstractions_under_contract": 41,
+      "verified_safe_abstractions_under_contract": 41,
+      "safe_fns_under_contract": 77,
+      "verified_safe_fns_under_contract": 75,
+      "total_functions_under_contract": 273
     }
   ]
 }
