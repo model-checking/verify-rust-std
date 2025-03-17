@@ -3324,10 +3324,11 @@ pub fn contract_check_ensures<'a, Ret, C: Fn(&'a Ret) -> bool>(ret: &'a Ret, con
 #[rustc_intrinsic]
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
-#[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
-pub unsafe fn vtable_size(_ptr: *const ()) -> usize {
-    unreachable!()
-}
+// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
+// function used to have a dummy body, but no longer has since
+// https://github.com/rust-lang/rust/pull/137489 has been merged).
+// #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
+pub unsafe fn vtable_size(_ptr: *const ()) -> usize;
 
 /// The intrinsic will return the alignment stored in that vtable.
 ///
@@ -3339,10 +3340,12 @@ pub unsafe fn vtable_size(_ptr: *const ()) -> usize {
 #[rustc_intrinsic]
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
-#[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
-pub unsafe fn vtable_align(_ptr: *const ()) -> usize {
-    unreachable!()
-}
+// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
+// function used to have a dummy body, but no longer has since
+// https://github.com/rust-lang/rust/pull/137489 has been merged).
+// #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
+// #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
+pub unsafe fn vtable_align(_ptr: *const ()) -> usize;
 
 /// The size of a type in bytes.
 ///
