@@ -332,7 +332,10 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[stable(feature = "strict_provenance", since = "1.84.0")]
+<<<<<<< HEAD
     #[ensures(|result| result.get() == self.as_ptr() as *const() as usize)]
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
     pub fn addr(self) -> NonZero<usize> {
         // SAFETY: The pointer is guaranteed by the type to be non-null,
         // meaning that the address will be non-zero.
@@ -361,7 +364,10 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[stable(feature = "strict_provenance", since = "1.84.0")]
+<<<<<<< HEAD
     #[ensures(|result: &Self| !result.as_ptr().is_null() && result.addr() == addr)]
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
     pub fn with_addr(self, addr: NonZero<usize>) -> Self {
         // SAFETY: The result of `ptr::from::with_addr` is non-null because `addr` is guaranteed to be non-zero.
         unsafe { NonNull::new_unchecked(self.as_ptr().with_addr(addr.get()) as *mut _) }
@@ -376,7 +382,10 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use]
     #[inline]
     #[stable(feature = "strict_provenance", since = "1.84.0")]
+<<<<<<< HEAD
     #[ensures(|result: &Self| !result.as_ptr().is_null())]
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
     pub fn map_addr(self, f: impl FnOnce(NonZero<usize>) -> NonZero<usize>) -> Self {
         self.with_addr(f(self.addr()))
     }
@@ -736,12 +745,15 @@ impl<T: ?Sized> NonNull<T> {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
+<<<<<<< HEAD
     #[requires(
         count.checked_mul(core::mem::size_of::<T>()).is_some() &&
         count * core::mem::size_of::<T>() <= isize::MAX as usize &&
         core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
     )]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -984,6 +996,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "ptr_sub_ptr", since = "CURRENT_RUSTC_VERSION")]
     #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "CURRENT_RUSTC_VERSION")]
+<<<<<<< HEAD
     #[requires(
         self.as_ptr().addr().checked_sub(subtracted.as_ptr().addr()).is_some() &&
         core::ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
@@ -991,6 +1004,8 @@ impl<T: ?Sized> NonNull<T> {
         (self.as_ptr().addr() - subtracted.as_ptr().addr()) % core::mem::size_of::<T>() == 0
     )]
     #[ensures(|result: &usize| *result == self.as_ptr().offset_from(subtracted.as_ptr()) as usize)]
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
     pub const unsafe fn offset_from_unsigned(self, subtracted: NonNull<T>) -> usize
     where
         T: Sized,
@@ -1309,9 +1324,12 @@ impl<T: ?Sized> NonNull<T> {
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
+<<<<<<< HEAD
     #[cfg_attr(kani, kani::modifies(self.as_ptr(), with.as_ptr()))]
     #[requires(ub_checks::can_dereference(self.as_ptr()) && ub_checks::can_write(self.as_ptr()))]
     #[requires(ub_checks::can_dereference(with.as_ptr()) && ub_checks::can_write(with.as_ptr()))]
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
     pub const unsafe fn swap(self, with: NonNull<T>)
     where
         T: Sized,

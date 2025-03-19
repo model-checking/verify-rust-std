@@ -38,9 +38,12 @@
     issue = "27721"
 )]
 
+<<<<<<< HEAD
 #[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
 use safety::{loop_invariant, requires};
 
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 use crate::char::MAX_LEN_UTF8;
 use crate::cmp::Ordering;
 use crate::convert::TryInto as _;

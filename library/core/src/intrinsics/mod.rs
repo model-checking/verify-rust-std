@@ -3201,6 +3201,7 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[rustc_intrinsic]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_allow_const_fn_unstable(const_swap_nonoverlapping)] // this is anyway not called since CTFE implements the intrinsic
+<<<<<<< HEAD
 #[cfg_attr(kani, kani::modifies(x))]
 #[cfg_attr(kani, kani::modifies(y))]
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
@@ -3208,6 +3209,8 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
 #[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), size_of::<T>(), 1))]
 #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
     // pointers, so swapping them with `count: 1` is fine.
@@ -3322,6 +3325,7 @@ pub fn contract_check_ensures<'a, Ret, C: Fn(&'a Ret) -> bool>(ret: &'a Ret, con
 #[rustc_nounwind]
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
+<<<<<<< HEAD
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
 // TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
@@ -3329,6 +3333,9 @@ pub fn contract_check_ensures<'a, Ret, C: Fn(&'a Ret) -> bool>(ret: &'a Ret, con
 // https://github.com/rust-lang/rust/pull/137489 has been merged).
 // #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
 pub unsafe fn vtable_size(_ptr: *const ()) -> usize;
+=======
+pub unsafe fn vtable_size(ptr: *const ()) -> usize;
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 
 /// The intrinsic will return the alignment stored in that vtable.
 ///
@@ -3338,6 +3345,7 @@ pub unsafe fn vtable_size(_ptr: *const ()) -> usize;
 #[rustc_nounwind]
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic]
+<<<<<<< HEAD
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
 // TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
@@ -3346,6 +3354,9 @@ pub unsafe fn vtable_size(_ptr: *const ()) -> usize;
 // #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
 // #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
 pub unsafe fn vtable_align(_ptr: *const ()) -> usize;
+=======
+pub unsafe fn vtable_align(ptr: *const ()) -> usize;
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 
 /// The size of a type in bytes.
 ///
@@ -3976,6 +3987,7 @@ pub const unsafe fn copysignf64(x: f64, y: f64) -> f64;
 #[rustc_nounwind]
 #[rustc_intrinsic]
 pub const unsafe fn copysignf128(x: f128, y: f128) -> f128;
+<<<<<<< HEAD
 
 /// Return whether the initialization state is preserved.
 ///
@@ -4006,6 +4018,8 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
     #[cfg(not(kani))]
     false
 }
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 
 /// Inform Miri that a given pointer definitely has a certain alignment.
 #[cfg(miri)]

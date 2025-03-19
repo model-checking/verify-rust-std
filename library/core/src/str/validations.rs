@@ -2,8 +2,11 @@
 
 use super::Utf8Error;
 use crate::intrinsics::const_eval_select;
+<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
+=======
+>>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 
 /// Returns the initial codepoint accumulator for the first byte.
 /// The first byte is special, only want bottom 5 bits for width 2, 4 bits
