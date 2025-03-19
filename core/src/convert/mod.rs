@@ -443,6 +443,7 @@ pub trait AsMut<T: ?Sized> {
 /// [`Vec`]: ../../std/vec/struct.Vec.html
 #[rustc_diagnostic_item = "Into"]
 #[stable(feature = "rust1", since = "1.0.0")]
+#[doc(search_unbox)]
 pub trait Into<T>: Sized {
     /// Converts this type into the (usually inferred) input type.
     #[must_use]
@@ -577,6 +578,7 @@ pub trait Into<T>: Sized {
     all(_Self = "&str", T = "alloc::string::String"),
     note = "to coerce a `{T}` into a `{Self}`, use `&*` as a prefix",
 ))]
+#[doc(search_unbox)]
 pub trait From<T>: Sized {
     /// Converts to this type from the input type.
     #[rustc_diagnostic_item = "from_fn"]
@@ -776,7 +778,6 @@ impl<T> From<T> for T {
 ///
 /// [#64715]: https://github.com/rust-lang/rust/issues/64715
 #[stable(feature = "convert_infallible", since = "1.34.0")]
-#[allow(unused_attributes)] // FIXME(#58633): do a principled fix instead.
 #[rustc_reservation_impl = "permitting this impl would forbid us from adding \
                             `impl<T> From<!> for T` later; see rust-lang/rust#64715 for details"]
 impl<T> From<!> for T {

@@ -18,7 +18,7 @@ impl Command {
         let envp = self.capture_env();
 
         if self.saw_nul() {
-            return Err(io::const_io_error!(
+            return Err(io::const_error!(
                 io::ErrorKind::InvalidInput,
                 "nul byte found in provided data",
             ));
@@ -38,7 +38,7 @@ impl Command {
 
     pub fn exec(&mut self, default: Stdio) -> io::Error {
         if self.saw_nul() {
-            return io::const_io_error!(
+            return io::const_error!(
                 io::ErrorKind::InvalidInput,
                 "nul byte found in provided data",
             );
@@ -179,15 +179,15 @@ impl Process {
                 self.handle.raw(),
                 ZX_INFO_PROCESS,
                 (&raw mut proc_info) as *mut libc::c_void,
-                mem::size_of::<zx_info_process_t>(),
+                size_of::<zx_info_process_t>(),
                 &mut actual,
                 &mut avail,
             ))?;
         }
         if actual != 1 {
-            return Err(io::const_io_error!(
+            return Err(io::const_error!(
                 io::ErrorKind::InvalidData,
-                "Failed to get exit status of process",
+                "failed to get exit status of process",
             ));
         }
         Ok(ExitStatus(proc_info.return_code))
@@ -216,15 +216,15 @@ impl Process {
                 self.handle.raw(),
                 ZX_INFO_PROCESS,
                 (&raw mut proc_info) as *mut libc::c_void,
-                mem::size_of::<zx_info_process_t>(),
+                size_of::<zx_info_process_t>(),
                 &mut actual,
                 &mut avail,
             ))?;
         }
         if actual != 1 {
-            return Err(io::const_io_error!(
+            return Err(io::const_error!(
                 io::ErrorKind::InvalidData,
-                "Failed to get exit status of process",
+                "failed to get exit status of process",
             ));
         }
         Ok(Some(ExitStatus(proc_info.return_code)))

@@ -47,10 +47,11 @@ use crate::{mem, ptr};
 /// // some bytes, in a vector
 /// let sparkle_heart = vec![240, 159, 146, 150];
 ///
-/// // We know these bytes are valid, so just use `unwrap()`.
-/// let sparkle_heart = str::from_utf8(&sparkle_heart).unwrap();
+/// // We can use the ? (try) operator to check if the bytes are valid
+/// let sparkle_heart = str::from_utf8(&sparkle_heart)?;
 ///
 /// assert_eq!("💖", sparkle_heart);
+/// # Ok::<_, str::Utf8Error>(())
 /// ```
 ///
 /// Incorrect bytes:
@@ -125,7 +126,7 @@ pub const fn from_utf8(v: &[u8]) -> Result<&str, Utf8Error> {
 /// See the docs for [`Utf8Error`] for more details on the kinds of
 /// errors that can be returned.
 #[stable(feature = "str_mut_extras", since = "1.20.0")]
-#[rustc_const_unstable(feature = "const_str_from_utf8", issue = "91006")]
+#[rustc_const_stable(feature = "const_str_from_utf8", since = "CURRENT_RUSTC_VERSION")]
 #[rustc_diagnostic_item = "str_from_utf8_mut"]
 pub const fn from_utf8_mut(v: &mut [u8]) -> Result<&mut str, Utf8Error> {
     // FIXME(const-hack): This should use `?` again, once it's `const`

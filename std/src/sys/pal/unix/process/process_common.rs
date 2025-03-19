@@ -43,10 +43,7 @@ cfg_if::cfg_if! {
 
         #[allow(dead_code)]
         pub unsafe fn sigaddset(set: *mut libc::sigset_t, signum: libc::c_int) -> libc::c_int {
-            use crate::{
-                mem::{align_of, size_of},
-                slice,
-            };
+            use crate::slice;
             use libc::{c_ulong, sigset_t};
 
             // The implementations from bionic (android libc) type pun `sigset_t` as an
@@ -393,7 +390,7 @@ impl Command {
 fn os2c(s: &OsStr, saw_nul: &mut bool) -> CString {
     CString::new(s.as_bytes()).unwrap_or_else(|_e| {
         *saw_nul = true;
-        CString::new("<string-with-nul>").unwrap()
+        c"<string-with-nul>".to_owned()
     })
 }
 
