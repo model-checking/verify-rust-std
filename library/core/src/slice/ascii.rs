@@ -5,14 +5,10 @@ use core::ascii::EscapeDefault;
 use crate::fmt::{self, Write};
 #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
 use crate::intrinsics::const_eval_select;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-=======
->>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 use crate::{ascii, iter, ops};
 
-#[cfg(not(test))]
 impl [u8] {
     /// Checks if all bytes in this slice are within the ASCII range.
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
@@ -510,7 +506,6 @@ const fn is_ascii(bytes: &[u8]) -> bool {
 
     is_ascii
 }
-<<<<<<< HEAD
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -536,5 +531,3 @@ pub mod verify {
         }
     }
 }
-=======
->>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980

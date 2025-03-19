@@ -3,11 +3,8 @@ use safety::{ensures, requires};
 use super::*;
 use crate::cmp::Ordering::{Equal, Greater, Less};
 use crate::intrinsics::const_eval_select;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-=======
->>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 use crate::mem::{self, SizedTypeProperties};
 use crate::slice::{self, SliceIndex};
 

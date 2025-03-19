@@ -38,12 +38,9 @@
     issue = "27721"
 )]
 
-<<<<<<< HEAD
 #[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
 use safety::{loop_invariant, requires};
 
-=======
->>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 use crate::char::MAX_LEN_UTF8;
 use crate::cmp::Ordering;
 use crate::convert::TryInto as _;
@@ -652,21 +649,21 @@ where
 impl<const N: usize> MultiCharEq for [char; N] {
     #[inline]
     fn matches(&mut self, c: char) -> bool {
-        self.iter().any(|&m| m == c)
+        self.contains(&c)
     }
 }
 
 impl<const N: usize> MultiCharEq for &[char; N] {
     #[inline]
     fn matches(&mut self, c: char) -> bool {
-        self.iter().any(|&m| m == c)
+        self.contains(&c)
     }
 }
 
 impl MultiCharEq for &[char] {
     #[inline]
     fn matches(&mut self, c: char) -> bool {
-        self.iter().any(|&m| m == c)
+        self.contains(&c)
     }
 }
 

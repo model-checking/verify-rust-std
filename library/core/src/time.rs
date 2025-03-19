@@ -23,11 +23,8 @@ use safety::{Invariant, ensures};
 
 use crate::fmt;
 use crate::iter::Sum;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-=======
->>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 use crate::num::niche_types::Nanoseconds;
 use crate::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 use crate::ub_checks::Invariant;
@@ -46,7 +43,6 @@ const HOURS_PER_DAY: u64 = 24;
 #[unstable(feature = "duration_units", issue = "120301")]
 const DAYS_PER_WEEK: u64 = 7;
 
-<<<<<<< HEAD
 #[unstable(feature = "ub_checks", issue = "none")]
 impl Invariant for Nanoseconds {
     fn is_safe(&self) -> bool {
@@ -54,8 +50,6 @@ impl Invariant for Nanoseconds {
     }
 }
 
-=======
->>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 /// A `Duration` type to represent a span of time, typically used for system
 /// timeouts.
 ///
@@ -95,7 +89,7 @@ impl Invariant for Nanoseconds {
 /// crate to do so.
 #[stable(feature = "duration", since = "1.3.0")]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[cfg_attr(not(test), rustc_diagnostic_item = "Duration")]
+#[rustc_diagnostic_item = "Duration"]
 #[derive(Invariant)]
 pub struct Duration {
     secs: u64,

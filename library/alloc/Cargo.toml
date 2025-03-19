@@ -8,7 +8,7 @@ repository = "https://github.com/rust-lang/rust.git"
 description = "The Rust core allocation and collections library"
 autotests = false
 autobenches = false
-edition = "2021"
+edition = "2024"
 
 [lib]
 test = false
@@ -17,10 +17,7 @@ bench = false
 [dependencies]
 core = { path = "../core", public = true }
 compiler_builtins = { version = "=0.1.151", features = ['rustc-dep-of-std'] }
-<<<<<<< HEAD
 safety = { path = "../contracts/safety" }
-=======
->>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 
 [features]
 compiler-builtins-mem = ['compiler_builtins/mem']

@@ -93,10 +93,7 @@
 //
 // Library features:
 // tidy-alphabetical-start
-<<<<<<< HEAD
 #![cfg_attr(kani, feature(kani))]
-=======
->>>>>>> fdc0067d05b875da82a5bed4bd364df0b4fde980
 #![feature(alloc_layout_extra)]
 #![feature(allocator_api)]
 #![feature(array_chunks)]
