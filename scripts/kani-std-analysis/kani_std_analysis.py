@@ -290,7 +290,7 @@ class KaniSTDMetricsOverTime():
             "safe_fns_with_loop_under_contract": safe_fns_with_loop_under_contract,
             "verified_safe_fns_under_contract": verified_safe_fns_under_contract,
             "verified_safe_fns_with_loop_under_contract": verified_safe_fns_with_loop_under_contract,
-            "total_functions_under_contract": kani_data.total_fns_under_contract,
+            "total_functions_under_contract_all_crates": kani_data.total_fns_under_contract,
         }
 
         self.update_plot_metrics([data])
