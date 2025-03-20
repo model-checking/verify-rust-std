@@ -65,6 +65,7 @@ then
 fi
 cargo new std_lib_analysis --lib
 cd std_lib_analysis
+sed -i '1i cargo-features = ["edition2024"]' Cargo.toml
 
 echo '
 pub fn dummy() {
