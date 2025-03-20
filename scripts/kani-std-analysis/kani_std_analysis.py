@@ -173,7 +173,7 @@ class KaniSTDMetricsOverTime():
                 ]
         self.safe_abstr_metrics = [
                 'total_safe_abstractions',
-                'total_safe_abstractions_with_loop'
+                'total_safe_abstractions_with_loop',
                 'safe_abstractions_under_contract',
                 'safe_abstractions_with_loop_under_contract',
                 'verified_safe_abstractions_under_contract',
