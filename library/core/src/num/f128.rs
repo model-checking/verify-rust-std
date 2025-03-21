@@ -16,8 +16,6 @@ use safety::requires;
 use crate::convert::FloatToInt;
 #[cfg(kani)]
 use crate::kani;
-use crate::num::FpCategory;
-use crate::panic::const_assert;
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;
 use crate::num::FpCategory;
