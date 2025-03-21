@@ -11,8 +11,7 @@
 
 ## Goal
 
-The implementations of the traits `StableSmallSortTypeImpl`, `UnstableSmallSortTypeImpl`, and `UnstableSmallSortFreezeTypeImpl` in the `smallsort` [module](https://github.com/rust-lang/rust/blob/master/library/core/src/slice/sort/shared/smallsort.rs) of the Rust standard library are the sorting
-algorithms optimized for slices with small lengths.
+The implementations of the traits `StableSmallSortTypeImpl`, `UnstableSmallSortTypeImpl`, and `UnstableSmallSortFreezeTypeImpl` in the `smallsort` [module](https://github.com/rust-lang/rust/blob/master/library/core/src/slice/sort/shared/smallsort.rs) of the Rust standard library are the sorting algorithms with optimized implementations for slices with small lengths.
 In this challenge, the goal is to, first prove the memory safety of the public functions in the `smallsort` module, and, second, write contracts for them to
 show that the sorting algorithms actually sort the slices.
 
