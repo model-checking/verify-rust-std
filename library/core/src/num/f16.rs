@@ -20,6 +20,8 @@ use crate::num::FpCategory;
 use crate::panic::const_assert;
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;
+use crate::num::FpCategory;
+use crate::panic::const_assert;
 use crate::{intrinsics, mem};
 
 /// Basic mathematical constants.
