@@ -29,3 +29,4 @@
   - [13: Safety of `CStr`](./challenges/0013-cstr.md)
   - [14: Safety of Primitive Conversions](./challenges/0014-convert-num.md)
   - [15: Contracts and Tests for SIMD Intrinsics](./challenges/0015-intrinsics-simd.md)
+  - [25: Verify the safety of `VecDeque` functions](./challenges/0025-vecdeque.md)
