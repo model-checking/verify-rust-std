@@ -29,3 +29,6 @@
   - [13: Safety of `CStr`](./challenges/0013-cstr.md)
   - [14: Safety of Primitive Conversions](./challenges/0014-convert-num.md)
   - [15: Contracts and Tests for SIMD Intrinsics](./challenges/0015-intrinsics-simd.md)
+  - [20: Verify the safety of char-related functions in str::pattern](./challenges/0020-str-pattern-pt1.md)
+  - [21: Verify the safety of substring-related functions in str::pattern](./challenges/0021-str-pattern-pt2.md)
+  - [22: Verify the safety of str iter functions](./challenges/0022-str-iter.md)
