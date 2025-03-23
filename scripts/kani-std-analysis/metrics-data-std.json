@@ -1,4 +1,26 @@
 {
   "results": [
+    {
+      "date": "2025-03-23",
+      "total_unsafe_fns": 179,
+      "total_unsafe_fns_with_loop": 12,
+      "total_safe_abstractions": 567,
+      "total_safe_abstractions_with_loop": 43,
+      "total_safe_fns": 4052,
+      "total_safe_fns_with_loop": 175,
+      "unsafe_fns_under_contract": 0,
+      "unsafe_fns_with_loop_under_contract": 0,
+      "verified_unsafe_fns_under_contract": 0,
+      "verified_unsafe_fns_with_loop_under_contract": 0,
+      "safe_abstractions_under_contract": 0,
+      "safe_abstractions_with_loop_under_contract": 0,
+      "verified_safe_abstractions_under_contract": 0,
+      "verified_safe_abstractions_with_loop_under_contract": 0,
+      "safe_fns_under_contract": 0,
+      "safe_fns_with_loop_under_contract": 0,
+      "verified_safe_fns_under_contract": 0,
+      "verified_safe_fns_with_loop_under_contract": 0,
+      "total_functions_under_contract_all_crates": 274
+    }
   ]
 }
