@@ -3,7 +3,7 @@
 - **Status:** Open
 - **Reward:** 
 - **Solution:** 
-- **Tracking Issue:** https://github.com/model-checking/verify-rust-std/issues/173
+- **Tracking Issue:** [#173](https://github.com/model-checking/verify-rust-std/issues/173)
 - **Start date:** 2025/02/01
 - **End date:** 2025/08/01
 

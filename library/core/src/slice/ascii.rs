@@ -9,7 +9,6 @@ use crate::intrinsics::const_eval_select;
 use crate::kani;
 use crate::{ascii, iter, ops};
 
-#[cfg(not(test))]
 impl [u8] {
     /// Checks if all bytes in this slice are within the ASCII range.
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]

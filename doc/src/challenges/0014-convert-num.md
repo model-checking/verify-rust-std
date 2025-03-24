@@ -1,11 +1,11 @@
 # Challenge 14: Safety of Primitive Conversions
 
-- **Status:** Open
-- **Tracking Issue:** https://github.com/model-checking/verify-rust-std/issues/220
+- **Status:** Resolved
+- **Tracking Issue:** [#220](https://github.com/model-checking/verify-rust-std/issues/220)
 - **Start date:** 2024/12/15
 - **End date:** 2025/2/28
 - **Prize:** *TBD*
-
+- **Contributors**: [Shoyu Vanilla](https://github.com/ShoyuVanilla)
 -------------------
 
 ## Goal

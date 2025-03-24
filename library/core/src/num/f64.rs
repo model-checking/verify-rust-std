@@ -14,15 +14,13 @@
 use safety::requires;
 
 use crate::convert::FloatToInt;
-#[cfg(not(test))]
-use crate::intrinsics;
 #[cfg(kani)]
 use crate::kani;
-use crate::mem;
 use crate::num::FpCategory;
 use crate::panic::const_assert;
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;
+use crate::{intrinsics, mem};
 
 /// The radix or base of the internal representation of `f64`.
 /// Use [`f64::RADIX`] instead.
@@ -392,7 +390,6 @@ pub mod consts {
     pub const LN_10: f64 = 2.30258509299404568401799145468436421_f64;
 }
 
-#[cfg(not(test))]
 impl f64 {
     /// The radix or base of the internal representation of `f64`.
     #[stable(feature = "assoc_int_consts", since = "1.43.0")]
@@ -421,7 +418,7 @@ impl f64 {
     /// [Machine epsilon]: https://en.wikipedia.org/wiki/Machine_epsilon
     /// [`MANTISSA_DIGITS`]: f64::MANTISSA_DIGITS
     #[stable(feature = "assoc_int_consts", since = "1.43.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "f64_epsilon")]
+    #[rustc_diagnostic_item = "f64_epsilon"]
     pub const EPSILON: f64 = 2.2204460492503131e-16_f64;
 
     /// Smallest finite `f64` value.
@@ -498,13 +495,13 @@ impl f64 {
     pub const NEG_INFINITY: f64 = -1.0_f64 / 0.0_f64;
 
     /// Sign bit
-    const SIGN_MASK: u64 = 0x8000_0000_0000_0000;
+    pub(crate) const SIGN_MASK: u64 = 0x8000_0000_0000_0000;
 
     /// Exponent mask
-    const EXP_MASK: u64 = 0x7ff0_0000_0000_0000;
+    pub(crate) const EXP_MASK: u64 = 0x7ff0_0000_0000_0000;
 
     /// Mantissa mask
-    const MAN_MASK: u64 = 0x000f_ffff_ffff_ffff;
+    pub(crate) const MAN_MASK: u64 = 0x000f_ffff_ffff_ffff;
 
     /// Minimum representable positive value (min subnormal)
     const TINY_BITS: u64 = 0x1;
@@ -764,8 +761,8 @@ impl f64 {
     /// [`MAX`]: Self::MAX
     #[inline]
     #[doc(alias = "nextUp")]
-    #[stable(feature = "float_next_up_down", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "float_next_up_down", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "float_next_up_down", since = "1.86.0")]
+    #[rustc_const_stable(feature = "float_next_up_down", since = "1.86.0")]
     pub const fn next_up(self) -> Self {
         // Some targets violate Rust's assumption of IEEE semantics, e.g. by flushing
         // denormals to zero. This is in general unsound and unsupported, but here
@@ -815,8 +812,8 @@ impl f64 {
     /// [`MAX`]: Self::MAX
     #[inline]
     #[doc(alias = "nextDown")]
-    #[stable(feature = "float_next_up_down", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "float_next_up_down", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "float_next_up_down", since = "1.86.0")]
+    #[rustc_const_stable(feature = "float_next_up_down", since = "1.86.0")]
     pub const fn next_down(self) -> Self {
         // Some targets violate Rust's assumption of IEEE semantics, e.g. by flushing
         // denormals to zero. This is in general unsound and unsupported, but here

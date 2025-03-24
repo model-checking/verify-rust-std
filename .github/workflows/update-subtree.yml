@@ -11,7 +11,10 @@ defaults:
 
 jobs:
   update-subtree-library:
-    runs-on: ubuntu-latest
+    # Changing the host platform may alter the libgit2 version as used by
+    # splitsh-lite, which will require changing the version of git2go.
+    # See https://github.com/jeffWelling/git2go?tab=readme-ov-file#which-go-version-to-use
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout Repository
@@ -33,12 +36,6 @@ jobs:
         repository: rust-lang/rust
         fetch-depth: 0
         path: rust-tmp
-
-    - name: Checkout git-filter-repo
-      uses: actions/checkout@v4
-      with:
-        repository: newren/git-filter-repo
-        path: git-filter-repo
 
     - name: Fetch toolchain versions
       run: |
@@ -77,6 +74,30 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
 
+    - name: Checkout splitsh-lite
+      if: ${{ env.SUBTREE_PR_EXISTS == 'no' }}
+      uses: actions/checkout@v4
+      with:
+        repository: splitsh/lite
+        path: splitsh-lite
+
+    - name: Build splitsh-lite
+      if: ${{ env.SUBTREE_PR_EXISTS == 'no' }}
+      run: |
+        cd splitsh-lite
+        sudo apt-get install -y golang libgit2-dev
+        # git2go upstream hasn't been updated to more recent versions of
+        # libgit2, so using a fork that does stay up to date
+        sed -i 's#github.com/libgit2/git2go#github.com/jeffwelling/git2go#' go.mod splitter/*
+        # may need to adjust "v37" to a higher number per
+        # https://github.com/jeffWelling/git2go?tab=readme-ov-file#which-go-version-to-use
+        # depening on the libgit2 version being installed
+        sed -i -e 's/v34/v37/g' go.mod splitter/*.go
+        # v37.0.0 had issues that weren't fully fixed until v37.0.4
+        sed -i 's/v37.0.0/v37.0.4/' go.mod
+        go mod tidy
+        go build -o splitsh-lite github.com/splitsh/lite
+
     - name: Update subtree/library locally
       if: ${{ env.SUBTREE_PR_EXISTS == 'no' }}
       run: |
@@ -89,15 +110,16 @@ jobs:
         fi
 
         git checkout ${NEXT_COMMIT_HASH}
-        ../git-filter-repo/git-filter-repo --subdirectory-filter library --force
-        git checkout -b subtree/library
+        /usr/bin/time -v ../splitsh-lite/splitsh-lite --progress --prefix=library --target subtree/library
+        git checkout -b subtree/library subtree/library
 
         cd ../verify-rust-std
         git remote add rust-filtered ../rust-tmp/
         git fetch rust-filtered
         git checkout -b subtree/library rust-filtered/subtree/library
-        # The filter-subtree operation adds an extraneous `library/` folder containing the submodules
-        # (c.f. https://github.com/model-checking/verify-rust-std/issues/249), so remove that before committing.
+        # The checkout still leaves behind the library folder with submodules.
+        # We need to remove this as we'd otherwise have the create-pull-request
+        # action create an extra commit.
         rm -rf library
         SUBTREE_HEAD_MSG=$(git log --format=%s -n 1 origin/subtree/library)
         UPSTREAM_FROM=$(git log --grep="${SUBTREE_HEAD_MSG}" -n 1 --format=%H rust-filtered/subtree/library)
@@ -107,7 +129,6 @@ jobs:
           echo "MERGE_CONFLICTS=noop" >> $GITHUB_ENV
         else
           git branch --set-upstream-to=origin/subtree/library
-          git -c user.name=gitbot -c user.email=git@bot rebase
           echo "MERGE_CONFLICTS=maybe" >> $GITHUB_ENV
         fi
 
@@ -130,12 +151,15 @@ jobs:
       if: ${{ env.MERGE_CONFLICTS != 'noop' && env.MERGE_PR_EXISTS == 'no' }}
       run: |
         cd verify-rust-std
+        if ! git rev-parse --verify subtree/library; then
+          git checkout -t -b subtree/library origin/update-subtree/library
+        fi
         git checkout main
 
         # This command may fail, which will require human intervention.
         if ! git \
             -c user.name=gitbot -c user.email=git@bot \
-            subtree merge --prefix=library update-subtree/library --squash; then
+            subtree merge --prefix=library subtree/library --squash; then
           echo "MERGE_CONFLICTS=yes" >> $GITHUB_ENV
           git -c user.name=gitbot -c user.email=git@bot commit -a -m "Merge from $NEXT_COMMIT_HASH with conflicts"
         else

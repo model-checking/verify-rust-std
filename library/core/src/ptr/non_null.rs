@@ -55,7 +55,6 @@ use crate::{fmt, hash, intrinsics, mem, ptr};
 /// are guaranteed to have the same size and alignment:
 ///
 /// ```
-/// # use std::mem::{size_of, align_of};
 /// use std::ptr::NonNull;
 ///
 /// assert_eq!(size_of::<NonNull<i16>>(), size_of::<Option<NonNull<i16>>>());
@@ -792,9 +791,9 @@ impl<T: ?Sized> NonNull<T> {
     }
 
     /// Calculates the distance between two pointers within the same allocation. The returned value is in
-    /// units of T: the distance in bytes divided by `mem::size_of::<T>()`.
+    /// units of T: the distance in bytes divided by `size_of::<T>()`.
     ///
-    /// This is equivalent to `(self as isize - origin as isize) / (mem::size_of::<T>() as isize)`,
+    /// This is equivalent to `(self as isize - origin as isize) / (size_of::<T>() as isize)`,
     /// except that it has a lot more opportunities for UB, in exchange for the compiler
     /// better understanding what you are doing.
     ///
@@ -830,7 +829,7 @@ impl<T: ?Sized> NonNull<T> {
     /// objects is not known at compile-time. However, the requirement also exists at
     /// runtime and may be exploited by optimizations. If you wish to compute the difference between
     /// pointers that are not guaranteed to be from the same allocation, use `(self as isize -
-    /// origin as isize) / mem::size_of::<T>()`.
+    /// origin as isize) / size_of::<T>()`.
     // FIXME: recommend `addr()` instead of `as usize` once that is stable.
     ///
     /// [`add`]: #method.add
@@ -924,7 +923,7 @@ impl<T: ?Sized> NonNull<T> {
 
     /// Calculates the distance between two pointers within the same allocation, *where it's known that
     /// `self` is equal to or greater than `origin`*. The returned value is in
-    /// units of T: the distance in bytes is divided by `mem::size_of::<T>()`.
+    /// units of T: the distance in bytes is divided by `size_of::<T>()`.
     ///
     /// This computes the same value that [`offset_from`](#method.offset_from)
     /// would compute, but with the added precondition that the offset is
@@ -938,14 +937,13 @@ impl<T: ?Sized> NonNull<T> {
     /// to [`sub`](#method.sub)).  The following are all equivalent, assuming
     /// that their safety preconditions are met:
     /// ```rust
-    /// # #![feature(ptr_sub_ptr)]
-    /// # unsafe fn blah(ptr: std::ptr::NonNull<u32>, origin: std::ptr::NonNull<u32>, count: usize) -> bool {
-    /// ptr.sub_ptr(origin) == count
+    /// # unsafe fn blah(ptr: std::ptr::NonNull<u32>, origin: std::ptr::NonNull<u32>, count: usize) -> bool { unsafe {
+    /// ptr.offset_from_unsigned(origin) == count
     /// # &&
     /// origin.add(count) == ptr
     /// # &&
     /// ptr.sub(count) == origin
-    /// # }
+    /// # } }
     /// ```
     ///
     /// # Safety
@@ -967,26 +965,25 @@ impl<T: ?Sized> NonNull<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(ptr_sub_ptr)]
     /// use std::ptr::NonNull;
     ///
     /// let a = [0; 5];
     /// let ptr1: NonNull<u32> = NonNull::from(&a[1]);
     /// let ptr2: NonNull<u32> = NonNull::from(&a[3]);
     /// unsafe {
-    ///     assert_eq!(ptr2.sub_ptr(ptr1), 2);
+    ///     assert_eq!(ptr2.offset_from_unsigned(ptr1), 2);
     ///     assert_eq!(ptr1.add(2), ptr2);
     ///     assert_eq!(ptr2.sub(2), ptr1);
-    ///     assert_eq!(ptr2.sub_ptr(ptr2), 0);
+    ///     assert_eq!(ptr2.offset_from_unsigned(ptr2), 0);
     /// }
     ///
     /// // This would be incorrect, as the pointers are not correctly ordered:
-    /// // ptr1.sub_ptr(ptr2)
+    /// // ptr1.offset_from_unsigned(ptr2)
     /// ```
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-    #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
-    #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
+    #[stable(feature = "ptr_sub_ptr", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "CURRENT_RUSTC_VERSION")]
     #[requires(
         self.as_ptr().addr().checked_sub(subtracted.as_ptr().addr()).is_some() &&
         core::ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
@@ -994,12 +991,12 @@ impl<T: ?Sized> NonNull<T> {
         (self.as_ptr().addr() - subtracted.as_ptr().addr()) % core::mem::size_of::<T>() == 0
     )]
     #[ensures(|result: &usize| *result == self.as_ptr().offset_from(subtracted.as_ptr()) as usize)]
-    pub const unsafe fn sub_ptr(self, subtracted: NonNull<T>) -> usize
+    pub const unsafe fn offset_from_unsigned(self, subtracted: NonNull<T>) -> usize
     where
         T: Sized,
     {
         // SAFETY: the caller must uphold the safety contract for `sub_ptr`.
-        unsafe { self.as_ptr().sub_ptr(subtracted.as_ptr()) }
+        unsafe { self.as_ptr().offset_from_unsigned(subtracted.as_ptr()) }
     }
 
     /// Calculates the distance between two pointers within the same allocation, *where it's known that
@@ -1007,18 +1004,18 @@ impl<T: ?Sized> NonNull<T> {
     /// units of **bytes**.
     ///
     /// This is purely a convenience for casting to a `u8` pointer and
-    /// using [`sub_ptr`][NonNull::sub_ptr] on it. See that method for
+    /// using [`sub_ptr`][NonNull::offset_from_unsigned] on it. See that method for
     /// documentation and safety requirements.
     ///
     /// For non-`Sized` pointees this operation considers only the data pointers,
     /// ignoring the metadata.
     #[inline(always)]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-    #[unstable(feature = "ptr_sub_ptr", issue = "95892")]
-    #[rustc_const_unstable(feature = "const_ptr_sub_ptr", issue = "95892")]
-    pub const unsafe fn byte_sub_ptr<U: ?Sized>(self, origin: NonNull<U>) -> usize {
+    #[stable(feature = "ptr_sub_ptr", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "CURRENT_RUSTC_VERSION")]
+    pub const unsafe fn byte_offset_from_unsigned<U: ?Sized>(self, origin: NonNull<U>) -> usize {
         // SAFETY: the caller must uphold the safety contract for `byte_sub_ptr`.
-        unsafe { self.as_ptr().byte_sub_ptr(origin.as_ptr()) }
+        unsafe { self.as_ptr().byte_offset_from_unsigned(origin.as_ptr()) }
     }
 
     /// Reads the value from `self` without moving it. This leaves the
@@ -1083,7 +1080,7 @@ impl<T: ?Sized> NonNull<T> {
         unsafe { ptr::read_unaligned(self.as_ptr()) }
     }
 
-    /// Copies `count * size_of<T>` bytes from `self` to `dest`. The source
+    /// Copies `count * size_of::<T>()` bytes from `self` to `dest`. The source
     /// and destination may overlap.
     ///
     /// NOTE: this has the *same* argument order as [`ptr::copy`].
@@ -1109,7 +1106,7 @@ impl<T: ?Sized> NonNull<T> {
         unsafe { ptr::copy(self.as_ptr(), dest.as_ptr(), count) }
     }
 
-    /// Copies `count * size_of<T>` bytes from `self` to `dest`. The source
+    /// Copies `count * size_of::<T>()` bytes from `self` to `dest`. The source
     /// and destination may *not* overlap.
     ///
     /// NOTE: this has the *same* argument order as [`ptr::copy_nonoverlapping`].
@@ -1136,7 +1133,7 @@ impl<T: ?Sized> NonNull<T> {
         unsafe { ptr::copy_nonoverlapping(self.as_ptr(), dest.as_ptr(), count) }
     }
 
-    /// Copies `count * size_of<T>` bytes from `src` to `self`. The source
+    /// Copies `count * size_of::<T>()` bytes from `src` to `self`. The source
     /// and destination may overlap.
     ///
     /// NOTE: this has the *opposite* argument order of [`ptr::copy`].
@@ -1162,7 +1159,7 @@ impl<T: ?Sized> NonNull<T> {
         unsafe { ptr::copy(src.as_ptr(), self.as_ptr(), count) }
     }
 
-    /// Copies `count * size_of<T>` bytes from `src` to `self`. The source
+    /// Copies `count * size_of::<T>()` bytes from `src` to `self`. The source
     /// and destination may *not* overlap.
     ///
     /// NOTE: this has the *opposite* argument order of [`ptr::copy_nonoverlapping`].
@@ -1213,6 +1210,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_ptr_write", since = "1.83.0")]
+    #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
+    #[requires(ub_checks::can_write(self.as_ptr()))]
     pub const unsafe fn write(self, val: T)
     where
         T: Sized,
@@ -1232,6 +1231,13 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_ptr_write", since = "1.83.0")]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(self.as_ptr(), count)))]
+    #[requires(
+        count.checked_mul(core::mem::size_of::<T>() as usize).is_some_and(|byte_count| byte_count.wrapping_add(self.as_ptr() as usize) <= isize::MAX as usize) &&
+        ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(self.as_ptr(), count))
+    )]
+    #[ensures(|_|
+        ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(self.as_ptr() as *const u8, count * size_of::<T>())))]
     pub const unsafe fn write_bytes(self, val: u8, count: usize)
     where
         T: Sized,
@@ -1275,6 +1281,8 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_ptr_write", since = "1.83.0")]
+    #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
+    #[requires(ub_checks::can_write_unaligned(self.as_ptr()))]
     pub const unsafe fn write_unaligned(self, val: T)
     where
         T: Sized,
@@ -1353,7 +1361,6 @@ impl<T: ?Sized> NonNull<T> {
     /// Accessing adjacent `u8` as `u16`
     ///
     /// ```
-    /// use std::mem::align_of;
     /// use std::ptr::NonNull;
     ///
     /// # unsafe {
@@ -1613,7 +1620,7 @@ impl<T> NonNull<[T]> {
     ///
     /// When calling this method, you have to ensure that all of the following is true:
     ///
-    /// * The pointer must be [valid] for reads for `ptr.len() * mem::size_of::<T>()` many bytes,
+    /// * The pointer must be [valid] for reads for `ptr.len() * size_of::<T>()` many bytes,
     ///   and it must be properly aligned. This means in particular:
     ///
     ///     * The entire memory range of this slice must be contained within a single allocated object!
@@ -1625,7 +1632,7 @@ impl<T> NonNull<[T]> {
     ///       them from other data. You can obtain a pointer that is usable as `data`
     ///       for zero-length slices using [`NonNull::dangling()`].
     ///
-    /// * The total size `ptr.len() * mem::size_of::<T>()` of the slice must be no larger than `isize::MAX`.
+    /// * The total size `ptr.len() * size_of::<T>()` of the slice must be no larger than `isize::MAX`.
     ///   See the safety documentation of [`pointer::offset`].
     ///
     /// * You must enforce Rust's aliasing rules, since the returned lifetime `'a` is
@@ -1667,7 +1674,7 @@ impl<T> NonNull<[T]> {
     ///
     /// When calling this method, you have to ensure that all of the following is true:
     ///
-    /// * The pointer must be [valid] for reads and writes for `ptr.len() * mem::size_of::<T>()`
+    /// * The pointer must be [valid] for reads and writes for `ptr.len() * size_of::<T>()`
     ///   many bytes, and it must be properly aligned. This means in particular:
     ///
     ///     * The entire memory range of this slice must be contained within a single allocated object!
@@ -1679,7 +1686,7 @@ impl<T> NonNull<[T]> {
     ///       them from other data. You can obtain a pointer that is usable as `data`
     ///       for zero-length slices using [`NonNull::dangling()`].
     ///
-    /// * The total size `ptr.len() * mem::size_of::<T>()` of the slice must be no larger than `isize::MAX`.
+    /// * The total size `ptr.len() * size_of::<T>()` of the slice must be no larger than `isize::MAX`.
     ///   See the safety documentation of [`pointer::offset`].
     ///
     /// * You must enforce Rust's aliasing rules, since the returned lifetime `'a` is
@@ -2221,7 +2228,7 @@ mod verify {
         use core::mem::MaybeUninit;
 
         const SIZE: usize = 100000;
-        let arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let arr = [MaybeUninit::uninit(); SIZE];
         let slice: &[MaybeUninit<i32>] = kani::slice::any_slice_of_array(&arr);
         let ptr = NonNull::slice_from_raw_parts(
             NonNull::new(slice.as_ptr() as *mut MaybeUninit<i32>).unwrap(),
@@ -2238,7 +2245,7 @@ mod verify {
         use core::mem::MaybeUninit;
 
         const SIZE: usize = 100000;
-        let mut arr: [MaybeUninit<i32>; SIZE] = MaybeUninit::uninit_array();
+        let mut arr = [MaybeUninit::uninit(); SIZE];
         let slice: &[MaybeUninit<i32>] = kani::slice::any_slice_of_array(&mut arr);
         let ptr = NonNull::slice_from_raw_parts(
             NonNull::new(slice.as_ptr() as *mut MaybeUninit<i32>).unwrap(),
@@ -2483,7 +2490,7 @@ mod verify {
         }
     }
 
-    #[kani::proof_for_contract(NonNull::sub_ptr)]
+    #[kani::proof_for_contract(NonNull::offset_from_unsigned)]
     pub fn non_null_check_sub_ptr() {
         const SIZE: usize = core::mem::size_of::<i32>() * 1000;
         let mut generator1 = kani::PointerGenerator::<SIZE>::new();
@@ -2505,7 +2512,7 @@ mod verify {
         let origin_nonnull = unsafe { NonNull::new(origin).unwrap() };
 
         unsafe {
-            let distance = ptr_nonnull.sub_ptr(origin_nonnull);
+            let distance = ptr_nonnull.offset_from_unsigned(origin_nonnull);
         }
     }
 
@@ -2535,12 +2542,143 @@ mod verify {
         }
     }
 
+    macro_rules! generate_write_harness {
+        ($type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonNull::write)]
+            pub fn $harness_name() {
+                // Create a pointer generator for the given type with appropriate byte size
+                const ARR_SIZE: usize = mem::size_of::<$type>() * 100;
+                let mut generator = kani::PointerGenerator::<ARR_SIZE>::new();
+
+                // Get a raw pointer from the generator
+                let raw_ptr: *mut $type = generator.any_in_bounds().ptr;
+
+                // Create a non-null pointer from the raw pointer
+                let ptr = NonNull::new(raw_ptr).unwrap();
+
+                // Create a non-deterministic value to write
+                let new_value: $type = kani::any();
+
+                unsafe {
+                    // Perform the volatile write operation
+                    ptr.write(new_value);
+
+                    // Read back the value and assert it's correct
+                    assert_eq!(ptr.as_ptr().read(), new_value);
+                }
+            }
+        };
+    }
+
+    #[kani::proof_for_contract(NonNull::write)]
+    pub fn non_null_check_write_unit() {
+        // Create a pointer generator for the given type with appropriate byte size
+        let mut generator = kani::PointerGenerator::<1>::new();
+
+        // Get a raw pointer from the generator
+        let raw_ptr: *mut () = generator.any_in_bounds().ptr;
+
+        // Create a non-null pointer from the raw pointer
+        let ptr = NonNull::new(raw_ptr).unwrap();
+
+        // Create a non-deterministic value to write
+        let new_value: () = kani::any();
+
+        unsafe {
+            // Perform the volatile write operation
+            ptr.write(new_value);
+
+            // Read back the value and assert it's correct
+            assert_eq!(ptr.as_ptr().read(), new_value);
+        }
+    }
+
+    // Generate proof harnesses for multiple types with appropriate byte sizes
+    generate_write_harness!(i8, non_null_check_write_i8);
+    generate_write_harness!(i16, non_null_check_write_i16);
+    generate_write_harness!(i32, non_null_check_write_i32);
+    generate_write_harness!(i64, non_null_check_write_i64);
+    generate_write_harness!(i128, non_null_check_write_i128);
+    generate_write_harness!(isize, non_null_check_write_isize);
+    generate_write_harness!(u8, non_null_check_write_u8);
+    generate_write_harness!(u16, non_null_check_write_u16);
+    generate_write_harness!(u32, non_null_check_write_u32);
+    generate_write_harness!(u64, non_null_check_write_u64);
+    generate_write_harness!(u128, non_null_check_write_u128);
+    generate_write_harness!(usize, non_null_check_write_usize);
+
+    macro_rules! generate_write_unaligned_harness {
+        ($type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonNull::write_unaligned)]
+            pub fn $harness_name() {
+                // Create a pointer generator for the given type with appropriate byte size
+                const ARR_SIZE: usize = mem::size_of::<$type>() * 100;
+                let mut generator = kani::PointerGenerator::<ARR_SIZE>::new();
+
+                // Get a raw pointer from the generator
+                let raw_ptr: *mut $type = generator.any_in_bounds().ptr;
+
+                // Create a non-null pointer from the raw pointer
+                let ptr = NonNull::new(raw_ptr).unwrap();
+
+                // Create a non-deterministic value to write
+                let new_value: $type = kani::any();
+
+                unsafe {
+                    // Perform the volatile write operation
+                    ptr.write_unaligned(new_value);
+
+                    // Read back the value and assert it's correct
+                    assert_eq!(ptr.as_ptr().read_unaligned(), new_value);
+                }
+            }
+        };
+    }
+
+    #[kani::proof_for_contract(NonNull::write_unaligned)]
+    pub fn non_null_check_write_unaligned_unit() {
+        // Create a pointer generator for the given type with appropriate byte size
+        let mut generator = kani::PointerGenerator::<1>::new();
+
+        // Get a raw pointer from the generator
+        let raw_ptr: *mut () = generator.any_in_bounds().ptr;
+
+        // Create a non-null pointer from the raw pointer
+        let ptr = NonNull::new(raw_ptr).unwrap();
+
+        // Create a non-deterministic value to write
+        let new_value: () = kani::any();
+
+        unsafe {
+            // Perform the volatile write operation
+            ptr.write_unaligned(new_value);
+
+            // Read back the value and assert it's correct
+            assert_eq!(ptr.as_ptr().read_unaligned(), new_value);
+        }
+    }
+
+    // Generate proof harnesses for multiple types with appropriate byte sizes
+    generate_write_unaligned_harness!(i8, non_null_check_write_unaligned_i8);
+    generate_write_unaligned_harness!(i16, non_null_check_write_unaligned_i16);
+    generate_write_unaligned_harness!(i32, non_null_check_write_unaligned_i32);
+    generate_write_unaligned_harness!(i64, non_null_check_write_unaligned_i64);
+    generate_write_unaligned_harness!(i128, non_null_check_write_unaligned_i128);
+    generate_write_unaligned_harness!(isize, non_null_check_write_unaligned_isize);
+    generate_write_unaligned_harness!(u8, non_null_check_write_unaligned_u8);
+    generate_write_unaligned_harness!(u16, non_null_check_write_unaligned_u16);
+    generate_write_unaligned_harness!(u32, non_null_check_write_unaligned_u32);
+    generate_write_unaligned_harness!(u64, non_null_check_write_unaligned_u64);
+    generate_write_unaligned_harness!(u128, non_null_check_write_unaligned_u128);
+    generate_write_unaligned_harness!(usize, non_null_check_write_unaligned_usize);
+
     macro_rules! generate_write_volatile_harness {
-        ($type:ty, $byte_size:expr, $harness_name:ident) => {
+        ($type:ty, $harness_name:ident) => {
             #[kani::proof_for_contract(NonNull::write_volatile)]
             pub fn $harness_name() {
                 // Create a pointer generator for the given type with appropriate byte size
-                let mut generator = kani::PointerGenerator::<$byte_size>::new();
+                const ARR_SIZE: usize = mem::size_of::<$type>() * 100;
+                let mut generator = kani::PointerGenerator::<ARR_SIZE>::new();
 
                 // Get a raw pointer from the generator
                 let raw_ptr: *mut $type = generator.any_in_bounds().ptr;
@@ -2562,28 +2700,114 @@ mod verify {
         };
     }
 
+    #[kani::proof_for_contract(NonNull::write_volatile)]
+    pub fn non_null_check_write_volatile_unit() {
+        // Create a pointer generator for the given type with appropriate byte size
+        let mut generator = kani::PointerGenerator::<1>::new();
+
+        // Get a raw pointer from the generator
+        let raw_ptr: *mut () = generator.any_in_bounds().ptr;
+
+        // Create a non-null pointer from the raw pointer
+        let ptr = NonNull::new(raw_ptr).unwrap();
+
+        // Create a non-deterministic value to write
+        let new_value: () = kani::any();
+
+        unsafe {
+            // Perform the volatile write operation
+            ptr.write_volatile(new_value);
+
+            // Read back the value and assert it's correct
+            assert_eq!(ptr.as_ptr().read_volatile(), new_value);
+        }
+    }
+
     // Generate proof harnesses for multiple types with appropriate byte sizes
-    generate_write_volatile_harness!(i8, 1, non_null_check_write_volatile_i8);
-    generate_write_volatile_harness!(i16, 2, non_null_check_write_volatile_i16);
-    generate_write_volatile_harness!(i32, 4, non_null_check_write_volatile_i32);
-    generate_write_volatile_harness!(i64, 8, non_null_check_write_volatile_i64);
-    generate_write_volatile_harness!(i128, 16, non_null_check_write_volatile_i128);
-    generate_write_volatile_harness!(
-        isize,
-        { core::mem::size_of::<isize>() },
-        non_null_check_write_volatile_isize
-    );
-    generate_write_volatile_harness!(u8, 1, non_null_check_write_volatile_u8);
-    generate_write_volatile_harness!(u16, 2, non_null_check_write_volatile_u16);
-    generate_write_volatile_harness!(u32, 4, non_null_check_write_volatile_u32);
-    generate_write_volatile_harness!(u64, 8, non_null_check_write_volatile_u64);
-    generate_write_volatile_harness!(u128, 16, non_null_check_write_volatile_u128);
-    generate_write_volatile_harness!(
-        usize,
-        { core::mem::size_of::<usize>() },
-        non_null_check_write_volatile_usize
-    );
-    generate_write_volatile_harness!((), 1, non_null_check_write_volatile_unit);
+    generate_write_volatile_harness!(i8, non_null_check_write_volatile_i8);
+    generate_write_volatile_harness!(i16, non_null_check_write_volatile_i16);
+    generate_write_volatile_harness!(i32, non_null_check_write_volatile_i32);
+    generate_write_volatile_harness!(i64, non_null_check_write_volatile_i64);
+    generate_write_volatile_harness!(i128, non_null_check_write_volatile_i128);
+    generate_write_volatile_harness!(isize, non_null_check_write_volatile_isize);
+    generate_write_volatile_harness!(u8, non_null_check_write_volatile_u8);
+    generate_write_volatile_harness!(u16, non_null_check_write_volatile_u16);
+    generate_write_volatile_harness!(u32, non_null_check_write_volatile_u32);
+    generate_write_volatile_harness!(u64, non_null_check_write_volatile_u64);
+    generate_write_volatile_harness!(u128, non_null_check_write_volatile_u128);
+    generate_write_volatile_harness!(usize, non_null_check_write_volatile_usize);
+
+    macro_rules! generate_write_bytes_harness {
+        ($type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonNull::write_bytes)]
+            pub fn $harness_name() {
+                // Create a pointer generator for the given type with appropriate byte size
+                const ARR_SIZE: usize = mem::size_of::<$type>() * 10;
+                let mut generator = kani::PointerGenerator::<ARR_SIZE>::new();
+
+                // Get a raw pointer from the generator
+                let raw_ptr: *mut $type = generator.any_in_bounds().ptr;
+
+                // Create a non-null pointer from the raw pointer
+                let ptr = NonNull::new(raw_ptr).unwrap();
+
+                // Create a non-deterministic value to write
+                let val: u8 = kani::any();
+
+                // Create a non-deterministic count
+                let count: usize = kani::any();
+
+                unsafe {
+                    // Perform the volatile write operation
+                    ptr.write_bytes(val, count);
+
+                    // Create a non-deterministic count
+                    let i: usize = kani::any_where(|&x| x < count * mem::size_of::<$type>());
+                    let ptr_byte = ptr.as_ptr() as *const u8;
+
+                    // Read back the value and assert it's correct
+                    assert_eq!(*ptr_byte.add(i), val);
+                }
+            }
+        };
+    }
+
+    #[kani::proof_for_contract(NonNull::write_bytes)]
+    pub fn non_null_check_write_bytes_unit() {
+        // Create a pointer generator for the given type with appropriate byte size
+        let mut generator = kani::PointerGenerator::<1>::new();
+
+        // Get a raw pointer from the generator
+        let raw_ptr: *mut () = generator.any_in_bounds().ptr;
+
+        // Create a non-null pointer from the raw pointer
+        let ptr = NonNull::new(raw_ptr).unwrap();
+
+        // Create a non-deterministic value to write
+        let val: u8 = kani::any();
+
+        // Create a non-deterministic count
+        let count: usize = kani::any();
+
+        unsafe {
+            // Perform the volatile write operation
+            ptr.write_bytes(val, count);
+        }
+    }
+
+    // Generate proof harnesses for multiple types with appropriate byte sizes
+    generate_write_bytes_harness!(i8, non_null_check_write_bytes_i8);
+    generate_write_bytes_harness!(i16, non_null_check_write_bytes_i16);
+    generate_write_bytes_harness!(i32, non_null_check_write_bytes_i32);
+    generate_write_bytes_harness!(i64, non_null_check_write_bytes_i64);
+    generate_write_bytes_harness!(i128, non_null_check_write_bytes_i128);
+    generate_write_bytes_harness!(isize, non_null_check_write_bytes_isize);
+    generate_write_bytes_harness!(u8, non_null_check_write_bytes_u8);
+    generate_write_bytes_harness!(u16, non_null_check_write_bytes_u16);
+    generate_write_bytes_harness!(u32, non_null_check_write_bytes_u32);
+    generate_write_bytes_harness!(u64, non_null_check_write_bytes_u64);
+    generate_write_bytes_harness!(u128, non_null_check_write_bytes_u128);
+    generate_write_bytes_harness!(usize, non_null_check_write_bytes_usize);
 
     #[kani::proof_for_contract(NonNull::byte_add)]
     pub fn non_null_byte_add_proof() {

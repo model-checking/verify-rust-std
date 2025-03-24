@@ -174,7 +174,9 @@
 //!
 //! - after-main use of thread-locals, which also affects additional features:
 //!   - [`thread::current()`]
-//! - before-main stdio file descriptors are not guaranteed to be open on unix platforms
+//! - under UNIX, before main, file descriptors 0, 1, and 2 may be unchanged
+//!   (they are guaranteed to be open during main,
+//!    and are opened to /dev/null O_RDWR if they weren't open on program start)
 //!
 //!
 //! [I/O]: io
@@ -273,6 +275,8 @@
 //
 // Language features:
 // tidy-alphabetical-start
+
+// stabilization was reverted after it hit beta
 #![feature(alloc_error_handler)]
 #![feature(allocator_internals)]
 #![feature(allow_internal_unsafe)]
@@ -282,6 +286,7 @@
 #![feature(cfg_sanitizer_cfi)]
 #![feature(cfg_target_thread_local)]
 #![feature(cfi_encoding)]
+#![feature(char_max_len)]
 #![feature(concat_idents)]
 #![feature(decl_macro)]
 #![feature(deprecated_suggestion)]
@@ -290,6 +295,7 @@
 #![feature(doc_masked)]
 #![feature(doc_notable_trait)]
 #![feature(dropck_eyepatch)]
+#![feature(extended_varargs_abi_support)]
 #![feature(f128)]
 #![feature(f16)]
 #![feature(formatting_options)]
@@ -300,6 +306,7 @@
 #![feature(link_cfg)]
 #![feature(linkage)]
 #![feature(macro_metavar_expr_concat)]
+#![feature(maybe_uninit_fill)]
 #![feature(min_specialization)]
 #![feature(must_not_suspend)]
 #![feature(needs_panic_runtime)]
@@ -402,7 +409,6 @@
 #![feature(custom_test_frameworks)]
 #![feature(edition_panic)]
 #![feature(format_args_nl)]
-#![feature(get_many_mut)]
 #![feature(log_syntax)]
 #![feature(test)]
 #![feature(trace_macros)]
@@ -663,6 +669,8 @@ pub mod arch {
     pub use std_detect::is_loongarch_feature_detected;
     #[unstable(feature = "is_riscv_feature_detected", issue = "111192")]
     pub use std_detect::is_riscv_feature_detected;
+    #[unstable(feature = "stdarch_s390x_feature_detection", issue = "135413")]
+    pub use std_detect::is_s390x_feature_detected;
     #[stable(feature = "simd_x86", since = "1.27.0")]
     pub use std_detect::is_x86_feature_detected;
     #[unstable(feature = "stdarch_mips_feature_detection", issue = "111188")]
