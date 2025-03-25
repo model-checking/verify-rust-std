@@ -29,3 +29,5 @@
   - [13: Safety of `CStr`](./challenges/0013-cstr.md)
   - [14: Safety of Primitive Conversions](./challenges/0014-convert-num.md)
   - [15: Contracts and Tests for SIMD Intrinsics](./challenges/0015-intrinsics-simd.md)
+  - [23: Verify the safety of Vec functions part 1](./challenges/0023-vec-pt1.md)
+  - [24: Verify the safety of Vec functions part 2](./challenges/0024-vec-pt2.md)
