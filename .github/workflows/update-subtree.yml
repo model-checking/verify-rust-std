@@ -137,11 +137,14 @@ jobs:
       uses: peter-evans/create-pull-request@v7
       with:
         title: 'Update subtree/library to ${{ env.NEXT_TOOLCHAIN_DATE }}'
-        body: |
+        body: >
           This is an automated PR to update the subtree/library branch to the changes
-          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
-          to ${{ env.NEXT_TOOLCHAIN_DATE }} (${{ env.NEXT_COMMIT_HASH }}), inclusive.
-          **Do not merge this PR using the merge queue. Instead, use the rebase strategy.**
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.NEXT_COMMIT_HASH }}), inclusive.
+
+          **Review this PR as usual, but do not merge this PR using the GitHub web interface.
+          Instead, once it is approved, use `git push` to literally push the changes to `subtree/library`
+          without any rebase or merge.**
         branch: update-subtree/library
         delete-branch: true
         base: subtree/library
@@ -151,20 +154,36 @@ jobs:
       if: ${{ env.MERGE_CONFLICTS != 'noop' && env.MERGE_PR_EXISTS == 'no' }}
       run: |
         cd verify-rust-std
-        if ! git rev-parse --verify subtree/library; then
+        # create-pull-request resets branches locally, implying that
+        # `subtree/library` no longer is what the above instructions created.
+        if [ "${SUBTREE_PR_EXISTS}" = "yes" ]; then
           git checkout -t -b subtree/library origin/update-subtree/library
+        else
+          git checkout subtree/library
+          git reset --hard origin/update-subtree/library
         fi
         git checkout main
+
+        # Tell git about the correct merge base to use, which is the subtree
+        # head that we last merged from.
+        PREV_SUBTREE_HEAD=$(git log --grep="^git-subtree-split:" | egrep '^[[:space:]]+git-subtree-split:' | awk '{print $2;exit}')
+        echo "Previous subtree head: ${PREV_SUBTREE_HEAD}"
+        git replace --graft subtree/library ${PREV_SUBTREE_HEAD}
+        git replace --graft main ${PREV_SUBTREE_HEAD}
 
         # This command may fail, which will require human intervention.
         if ! git \
             -c user.name=gitbot -c user.email=git@bot \
-            subtree merge --prefix=library subtree/library --squash; then
+            merge -Xsubtree=library subtree/library; then
           echo "MERGE_CONFLICTS=yes" >> $GITHUB_ENV
           git -c user.name=gitbot -c user.email=git@bot commit -a -m "Merge from $NEXT_COMMIT_HASH with conflicts"
         else
           echo "MERGE_CONFLICTS=no" >> $GITHUB_ENV
         fi
+        git replace -d subtree/library
+        git replace -d main~1
+        NEW_SUBTREE_HEAD=$(git rev-parse subtree/library)
+        echo "NEW_SUBTREE_HEAD=${NEW_SUBTREE_HEAD}" >> $GITHUB_ENV
 
         sed -i "s/^channel = \"nightly-.*\"/channel = \"nightly-${NEXT_TOOLCHAIN_DATE}\"/" rust-toolchain.toml
         git -c user.name=gitbot -c user.email=git@bot \
@@ -173,16 +192,22 @@ jobs:
         sed -i "s/commit = .*/commit = \"${KANI_COMMIT_HASH}\"/" tool_config/kani-version.toml
         git -c user.name=gitbot -c user.email=git@bot \
           commit -m "Update Kani version to ${KANI_COMMIT_HASH}" tool_config/kani-version.toml
+
     - name: Create Pull Request without conflicts
       if: ${{ env.MERGE_CONFLICTS == 'no' && env.MERGE_PR_EXISTS == 'no' }}
       uses: peter-evans/create-pull-request@v7
       with:
         title: 'Merge subtree update for toolchain nightly-${{ env.NEXT_TOOLCHAIN_DATE }}'
-        body: |
+        body: >
           This is an automated PR to merge library subtree updates
-          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
-          to ${{ env.NEXT_TOOLCHAIN_DATE }} (${{ env.NEXT_COMMIT_HASH }}), inclusive.
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.NEXT_COMMIT_HASH }}), inclusive.
           This is a clean merge, no conflicts were detected.
+          **Do not remove or edit the following annotations:**
+
+          git-subtree-dir: library
+
+          git-subtree-split: ${{ env.NEW_SUBTREE_HEAD }}
         branch: sync-${{ env.NEXT_TOOLCHAIN_DATE }}
         delete-branch: true
         base: main
@@ -193,12 +218,17 @@ jobs:
       uses: peter-evans/create-pull-request@v7
       with:
         title: 'Merge subtree update for toolchain nightly-${{ env.NEXT_TOOLCHAIN_DATE }}'
-        body: |
+        body: >
           This is an automated PR to merge library subtree updates
-          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (${{ env.CURRENT_COMMIT_HASH }})
-          to ${{ env.NEXT_TOOLCHAIN_DATE }} (${{ env.NEXT_COMMIT_HASH }}) (inclusive)
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.NEXT_COMMIT_HASH }}) (inclusive)
           into main. `git merge` resulted in conflicts, which require manual resolution.
           Files were commited with merge conflict markers.
+          **Do not remove or edit the following annotations:**
+
+          git-subtree-dir: library
+
+          git-subtree-split: ${{ env.NEW_SUBTREE_HEAD }}
         branch: sync-${{ env.NEXT_TOOLCHAIN_DATE }}
         delete-branch: true
         base: main
