@@ -42,4 +42,4 @@ jobs:
         run: |
           export PATH=~/verifast-25.02/bin:$PATH
           cd verifast-proofs
-          mysh check-verifast-proofs-negative.mysh
+          bash check-verifast-proofs-negative.sh
