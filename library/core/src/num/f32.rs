@@ -20,7 +20,7 @@ use crate::num::FpCategory;
 use crate::panic::const_assert;
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;
-use crate::{intrinsics, mem};
+use crate::{cfg_match, intrinsics, mem};
 
 /// The radix or base of the internal representation of `f32`.
 /// Use [`f32::RADIX`] instead.
@@ -1002,21 +1002,22 @@ impl f32 {
     #[stable(feature = "num_midpoint", since = "1.85.0")]
     #[rustc_const_stable(feature = "num_midpoint", since = "1.85.0")]
     pub const fn midpoint(self, other: f32) -> f32 {
-        cfg_if! {
+        cfg_match! {
             // Allow faster implementation that have known good 64-bit float
             // implementations. Falling back to the branchy code on targets that don't
             // have 64-bit hardware floats or buggy implementations.
             // https://github.com/rust-lang/rust/pull/121062#issuecomment-2123408114
-            if #[cfg(any(
-                    target_arch = "x86_64",
-                    target_arch = "aarch64",
-                    all(any(target_arch = "riscv32", target_arch = "riscv64"), target_feature = "d"),
-                    all(target_arch = "arm", target_feature = "vfp2"),
-                    target_arch = "wasm32",
-                    target_arch = "wasm64",
-                ))] {
+            any(
+                target_arch = "x86_64",
+                target_arch = "aarch64",
+                all(any(target_arch = "riscv32", target_arch = "riscv64"), target_feature = "d"),
+                all(target_arch = "arm", target_feature = "vfp2"),
+                target_arch = "wasm32",
+                target_arch = "wasm64",
+            ) => {
                 ((self as f64 + other as f64) / 2.0) as f32
-            } else {
+            }
+            _ => {
                 const LO: f32 = f32::MIN_POSITIVE * 2.;
                 const HI: f32 = f32::MAX / 2.;
 
