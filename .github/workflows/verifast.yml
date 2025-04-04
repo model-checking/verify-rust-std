@@ -39,4 +39,29 @@ jobs:
         run: |
           export PATH=~/verifast-25.02/bin:$PATH
           cd verifast-proofs
-          mysh check-verifast-proofs.mysh
+          bash check-verifast-proofs.sh
+
+  notify-btj:
+    name: Notify @btj
+    runs-on: ubuntu-latest
+    needs: check-verifast-on-std
+    if: failure()
+    permissions:
+      id-token: write
+    
+    steps:
+      - name: Get GitHub OIDC token
+        id: get_token
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const audience = 'notify-bart-jacobs';
+            return await core.getIDToken(audience);
+          result-encoding: string
+
+      - name: Call notification endpoint
+        run: |
+          curl -X POST "https://verify-rust-std-verifast-monitor.bart-jacobs.workers.dev/" \
+            -H "Authorization: Bearer ${{ steps.get_token.outputs.result }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
