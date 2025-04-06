@@ -99,31 +99,50 @@ for full license details.
 
 ## Steps to Use the Tool
 
-**TODO Edit this to avoid mentioning `kup` and describe the high-level workflow only**
+**TODO Is there a better way to do this with docker?**
 
-At RV, we generally strives to use
-[kup](https://github.com/runtimeverification/kup) , a `nix`-based software
-installer, to distribute our software.  This is future work, at the moment
-`kmir` requires a local build from source using the `K Framework` (installed
-with `kup`).
+Currently, `kmir` requires a local build from source using the `K Framework` (installed with 
+`kup`). The steps to install `kup` and `k` are taken from the 
+[kup documentation](https://github.com/runtimeverification/kup/README.md) 
 
-The future workflow we imagine is to
-1. Download [kup](https://github.com/runtimeverification/kup) and install
-2. Install KMIR `kup install kmir`
-3. Compile the desired verification target with `kmir build module.rs`.
-   The `module.rs` should contain functions that act as property tests and are
-   run with symbolic inputs.
-4. Verify the target with `kmir prove module.rs --target target_function`.
-   This executes `target_function` with symbolic arguments. The test is expected
-   to contain assertions about computed values.
-5. Inspect KCFG of proof with `kmir view module::target_function`
+1. To install `kup`:
+```
+bash <(curl https://kframework.org/install)
+```
 
-At the time of writing, step 3 requires manual work to set up a _claim_ in the K
-language. We will automate this process in the frontend code to prevent the
-user from having to write K code.
+2. To install `k`:
+```
+kup install k
+```
+
+Then after cloning the [kmir repository](https://github.com/runtimeverification/mir-semantics/) 
+the instructions from the kmir documentation can be followed to build and run `kmir`:
+
+3. To build `kmir`:
+```
+make build
+```
+
+4. To run a `kmir` command (e.g. `kmir prove run`, `kmir prove view`):
+```
+poetry run -C kmir/ kmir <COMMAND>
+```
 
 Small examples of proofs using KMIR, and how to derive them from a
 Rust program manually, are [provided in the `kmir-proofs` directory]().
+To follow some of the steps listed the submodule dependency 
+[Stable MIR JSON](https://github.com/runtimeverification/stable-mir-json/) will need to 
+be installed with the following commands:
+
+5. Update the submodule
+```
+git submodule update --init --recursive
+```
+
+6. Build `stable-mir-json`:
+```
+make stable-mir-json
+```
 
 ## Background Reading
 
