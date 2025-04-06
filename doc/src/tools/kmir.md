@@ -21,9 +21,14 @@ This diagram describes the extraction and verification workflow for KMIR:
 ![kmir_env_diagram_march_2025](https://github.com/user-attachments/assets/bf426c8d-f241-4ad6-8cb2-86ca06d8d15b)
 
 
-Particular to this challenge, KMIR verifies program correctness using the
+To understand how KMIR works the K Framework must first be understood, and the best description 
+can be found at [kframework.org](https://kframework.org/):
+> K is a rewrite-based executable semantic framework in which programming languages, type systems and formal analysis tools can be defined using configurations and rules. Configurations organize the state in units called cells, which are labeled and can be nested. K rewrite rules make it explicit which parts of the term are read-only, write-only, read-write, or unused. This makes K suitable for defining truly concurrent languages even in the presence of sharing. Computations are represented as syntactic extensions of the original language abstract syntax, using a nested list structure which sequentializes computational tasks, such as program fragments. Computations are like any other terms in a rewriting environment: they can be matched, moved from one place to another, modified, or deleted. This makes K suitable for defining control-intensive features such as abrupt termination, exceptions, or call/cc.
+
+K (and thus KMIR) verifies program correctness using the
 correct-by-construction symbolic execution engine and verifier derived from the
-K encoding of the Stable MIR semantics. The K semantics framework is based on
+K encoding of the languages operational semantics, in this case the Stable MIR semantics. 
+The K semantics framework is based on
 reachability logic, which is a theory describing transition systems in [matching
 logic](http://www.matching-logic.org/). Transition rules of the semantics are
 rewriting steps that match patterns and transform the current continuation and
