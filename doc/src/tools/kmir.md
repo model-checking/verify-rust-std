@@ -14,9 +14,7 @@ step toward full formal verification of Rust programs. Through the dependency
 [Stable MIR JSON](https://github.com/runtimeverification/stable-mir-json/), KMIR
 allows developers to extract serialized Stable MIR from Rust’s compilation
 process, execute it, and eventually prove critical properties of their
-code. Soon, KMIR will be available via our package manager,
-[kup](https://github.com/runtimeverification/kup), which will make it easily
-installable and integrable into various workflows.
+code.
 
 This diagram describes the extraction and verification workflow for KMIR:
 
