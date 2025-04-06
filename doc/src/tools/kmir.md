@@ -129,7 +129,7 @@ poetry run -C kmir/ kmir <COMMAND>
 ```
 
 Small examples of proofs using KMIR, and how to derive them from a
-Rust program manually, are [provided in the `kmir-proofs` directory]().
+Rust program manually, are [provided in the `kmir-proofs` directory](https://github.com/runtimeverification/mir-semantics/tree/sample-challenge-11-proofs/rust-verification-proofs).
 To follow some of the steps listed the submodule dependency 
 [Stable MIR JSON](https://github.com/runtimeverification/stable-mir-json/) will need to 
 be installed with the following commands:
