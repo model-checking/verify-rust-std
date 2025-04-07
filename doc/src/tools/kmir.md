@@ -83,6 +83,13 @@ example of a KMIR proof being analyzed using the KCFG viewer can be seen below:
   *Yes – The Runtime Verification team is committed to supporting KMIR and will
   provide ongoing maintenance and community support.*
 
+## Licenses
+KMIR is released under an OSI-approved open source license. It is distributed
+under the BSD-3 clause license, which is compatible with the Rust standard
+library licenses. Please refer to the [KMIR GitHub
+repository](https://github.com/runtimeverification/mir-semantics?tab=BSD-3-Clause-1-ov-file)
+for full license details.
+
 ## Comparison to Other Approved Tools
 The other tools approved at the time of writing are Kani, Verifast, and
 Goto-transcoder (ESBMC).
@@ -106,59 +113,49 @@ Goto-transcoder (ESBMC).
   means that performance and user experience are projected to improve due to the
   continued development of other semantics.
 
-## Licenses
-KMIR is released under an OSI-approved open source license. It is distributed
-under the BSD-3 clause license, which is compatible with the Rust standard
-library licenses. Please refer to the [KMIR GitHub
-repository](https://github.com/runtimeverification/mir-semantics?tab=BSD-3-Clause-1-ov-file)
-for full license details.
-
 ## Steps to Use the Tool
 
-**TODO Is there a better way to do this with docker?**
+The [KMIR docker
+image](https://github.com/runtimeverification/mir-semantics/blob/c221c81d73a56c48692a087a2ced29917de99246/Dockerfile.kmir)
+is currently the best option for casual users of KMIR. It contains an
+installation of K Framework, the tool `kmir`, and the `stable-mir-json`
+extraction tool, which is a custom version of `rustc` which extracts Stable MIR
+as JSON or as graphviz' *.dot when compiling a crate.
+The image is [available on Docker Hub](https://hub.docker.com/r/runtimeverificationinc/kmir/tags).
 
-Currently, `kmir` requires a local build from source using the `K Framework` (installed with
-`kup`). The steps to install `kup` and `k` are taken from the
-[kup documentation](https://github.com/runtimeverification/kup/README.md)
+Alternatively, the tools for `kmir` can be built from source as [described in
+the `mir-semantics` repository's
+`README.md`](https://github.com/runtimeverification/mir-semantics). This
+requires an installation of `K Framework`, best done [using the `kup`
+tool](https://github.com/runtimeverification/kup/README.md), and includes a
+git submodule dependency on `stable-mir-json`.
 
-1. To install `kup`:
-```
-bash <(curl https://kframework.org/install)
-```
+The `stable-mir-json` tool is a custom version of `rustc` which, while compiling
+Rust code, writes the code's Stable MIR, represented in a JSON format, to a
+file.  Just like `rustc` itself, `stable-mir-json` extracts MIR of a single
+crate and must be invoked via `cargo` for multi-crate programs. Besides the JSON
+extraction, `stable-mir-json` can also write a graphviz `dot` file representing
+the Stable MIR structure of all functions and their call graph within the crate.
 
-2. To install `k`:
-```
-kup install k
-```
+The `kmir` tool provides commands to work with the Stable MIR representation of
+Rust programs that `stable-mir-json` extracts.
 
-Then after cloning the [kmir repository](https://github.com/runtimeverification/mir-semantics/)
-the instructions from the kmir documentation can be followed to build and run `kmir`:
+* Run Stable MIR code extracted from Rust programs (`kmir run my-program.smir.json`);
+* Prove a property about a Rust program, which is given as a K "claim" and
+  proven using an all-path reachability proof in K (`kmir prove run my-program-spec.k`);
+* Inspect the control flow graph of a program's proof constructed by the `kmir
+  prove run` command (`kmir prove view Module.Proof-Identifier`).
 
-3. To build `kmir`:
-```
-make build
-```
+Examples of proofs using KMIR, and how to derive them from a Rust program
+manually, are [provided in the `kmir-proofs`
+directory](https://github.com/model-checking/verify-rust-std/tree/main/kmir-proofs).
 
-4. To run a `kmir` command (e.g. `kmir prove run`, `kmir prove view`):
-```
-poetry run -C kmir/ kmir <COMMAND>
-```
+The `kmir` tool is under active development at the time of writing.
+Constructing a K claim from a given Rust program is currently a manual process
+but will be automated in a future version. Likewise, at the time of writing, the
+`kmir` tool does not automatically extract Stable MIR from a Rust program, the
+Stable MIR must be extracted by invoking `stable-mir-json` manually.
 
-Small examples of proofs using KMIR, and how to derive them from a
-Rust program manually, are [provided in the `kmir-proofs` directory](https://github.com/runtimeverification/mir-semantics/tree/sample-challenge-11-proofs/rust-verification-proofs).
-To follow some of the steps listed the submodule dependency
-[Stable MIR JSON](https://github.com/runtimeverification/stable-mir-json/) will need to
-be installed with the following commands:
-
-5. Update the submodule
-```
-git submodule update --init --recursive
-```
-
-6. Build `stable-mir-json`:
-```
-make stable-mir-json
-```
 
 ## Background Reading
 
@@ -172,40 +169,3 @@ make stable-mir-json
   defining programming languages, type systems, and formal analysis tools. It
   automatically generates language analysis tools directly from their formal
   semantics.
-
-## Versioning
-KMIR and Stable MIR JSON are both version controlled using git and hosted by
-Github. Semantic version numbers are used as soon as releases are made.
-Stable MIR JSON depends on a nightly Rust compiler of a particular version
-(which is regularly updated, currently `nightly-2024-11-29`).
-Dependencies for K and MIR JSON are tracked as pinned versions in the 'deps'
-folder and updated as changes are published upstream and tested against
-mir-semantics.
-
-## CI
-At Runtime Verification, we are regularly releasing and updating our tools using
-GitHub Actions and publishing our updated tool releases to standardized
-locations such as [Dockerhub](https://hub.docker.com/u/runtimeverificationinc) /
-ghcr.io / [cachix](https://app.cachix.org/cache/k-framework-binary). Any changes
-upstream to [K](https://github.com/runtimeverification/k) or
-[stable-mir-json](https://github.com/runtimeverification/stable-mir-json/) are
-immediately propagated to mir-semantics via workflow triggers to ensure the
-latest release of the tool is getting the latest improvements from K.
-
-For integrating KMIR into your project's CI pipeline, we recommend using our
-pre-built packages. You can choose from several installation methods depending
-on your needs:
-
-Our current Registries / Caches are:
-
-1. [Binary Cachix cache used by Kup](https://app.cachix.org/cache/k-framework-binary)
-2. Source code on GitHub: [mir-semantics]](https://github.com/runtimeverification/mir-semantics) and [stable-mir-json](https://github.com/runtimeverification/stable-mir-json)
-3. [Container image on Dockerhub](https://hub.docker.com/u/runtimeverificationinc)
-
-The [KMIR docker
-image](https://github.com/runtimeverification/mir-semantics/blob/c221c81d73a56c48692a087a2ced29917de99246/Dockerfile.kmir)
-is the best option for both casual users of KMIR and CI. It contains
-an installation of K Framework, the tool `kmir`, and the
-`stable-mir-json` extraction tool, which is a custom version of
-`rustc` which extracts Stable MIR as JSON or as graphviz' *.dot when
-compiling a crate.
