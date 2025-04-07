@@ -21,39 +21,46 @@ This diagram describes the extraction and verification workflow for KMIR:
 ![kmir_env_diagram_march_2025](https://github.com/user-attachments/assets/bf426c8d-f241-4ad6-8cb2-86ca06d8d15b)
 
 
-To understand how KMIR works the K Framework must first be understood, and the
-best description can be found at [kframework.org](https://kframework.org/):
+The K Framework ([kframework.org](https://kframework.org/) is the basis of how
+KMIR operates to guarantee properties of Rust programs. K is a rewrite-based
+semantic framework based on [matching logic](http://www.matching-logic.org/) in
+which programming languages, their operational semantics and type systems, and
+formal analysis tools can be defined through syntax, configurations, and rules.
+The _syntax_ definitions in KMIR model the AST of Stable MIR (e.g., the
+statements and terminator of a basic block in a function body) and configuration
+data that exists at runtime (e.g., the stack frame structure of a function
+call).
+The _configuration_ of a KMIR program organizes the state of an executed program in
+nested configuration units called cells (e.g., a stack frame is part of a stack
+stored in the configuration).
+_K Framework transition rules_ of the KMIR semantics are rewriting steps that
+match patterns and transform the current continuation and state accordingly.
+They describe how program configuration and its contained data changes when
+particular program statements or terminators are executed (e.g., a returning
+function modifies the call stack and writes a return value into the caller's
+local variables).
 
-> K is a rewrite-based executable semantic framework in which programming
-> languages, type systems and formal analysis tools can be defined using
-> configurations and rules. Configurations organize the state in units called
-> cells, which are labeled and can be nested. K rewrite rules make it explicit
-> which parts of the term are read-only, write-only, read-write, or unused. This
-> makes K suitable for defining truly concurrent languages even in the presence
-> of sharing. Computations are represented as syntactic extensions of the
-> original language abstract syntax, using a nested list structure which
-> sequentializes computational tasks, such as program fragments. Computations
-> are like any other terms in a rewriting environment: they can be matched,
-> moved from one place to another, modified, or deleted. This makes K suitable
-> for defining control-intensive features such as abrupt termination,
-> exceptions, or call/cc.
+Using the K semantics of Stable MIR, the KMIR execution of an entire Rust
+program represented as Stable MIR breaks down to a series of configuration
+rewrites that compute data held in local variables, and the program may either
+terminate normally or reach an exception or construct with undefined behaviour,
+which terminates the execution abnormally. Programs modelled in K Framework can
+be executed _symbolically_, i.e., operating on abstract input which is not fully
+specified but characterised by _path conditions_ (e.g., that an integer variable
+holds an unknown but non-negative value).
 
-K (and thus KMIR) verifies program correctness using the
-symbolic execution engine and verifier derived from the
-K encoding of the languages operational semantics, in this case the Stable MIR semantics.
-The K semantics framework is based on
-reachability logic, which is a theory describing transition systems in [matching
-logic](http://www.matching-logic.org/). Transition rules of the semantics are
-rewriting steps that match patterns and transform the current continuation and
-state accordingly. An all-path-reachability proof in this system verifies that a
-particular _target_ end state is _always_ reachable from a given starting
-state. The rewrite rules branch on symbolic inputs covering the possible
-transitions, creating a model that is provably complete, and requiring
-unification on every leaf state. A one-path-reachability proof is similar to the
-above, but the proof requirement is that at least one leaf state unifies with
-the target state. One feature of such a system is that the requirement for an
-SMT is minimized to determining completeness on path conditions when branching
-would occur.
+K (and thus KMIR) verifies program correctness by performing an
+_all-path-reachability proof_ using the symbolic execution engine and verifier
+derived from the K encoding of the Stable MIR operational semantics.
+The K semantics framework is based on reachability logic, which is a theory
+describing transition systems in [matching logic](http://www.matching-logic.org/).
+An all-path-reachability proof in this system verifies that a particular
+_target_ end state is _always_ reached from a given starting state.
+The rewrite rules branch on symbolic inputs covering the possible transitions,
+creating a model that is provably complete. For all-path reachability, every
+leaf state is required to unify with the target state.
+A one-path-reachability proof is similar to the above, but the proof requirement
+is that _at least one_ leaf state unifies with the target state.
 
 KMIR also prioritizes UI with interactive proof exploration available
 out-of-the-box through the terminal KCFG (K Control Flow Graph) viewer, allowing
