@@ -21,13 +21,26 @@ This diagram describes the extraction and verification workflow for KMIR:
 ![kmir_env_diagram_march_2025](https://github.com/user-attachments/assets/bf426c8d-f241-4ad6-8cb2-86ca06d8d15b)
 
 
-To understand how KMIR works the K Framework must first be understood, and the best description 
-can be found at [kframework.org](https://kframework.org/):
-> K is a rewrite-based executable semantic framework in which programming languages, type systems and formal analysis tools can be defined using configurations and rules. Configurations organize the state in units called cells, which are labeled and can be nested. K rewrite rules make it explicit which parts of the term are read-only, write-only, read-write, or unused. This makes K suitable for defining truly concurrent languages even in the presence of sharing. Computations are represented as syntactic extensions of the original language abstract syntax, using a nested list structure which sequentializes computational tasks, such as program fragments. Computations are like any other terms in a rewriting environment: they can be matched, moved from one place to another, modified, or deleted. This makes K suitable for defining control-intensive features such as abrupt termination, exceptions, or call/cc.
+To understand how KMIR works the K Framework must first be understood, and the
+best description can be found at [kframework.org](https://kframework.org/):
+
+> K is a rewrite-based executable semantic framework in which programming
+> languages, type systems and formal analysis tools can be defined using
+> configurations and rules. Configurations organize the state in units called
+> cells, which are labeled and can be nested. K rewrite rules make it explicit
+> which parts of the term are read-only, write-only, read-write, or unused. This
+> makes K suitable for defining truly concurrent languages even in the presence
+> of sharing. Computations are represented as syntactic extensions of the
+> original language abstract syntax, using a nested list structure which
+> sequentializes computational tasks, such as program fragments. Computations
+> are like any other terms in a rewriting environment: they can be matched,
+> moved from one place to another, modified, or deleted. This makes K suitable
+> for defining control-intensive features such as abrupt termination,
+> exceptions, or call/cc.
 
 K (and thus KMIR) verifies program correctness using the
-correct-by-construction symbolic execution engine and verifier derived from the
-K encoding of the languages operational semantics, in this case the Stable MIR semantics. 
+symbolic execution engine and verifier derived from the
+K encoding of the languages operational semantics, in this case the Stable MIR semantics.
 The K semantics framework is based on
 reachability logic, which is a theory describing transition systems in [matching
 logic](http://www.matching-logic.org/). Transition rules of the semantics are
@@ -104,9 +117,9 @@ for full license details.
 
 **TODO Is there a better way to do this with docker?**
 
-Currently, `kmir` requires a local build from source using the `K Framework` (installed with 
-`kup`). The steps to install `kup` and `k` are taken from the 
-[kup documentation](https://github.com/runtimeverification/kup/README.md) 
+Currently, `kmir` requires a local build from source using the `K Framework` (installed with
+`kup`). The steps to install `kup` and `k` are taken from the
+[kup documentation](https://github.com/runtimeverification/kup/README.md)
 
 1. To install `kup`:
 ```
@@ -118,7 +131,7 @@ bash <(curl https://kframework.org/install)
 kup install k
 ```
 
-Then after cloning the [kmir repository](https://github.com/runtimeverification/mir-semantics/) 
+Then after cloning the [kmir repository](https://github.com/runtimeverification/mir-semantics/)
 the instructions from the kmir documentation can be followed to build and run `kmir`:
 
 3. To build `kmir`:
@@ -133,8 +146,8 @@ poetry run -C kmir/ kmir <COMMAND>
 
 Small examples of proofs using KMIR, and how to derive them from a
 Rust program manually, are [provided in the `kmir-proofs` directory](https://github.com/runtimeverification/mir-semantics/tree/sample-challenge-11-proofs/rust-verification-proofs).
-To follow some of the steps listed the submodule dependency 
-[Stable MIR JSON](https://github.com/runtimeverification/stable-mir-json/) will need to 
+To follow some of the steps listed the submodule dependency
+[Stable MIR JSON](https://github.com/runtimeverification/stable-mir-json/) will need to
 be installed with the following commands:
 
 5. Update the submodule
