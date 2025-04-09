@@ -32,3 +32,6 @@
   - [16: Verify the safety of Iterator functions](./challenges/0016-iter.md)
   - [17: Verify the safety of slice functions](./challenges/0017-slice.md)
   - [18: Verify the safety of slice iter functions](./challenges/0018-slice-iter-pt1.md)
+  - [20: Verify the safety of char-related functions in str::pattern](./challenges/0020-str-pattern-pt1.md)
+  - [21: Verify the safety of substring-related functions in str::pattern](./challenges/0021-str-pattern-pt2.md)
+  - [22: Verify the safety of str iter functions](./challenges/0022-str-iter.md)
