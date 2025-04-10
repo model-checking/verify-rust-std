@@ -4327,6 +4327,12 @@ mod verify {
     transmute_unchecked_should_fail!(transmute_unchecked_i32_to_char, i32, char);
     transmute_unchecked_should_fail!(transmute_unchecked_u32_to_char, u32, char);
     transmute_unchecked_should_fail!(transmute_unchecked_f32_to_char, f32, char);
+    //transmute to type with potentially invalid bit patterns, but filtering out invalid inputs
+    transmute_unchecked_should_succeed!(transmute_unchecked_valid_i8_to_bool, i8, bool);
+    transmute_unchecked_should_succeed!(transmute_unchecked_valid_u8_to_bool, u8, bool);
+    transmute_unchecked_should_succeed!(transmute_unchecked_valid_i32_to_char, i32, char);
+    transmute_unchecked_should_succeed!(transmute_unchecked_valid_u32_to_char, u32, char);
+    transmute_unchecked_should_succeed!(transmute_unchecked_valid_f32_to_char, f32, char);
 
     //Note: the following harness fails when it in theory should not
     //The problem is that ub_checks::can_dereference(), used in a validity precondition
@@ -4374,9 +4380,10 @@ mod verify {
     //we then assert that the resulting value is equal to the initial value
     macro_rules! transmute_unchecked_two_ways {
         ($harness:ident, $src:ty, $dst:ty) => {
-            #[kani::proof_for_contract(transmute_unchecked_wrapper)]
+            #[kani::proof]
             fn $harness() {
                 let src: $src = kani::any();
+                kani::assume(ub_checks::can_dereference(&src as *const $src as *const $dst));
                 let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
                 let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
                 assert_eq!(src, src2);
@@ -4392,6 +4399,7 @@ mod verify {
             #[kani::proof]
             fn $harness() {
                 let src: $src = kani::any();
+                kani::assume(ub_checks::can_dereference(&src as *const $src as *const $dst));
                 let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
                 let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
                 if src.is_nan() {
