@@ -10,12 +10,12 @@ use libc::{c_int, pid_t};
 )))]
 use libc::{gid_t, uid_t};
 
+use super::common::*;
 use crate::io::{self, Error, ErrorKind};
 use crate::num::NonZero;
 use crate::sys::cvt;
 #[cfg(target_os = "linux")]
-use crate::sys::pal::unix::linux::pidfd::PidFd;
-use crate::sys::process::process_common::*;
+use crate::sys::pal::linux::pidfd::PidFd;
 use crate::{fmt, mem, sys};
 
 cfg_if::cfg_if! {
@@ -461,18 +461,20 @@ impl Command {
             if #[cfg(target_os = "linux")] {
                 use crate::sys::weak::weak;
 
-                weak! {
+                weak!(
                     fn pidfd_spawnp(
-                        *mut libc::c_int,
-                        *const libc::c_char,
-                        *const libc::posix_spawn_file_actions_t,
-                        *const libc::posix_spawnattr_t,
-                        *const *mut libc::c_char,
-                        *const *mut libc::c_char
-                    ) -> libc::c_int
-                }
+                        pidfd: *mut libc::c_int,
+                        path: *const libc::c_char,
+                        file_actions: *const libc::posix_spawn_file_actions_t,
+                        attrp: *const libc::posix_spawnattr_t,
+                        argv: *const *mut libc::c_char,
+                        envp: *const *mut libc::c_char,
+                    ) -> libc::c_int;
+                );
 
-                weak! { fn pidfd_getpid(libc::c_int) -> libc::c_int }
+                weak!(
+                    fn pidfd_getpid(pidfd: libc::c_int) -> libc::c_int;
+                );
 
                 static PIDFD_SUPPORTED: AtomicU8 = AtomicU8::new(0);
                 const UNKNOWN: u8 = 0;
@@ -593,19 +595,19 @@ impl Command {
             // https://pubs.opengroup.org/onlinepubs/9799919799/functions/posix_spawn_file_actions_addchdir.html.
             // The _np version is more widely available, though, so try that first.
 
-            weak! {
+            weak!(
                 fn posix_spawn_file_actions_addchdir_np(
-                    *mut libc::posix_spawn_file_actions_t,
-                    *const libc::c_char
-                ) -> libc::c_int
-            }
+                    file_actions: *mut libc::posix_spawn_file_actions_t,
+                    path: *const libc::c_char,
+                ) -> libc::c_int;
+            );
 
-            weak! {
+            weak!(
                 fn posix_spawn_file_actions_addchdir(
-                    *mut libc::posix_spawn_file_actions_t,
-                    *const libc::c_char
-                ) -> libc::c_int
-            }
+                    file_actions: *mut libc::posix_spawn_file_actions_t,
+                    path: *const libc::c_char,
+                ) -> libc::c_int;
+            );
 
             posix_spawn_file_actions_addchdir_np
                 .get()
@@ -1051,7 +1053,7 @@ impl ExitStatus {
         // true on all actual versions of Unix, is widely assumed, and is specified in SuS
         // https://pubs.opengroup.org/onlinepubs/9699919799/functions/wait.html. If it is not
         // true for a platform pretending to be Unix, the tests (our doctests, and also
-        // process_unix/tests.rs) will spot it. `ExitStatusError::code` assumes this too.
+        // unix/tests.rs) will spot it. `ExitStatusError::code` assumes this too.
         match NonZero::try_from(self.0) {
             /* was nonzero */ Ok(failure) => Err(ExitStatusError(failure)),
             /* was zero, couldn't convert */ Err(_) => Ok(()),
@@ -1232,10 +1234,9 @@ impl ExitStatusError {
 
 #[cfg(target_os = "linux")]
 mod linux_child_ext {
-
+    use crate::io::ErrorKind;
     use crate::os::linux::process as os;
-    use crate::sys::pal::unix::ErrorKind;
-    use crate::sys::pal::unix::linux::pidfd as imp;
+    use crate::sys::pal::linux::pidfd as imp;
     use crate::sys_common::FromInner;
     use crate::{io, mem};
 
@@ -1261,10 +1262,9 @@ mod linux_child_ext {
 }
 
 #[cfg(test)]
-#[path = "process_unix/tests.rs"]
 mod tests;
 
-// See [`process_unsupported_wait_status::compare_with_linux`];
+// See [`unsupported_wait_status::compare_with_linux`];
 #[cfg(all(test, target_os = "linux"))]
-#[path = "process_unsupported/wait_status.rs"]
-mod process_unsupported_wait_status;
+#[path = "unsupported/wait_status.rs"]
+mod unsupported_wait_status;

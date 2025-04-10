@@ -29,3 +29,6 @@
   - [13: Safety of `CStr`](./challenges/0013-cstr.md)
   - [14: Safety of Primitive Conversions](./challenges/0014-convert-num.md)
   - [15: Contracts and Tests for SIMD Intrinsics](./challenges/0015-intrinsics-simd.md)
+  - [16: Verify the safety of Iterator functions](./challenges/0016-iter.md)
+  - [17: Verify the safety of slice functions](./challenges/0017-slice.md)
+  - [18: Verify the safety of slice iter functions](./challenges/0018-slice-iter-pt1.md)
