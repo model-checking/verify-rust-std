@@ -4293,15 +4293,15 @@ mod verify {
     }
 
     //We test the wrapper's validity clause on all combinations of primitives
-    //transmute 2-ways between 1-byte primitives
+    //transmute between 1-byte primitives
     transmute_unchecked_should_succeed!(transmute_unchecked_i8_to_u8, i8, u8);
     transmute_unchecked_should_succeed!(transmute_unchecked_u8_to_i8, u8, i8);
     transmute_unchecked_should_succeed!(transmute_unchecked_bool_to_i8, bool, i8);
     transmute_unchecked_should_succeed!(transmute_unchecked_bool_to_u8, bool, u8);
-    //transmute 2-ways between 2-byte primitives
+    //transmute between 2-byte primitives
     transmute_unchecked_should_succeed!(transmute_unchecked_i16_to_u16, i16, u16);
     transmute_unchecked_should_succeed!(transmute_unchecked_u16_to_i16, u16, i16);
-    //transmute 2-ways between 4-byte primitives
+    //transmute between 4-byte primitives
     transmute_unchecked_should_succeed!(transmute_unchecked_i32_to_u32, i32, u32);
     transmute_unchecked_should_succeed!(transmute_unchecked_i32_to_f32, i32, f32);
     transmute_unchecked_should_succeed!(transmute_unchecked_u32_to_i32, u32, i32);
@@ -4311,14 +4311,14 @@ mod verify {
     transmute_unchecked_should_succeed!(transmute_unchecked_char_to_f32, char, f32);
     transmute_unchecked_should_succeed!(transmute_unchecked_f32_to_i32, f32, i32);
     transmute_unchecked_should_succeed!(transmute_unchecked_f32_to_u32, f32, u32);
-    //transmute 2-ways between 8-byte primitives
+    //transmute between 8-byte primitives
     transmute_unchecked_should_succeed!(transmute_unchecked_i64_to_u64, i64, u64);
     transmute_unchecked_should_succeed!(transmute_unchecked_i64_to_f64, i64, f64);
     transmute_unchecked_should_succeed!(transmute_unchecked_u64_to_i64, u64, i64);
     transmute_unchecked_should_succeed!(transmute_unchecked_u64_to_f64, u64, f64);
     transmute_unchecked_should_succeed!(transmute_unchecked_f64_to_i64, f64, i64);
     transmute_unchecked_should_succeed!(transmute_unchecked_f64_to_u64, f64, u64);
-    //transmute 2-ways between 16-byte primitives
+    //transmute between 16-byte primitives
     transmute_unchecked_should_succeed!(transmute_unchecked_i128_to_u128, i128, u128);
     transmute_unchecked_should_succeed!(transmute_unchecked_u128_to_i128, u128, i128);
     //transmute to type with potentially invalid bit patterns
