@@ -96,9 +96,9 @@ unsafe impl<T: Sync> Send for Iter<'_, T> {}
 
 impl<'a, T> Iter<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a [T]) -> Self {
+    pub(super) const fn new(slice: &'a [T]) -> Self {
         let len = slice.len();
-        let ptr: NonNull<T> = NonNull::from(slice).cast();
+        let ptr: NonNull<T> = NonNull::from_ref(slice).cast();
         // SAFETY: Similar to `IterMut::new`.
         unsafe {
             let end_or_len =
@@ -270,9 +270,9 @@ unsafe impl<T: Send> Send for IterMut<'_, T> {}
 
 impl<'a, T> IterMut<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a mut [T]) -> Self {
+    pub(super) const fn new(slice: &'a mut [T]) -> Self {
         let len = slice.len();
-        let ptr: NonNull<T> = NonNull::from(slice).cast();
+        let ptr: NonNull<T> = NonNull::from_mut(slice).cast();
         // SAFETY: There are several things here:
         //
         // `ptr` has been obtained by `slice.as_ptr()` where `slice` is a valid
@@ -1387,7 +1387,7 @@ pub struct Windows<'a, T: 'a> {
 
 impl<'a, T: 'a> Windows<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a [T], size: NonZero<usize>) -> Self {
+    pub(super) const fn new(slice: &'a [T], size: NonZero<usize>) -> Self {
         Self { v: slice, size }
     }
 }
@@ -1539,7 +1539,7 @@ pub struct Chunks<'a, T: 'a> {
 
 impl<'a, T: 'a> Chunks<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a [T], size: usize) -> Self {
+    pub(super) const fn new(slice: &'a [T], size: usize) -> Self {
         Self { v: slice, chunk_size: size }
     }
 }
@@ -1729,7 +1729,7 @@ pub struct ChunksMut<'a, T: 'a> {
 
 impl<'a, T: 'a> ChunksMut<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a mut [T], size: usize) -> Self {
+    pub(super) const fn new(slice: &'a mut [T], size: usize) -> Self {
         Self { v: slice, chunk_size: size, _marker: PhantomData }
     }
 }
@@ -1915,7 +1915,7 @@ pub struct ChunksExact<'a, T: 'a> {
 
 impl<'a, T> ChunksExact<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a [T], chunk_size: usize) -> Self {
+    pub(super) const fn new(slice: &'a [T], chunk_size: usize) -> Self {
         let rem = slice.len() % chunk_size;
         let fst_len = slice.len() - rem;
         // SAFETY: 0 <= fst_len <= slice.len() by construction above
@@ -2095,7 +2095,7 @@ pub struct ChunksExactMut<'a, T: 'a> {
 
 impl<'a, T> ChunksExactMut<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a mut [T], chunk_size: usize) -> Self {
+    pub(super) const fn new(slice: &'a mut [T], chunk_size: usize) -> Self {
         let rem = slice.len() % chunk_size;
         let fst_len = slice.len() - rem;
         // SAFETY: 0 <= fst_len <= slice.len() by construction above
@@ -2262,7 +2262,7 @@ pub struct ArrayWindows<'a, T: 'a, const N: usize> {
 
 impl<'a, T: 'a, const N: usize> ArrayWindows<'a, T, N> {
     #[inline]
-    pub(super) fn new(slice: &'a [T]) -> Self {
+    pub(super) const fn new(slice: &'a [T]) -> Self {
         let num_windows = slice.len().saturating_sub(N - 1);
         Self { slice_head: slice.as_ptr(), num: num_windows, marker: PhantomData }
     }
@@ -2386,8 +2386,10 @@ pub struct ArrayChunks<'a, T: 'a, const N: usize> {
 }
 
 impl<'a, T, const N: usize> ArrayChunks<'a, T, N> {
+    #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+    // #[rustc_const_unstable(feature = "slice_as_chunks", issue = "74985")]
     #[inline]
-    pub(super) fn new(slice: &'a [T]) -> Self {
+    pub(super) const fn new(slice: &'a [T]) -> Self {
         let (array_slice, rem) = slice.as_chunks();
         Self { iter: array_slice.iter(), rem }
     }
@@ -2512,8 +2514,9 @@ pub struct ArrayChunksMut<'a, T: 'a, const N: usize> {
 }
 
 impl<'a, T, const N: usize> ArrayChunksMut<'a, T, N> {
+    #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
     #[inline]
-    pub(super) fn new(slice: &'a mut [T]) -> Self {
+    pub(super) const fn new(slice: &'a mut [T]) -> Self {
         let (array_slice, rem) = slice.as_chunks_mut();
         Self { iter: array_slice.iter_mut(), rem }
     }
@@ -2631,7 +2634,7 @@ pub struct RChunks<'a, T: 'a> {
 
 impl<'a, T: 'a> RChunks<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a [T], size: usize) -> Self {
+    pub(super) const fn new(slice: &'a [T], size: usize) -> Self {
         Self { v: slice, chunk_size: size }
     }
 }
@@ -2811,7 +2814,7 @@ pub struct RChunksMut<'a, T: 'a> {
 
 impl<'a, T: 'a> RChunksMut<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a mut [T], size: usize) -> Self {
+    pub(super) const fn new(slice: &'a mut [T], size: usize) -> Self {
         Self { v: slice, chunk_size: size, _marker: PhantomData }
     }
 }
@@ -3002,7 +3005,7 @@ pub struct RChunksExact<'a, T: 'a> {
 
 impl<'a, T> RChunksExact<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a [T], chunk_size: usize) -> Self {
+    pub(super) const fn new(slice: &'a [T], chunk_size: usize) -> Self {
         let rem = slice.len() % chunk_size;
         // SAFETY: 0 <= rem <= slice.len() by construction above
         let (fst, snd) = unsafe { slice.split_at_unchecked(rem) };
@@ -3028,7 +3031,8 @@ impl<'a, T> RChunksExact<'a, T> {
     /// ```
     #[must_use]
     #[stable(feature = "rchunks", since = "1.31.0")]
-    pub fn remainder(&self) -> &'a [T] {
+    #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+    pub const fn remainder(&self) -> &'a [T] {
         self.rem
     }
 }
@@ -3184,7 +3188,7 @@ pub struct RChunksExactMut<'a, T: 'a> {
 
 impl<'a, T> RChunksExactMut<'a, T> {
     #[inline]
-    pub(super) fn new(slice: &'a mut [T], chunk_size: usize) -> Self {
+    pub(super) const fn new(slice: &'a mut [T], chunk_size: usize) -> Self {
         let rem = slice.len() % chunk_size;
         // SAFETY: 0 <= rem <= slice.len() by construction above
         let (fst, snd) = unsafe { slice.split_at_mut_unchecked(rem) };
@@ -3196,7 +3200,8 @@ impl<'a, T> RChunksExactMut<'a, T> {
     /// elements.
     #[must_use = "`self` will be dropped if the result is not used"]
     #[stable(feature = "rchunks", since = "1.31.0")]
-    pub fn into_remainder(self) -> &'a mut [T] {
+    #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
+    pub const fn into_remainder(self) -> &'a mut [T] {
         self.rem
     }
 }
@@ -3360,7 +3365,7 @@ pub struct ChunkBy<'a, T: 'a, P> {
 
 #[stable(feature = "slice_group_by", since = "1.77.0")]
 impl<'a, T: 'a, P> ChunkBy<'a, T, P> {
-    pub(super) fn new(slice: &'a [T], predicate: P) -> Self {
+    pub(super) const fn new(slice: &'a [T], predicate: P) -> Self {
         ChunkBy { slice, predicate }
     }
 }
@@ -3447,7 +3452,7 @@ pub struct ChunkByMut<'a, T: 'a, P> {
 
 #[stable(feature = "slice_group_by", since = "1.77.0")]
 impl<'a, T: 'a, P> ChunkByMut<'a, T, P> {
-    pub(super) fn new(slice: &'a mut [T], predicate: P) -> Self {
+    pub(super) const fn new(slice: &'a mut [T], predicate: P) -> Self {
         ChunkByMut { slice, predicate }
     }
 }
