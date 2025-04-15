@@ -62,6 +62,26 @@ leaf state is required to unify with the target state.
 A one-path-reachability proof is similar to the above, but the proof requirement
 is that _at least one_ leaf state unifies with the target state.
 
+When performing a proof of a program that involves recursion or a loop construct,
+one of several possible techniques can be used:
+
+1) K (and thus KMIR) are capable of unbounded verification via allowing the
+   user to write loop invariants. However, these loop invariants would then
+   need to be written in K's native language.
+2) As potential future work, it would be possible to implement an annotation
+   language to provide the required context for loop invariant directly in
+   source code (as done in the past using natspec for Solitidy code).
+3) In general, K also supports bounded loop unrolling, by way of identifying
+   loop heads and counting how many times the same loop head has been observed.
+   This technique is managed by the all-path reachability prover library for
+   K and works out of the box with suitable arguments, without requiring any
+   special support from the back-end.
+
+Our front-end, at the time of writing, does not have either of these
+options turned on. As soon as larger programs will require it, we will decide
+whether the preference is to implement support for user-supplied K-level
+loop invariants, or bounded loop unrolling support, or (probably) offer both.
+
 KMIR also prioritizes UI with interactive proof exploration available
 out-of-the-box through the terminal KCFG (K Control Flow Graph) viewer, allowing
 users to inspect intermediate states of the proof to get feedback on the
