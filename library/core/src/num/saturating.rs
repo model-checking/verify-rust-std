@@ -35,6 +35,7 @@ use crate::ops::{
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Hash)]
 #[repr(transparent)]
 #[rustc_diagnostic_item = "Saturating"]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub struct Saturating<T>(#[stable(feature = "saturating_int_impl", since = "1.74.0")] pub T);
 
 #[stable(feature = "saturating_int_impl", since = "1.74.0")]
