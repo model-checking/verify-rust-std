@@ -1780,6 +1780,7 @@ macro_rules! uint_impl {
             let mut base = self;
             let mut acc: Self = 1;
 
+            #[safety::loop_invariant(true)]
             loop {
                 if (exp & 1) == 1 {
                     acc = try_opt!(acc.checked_mul(base));
@@ -2349,6 +2350,7 @@ macro_rules! uint_impl {
             let mut acc: Self = 1;
 
             if intrinsics::is_val_statically_known(exp) {
+                #[safety::loop_invariant(exp>=1)]
                 while exp > 1 {
                     if (exp & 1) == 1 {
                         acc = acc.wrapping_mul(base);
@@ -2366,6 +2368,7 @@ macro_rules! uint_impl {
                 // at compile time. We can't use the same code for the constant
                 // exponent case because LLVM is currently unable to unroll
                 // this loop.
+                #[safety::loop_invariant(true)]
                 loop {
                     if (exp & 1) == 1 {
                         acc = acc.wrapping_mul(base);
@@ -3044,6 +3047,7 @@ macro_rules! uint_impl {
             // Scratch space for storing results of overflowing_mul.
             let mut r;
 
+            #[safety::loop_invariant(true)]
             loop {
                 if (exp & 1) == 1 {
                     r = acc.overflowing_mul(base);
