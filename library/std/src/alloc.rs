@@ -56,16 +56,16 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![stable(feature = "alloc_module", since = "1.28.0")]
 
+#[cfg(kani)]
+use core::kani;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicPtr, Ordering};
 use core::{hint, mem, ptr};
-#[cfg(kani)]
-use core::kani;
-use safety::requires;
 
 #[stable(feature = "alloc_module", since = "1.28.0")]
 #[doc(inline)]
 pub use alloc_crate::alloc::*;
+use safety::requires;
 
 /// The default memory allocator provided by the operating system.
 ///
@@ -395,6 +395,7 @@ pub fn rust_oom(layout: Layout) -> ! {
 pub mod __default_lib_allocator {
     #[cfg(kani)]
     use core::kani;
+
     use safety::requires;
 
     use super::{GlobalAlloc, Layout, System};
