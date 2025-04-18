@@ -44,10 +44,23 @@ Using the K semantics of Stable MIR, the KMIR execution of an entire Rust
 program represented as Stable MIR breaks down to a series of configuration
 rewrites that compute data held in local variables, and the program may either
 terminate normally or reach an exception or construct with undefined behaviour,
-which terminates the execution abnormally. Programs modelled in K Framework can
-be executed _symbolically_, i.e., operating on abstract input which is not fully
-specified but characterised by _path conditions_ (e.g., that an integer variable
-holds an unknown but non-negative value).
+which terminates the execution abnormally. KMIR is designed to provide sound 
+assurances about undefined behavior (UB) in Rust’s MIR. Rather than statically 
+over‑approximating or flagging UB at every unsafe block, KMIR models the full 
+MIR semantics, including UB transitions, use a **refusal-to-execute** strategy. 
+This means that if symbolic execution reaches a MIR instruction and cannot prove 
+that executing it would not result in UB (e.g., an out-of-bounds pointer dereference 
+or an unchecked arithmetic overflow), execution halts in a `UB DETECTED` state. 
+This state cannot be unified with a valid target state in the proof, so the proof 
+fails. KMIR systematically explores all feasible paths under the user-supplied 
+preconditions. Only when **every** path terminates without hitting UB *and* 
+satisfies the target property does KMIR declare the program UB-free (and correct 
+for the property). This ensures that any “no UB” claim holds under the sole assumption
+that KMIR’s implementation is correct. 
+
+Programs modelled in K Framework can be executed _symbolically_, i.e., operating 
+on abstract input which is not fully specified but characterized by _path conditions_ 
+(e.g., that an integer variable holds an unknown but non-negative value).
 
 K (and thus KMIR) verifies program correctness by performing an
 _all-path-reachability proof_ using the symbolic execution engine and verifier
