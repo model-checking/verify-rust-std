@@ -297,6 +297,15 @@ main() {
                 --enable-unstable \
                 --cbmc-args --object-bits 12
         fi
+      elif [[ "$run_command" == "autoharness" ]]; then
+          # Run verification for all automatically generated harnesses (not in parallel)
+          echo "Running Kani autoharness command..."
+          "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
+              $unstable_args \
+              --no-assert-contracts \
+              $command_args \
+              --enable-unstable \
+              --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         "$kani_path" list -Z list $unstable_args ./library --std --format markdown
