@@ -1,6 +1,8 @@
 //! Definitions of `Saturating<T>`.
 
 use crate::fmt;
+#[cfg(kani)]
+use crate::kani;
 use crate::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Sub, SubAssign,
@@ -36,6 +38,14 @@ use crate::ops::{
 #[repr(transparent)]
 #[rustc_diagnostic_item = "Saturating"]
 pub struct Saturating<T>(#[stable(feature = "saturating_int_impl", since = "1.74.0")] pub T);
+
+#[cfg(kani)]
+#[stable(feature = "saturating_int_impl", since = "1.74.0")]
+impl<T: kani::Arbitrary> kani::Arbitrary for Saturating<T> {
+    fn any() -> Self {
+        Self { 0: kani::any() }
+    }
+}
 
 #[stable(feature = "saturating_int_impl", since = "1.74.0")]
 impl<T: fmt::Debug> fmt::Debug for Saturating<T> {
