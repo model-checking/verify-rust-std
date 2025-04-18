@@ -32,3 +32,4 @@
   - [16: Verify the safety of Iterator functions](./challenges/0016-iter.md)
   - [17: Verify the safety of slice functions](./challenges/0017-slice.md)
   - [18: Verify the safety of slice iter functions](./challenges/0018-slice-iter-pt1.md)
+  - [19: Safety of `RawVec`](./challenges/0019-rawvec.md)
