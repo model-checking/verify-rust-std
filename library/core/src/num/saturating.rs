@@ -1,6 +1,8 @@
 //! Definitions of `Saturating<T>`.
 
 use crate::fmt;
+#[cfg(kani)]
+use crate::kani;
 use crate::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Sub, SubAssign,

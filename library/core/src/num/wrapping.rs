@@ -1,6 +1,8 @@
 //! Definitions of `Wrapping<T>`.
 
 use crate::fmt;
+#[cfg(kani)]
+use crate::kani;
 use crate::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
