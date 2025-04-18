@@ -53,6 +53,38 @@ jobs:
       - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
    
+  kani-autoharness:
+    name: Verify std library using autoharness
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
+      fail-fast: false
+
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # Step 2: Run Kani autoharness on the std library for selected functions.
+      # Uses "--include-pattern no::such::function" to make sure we do not try
+      # to run across all possible functions as that may take a lot longer than
+      # expected
+      - name: Run Kani Verification
+        run: |
+          scripts/run-kani.sh --run autoharness --kani-args \
+            --include-pattern no:such::function:: \
+            --harness-timeout 5m \
+            --default-unwind 1000 \
+            --jobs=3 --output-format=terse
+
   run-kani-list:
     name: Kani List
     runs-on: ubuntu-latest

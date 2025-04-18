@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         --run)
-            if [[ -n $2 && ($2 == "verify-std" || $2 == "list" || $2 == "metrics") ]]; then
+            if [[ -n $2 && ($2 == "verify-std" || $2 == "list" || $2 == "metrics" || $2 == "autoharness") ]]; then
                 run_command=$2
                 shift 2
             else
@@ -297,13 +297,23 @@ main() {
                 --enable-unstable \
                 --cbmc-args --object-bits 12
         fi
+      elif [[ "$run_command" == "autoharness" ]]; then
+          # Run verification for a subset of automatically generated harnesses
+          # (not in parallel)
+          echo "Running Kani autoharness command..."
+          "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
+              $unstable_args \
+              --no-assert-contracts \
+              $command_args \
+              --enable-unstable \
+              --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
-        "$kani_path" list -Z list $unstable_args ./library --std --format markdown
+        "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format markdown
     elif [[ "$run_command" == "metrics" ]]; then
         local current_dir=$(pwd)
         echo "Running Kani list command..."
-        "$kani_path" list -Z list $unstable_args ./library --std --format json
+        "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format json
         pushd scripts/kani-std-analysis
         echo "Running Kani's std-analysis command..."
         ./std-analysis.sh $build_dir
