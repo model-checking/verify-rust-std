@@ -40,8 +40,15 @@ use crate::ops::{
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Hash)]
 #[repr(transparent)]
 #[rustc_diagnostic_item = "Wrapping"]
-#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub struct Wrapping<T>(#[stable(feature = "rust1", since = "1.0.0")] pub T);
+
+#[cfg(kani)]
+#[stable(feature = "rust1", since = "1.0.0")]
+impl<T: kani::Arbitrary> kani::Arbitrary for Wrapping<T> {
+    fn any() -> Self {
+        Self { 0: kani::any() }
+    }
+}
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: fmt::Debug> fmt::Debug for Wrapping<T> {
