@@ -79,6 +79,7 @@ jobs:
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
+            --include-pattern ptr::align_offset::mod_inv \
             --include-pattern time::Duration::from_micros \
             --include-pattern time::Duration::from_millis \
             --include-pattern time::Duration::from_nanos \
