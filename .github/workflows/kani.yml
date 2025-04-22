@@ -74,13 +74,16 @@ jobs:
           submodules: true
 
       # Step 2: Run Kani autoharness on the std library for selected functions.
-      # Uses "--include-pattern no::such::function" to make sure we do not try
-      # to run across all possible functions as that may take a lot longer than
-      # expected
+      # Uses "--include-pattern" to make sure we do not try to run across all
+      # possible functions as that may take a lot longer than expected
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
-            --include-pattern no:such::function:: \
+            --include-pattern time::Duration::from_micros \
+            --include-pattern time::Duration::from_millis \
+            --include-pattern time::Duration::from_nanos \
+            --include-pattern time::Duration::from_secs \
+            --exclude-pattern time::Duration::from_secs_f \
             --harness-timeout 5m \
             --default-unwind 1000 \
             --jobs=3 --output-format=terse
