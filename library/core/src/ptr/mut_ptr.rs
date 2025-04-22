@@ -2275,7 +2275,14 @@ impl<T: ?Sized> PartialOrd for *mut T {
     }
 }
 
-<<<<<<< HEAD
+#[stable(feature = "raw_ptr_default", since = "CURRENT_RUSTC_VERSION")]
+impl<T: ?Sized + Thin> Default for *mut T {
+    /// Returns the default value of [`null_mut()`][crate::ptr::null_mut].
+    fn default() -> Self {
+        crate::ptr::null_mut()
+    }
+}
+
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
@@ -3169,12 +3176,5 @@ mod verify {
         unsafe {
             ptr_caller.byte_offset_from(ptr_input);
         }
-=======
-#[stable(feature = "raw_ptr_default", since = "CURRENT_RUSTC_VERSION")]
-impl<T: ?Sized + Thin> Default for *mut T {
-    /// Returns the default value of [`null_mut()`][crate::ptr::null_mut].
-    fn default() -> Self {
-        crate::ptr::null_mut()
->>>>>>> subtree/library
     }
 }

@@ -982,9 +982,8 @@ impl<T: ?Sized> NonNull<T> {
     /// ```
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-<<<<<<< HEAD
-    #[stable(feature = "ptr_sub_ptr", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "ptr_sub_ptr", since = "1.87.0")]
+    #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "1.87.0")]
     #[requires(
         self.as_ptr().addr().checked_sub(subtracted.as_ptr().addr()).is_some() &&
         core::ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
@@ -992,10 +991,6 @@ impl<T: ?Sized> NonNull<T> {
         (self.as_ptr().addr() - subtracted.as_ptr().addr()) % core::mem::size_of::<T>() == 0
     )]
     #[ensures(|result: &usize| *result == self.as_ptr().offset_from(subtracted.as_ptr()) as usize)]
-=======
-    #[stable(feature = "ptr_sub_ptr", since = "1.87.0")]
-    #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "1.87.0")]
->>>>>>> subtree/library
     pub const unsafe fn offset_from_unsigned(self, subtracted: NonNull<T>) -> usize
     where
         T: Sized,

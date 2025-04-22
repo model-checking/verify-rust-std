@@ -1849,7 +1849,14 @@ impl<T: ?Sized> PartialOrd for *const T {
     }
 }
 
-<<<<<<< HEAD
+#[stable(feature = "raw_ptr_default", since = "CURRENT_RUSTC_VERSION")]
+impl<T: ?Sized + Thin> Default for *const T {
+    /// Returns the default value of [`null()`][crate::ptr::null].
+    fn default() -> Self {
+        crate::ptr::null()
+    }
+}
+
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
@@ -2811,12 +2818,5 @@ mod verify {
         unsafe {
             ptr_caller.byte_offset_from(ptr_input);
         }
-=======
-#[stable(feature = "raw_ptr_default", since = "CURRENT_RUSTC_VERSION")]
-impl<T: ?Sized + Thin> Default for *const T {
-    /// Returns the default value of [`null()`][crate::ptr::null].
-    fn default() -> Self {
-        crate::ptr::null()
->>>>>>> subtree/library
     }
 }
