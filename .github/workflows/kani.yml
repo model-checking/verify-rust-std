@@ -109,8 +109,14 @@ jobs:
 
       # Step 2: Run list on the std library
       - name: Run Kani List
-        run: head/scripts/run-kani.sh --run list --path ${{github.workspace}}/head
-      
+        run: |
+          head/scripts/run-kani.sh --run list --path ${{github.workspace}}/head
+          # remove duplicate white space to reduce file size (GitHub permits at
+          # most one 1MB)
+          ls -l ${{github.workspace}}/head/kani-list.md
+          perl -p -i -e 's/ +/ /g' ${{github.workspace}}/head/kani-list.md
+          ls -l ${{github.workspace}}/head/kani-list.md
+
       # Step 3: Add output to job summary
       - name: Add Kani List output to job summary
         uses: actions/github-script@v6
