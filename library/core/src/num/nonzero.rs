@@ -454,7 +454,7 @@ where
     #[inline]
     #[requires({
         let size = core::mem::size_of::<T>();
-        let ptr = &n as *const T as *const u8;
+        let ptr = n as *const T as *const u8;
         let slice = unsafe { core::slice::from_raw_parts(ptr, size) };
         !slice.iter().all(|&byte| byte == 0)
     })]
@@ -2431,7 +2431,7 @@ mod verify {
 
     macro_rules! nonzero_check_from_mut_unchecked {
         ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
-            #[kani::proof_for_contract(NonZero::from_mut_unchecked)]
+            #[kani::proof_for_contract(NonZero<$t>::from_mut_unchecked)]
             pub fn $harness_name() {
                 let mut x: $t = kani::any();
                 unsafe {
@@ -2671,8 +2671,8 @@ mod verify {
 
     macro_rules! check_mul_unchecked_small{
         ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident) => {
-            #[kani::proof_for_contract(<$t>::unchecked_mul)]
-            pub fn $nonzero_check_mul_for() {
+            #[kani::proof_for_contract(NonZero<$t>::unchecked_mul)]
+            pub fn $nonzero_check_unchecked_mul_for() {
                 let x: $nonzero_type = kani::any();
                 let y: $nonzero_type = kani::any();
 
@@ -2685,16 +2685,16 @@ mod verify {
 
     macro_rules! check_mul_unchecked_intervals{
         ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident, $min:expr, $max:expr) => {
-            #[kani::proof_for_contract(<$t>::unchecked_mul)]
+            #[kani::proof_for_contract(NonZero<$t>::unchecked_mul)]
             pub fn $nonzero_check_mul_for() {
                 let x = kani::any::<$t>();
-            let y = kani::any::<$t>();
+                let y = kani::any::<$t>();
 
-            kani::assume(x != 0 && x >= $min && x <= $max);
-            kani::assume(y != 0 && y >= $min && y <= $max);
+                kani::assume(x != 0 && x >= $min && x <= $max);
+                kani::assume(y != 0 && y >= $min && y <= $max);
 
-            let x = <$nonzero_type>::new(x).unwrap();
-            let y = <$nonzero_type>::new(y).unwrap();
+                let x = <$nonzero_type>::new(x).unwrap();
+                let y = <$nonzero_type>::new(y).unwrap();
 
                 unsafe {
                     x.unchecked_mul(y);
@@ -2761,7 +2761,7 @@ mod verify {
 
     macro_rules! nonzero_check_add {
         ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_add_for:ident) => {
-            #[kani::proof_for_contract(<$nonzero_type>::unchecked_add)]
+            #[kani::proof_for_contract(NonZero<$t>::unchecked_add)]
             pub fn $nonzero_check_unchecked_add_for() {
                 let x: $nonzero_type = kani::any();
                 let y: $t = kani::any();
