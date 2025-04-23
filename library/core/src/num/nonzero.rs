@@ -452,6 +452,12 @@ where
     #[unstable(feature = "nonzero_from_mut", issue = "106290")]
     #[must_use]
     #[inline]
+    #[requires({
+        let size = core::mem::size_of::<T>();
+        let ptr = &n as *const T as *const u8;
+        let slice = unsafe { core::slice::from_raw_parts(ptr, size) };
+        !slice.iter().all(|&byte| byte == 0)
+    })]
     pub unsafe fn from_mut_unchecked(n: &mut T) -> &mut Self {
         match Self::from_mut(n) {
             Some(n) => n,
@@ -2425,10 +2431,9 @@ mod verify {
 
     macro_rules! nonzero_check_from_mut_unchecked {
         ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
-            #[kani::proof]
+            #[kani::proof_for_contract(NonZero::from_mut_unchecked)]
             pub fn $harness_name() {
                 let mut x: $t = kani::any();
-                kani::assume(x != 0);
                 unsafe {
                     <$nonzero_type>::from_mut_unchecked(&mut x);
                 }
