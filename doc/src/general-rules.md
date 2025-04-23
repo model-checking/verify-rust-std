@@ -6,8 +6,6 @@
 and we kept a copy of the Rust standard library inside the `library/` folder that shall be used as the verification target for all our challenges.
 We will periodically update the `library/` folder to track newer versions of the [official Rust standard library](https://github.com/rust-lang/rust/).
 
-**NOTE:** This work is not officially affiliated, or endorsed by the Rust project or Rust Foundation.
-
 **Challenges:** Each individual verification effort will have a
 tracking issue where contributors can add comments and ask clarification questions.
 You can find the list of [open challenges here](https://github.com/model-checking/verify-rust-std/labels/Challenge).
@@ -69,20 +67,17 @@ Follow the following steps to create a new proposal:
 
 ## Tool Applications
 
-Solutions must be automated using one of the tools previously approved and listed [here](tools.md#approved-tools):
+Solutions must be automated using one of the tools previously approved and listed [here](tools.md#approved-tools).
+To use a new tool, participants must first submit an application for it.
 
-* Any new tool that participants want to enable will require an application using the [tool application template](./tool_template.md).
-* The tool will be analyzed by an independent committee consisting of members from the Rust open-source developers and AWS
-* A new tool application should clearly specify the differences to existing techniques and provide sufficient background
-  of why this is needed.
-* The tool application should also include mechanisms to audit its implementation and correctness.
-* Once the tool is approved, the participant needs to create a PR that creates a new action that runs the
-  std library verification using the new tool, as well as an entry to the “Approved Tools” section of this book.
-* Once the PR is merged, the tool is considered integrated.
-* The repository will be updated periodically, which can impact the tool capacity to analyze the new version of the repository.
-  I.e., the action may no longer pass after an update.
-  This will not impact the approval status of the tool, however,
-  new solutions that want to employ the tool may need to ensure the action is passing first.
+* To submit a tool application, open a new issue in this repository using the "Tool Application" issue template.
+* The committee will review the application. Once a committee member approves the application, the participant needs to create a PR with:
+  * A new workflow that runs the tool against the standard library.
+  * A new entry to the “Approved Tools” section of this book.
+* Once this PR is merged, the tool is considered integrated, and the tool application issue will be closed.
+
+The repository will be updated periodically, which can impact a tool's capacity to analyze the new version of the repository (i.e., the workflow may no longer pass after an update).
+If it is determined that the tool requires changes and such changes cannot be provided in a timely fashion the tool's approval may be revoked.
 
 ## Committee Applications
 
@@ -95,3 +90,21 @@ members = [
 +   "rahulku"
 ]
 ```
+
+Committee members are expected to contribute by reviewing pull requests (all
+pull requests review approvals from at least two committee members before they
+can be merged).
+Reviews of solutions towards challenges should consider at least the following aspects:
+
+1. Does the pull request implement a solution that respects/meets the success
+   criteria of the challenge?
+2. Do the contracts and harnesses incorporate the safety conditions stated in
+   the documentation (from comments in the code and the
+   [standard library documentation](https://doc.rust-lang.org/std/index.html))?
+   Note that we currently focus on safety verification. Pre- and post-conditions
+   towards functional correctness are acceptable as long as they do not
+   negatively impact verification of safety, such as over-constraining input
+   values or causing excessive verification run time.
+3. Is the contributed code of adequate quality, idiomatic, and stands a chance
+   to be accepted into the standard library (to the best of the committee
+   member's knowledge)?

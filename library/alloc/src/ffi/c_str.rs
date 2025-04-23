@@ -1,8 +1,5 @@
 //! [`CString`] and its related types.
 
-#[cfg(test)]
-mod tests;
-
 use core::borrow::Borrow;
 use core::ffi::{CStr, c_char};
 use core::num::NonZero;
@@ -13,7 +10,6 @@ use core::{fmt, mem, ops, ptr, slice};
 use crate::borrow::{Cow, ToOwned};
 use crate::boxed::Box;
 use crate::rc::Rc;
-use crate::slice::hack::into_vec;
 use crate::string::String;
 #[cfg(target_has_atomic = "ptr")]
 use crate::sync::Arc;
@@ -106,7 +102,7 @@ use crate::vec::Vec;
 /// of `CString` instances can lead to invalid memory accesses, memory leaks,
 /// and other memory errors.
 #[derive(PartialEq, PartialOrd, Eq, Ord, Hash, Clone)]
-#[cfg_attr(not(test), rustc_diagnostic_item = "cstring_type")]
+#[rustc_diagnostic_item = "cstring_type"]
 #[stable(feature = "alloc_c_string", since = "1.64.0")]
 pub struct CString {
     // Invariant 1: the slice ends with a zero byte and has a length of at least one.
@@ -384,7 +380,7 @@ impl CString {
     ///     fn some_extern_function(s: *mut c_char);
     /// }
     ///
-    /// let c_string = CString::new("Hello!").expect("CString::new failed");
+    /// let c_string = CString::from(c"Hello!");
     /// let raw = c_string.into_raw();
     /// unsafe {
     ///     some_extern_function(raw);
@@ -400,7 +396,7 @@ impl CString {
         // information about the size of the allocation is correct on Rust's
         // side.
         unsafe {
-            extern "C" {
+            unsafe extern "C" {
                 /// Provided by libc or compiler_builtins.
                 fn strlen(s: *const c_char) -> usize;
             }
@@ -429,7 +425,7 @@ impl CString {
     /// ```
     /// use std::ffi::CString;
     ///
-    /// let c_string = CString::new("foo").expect("CString::new failed");
+    /// let c_string = CString::from(c"foo");
     ///
     /// let ptr = c_string.into_raw();
     ///
@@ -487,14 +483,14 @@ impl CString {
     /// ```
     /// use std::ffi::CString;
     ///
-    /// let c_string = CString::new("foo").expect("CString::new failed");
+    /// let c_string = CString::from(c"foo");
     /// let bytes = c_string.into_bytes();
     /// assert_eq!(bytes, vec![b'f', b'o', b'o']);
     /// ```
     #[must_use = "`self` will be dropped if the result is not used"]
     #[stable(feature = "cstring_into", since = "1.7.0")]
     pub fn into_bytes(self) -> Vec<u8> {
-        let mut vec = into_vec(self.into_inner());
+        let mut vec = self.into_inner().into_vec();
         let _nul = vec.pop();
         debug_assert_eq!(_nul, Some(0u8));
         vec
@@ -508,14 +504,14 @@ impl CString {
     /// ```
     /// use std::ffi::CString;
     ///
-    /// let c_string = CString::new("foo").expect("CString::new failed");
+    /// let c_string = CString::from(c"foo");
     /// let bytes = c_string.into_bytes_with_nul();
     /// assert_eq!(bytes, vec![b'f', b'o', b'o', b'\0']);
     /// ```
     #[must_use = "`self` will be dropped if the result is not used"]
     #[stable(feature = "cstring_into", since = "1.7.0")]
     pub fn into_bytes_with_nul(self) -> Vec<u8> {
-        into_vec(self.into_inner())
+        self.into_inner().into_vec()
     }
 
     /// Returns the contents of this `CString` as a slice of bytes.
@@ -530,7 +526,7 @@ impl CString {
     /// ```
     /// use std::ffi::CString;
     ///
-    /// let c_string = CString::new("foo").expect("CString::new failed");
+    /// let c_string = CString::from(c"foo");
     /// let bytes = c_string.as_bytes();
     /// assert_eq!(bytes, &[b'f', b'o', b'o']);
     /// ```
@@ -550,7 +546,7 @@ impl CString {
     /// ```
     /// use std::ffi::CString;
     ///
-    /// let c_string = CString::new("foo").expect("CString::new failed");
+    /// let c_string = CString::from(c"foo");
     /// let bytes = c_string.as_bytes_with_nul();
     /// assert_eq!(bytes, &[b'f', b'o', b'o', b'\0']);
     /// ```
@@ -568,7 +564,7 @@ impl CString {
     /// ```
     /// use std::ffi::{CString, CStr};
     ///
-    /// let c_string = CString::new(b"foo".to_vec()).expect("CString::new failed");
+    /// let c_string = CString::from(c"foo");
     /// let cstr = c_string.as_c_str();
     /// assert_eq!(cstr,
     ///            CStr::from_bytes_with_nul(b"foo\0").expect("CStr::from_bytes_with_nul failed"));
@@ -576,7 +572,7 @@ impl CString {
     #[inline]
     #[must_use]
     #[stable(feature = "as_c_str", since = "1.20.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "cstring_as_c_str")]
+    #[rustc_diagnostic_item = "cstring_as_c_str"]
     pub fn as_c_str(&self) -> &CStr {
         &*self
     }
@@ -586,12 +582,9 @@ impl CString {
     /// # Examples
     ///
     /// ```
-    /// use std::ffi::{CString, CStr};
-    ///
-    /// let c_string = CString::new(b"foo".to_vec()).expect("CString::new failed");
+    /// let c_string = c"foo".to_owned();
     /// let boxed = c_string.into_boxed_c_str();
-    /// assert_eq!(&*boxed,
-    ///            CStr::from_bytes_with_nul(b"foo\0").expect("CStr::from_bytes_with_nul failed"));
+    /// assert_eq!(boxed.to_bytes_with_nul(), b"foo\0");
     /// ```
     #[must_use = "`self` will be dropped if the result is not used"]
     #[stable(feature = "into_boxed_c_str", since = "1.20.0")]
@@ -658,7 +651,7 @@ impl CString {
     /// assert_eq!(
     ///     CString::from_vec_with_nul(b"abc\0".to_vec())
     ///         .expect("CString::from_vec_with_nul failed"),
-    ///     CString::new(b"abc".to_vec()).expect("CString::new failed")
+    ///     c"abc".to_owned()
     /// );
     /// ```
     ///
@@ -761,7 +754,6 @@ impl<'a> From<Cow<'a, CStr>> for CString {
     }
 }
 
-#[cfg(not(test))]
 #[stable(feature = "box_from_c_str", since = "1.17.0")]
 impl From<&CStr> for Box<CStr> {
     /// Converts a `&CStr` into a `Box<CStr>`,
@@ -769,6 +761,15 @@ impl From<&CStr> for Box<CStr> {
     fn from(s: &CStr) -> Box<CStr> {
         let boxed: Box<[u8]> = Box::from(s.to_bytes_with_nul());
         unsafe { Box::from_raw(Box::into_raw(boxed) as *mut CStr) }
+    }
+}
+
+#[stable(feature = "box_from_mut_slice", since = "1.84.0")]
+impl From<&mut CStr> for Box<CStr> {
+    /// Converts a `&mut CStr` into a `Box<CStr>`,
+    /// by copying the contents into a newly allocated [`Box`].
+    fn from(s: &mut CStr) -> Box<CStr> {
+        Self::from(&*s)
     }
 }
 
@@ -841,7 +842,6 @@ impl TryFrom<CString> for String {
     }
 }
 
-#[cfg(not(test))]
 #[stable(feature = "more_box_slice_clone", since = "1.29.0")]
 impl Clone for Box<CStr> {
     #[inline]
@@ -910,6 +910,17 @@ impl From<&CStr> for Arc<CStr> {
     }
 }
 
+#[cfg(target_has_atomic = "ptr")]
+#[stable(feature = "shared_from_mut_slice", since = "1.84.0")]
+impl From<&mut CStr> for Arc<CStr> {
+    /// Converts a `&mut CStr` into a `Arc<CStr>`,
+    /// by copying the contents into a newly allocated [`Arc`].
+    #[inline]
+    fn from(s: &mut CStr) -> Arc<CStr> {
+        Arc::from(&*s)
+    }
+}
+
 #[stable(feature = "shared_from_slice2", since = "1.24.0")]
 impl From<CString> for Rc<CStr> {
     /// Converts a [`CString`] into an <code>[Rc]<[CStr]></code> by moving the [`CString`]
@@ -932,6 +943,16 @@ impl From<&CStr> for Rc<CStr> {
     }
 }
 
+#[stable(feature = "shared_from_mut_slice", since = "1.84.0")]
+impl From<&mut CStr> for Rc<CStr> {
+    /// Converts a `&mut CStr` into a `Rc<CStr>`,
+    /// by copying the contents into a newly allocated [`Rc`].
+    #[inline]
+    fn from(s: &mut CStr) -> Rc<CStr> {
+        Rc::from(&*s)
+    }
+}
+
 #[cfg(not(no_global_oom_handling))]
 #[stable(feature = "more_rc_default_impls", since = "1.80.0")]
 impl Default for Rc<CStr> {
@@ -940,12 +961,12 @@ impl Default for Rc<CStr> {
     /// This may or may not share an allocation with other Rcs on the same thread.
     #[inline]
     fn default() -> Self {
-        let c_str: &CStr = Default::default();
-        Rc::from(c_str)
+        let rc = Rc::<[u8]>::from(*b"\0");
+        // `[u8]` has the same layout as `CStr`, and it is `NUL` terminated.
+        unsafe { Rc::from_raw(Rc::into_raw(rc) as *const CStr) }
     }
 }
 
-#[cfg(not(test))]
 #[stable(feature = "default_box_extra", since = "1.17.0")]
 impl Default for Box<CStr> {
     fn default() -> Box<CStr> {
@@ -1054,7 +1075,7 @@ impl ToOwned for CStr {
     }
 
     fn clone_into(&self, target: &mut CString) {
-        let mut b = into_vec(mem::take(&mut target.inner));
+        let mut b = mem::take(&mut target.inner).into_vec();
         self.to_bytes_with_nul().clone_into(&mut b);
         target.inner = b.into_boxed_slice();
     }
@@ -1087,7 +1108,6 @@ impl AsRef<CStr> for CString {
     }
 }
 
-#[cfg(not(test))]
 impl CStr {
     /// Converts a `CStr` into a <code>[Cow]<[str]></code>.
     ///
@@ -1096,7 +1116,7 @@ impl CStr {
     /// with the corresponding <code>&[str]</code> slice. Otherwise, it will
     /// replace any invalid UTF-8 sequences with
     /// [`U+FFFD REPLACEMENT CHARACTER`][U+FFFD] and return a
-    /// <code>[Cow]::[Owned]\(&[str])</code> with the result.
+    /// <code>[Cow]::[Owned]\([String])</code> with the result.
     ///
     /// [str]: prim@str "str"
     /// [Borrowed]: Cow::Borrowed
@@ -1137,11 +1157,12 @@ impl CStr {
     /// # Examples
     ///
     /// ```
-    /// use std::ffi::CString;
+    /// use std::ffi::{CStr, CString};
     ///
-    /// let c_string = CString::new(b"foo".to_vec()).expect("CString::new failed");
-    /// let boxed = c_string.into_boxed_c_str();
-    /// assert_eq!(boxed.into_c_string(), CString::new("foo").expect("CString::new failed"));
+    /// let boxed: Box<CStr> = Box::from(c"foo");
+    /// let c_string: CString = c"foo".to_owned();
+    ///
+    /// assert_eq!(boxed.into_c_string(), c_string);
     /// ```
     #[rustc_allow_incoherent_impl]
     #[must_use = "`self` will be dropped if the result is not used"]

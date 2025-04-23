@@ -199,7 +199,7 @@ pub trait Iterator {
     ///
     /// The method does no guarding against overflows, so counting elements of
     /// an iterator with more than [`usize::MAX`] elements either produces the
-    /// wrong result or panics. If debug assertions are enabled, a panic is
+    /// wrong result or panics. If overflow checks are enabled, a panic is
     /// guaranteed.
     ///
     /// # Panics
@@ -862,7 +862,7 @@ pub trait Iterator {
     /// Note that `iter.filter(f).next()` is equivalent to `iter.find(f)`.
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "iter_filter")]
+    #[rustc_diagnostic_item = "iter_filter"]
     fn filter<P>(self, predicate: P) -> Filter<Self, P>
     where
         Self: Sized,
@@ -931,7 +931,7 @@ pub trait Iterator {
     ///
     /// The method does no guarding against overflows, so enumerating more than
     /// [`usize::MAX`] elements either produces the wrong result or panics. If
-    /// debug assertions are enabled, a panic is guaranteed.
+    /// overflow checks are enabled, a panic is guaranteed.
     ///
     /// # Panics
     ///
@@ -954,7 +954,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "enumerate_method")]
+    #[rustc_diagnostic_item = "enumerate_method"]
     fn enumerate(self) -> Enumerate<Self>
     where
         Self: Sized,
@@ -1553,7 +1553,7 @@ pub trait Iterator {
     ///
     /// # Panics
     ///
-    /// Panics if `N` is 0. This check will most probably get changed to a
+    /// Panics if `N` is zero. This check will most probably get changed to a
     /// compile time error before this method gets stabilized.
     ///
     /// ```should_panic
@@ -1704,11 +1704,7 @@ pub trait Iterator {
     ///         self.state = self.state + 1;
     ///
     ///         // if it's even, Some(i32), else None
-    ///         if val % 2 == 0 {
-    ///             Some(val)
-    ///         } else {
-    ///             None
-    ///         }
+    ///         (val % 2 == 0).then_some(val)
     ///     }
     /// }
     ///
@@ -1825,10 +1821,19 @@ pub trait Iterator {
         Inspect::new(self, f)
     }
 
-    /// Borrows an iterator, rather than consuming it.
+    /// Creates a "by reference" adapter for this instance of `Iterator`.
     ///
-    /// This is useful to allow applying iterator adapters while still
-    /// retaining ownership of the original iterator.
+    /// Consuming method calls (direct or indirect calls to `next`)
+    /// on the "by reference" adapter will consume the original iterator,
+    /// but ownership-taking methods (those with a `self` parameter)
+    /// only take ownership of the "by reference" iterator.
+    ///
+    /// This is useful for applying ownership-taking methods
+    /// (such as `take` in the example below)
+    /// without giving up ownership of the original iterator,
+    /// so you can use the original iterator afterwards.
+    ///
+    /// Uses [impl<I: Iterator + ?Sized> Iterator for &mut I { type Item = I::Item; ...}](https://doc.rust-lang.org/nightly/std/iter/trait.Iterator.html#impl-Iterator-for-%26mut+I).
     ///
     /// # Examples
     ///
@@ -1963,11 +1968,20 @@ pub trait Iterator {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use = "if you really need to exhaust the iterator, consider `.for_each(drop)` instead"]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "iterator_collect_fn")]
+    #[rustc_diagnostic_item = "iterator_collect_fn"]
     fn collect<B: FromIterator<Self::Item>>(self) -> B
     where
         Self: Sized,
     {
+        // This is too aggressive to turn on for everything all the time, but PR#137908
+        // accidentally noticed that some rustc iterators had malformed `size_hint`s,
+        // so this will help catch such things in debug-assertions-std runners,
+        // even if users won't actually ever see it.
+        if cfg!(debug_assertions) {
+            let hint = self.size_hint();
+            assert!(hint.1.is_none_or(|high| high >= hint.0), "Malformed size_hint {hint:?}");
+        }
+
         FromIterator::from_iter(self)
     }
 
@@ -2564,7 +2578,7 @@ pub trait Iterator {
     /// # Example
     ///
     /// ```
-    /// let reduced: i32 = (1..10).reduce(|acc, e| acc + e).unwrap();
+    /// let reduced: i32 = (1..10).reduce(|acc, e| acc + e).unwrap_or(0);
     /// assert_eq!(reduced, 45);
     ///
     /// // Which is equivalent to doing it with `fold`:
@@ -2950,7 +2964,7 @@ pub trait Iterator {
     ///
     /// The method does no guarding against overflows, so if there are more
     /// than [`usize::MAX`] non-matching elements, it either produces the wrong
-    /// result or panics. If debug assertions are enabled, a panic is
+    /// result or panics. If overflow checks are enabled, a panic is
     /// guaranteed.
     ///
     /// # Panics
@@ -3051,6 +3065,7 @@ pub trait Iterator {
     ///
     /// // we can still use `iter`, as there are more elements.
     /// assert_eq!(iter.next(), Some(&-1));
+    /// assert_eq!(iter.next_back(), Some(&3));
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -3087,7 +3102,7 @@ pub trait Iterator {
     ///     [2.4, f32::NAN, 1.3]
     ///         .into_iter()
     ///         .reduce(f32::max)
-    ///         .unwrap(),
+    ///         .unwrap_or(0.),
     ///     2.4
     /// );
     /// ```
@@ -3123,7 +3138,7 @@ pub trait Iterator {
     ///     [2.4, f32::NAN, 1.3]
     ///         .into_iter()
     ///         .reduce(f32::min)
-    ///         .unwrap(),
+    ///         .unwrap_or(0.),
     ///     1.3
     /// );
     /// ```
@@ -3357,7 +3372,7 @@ pub trait Iterator {
     /// assert_eq!(v_map, vec![1, 2, 3]);
     /// ```
     #[stable(feature = "iter_copied", since = "1.36.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "iter_copied")]
+    #[rustc_diagnostic_item = "iter_copied"]
     fn copied<'a, T: 'a>(self) -> Copied<Self>
     where
         Self: Sized + Iterator<Item = &'a T>,
@@ -3405,7 +3420,7 @@ pub trait Iterator {
     /// assert_eq!(&[vec![23]], &faster[..]);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "iter_cloned")]
+    #[rustc_diagnostic_item = "iter_cloned"]
     fn cloned<'a, T: 'a>(self) -> Cloned<Self>
     where
         Self: Sized + Iterator<Item = &'a T>,
@@ -3454,7 +3469,7 @@ pub trait Iterator {
     ///
     /// # Panics
     ///
-    /// Panics if `N` is 0.
+    /// Panics if `N` is zero.
     ///
     /// # Examples
     ///
@@ -3492,7 +3507,8 @@ pub trait Iterator {
     ///
     /// Takes each element, adds them together, and returns the result.
     ///
-    /// An empty iterator returns the zero value of the type.
+    /// An empty iterator returns the *additive identity* ("zero") of the type,
+    /// which is `0` for integers and `-0.0` for floats.
     ///
     /// `sum()` can be used to sum any type implementing [`Sum`][`core::iter::Sum`],
     /// including [`Option`][`Option::sum`] and [`Result`][`Result::sum`].
@@ -3500,7 +3516,7 @@ pub trait Iterator {
     /// # Panics
     ///
     /// When calling `sum()` and a primitive integer type is being returned, this
-    /// method will panic if the computation overflows and debug assertions are
+    /// method will panic if the computation overflows and overflow checks are
     /// enabled.
     ///
     /// # Examples
@@ -3510,6 +3526,10 @@ pub trait Iterator {
     /// let sum: i32 = a.iter().sum();
     ///
     /// assert_eq!(sum, 6);
+    ///
+    /// let b: Vec<f32> = vec![];
+    /// let sum: f32 = b.iter().sum();
+    /// assert_eq!(sum, -0.0_f32);
     /// ```
     #[stable(feature = "iter_arith", since = "1.11.0")]
     fn sum<S>(self) -> S
@@ -3530,7 +3550,7 @@ pub trait Iterator {
     /// # Panics
     ///
     /// When calling `product()` and a primitive integer type is being returned,
-    /// method will panic if the computation overflows and debug assertions are
+    /// method will panic if the computation overflows and overflow checks are
     /// enabled.
     ///
     /// # Examples
@@ -4018,6 +4038,9 @@ where
     }
 }
 
+/// Implements `Iterator` for mutable references to iterators, such as those produced by [`Iterator::by_ref`].
+///
+/// This implementation passes all method calls on to the original iterator.
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<I: Iterator + ?Sized> Iterator for &mut I {
     type Item = I::Item;

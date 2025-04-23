@@ -4,7 +4,8 @@
         target_os = "emscripten",
         all(target_os = "wasi", target_env = "p1"),
         target_env = "sgx",
-        target_os = "xous"
+        target_os = "xous",
+        target_os = "trusty",
     ))
 ))]
 mod tests;
@@ -12,7 +13,8 @@ mod tests;
 use crate::fmt;
 use crate::io::{self, ErrorKind};
 use crate::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
-use crate::sys_common::{AsInner, FromInner, IntoInner, net as net_imp};
+use crate::sys::net as net_imp;
+use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::time::Duration;
 
 /// A UDP socket.
@@ -203,9 +205,7 @@ impl UdpSocket {
     pub fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], addr: A) -> io::Result<usize> {
         match addr.to_socket_addrs()?.next() {
             Some(addr) => self.0.send_to(buf, &addr),
-            None => {
-                Err(io::const_io_error!(ErrorKind::InvalidInput, "no addresses to send data to"))
-            }
+            None => Err(io::const_error!(ErrorKind::InvalidInput, "no addresses to send data to")),
         }
     }
 

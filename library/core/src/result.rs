@@ -520,6 +520,7 @@ use crate::{convert, fmt, hint};
 /// `Result` is a type that represents either success ([`Ok`]) or failure ([`Err`]).
 ///
 /// See the [module documentation](self) for details.
+#[doc(search_unbox)]
 #[derive(Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 #[must_use = "this `Result` may be an `Err` variant, which should be handled"]
 #[rustc_diagnostic_item = "Result"]
@@ -653,7 +654,7 @@ impl<T, E> Result<T, E> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "result_ok_method")]
+    #[rustc_diagnostic_item = "result_ok_method"]
     pub fn ok(self) -> Option<T> {
         match self {
             Ok(x) => Some(x),
@@ -1064,10 +1065,15 @@ impl<T, E> Result<T, E> {
     /// Returns the contained [`Ok`] value, consuming the `self` value.
     ///
     /// Because this function may panic, its use is generally discouraged.
-    /// Instead, prefer to use pattern matching and handle the [`Err`]
-    /// case explicitly, or call [`unwrap_or`], [`unwrap_or_else`], or
-    /// [`unwrap_or_default`].
+    /// Panics are meant for unrecoverable errors, and
+    /// [may abort the entire program][panic-abort].
     ///
+    /// Instead, prefer to use [the `?` (try) operator][try-operator], or pattern matching
+    /// to handle the [`Err`] case explicitly, or call [`unwrap_or`],
+    /// [`unwrap_or_else`], or [`unwrap_or_default`].
+    ///
+    /// [panic-abort]: https://doc.rust-lang.org/book/ch09-01-unrecoverable-errors-with-panic.html
+    /// [try-operator]: https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html#a-shortcut-for-propagating-errors-the--operator
     /// [`unwrap_or`]: Result::unwrap_or
     /// [`unwrap_or_else`]: Result::unwrap_or_else
     /// [`unwrap_or_default`]: Result::unwrap_or_default
@@ -1736,6 +1742,14 @@ where
             (to, from) => *to = from.clone(),
         }
     }
+}
+
+#[unstable(feature = "ergonomic_clones", issue = "132290")]
+impl<T, E> crate::clone::UseCloned for Result<T, E>
+where
+    T: crate::clone::UseCloned,
+    E: crate::clone::UseCloned,
+{
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]

@@ -110,6 +110,29 @@ impl<T: Clone> From<&[T]> for Box<[T]> {
 }
 
 #[cfg(not(no_global_oom_handling))]
+#[stable(feature = "box_from_mut_slice", since = "1.84.0")]
+impl<T: Clone> From<&mut [T]> for Box<[T]> {
+    /// Converts a `&mut [T]` into a `Box<[T]>`
+    ///
+    /// This conversion allocates on the heap
+    /// and performs a copy of `slice` and its contents.
+    ///
+    /// # Examples
+    /// ```rust
+    /// // create a &mut [u8] which will be used to create a Box<[u8]>
+    /// let mut array = [104, 101, 108, 108, 111];
+    /// let slice: &mut [u8] = &mut array;
+    /// let boxed_slice: Box<[u8]> = Box::from(slice);
+    ///
+    /// println!("{boxed_slice:?}");
+    /// ```
+    #[inline]
+    fn from(slice: &mut [T]) -> Box<[T]> {
+        Self::from(&*slice)
+    }
+}
+
+#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "box_from_cow", since = "1.45.0")]
 impl<T: Clone> From<Cow<'_, [T]>> for Box<[T]> {
     /// Converts a `Cow<'_, [T]>` into a `Box<[T]>`
@@ -144,6 +167,28 @@ impl From<&str> for Box<str> {
     #[inline]
     fn from(s: &str) -> Box<str> {
         unsafe { from_boxed_utf8_unchecked(Box::from(s.as_bytes())) }
+    }
+}
+
+#[cfg(not(no_global_oom_handling))]
+#[stable(feature = "box_from_mut_slice", since = "1.84.0")]
+impl From<&mut str> for Box<str> {
+    /// Converts a `&mut str` into a `Box<str>`
+    ///
+    /// This conversion allocates on the heap
+    /// and performs a copy of `s`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let mut original = String::from("hello");
+    /// let original: &mut str = &mut original;
+    /// let boxed: Box<str> = Box::from(original);
+    /// println!("{boxed}");
+    /// ```
+    #[inline]
+    fn from(s: &mut str) -> Box<str> {
+        Self::from(&*s)
     }
 }
 
@@ -484,7 +529,6 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
     /// ```
     /// use std::error::Error;
     /// use std::fmt;
-    /// use std::mem;
     ///
     /// #[derive(Debug)]
     /// struct AnError;
@@ -498,9 +542,9 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
     /// impl Error for AnError {}
     ///
     /// let an_error = AnError;
-    /// assert!(0 == mem::size_of_val(&an_error));
+    /// assert!(0 == size_of_val(&an_error));
     /// let a_boxed_error = Box::<dyn Error>::from(an_error);
-    /// assert!(mem::size_of::<Box<dyn Error>>() == mem::size_of_val(&a_boxed_error))
+    /// assert!(size_of::<Box<dyn Error>>() == size_of_val(&a_boxed_error))
     /// ```
     fn from(err: E) -> Box<dyn Error + 'a> {
         Box::new(err)
@@ -518,7 +562,6 @@ impl<'a, E: Error + Send + Sync + 'a> From<E> for Box<dyn Error + Send + Sync + 
     /// ```
     /// use std::error::Error;
     /// use std::fmt;
-    /// use std::mem;
     ///
     /// #[derive(Debug)]
     /// struct AnError;
@@ -536,10 +579,10 @@ impl<'a, E: Error + Send + Sync + 'a> From<E> for Box<dyn Error + Send + Sync + 
     /// unsafe impl Sync for AnError {}
     ///
     /// let an_error = AnError;
-    /// assert!(0 == mem::size_of_val(&an_error));
+    /// assert!(0 == size_of_val(&an_error));
     /// let a_boxed_error = Box::<dyn Error + Send + Sync>::from(an_error);
     /// assert!(
-    ///     mem::size_of::<Box<dyn Error + Send + Sync>>() == mem::size_of_val(&a_boxed_error))
+    ///     size_of::<Box<dyn Error + Send + Sync>>() == size_of_val(&a_boxed_error))
     /// ```
     fn from(err: E) -> Box<dyn Error + Send + Sync + 'a> {
         Box::new(err)
@@ -555,12 +598,11 @@ impl<'a> From<String> for Box<dyn Error + Send + Sync + 'a> {
     ///
     /// ```
     /// use std::error::Error;
-    /// use std::mem;
     ///
     /// let a_string_error = "a string error".to_string();
     /// let a_boxed_error = Box::<dyn Error + Send + Sync>::from(a_string_error);
     /// assert!(
-    ///     mem::size_of::<Box<dyn Error + Send + Sync>>() == mem::size_of_val(&a_boxed_error))
+    ///     size_of::<Box<dyn Error + Send + Sync>>() == size_of_val(&a_boxed_error))
     /// ```
     #[inline]
     fn from(err: String) -> Box<dyn Error + Send + Sync + 'a> {
@@ -599,11 +641,10 @@ impl<'a> From<String> for Box<dyn Error + 'a> {
     ///
     /// ```
     /// use std::error::Error;
-    /// use std::mem;
     ///
     /// let a_string_error = "a string error".to_string();
     /// let a_boxed_error = Box::<dyn Error>::from(a_string_error);
-    /// assert!(mem::size_of::<Box<dyn Error>>() == mem::size_of_val(&a_boxed_error))
+    /// assert!(size_of::<Box<dyn Error>>() == size_of_val(&a_boxed_error))
     /// ```
     fn from(str_err: String) -> Box<dyn Error + 'a> {
         let err1: Box<dyn Error + Send + Sync> = From::from(str_err);
@@ -623,12 +664,11 @@ impl<'a> From<&str> for Box<dyn Error + Send + Sync + 'a> {
     ///
     /// ```
     /// use std::error::Error;
-    /// use std::mem;
     ///
     /// let a_str_error = "a str error";
     /// let a_boxed_error = Box::<dyn Error + Send + Sync>::from(a_str_error);
     /// assert!(
-    ///     mem::size_of::<Box<dyn Error + Send + Sync>>() == mem::size_of_val(&a_boxed_error))
+    ///     size_of::<Box<dyn Error + Send + Sync>>() == size_of_val(&a_boxed_error))
     /// ```
     #[inline]
     fn from(err: &str) -> Box<dyn Error + Send + Sync + 'a> {
@@ -647,11 +687,10 @@ impl<'a> From<&str> for Box<dyn Error + 'a> {
     ///
     /// ```
     /// use std::error::Error;
-    /// use std::mem;
     ///
     /// let a_str_error = "a str error";
     /// let a_boxed_error = Box::<dyn Error>::from(a_str_error);
-    /// assert!(mem::size_of::<Box<dyn Error>>() == mem::size_of_val(&a_boxed_error))
+    /// assert!(size_of::<Box<dyn Error>>() == size_of_val(&a_boxed_error))
     /// ```
     fn from(err: &str) -> Box<dyn Error + 'a> {
         From::from(String::from(err))
@@ -667,13 +706,12 @@ impl<'a, 'b> From<Cow<'b, str>> for Box<dyn Error + Send + Sync + 'a> {
     ///
     /// ```
     /// use std::error::Error;
-    /// use std::mem;
     /// use std::borrow::Cow;
     ///
     /// let a_cow_str_error = Cow::from("a str error");
     /// let a_boxed_error = Box::<dyn Error + Send + Sync>::from(a_cow_str_error);
     /// assert!(
-    ///     mem::size_of::<Box<dyn Error + Send + Sync>>() == mem::size_of_val(&a_boxed_error))
+    ///     size_of::<Box<dyn Error + Send + Sync>>() == size_of_val(&a_boxed_error))
     /// ```
     fn from(err: Cow<'b, str>) -> Box<dyn Error + Send + Sync + 'a> {
         From::from(String::from(err))
@@ -689,12 +727,11 @@ impl<'a, 'b> From<Cow<'b, str>> for Box<dyn Error + 'a> {
     ///
     /// ```
     /// use std::error::Error;
-    /// use std::mem;
     /// use std::borrow::Cow;
     ///
     /// let a_cow_str_error = Cow::from("a str error");
     /// let a_boxed_error = Box::<dyn Error>::from(a_cow_str_error);
-    /// assert!(mem::size_of::<Box<dyn Error>>() == mem::size_of_val(&a_boxed_error))
+    /// assert!(size_of::<Box<dyn Error>>() == size_of_val(&a_boxed_error))
     /// ```
     fn from(err: Cow<'b, str>) -> Box<dyn Error + 'a> {
         From::from(String::from(err))

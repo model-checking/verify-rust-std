@@ -17,6 +17,8 @@ pub(crate) use unicode_data::uppercase::lookup as Uppercase;
 pub(crate) use unicode_data::white_space::lookup as White_Space;
 
 pub(crate) mod printable;
+
+#[allow(unreachable_pub)]
 mod unicode_data;
 
 /// The version of [Unicode](https://www.unicode.org/) that the Unicode parts of
@@ -34,7 +36,7 @@ pub const UNICODE_VERSION: (u8, u8, u8) = unicode_data::UNICODE_VERSION;
 
 #[cfg(kani)]
 mod verify {
-    use super::conversions::{to_upper, to_lower};
+    use super::conversions::{to_lower, to_upper};
     use crate::kani;
 
     /// Checks that `to_upper` does not trigger UB or panics for all valid characters.

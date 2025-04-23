@@ -4,21 +4,20 @@
 // collections, resulting in having to optimize down excess IR multiple times.
 // Your performance intuition is useless. Run perf.
 
-use safety::{ensures, Invariant, requires};
-use crate::error::Error;
-use crate::intrinsics::{unchecked_add, unchecked_mul, unchecked_sub};
-use crate::mem::SizedTypeProperties;
-use crate::ptr::{Alignment, NonNull};
-use crate::{assert_unsafe_precondition, fmt, mem};
+use safety::{Invariant, ensures, requires};
 
-#[cfg(kani)]
-use crate::kani;
 #[cfg(kani)]
 use crate::cmp;
-
+use crate::error::Error;
+use crate::intrinsics::{unchecked_add, unchecked_mul, unchecked_sub};
+#[cfg(kani)]
+use crate::kani;
+use crate::mem::SizedTypeProperties;
+use crate::ptr::{Alignment, NonNull};
 // Used only for contract verification.
 #[allow(unused_imports)]
 use crate::ub_checks::Invariant;
+use crate::{assert_unsafe_precondition, fmt, mem};
 
 // While this function is used in one place and its implementation
 // could be inlined, the previous attempts to do so made rustc
@@ -27,7 +26,7 @@ use crate::ub_checks::Invariant;
 // * https://github.com/rust-lang/rust/pull/72189
 // * https://github.com/rust-lang/rust/pull/79827
 const fn size_align<T>() -> (usize, usize) {
-    (mem::size_of::<T>(), mem::align_of::<T>())
+    (size_of::<T>(), align_of::<T>())
 }
 
 /// Layout of a block of memory.
@@ -178,7 +177,6 @@ impl Layout {
     #[must_use = "this returns the minimum alignment, \
                   without modifying the layout"]
     #[inline]
-    #[cfg_attr(bootstrap, rustc_allow_const_fn_unstable(ptr_alignment_type))]
     pub const fn align(&self) -> usize {
         self.align.as_usize()
     }
@@ -202,13 +200,13 @@ impl Layout {
     /// allocate backing structure for `T` (which could be a trait
     /// or other unsized type like a slice).
     #[stable(feature = "alloc_layout", since = "1.28.0")]
-    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
+    #[rustc_const_stable(feature = "const_alloc_layout", since = "1.85.0")]
     #[must_use]
     #[inline]
     #[requires(mem::align_of_val(t).is_power_of_two())]
     #[ensures(|result| result.align() == mem::align_of_val(t))]
     pub const fn for_value<T: ?Sized>(t: &T) -> Self {
-        let (size, align) = (mem::size_of_val(t), mem::align_of_val(t));
+        let (size, align) = (size_of_val(t), align_of_val(t));
         // SAFETY: see rationale in `new` for why this is using the unsafe variant
         unsafe { Layout::from_size_align_unchecked(size, align) }
     }
@@ -241,7 +239,6 @@ impl Layout {
     /// [trait object]: ../../book/ch17-02-trait-objects.html
     /// [extern type]: ../../unstable-book/language-features/extern-types.html
     #[unstable(feature = "layout_for_ptr", issue = "69835")]
-    #[rustc_const_unstable(feature = "layout_for_ptr", issue = "69835")]
     #[must_use]
     // TODO: we should try to capture the above constraints on T in a `requires` clause, and the
     // metadata helpers from https://github.com/model-checking/verify-rust-std/pull/37 may be able
@@ -265,8 +262,7 @@ impl Layout {
     #[inline]
     #[ensures(|result| result.is_aligned())]
     pub const fn dangling(&self) -> NonNull<u8> {
-        // SAFETY: align is guaranteed to be non-zero
-        unsafe { NonNull::new_unchecked(crate::ptr::without_provenance_mut::<u8>(self.align())) }
+        NonNull::without_provenance(self.align.as_nonzero())
     }
 
     /// Creates a layout describing the record that can hold a value
@@ -284,8 +280,7 @@ impl Layout {
     /// Returns an error if the combination of `self.size()` and the given
     /// `align` violates the conditions listed in [`Layout::from_size_align`].
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
-    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
-    #[cfg_attr(not(bootstrap), rustc_const_stable_indirect)]
+    #[rustc_const_stable(feature = "const_alloc_layout", since = "1.85.0")]
     #[inline]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() >= align)]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().align().is_power_of_two())]
@@ -363,8 +358,7 @@ impl Layout {
     /// This is equivalent to adding the result of `padding_needed_for`
     /// to the layout's current size.
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
-    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
-    #[cfg_attr(not(bootstrap), rustc_const_stable_indirect)]
+    #[rustc_const_stable(feature = "const_alloc_layout", since = "1.85.0")]
     #[must_use = "this returns a new `Layout`, \
                   without modifying the original"]
     #[inline]
@@ -481,8 +475,7 @@ impl Layout {
     /// # assert_eq!(repr_c(&[u64, u32, u16, u32]), Ok((s, vec![0, 8, 12, 16])));
     /// ```
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
-    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
-    #[cfg_attr(not(bootstrap), rustc_const_stable_indirect)]
+    #[rustc_const_stable(feature = "const_alloc_layout", since = "1.85.0")]
     #[inline]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.align() == cmp::max(self.align(), next.align()))]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().0.size() >= self.size() + next.size())]
@@ -558,8 +551,7 @@ impl Layout {
     /// On arithmetic overflow or when the total size would exceed
     /// `isize::MAX`, returns `LayoutError`.
     #[stable(feature = "alloc_layout_manipulation", since = "1.44.0")]
-    #[rustc_const_unstable(feature = "const_alloc_layout", issue = "67521")]
-    #[cfg_attr(not(bootstrap), rustc_const_stable_indirect)]
+    #[rustc_const_stable(feature = "const_alloc_layout", since = "1.85.0")]
     #[inline]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == n * mem::size_of::<T>())]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == mem::align_of::<T>())]
@@ -593,6 +585,14 @@ impl Layout {
             unsafe { Ok(Layout::from_size_align_unchecked(array_size, align.as_usize())) }
         }
     }
+
+    /// Perma-unstable access to `align` as `Alignment` type.
+    #[unstable(issue = "none", feature = "std_internals")]
+    #[doc(hidden)]
+    #[inline]
+    pub const fn alignment(&self) -> Alignment {
+        self.align
+    }
 }
 
 #[stable(feature = "alloc_layout", since = "1.28.0")]
@@ -624,14 +624,15 @@ impl fmt::Display for LayoutError {
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
 
     impl kani::Arbitrary for Layout {
         fn any() -> Self {
             let align = kani::any::<Alignment>();
-            let size = kani::any_where(|s: &usize| *s <= isize::MAX as usize - (align.as_usize() - 1));
+            let size =
+                kani::any_where(|s: &usize| *s <= isize::MAX as usize - (align.as_usize() - 1));
             unsafe { Layout { size, align } }
         }
     }
@@ -684,8 +685,8 @@ mod verify {
     pub fn check_for_value_i32() {
         let x = kani::any::<i32>();
         let _ = Layout::for_value::<i32>(&x);
-        let array : [i32; 2] = [1, 2];
-        let _ = Layout::for_value::<[i32]>(&array[1 .. 1]);
+        let array: [i32; 2] = [1, 2];
+        let _ = Layout::for_value::<[i32]>(&array[1..1]);
         let trait_ref: &dyn core::fmt::Debug = &x;
         let _ = Layout::for_value::<dyn core::fmt::Debug>(trait_ref);
         // TODO: the case of an extern type as unsized tail is not yet covered
@@ -724,7 +725,7 @@ mod verify {
     pub fn check_padding_needed_for() {
         let layout = kani::any::<Layout>();
         let a2 = kani::any::<usize>();
-        if(a2.is_power_of_two() && a2 <= layout.align()) {
+        if (a2.is_power_of_two() && a2 <= layout.align()) {
             let _ = layout.padding_needed_for(a2);
         }
     }

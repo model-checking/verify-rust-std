@@ -563,6 +563,7 @@ use crate::pin::Pin;
 use crate::{cmp, convert, hint, mem, slice};
 
 /// The `Option` type. See [the module level documentation](self) for more.
+#[doc(search_unbox)]
 #[derive(Copy, Eq, Debug, Hash)]
 #[rustc_diagnostic_item = "Option"]
 #[lang = "Option"]
@@ -737,7 +738,7 @@ impl<T> Option<T> {
     #[inline]
     #[must_use]
     #[stable(feature = "pin", since = "1.33.0")]
-    #[rustc_const_unstable(feature = "const_option_ext", issue = "91930")]
+    #[rustc_const_stable(feature = "const_option_ext", since = "1.84.0")]
     pub const fn as_pin_ref(self: Pin<&Self>) -> Option<Pin<&T>> {
         // FIXME(const-hack): use `map` once that is possible
         match Pin::get_ref(self).as_ref() {
@@ -754,7 +755,7 @@ impl<T> Option<T> {
     #[inline]
     #[must_use]
     #[stable(feature = "pin", since = "1.33.0")]
-    #[rustc_const_unstable(feature = "const_option_ext", issue = "91930")]
+    #[rustc_const_stable(feature = "const_option_ext", since = "1.84.0")]
     pub const fn as_pin_mut(self: Pin<&mut Self>) -> Option<Pin<&mut T>> {
         // SAFETY: `get_unchecked_mut` is never used to move the `Option` inside `self`.
         // `x` is guaranteed to be pinned because it comes from `self` which is pinned.
@@ -801,7 +802,7 @@ impl<T> Option<T> {
     #[inline]
     #[must_use]
     #[stable(feature = "option_as_slice", since = "1.75.0")]
-    #[rustc_const_unstable(feature = "const_option_ext", issue = "91930")]
+    #[rustc_const_stable(feature = "const_option_ext", since = "1.84.0")]
     pub const fn as_slice(&self) -> &[T] {
         // SAFETY: When the `Option` is `Some`, we're using the actual pointer
         // to the payload, with a length of 1, so this is equivalent to
@@ -856,7 +857,7 @@ impl<T> Option<T> {
     #[inline]
     #[must_use]
     #[stable(feature = "option_as_slice", since = "1.75.0")]
-    #[rustc_const_unstable(feature = "const_option_ext", issue = "91930")]
+    #[rustc_const_stable(feature = "const_option_ext", since = "1.84.0")]
     pub const fn as_mut_slice(&mut self) -> &mut [T] {
         // SAFETY: When the `Option` is `Some`, we're using the actual pointer
         // to the payload, with a length of 1, so this is equivalent to
@@ -923,7 +924,7 @@ impl<T> Option<T> {
     #[inline]
     #[track_caller]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "option_expect")]
+    #[rustc_diagnostic_item = "option_expect"]
     #[rustc_allow_const_fn_unstable(const_precise_live_drops)]
     #[rustc_const_stable(feature = "const_option", since = "1.83.0")]
     pub const fn expect(self, msg: &str) -> T {
@@ -936,10 +937,16 @@ impl<T> Option<T> {
     /// Returns the contained [`Some`] value, consuming the `self` value.
     ///
     /// Because this function may panic, its use is generally discouraged.
+    /// Panics are meant for unrecoverable errors, and
+    /// [may abort the entire program][panic-abort].
+    ///
     /// Instead, prefer to use pattern matching and handle the [`None`]
     /// case explicitly, or call [`unwrap_or`], [`unwrap_or_else`], or
-    /// [`unwrap_or_default`].
+    /// [`unwrap_or_default`]. In functions returning `Option`, you can use
+    /// [the `?` (try) operator][try-option].
     ///
+    /// [panic-abort]: https://doc.rust-lang.org/book/ch09-01-unrecoverable-errors-with-panic.html
+    /// [try-option]: https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html#where-the--operator-can-be-used
     /// [`unwrap_or`]: Option::unwrap_or
     /// [`unwrap_or_else`]: Option::unwrap_or_else
     /// [`unwrap_or_default`]: Option::unwrap_or_default
@@ -962,7 +969,7 @@ impl<T> Option<T> {
     #[inline(always)]
     #[track_caller]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[cfg_attr(not(test), rustc_diagnostic_item = "option_unwrap")]
+    #[rustc_diagnostic_item = "option_unwrap"]
     #[rustc_allow_const_fn_unstable(const_precise_live_drops)]
     #[rustc_const_stable(feature = "const_option", since = "1.83.0")]
     pub const fn unwrap(self) -> T {
@@ -2043,6 +2050,9 @@ where
     }
 }
 
+#[unstable(feature = "ergonomic_clones", issue = "132290")]
+impl<T> crate::clone::UseCloned for Option<T> where T: crate::clone::UseCloned {}
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Default for Option<T> {
     /// Returns [`None`][Option::None].
@@ -2569,5 +2579,32 @@ impl<T, const N: usize> [Option<T>; N] {
     #[unstable(feature = "option_array_transpose", issue = "130828")]
     pub fn transpose(self) -> Option<[T; N]> {
         self.try_map(core::convert::identity)
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use crate::kani;
+    use crate::option::Option;
+
+    #[kani::proof]
+    fn verify_as_slice() {
+        if kani::any() {
+            // Case 1: Option is Some
+            let value: u32 = kani::any();
+            let some_option: Option<u32> = Some(value);
+
+            let slice = some_option.as_slice();
+            assert_eq!(slice.len(), 1); // The slice should have exactly one element
+            assert_eq!(slice[0], value); // The value in the slice should match
+        } else {
+            // Case 2: Option is None
+            let none_option: Option<u32> = None;
+
+            let empty_slice = none_option.as_slice();
+            assert_eq!(empty_slice.len(), 0); // The slice should be empty
+            assert!(empty_slice.is_empty()); // Explicit check for emptiness
+        }
     }
 }

@@ -41,8 +41,10 @@ mod platform {
     pub use crate::os::aix::*;
     #[cfg(target_os = "android")]
     pub use crate::os::android::*;
+    #[cfg(target_os = "cygwin")]
+    pub use crate::os::cygwin::*;
     #[cfg(target_vendor = "apple")]
-    pub(super) use crate::os::darwin::*;
+    pub use crate::os::darwin::*;
     #[cfg(target_os = "dragonfly")]
     pub use crate::os::dragonfly::*;
     #[cfg(target_os = "emscripten")]

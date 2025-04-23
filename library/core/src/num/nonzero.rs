@@ -1,16 +1,19 @@
 //! Definitions of integer that is known not to equal zero.
 
+use safety::{ensures, requires};
+
 use super::{IntErrorKind, ParseIntError};
+use crate::clone::UseCloned;
 use crate::cmp::Ordering;
 use crate::hash::{Hash, Hasher};
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::{Freeze, StructuralPartialEq};
 use crate::ops::{BitOr, BitOrAssign, Div, DivAssign, Neg, Rem, RemAssign};
 use crate::panic::{RefUnwindSafe, UnwindSafe};
 use crate::str::FromStr;
 use crate::{fmt, intrinsics, ptr, ub_checks};
-use safety::{ensures, requires};
-#[cfg(kani)]
-use crate::kani;
+
 /// A marker trait for primitive types which can be zero.
 ///
 /// This is an implementation detail for <code>[NonZero]\<T></code> which may disappear or be replaced at any time.
@@ -45,19 +48,6 @@ macro_rules! impl_zeroable_primitive {
                 issue = "none"
             )]
             pub trait Sealed {}
-
-            $(
-                #[derive(Debug, Clone, Copy, PartialEq)]
-                #[repr(transparent)]
-                #[rustc_layout_scalar_valid_range_start(1)]
-                #[rustc_nonnull_optimization_guaranteed]
-                #[unstable(
-                    feature = "nonzero_internals",
-                    reason = "implementation detail which may disappear or be replaced at any time",
-                    issue = "none"
-                )]
-                pub struct $NonZeroInner($primitive);
-            )+
         }
 
         $(
@@ -74,7 +64,7 @@ macro_rules! impl_zeroable_primitive {
                 issue = "none"
             )]
             unsafe impl ZeroablePrimitive for $primitive {
-                type NonZeroInner = private::$NonZeroInner;
+                type NonZeroInner = super::niche_types::$NonZeroInner;
             }
         )+
     };
@@ -101,10 +91,29 @@ impl_zeroable_primitive!(
 /// For example, `Option<NonZero<u32>>` is the same size as `u32`:
 ///
 /// ```
-/// use core::{mem::size_of, num::NonZero};
+/// use core::{num::NonZero};
 ///
 /// assert_eq!(size_of::<Option<NonZero<u32>>>(), size_of::<u32>());
 /// ```
+///
+/// # Layout
+///
+/// `NonZero<T>` is guaranteed to have the same layout and bit validity as `T`
+/// with the exception that the all-zero bit pattern is invalid.
+/// `Option<NonZero<T>>` is guaranteed to be compatible with `T`, including in
+/// FFI.
+///
+/// Thanks to the [null pointer optimization], `NonZero<T>` and
+/// `Option<NonZero<T>>` are guaranteed to have the same size and alignment:
+///
+/// ```
+/// use std::num::NonZero;
+///
+/// assert_eq!(size_of::<NonZero<u32>>(), size_of::<Option<NonZero<u32>>>());
+/// assert_eq!(align_of::<NonZero<u32>>(), align_of::<Option<NonZero<u32>>>());
+/// ```
+///
+/// [null pointer optimization]: crate::option#representation
 #[stable(feature = "generic_nonzero", since = "1.79.0")]
 #[repr(transparent)]
 #[rustc_nonnull_optimization_guaranteed]
@@ -112,26 +121,40 @@ impl_zeroable_primitive!(
 pub struct NonZero<T: ZeroablePrimitive>(T::NonZeroInner);
 
 macro_rules! impl_nonzero_fmt {
-    ($Trait:ident) => {
-        #[stable(feature = "nonzero", since = "1.28.0")]
-        impl<T> fmt::$Trait for NonZero<T>
-        where
-            T: ZeroablePrimitive + fmt::$Trait,
-        {
-            #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.get().fmt(f)
+    ($(#[$Attribute:meta] $Trait:ident)*) => {
+        $(
+            #[$Attribute]
+            impl<T> fmt::$Trait for NonZero<T>
+            where
+                T: ZeroablePrimitive + fmt::$Trait,
+            {
+                #[inline]
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.get().fmt(f)
+                }
             }
-        }
+        )*
     };
 }
 
-impl_nonzero_fmt!(Debug);
-impl_nonzero_fmt!(Display);
-impl_nonzero_fmt!(Binary);
-impl_nonzero_fmt!(Octal);
-impl_nonzero_fmt!(LowerHex);
-impl_nonzero_fmt!(UpperHex);
+impl_nonzero_fmt! {
+    #[stable(feature = "nonzero", since = "1.28.0")]
+    Debug
+    #[stable(feature = "nonzero", since = "1.28.0")]
+    Display
+    #[stable(feature = "nonzero", since = "1.28.0")]
+    Binary
+    #[stable(feature = "nonzero", since = "1.28.0")]
+    Octal
+    #[stable(feature = "nonzero", since = "1.28.0")]
+    LowerHex
+    #[stable(feature = "nonzero", since = "1.28.0")]
+    UpperHex
+    #[stable(feature = "nonzero_fmt_exp", since = "1.84.0")]
+    LowerExp
+    #[stable(feature = "nonzero_fmt_exp", since = "1.84.0")]
+    UpperExp
+}
 
 macro_rules! impl_nonzero_auto_trait {
     (unsafe $Trait:ident) => {
@@ -160,9 +183,12 @@ where
 {
     #[inline]
     fn clone(&self) -> Self {
-        Self(self.0)
+        *self
     }
 }
+
+#[unstable(feature = "ergonomic_clones", issue = "132290")]
+impl<T> UseCloned for NonZero<T> where T: ZeroablePrimitive {}
 
 #[stable(feature = "nonzero", since = "1.28.0")]
 impl<T> Copy for NonZero<T> where T: ZeroablePrimitive {}
@@ -366,9 +392,9 @@ where
     #[rustc_const_stable(feature = "nonzero", since = "1.28.0")]
     #[must_use]
     #[inline]
-    // #[rustc_allow_const_fn_unstable(const_refs_to_cell)] enables byte-level 
-    // comparisons within const functions. This is needed here to validate the 
-    // contents of `T` by converting a pointer to a `u8` slice for our `requires` 
+    // #[rustc_allow_const_fn_unstable(const_refs_to_cell)] enables byte-level
+    // comparisons within const functions. This is needed here to validate the
+    // contents of `T` by converting a pointer to a `u8` slice for our `requires`
     // and `ensures` checks.
     #[rustc_allow_const_fn_unstable(const_refs_to_cell)]
     #[requires({
@@ -384,7 +410,6 @@ where
         let result_ptr: *const T = &result_inner;
         let n_slice = unsafe { core::slice::from_raw_parts(n_ptr as *const u8, size) };
         let result_slice = unsafe { core::slice::from_raw_parts(result_ptr as *const u8, size) };
-    
         n_slice == result_slice
     })]
     pub const unsafe fn new_unchecked(n: T) -> Self {
@@ -449,15 +474,21 @@ where
     #[rustc_const_stable(feature = "const_nonzero_get", since = "1.34.0")]
     #[inline]
     pub const fn get(self) -> T {
-        // FIXME: This can be changed to simply `self.0` once LLVM supports `!range` metadata
-        // for function arguments: https://github.com/llvm/llvm-project/issues/76628
-        //
         // Rustc can set range metadata only if it loads `self` from
         // memory somewhere. If the value of `self` was from by-value argument
         // of some not-inlined function, LLVM don't have range metadata
         // to understand that the value cannot be zero.
         //
-        // For now, using the transmute `assume`s the range at runtime.
+        // Using the transmute `assume`s the range at runtime.
+        //
+        // Even once LLVM supports `!range` metadata for function arguments
+        // (see <https://github.com/llvm/llvm-project/issues/76628>), this can't
+        // be `.0` because MCP#807 bans field-projecting into `scalar_valid_range`
+        // types, and it arguably wouldn't want to be anyway because if this is
+        // MIR-inlined, there's no opportunity to put that argument metadata anywhere.
+        //
+        // The good answer here will eventually be pattern types, which will hopefully
+        // allow it to go back to `.0`, maybe with a cast of some sort.
         //
         // SAFETY: `ZeroablePrimitive` guarantees that the size and bit validity
         // of `.0` is such that this transmute is sound.
@@ -470,6 +501,7 @@ macro_rules! nonzero_integer {
         #[$stability:meta]
         Self = $Ty:ident,
         Primitive = $signedness:ident $Int:ident,
+        SignedPrimitive = $Sint:ty,
         UnsignedPrimitive = $Uint:ty,
 
         // Used in doc comments.
@@ -481,13 +513,20 @@ macro_rules! nonzero_integer {
         reversed = $reversed:literal,
         leading_zeros_test = $leading_zeros_test:expr,
     ) => {
-        /// An integer that is known not to equal zero.
+        #[doc = sign_dependent_expr!{
+            $signedness ?
+            if signed {
+                concat!("An [`", stringify!($Int), "`] that is known not to equal zero.")
+            }
+            if unsigned {
+                concat!("A [`", stringify!($Int), "`] that is known not to equal zero.")
+            }
+        }]
         ///
         /// This enables some memory layout optimization.
         #[doc = concat!("For example, `Option<", stringify!($Ty), ">` is the same size as `", stringify!($Int), "`:")]
         ///
         /// ```rust
-        /// use std::mem::size_of;
         #[doc = concat!("assert_eq!(size_of::<Option<core::num::", stringify!($Ty), ">>(), size_of::<", stringify!($Int), ">());")]
         /// ```
         ///
@@ -503,7 +542,6 @@ macro_rules! nonzero_integer {
         /// are guaranteed to have the same size and alignment:
         ///
         /// ```
-        /// # use std::mem::{size_of, align_of};
         #[doc = concat!("use std::num::", stringify!($Ty), ";")]
         ///
         #[doc = concat!("assert_eq!(size_of::<", stringify!($Ty), ">(), size_of::<Option<", stringify!($Ty), ">>());")]
@@ -592,6 +630,70 @@ macro_rules! nonzero_integer {
                 }
             }
 
+            /// Returns `self` with only the most significant bit set.
+            ///
+            /// # Example
+            ///
+            /// Basic usage:
+            ///
+            /// ```
+            /// #![feature(isolate_most_least_significant_one)]
+            ///
+            /// # use core::num::NonZero;
+            /// # fn main() { test().unwrap(); }
+            /// # fn test() -> Option<()> {
+            #[doc = concat!("let a = NonZero::<", stringify!($Int), ">::new(0b_01100100)?;")]
+            #[doc = concat!("let b = NonZero::<", stringify!($Int), ">::new(0b_01000000)?;")]
+            ///
+            /// assert_eq!(a.isolate_most_significant_one(), b);
+            /// # Some(())
+            /// # }
+            /// ```
+            #[unstable(feature = "isolate_most_least_significant_one", issue = "136909")]
+            #[must_use = "this returns the result of the operation, \
+                        without modifying the original"]
+            #[inline(always)]
+            pub const fn isolate_most_significant_one(self) -> Self {
+                let n = self.get() & (((1 as $Int) << (<$Int>::BITS - 1)).wrapping_shr(self.leading_zeros()));
+
+                // SAFETY:
+                // `self` is non-zero, so masking to preserve only the most
+                // significant set bit will result in a non-zero `n`.
+                unsafe { NonZero::new_unchecked(n) }
+            }
+
+            /// Returns `self` with only the least significant bit set.
+            ///
+            /// # Example
+            ///
+            /// Basic usage:
+            ///
+            /// ```
+            /// #![feature(isolate_most_least_significant_one)]
+            ///
+            /// # use core::num::NonZero;
+            /// # fn main() { test().unwrap(); }
+            /// # fn test() -> Option<()> {
+            #[doc = concat!("let a = NonZero::<", stringify!($Int), ">::new(0b_01100100)?;")]
+            #[doc = concat!("let b = NonZero::<", stringify!($Int), ">::new(0b_00000100)?;")]
+            ///
+            /// assert_eq!(a.isolate_least_significant_one(), b);
+            /// # Some(())
+            /// # }
+            /// ```
+            #[unstable(feature = "isolate_most_least_significant_one", issue = "136909")]
+            #[must_use = "this returns the result of the operation, \
+                        without modifying the original"]
+            #[inline(always)]
+            pub const fn isolate_least_significant_one(self) -> Self {
+                let n = self.get();
+                let n = n & n.wrapping_neg();
+
+                // SAFETY: `self` is non-zero, so `self` with only its least
+                // significant set bit will remain non-zero.
+                unsafe { NonZero::new_unchecked(n) }
+            }
+
             /// Returns the number of ones in the binary representation of `self`.
             ///
             /// # Examples
@@ -599,8 +701,6 @@ macro_rules! nonzero_integer {
             /// Basic usage:
             ///
             /// ```
-            /// #![feature(non_zero_count_ones)]
-            ///
             /// # use std::num::NonZero;
             /// #
             /// # fn main() { test().unwrap(); }
@@ -614,8 +714,8 @@ macro_rules! nonzero_integer {
             /// # }
             /// ```
             ///
-            #[unstable(feature = "non_zero_count_ones", issue = "120287")]
-            #[rustc_const_unstable(feature = "non_zero_count_ones", issue = "120287")]
+            #[stable(feature = "non_zero_count_ones", since = "1.86.0")]
+            #[rustc_const_stable(feature = "non_zero_count_ones", since = "1.86.0")]
             #[doc(alias = "popcount")]
             #[doc(alias = "popcnt")]
             #[must_use = "this returns the result of the operation, \
@@ -894,6 +994,7 @@ macro_rules! nonzero_integer {
 
             nonzero_integer_signedness_dependent_methods! {
                 Primitive = $signedness $Int,
+                SignedPrimitive = $Sint,
                 UnsignedPrimitive = $Uint,
             }
 
@@ -1123,6 +1224,7 @@ macro_rules! nonzero_integer {
     (
         Self = $Ty:ident,
         Primitive = unsigned $Int:ident,
+        SignedPrimitive = $Sint:ident,
         rot = $rot:literal,
         rot_op = $rot_op:literal,
         rot_result = $rot_result:literal,
@@ -1135,6 +1237,7 @@ macro_rules! nonzero_integer {
             #[stable(feature = "nonzero", since = "1.28.0")]
             Self = $Ty,
             Primitive = unsigned $Int,
+            SignedPrimitive = $Sint,
             UnsignedPrimitive = $Int,
             rot = $rot,
             rot_op = $rot_op,
@@ -1149,7 +1252,7 @@ macro_rules! nonzero_integer {
     (
         Self = $Ty:ident,
         Primitive = signed $Int:ident,
-        UnsignedPrimitive = $UInt:ident,
+        UnsignedPrimitive = $Uint:ident,
         rot = $rot:literal,
         rot_op = $rot_op:literal,
         rot_result = $rot_result:literal,
@@ -1161,7 +1264,8 @@ macro_rules! nonzero_integer {
             #[stable(feature = "signed_nonzero", since = "1.34.0")]
             Self = $Ty,
             Primitive = signed $Int,
-            UnsignedPrimitive = $UInt,
+            SignedPrimitive = $Int,
+            UnsignedPrimitive = $Uint,
             rot = $rot,
             rot_op = $rot_op,
             rot_result = $rot_result,
@@ -1180,8 +1284,12 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
         impl Div<NonZero<$Int>> for $Int {
             type Output = $Int;
 
+            /// Same as `self / other.get()`, but because `other` is a `NonZero<_>`,
+            /// there's never a runtime check for division-by-zero.
+            ///
             /// This operation rounds towards zero, truncating any fractional
             /// part of the exact result, and cannot panic.
+            #[doc(alias = "unchecked_div")]
             #[inline]
             fn div(self, other: NonZero<$Int>) -> $Int {
                 // SAFETY: Division by zero is checked because `other` is non-zero,
@@ -1192,6 +1300,9 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
 
         #[stable(feature = "nonzero_div_assign", since = "1.79.0")]
         impl DivAssign<NonZero<$Int>> for $Int {
+            /// Same as `self /= other.get()`, but because `other` is a `NonZero<_>`,
+            /// there's never a runtime check for division-by-zero.
+            ///
             /// This operation rounds towards zero, truncating any fractional
             /// part of the exact result, and cannot panic.
             #[inline]
@@ -1221,6 +1332,35 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
                 *self = *self % other;
             }
         }
+
+        impl NonZero<$Int> {
+            /// Calculates the quotient of `self` and `rhs`, rounding the result towards positive infinity.
+            ///
+            /// The result is guaranteed to be non-zero.
+            ///
+            /// # Examples
+            ///
+            /// ```
+            /// # #![feature(unsigned_nonzero_div_ceil)]
+            /// # use std::num::NonZero;
+            #[doc = concat!("let one = NonZero::new(1", stringify!($Int), ").unwrap();")]
+            #[doc = concat!("let max = NonZero::new(", stringify!($Int), "::MAX).unwrap();")]
+            /// assert_eq!(one.div_ceil(max), one);
+            ///
+            #[doc = concat!("let two = NonZero::new(2", stringify!($Int), ").unwrap();")]
+            #[doc = concat!("let three = NonZero::new(3", stringify!($Int), ").unwrap();")]
+            /// assert_eq!(three.div_ceil(two), two);
+            /// ```
+            #[unstable(feature = "unsigned_nonzero_div_ceil", issue = "132968")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn div_ceil(self, rhs: Self) -> Self {
+                let v = self.get().div_ceil(rhs.get());
+                // SAFETY: ceiled division of two positive integers can never be zero.
+                unsafe { Self::new_unchecked(v) }
+            }
+        }
     };
     // Impls for signed nonzero types only.
     (signed $Int:ty) => {
@@ -1245,6 +1385,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
     // Associated items for unsigned nonzero types only.
     (
         Primitive = unsigned $Int:ident,
+        SignedPrimitive = $Sint:ty,
         UnsignedPrimitive = $Uint:ty,
     ) => {
         /// The smallest value that can be represented by this non-zero
@@ -1494,8 +1635,6 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         /// # Examples
         ///
         /// ```
-        /// #![feature(num_midpoint)]
-        ///
         /// # use std::num::NonZero;
         /// #
         /// # fn main() { test().unwrap(); }
@@ -1509,8 +1648,8 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         /// # Some(())
         /// # }
         /// ```
-        #[unstable(feature = "num_midpoint", issue = "110840")]
-        #[rustc_const_unstable(feature = "const_num_midpoint", issue = "110840")]
+        #[stable(feature = "num_midpoint", since = "1.85.0")]
+        #[rustc_const_stable(feature = "num_midpoint", since = "1.85.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -1573,8 +1712,8 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         /// # Some(())
         /// # }
         /// ```
-        #[stable(feature = "isqrt", since = "CURRENT_RUSTC_VERSION")]
-        #[rustc_const_stable(feature = "isqrt", since = "CURRENT_RUSTC_VERSION")]
+        #[stable(feature = "isqrt", since = "1.84.0")]
+        #[rustc_const_stable(feature = "isqrt", since = "1.84.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -1588,11 +1727,35 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
             // results will be sqrt(1), which is 1, so a result can't be zero.
             unsafe { Self::new_unchecked(result) }
         }
+
+        /// Returns the bit pattern of `self` reinterpreted as a signed integer of the same size.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        ///
+        /// ```
+        /// # use std::num::NonZero;
+        ///
+        #[doc = concat!("let n = NonZero::<", stringify!($Int), ">::MAX;")]
+        ///
+        #[doc = concat!("assert_eq!(n.cast_signed(), NonZero::new(-1", stringify!($Sint), ").unwrap());")]
+        /// ```
+        #[stable(feature = "integer_sign_cast", since = "1.87.0")]
+        #[rustc_const_stable(feature = "integer_sign_cast", since = "1.87.0")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline(always)]
+        pub const fn cast_signed(self) -> NonZero<$Sint> {
+            // SAFETY: `self.get()` can't be zero
+            unsafe { NonZero::new_unchecked(self.get().cast_signed()) }
+        }
     };
 
     // Associated items for signed nonzero types only.
     (
         Primitive = signed $Int:ident,
+        SignedPrimitive = $Sint:ty,
         UnsignedPrimitive = $Uint:ty,
     ) => {
         /// The smallest value that can be represented by this non-zero
@@ -2003,12 +2166,37 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
             // SAFETY: negation of nonzero cannot yield zero values.
             unsafe { Self::new_unchecked(result) }
         }
+
+        /// Returns the bit pattern of `self` reinterpreted as an unsigned integer of the same size.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        ///
+        /// ```
+        /// # use std::num::NonZero;
+        ///
+        #[doc = concat!("let n = NonZero::new(-1", stringify!($Int), ").unwrap();")]
+        ///
+        #[doc = concat!("assert_eq!(n.cast_unsigned(), NonZero::<", stringify!($Uint), ">::MAX);")]
+        /// ```
+        #[stable(feature = "integer_sign_cast", since = "1.87.0")]
+        #[rustc_const_stable(feature = "integer_sign_cast", since = "1.87.0")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline(always)]
+        pub const fn cast_unsigned(self) -> NonZero<$Uint> {
+            // SAFETY: `self.get()` can't be zero
+            unsafe { NonZero::new_unchecked(self.get().cast_unsigned()) }
+        }
+
     };
 }
 
 nonzero_integer! {
     Self = NonZeroU8,
     Primitive = unsigned u8,
+    SignedPrimitive = i8,
     rot = 2,
     rot_op = "0x82",
     rot_result = "0xa",
@@ -2020,6 +2208,7 @@ nonzero_integer! {
 nonzero_integer! {
     Self = NonZeroU16,
     Primitive = unsigned u16,
+    SignedPrimitive = i16,
     rot = 4,
     rot_op = "0xa003",
     rot_result = "0x3a",
@@ -2031,6 +2220,7 @@ nonzero_integer! {
 nonzero_integer! {
     Self = NonZeroU32,
     Primitive = unsigned u32,
+    SignedPrimitive = i32,
     rot = 8,
     rot_op = "0x10000b3",
     rot_result = "0xb301",
@@ -2042,6 +2232,7 @@ nonzero_integer! {
 nonzero_integer! {
     Self = NonZeroU64,
     Primitive = unsigned u64,
+    SignedPrimitive = i64,
     rot = 12,
     rot_op = "0xaa00000000006e1",
     rot_result = "0x6e10aa",
@@ -2053,6 +2244,7 @@ nonzero_integer! {
 nonzero_integer! {
     Self = NonZeroU128,
     Primitive = unsigned u128,
+    SignedPrimitive = i128,
     rot = 16,
     rot_op = "0x13f40000000000000000000000004f76",
     rot_result = "0x4f7613f4",
@@ -2065,6 +2257,7 @@ nonzero_integer! {
 nonzero_integer! {
     Self = NonZeroUsize,
     Primitive = unsigned usize,
+    SignedPrimitive = isize,
     rot = 4,
     rot_op = "0xa003",
     rot_result = "0x3a",
@@ -2077,6 +2270,7 @@ nonzero_integer! {
 nonzero_integer! {
     Self = NonZeroUsize,
     Primitive = unsigned usize,
+    SignedPrimitive = isize,
     rot = 8,
     rot_op = "0x10000b3",
     rot_result = "0xb301",
@@ -2089,6 +2283,7 @@ nonzero_integer! {
 nonzero_integer! {
     Self = NonZeroUsize,
     Primitive = unsigned usize,
+    SignedPrimitive = isize,
     rot = 12,
     rot_op = "0xaa00000000006e1",
     rot_result = "0x6e10aa",
@@ -2196,24 +2391,24 @@ nonzero_integer! {
     reversed = "0x6a2c48091e6a2c48",
 }
 
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 #[cfg(kani)]
 mod verify {
-      use super::*;
+    use super::*;
 
     macro_rules! nonzero_check {
         ($t:ty, $nonzero_type:ty, $nonzero_check_new_unchecked_for:ident) => {
             #[kani::proof_for_contract(NonZero::new_unchecked)]
             pub fn $nonzero_check_new_unchecked_for() {
-                let x: $t = kani::any();  // Generates a symbolic value of the provided type
+                let x: $t = kani::any(); // Generates a symbolic value of the provided type
 
                 unsafe {
-                    <$nonzero_type>::new_unchecked(x);  // Calls NonZero::new_unchecked for the specified NonZero type
+                    <$nonzero_type>::new_unchecked(x); // Calls NonZero::new_unchecked for the specified NonZero type
                 }
             }
         };
     }
-    
+
     // Use the macro to generate different versions of the function for multiple types
     nonzero_check!(i8, core::num::NonZeroI8, nonzero_check_new_unchecked_for_i8);
     nonzero_check!(i16, core::num::NonZeroI16, nonzero_check_new_unchecked_for_16);
@@ -2227,7 +2422,6 @@ mod verify {
     nonzero_check!(u64, core::num::NonZeroU64, nonzero_check_new_unchecked_for_u64);
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
-
 
     macro_rules! nonzero_check_from_mut_unchecked {
         ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
@@ -2267,6 +2461,23 @@ mod verify {
 
                 unsafe {
                     x.unchecked_mul(y);
+                }
+            }
+        };
+    }
+
+    macro_rules! nonzero_check_cmp {
+        ($nonzero_type:ty, $nonzero_check_cmp_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_cmp_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                if x < y {
+                    assert!(x.cmp(&y) == core::cmp::Ordering::Less);
+                } else if x > y {
+                    assert!(x.cmp(&y) == core::cmp::Ordering::Greater);
+                } else {
+                    assert!(x.cmp(&y) == core::cmp::Ordering::Equal);
                 }
             }
         };
@@ -2361,6 +2572,36 @@ mod verify {
             }
         };
     }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_cmp!(core::num::NonZeroI8, nonzero_check_cmp_for_i8);
+    nonzero_check_cmp!(core::num::NonZeroI16, nonzero_check_cmp_for_i16);
+    nonzero_check_cmp!(core::num::NonZeroI32, nonzero_check_cmp_for_i32);
+    nonzero_check_cmp!(core::num::NonZeroI64, nonzero_check_cmp_for_i64);
+    nonzero_check_cmp!(core::num::NonZeroI128, nonzero_check_cmp_for_i128);
+    nonzero_check_cmp!(core::num::NonZeroIsize, nonzero_check_cmp_for_isize);
+    nonzero_check_cmp!(core::num::NonZeroU8, nonzero_check_cmp_for_u8);
+    nonzero_check_cmp!(core::num::NonZeroU16, nonzero_check_cmp_for_u16);
+    nonzero_check_cmp!(core::num::NonZeroU32, nonzero_check_cmp_for_u32);
+    nonzero_check_cmp!(core::num::NonZeroU64, nonzero_check_cmp_for_u64);
+    nonzero_check_cmp!(core::num::NonZeroU128, nonzero_check_cmp_for_u128);
+    nonzero_check_cmp!(core::num::NonZeroUsize, nonzero_check_cmp_for_usize);
+
+    macro_rules! nonzero_check_max {
+        ($nonzero_type:ty, $nonzero_check_max_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_max_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x.max(y);
+                if x > y {
+                    assert!(result == x);
+                } else {
+                    assert!(result == y);
+                }
+            }
+        };
+    }
     
     // Generate proofs for all NonZero types
     nonzero_check_add!(i8, core::num::NonZeroI8, nonzero_check_unchecked_add_for_i8);
@@ -2375,4 +2616,171 @@ mod verify {
     nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
     nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
     nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
+
+    nonzero_check_max!(core::num::NonZeroI8, nonzero_check_max_for_i8);
+    nonzero_check_max!(core::num::NonZeroI16, nonzero_check_max_for_i16);
+    nonzero_check_max!(core::num::NonZeroI32, nonzero_check_max_for_i32);
+    nonzero_check_max!(core::num::NonZeroI64, nonzero_check_max_for_i64);
+    nonzero_check_max!(core::num::NonZeroI128, nonzero_check_max_for_i128);
+    nonzero_check_max!(core::num::NonZeroIsize, nonzero_check_max_for_isize);
+    nonzero_check_max!(core::num::NonZeroU8, nonzero_check_max_for_u8);
+    nonzero_check_max!(core::num::NonZeroU16, nonzero_check_max_for_u16);
+    nonzero_check_max!(core::num::NonZeroU32, nonzero_check_max_for_u32);
+    nonzero_check_max!(core::num::NonZeroU64, nonzero_check_max_for_u64);
+    nonzero_check_max!(core::num::NonZeroU128, nonzero_check_max_for_u128);
+    nonzero_check_max!(core::num::NonZeroUsize, nonzero_check_max_for_usize);
+
+    macro_rules! nonzero_check_min {
+        ($nonzero_type:ty, $nonzero_check_min_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_min_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x.min(y);
+                if x < y {
+                    assert!(result == x);
+                } else {
+                    assert!(result == y);
+                }
+            }
+        };
+    }
+
+    nonzero_check_min!(core::num::NonZeroI8, nonzero_check_min_for_i8);
+    nonzero_check_min!(core::num::NonZeroI16, nonzero_check_min_for_i16);
+    nonzero_check_min!(core::num::NonZeroI32, nonzero_check_min_for_i32);
+    nonzero_check_min!(core::num::NonZeroI64, nonzero_check_min_for_i64);
+    nonzero_check_min!(core::num::NonZeroI128, nonzero_check_min_for_i128);
+    nonzero_check_min!(core::num::NonZeroIsize, nonzero_check_min_for_isize);
+    nonzero_check_min!(core::num::NonZeroU8, nonzero_check_min_for_u8);
+    nonzero_check_min!(core::num::NonZeroU16, nonzero_check_min_for_u16);
+    nonzero_check_min!(core::num::NonZeroU32, nonzero_check_min_for_u32);
+    nonzero_check_min!(core::num::NonZeroU64, nonzero_check_min_for_u64);
+    nonzero_check_min!(core::num::NonZeroU128, nonzero_check_min_for_u128);
+    nonzero_check_min!(core::num::NonZeroUsize, nonzero_check_min_for_usize);
+
+    macro_rules! nonzero_check_clamp {
+        ($nonzero_type:ty, $nonzero_check_clamp_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_clamp_for() {
+                let x: $nonzero_type = kani::any();
+                let min: $nonzero_type = kani::any();
+                let max: $nonzero_type = kani::any();
+                // Ensure min <= max, so the function should no panic
+                kani::assume(min <= max);
+                // Use the clamp function and check the result
+                let result = x.clamp(min, max);
+                if x < min {
+                    assert!(result == min);
+                } else if x > max {
+                    assert!(result == max);
+                } else {
+                    assert!(result == x);
+                }
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_clamp!(core::num::NonZeroI8, nonzero_check_clamp_for_i8);
+    nonzero_check_clamp!(core::num::NonZeroI16, nonzero_check_clamp_for_16);
+    nonzero_check_clamp!(core::num::NonZeroI32, nonzero_check_clamp_for_32);
+    nonzero_check_clamp!(core::num::NonZeroI64, nonzero_check_clamp_for_64);
+    nonzero_check_clamp!(core::num::NonZeroI128, nonzero_check_clamp_for_128);
+    nonzero_check_clamp!(core::num::NonZeroIsize, nonzero_check_clamp_for_isize);
+    nonzero_check_clamp!(core::num::NonZeroU8, nonzero_check_clamp_for_u8);
+    nonzero_check_clamp!(core::num::NonZeroU16, nonzero_check_clamp_for_u16);
+    nonzero_check_clamp!(core::num::NonZeroU32, nonzero_check_clamp_for_u32);
+    nonzero_check_clamp!(core::num::NonZeroU64, nonzero_check_clamp_for_u64);
+    nonzero_check_clamp!(core::num::NonZeroU128, nonzero_check_clamp_for_u128);
+    nonzero_check_clamp!(core::num::NonZeroUsize, nonzero_check_clamp_for_usize);
+
+    macro_rules! nonzero_check_clamp_panic {
+        ($nonzero_type:ty, $nonzero_check_clamp_for:ident) => {
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $nonzero_check_clamp_for() {
+                let x: $nonzero_type = kani::any();
+                let min: $nonzero_type = kani::any();
+                let max: $nonzero_type = kani::any();
+                // Ensure min > max, so the function should panic
+                kani::assume(min > max);
+                // Use the clamp function and check the result
+                let result = x.clamp(min, max);
+                if x < min {
+                    assert!(result == min);
+                } else if x > max {
+                    assert!(result == max);
+                } else {
+                    assert!(result == x);
+                }
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_clamp_panic!(core::num::NonZeroI8, nonzero_check_clamp_panic_for_i8);
+    nonzero_check_clamp_panic!(core::num::NonZeroI16, nonzero_check_clamp_panic_for_16);
+    nonzero_check_clamp_panic!(core::num::NonZeroI32, nonzero_check_clamp_panic_for_32);
+    nonzero_check_clamp_panic!(core::num::NonZeroI64, nonzero_check_clamp_panic_for_64);
+    nonzero_check_clamp_panic!(core::num::NonZeroI128, nonzero_check_clamp_panic_for_128);
+    nonzero_check_clamp_panic!(core::num::NonZeroIsize, nonzero_check_clamp_panic_for_isize);
+    nonzero_check_clamp_panic!(core::num::NonZeroU8, nonzero_check_clamp_panic_for_u8);
+    nonzero_check_clamp_panic!(core::num::NonZeroU16, nonzero_check_clamp_panic_for_u16);
+    nonzero_check_clamp_panic!(core::num::NonZeroU32, nonzero_check_clamp_panic_for_u32);
+    nonzero_check_clamp_panic!(core::num::NonZeroU64, nonzero_check_clamp_panic_for_u64);
+    nonzero_check_clamp_panic!(core::num::NonZeroU128, nonzero_check_clamp_panic_for_u128);
+    nonzero_check_clamp_panic!(core::num::NonZeroUsize, nonzero_check_clamp_panic_for_usize);
+
+    macro_rules! nonzero_check_count_ones {
+        ($nonzero_type:ty, $nonzero_check_count_ones_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_count_ones_for() {
+                let x: $nonzero_type = kani::any();
+                let result = x.count_ones();
+                // Since x is non-zero, count_ones should never return 0
+                assert!(result.get() > 0);
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_count_ones!(core::num::NonZeroI8, nonzero_check_count_ones_for_i8);
+    nonzero_check_count_ones!(core::num::NonZeroI16, nonzero_check_count_ones_for_i16);
+    nonzero_check_count_ones!(core::num::NonZeroI32, nonzero_check_count_ones_for_i32);
+    nonzero_check_count_ones!(core::num::NonZeroI64, nonzero_check_count_ones_for_i64);
+    nonzero_check_count_ones!(core::num::NonZeroI128, nonzero_check_count_ones_for_i128);
+    nonzero_check_count_ones!(core::num::NonZeroIsize, nonzero_check_count_ones_for_isize);
+    nonzero_check_count_ones!(core::num::NonZeroU8, nonzero_check_count_ones_for_u8);
+    nonzero_check_count_ones!(core::num::NonZeroU16, nonzero_check_count_ones_for_u16);
+    nonzero_check_count_ones!(core::num::NonZeroU32, nonzero_check_count_ones_for_u32);
+    nonzero_check_count_ones!(core::num::NonZeroU64, nonzero_check_count_ones_for_u64);
+    nonzero_check_count_ones!(core::num::NonZeroU128, nonzero_check_count_ones_for_u128);
+    nonzero_check_count_ones!(core::num::NonZeroUsize, nonzero_check_count_ones_for_usize);
+
+    macro_rules! nonzero_check_rotate_left_and_right {
+        ($nonzero_type:ty, $nonzero_check_rotate_for:ident) => {
+            #[kani::proof]
+            pub fn $nonzero_check_rotate_for() {
+                let x: $nonzero_type = kani::any();
+                let n: u32 = kani::any();
+                let result = x.rotate_left(n).rotate_right(n);
+                assert!(result == x);
+            }
+        };
+    }
+
+    // Use the macro to generate different versions of the function for multiple types
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI8, nonzero_check_rotate_for_i8);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI16, nonzero_check_rotate_for_i16);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI32, nonzero_check_rotate_for_i32);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI64, nonzero_check_rotate_for_i64);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroI128, nonzero_check_rotate_for_i128);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroIsize, nonzero_check_rotate_for_isize);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU8, nonzero_check_rotate_for_u8);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU16, nonzero_check_rotate_for_u16);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU32, nonzero_check_rotate_for_u32);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU64, nonzero_check_rotate_for_u64);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroU128, nonzero_check_rotate_for_u128);
+    nonzero_check_rotate_left_and_right!(core::num::NonZeroUsize, nonzero_check_rotate_for_usize);
 }

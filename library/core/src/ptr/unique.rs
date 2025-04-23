@@ -1,12 +1,12 @@
 use safety::{ensures, requires};
+
 use crate::fmt;
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::{PhantomData, Unsize};
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
 use crate::ptr::NonNull;
-
-#[cfg(kani)]
-use crate::kani;
 
 /// A wrapper around a raw non-null `*mut T` that indicates that the possessor
 /// of this wrapper owns the referent. Useful for building abstractions like
@@ -98,7 +98,6 @@ impl<T: ?Sized> Unique<T> {
 
     /// Creates a new `Unique` if `ptr` is non-null.
     #[inline]
-    #[rustc_const_unstable(feature = "const_align_offset", issue = "90962")]
     #[ensures(|result| result.is_none() == ptr.is_null())]
     #[ensures(|result| result.is_none() || result.unwrap().as_ptr() == ptr)]
     pub const fn new(ptr: *mut T) -> Option<Self> {
@@ -107,6 +106,12 @@ impl<T: ?Sized> Unique<T> {
         } else {
             None
         }
+    }
+
+    /// Create a new `Unique` from a `NonNull` in const context.
+    #[inline]
+    pub const fn from_non_null(pointer: NonNull<T>) -> Self {
+        Unique { pointer, _marker: PhantomData }
     }
 
     /// Acquires the underlying `*mut` pointer.
@@ -213,19 +218,19 @@ impl<T: ?Sized> From<NonNull<T>> for Unique<T> {
     /// This conversion is infallible since `NonNull` cannot be null.
     #[inline]
     fn from(pointer: NonNull<T>) -> Self {
-        Unique { pointer, _marker: PhantomData }
+        Unique::from_non_null(pointer)
     }
 }
 
 #[cfg(kani)]
-#[unstable(feature="kani", issue="none")]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
 
     // pub const unsafe fn new_unchecked(ptr: *mut T) -> Self
     #[kani::proof_for_contract(Unique::new_unchecked)]
     pub fn check_new_unchecked() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
         unsafe {
             let _ = Unique::new_unchecked(xptr as *mut i32);
@@ -235,7 +240,7 @@ mod verify {
     // pub const fn new(ptr: *mut T) -> Option<Self>
     #[kani::proof_for_contract(Unique::new)]
     pub fn check_new() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
         let _ = Unique::new(xptr as *mut i32);
     }
@@ -243,7 +248,7 @@ mod verify {
     // pub const fn as_ptr(self) -> *mut T
     #[kani::proof_for_contract(Unique::as_ptr)]
     pub fn check_as_ptr() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
         unsafe {
             let unique = Unique::new_unchecked(xptr as *mut i32);
@@ -254,7 +259,7 @@ mod verify {
     // pub const fn as_non_null_ptr(self) -> NonNull<T>
     #[kani::proof_for_contract(Unique::as_non_null_ptr)]
     pub fn check_as_non_null_ptr() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
         unsafe {
             let unique = Unique::new_unchecked(xptr as *mut i32);
@@ -265,7 +270,7 @@ mod verify {
     // pub const unsafe fn as_ref(&self) -> &T
     #[kani::proof]
     pub fn check_as_ref() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
         unsafe {
             let unique = Unique::new_unchecked(xptr as *mut i32);
@@ -276,7 +281,7 @@ mod verify {
     // pub const unsafe fn as_mut(&mut self) -> &mut T
     #[kani::proof]
     pub fn check_as_mut() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
         unsafe {
             let mut unique = Unique::new_unchecked(xptr as *mut i32);
@@ -287,7 +292,7 @@ mod verify {
     // pub const fn cast<U>(self) -> Unique<U>
     #[kani::proof]
     pub fn check_cast() {
-        let mut x : i32 = kani::any();
+        let mut x: i32 = kani::any();
         let xptr = &mut x;
         unsafe {
             let unique = Unique::new_unchecked(xptr as *mut i32);

@@ -1,0 +1,42 @@
+name: Kani Metrics Update
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Run at 00:00 UTC every Sunday
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  update-kani-metrics:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+    
+    # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Compute Kani Metrics
+      run: ./scripts/run-kani.sh --run metrics --path ${{github.workspace}}
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v7
+      with:
+        commit-message: Update Kani metrics
+        title: 'Update Kani Metrics'
+        body: |
+          This is an automated PR to update Kani metrics.
+          
+          The metrics have been updated by running `./scripts/run-kani.sh --run metrics`.
+        branch: update-kani-metrics
+        delete-branch: true
+        base: main

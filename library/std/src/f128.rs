@@ -1,11 +1,8 @@
-//! Constants for the `f128` double-precision floating point type.
+//! Constants for the `f128` quadruple-precision floating point type.
 //!
 //! *[See also the `f128` primitive type](primitive@f128).*
 //!
 //! Mathematically significant numbers are provided in the `consts` sub-module.
-
-#[cfg(test)]
-mod tests;
 
 #[unstable(feature = "f128", issue = "116909")]
 pub use core::f128::consts;
@@ -129,7 +126,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn round_ties_even(self) -> f128 {
-        unsafe { intrinsics::rintf128(self) }
+        intrinsics::round_ties_even_f128(self)
     }
 
     /// Returns the integer part of `self`.
@@ -188,104 +185,6 @@ impl f128 {
         self - self.trunc()
     }
 
-    /// Computes the absolute value of `self`.
-    ///
-    /// This function always returns the precise result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f128)]
-    /// # #[cfg(reliable_f128)] {
-    ///
-    /// let x = 3.5_f128;
-    /// let y = -3.5_f128;
-    ///
-    /// assert_eq!(x.abs(), x);
-    /// assert_eq!(y.abs(), -y);
-    ///
-    /// assert!(f128::NAN.abs().is_nan());
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f128", issue = "116909")]
-    #[rustc_const_unstable(feature = "const_float_methods", issue = "130843")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub const fn abs(self) -> Self {
-        // FIXME(f16_f128): replace with `intrinsics::fabsf128` when available
-        // We don't do this now because LLVM has lowering bugs for f128 math.
-        Self::from_bits(self.to_bits() & !(1 << 127))
-    }
-
-    /// Returns a number that represents the sign of `self`.
-    ///
-    /// - `1.0` if the number is positive, `+0.0` or `INFINITY`
-    /// - `-1.0` if the number is negative, `-0.0` or `NEG_INFINITY`
-    /// - NaN if the number is NaN
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f128)]
-    /// # #[cfg(reliable_f128_math)] {
-    ///
-    /// let f = 3.5_f128;
-    ///
-    /// assert_eq!(f.signum(), 1.0);
-    /// assert_eq!(f128::NEG_INFINITY.signum(), -1.0);
-    ///
-    /// assert!(f128::NAN.signum().is_nan());
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f128", issue = "116909")]
-    #[rustc_const_unstable(feature = "const_float_methods", issue = "130843")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub const fn signum(self) -> f128 {
-        if self.is_nan() { Self::NAN } else { 1.0_f128.copysign(self) }
-    }
-
-    /// Returns a number composed of the magnitude of `self` and the sign of
-    /// `sign`.
-    ///
-    /// Equal to `self` if the sign of `self` and `sign` are the same, otherwise equal to `-self`.
-    /// If `self` is a NaN, then a NaN with the same payload as `self` and the sign bit of `sign` is
-    /// returned.
-    ///
-    /// If `sign` is a NaN, then this operation will still carry over its sign into the result. Note
-    /// that IEEE 754 doesn't assign any meaning to the sign bit in case of a NaN, and as Rust
-    /// doesn't guarantee that the bit pattern of NaNs are conserved over arithmetic operations, the
-    /// result of `copysign` with `sign` being a NaN might produce an unexpected or non-portable
-    /// result. See the [specification of NaN bit patterns](primitive@f32#nan-bit-patterns) for more
-    /// info.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f128)]
-    /// # #[cfg(reliable_f128_math)] {
-    ///
-    /// let f = 3.5_f128;
-    ///
-    /// assert_eq!(f.copysign(0.42), 3.5_f128);
-    /// assert_eq!(f.copysign(-0.42), -3.5_f128);
-    /// assert_eq!((-f).copysign(0.42), 3.5_f128);
-    /// assert_eq!((-f).copysign(-0.42), -3.5_f128);
-    ///
-    /// assert!(f128::NAN.copysign(1.0).is_nan());
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f128", issue = "116909")]
-    #[rustc_const_unstable(feature = "const_float_methods", issue = "130843")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub const fn copysign(self, sign: f128) -> f128 {
-        unsafe { intrinsics::copysignf128(self, sign) }
-    }
-
     /// Fused multiply-add. Computes `(self * a) + b` with only one rounding
     /// error, yielding a more accurate result than an unfused multiply-add.
     ///
@@ -325,6 +224,7 @@ impl f128 {
     /// ```
     #[inline]
     #[rustc_allow_incoherent_impl]
+    #[doc(alias = "fmaf128", alias = "fusedMultiplyAdd")]
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn mul_add(self, a: f128, b: f128) -> f128 {
@@ -421,6 +321,20 @@ impl f128 {
     ///
     /// The precision of this function is non-deterministic. This means it varies by platform,
     /// Rust version, and can even differ within the same execution from one invocation to the next.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(f128)]
+    /// # #[cfg(reliable_f128_math)] {
+    ///
+    /// let x = 2.0_f128;
+    /// let abs_difference = (x.powi(2) - (x * x)).abs();
+    /// assert!(abs_difference <= f128::EPSILON);
+    ///
+    /// assert_eq!(f128::powi(f128::NAN, 0), 1.0);
+    /// # }
+    /// ```
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
@@ -444,8 +358,10 @@ impl f128 {
     ///
     /// let x = 2.0_f128;
     /// let abs_difference = (x.powf(2.0) - (x * x)).abs();
-    ///
     /// assert!(abs_difference <= f128::EPSILON);
+    ///
+    /// assert_eq!(f128::powf(1.0, f128::NAN), 1.0);
+    /// assert_eq!(f128::powf(f128::NAN, 0.0), 1.0);
     /// # }
     /// ```
     #[inline]
@@ -482,6 +398,7 @@ impl f128 {
     /// # }
     /// ```
     #[inline]
+    #[doc(alias = "squareRoot")]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
@@ -551,6 +468,8 @@ impl f128 {
 
     /// Returns the natural logarithm of the number.
     ///
+    /// This returns NaN when the number is negative, and negative infinity when number is zero.
+    ///
     /// # Unspecified precision
     ///
     /// The precision of this function is non-deterministic. This means it varies by platform,
@@ -572,6 +491,16 @@ impl f128 {
     /// assert!(abs_difference <= f128::EPSILON);
     /// # }
     /// ```
+    ///
+    /// Non-positive values:
+    /// ```
+    /// #![feature(f128)]
+    /// # #[cfg(reliable_f128_math)] {
+    ///
+    /// assert_eq!(0_f128.ln(), f128::NEG_INFINITY);
+    /// assert!((-42_f128).ln().is_nan());
+    /// # }
+    /// ```
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
@@ -581,6 +510,8 @@ impl f128 {
     }
 
     /// Returns the logarithm of the number with respect to an arbitrary base.
+    ///
+    /// This returns NaN when the number is negative, and negative infinity when number is zero.
     ///
     /// The result might not be correctly rounded owing to implementation details;
     /// `self.log2()` can produce more accurate results for base 2, and
@@ -605,6 +536,16 @@ impl f128 {
     /// assert!(abs_difference <= f128::EPSILON);
     /// # }
     /// ```
+    ///
+    /// Non-positive values:
+    /// ```
+    /// #![feature(f128)]
+    /// # #[cfg(reliable_f128_math)] {
+    ///
+    /// assert_eq!(0_f128.log(10.0), f128::NEG_INFINITY);
+    /// assert!((-42_f128).log(10.0).is_nan());
+    /// # }
+    /// ```
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
@@ -614,6 +555,8 @@ impl f128 {
     }
 
     /// Returns the base 2 logarithm of the number.
+    ///
+    /// This returns NaN when the number is negative, and negative infinity when number is zero.
     ///
     /// # Unspecified precision
     ///
@@ -634,6 +577,16 @@ impl f128 {
     /// assert!(abs_difference <= f128::EPSILON);
     /// # }
     /// ```
+    ///
+    /// Non-positive values:
+    /// ```
+    /// #![feature(f128)]
+    /// # #[cfg(reliable_f128_math)] {
+    ///
+    /// assert_eq!(0_f128.log2(), f128::NEG_INFINITY);
+    /// assert!((-42_f128).log2().is_nan());
+    /// # }
+    /// ```
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
@@ -643,6 +596,8 @@ impl f128 {
     }
 
     /// Returns the base 10 logarithm of the number.
+    ///
+    /// This returns NaN when the number is negative, and negative infinity when number is zero.
     ///
     /// # Unspecified precision
     ///
@@ -661,6 +616,16 @@ impl f128 {
     /// let abs_difference = (ten.log10() - 1.0).abs();
     ///
     /// assert!(abs_difference <= f128::EPSILON);
+    /// # }
+    /// ```
+    ///
+    /// Non-positive values:
+    /// ```
+    /// #![feature(f128)]
+    /// # #[cfg(reliable_f128_math)] {
+    ///
+    /// assert_eq!(0_f128.log10(), f128::NEG_INFINITY);
+    /// assert!((-42_f128).log10().is_nan());
     /// # }
     /// ```
     #[inline]
@@ -701,7 +666,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn cbrt(self) -> f128 {
-        unsafe { cmath::cbrtf128(self) }
+        cmath::cbrtf128(self)
     }
 
     /// Compute the distance between the origin and a point (`x`, `y`) on the
@@ -738,7 +703,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn hypot(self, other: f128) -> f128 {
-        unsafe { cmath::hypotf128(self, other) }
+        cmath::hypotf128(self, other)
     }
 
     /// Computes the sine of a number (in radians).
@@ -824,7 +789,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn tan(self) -> f128 {
-        unsafe { cmath::tanf128(self) }
+        cmath::tanf128(self)
     }
 
     /// Computes the arcsine of a number. Return value is in radians in
@@ -859,7 +824,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn asin(self) -> f128 {
-        unsafe { cmath::asinf128(self) }
+        cmath::asinf128(self)
     }
 
     /// Computes the arccosine of a number. Return value is in radians in
@@ -894,7 +859,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn acos(self) -> f128 {
-        unsafe { cmath::acosf128(self) }
+        cmath::acosf128(self)
     }
 
     /// Computes the arctangent of a number. Return value is in radians in the
@@ -928,7 +893,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn atan(self) -> f128 {
-        unsafe { cmath::atanf128(self) }
+        cmath::atanf128(self)
     }
 
     /// Computes the four quadrant arctangent of `self` (`y`) and `other` (`x`) in radians.
@@ -974,7 +939,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn atan2(self, other: f128) -> f128 {
-        unsafe { cmath::atan2f128(self, other) }
+        cmath::atan2f128(self, other)
     }
 
     /// Simultaneously computes the sine and cosine of the number, `x`. Returns
@@ -1043,11 +1008,13 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn exp_m1(self) -> f128 {
-        unsafe { cmath::expm1f128(self) }
+        cmath::expm1f128(self)
     }
 
     /// Returns `ln(1+n)` (natural logarithm) more accurately than if
     /// the operations were performed separately.
+    ///
+    /// This returns NaN when `n < -1.0`, and negative infinity when `n == -1.0`.
     ///
     /// # Unspecified precision
     ///
@@ -1072,13 +1039,23 @@ impl f128 {
     /// assert!(abs_difference < 1e-10);
     /// # }
     /// ```
+    ///
+    /// Out-of-range values:
+    /// ```
+    /// #![feature(f128)]
+    /// # #[cfg(reliable_f128_math)] {
+    ///
+    /// assert_eq!((-1.0_f128).ln_1p(), f128::NEG_INFINITY);
+    /// assert!((-2.0_f128).ln_1p().is_nan());
+    /// # }
+    /// ```
     #[inline]
     #[doc(alias = "log1p")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
     pub fn ln_1p(self) -> f128 {
-        unsafe { cmath::log1pf128(self) }
+        cmath::log1pf128(self)
     }
 
     /// Hyperbolic sine function.
@@ -1113,7 +1090,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn sinh(self) -> f128 {
-        unsafe { cmath::sinhf128(self) }
+        cmath::sinhf128(self)
     }
 
     /// Hyperbolic cosine function.
@@ -1148,7 +1125,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn cosh(self) -> f128 {
-        unsafe { cmath::coshf128(self) }
+        cmath::coshf128(self)
     }
 
     /// Hyperbolic tangent function.
@@ -1183,7 +1160,7 @@ impl f128 {
     #[unstable(feature = "f128", issue = "116909")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn tanh(self) -> f128 {
-        unsafe { cmath::tanhf128(self) }
+        cmath::tanhf128(self)
     }
 
     /// Inverse hyperbolic sine function.
@@ -1309,9 +1286,10 @@ impl f128 {
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
+    // #[unstable(feature = "float_gamma", issue = "99842")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn gamma(self) -> f128 {
-        unsafe { cmath::tgammaf128(self) }
+        cmath::tgammaf128(self)
     }
 
     /// Natural logarithm of the absolute value of the gamma function
@@ -1343,10 +1321,83 @@ impl f128 {
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f128", issue = "116909")]
+    // #[unstable(feature = "float_gamma", issue = "99842")]
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn ln_gamma(self) -> (f128, i32) {
         let mut signgamp: i32 = 0;
-        let x = unsafe { cmath::lgammaf128_r(self, &mut signgamp) };
+        let x = cmath::lgammaf128_r(self, &mut signgamp);
         (x, signgamp)
+    }
+
+    /// Error function.
+    ///
+    /// # Unspecified precision
+    ///
+    /// The precision of this function is non-deterministic. This means it varies by platform,
+    /// Rust version, and can even differ within the same execution from one invocation to the next.
+    ///
+    /// This function currently corresponds to the `erff128` from libc on Unix
+    /// and Windows. Note that this might change in the future.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(f128)]
+    /// #![feature(float_erf)]
+    /// # #[cfg(reliable_f128_math)] {
+    /// /// The error function relates what percent of a normal distribution lies
+    /// /// within `x` standard deviations (scaled by `1/sqrt(2)`).
+    /// fn within_standard_deviations(x: f128) -> f128 {
+    ///     (x * std::f128::consts::FRAC_1_SQRT_2).erf() * 100.0
+    /// }
+    ///
+    /// // 68% of a normal distribution is within one standard deviation
+    /// assert!((within_standard_deviations(1.0) - 68.269).abs() < 0.01);
+    /// // 95% of a normal distribution is within two standard deviations
+    /// assert!((within_standard_deviations(2.0) - 95.450).abs() < 0.01);
+    /// // 99.7% of a normal distribution is within three standard deviations
+    /// assert!((within_standard_deviations(3.0) - 99.730).abs() < 0.01);
+    /// # }
+    /// ```
+    #[rustc_allow_incoherent_impl]
+    #[must_use = "method returns a new number and does not mutate the original value"]
+    #[unstable(feature = "f128", issue = "116909")]
+    // #[unstable(feature = "float_erf", issue = "136321")]
+    #[inline]
+    pub fn erf(self) -> f128 {
+        cmath::erff128(self)
+    }
+
+    /// Complementary error function.
+    ///
+    /// # Unspecified precision
+    ///
+    /// The precision of this function is non-deterministic. This means it varies by platform,
+    /// Rust version, and can even differ within the same execution from one invocation to the next.
+    ///
+    /// This function currently corresponds to the `erfcf128` from libc on Unix
+    /// and Windows. Note that this might change in the future.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(f128)]
+    /// #![feature(float_erf)]
+    /// # #[cfg(reliable_f128_math)] {
+    /// let x: f128 = 0.123;
+    ///
+    /// let one = x.erf() + x.erfc();
+    /// let abs_difference = (one - 1.0).abs();
+    ///
+    /// assert!(abs_difference <= f128::EPSILON);
+    /// # }
+    /// ```
+    #[rustc_allow_incoherent_impl]
+    #[must_use = "method returns a new number and does not mutate the original value"]
+    #[unstable(feature = "f128", issue = "116909")]
+    // #[unstable(feature = "float_erf", issue = "136321")]
+    #[inline]
+    pub fn erfc(self) -> f128 {
+        cmath::erfcf128(self)
     }
 }

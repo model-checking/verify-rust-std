@@ -1,0 +1,237 @@
+name: Subtree Update
+
+on:
+  schedule:
+    - cron: '0 14 * * *'  # Run at 14:00 UTC every day
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  update-subtree-library:
+    # Changing the host platform may alter the libgit2 version as used by
+    # splitsh-lite, which will require changing the version of git2go.
+    # See https://github.com/jeffWelling/git2go?tab=readme-ov-file#which-go-version-to-use
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        path: verify-rust-std
+        submodules: true
+
+    - name: Checkout Kani
+      uses: actions/checkout@v4
+      with:
+        repository: model-checking/kani
+        path: kani-tmp
+
+    - name: Checkout Rust
+      uses: actions/checkout@v4
+      with:
+        repository: rust-lang/rust
+        fetch-depth: 0
+        path: rust-tmp
+
+    - name: Fetch toolchain versions
+      run: |
+        CURRENT_TOOLCHAIN_DATE=$(grep -oP 'channel = "nightly-\K\d{4}-\d{2}-\d{2}' verify-rust-std/rust-toolchain.toml)
+        NEXT_TOOLCHAIN_DATE=$(grep -oP 'channel = "nightly-\K\d{4}-\d{2}-\d{2}' kani-tmp/rust-toolchain.toml)
+        CURRENT_COMMIT_HASH=$(curl https://static.rust-lang.org/dist/$CURRENT_TOOLCHAIN_DATE/channel-rust-nightly-git-commit-hash.txt)
+        NEXT_COMMIT_HASH=$(curl https://static.rust-lang.org/dist/$NEXT_TOOLCHAIN_DATE/channel-rust-nightly-git-commit-hash.txt)
+        if [ -z "$CURRENT_COMMIT_HASH" ]; then
+          echo "Could not find current commit hash on static.rust-lang.org"
+          exit 1
+        fi
+        if [ -z "$NEXT_COMMIT_HASH" ]; then
+          echo "Could not find next commit hash on static.rust-lang.org"
+          exit 1
+        fi
+        echo "CURRENT_TOOLCHAIN_DATE=${CURRENT_TOOLCHAIN_DATE}" >> $GITHUB_ENV
+        echo "NEXT_TOOLCHAIN_DATE=${NEXT_TOOLCHAIN_DATE}" >> $GITHUB_ENV
+        echo "CURRENT_COMMIT_HASH=${CURRENT_COMMIT_HASH}" >> $GITHUB_ENV
+        echo "NEXT_COMMIT_HASH=${NEXT_COMMIT_HASH}" >> $GITHUB_ENV
+        KANI_COMMIT_HASH=$(git -C kani-tmp rev-parse HEAD)
+        echo "KANI_COMMIT_HASH=${KANI_COMMIT_HASH}" >> $GITHUB_ENV
+
+    - name: Check for existing pull requests
+      run: |
+        cd verify-rust-std
+        if gh pr list --json title --jq '.[] | select(.title | startswith("Update subtree/library to")) | .title' | grep -q .; then
+          echo "SUBTREE_PR_EXISTS=yes" >> $GITHUB_ENV
+        else
+          echo "SUBTREE_PR_EXISTS=no" >> $GITHUB_ENV
+        fi
+        if gh pr list --json title --jq '.[] | select(.title | startswith("Merge subtree update for toolchain nightly-")) | .title' | grep -q .; then
+          echo "MERGE_PR_EXISTS=yes" >> $GITHUB_ENV
+        else
+          echo "MERGE_PR_EXISTS=no" >> $GITHUB_ENV
+        fi
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Checkout splitsh-lite
+      if: ${{ env.SUBTREE_PR_EXISTS == 'no' }}
+      uses: actions/checkout@v4
+      with:
+        repository: splitsh/lite
+        path: splitsh-lite
+
+    - name: Build splitsh-lite
+      if: ${{ env.SUBTREE_PR_EXISTS == 'no' }}
+      run: |
+        cd splitsh-lite
+        sudo apt-get install -y golang libgit2-dev
+        # git2go upstream hasn't been updated to more recent versions of
+        # libgit2, so using a fork that does stay up to date
+        sed -i 's#github.com/libgit2/git2go#github.com/jeffwelling/git2go#' go.mod splitter/*
+        # may need to adjust "v37" to a higher number per
+        # https://github.com/jeffWelling/git2go?tab=readme-ov-file#which-go-version-to-use
+        # depening on the libgit2 version being installed
+        sed -i -e 's/v34/v37/g' go.mod splitter/*.go
+        # v37.0.0 had issues that weren't fully fixed until v37.0.4
+        sed -i 's/v37.0.0/v37.0.4/' go.mod
+        go mod tidy
+        go build -o splitsh-lite github.com/splitsh/lite
+
+    - name: Update subtree/library locally
+      if: ${{ env.SUBTREE_PR_EXISTS == 'no' }}
+      run: |
+        cd rust-tmp
+
+        # Ensure "upstream/master" branch contains the target commit
+        if ! git show ${NEXT_COMMIT_HASH} --oneline --no-patch; then
+          echo "Rust commit ${NEXT_COMMIT_HASH} cannot be found."
+          exit 1
+        fi
+
+        git checkout ${NEXT_COMMIT_HASH}
+        /usr/bin/time -v ../splitsh-lite/splitsh-lite --progress --prefix=library --target subtree/library
+        git checkout -b subtree/library subtree/library
+
+        cd ../verify-rust-std
+        git remote add rust-filtered ../rust-tmp/
+        git fetch rust-filtered
+        git checkout -b subtree/library rust-filtered/subtree/library
+        # The checkout still leaves behind the library folder with submodules.
+        # We need to remove this as we'd otherwise have the create-pull-request
+        # action create an extra commit.
+        rm -rf library
+        SUBTREE_HEAD_MSG=$(git log --format=%s -n 1 origin/subtree/library)
+        UPSTREAM_FROM=$(git log --grep="${SUBTREE_HEAD_MSG}" -n 1 --format=%H rust-filtered/subtree/library)
+        UPSTREAM_HEAD=$(git log --format=%H -n 1 rust-filtered/subtree/library)
+        if [ "${UPSTREAM_HEAD}" = "${UPSTREAM_FROM}" ]; then
+          echo "Nothing to do, ${UPSTREAM_FROM} matches ${UPSTREAM_HEAD} (${SUBTREE_HEAD_MSG})"
+          echo "SUBTREE_PR_REQUIRED=no" >> $GITHUB_ENV
+        else
+          git branch --set-upstream-to=origin/subtree/library
+          echo "SUBTREE_PR_REQUIRED=yes" >> $GITHUB_ENV
+        fi
+
+    - name: Create Pull Request to update subtree/library
+      if: ${{ env.SUBTREE_PR_REQUIRED == 'yes' && env.SUBTREE_PR_EXISTS == 'no' }}
+      uses: peter-evans/create-pull-request@v7
+      with:
+        title: 'Update subtree/library to ${{ env.NEXT_TOOLCHAIN_DATE }}'
+        body: >
+          This is an automated PR to update the subtree/library branch to the changes
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.NEXT_COMMIT_HASH }}), inclusive.
+
+          **Review this PR as usual, but do not merge this PR using the GitHub web interface.
+          Instead, once it is approved, use `git push` to literally push the changes to `subtree/library`
+          without any rebase or merge.**
+        branch: update-subtree/library
+        delete-branch: true
+        base: subtree/library
+        path: verify-rust-std
+
+    - name: Merge subtree/library changes
+      if: ${{ env.CURRENT_TOOLCHAIN_DATE != env.NEXT_TOOLCHAIN_DATE && env.MERGE_PR_EXISTS == 'no' }}
+      run: |
+        cd verify-rust-std
+        # create-pull-request resets branches locally, implying that
+        # `subtree/library` no longer is what the above instructions created.
+        if [ "${SUBTREE_PR_EXISTS}" = "yes" ]; then
+          git checkout -t -b subtree/library origin/update-subtree/library
+        else
+          git checkout subtree/library
+          if [ "${SUBTREE_PR_REQUIRED}" = "yes" ]; then
+            git reset --hard origin/update-subtree/library
+          fi
+        fi
+        git checkout main
+
+        # Tell git about the correct merge base to use, which is the subtree
+        # head that we last merged from.
+        PREV_SUBTREE_HEAD=$(git log --grep="^git-subtree-split:" | egrep '^[[:space:]]+git-subtree-split:' | awk '{print $2;exit}')
+        echo "Previous subtree head: ${PREV_SUBTREE_HEAD}"
+        git replace --graft subtree/library ${PREV_SUBTREE_HEAD}
+        git replace --graft main ${PREV_SUBTREE_HEAD}
+
+        # This command may fail, which will require human intervention.
+        if ! git \
+            -c user.name=gitbot -c user.email=git@bot \
+            merge -Xsubtree=library subtree/library; then
+          echo "MERGE_CONFLICTS=yes" >> $GITHUB_ENV
+          git -c user.name=gitbot -c user.email=git@bot commit -a -m "Merge from $NEXT_COMMIT_HASH with conflicts"
+        else
+          echo "MERGE_CONFLICTS=no" >> $GITHUB_ENV
+        fi
+        git replace -d subtree/library
+        git replace -d main~1
+        NEW_SUBTREE_HEAD=$(git rev-parse subtree/library)
+        echo "NEW_SUBTREE_HEAD=${NEW_SUBTREE_HEAD}" >> $GITHUB_ENV
+
+        sed -i "s/^channel = \"nightly-.*\"/channel = \"nightly-${NEXT_TOOLCHAIN_DATE}\"/" rust-toolchain.toml
+        git -c user.name=gitbot -c user.email=git@bot \
+          commit -m "Update toolchain to ${NEXT_TOOLCHAIN_DATE}" rust-toolchain.toml
+        # Update kani-version.toml with the new Kani commit hash
+        sed -i "s/commit = .*/commit = \"${KANI_COMMIT_HASH}\"/" tool_config/kani-version.toml
+        git -c user.name=gitbot -c user.email=git@bot \
+          commit -m "Update Kani version to ${KANI_COMMIT_HASH}" tool_config/kani-version.toml
+
+    - name: Create Pull Request without conflicts
+      if: ${{ env.MERGE_CONFLICTS == 'no' && env.MERGE_PR_EXISTS == 'no' }}
+      uses: peter-evans/create-pull-request@v7
+      with:
+        title: 'Merge subtree update for toolchain nightly-${{ env.NEXT_TOOLCHAIN_DATE }}'
+        body: >
+          This is an automated PR to merge library subtree updates
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.NEXT_COMMIT_HASH }}), inclusive.
+          This is a clean merge, no conflicts were detected.
+          **Do not remove or edit the following annotations:**
+
+          git-subtree-dir: library
+
+          git-subtree-split: ${{ env.NEW_SUBTREE_HEAD }}
+        branch: sync-${{ env.NEXT_TOOLCHAIN_DATE }}
+        delete-branch: true
+        base: main
+        path: verify-rust-std
+
+    - name: Create Pull Request with conflicts
+      if: ${{ env.MERGE_CONFLICTS == 'yes' && env.MERGE_PR_EXISTS == 'no' }}
+      uses: peter-evans/create-pull-request@v7
+      with:
+        title: 'Merge subtree update for toolchain nightly-${{ env.NEXT_TOOLCHAIN_DATE }}'
+        body: >
+          This is an automated PR to merge library subtree updates
+          from ${{ env.CURRENT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.CURRENT_COMMIT_HASH }})
+          to ${{ env.NEXT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.NEXT_COMMIT_HASH }}) (inclusive)
+          into main. `git merge` resulted in conflicts, which require manual resolution.
+          Files were commited with merge conflict markers.
+          **Do not remove or edit the following annotations:**
+
+          git-subtree-dir: library
+
+          git-subtree-split: ${{ env.NEW_SUBTREE_HEAD }}
+        branch: sync-${{ env.NEXT_TOOLCHAIN_DATE }}
+        delete-branch: true
+        base: main
+        path: verify-rust-std

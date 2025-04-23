@@ -154,7 +154,8 @@
         target_os = "emscripten",
         target_os = "wasi",
         target_env = "sgx",
-        target_os = "xous"
+        target_os = "xous",
+        target_os = "trusty",
     ))
 ))]
 mod tests;
@@ -217,6 +218,7 @@ use crate::{fmt, fs, str};
 ///
 /// [`wait`]: Child::wait
 #[stable(feature = "process", since = "1.0.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "Child")]
 pub struct Child {
     pub(crate) handle: imp::Process,
 
@@ -224,7 +226,7 @@ pub struct Child {
     /// has been captured. You might find it helpful to do
     ///
     /// ```ignore (incomplete)
-    /// let stdin = child.stdin.take().unwrap();
+    /// let stdin = child.stdin.take().expect("handle present");
     /// ```
     ///
     /// to avoid partially moving the `child` and thus blocking yourself from calling
@@ -236,7 +238,7 @@ pub struct Child {
     /// has been captured. You might find it helpful to do
     ///
     /// ```ignore (incomplete)
-    /// let stdout = child.stdout.take().unwrap();
+    /// let stdout = child.stdout.take().expect("handle present");
     /// ```
     ///
     /// to avoid partially moving the `child` and thus blocking yourself from calling
@@ -248,7 +250,7 @@ pub struct Child {
     /// has been captured. You might find it helpful to do
     ///
     /// ```ignore (incomplete)
-    /// let stderr = child.stderr.take().unwrap();
+    /// let stderr = child.stderr.take().expect("handle present");
     /// ```
     ///
     /// to avoid partially moving the `child` and thus blocking yourself from calling
@@ -868,13 +870,17 @@ impl Command {
     ///
     /// # Examples
     ///
+    /// Prevent any inherited `GIT_DIR` variable from changing the target of the `git` command,
+    /// while allowing all other variables, like `GIT_AUTHOR_NAME`.
+    ///
     /// ```no_run
     /// use std::process::Command;
     ///
-    /// Command::new("ls")
-    ///     .env_remove("PATH")
-    ///     .spawn()
-    ///     .expect("ls command failed to start");
+    /// Command::new("git")
+    ///     .arg("commit")
+    ///     .env_remove("GIT_DIR")
+    ///     .spawn()?;
+    /// # std::io::Result::Ok(())
     /// ```
     #[stable(feature = "process", since = "1.0.0")]
     pub fn env_remove<K: AsRef<OsStr>>(&mut self, key: K) -> &mut Command {
@@ -896,13 +902,17 @@ impl Command {
     ///
     /// # Examples
     ///
+    /// The behavior of `sort` is affected by `LANG` and `LC_*` environment variables.
+    /// Clearing the environment makes `sort`'s behavior independent of the parent processes' language.
+    ///
     /// ```no_run
     /// use std::process::Command;
     ///
-    /// Command::new("ls")
+    /// Command::new("sort")
+    ///     .arg("file.txt")
     ///     .env_clear()
-    ///     .spawn()
-    ///     .expect("ls command failed to start");
+    ///     .spawn()?;
+    /// # std::io::Result::Ok(())
     /// ```
     #[stable(feature = "process", since = "1.0.0")]
     pub fn env_clear(&mut self) -> &mut Command {
@@ -1052,14 +1062,14 @@ impl Command {
     /// use std::io::{self, Write};
     /// let output = Command::new("/bin/cat")
     ///     .arg("file.txt")
-    ///     .output()
-    ///     .expect("failed to execute process");
+    ///     .output()?;
     ///
     /// println!("status: {}", output.status);
-    /// io::stdout().write_all(&output.stdout).unwrap();
-    /// io::stderr().write_all(&output.stderr).unwrap();
+    /// io::stdout().write_all(&output.stdout)?;
+    /// io::stderr().write_all(&output.stderr)?;
     ///
     /// assert!(output.status.success());
+    /// # io::Result::Ok(())
     /// ```
     #[stable(feature = "process", since = "1.0.0")]
     pub fn output(&mut self) -> io::Result<Output> {
@@ -1276,6 +1286,40 @@ pub struct Output {
     pub stderr: Vec<u8>,
 }
 
+impl Output {
+    /// Returns an error if a nonzero exit status was received.
+    ///
+    /// If the [`Command`] exited successfully,
+    /// `self` is returned.
+    ///
+    /// This is equivalent to calling [`exit_ok`](ExitStatus::exit_ok)
+    /// on [`Output.status`](Output::status).
+    ///
+    /// Note that this will throw away the [`Output::stderr`] field in the error case.
+    /// If the child process outputs useful informantion to stderr, you can:
+    /// * Use `cmd.stderr(Stdio::inherit())` to forward the
+    ///   stderr child process to the parent's stderr,
+    ///   usually printing it to console where the user can see it.
+    ///   This is usually correct for command-line applications.
+    /// * Capture `stderr` using a custom error type.
+    ///   This is usually correct for libraries.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(exit_status_error)]
+    /// # #[cfg(unix)] {
+    /// use std::process::Command;
+    /// assert!(Command::new("false").output().unwrap().exit_ok().is_err());
+    /// # }
+    /// ```
+    #[unstable(feature = "exit_status_error", issue = "84908")]
+    pub fn exit_ok(self) -> Result<Self, ExitStatusError> {
+        self.status.exit_ok()?;
+        Ok(self)
+    }
+}
+
 // If either stderr or stdout are valid utf8 strings it prints the valid
 // strings, otherwise it prints the byte sequence instead
 #[stable(feature = "process_output_debug", since = "1.7.0")]
@@ -1283,13 +1327,13 @@ impl fmt::Debug for Output {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let stdout_utf8 = str::from_utf8(&self.stdout);
         let stdout_debug: &dyn fmt::Debug = match stdout_utf8 {
-            Ok(ref str) => str,
+            Ok(ref s) => s,
             Err(_) => &self.stdout,
         };
 
         let stderr_utf8 = str::from_utf8(&self.stderr);
         let stderr_debug: &dyn fmt::Debug = match stderr_utf8 {
-            Ok(ref str) => str,
+            Ok(ref s) => s,
             Err(_) => &self.stderr,
         };
 
@@ -1391,11 +1435,11 @@ impl Stdio {
     /// let output = Command::new("rev")
     ///     .stdin(Stdio::inherit())
     ///     .stdout(Stdio::piped())
-    ///     .output()
-    ///     .expect("Failed to execute command");
+    ///     .output()?;
     ///
     /// print!("You piped in the reverse of: ");
-    /// io::stdout().write_all(&output.stdout).unwrap();
+    /// io::stdout().write_all(&output.stdout)?;
+    /// # io::Result::Ok(())
     /// ```
     #[must_use]
     #[stable(feature = "process", since = "1.0.0")]
@@ -1575,14 +1619,14 @@ impl From<fs::File> for Stdio {
     /// use std::process::Command;
     ///
     /// // With the `foo.txt` file containing "Hello, world!"
-    /// let file = File::open("foo.txt").unwrap();
+    /// let file = File::open("foo.txt")?;
     ///
     /// let reverse = Command::new("rev")
     ///     .stdin(file)  // Implicit File conversion into a Stdio
-    ///     .output()
-    ///     .expect("failed reverse command");
+    ///     .output()?;
     ///
     /// assert_eq!(reverse.stdout, b"!dlrow ,olleH");
+    /// # std::io::Result::Ok(())
     /// ```
     fn from(file: fs::File) -> Stdio {
         Stdio::from_inner(file.into_inner().into())
@@ -1646,6 +1690,20 @@ impl From<io::Stderr> for Stdio {
     /// ```
     fn from(inherit: io::Stderr) -> Stdio {
         Stdio::from_inner(inherit.into())
+    }
+}
+
+#[stable(feature = "anonymous_pipe", since = "1.87.0")]
+impl From<io::PipeWriter> for Stdio {
+    fn from(pipe: io::PipeWriter) -> Self {
+        Stdio::from_inner(pipe.into_inner().into())
+    }
+}
+
+#[stable(feature = "anonymous_pipe", since = "1.87.0")]
+impl From<io::PipeReader> for Stdio {
+    fn from(pipe: io::PipeReader) -> Self {
+        Stdio::from_inner(pipe.into_inner().into())
     }
 }
 
@@ -1812,7 +1870,7 @@ impl crate::sealed::Sealed for ExitStatusError {}
 /// # if cfg!(unix) {
 /// use std::process::{Command, ExitStatusError};
 ///
-/// fn run(cmd: &str) -> Result<(),ExitStatusError> {
+/// fn run(cmd: &str) -> Result<(), ExitStatusError> {
 ///     Command::new(cmd).status().unwrap().exit_ok()?;
 ///     Ok(())
 /// }
@@ -1994,9 +2052,9 @@ impl ExitCode {
     ///
     /// Note that this has the same caveats as [`process::exit()`][exit], namely that this function
     /// terminates the process immediately, so no destructors on the current stack or any other
-    /// thread's stack will be run. If a clean shutdown is needed, it is recommended to simply
-    /// return this ExitCode from the `main` function, as demonstrated in the [type
-    /// documentation](#examples).
+    /// thread's stack will be run. Also see those docs for some important notes on interop with C
+    /// code. If a clean shutdown is needed, it is recommended to simply return this ExitCode from
+    /// the `main` function, as demonstrated in the [type documentation](#examples).
     ///
     /// # Differences from `process::exit()`
     ///
@@ -2107,6 +2165,7 @@ impl Child {
     /// [`ErrorKind`]: io::ErrorKind
     /// [`InvalidInput`]: io::ErrorKind::InvalidInput
     #[stable(feature = "process", since = "1.0.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "child_kill")]
     pub fn kill(&mut self) -> io::Result<()> {
         self.handle.kill()
     }
@@ -2127,6 +2186,7 @@ impl Child {
     /// ```
     #[must_use]
     #[stable(feature = "process_id", since = "1.3.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "child_id")]
     pub fn id(&self) -> u32 {
         self.handle.id()
     }
@@ -2179,7 +2239,7 @@ impl Child {
     /// ```no_run
     /// use std::process::Command;
     ///
-    /// let mut child = Command::new("ls").spawn().unwrap();
+    /// let mut child = Command::new("ls").spawn()?;
     ///
     /// match child.try_wait() {
     ///     Ok(Some(status)) => println!("exited with: {status}"),
@@ -2190,6 +2250,7 @@ impl Child {
     ///     }
     ///     Err(e) => println!("error attempting to wait: {e}"),
     /// }
+    /// # std::io::Result::Ok(())
     /// ```
     #[stable(feature = "process_try_wait", since = "1.18.0")]
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
@@ -2299,6 +2360,33 @@ impl Child {
 ///
 /// process::exit(0x0100);
 /// ```
+///
+/// ### Safe interop with C code
+///
+/// On Unix, this function is currently implemented using the `exit` C function [`exit`][C-exit]. As
+/// of C23, the C standard does not permit multiple threads to call `exit` concurrently. Rust
+/// mitigates this with a lock, but if C code calls `exit`, that can still cause undefined behavior.
+/// Note that returning from `main` is equivalent to calling `exit`.
+///
+/// Therefore, it is undefined behavior to have two concurrent threads perform the following
+/// without synchronization:
+/// - One thread calls Rust's `exit` function or returns from Rust's `main` function
+/// - Another thread calls the C function `exit` or `quick_exit`, or returns from C's `main` function
+///
+/// Note that if a binary contains multiple copies of the Rust runtime (e.g., when combining
+/// multiple `cdylib` or `staticlib`), they each have their own separate lock, so from the
+/// perspective of code running in one of the Rust runtimes, the "outside" Rust code is basically C
+/// code, and concurrent `exit` again causes undefined behavior.
+///
+/// Individual C implementations might provide more guarantees than the standard and permit concurrent
+/// calls to `exit`; consult the documentation of your C implementation for details.
+///
+/// For some of the on-going discussion to make `exit` thread-safe in C, see:
+/// - [Rust issue #126600](https://github.com/rust-lang/rust/issues/126600)
+/// - [Austin Group Bugzilla (for POSIX)](https://austingroupbugs.net/view.php?id=1845)
+/// - [GNU C library Bugzilla](https://sourceware.org/bugzilla/show_bug.cgi?id=31997)
+///
+/// [C-exit]: https://en.cppreference.com/w/c/program/exit
 #[stable(feature = "rust1", since = "1.0.0")]
 #[cfg_attr(not(test), rustc_diagnostic_item = "process_exit")]
 pub fn exit(code: i32) -> ! {
@@ -2309,14 +2397,10 @@ pub fn exit(code: i32) -> ! {
 /// Terminates the process in an abnormal fashion.
 ///
 /// The function will never return and will immediately terminate the current
-/// process in a platform specific "abnormal" manner.
-///
-/// Note that because this function never returns, and that it terminates the
-/// process, no destructors on the current stack or any other thread's stack
-/// will be run.
-///
-/// Rust IO buffers (eg, from `BufWriter`) will not be flushed.
-/// Likewise, C stdio buffers will (on most platforms) not be flushed.
+/// process in a platform specific "abnormal" manner. As a consequence,
+/// no destructors on the current stack or any other thread's stack
+/// will be run, Rust IO buffers (eg, from `BufWriter`) will not be flushed,
+/// and C stdio buffers will (on most platforms) not be flushed.
 ///
 /// This is in contrast to the default behavior of [`panic!`] which unwinds
 /// the current thread's stack and calls all destructors.
@@ -2370,6 +2454,7 @@ pub fn exit(code: i32) -> ! {
 /// [panic hook]: crate::panic::set_hook
 #[stable(feature = "process_abort", since = "1.17.0")]
 #[cold]
+#[cfg_attr(not(test), rustc_diagnostic_item = "process_abort")]
 pub fn abort() -> ! {
     crate::sys::abort_internal();
 }

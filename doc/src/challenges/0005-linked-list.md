@@ -11,7 +11,7 @@
 
 ## Goal
 
-Verify the memory safety of [`alloc::collections::linked_list` functions](https://github.com/rust-lang/rust/blob/c290e9de32e8ba6a673ef125fde40eadd395d170/library/alloc/src/collections/linked_list.rs) that iterate the its internal inductive-defined data type.
+Verify the memory safety of [`alloc::collections::linked_list` functions](https://github.com/rust-lang/rust/blob/c290e9de32e8ba6a673ef125fde40eadd395d170/library/alloc/src/collections/linked_list.rs) that iterate over its internal inductive-defined data type.
 
 ### Details
 

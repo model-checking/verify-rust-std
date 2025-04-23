@@ -19,10 +19,6 @@
 )]
 #![doc(rust_logo)]
 #![feature(rustdoc_internals)]
-// This library is copied into rust-analyzer to allow loading rustc compiled proc macros.
-// Please avoid unstable features where possible to minimize the amount of changes necessary
-// to make it compile with rust-analyzer on stable.
-#![feature(rustc_allow_const_fn_unstable)]
 #![feature(staged_api)]
 #![feature(allow_internal_unstable)]
 #![feature(decl_macro)]
@@ -31,12 +27,14 @@
 #![feature(panic_can_unwind)]
 #![feature(restricted_std)]
 #![feature(rustc_attrs)]
-#![feature(min_specialization)]
+#![feature(stmt_expr_attributes)]
 #![feature(extend_one)]
 #![recursion_limit = "256"]
 #![allow(internal_features)]
 #![deny(ffi_unwind_calls)]
 #![warn(rustdoc::unescaped_backticks)]
+#![warn(unreachable_pub)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 #[unstable(feature = "proc_macro_internals", issue = "27812")]
 #[doc(hidden)]
@@ -54,10 +52,23 @@ use std::{error, fmt};
 
 #[unstable(feature = "proc_macro_diagnostic", issue = "54140")]
 pub use diagnostic::{Diagnostic, Level, MultiSpan};
+#[unstable(feature = "proc_macro_value", issue = "136652")]
+pub use rustc_literal_escaper::EscapeError;
+use rustc_literal_escaper::{MixedUnit, Mode, byte_from_char, unescape_mixed, unescape_unicode};
 #[unstable(feature = "proc_macro_totokens", issue = "130977")]
 pub use to_tokens::ToTokens;
 
 use crate::escape::{EscapeOptions, escape_bytes};
+
+/// Errors returned when trying to retrieve a literal unescaped value.
+#[unstable(feature = "proc_macro_value", issue = "136652")]
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConversionErrorKind {
+    /// The literal failed to be escaped, take a look at [`EscapeError`] for more information.
+    FailedToUnescape(EscapeError),
+    /// Trying to convert a literal with the wrong type.
+    InvalidLiteralKind,
+}
 
 /// Determines whether proc_macro has been made accessible to the currently
 /// running program.
@@ -186,16 +197,6 @@ impl FromStr for TokenStream {
     }
 }
 
-// N.B., the bridge only provides `to_string`, implement `fmt::Display`
-// based on it (the reverse of the usual relationship between the two).
-#[doc(hidden)]
-#[stable(feature = "proc_macro_lib", since = "1.15.0")]
-impl ToString for TokenStream {
-    fn to_string(&self) -> String {
-        self.0.as_ref().map(|t| t.to_string()).unwrap_or_default()
-    }
-}
-
 /// Prints the token stream as a string that is supposed to be losslessly convertible back
 /// into the same token stream (modulo spans), except for possibly `TokenTree::Group`s
 /// with `Delimiter::None` delimiters and negative numeric literals.
@@ -211,7 +212,10 @@ impl ToString for TokenStream {
 impl fmt::Display for TokenStream {
     #[allow(clippy::recursive_format_impl)] // clippy doesn't see the specialization
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_string())
+        match &self.0 {
+            Some(ts) => write!(f, "{}", ts.to_string()),
+            None => Ok(()),
+        }
     }
 }
 
@@ -431,7 +435,7 @@ pub mod token_stream {
 /// Unquoting is done with `$`, and works by taking the single next ident as the unquoted term.
 /// To quote `$` itself, use `$$`.
 #[unstable(feature = "proc_macro_quote", issue = "54722")]
-#[allow_internal_unstable(proc_macro_def_site, proc_macro_internals)]
+#[allow_internal_unstable(proc_macro_def_site, proc_macro_internals, proc_macro_totokens)]
 #[rustc_builtin_macro]
 pub macro quote($($t:tt)*) {
     /* compiler built-in */
@@ -487,12 +491,6 @@ impl Span {
         Span(bridge::client::Span::mixed_site())
     }
 
-    /// The original source file into which this span points.
-    #[unstable(feature = "proc_macro_span", issue = "54725")]
-    pub fn source_file(&self) -> SourceFile {
-        SourceFile(self.0.source_file())
-    }
-
     /// The `Span` for the tokens in the previous macro expansion from which
     /// `self` was generated from, if any.
     #[unstable(feature = "proc_macro_span", issue = "54725")]
@@ -540,6 +538,25 @@ impl Span {
     #[unstable(feature = "proc_macro_span", issue = "54725")]
     pub fn column(&self) -> usize {
         self.0.column()
+    }
+
+    /// The path to the source file in which this span occurs, for display purposes.
+    ///
+    /// This might not correspond to a valid file system path.
+    /// It might be remapped, or might be an artificial path such as `"<macro expansion>"`.
+    #[unstable(feature = "proc_macro_span", issue = "54725")]
+    pub fn file(&self) -> String {
+        self.0.file()
+    }
+
+    /// The path to the source file in which this span occurs on disk.
+    ///
+    /// This is the actual path on disk. It is unaffected by path remapping.
+    ///
+    /// This path should not be embedded in the output of the macro; prefer `file()` instead.
+    #[unstable(feature = "proc_macro_span", issue = "54725")]
+    pub fn local_file(&self) -> Option<PathBuf> {
+        self.0.local_file().map(|s| PathBuf::from(s))
     }
 
     /// Creates a new span encompassing `self` and `other`.
@@ -609,58 +626,6 @@ impl fmt::Debug for Span {
         self.0.fmt(f)
     }
 }
-
-/// The source file of a given `Span`.
-#[unstable(feature = "proc_macro_span", issue = "54725")]
-#[derive(Clone)]
-pub struct SourceFile(bridge::client::SourceFile);
-
-impl SourceFile {
-    /// Gets the path to this source file.
-    ///
-    /// ### Note
-    /// If the code span associated with this `SourceFile` was generated by an external macro, this
-    /// macro, this might not be an actual path on the filesystem. Use [`is_real`] to check.
-    ///
-    /// Also note that even if `is_real` returns `true`, if `--remap-path-prefix` was passed on
-    /// the command line, the path as given might not actually be valid.
-    ///
-    /// [`is_real`]: Self::is_real
-    #[unstable(feature = "proc_macro_span", issue = "54725")]
-    pub fn path(&self) -> PathBuf {
-        PathBuf::from(self.0.path())
-    }
-
-    /// Returns `true` if this source file is a real source file, and not generated by an external
-    /// macro's expansion.
-    #[unstable(feature = "proc_macro_span", issue = "54725")]
-    pub fn is_real(&self) -> bool {
-        // This is a hack until intercrate spans are implemented and we can have real source files
-        // for spans generated in external macros.
-        // https://github.com/rust-lang/rust/pull/43604#issuecomment-333334368
-        self.0.is_real()
-    }
-}
-
-#[unstable(feature = "proc_macro_span", issue = "54725")]
-impl fmt::Debug for SourceFile {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SourceFile")
-            .field("path", &self.path())
-            .field("is_real", &self.is_real())
-            .finish()
-    }
-}
-
-#[unstable(feature = "proc_macro_span", issue = "54725")]
-impl PartialEq for SourceFile {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-
-#[unstable(feature = "proc_macro_span", issue = "54725")]
-impl Eq for SourceFile {}
 
 /// A single token or a delimited sequence of token trees (e.g., `[1, (), ..]`).
 #[stable(feature = "proc_macro_lib2", since = "1.29.0")]
@@ -757,21 +722,6 @@ impl From<Literal> for TokenTree {
     }
 }
 
-// N.B., the bridge only provides `to_string`, implement `fmt::Display`
-// based on it (the reverse of the usual relationship between the two).
-#[doc(hidden)]
-#[stable(feature = "proc_macro_lib", since = "1.15.0")]
-impl ToString for TokenTree {
-    fn to_string(&self) -> String {
-        match *self {
-            TokenTree::Group(ref t) => t.to_string(),
-            TokenTree::Ident(ref t) => t.to_string(),
-            TokenTree::Punct(ref t) => t.to_string(),
-            TokenTree::Literal(ref t) => t.to_string(),
-        }
-    }
-}
-
 /// Prints the token tree as a string that is supposed to be losslessly convertible back
 /// into the same token tree (modulo spans), except for possibly `TokenTree::Group`s
 /// with `Delimiter::None` delimiters and negative numeric literals.
@@ -787,7 +737,12 @@ impl ToString for TokenTree {
 impl fmt::Display for TokenTree {
     #[allow(clippy::recursive_format_impl)] // clippy doesn't see the specialization
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_string())
+        match self {
+            TokenTree::Group(t) => write!(f, "{t}"),
+            TokenTree::Ident(t) => write!(f, "{t}"),
+            TokenTree::Punct(t) => write!(f, "{t}"),
+            TokenTree::Literal(t) => write!(f, "{t}"),
+        }
     }
 }
 
@@ -913,16 +868,6 @@ impl Group {
     }
 }
 
-// N.B., the bridge only provides `to_string`, implement `fmt::Display`
-// based on it (the reverse of the usual relationship between the two).
-#[doc(hidden)]
-#[stable(feature = "proc_macro_lib", since = "1.15.0")]
-impl ToString for Group {
-    fn to_string(&self) -> String {
-        TokenStream::from(TokenTree::from(self.clone())).to_string()
-    }
-}
-
 /// Prints the group as a string that should be losslessly convertible back
 /// into the same group (modulo spans), except for possibly `TokenTree::Group`s
 /// with `Delimiter::None` delimiters.
@@ -930,7 +875,7 @@ impl ToString for Group {
 impl fmt::Display for Group {
     #[allow(clippy::recursive_format_impl)] // clippy doesn't see the specialization
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_string())
+        write!(f, "{}", TokenStream::from(TokenTree::from(self.clone())))
     }
 }
 
@@ -1036,14 +981,6 @@ impl Punct {
     }
 }
 
-#[doc(hidden)]
-#[stable(feature = "proc_macro_lib2", since = "1.29.0")]
-impl ToString for Punct {
-    fn to_string(&self) -> String {
-        self.as_char().to_string()
-    }
-}
-
 /// Prints the punctuation character as a string that should be losslessly convertible
 /// back into the same character.
 #[stable(feature = "proc_macro_lib2", since = "1.29.0")]
@@ -1136,14 +1073,6 @@ impl Ident {
     #[stable(feature = "proc_macro_lib2", since = "1.29.0")]
     pub fn set_span(&mut self, span: Span) {
         self.0.span = span.0;
-    }
-}
-
-#[doc(hidden)]
-#[stable(feature = "proc_macro_lib2", since = "1.29.0")]
-impl ToString for Ident {
-    fn to_string(&self) -> String {
-        self.0.sym.with(|sym| if self.0.is_raw { ["r#", sym].concat() } else { sym.to_owned() })
     }
 }
 
@@ -1497,6 +1426,107 @@ impl Literal {
             }
         })
     }
+
+    /// Returns the unescaped string value if the current literal is a string or a string literal.
+    #[unstable(feature = "proc_macro_value", issue = "136652")]
+    pub fn str_value(&self) -> Result<String, ConversionErrorKind> {
+        self.0.symbol.with(|symbol| match self.0.kind {
+            bridge::LitKind::Str => {
+                if symbol.contains('\\') {
+                    let mut buf = String::with_capacity(symbol.len());
+                    let mut error = None;
+                    // Force-inlining here is aggressive but the closure is
+                    // called on every char in the string, so it can be hot in
+                    // programs with many long strings containing escapes.
+                    unescape_unicode(
+                        symbol,
+                        Mode::Str,
+                        &mut #[inline(always)]
+                        |_, c| match c {
+                            Ok(c) => buf.push(c),
+                            Err(err) => {
+                                if err.is_fatal() {
+                                    error = Some(ConversionErrorKind::FailedToUnescape(err));
+                                }
+                            }
+                        },
+                    );
+                    if let Some(error) = error { Err(error) } else { Ok(buf) }
+                } else {
+                    Ok(symbol.to_string())
+                }
+            }
+            bridge::LitKind::StrRaw(_) => Ok(symbol.to_string()),
+            _ => Err(ConversionErrorKind::InvalidLiteralKind),
+        })
+    }
+
+    /// Returns the unescaped string value if the current literal is a c-string or a c-string
+    /// literal.
+    #[unstable(feature = "proc_macro_value", issue = "136652")]
+    pub fn cstr_value(&self) -> Result<Vec<u8>, ConversionErrorKind> {
+        self.0.symbol.with(|symbol| match self.0.kind {
+            bridge::LitKind::CStr => {
+                let mut error = None;
+                let mut buf = Vec::with_capacity(symbol.len());
+
+                unescape_mixed(symbol, Mode::CStr, &mut |_span, c| match c {
+                    Ok(MixedUnit::Char(c)) => {
+                        buf.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes())
+                    }
+                    Ok(MixedUnit::HighByte(b)) => buf.push(b),
+                    Err(err) => {
+                        if err.is_fatal() {
+                            error = Some(ConversionErrorKind::FailedToUnescape(err));
+                        }
+                    }
+                });
+                if let Some(error) = error {
+                    Err(error)
+                } else {
+                    buf.push(0);
+                    Ok(buf)
+                }
+            }
+            bridge::LitKind::CStrRaw(_) => {
+                // Raw strings have no escapes so we can convert the symbol
+                // directly to a `Lrc<u8>` after appending the terminating NUL
+                // char.
+                let mut buf = symbol.to_owned().into_bytes();
+                buf.push(0);
+                Ok(buf)
+            }
+            _ => Err(ConversionErrorKind::InvalidLiteralKind),
+        })
+    }
+
+    /// Returns the unescaped string value if the current literal is a byte string or a byte string
+    /// literal.
+    #[unstable(feature = "proc_macro_value", issue = "136652")]
+    pub fn byte_str_value(&self) -> Result<Vec<u8>, ConversionErrorKind> {
+        self.0.symbol.with(|symbol| match self.0.kind {
+            bridge::LitKind::ByteStr => {
+                let mut buf = Vec::with_capacity(symbol.len());
+                let mut error = None;
+
+                unescape_unicode(symbol, Mode::ByteStr, &mut |_, c| match c {
+                    Ok(c) => buf.push(byte_from_char(c)),
+                    Err(err) => {
+                        if err.is_fatal() {
+                            error = Some(ConversionErrorKind::FailedToUnescape(err));
+                        }
+                    }
+                });
+                if let Some(error) = error { Err(error) } else { Ok(buf) }
+            }
+            bridge::LitKind::ByteStrRaw(_) => {
+                // Raw strings have no escapes so we can convert the symbol
+                // directly to a `Lrc<u8>`.
+                Ok(symbol.to_owned().into_bytes())
+            }
+            _ => Err(ConversionErrorKind::InvalidLiteralKind),
+        })
+    }
 }
 
 /// Parse a single literal from its stringified representation.
@@ -1518,14 +1548,6 @@ impl FromStr for Literal {
             Ok(literal) => Ok(Literal(literal)),
             Err(()) => Err(LexError),
         }
-    }
-}
-
-#[doc(hidden)]
-#[stable(feature = "proc_macro_lib2", since = "1.29.0")]
-impl ToString for Literal {
-    fn to_string(&self) -> String {
-        self.with_stringify_parts(|parts| parts.concat())
     }
 }
 
