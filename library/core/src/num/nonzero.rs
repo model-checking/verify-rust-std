@@ -2561,17 +2561,31 @@ mod verify {
 
     macro_rules! nonzero_check_add {
         ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_add_for:ident) => {
-            #[kani::proof_for_contract(<$t>::unchecked_add)]
+            #[kani::proof_for_contract(<$nonzero_type>::unchecked_add)]
             pub fn $nonzero_check_unchecked_add_for() {
                 let x: $nonzero_type = kani::any();
-                let y: $nonzero_type = kani::any();
-    
+                let y: $t = kani::any();
+
                 unsafe {
-                    x.get().unchecked_add(y.get());
+                    x.unchecked_add(y);
                 }
             }
         };
     }
+
+    // Generate proofs for all NonZero types
+    nonzero_check_add!(i8, core::num::NonZeroI8, nonzero_check_unchecked_add_for_i8);
+    nonzero_check_add!(i16, core::num::NonZeroI16, nonzero_check_unchecked_add_for_i16);
+    nonzero_check_add!(i32, core::num::NonZeroI32, nonzero_check_unchecked_add_for_i32);
+    nonzero_check_add!(i64, core::num::NonZeroI64, nonzero_check_unchecked_add_for_i64);
+    nonzero_check_add!(i128, core::num::NonZeroI128, nonzero_check_unchecked_add_for_i128);
+    nonzero_check_add!(isize, core::num::NonZeroIsize, nonzero_check_unchecked_add_for_isize);
+    nonzero_check_add!(u8, core::num::NonZeroU8, nonzero_check_unchecked_add_for_u8);
+    nonzero_check_add!(u16, core::num::NonZeroU16, nonzero_check_unchecked_add_for_u16);
+    nonzero_check_add!(u32, core::num::NonZeroU32, nonzero_check_unchecked_add_for_u32);
+    nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
+    nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
+    nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
 
     // Use the macro to generate different versions of the function for multiple types
     nonzero_check_cmp!(core::num::NonZeroI8, nonzero_check_cmp_for_i8);
@@ -2602,20 +2616,6 @@ mod verify {
             }
         };
     }
-    
-    // Generate proofs for all NonZero types
-    nonzero_check_add!(i8, core::num::NonZeroI8, nonzero_check_unchecked_add_for_i8);
-    nonzero_check_add!(i16, core::num::NonZeroI16, nonzero_check_unchecked_add_for_i16);
-    nonzero_check_add!(i32, core::num::NonZeroI32, nonzero_check_unchecked_add_for_i32);
-    nonzero_check_add!(i64, core::num::NonZeroI64, nonzero_check_unchecked_add_for_i64);
-    nonzero_check_add!(i128, core::num::NonZeroI128, nonzero_check_unchecked_add_for_i128);
-    nonzero_check_add!(isize, core::num::NonZeroIsize, nonzero_check_unchecked_add_for_isize);
-    nonzero_check_add!(u8, core::num::NonZeroU8, nonzero_check_unchecked_add_for_u8);
-    nonzero_check_add!(u16, core::num::NonZeroU16, nonzero_check_unchecked_add_for_u16);
-    nonzero_check_add!(u32, core::num::NonZeroU32, nonzero_check_unchecked_add_for_u32);
-    nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
-    nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
-    nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
 
     nonzero_check_max!(core::num::NonZeroI8, nonzero_check_max_for_i8);
     nonzero_check_max!(core::num::NonZeroI16, nonzero_check_max_for_i16);
