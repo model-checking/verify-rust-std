@@ -2418,57 +2418,17 @@ mod verify {
 
     // Use the macro to generate different versions of the function for multiple types
     nonzero_check!(i8, core::num::NonZeroI8, nonzero_check_new_unchecked_for_i8);
-    nonzero_check!(
-        i16,
-        core::num::NonZeroI16,
-        nonzero_check_new_unchecked_for_16
-    );
-    nonzero_check!(
-        i32,
-        core::num::NonZeroI32,
-        nonzero_check_new_unchecked_for_32
-    );
-    nonzero_check!(
-        i64,
-        core::num::NonZeroI64,
-        nonzero_check_new_unchecked_for_64
-    );
-    nonzero_check!(
-        i128,
-        core::num::NonZeroI128,
-        nonzero_check_new_unchecked_for_128
-    );
-    nonzero_check!(
-        isize,
-        core::num::NonZeroIsize,
-        nonzero_check_new_unchecked_for_isize
-    );
+    nonzero_check!(i16, core::num::NonZeroI16, nonzero_check_new_unchecked_for_16);
+    nonzero_check!(i32, core::num::NonZeroI32, nonzero_check_new_unchecked_for_32);
+    nonzero_check!( i64, core::num::NonZeroI64, nonzero_check_new_unchecked_for_64);
+    nonzero_check!(i128, core::num::NonZeroI128, nonzero_check_new_unchecked_for_128);
+    nonzero_check!(isize, core::num::NonZeroIsize, nonzero_check_new_unchecked_for_isize);
     nonzero_check!(u8, core::num::NonZeroU8, nonzero_check_new_unchecked_for_u8);
-    nonzero_check!(
-        u16,
-        core::num::NonZeroU16,
-        nonzero_check_new_unchecked_for_u16
-    );
-    nonzero_check!(
-        u32,
-        core::num::NonZeroU32,
-        nonzero_check_new_unchecked_for_u32
-    );
-    nonzero_check!(
-        u64,
-        core::num::NonZeroU64,
-        nonzero_check_new_unchecked_for_u64
-    );
-    nonzero_check!(
-        u128,
-        core::num::NonZeroU128,
-        nonzero_check_new_unchecked_for_u128
-    );
-    nonzero_check!(
-        usize,
-        core::num::NonZeroUsize,
-        nonzero_check_new_unchecked_for_usize
-    );
+    nonzero_check!(u16, core::num::NonZeroU16, nonzero_check_new_unchecked_for_u16);
+    nonzero_check!(u32, core::num::NonZeroU32, nonzero_check_new_unchecked_for_u32);
+    nonzero_check!(u64, core::num::NonZeroU64, nonzero_check_new_unchecked_for_u64);
+    nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
+    nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 
     // macro_rules! nonzero_check_from_mut_unchecked {
     //     ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
@@ -3014,29 +2974,9 @@ mod verify {
     // nonzero_check_add!(i128, core::num::NonZeroI128, nonzero_check_unchecked_add_for_i128);
     // nonzero_check_add!(isize, core::num::NonZeroIsize, nonzero_check_unchecked_add_for_isize);
     nonzero_check_add!(u8, core::num::NonZeroU8, nonzero_check_unchecked_add_for_u8);
-    nonzero_check_add!(
-        u16,
-        core::num::NonZeroU16,
-        nonzero_check_unchecked_add_for_u16
-    );
-    nonzero_check_add!(
-        u32,
-        core::num::NonZeroU32,
-        nonzero_check_unchecked_add_for_u32
-    );
-    nonzero_check_add!(
-        u64,
-        core::num::NonZeroU64,
-        nonzero_check_unchecked_add_for_u64
-    );
-    nonzero_check_add!(
-        u128,
-        core::num::NonZeroU128,
-        nonzero_check_unchecked_add_for_u128
-    );
-    nonzero_check_add!(
-        usize,
-        core::num::NonZeroUsize,
-        nonzero_check_unchecked_add_for_usize
-    );
+    nonzero_check_add!(u16, core::num::NonZeroU16, nonzero_check_unchecked_add_for_u16);
+    nonzero_check_add!(u32, core::num::NonZeroU32, nonzero_check_unchecked_add_for_u32);
+    nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
+    nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
+    nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
 }
