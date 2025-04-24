@@ -2420,7 +2420,7 @@ mod verify {
     nonzero_check!(i8, core::num::NonZeroI8, nonzero_check_new_unchecked_for_i8);
     nonzero_check!(i16, core::num::NonZeroI16, nonzero_check_new_unchecked_for_16);
     nonzero_check!(i32, core::num::NonZeroI32, nonzero_check_new_unchecked_for_32);
-    nonzero_check!( i64, core::num::NonZeroI64, nonzero_check_new_unchecked_for_64);
+    nonzero_check!(i64, core::num::NonZeroI64, nonzero_check_new_unchecked_for_64);
     nonzero_check!(i128, core::num::NonZeroI128, nonzero_check_new_unchecked_for_128);
     nonzero_check!(isize, core::num::NonZeroIsize, nonzero_check_new_unchecked_for_isize);
     nonzero_check!(u8, core::num::NonZeroU8, nonzero_check_new_unchecked_for_u8);
