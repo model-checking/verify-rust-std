@@ -2432,7 +2432,7 @@ mod verify {
 
     // macro_rules! nonzero_check_from_mut_unchecked {
     //     ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
-    //         #[kani::proof_for_contract(NonZero::<T>::from_mut_unchecked)]
+    //         #[kani::proof_for_contract(<T>::from_mut_unchecked)]
     //         pub fn $harness_name() {
     //             let mut x: $t = kani::any();
     //             unsafe {
@@ -2672,7 +2672,7 @@ mod verify {
 
     macro_rules! check_mul_unchecked_small{
         ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_mul_for:ident) => {
-            #[kani::proof_for_contract(NonZero::<T>::unchecked_mul)]
+            #[kani::proof_for_contract(<$t>::unchecked_mul)]
             pub fn $nonzero_check_unchecked_mul_for() {
                 let x: $nonzero_type = kani::any();
                 let y: $nonzero_type = kani::any();
@@ -2686,7 +2686,7 @@ mod verify {
 
     macro_rules! check_mul_unchecked_intervals{
         ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident, $min:expr, $max:expr) => {
-            #[kani::proof_for_contract(NonZero::<T>::unchecked_mul)]
+            #[kani::proof_for_contract(<$t>::unchecked_mul)]
             pub fn $nonzero_check_mul_for() {
                 let x = kani::any::<$t>();
                 let y = kani::any::<$t>();
@@ -2762,7 +2762,7 @@ mod verify {
 
     macro_rules! nonzero_check_add {
         ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_add_for:ident) => {
-            #[kani::proof_for_contract(NonZero::<T>::unchecked_add)]
+            #[kani::proof_for_contract(<$t>::unchecked_add)]
             pub fn $nonzero_check_unchecked_add_for() {
                 let x: $nonzero_type = kani::any();
                 let y: $t = kani::any();
