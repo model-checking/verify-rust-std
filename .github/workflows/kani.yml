@@ -110,7 +110,7 @@ jobs:
       # Step 2: Run list on the std library
       - name: Run Kani List
         run: |
-          head/scripts/run-kani.sh --run list --path ${{github.workspace}}/head
+          head/scripts/run-kani.sh --run list --with-autoharness --path ${{github.workspace}}/head
           # remove duplicate white space to reduce file size (GitHub permits at
           # most one 1MB)
           ls -l ${{github.workspace}}/head/kani-list.md

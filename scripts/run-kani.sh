@@ -16,6 +16,7 @@ usage() {
 command_args=""
 path=""
 run_command="verify-std"
+with_autoharness="false"
 
 # Parse command line arguments
 # TODO: Improve parsing with getopts
@@ -41,6 +42,10 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: Invalid run command. Must be 'verify-std', 'list', or 'metrics'."
                 usage
             fi
+            ;;
+        --with-autoharness)
+            with_autoharness="true"
+            shift
             ;;
         --kani-args)
             shift
@@ -309,11 +314,19 @@ main() {
               --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
-        "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format markdown
+        if [[ "$with_autoharness" == "true" ]]; then
+            "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format markdown
+        else
+            "$kani_path" list -Z list $unstable_args ./library --std --format markdown
+        fi
     elif [[ "$run_command" == "metrics" ]]; then
         local current_dir=$(pwd)
         echo "Running Kani list command..."
-        "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format json
+        if [[ "$with_autoharness" == "true" ]]; then
+            "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format json
+        else
+            "$kani_path" list -Z list $unstable_args ./library --std --format json
+        fi
         pushd scripts/kani-std-analysis
         echo "Running Kani's std-analysis command..."
         ./std-analysis.sh $build_dir
