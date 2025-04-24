@@ -16,7 +16,9 @@ use crate::{cmp, fmt, hash, mem, num};
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
-#[invariant(self.as_usize().is_power_of_two())]
+// uses .0 instead of .as_usize() to permit proving as_usize so that its proof does not itself use
+// as_usize
+#[invariant((self.0 as usize).is_power_of_two())]
 pub struct Alignment(AlignmentEnum);
 
 // Alignment is `repr(usize)`, but via extra steps.
