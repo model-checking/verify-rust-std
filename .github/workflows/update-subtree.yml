@@ -126,14 +126,14 @@ jobs:
         UPSTREAM_HEAD=$(git log --format=%H -n 1 rust-filtered/subtree/library)
         if [ "${UPSTREAM_HEAD}" = "${UPSTREAM_FROM}" ]; then
           echo "Nothing to do, ${UPSTREAM_FROM} matches ${UPSTREAM_HEAD} (${SUBTREE_HEAD_MSG})"
-          echo "MERGE_CONFLICTS=noop" >> $GITHUB_ENV
+          echo "SUBTREE_PR_REQUIRED=no" >> $GITHUB_ENV
         else
           git branch --set-upstream-to=origin/subtree/library
-          echo "MERGE_CONFLICTS=maybe" >> $GITHUB_ENV
+          echo "SUBTREE_PR_REQUIRED=yes" >> $GITHUB_ENV
         fi
 
     - name: Create Pull Request to update subtree/library
-      if: ${{ env.MERGE_CONFLICTS != 'noop' && env.SUBTREE_PR_EXISTS == 'no' }}
+      if: ${{ env.SUBTREE_PR_REQUIRED == 'yes' && env.SUBTREE_PR_EXISTS == 'no' }}
       uses: peter-evans/create-pull-request@v7
       with:
         title: 'Update subtree/library to ${{ env.NEXT_TOOLCHAIN_DATE }}'
@@ -151,7 +151,7 @@ jobs:
         path: verify-rust-std
 
     - name: Merge subtree/library changes
-      if: ${{ env.MERGE_CONFLICTS != 'noop' && env.MERGE_PR_EXISTS == 'no' }}
+      if: ${{ env.CURRENT_TOOLCHAIN_DATE != env.NEXT_TOOLCHAIN_DATE && env.MERGE_PR_EXISTS == 'no' }}
       run: |
         cd verify-rust-std
         # create-pull-request resets branches locally, implying that
@@ -160,7 +160,9 @@ jobs:
           git checkout -t -b subtree/library origin/update-subtree/library
         else
           git checkout subtree/library
-          git reset --hard origin/update-subtree/library
+          if [ "${SUBTREE_PR_REQUIRED}" = "yes" ]; then
+            git reset --hard origin/update-subtree/library
+          fi
         fi
         git checkout main
 
