@@ -1,5 +1,49 @@
 #!/usr/bin/env python3
 
+"""
+Parse log file of multi-threaded Kani run (terse output) into JSON.
+Given a run of Kani on the standard library with `--jobs=<N>
+--output-format=terse` (and, typically, `autoharness`) enabled this produces
+a machine-processable JSON result via
+```
+python3 log_parser.py \
+  --kani-list-file kani-list.json \
+  --analysis-results-dir std_lib_analysis/results/ \
+  verification.log -o results.json
+```
+where each entry in the resulting JSON array is of the form
+```
+{
+  "thread_id": int,
+  "result": {
+    "harness": string,
+    "is_autoharness": bool,
+    "autoharness_result": string,
+    "with_contract": bool,
+    "crate": string,
+    "function": string,
+    "function_safeness": string,
+    "file_name": string,
+    "n_failed_properties": int,
+    "n_total_properties": int,
+    "result": string,
+    "time": string,
+    "output": array
+  }
+}
+```
+With the help of `jq` one can then conveniently compute various metrics:
+```
+jq 'map(select(.result.result == "SUCCESSFUL" and
+               .result.is_autoharness == true and
+               .result.crate == "core" and
+               .result.function_safeness == "unsafe" and
+               .result.with_contract == true)) | length' results.json
+```
+to find the number of successfully-verified contracts of unsafe functions in
+crate `core` that were verified using automatically generated harnesses.
+"""
+
 import argparse
 import csv
 import glob
@@ -8,10 +52,50 @@ import re
 import sys
 
 
+def read_scanner_results(scanner_results_dir):
+    """Parse information produced by Kani's scanner tool."""
+    crate_pattern = re.compile(r'^.*/(.+)_scan_functions.csv$')
+    fn_to_info = {}
+    for csv_file in glob.glob(f'{scanner_results_dir}/*_scan_functions.csv'):
+        crate_match = re.match(crate_pattern, csv_file)
+        crate = crate_match.group(1)
+        with open(csv_file) as f:
+            csv_reader = csv.DictReader(f, delimiter=';')
+            for row in csv_reader:
+                fn = row['name']
+                if row['is_unsafe'] == 'true':
+                    target_safeness = 'unsafe'
+                elif row['has_unsafe_ops'] == 'true':
+                    target_safeness = 'safe abstraction'
+                else:
+                    target_safeness = 'safe'
+                if fn_to_info.get(fn) is None:
+                    fn_to_info[fn] = {}
+                else:
+                    # assert fn_to_info[fn].get(crate) is None
+                    if ex_entry := fn_to_info[fn].get(crate):
+                        # print(f'Scanner entry for {fn} in {crate} already exists',
+                        #       file=sys.stderr)
+                        # the below doesn't even hold!
+                        # assert ex_entry['target_safeness'] == target_safeness
+                        continue
+                fn_to_info[fn][crate] = {
+                        'target_safeness': target_safeness
+                    }
+
+    return fn_to_info
+
+
 def read_kani_list(kani_list_file, scanner_data):
+    """Read from kani_list_file (a JSON file produced using kani list) and
+    combine the information with the scanner's data."""
     with open(kani_list_file, 'r') as f:
         harnesses = json.load(f)
 
+    # There is no reasonable way to reliably deduce which function a
+    # non-contract harness is targeting for verification, so we apply a bunch
+    # of patterns that we know are being used. We expect that, over time,
+    # manual harnesses will largely disappear.
     harness_pattern1 = re.compile(r'^(.+)::verify::(check|verify)_(.+)$')
     harness_pattern2 = re.compile(
             r'^(.+)::verify::(non_null|nonzero)_check_(.+)$')
@@ -40,20 +124,33 @@ def read_kani_list(kani_list_file, scanner_data):
             elif h == 'option::verify::verify_as_slice':
                 fn = 'option::Option::<T>::as_slice'
             else:
-                lt_replaced = h.replace('<\'_>', '<\'a>')
-                if scanner_data.get(h) is None and (
-                        scanner_data.get(lt_replaced) is not None):
-                    fn = lt_replaced
-                else:
-                    fn = h
-            fn_info = scanner_data.get(
-                    fn, {'crate': None, 'target_safeness': None})
-            standard_harnesses[h] = {
-                    'file_name': file_name,
-                    'crate': fn_info['crate'],
-                    'function': fn,
-                    'target_safeness': fn_info['target_safeness']
-                }
+                fn = h
+            fn_info = scanner_data.get(fn)
+            if fn_info is None:
+                standard_harnesses[h] = {
+                        'file_name': file_name,
+                        'crate': None,
+                        'function': fn,
+                        'target_safeness': None
+                    }
+            elif len(fn_info.keys()) > 1:
+                crates = list(fn_info.keys())
+                target_safenesses = [ts['target_safenesses']
+                                     for _, ts in fn_info.items()]
+                standard_harnesses[h] = {
+                        'file_name': file_name,
+                        'crate': crates,
+                        'function': fn,
+                        'target_safeness': target_safenesses
+                    }
+            else:
+                crate = list(fn_info.keys())[0]
+                standard_harnesses[h] = {
+                        'file_name': file_name,
+                        'crate': crate,
+                        'function': fn,
+                        'target_safeness': fn_info[crate]['target_safeness']
+                    }
 
     contract_harnesses = {}
     for file_name, l in harnesses['contract-harnesses'].items():
@@ -67,9 +164,9 @@ def read_kani_list(kani_list_file, scanner_data):
     for o in harnesses['contracts']:
         for h in o['harnesses']:
             fn = o['function']
-            fn_info = scanner_data.get(
-                    fn, {'crate': None, 'target_safeness': None})
-            if h == 'kani::internal::automatic_harness':
+            if h == 'core::kani::internal::automatic_harness':
+                entry = contract_harnesses[fn]
+            elif h == 'kani::internal::automatic_harness':
                 entry = contract_harnesses[fn]
             else:
                 entry = contract_harnesses[h]
@@ -77,71 +174,70 @@ def read_kani_list(kani_list_file, scanner_data):
                     # replace harness file name by target function file name
                     entry['file_name'] = o['file']
             entry['function'] = fn
-            entry['crate'] = fn_info['crate']
-            entry['target_safeness'] = fn_info['target_safeness']
+            fn_info = scanner_data.get(fn)
+            if fn_info is not None:
+                if len(fn_info.keys()) > 1:
+                    crates = list(fn_info.keys())
+                    target_safenesses = [ts['target_safenesses']
+                                         for _, ts in fn_info.items()]
+                    entry['crate'] = crates
+                    entry['target_safeness'] = target_safenesses
+                else:
+                    crate = list(fn_info.keys())[0]
+                    entry['crate'] = crate
+                    entry['target_safeness'] = fn_info[crate][
+                            'target_safeness']
 
     return contract_harnesses, standard_harnesses
-
-
-def read_scanner_results(scanner_results_dir):
-    crate_pattern = re.compile(r'^.*/(.+)_scan_functions.csv$')
-    fn_to_info = {}
-    for csv_file in glob.glob(f'{scanner_results_dir}/*_scan_functions.csv'):
-        crate_match = re.match(crate_pattern, csv_file)
-        crate = crate_match.group(1)
-        with open(csv_file) as f:
-            csv_reader = csv.DictReader(f, delimiter=';')
-            for row in csv_reader:
-                fn = row['name']
-                if row['is_unsafe'] == 'false':
-                    target_safeness = 'unsafe'
-                elif row['has_unsafe_ops'] == 'true':
-                    target_safeness = 'safe abstraction'
-                else:
-                    target_safeness = 'safe'
-                if ex_entry := fn_to_info.get(fn):
-                    # print(f'Scanner entry for {fn} already exists',
-                    #       file=sys.stderr)
-                    # the below don't even hold!
-                    # assert ex_entry['crate'] == crate
-                    # assert ex_entry['target_safeness'] == target_safeness
-                    continue
-                fn_to_info[fn] = {
-                        'crate': crate,
-                        'target_safeness': target_safeness
-                    }
-
-    return fn_to_info
 
 
 def find_harness_map_entry(
         harness, autoharness_for_contract, contract_harnesses,
         standard_harnesses):
+    """Find harness in either contract- or standard harness dict."""
     if entry := contract_harnesses.get(harness):
         return (entry, True)
     elif entry := standard_harnesses.get(harness):
         with_contract = autoharness_for_contract is True
         return (entry, with_contract)
     else:
-        return None, None
+        return {
+                'crate': None,
+                'function': None,
+                'target_safeness': None,
+                'file_name': None
+               }, None
 
 
 def init_entry(
         match_group, is_autoharness, autoharness_for_contract,
         contract_harnesses, standard_harnesses, active_threads,
         autoharness_info):
+    """Initialize verification result entry."""
     thread_id = int(match_group(1))
     harness = match_group(2)
     (harness_map_entry, with_contract) = find_harness_map_entry(
             harness, autoharness_for_contract, contract_harnesses,
             standard_harnesses)
+    crate = harness_map_entry['crate']
     if is_autoharness:
-        assert autoharness_info[harness] == 'ok'
-        del autoharness_info[harness]
+        if crate is None:
+            print(f'No autoharness info for {harness}', file=sys.stderr)
+        else:
+            if autoharness_info.get(crate) is None:
+                print(f'No autoharness info for {crate}',
+                        file=sys.stderr)
+            else:
+                if autoharness_info[crate][harness] != 'ok':
+                    print(f'Unexpected autoharness info for {harness} in {crate}',
+                            file=sys.stderr)
+                del autoharness_info[crate][harness]
         autoharness_result = 'ok'
     else:
         fn = harness_map_entry['function']
-        if autoharness_info_entry := autoharness_info.get(fn):
+        if autoharness_info.get(crate) is None:
+            autoharness_result = None
+        elif autoharness_info_entry := autoharness_info[crate].get(fn):
             autoharness_result = autoharness_info_entry
             del autoharness_info_entry
         else:
@@ -156,7 +252,7 @@ def init_entry(
             'is_autoharness': is_autoharness,
             'autoharness_result': autoharness_result,
             'with_contract': with_contract,
-            'crate': harness_map_entry['crate'],
+            'crate': crate,
             'function': harness_map_entry['function'],
             'function_safeness': harness_map_entry['target_safeness'],
             'file_name': harness_map_entry['file_name'],
@@ -169,28 +265,65 @@ def init_entry(
 
 
 def create_autoharness_result(
-        fn, autoharness_result, contract_harnesses, standard_harnesses,
+        crate, fn, autoharness_result, contract_harnesses, standard_harnesses,
         scanner_data):
+    """Initialize entries from autoharness summary tables."""
     (harness_map_entry, with_contract) = find_harness_map_entry(
             fn, None, contract_harnesses, standard_harnesses)
     if harness_map_entry is None:
-        fn_info = scanner_data.get(
-                fn, {'crate': None, 'target_safeness': None})
-        return {
-                'harness': fn,
-                'is_autoharness': True,
-                'autoharness_result': autoharness_result,
-                'with_contract': None,
-                'crate': fn_info['crate'],
-                'function': fn,
-                'function_safeness': fn_info['target_safeness'],
-                'file_name': None,
-                'n_failed_properties': None,
-                'n_total_properties': None,
-                'result': None,
-                'time': None,
-                'output': []
-            }
+        fn_info = scanner_data.get(fn)
+        if fn_info is None:
+            return {
+                    'harness': fn,
+                    'is_autoharness': True,
+                    'autoharness_result': autoharness_result,
+                    'with_contract': None,
+                    'crate': None,
+                    'function': fn,
+                    'function_safeness': None,
+                    'file_name': None,
+                    'n_failed_properties': None,
+                    'n_total_properties': None,
+                    'result': None,
+                    'time': None,
+                    'output': []
+                }
+        elif len(fn_info.keys()) > 1:
+            crates = list(fn_info.keys())
+            target_safenesses = [ts['target_safenesses']
+                                 for _, ts in fn_info.items()]
+            return {
+                    'harness': fn,
+                    'is_autoharness': True,
+                    'autoharness_result': autoharness_result,
+                    'with_contract': None,
+                    'crate': crates,
+                    'function': fn,
+                    'function_safeness': target_safenesses,
+                    'file_name': None,
+                    'n_failed_properties': None,
+                    'n_total_properties': None,
+                    'result': None,
+                    'time': None,
+                    'output': []
+                }
+        else:
+            crate = list(fn_info.keys())[0]
+            return {
+                    'harness': fn,
+                    'is_autoharness': True,
+                    'autoharness_result': autoharness_result,
+                    'with_contract': None,
+                    'crate': crate,
+                    'function': fn,
+                    'function_safeness': fn_info[crate]['target_safeness'],
+                    'file_name': None,
+                    'n_failed_properties': None,
+                    'n_total_properties': None,
+                    'result': None,
+                    'time': None,
+                    'output': []
+                }
     else:
         return {
                 'harness': fn,
@@ -210,8 +343,11 @@ def create_autoharness_result(
 
 
 def parse_autoharness_info(lines, i):
-    fn_ok_pattern = re.compile(r'^\| (.+?)\s+\|$')
-    fn_fail_pattern = re.compile(r'^\| (.+?)\s+\| (.+?)\s+\|$')
+    """Parse summary tables provided by autoharness."""
+    ok_header_pattern = re.compile(r'^\| Crate\s+\| Selected Function')
+    fail_header_pattern = re.compile(r'\| Crate\s+\| Skipped Function')
+    fn_ok_pattern = re.compile(r'^\| (.+?)\s+\| (.+?)\s+\|$')
+    fn_fail_pattern = re.compile(r'^\| (.+?)\s+\| (.+?)\s+\| (.+?)\s+\|$')
     parser_state = 0
     in_fails = False
     autoharness_info = {}
@@ -226,9 +362,9 @@ def parse_autoharness_info(lines, i):
             i += 1
         elif parser_state == 1 and (
                 line.startswith('+--') or
-                line.startswith('| Chosen Function') or
                 line.startswith('If you believe that the provided reason') or
-                line.startswith('| Skipped Function')):
+                re.match(ok_header_pattern, line) is not None or
+                re.match(fail_header_pattern, line) is not None):
             i += 1
         elif parser_state == 1 and line.startswith('+=='):
             parser_state = 2
@@ -246,15 +382,20 @@ def parse_autoharness_info(lines, i):
             assert parser_state == 2
             if in_fails:
                 fn_match = re.match(fn_fail_pattern, line)
-                fn = fn_match.group(1)
-                # there may be multiple entries here
-                # assert autoharness_info.get(fn) is None
-                autoharness_info[fn] = fn_match.group(2)
+                crate = fn_match.group(1)
+                if autoharness_info.get(crate) is None:
+                    autoharness_info[crate] = {}
+                fn = fn_match.group(2)
+                assert autoharness_info[crate].get(fn) is None
+                autoharness_info[crate][fn] = fn_match.group(3)
             else:
                 fn_match = re.match(fn_ok_pattern, line)
-                fn = fn_match.group(1)
-                assert autoharness_info.get(fn) is None
-                autoharness_info[fn] = 'ok'
+                crate = fn_match.group(1)
+                if autoharness_info.get(crate) is None:
+                    autoharness_info[crate] = {}
+                fn = fn_match.group(2)
+                assert autoharness_info[crate].get(fn) is None
+                autoharness_info[crate][fn] = 'ok'
             i += 1
 
     return i, autoharness_info
@@ -262,6 +403,8 @@ def parse_autoharness_info(lines, i):
 
 def parse_log_lines(
         lines, contract_harnesses, standard_harnesses, scanner_data):
+    """Parse (terse) output from multi-threaded Kani run while considering list
+    and scanner data."""
     # Regular expressions for matching patterns
     start_work_autoharness_contract_pattern = re.compile(
             r'Thread (\d+): Autoharness: Checking function (.*)\'s contract ' +
@@ -316,7 +459,7 @@ def parse_log_lines(
         if end_result_match := end_result_pattern.match(line):
             assert thread_id is not None
             active_threads[thread_id]['result'] = end_result_match.group(1)
-            next_i = i + 1
+            next_i = i
             if next_i < len(lines):
                 next_line = lines[next_i].rstrip()
                 if next_line.startswith('CBMC timed out.'):
@@ -354,16 +497,21 @@ def parse_log_lines(
 
     assert len(active_threads) == 0
 
-    for fn, value in autoharness_info.items():
-        all_results.append({'result': create_autoharness_result(
-            fn, value, contract_harnesses, standard_harnesses, scanner_data)})
+    for crate, crate_value in autoharness_info.items():
+        for fn, value in crate_value.items():
+            all_results.append({
+                'result': create_autoharness_result(
+                    crate, fn, value, contract_harnesses, standard_harnesses,
+                    scanner_data)
+            })
 
     return all_results
 
 
 def main():
     parser = argparse.ArgumentParser(
-            description='Parse log file of multi-threaded autoharness results')
+            description=__doc__,
+            formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('log_file', help='Path to the log file to parse')
     parser.add_argument(
             '-o', '--output', help='Output file path (default: stdout)')
