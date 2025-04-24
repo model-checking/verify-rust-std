@@ -8,7 +8,7 @@ usage() {
     echo "  -h, --help         Show this help message"
     echo "  -p, --path <path>  Optional: Specify a path to a copy of the std library. For example, if you want to run the script from an outside directory."
     echo "  --run <verify-std|list|metrics|autoharness>  Optional: Specify whether to run the 'kani verify-std' command, 'kani list' command, collect Kani-specific metrics, or run verification with autoharness support. Defaults to 'verify-std' if not specified."
-    echo "  --with-autoharness Include autoharness information in list or metrics commands.
+    echo "  --with-autoharness Include autoharness information in list or metrics commands."
     echo "  --kani-args  <command arguments to kani>  Optional: Arguments to pass to the command. Simply pass them in the same way you would to the Kani binary. This should be the last argument."
     exit 1
 }
