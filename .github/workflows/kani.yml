@@ -81,6 +81,7 @@ jobs:
           scripts/run-kani.sh --run autoharness --kani-args \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
+            --include-pattern char::convert::from_u32_unchecked \
             --include-pattern ptr::align_offset::mod_inv \
             --include-pattern ptr::alignment::Alignment::as_nonzero \
             --include-pattern ptr::alignment::Alignment::as_usize \
