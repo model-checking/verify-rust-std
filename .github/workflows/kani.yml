@@ -137,6 +137,18 @@ jobs:
             --include-pattern "num::<impl u64>::wrapping_sh" \
             --include-pattern "num::<impl u128>::wrapping_sh" \
             --include-pattern "num::<impl usize>::wrapping_sh" \
+            --include-pattern "num::nonzero::NonZero::<i8>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i16>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i32>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i64>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i128>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<isize>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u8>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u16>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u32>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u64>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u128>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<usize>::count_ones" \
             --include-pattern ptr::align_offset::mod_inv \
             --include-pattern ptr::alignment::Alignment::as_nonzero \
             --include-pattern ptr::alignment::Alignment::as_usize \
