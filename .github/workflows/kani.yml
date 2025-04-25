@@ -149,6 +149,18 @@ jobs:
             --include-pattern "num::nonzero::NonZero::<u64>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<u128>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<usize>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i8>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<i16>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<i32>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<i64>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<i128>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<isize>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u8>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u16>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u32>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u64>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u128>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<usize>::rotate_" \
             --include-pattern ptr::align_offset::mod_inv \
             --include-pattern ptr::alignment::Alignment::as_nonzero \
             --include-pattern ptr::alignment::Alignment::as_usize \
