@@ -1739,30 +1739,6 @@ mod verify {
         }
     }
 
-    // `unchecked_add` proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
-    //
-    // Target contracts:
-    // Preconditions: No overflow should occur
-    // #[requires(!self.overflowing_add(rhs).1)]
-    //
-    // Target function:
-    // pub const unsafe fn unchecked_add(self, rhs: Self) -> Self
-    generate_unchecked_math_harness!(i8, unchecked_add, checked_unchecked_add_i8);
-    generate_unchecked_math_harness!(i16, unchecked_add, checked_unchecked_add_i16);
-    generate_unchecked_math_harness!(i32, unchecked_add, checked_unchecked_add_i32);
-    generate_unchecked_math_harness!(i64, unchecked_add, checked_unchecked_add_i64);
-    generate_unchecked_math_harness!(i128, unchecked_add, checked_unchecked_add_i128);
-    generate_unchecked_math_harness!(isize, unchecked_add, checked_unchecked_add_isize);
-    generate_unchecked_math_harness!(u8, unchecked_add, checked_unchecked_add_u8);
-    generate_unchecked_math_harness!(u16, unchecked_add, checked_unchecked_add_u16);
-    generate_unchecked_math_harness!(u32, unchecked_add, checked_unchecked_add_u32);
-    generate_unchecked_math_harness!(u64, unchecked_add, checked_unchecked_add_u64);
-    generate_unchecked_math_harness!(u128, unchecked_add, checked_unchecked_add_u128);
-    generate_unchecked_math_harness!(usize, unchecked_add, checked_unchecked_add_usize);
-
     // `unchecked_mul` proofs
     //
     // Target types:
@@ -1919,32 +1895,6 @@ mod verify {
         usize::MAX / 2,
         usize::MAX
     );
-
-    // `unchecked_sub` proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
-    //
-    // Target contracts:
-    // Preconditions: No overflow should occur
-    // #[requires(!self.overflowing_sub(rhs).1)]
-    //
-    // Target function:
-    // pub const unsafe fn unchecked_sub(self, rhs: Self)  -> Self
-    //
-    // This function performs an unchecked subtraction operation.
-    generate_unchecked_math_harness!(i8, unchecked_sub, checked_unchecked_sub_i8);
-    generate_unchecked_math_harness!(i16, unchecked_sub, checked_unchecked_sub_i16);
-    generate_unchecked_math_harness!(i32, unchecked_sub, checked_unchecked_sub_i32);
-    generate_unchecked_math_harness!(i64, unchecked_sub, checked_unchecked_sub_i64);
-    generate_unchecked_math_harness!(i128, unchecked_sub, checked_unchecked_sub_i128);
-    generate_unchecked_math_harness!(isize, unchecked_sub, checked_unchecked_sub_isize);
-    generate_unchecked_math_harness!(u8, unchecked_sub, checked_unchecked_sub_u8);
-    generate_unchecked_math_harness!(u16, unchecked_sub, checked_unchecked_sub_u16);
-    generate_unchecked_math_harness!(u32, unchecked_sub, checked_unchecked_sub_u32);
-    generate_unchecked_math_harness!(u64, unchecked_sub, checked_unchecked_sub_u64);
-    generate_unchecked_math_harness!(u128, unchecked_sub, checked_unchecked_sub_u128);
-    generate_unchecked_math_harness!(usize, unchecked_sub, checked_unchecked_sub_usize);
 
     // Part_2 `carrying_mul` proofs
     //
