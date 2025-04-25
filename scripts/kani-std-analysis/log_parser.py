@@ -80,7 +80,8 @@ def read_scanner_results(scanner_results_dir):
                         # assert ex_entry['target_safeness'] == target_safeness
                         continue
                 fn_to_info[fn][crate] = {
-                        'target_safeness': target_safeness
+                        'target_safeness': target_safeness,
+                        'public_target': row['is_public'] == 'true'
                     }
 
     return fn_to_info
@@ -96,9 +97,9 @@ def read_kani_list(kani_list_file, scanner_data):
     # non-contract harness is targeting for verification, so we apply a bunch
     # of patterns that we know are being used. We expect that, over time,
     # manual harnesses will largely disappear.
-    harness_pattern1 = re.compile(r'^(.+)::verify::(check|verify)_(.+)$')
+    harness_pattern1 = re.compile(r'^(.+::)verify::(check|verify)_(.+)$')
     harness_pattern2 = re.compile(
-            r'^(.+)::verify::(non_null|nonzero)_check_(.+)$')
+            r'^(.+::)verify::(non_null|nonzero)_check_(.+)$')
     harness_pattern3 = re.compile(
             r'^time::duration_verify::duration_as_nanos(_panics)?$')
     harness_pattern4 = re.compile(
@@ -131,17 +132,21 @@ def read_kani_list(kani_list_file, scanner_data):
                         'file_name': file_name,
                         'crate': None,
                         'function': fn,
-                        'target_safeness': None
+                        'target_safeness': None,
+                        'public_target': None
                     }
             elif len(fn_info.keys()) > 1:
                 crates = list(fn_info.keys())
-                target_safenesses = [ts['target_safenesses']
-                                     for _, ts in fn_info.items()]
+                target_safenesses = [e['target_safenesses']
+                                     for _, e in fn_info.items()]
+                public_targets = [e['public_target']
+                                     for _, e in fn_info.items()]
                 standard_harnesses[h] = {
                         'file_name': file_name,
                         'crate': crates,
                         'function': fn,
-                        'target_safeness': target_safenesses
+                        'target_safeness': target_safenesses,
+                        'public_target': public_targets
                     }
             else:
                 crate = list(fn_info.keys())[0]
@@ -149,7 +154,8 @@ def read_kani_list(kani_list_file, scanner_data):
                         'file_name': file_name,
                         'crate': crate,
                         'function': fn,
-                        'target_safeness': fn_info[crate]['target_safeness']
+                        'target_safeness': fn_info[crate]['target_safeness'],
+                        'public_target': fn_info[crate]['public_target']
                     }
 
     contract_harnesses = {}
@@ -159,7 +165,8 @@ def read_kani_list(kani_list_file, scanner_data):
             contract_harnesses[h] = {
                     'file_name': file_name,
                     'crate': None,
-                    'target_safeness': None
+                    'target_safeness': None,
+                    'public_target': None
                 }
     for o in harnesses['contracts']:
         for h in o['harnesses']:
@@ -178,15 +185,19 @@ def read_kani_list(kani_list_file, scanner_data):
             if fn_info is not None:
                 if len(fn_info.keys()) > 1:
                     crates = list(fn_info.keys())
-                    target_safenesses = [ts['target_safenesses']
-                                         for _, ts in fn_info.items()]
+                    target_safenesses = [e['target_safenesses']
+                                         for _, e in fn_info.items()]
+                    public_targets = [e['public_target']
+                                         for _, e in fn_info.items()]
                     entry['crate'] = crates
                     entry['target_safeness'] = target_safenesses
+                    entry['public_target'] = public_targets
                 else:
                     crate = list(fn_info.keys())[0]
                     entry['crate'] = crate
                     entry['target_safeness'] = fn_info[crate][
                             'target_safeness']
+                    entry['public_target'] = fn_info[crate]['public_target']
 
     return contract_harnesses, standard_harnesses
 
@@ -205,6 +216,7 @@ def find_harness_map_entry(
                 'crate': None,
                 'function': None,
                 'target_safeness': None,
+                'public_target': None,
                 'file_name': None
                }, None
 
@@ -255,6 +267,7 @@ def init_entry(
             'crate': crate,
             'function': harness_map_entry['function'],
             'function_safeness': harness_map_entry['target_safeness'],
+            'public_target': harness_map_entry['public_target'],
             'file_name': harness_map_entry['file_name'],
             'n_failed_properties': None,
             'n_total_properties': None,
@@ -281,6 +294,7 @@ def create_autoharness_result(
                     'crate': None,
                     'function': fn,
                     'function_safeness': None,
+                    'public_target': None,
                     'file_name': None,
                     'n_failed_properties': None,
                     'n_total_properties': None,
@@ -290,8 +304,10 @@ def create_autoharness_result(
                 }
         elif len(fn_info.keys()) > 1:
             crates = list(fn_info.keys())
-            target_safenesses = [ts['target_safenesses']
-                                 for _, ts in fn_info.items()]
+            target_safenesses = [e['target_safenesses']
+                                 for _, e in fn_info.items()]
+            public_targets = [e['public_target']
+                                 for _, e in fn_info.items()]
             return {
                     'harness': fn,
                     'is_autoharness': True,
@@ -300,6 +316,7 @@ def create_autoharness_result(
                     'crate': crates,
                     'function': fn,
                     'function_safeness': target_safenesses,
+                    'public_target': public_targets,
                     'file_name': None,
                     'n_failed_properties': None,
                     'n_total_properties': None,
@@ -317,6 +334,7 @@ def create_autoharness_result(
                     'crate': crate,
                     'function': fn,
                     'function_safeness': fn_info[crate]['target_safeness'],
+                    'public_target': fn_info[crate]['public_target'],
                     'file_name': None,
                     'n_failed_properties': None,
                     'n_total_properties': None,
@@ -333,6 +351,7 @@ def create_autoharness_result(
                 'crate': harness_map_entry['crate'],
                 'function': harness_map_entry['function'],
                 'function_safeness': harness_map_entry['target_safeness'],
+                'public_target': harness_map_entry['public_target'],
                 'file_name': harness_map_entry['file_name'],
                 'n_failed_properties': None,
                 'n_total_properties': None,
