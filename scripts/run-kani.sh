@@ -14,7 +14,7 @@ usage() {
 }
 
 # Initialize variables
-command_args=""
+declare -a command_args
 path=""
 run_command="verify-std"
 with_autoharness="false"
@@ -50,7 +50,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --kani-args)
             shift
-            command_args="$@"
+            command_args=("$@")
             break
             ;;
         *)
@@ -217,7 +217,7 @@ run_verification_subset() {
         $harness_args --exact \
         -j \
         --output-format=terse \
-        $command_args \
+        "${command_args[@]}" \
         --enable-unstable \
         --cbmc-args --object-bits 12
 }
@@ -299,7 +299,7 @@ main() {
             "$kani_path" verify-std -Z unstable-options ./library \
                 $unstable_args \
                 --no-assert-contracts \
-                $command_args \
+                "${command_args[@]}" \
                 --enable-unstable \
                 --cbmc-args --object-bits 12
         fi
@@ -310,7 +310,7 @@ main() {
           "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
               $unstable_args \
               --no-assert-contracts \
-              $command_args \
+              "${command_args[@]}" \
               --enable-unstable \
               --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
