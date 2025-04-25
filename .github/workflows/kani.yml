@@ -82,7 +82,6 @@ jobs:
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
-            --include-pattern "convert::num::<impl convert::From<num::nonzero::NonZero<" \
             --include-pattern "num::<impl i8>::unchecked_add" \
             --include-pattern "num::<impl i16>::unchecked_add" \
             --include-pattern "num::<impl i32>::unchecked_add" \
