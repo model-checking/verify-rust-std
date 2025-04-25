@@ -1651,6 +1651,21 @@ mod verify {
         }
     }
 
+    // Verify `unchecked_{shl, shr}`
+    macro_rules! generate_unchecked_shift_harness {
+        ($type:ty, $method:ident, $harness_name:ident) => {
+            #[kani::proof_for_contract($type::$method)]
+            pub fn $harness_name() {
+                let num1: $type = kani::any::<$type>();
+                let num2: u32 = kani::any::<u32>();
+
+                unsafe {
+                    num1.$method(num2);
+                }
+            }
+        };
+    }
+
     macro_rules! generate_unchecked_neg_harness {
         ($type:ty, $harness_name:ident) => {
             #[kani::proof_for_contract($type::unchecked_neg)]
@@ -1949,6 +1964,54 @@ mod verify {
         usize::MAX / 2,
         usize::MAX
     );
+
+    // unchecked_shr proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[requires(rhs < <$ActualT>::BITS)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_shr(self, rhs: u32) -> Self
+    generate_unchecked_shift_harness!(i8, unchecked_shr, checked_unchecked_shr_i8);
+    generate_unchecked_shift_harness!(i16, unchecked_shr, checked_unchecked_shr_i16);
+    generate_unchecked_shift_harness!(i32, unchecked_shr, checked_unchecked_shr_i32);
+    generate_unchecked_shift_harness!(i64, unchecked_shr, checked_unchecked_shr_i64);
+    generate_unchecked_shift_harness!(i128, unchecked_shr, checked_unchecked_shr_i128);
+    generate_unchecked_shift_harness!(isize, unchecked_shr, checked_unchecked_shr_isize);
+    generate_unchecked_shift_harness!(u8, unchecked_shr, checked_unchecked_shr_u8);
+    generate_unchecked_shift_harness!(u16, unchecked_shr, checked_unchecked_shr_u16);
+    generate_unchecked_shift_harness!(u32, unchecked_shr, checked_unchecked_shr_u32);
+    generate_unchecked_shift_harness!(u64, unchecked_shr, checked_unchecked_shr_u64);
+    generate_unchecked_shift_harness!(u128, unchecked_shr, checked_unchecked_shr_u128);
+    generate_unchecked_shift_harness!(usize, unchecked_shr, checked_unchecked_shr_usize);
+
+    // `unchecked_shl` proofs
+    //
+    // Target types:
+    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
+    //
+    // Target contracts:
+    // #[requires(shift < Self::BITS)]
+    //
+    // Target function:
+    // pub const unsafe fn unchecked_shl(self, shift: u32) -> Self
+    //
+    // This function performs an unchecked bitwise left shift operation.
+    generate_unchecked_shift_harness!(i8, unchecked_shl, checked_unchecked_shl_i8);
+    generate_unchecked_shift_harness!(i16, unchecked_shl, checked_unchecked_shl_i16);
+    generate_unchecked_shift_harness!(i32, unchecked_shl, checked_unchecked_shl_i32);
+    generate_unchecked_shift_harness!(i64, unchecked_shl, checked_unchecked_shl_i64);
+    generate_unchecked_shift_harness!(i128, unchecked_shl, checked_unchecked_shl_i128);
+    generate_unchecked_shift_harness!(isize, unchecked_shl, checked_unchecked_shl_isize);
+    generate_unchecked_shift_harness!(u8, unchecked_shl, checked_unchecked_shl_u8);
+    generate_unchecked_shift_harness!(u16, unchecked_shl, checked_unchecked_shl_u16);
+    generate_unchecked_shift_harness!(u32, unchecked_shl, checked_unchecked_shl_u32);
+    generate_unchecked_shift_harness!(u64, unchecked_shl, checked_unchecked_shl_u64);
+    generate_unchecked_shift_harness!(u128, unchecked_shl, checked_unchecked_shl_u128);
+    generate_unchecked_shift_harness!(usize, unchecked_shl, checked_unchecked_shl_usize);
 
     // `unchecked_sub` proofs
     //
