@@ -82,6 +82,18 @@ jobs:
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
+            --include-pattern "num::<impl i8>::wrapping_sh" \
+            --include-pattern "num::<impl i16>::wrapping_sh" \
+            --include-pattern "num::<impl i32>::wrapping_sh" \
+            --include-pattern "num::<impl i64>::wrapping_sh" \
+            --include-pattern "num::<impl i128>::wrapping_sh" \
+            --include-pattern "num::<impl isize>::wrapping_sh" \
+            --include-pattern "num::<impl u8>::wrapping_sh" \
+            --include-pattern "num::<impl u16>::wrapping_sh" \
+            --include-pattern "num::<impl u32>::wrapping_sh" \
+            --include-pattern "num::<impl u64>::wrapping_sh" \
+            --include-pattern "num::<impl u128>::wrapping_sh" \
+            --include-pattern "num::<impl usize>::wrapping_sh" \
             --include-pattern ptr::align_offset::mod_inv \
             --include-pattern ptr::alignment::Alignment::as_nonzero \
             --include-pattern ptr::alignment::Alignment::as_usize \
