@@ -82,6 +82,12 @@ jobs:
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
+            --include-pattern "num::<impl i8>::unchecked_neg" \
+            --include-pattern "num::<impl i16>::unchecked_neg" \
+            --include-pattern "num::<impl i32>::unchecked_neg" \
+            --include-pattern "num::<impl i64>::unchecked_neg" \
+            --include-pattern "num::<impl i128>::unchecked_neg" \
+            --include-pattern "num::<impl isize>::unchecked_neg" \
             --include-pattern "num::<impl i8>::unchecked_sh" \
             --include-pattern "num::<impl i16>::unchecked_sh" \
             --include-pattern "num::<impl i32>::unchecked_sh" \
