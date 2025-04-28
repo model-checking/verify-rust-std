@@ -1530,7 +1530,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         })]
         #[ensures(|result: &Self| {
             // Postcondition: the result matches the expected addition
-            self.get().checked_add(other).unwrap() == result.get()
+            self.get().checked_add(other).is_some_and(|sum| sum == result.get())
         })]
         pub const unsafe fn unchecked_add(self, other: $Int) -> Self {
             // SAFETY: The caller ensures there is no overflow.
