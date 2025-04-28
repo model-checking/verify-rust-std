@@ -318,11 +318,6 @@ main() {
         popd
         rm kani-list.json
     elif [[ "$run_command" == "autoharness-analyzer" ]]; then
-        local current_dir=$(pwd)
-        echo "Running Kani's std-analysis command..."
-        pushd scripts/kani-std-analysis
-        ./std-analysis.sh $build_dir
-        popd
         echo "Running Kani autoharness codegen command..."
         "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
             --only-codegen -j --output-format=terse \
@@ -331,6 +326,10 @@ main() {
             $command_args \
             --enable-unstable \
             --cbmc-args --object-bits 12
+        echo "Running Kani's std-analysis command..."
+        pushd scripts/kani-std-analysis
+        ./std-analysis.sh $build_dir
+        popd
         echo "Running autoharness-analyzer command..."
         git clone https://github.com/carolynzech/autoharness_analyzer
         cd autoharness_analyzer
