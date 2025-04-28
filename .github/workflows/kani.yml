@@ -96,4 +96,13 @@ jobs:
 
       # Step 3: Add output to job summary
       - name: Add Autoharness Analyzer output to job summary
-        run: cat autoharness_analyzer/autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "# Autoharness Failure Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Crate core, all functions" >> "$GITHUB_STEP_SUMMARY"
+          cat autoharness_analyzer/core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          echo "## Crate core, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
+          cat autoharness_analyzer/core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          echo "## Crate std, all functions" >> "$GITHUB_STEP_SUMMARY"
+          cat autoharness_analyzer/std_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          echo "## Crate std, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
+          cat autoharness_analyzer/std_unsafe_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
