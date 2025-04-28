@@ -2966,13 +2966,6 @@ mod verify {
         };
     }
 
-    // Generate proofs for all NonZero types
-    // nonzero_check_add!(i8, core::num::NonZeroI8, nonzero_check_unchecked_add_for_i8);
-    // nonzero_check_add!(i16, core::num::NonZeroI16, nonzero_check_unchecked_add_for_i16);
-    // nonzero_check_add!(i32, core::num::NonZeroI32, nonzero_check_unchecked_add_for_i32);
-    // nonzero_check_add!(i64, core::num::NonZeroI64, nonzero_check_unchecked_add_for_i64);
-    // nonzero_check_add!(i128, core::num::NonZeroI128, nonzero_check_unchecked_add_for_i128);
-    // nonzero_check_add!(isize, core::num::NonZeroIsize, nonzero_check_unchecked_add_for_isize);
     nonzero_check_add!(u8, core::num::NonZeroU8, nonzero_check_unchecked_add_for_u8);
     nonzero_check_add!(u16, core::num::NonZeroU16, nonzero_check_unchecked_add_for_u16);
     nonzero_check_add!(u32, core::num::NonZeroU32, nonzero_check_unchecked_add_for_u32);
