@@ -79,3 +79,21 @@ jobs:
               .addHeading('Kani List Output', 2)
               .addRaw(kaniOutput, false)
               .write();
+
+  run-autoharness-analyzer:
+    name: Kani Autoharness Analyzer
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # Step 2: Run autoharness analyzer on the std library
+      - name: Run Autoharness Analyzer
+        run: scripts/run-kani.sh --run autoharness-analyzer
+
+      # Step 3: Add output to job summary
+      - name: Add Autoharness Analyzer output to job summary
+        run: cat autoharness_analyzer/autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
