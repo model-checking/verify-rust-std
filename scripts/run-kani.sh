@@ -325,7 +325,7 @@ main() {
         popd
         echo "Running Kani autoharness codegen command..."
         "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
-            --only-codegen -j --output-format=terse
+            --only-codegen -j --output-format=terse \
             $unstable_args \
             --no-assert-contracts \
             $command_args \
