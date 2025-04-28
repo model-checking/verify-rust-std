@@ -334,7 +334,9 @@ main() {
         echo "Running autoharness-analyzer command..."
         git clone https://github.com/carolynzech/autoharness_analyzer
         cd autoharness_analyzer
-        cargo run ../metadata /tmp/std_lib_analysis/results/
+        cargo run \
+          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          /tmp/std_lib_analysis/results/
     fi
 }
 
