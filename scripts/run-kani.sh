@@ -326,6 +326,9 @@ main() {
             $command_args \
             --enable-unstable \
             --cbmc-args --object-bits 12
+        # remove metadata file for Kani-generated "dummy" crate that we won't
+        # get scanner data for
+        rm ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/dummy-*
         echo "Running Kani's std-analysis command..."
         pushd scripts/kani-std-analysis
         ./std-analysis.sh $build_dir
