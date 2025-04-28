@@ -177,7 +177,7 @@ it. This would require more steps.
 
 ## Running the prover on the claim and viewing the proof
 
-Now that we have constructed claim, we can run use the KMIR verifier
+Now that we have constructed claim, we can use the KMIR verifier
 to perform symbolic execution, and can view the state of proof
 through the KMIR proof viewer.
 
