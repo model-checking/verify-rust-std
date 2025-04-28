@@ -2950,8 +2950,6 @@ mod verify {
     check_mul_unchecked_small!(u8, NonZeroU8, nonzero_check_mul_for_u8);
     check_mul_unchecked_small!(u16, NonZeroU16, nonzero_check_mul_for_u16);
 
-    //check_mul_unchecked_large!(i16, NonZeroU16, nonzero_check_mul_for_u16);
-
     macro_rules! nonzero_check_add {
         ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_add_for:ident) => {
             #[kani::proof_for_contract(<$t>::unchecked_add)]
