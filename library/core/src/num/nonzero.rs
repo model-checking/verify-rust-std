@@ -1121,7 +1121,7 @@ macro_rules! nonzero_integer {
                 self.get().checked_mul(other.get()).is_some()
             })]
             #[ensures(|result: &Self| {
-                self.get().checked_mul(other.get()).unwrap() == result.get()
+                self.get().checked_mul(other.get()).is_some_and(|product| product == result.get())
             })]
             pub const unsafe fn unchecked_mul(self, other: Self) -> Self {
                 // SAFETY: The caller ensures there is no overflow.
