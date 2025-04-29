@@ -5,6 +5,9 @@ use crate::simd::{
     ptr::{SimdConstPtr, SimdMutPtr},
 };
 
+#[cfg(kani)]
+use crate::kani;
+
 /// A SIMD vector with the shape of `[T; N]` but the operations of `T`.
 ///
 /// `Simd<T, N>` supports the operators (+, *, etc.) that `T` does in "elementwise" fashion.
@@ -100,6 +103,7 @@ use crate::simd::{
 // avoided, as it will likely become illegal on `#[repr(simd)]` structs in the future. It also
 // causes rustc to emit illegal LLVM IR in some cases.
 #[repr(simd, packed)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub struct Simd<T, const N: usize>([T; N])
 where
     LaneCount<N>: SupportedLaneCount,

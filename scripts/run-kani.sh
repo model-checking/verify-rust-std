@@ -7,7 +7,7 @@ usage() {
     echo "Options:"
     echo "  -h, --help         Show this help message"
     echo "  -p, --path <path>  Optional: Specify a path to a copy of the std library. For example, if you want to run the script from an outside directory."
-    echo "  --run <verify-std|list|metrics|autoharness>  Optional: Specify whether to run the 'kani verify-std' command, 'kani list' command, collect Kani-specific metrics, or run verification with autoharness support. Defaults to 'verify-std' if not specified."
+    echo "  --run <verify-std|list|metrics|autoharness|autoharness-analyzer>  Optional: Specify whether to run the 'kani verify-std' command, 'kani list' command, collect Kani-specific metrics, run verification with autoharness support, or summarize autoharness failure reasons. Defaults to 'verify-std' if not specified."
     echo "  --with-autoharness Include autoharness information in list or metrics commands."
     echo "  --kani-args  <command arguments to kani>  Optional: Arguments to pass to the command. Simply pass them in the same way you would to the Kani binary. This should be the last argument."
     exit 1
@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         --run)
-            if [[ -n $2 && ($2 == "verify-std" || $2 == "list" || $2 == "metrics" || $2 == "autoharness") ]]; then
+            if [[ -n $2 && ($2 == "verify-std" || $2 == "list" || $2 == "metrics" || $2 == "autoharness" || $2 == "autoharness-analyzer") ]]; then
                 run_command=$2
                 shift 2
             else
@@ -341,6 +341,31 @@ main() {
           --metrics-file metrics-data-std.json
         popd
         rm kani-list.json
+    elif [[ "$run_command" == "autoharness-analyzer" ]]; then
+        echo "Running Kani autoharness codegen command..."
+        "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
+            --only-codegen -j --output-format=terse \
+            $unstable_args \
+            --no-assert-contracts \
+            "${command_args[@]}" \
+            --enable-unstable \
+            --cbmc-args --object-bits 12
+        # remove metadata file for Kani-generated "dummy" crate that we won't
+        # get scanner data for
+        rm target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/dummy-*
+        echo "Running Kani's std-analysis command..."
+        pushd scripts/kani-std-analysis
+        ./std-analysis.sh $build_dir
+        popd
+        echo "Running autoharness-analyzer command..."
+        git clone --depth 1 https://github.com/carolynzech/autoharness_analyzer
+        cd autoharness_analyzer
+        cargo run -- --per-crate \
+          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          /tmp/std_lib_analysis/results/
+        cargo run -- --per-crate --unsafe-fns-only \
+          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          /tmp/std_lib_analysis/results/
     fi
 }
 
