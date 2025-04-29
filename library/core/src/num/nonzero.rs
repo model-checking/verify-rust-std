@@ -1119,7 +1119,7 @@ macro_rules! nonzero_integer {
                 self.get().checked_mul(other.get()).is_some()
             })]
             #[ensures(|result: &Self| {
-                self.get().checked_mul(other.get()).unwrap() == result.get()
+                self.get().checked_mul(other.get()).is_some_and(|product| product == result.get())
             })]
             pub const unsafe fn unchecked_mul(self, other: Self) -> Self {
                 // SAFETY: The caller ensures there is no overflow.
@@ -1528,7 +1528,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         })]
         #[ensures(|result: &Self| {
             // Postcondition: the result matches the expected addition
-            self.get().checked_add(other).unwrap() == result.get()
+            self.get().checked_add(other).is_some_and(|sum| sum == result.get())
         })]
         pub const unsafe fn unchecked_add(self, other: $Int) -> Self {
             // SAFETY: The caller ensures there is no overflow.
@@ -2870,8 +2870,6 @@ mod verify {
     check_mul_unchecked_small!(u8, NonZeroU8, nonzero_check_mul_for_u8);
     check_mul_unchecked_small!(u16, NonZeroU16, nonzero_check_mul_for_u16);
 
-    //check_mul_unchecked_large!(i16, NonZeroU16, nonzero_check_mul_for_u16);
-
     macro_rules! nonzero_check_add {
         ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_add_for:ident) => {
             #[kani::proof_for_contract(<$t>::unchecked_add)]
@@ -2886,13 +2884,6 @@ mod verify {
         };
     }
 
-    // Generate proofs for all NonZero types
-    // nonzero_check_add!(i8, core::num::NonZeroI8, nonzero_check_unchecked_add_for_i8);
-    // nonzero_check_add!(i16, core::num::NonZeroI16, nonzero_check_unchecked_add_for_i16);
-    // nonzero_check_add!(i32, core::num::NonZeroI32, nonzero_check_unchecked_add_for_i32);
-    // nonzero_check_add!(i64, core::num::NonZeroI64, nonzero_check_unchecked_add_for_i64);
-    // nonzero_check_add!(i128, core::num::NonZeroI128, nonzero_check_unchecked_add_for_i128);
-    // nonzero_check_add!(isize, core::num::NonZeroIsize, nonzero_check_unchecked_add_for_isize);
     nonzero_check_add!(u8, core::num::NonZeroU8, nonzero_check_unchecked_add_for_u8);
     nonzero_check_add!(u16, core::num::NonZeroU16, nonzero_check_unchecked_add_for_u16);
     nonzero_check_add!(u32, core::num::NonZeroU32, nonzero_check_unchecked_add_for_u32);
