@@ -621,23 +621,3 @@ impl fmt::Debug for AsciiChar {
         f.write_str(buf[..len].as_str())
     }
 }
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify {
-    use AsciiChar;
-
-    use super::*;
-
-    #[kani::proof_for_contract(AsciiChar::from_u8)]
-    fn check_from_u8() {
-        let b: u8 = kani::any();
-        AsciiChar::from_u8(b);
-    }
-
-    #[kani::proof_for_contract(AsciiChar::from_u8_unchecked)]
-    fn check_from_u8_unchecked() {
-        let b: u8 = kani::any();
-        unsafe { AsciiChar::from_u8_unchecked(b) };
-    }
-}

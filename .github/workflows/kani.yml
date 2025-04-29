@@ -53,6 +53,79 @@ jobs:
       - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
    
+  kani-autoharness:
+    name: Verify std library using autoharness
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
+      fail-fast: false
+
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # Step 2: Run Kani autoharness on the std library for selected functions.
+      # Uses "--include-pattern" to make sure we do not try to run across all
+      # possible functions as that may take a lot longer than expected. Instead,
+      # explicitly list all functions (or prefixes thereof) the proofs of which
+      # are known to pass.
+      - name: Run Kani Verification
+        run: |
+          scripts/run-kani.sh --run autoharness --kani-args \
+            --include-pattern alloc::layout::Layout::from_size_align \
+            --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
+            --include-pattern char::convert::from_u32_unchecked \
+            --include-pattern "num::nonzero::NonZero::<i8>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i16>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i32>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i64>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i128>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<isize>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u8>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u16>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u32>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u64>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<u128>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<usize>::count_ones" \
+            --include-pattern "num::nonzero::NonZero::<i8>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<i16>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<i32>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<i64>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<i128>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<isize>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u8>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u16>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u32>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u64>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<u128>::rotate_" \
+            --include-pattern "num::nonzero::NonZero::<usize>::rotate_" \
+            --include-pattern ptr::align_offset::mod_inv \
+            --include-pattern ptr::alignment::Alignment::as_nonzero \
+            --include-pattern ptr::alignment::Alignment::as_usize \
+            --include-pattern ptr::alignment::Alignment::log2 \
+            --include-pattern ptr::alignment::Alignment::mask \
+            --include-pattern ptr::alignment::Alignment::new \
+            --include-pattern ptr::alignment::Alignment::new_unchecked \
+            --include-pattern time::Duration::from_micros \
+            --include-pattern time::Duration::from_millis \
+            --include-pattern time::Duration::from_nanos \
+            --include-pattern time::Duration::from_secs \
+            --exclude-pattern time::Duration::from_secs_f \
+            --include-pattern unicode::unicode_data::conversions::to_ \
+            --exclude-pattern ::precondition_check \
+            --harness-timeout 5m \
+            --default-unwind 1000 \
+            --jobs=3 --output-format=terse
+
   run-kani-list:
     name: Kani List
     runs-on: ubuntu-latest
@@ -66,8 +139,14 @@ jobs:
 
       # Step 2: Run list on the std library
       - name: Run Kani List
-        run: head/scripts/run-kani.sh --run list --path ${{github.workspace}}/head
-      
+        run: |
+          head/scripts/run-kani.sh --run list --with-autoharness --path ${{github.workspace}}/head
+          # remove duplicate white space to reduce file size (GitHub permits at
+          # most one 1MB)
+          ls -l ${{github.workspace}}/head/kani-list.md
+          perl -p -i -e 's/ +/ /g' ${{github.workspace}}/head/kani-list.md
+          ls -l ${{github.workspace}}/head/kani-list.md
+
       # Step 3: Add output to job summary
       - name: Add Kani List output to job summary
         uses: actions/github-script@v6
@@ -79,3 +158,30 @@ jobs:
               .addHeading('Kani List Output', 2)
               .addRaw(kaniOutput, false)
               .write();
+
+  run-autoharness-analyzer:
+    name: Kani Autoharness Analyzer
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # Step 2: Run autoharness analyzer on the std library
+      - name: Run Autoharness Analyzer
+        run: scripts/run-kani.sh --run autoharness-analyzer
+
+      # Step 3: Add output to job summary
+      - name: Add Autoharness Analyzer output to job summary
+        run: |
+          echo "# Autoharness Failure Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Crate core, all functions" >> "$GITHUB_STEP_SUMMARY"
+          cat autoharness_analyzer/core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          echo "## Crate core, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
+          cat autoharness_analyzer/core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          echo "## Crate std, all functions" >> "$GITHUB_STEP_SUMMARY"
+          cat autoharness_analyzer/std_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          echo "## Crate std, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
+          cat autoharness_analyzer/std_unsafe_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
