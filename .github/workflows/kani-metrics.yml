@@ -26,7 +26,7 @@ jobs:
         python-version: '3.x'
 
     - name: Compute Kani Metrics
-      run: ./scripts/run-kani.sh --run metrics --path ${{github.workspace}}
+      run: ./scripts/run-kani.sh --run metrics --with-autoharness --path ${{github.workspace}}
 
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v7

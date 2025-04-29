@@ -7,7 +7,7 @@ use crate::char::{EscapeDebugExtArgs, MAX_LEN_UTF8};
 use crate::marker::PhantomData;
 use crate::num::fmt as numfmt;
 use crate::ops::Deref;
-use crate::{iter, mem, result, str};
+use crate::{iter, result, str};
 
 mod builders;
 #[cfg(not(no_fp_fmt_parse))]
@@ -1515,19 +1515,6 @@ unsafe fn run(fmt: &mut Formatter<'_>, arg: &rt::Placeholder, args: &[rt::Argume
         // which guarantees the indexes are always within bounds.
         unsafe { (getcount(args, &arg.width), getcount(args, &arg.precision)) };
 
-    #[cfg(bootstrap)]
-    let options =
-        *FormattingOptions { flags: flags::ALWAYS_SET | arg.flags << 21, width: 0, precision: 0 }
-            .align(match arg.align {
-                rt::Alignment::Left => Some(Alignment::Left),
-                rt::Alignment::Right => Some(Alignment::Right),
-                rt::Alignment::Center => Some(Alignment::Center),
-                rt::Alignment::Unknown => None,
-            })
-            .fill(arg.fill)
-            .width(width)
-            .precision(precision);
-    #[cfg(not(bootstrap))]
     let options = FormattingOptions { flags: arg.flags, width, precision };
 
     // Extract the correct argument
@@ -1544,21 +1531,6 @@ unsafe fn run(fmt: &mut Formatter<'_>, arg: &rt::Placeholder, args: &[rt::Argume
     unsafe { value.fmt(fmt) }
 }
 
-#[cfg(bootstrap)]
-unsafe fn getcount(args: &[rt::Argument<'_>], cnt: &rt::Count) -> Option<u16> {
-    match *cnt {
-        rt::Count::Is(n) => Some(n as u16),
-        rt::Count::Implied => None,
-        rt::Count::Param(i) => {
-            debug_assert!(i < args.len());
-            // SAFETY: cnt and args come from the same Arguments,
-            // which guarantees this index is always within bounds.
-            unsafe { args.get_unchecked(i).as_u16() }
-        }
-    }
-}
-
-#[cfg(not(bootstrap))]
 unsafe fn getcount(args: &[rt::Argument<'_>], cnt: &rt::Count) -> u16 {
     match *cnt {
         rt::Count::Is(n) => n,
@@ -3017,6 +2989,6 @@ impl<T: ?Sized> Debug for SyncUnsafeCell<T> {
     }
 }
 
-// If you expected tests to be here, look instead at the core/tests/fmt.rs file,
+// If you expected tests to be here, look instead at coretests/tests/fmt/;
 // it's a lot easier than creating all of the rt::Piece structures here.
-// There are also tests in the alloc crate, for those that need allocations.
+// There are also tests in alloctests/tests/fmt.rs, for those that need allocations.
