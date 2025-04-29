@@ -75,7 +75,9 @@ jobs:
 
       # Step 2: Run Kani autoharness on the std library for selected functions.
       # Uses "--include-pattern" to make sure we do not try to run across all
-      # possible functions as that may take a lot longer than expected
+      # possible functions as that may take a lot longer than expected. Instead,
+      # explicitly list all functions (or prefixes thereof) the proofs of which
+      # are known to pass.
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
