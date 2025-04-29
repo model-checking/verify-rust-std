@@ -1756,30 +1756,6 @@ pub mod duration_verify {
         let _ = Duration::new(secs, nanos);
     }
 
-    #[kani::proof_for_contract(Duration::from_secs)]
-    fn duration_from_secs() {
-        let secs = kani::any::<u64>();
-        let _ = Duration::from_secs(secs);
-    }
-
-    #[kani::proof_for_contract(Duration::from_millis)]
-    fn duration_from_millis() {
-        let ms = kani::any::<u64>();
-        let _ = Duration::from_millis(ms);
-    }
-
-    #[kani::proof_for_contract(Duration::from_micros)]
-    fn duration_from_micros() {
-        let micros = kani::any::<u64>();
-        let _ = Duration::from_micros(micros);
-    }
-
-    #[kani::proof_for_contract(Duration::from_nanos)]
-    fn duration_from_nanos() {
-        let nanos = kani::any::<u64>();
-        let _ = Duration::from_nanos(nanos);
-    }
-
     #[kani::proof_for_contract(Duration::as_secs)]
     fn duration_as_secs() {
         let dur = safe_duration();

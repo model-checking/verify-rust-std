@@ -721,6 +721,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() > 0)]
             pub const fn count_ones(self) -> NonZero<u32> {
                 // SAFETY:
                 // `self` is non-zero, which means it has at least one bit set, which means
@@ -754,6 +755,8 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() > 0)]
+            #[ensures(|result| result.rotate_right(n).get() == old(self).get())]
             pub const fn rotate_left(self, n: u32) -> Self {
                 let result = self.get().rotate_left(n);
                 // SAFETY: Rotating bits preserves the property int > 0.
@@ -787,6 +790,8 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() > 0)]
+            #[ensures(|result| result.rotate_left(n).get() == old(self).get())]
             pub const fn rotate_right(self, n: u32) -> Self {
                 let result = self.get().rotate_right(n);
                 // SAFETY: Rotating bits preserves the property int > 0.
@@ -2571,56 +2576,4 @@ mod verify {
     nonzero_check_clamp_panic!(core::num::NonZeroU64, nonzero_check_clamp_panic_for_u64);
     nonzero_check_clamp_panic!(core::num::NonZeroU128, nonzero_check_clamp_panic_for_u128);
     nonzero_check_clamp_panic!(core::num::NonZeroUsize, nonzero_check_clamp_panic_for_usize);
-
-    macro_rules! nonzero_check_count_ones {
-        ($nonzero_type:ty, $nonzero_check_count_ones_for:ident) => {
-            #[kani::proof]
-            pub fn $nonzero_check_count_ones_for() {
-                let x: $nonzero_type = kani::any();
-                let result = x.count_ones();
-                // Since x is non-zero, count_ones should never return 0
-                assert!(result.get() > 0);
-            }
-        };
-    }
-
-    // Use the macro to generate different versions of the function for multiple types
-    nonzero_check_count_ones!(core::num::NonZeroI8, nonzero_check_count_ones_for_i8);
-    nonzero_check_count_ones!(core::num::NonZeroI16, nonzero_check_count_ones_for_i16);
-    nonzero_check_count_ones!(core::num::NonZeroI32, nonzero_check_count_ones_for_i32);
-    nonzero_check_count_ones!(core::num::NonZeroI64, nonzero_check_count_ones_for_i64);
-    nonzero_check_count_ones!(core::num::NonZeroI128, nonzero_check_count_ones_for_i128);
-    nonzero_check_count_ones!(core::num::NonZeroIsize, nonzero_check_count_ones_for_isize);
-    nonzero_check_count_ones!(core::num::NonZeroU8, nonzero_check_count_ones_for_u8);
-    nonzero_check_count_ones!(core::num::NonZeroU16, nonzero_check_count_ones_for_u16);
-    nonzero_check_count_ones!(core::num::NonZeroU32, nonzero_check_count_ones_for_u32);
-    nonzero_check_count_ones!(core::num::NonZeroU64, nonzero_check_count_ones_for_u64);
-    nonzero_check_count_ones!(core::num::NonZeroU128, nonzero_check_count_ones_for_u128);
-    nonzero_check_count_ones!(core::num::NonZeroUsize, nonzero_check_count_ones_for_usize);
-
-    macro_rules! nonzero_check_rotate_left_and_right {
-        ($nonzero_type:ty, $nonzero_check_rotate_for:ident) => {
-            #[kani::proof]
-            pub fn $nonzero_check_rotate_for() {
-                let x: $nonzero_type = kani::any();
-                let n: u32 = kani::any();
-                let result = x.rotate_left(n).rotate_right(n);
-                assert!(result == x);
-            }
-        };
-    }
-
-    // Use the macro to generate different versions of the function for multiple types
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroI8, nonzero_check_rotate_for_i8);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroI16, nonzero_check_rotate_for_i16);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroI32, nonzero_check_rotate_for_i32);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroI64, nonzero_check_rotate_for_i64);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroI128, nonzero_check_rotate_for_i128);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroIsize, nonzero_check_rotate_for_isize);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroU8, nonzero_check_rotate_for_u8);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroU16, nonzero_check_rotate_for_u16);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroU32, nonzero_check_rotate_for_u32);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroU64, nonzero_check_rotate_for_u64);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroU128, nonzero_check_rotate_for_u128);
-    nonzero_check_rotate_left_and_right!(core::num::NonZeroUsize, nonzero_check_rotate_for_usize);
 }
