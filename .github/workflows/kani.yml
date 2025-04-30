@@ -203,6 +203,11 @@ jobs:
       fail-fast: false
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
       - name: Download log
         uses: actions/download-artifact@v4
         with:
