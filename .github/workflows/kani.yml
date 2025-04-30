@@ -44,7 +44,7 @@ jobs:
           path: head
           submodules: true
       - name: Apply stdarch patch
-        run: cd library/stdarch && patch -p1 < ../../stdarch.patch
+        run: cd head/library/stdarch && patch -p1 < ../../stdarch.patch
 
       # Step 2: Install jq
       - name: Install jq

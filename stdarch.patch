@@ -1,5 +1,14 @@
-diff --git a/crates/core_arch/src/macros.rs b/crates/core_arch/src/macros.rs
-index f59e278b..f3d33636 100644
+--- a/crates/core_arch/src/arm_shared/neon/mod.rs
++++ b/crates/core_arch/src/arm_shared/neon/mod.rs
+@@ -1,5 +1,8 @@
+ //! ARMv7 NEON intrinsics
+ 
++#[cfg(kani)]
++use crate::kani;
++
+ #[rustfmt::skip]
+ mod generated;
+ #[rustfmt::skip]
 --- a/crates/core_arch/src/macros.rs
 +++ b/crates/core_arch/src/macros.rs
 @@ -128,6 +128,15 @@ macro_rules! types {
@@ -18,8 +27,6 @@ index f59e278b..f3d33636 100644
          $(#[$stability])+
          impl crate::fmt::Debug for $name {
              #[inline]
-diff --git a/crates/core_arch/src/x86/mod.rs b/crates/core_arch/src/x86/mod.rs
-index 0404b194..d57d1fc8 100644
 --- a/crates/core_arch/src/x86/mod.rs
 +++ b/crates/core_arch/src/x86/mod.rs
 @@ -1,5 +1,7 @@
