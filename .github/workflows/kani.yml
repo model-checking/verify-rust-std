@@ -43,7 +43,9 @@ jobs:
         with:
           path: head
           submodules: true
-      
+      - name: Apply stdarch patch
+        run: cd library/stdarch && patch -p1 < ../../stdarch.patch
+
       # Step 2: Install jq
       - name: Install jq
         if: matrix.os == 'ubuntu-latest'
@@ -72,18 +74,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Apply stdarch patch
+        run: cd library/stdarch && patch -p1 < ../../stdarch.patch
 
       # Step 2: Run Kani autoharness on the std library for selected functions.
       # Uses "--include-pattern" to make sure we do not try to run across all
       # possible functions as that may take a lot longer than expected. Instead,
       # explicitly list all functions (or prefixes thereof) the proofs of which
       # are known to pass.
+      # Notes:
+      # - core_arch::x86::__m128d::as_f64x2 is just one example of hundreds of
+      #   core_arch::x86:: functions that are known to verify successfully.
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
+            --include-pattern core_arch::x86::__m128d::as_f64x2 \
             --include-pattern "num::nonzero::NonZero::<i8>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<i16>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<i32>::count_ones" \
@@ -136,6 +144,8 @@ jobs:
         with:
           path: head
           submodules: true
+      - name: Apply stdarch patch
+        run: cd head/library/stdarch && patch -p1 < ../../stdarch.patch
 
       # Step 2: Run list on the std library
       - name: Run Kani List
@@ -168,6 +178,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Apply stdarch patch
+        run: cd library/stdarch && patch -p1 < ../../stdarch.patch
 
       # Step 2: Run autoharness analyzer on the std library
       - name: Run Autoharness Analyzer
