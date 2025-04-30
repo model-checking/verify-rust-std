@@ -189,7 +189,7 @@ jobs:
           retention-days: 3
 
   run-log-analysis:
-    name: TestLocalToolchain
+    name: Build JSON from logs
     needs: [run_kani_metrics, kani_autoharness]
     runs-on: ${{ matrix.os }}
     strategy:
