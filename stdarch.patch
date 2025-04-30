@@ -1,3 +1,15 @@
+--- a/crates/core_arch/src/aarch64/neon/mod.rs
++++ b/crates/core_arch/src/aarch64/neon/mod.rs
+@@ -2,6 +2,9 @@
+ 
+ #![allow(non_camel_case_types)]
+ 
++#[cfg(kani)]
++use crate::kani;
++
+ #[rustfmt::skip]
+ mod generated;
+ #[rustfmt::skip]
 --- a/crates/core_arch/src/arm_shared/neon/mod.rs
 +++ b/crates/core_arch/src/arm_shared/neon/mod.rs
 @@ -1,5 +1,8 @@
