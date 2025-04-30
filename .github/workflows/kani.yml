@@ -220,12 +220,12 @@ jobs:
 
       - name: Run log parser
         run: |
-          gunzip ${{ matrix.os }}-autoharness-verification.log.gz
-          tar xzf ${{ matrix.os }}-results.tar.gz
+          gunzip autoharness-verification.log.gz
+          tar xzf results.tar.gz
           python3 scripts/kani-std-analysis/log_parser.py \
             --kani-list-file kani-list.json \
             --analysis-results-dir results/ \
-            ${{ matrix.os }}-autoharness-verification.log \
+            autoharness-verification.log \
             -o results.json
 
       - name: Upload JSON
