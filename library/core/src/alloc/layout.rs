@@ -585,6 +585,14 @@ impl Layout {
             unsafe { Ok(Layout::from_size_align_unchecked(array_size, align.as_usize())) }
         }
     }
+
+    /// Perma-unstable access to `align` as `Alignment` type.
+    #[unstable(issue = "none", feature = "std_internals")]
+    #[doc(hidden)]
+    #[inline]
+    pub const fn alignment(&self) -> Alignment {
+        self.align
+    }
 }
 
 #[stable(feature = "alloc_layout", since = "1.28.0")]
@@ -626,24 +634,6 @@ mod verify {
             let size =
                 kani::any_where(|s: &usize| *s <= isize::MAX as usize - (align.as_usize() - 1));
             unsafe { Layout { size, align } }
-        }
-    }
-
-    // pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError>
-    #[kani::proof_for_contract(Layout::from_size_align)]
-    pub fn check_from_size_align() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        let _ = Layout::from_size_align(s, a);
-    }
-
-    // pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self
-    #[kani::proof_for_contract(Layout::from_size_align_unchecked)]
-    pub fn check_from_size_align_unchecked() {
-        let s = kani::any::<usize>();
-        let a = kani::any::<usize>();
-        unsafe {
-            let _ = Layout::from_size_align_unchecked(s, a);
         }
     }
 

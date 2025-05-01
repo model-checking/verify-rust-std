@@ -288,15 +288,3 @@ pub(super) const fn from_digit(num: u32, radix: u32) -> Option<char> {
         None
     }
 }
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify {
-    use super::*;
-
-    #[kani::proof_for_contract(from_u32_unchecked)]
-    fn check_from_u32_unchecked() {
-        let i: u32 = kani::any();
-        unsafe { from_u32_unchecked(i) };
-    }
-}
