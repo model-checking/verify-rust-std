@@ -4368,7 +4368,7 @@ mod verify {
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     fn should_succeed_u8_to_bool() {
         let src: u8 = kani::any_where(|x| *x <= 1);
-        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+        let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
     }
 
     #[kani::proof]
@@ -4376,14 +4376,14 @@ mod verify {
     #[kani::should_panic]
     fn should_fail_u8_to_bool() {
         let src: u8 = kani::any_where(|x| *x > 1);
-        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+        let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
     }
 
     #[kani::proof]
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     fn should_succeed_i8_to_bool() {
         let src: u8 = kani::any_where(|x| *x as u8 <= 1);
-        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+        let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
     }
 
     #[kani::proof]
@@ -4391,7 +4391,7 @@ mod verify {
     #[kani::should_panic]
     fn should_fail_i8_to_bool() {
         let src: u8 = kani::any_where(|x| *x as u8 > 1);
-        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+        let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
     }
 
     //The following harnesses do the same as above, but for compound types
@@ -4442,7 +4442,7 @@ mod verify {
     #[kani::proof]
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     fn should_succeed_tuple_to_array() {
-        let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x <= 1));
+        let src: (u8, u8) = (kani::any_where(|x| *x <= 1), kani::any_where(|x| *x <= 1));
         let dst: [bool; 2] = unsafe { transmute_unchecked_wrapper(src) };
     }
 
@@ -4450,9 +4450,51 @@ mod verify {
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     #[kani::should_panic]
     fn should_fail_tuple_to_array() {
-        let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x > 1));
+        let src: (u8, u8) = (kani::any_where(|x| *x > 1), kani::any_where(|x| *x > 1));
         let dst: [bool; 2] = unsafe { transmute_unchecked_wrapper(src) };
     }
+
+    //generates should_succeed harnesses when the output type has no possible invalid values, like ints
+    macro_rules! should_succeed_no_validity_reqs {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof]
+            #[kani::stub_verified(transmute_unchecked_wrapper)]
+            fn $harness() {
+                let src: $src = kani::any();
+                let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
+            }
+        };
+    }
+
+    //call the above macro for all combinations of primitives where the output value cannot be invalid
+    //transmute between 1-byte primitives
+    should_succeed_no_validity_reqs!(should_succeed_i8_to_u8, i8, u8);
+    should_succeed_no_validity_reqs!(should_succeed_u8_to_i8, u8, i8);
+    should_succeed_no_validity_reqs!(should_succeed_bool_to_i8, bool, i8);
+    should_succeed_no_validity_reqs!(should_succeed_bool_to_u8, bool, u8);
+    //transmute between 2-byte primitives
+    should_succeed_no_validity_reqs!(should_succeed_i16_to_u16, i16, u16);
+    should_succeed_no_validity_reqs!(should_succeed_u16_to_i16, u16, i16);
+    //transmute between 4-byte primitives
+    should_succeed_no_validity_reqs!(should_succeed_i32_to_u32, i32, u32);
+    should_succeed_no_validity_reqs!(should_succeed_i32_to_f32, i32, f32);
+    should_succeed_no_validity_reqs!(should_succeed_u32_to_i32, u32, i32);
+    should_succeed_no_validity_reqs!(should_succeed_u32_to_f32, u32, f32);
+    should_succeed_no_validity_reqs!(should_succeed_char_to_i32, char, i32);
+    should_succeed_no_validity_reqs!(should_succeed_char_to_u32, char, u32);
+    should_succeed_no_validity_reqs!(should_succeed_char_to_f32, char, f32);
+    should_succeed_no_validity_reqs!(should_succeed_f32_to_i32, f32, i32);
+    should_succeed_no_validity_reqs!(should_succeed_f32_to_u32, f32, u32);
+    //transmute between 8-byte primitives
+    should_succeed_no_validity_reqs!(should_succeed_i64_to_u64, i64, u64);
+    should_succeed_no_validity_reqs!(should_succeed_i64_to_f64, i64, f64);
+    should_succeed_no_validity_reqs!(should_succeed_u64_to_i64, u64, i64);
+    should_succeed_no_validity_reqs!(should_succeed_u64_to_f64, u64, f64);
+    should_succeed_no_validity_reqs!(should_succeed_f64_to_i64, f64, i64);
+    should_succeed_no_validity_reqs!(should_succeed_f64_to_u64, f64, u64);
+    //transmute between 16-byte primitives
+    should_succeed_no_validity_reqs!(should_succeed_i128_to_u128, i128, u128);
+    should_succeed_no_validity_reqs!(should_succeed_u128_to_i128, u128, i128);
 
     //Note: the following harness fails when it in theory should not
     //The problem is that ub_checks::can_dereference(), used in a validity precondition
