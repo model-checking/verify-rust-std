@@ -4263,8 +4263,7 @@ mod verify {
     }
 
     //generates harness that transmutes arbitrary values of input type to output type
-    //use when you expect all resulting bit patterns of output type to be valid
-    macro_rules! transmute_unchecked_should_succeed {
+    macro_rules! proof_of_contract_for_transmute_unchecked {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof_for_contract(transmute_unchecked_wrapper)]
             fn $harness() {
@@ -4274,61 +4273,183 @@ mod verify {
         };
     }
 
-    //generates harness that transmutes arbitrary values of input type to output type
-    //use when you expect some resulting bit patterns of output type to be invalid
-    macro_rules! transmute_unchecked_should_fail {
-        ($harness:ident, $src:ty, $dst:ty) => {
-            #[kani::proof]
-            #[kani::stub_verified(transmute_unchecked_wrapper)]
-            #[kani::should_panic]
-            fn $harness() {
-                let src: $src = kani::any();
-                let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
-            }
-        };
+    //We check the contract for all combinations of primitives
+    //transmute between 1-byte primitives
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i8_to_u8, i8, u8);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u8_to_i8, u8, i8);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_bool_to_i8, bool, i8);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_bool_to_u8, bool, u8);
+    //transmute between 2-byte primitives
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i16_to_u16, i16, u16);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u16_to_i16, u16, i16);
+    //transmute between 4-byte primitives
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i32_to_u32, i32, u32);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i32_to_f32, i32, f32);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u32_to_i32, u32, i32);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u32_to_f32, u32, f32);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_char_to_i32, char, i32);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_char_to_u32, char, u32);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_char_to_f32, char, f32);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f32_to_i32, f32, i32);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f32_to_u32, f32, u32);
+    //transmute between 8-byte primitives
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i64_to_u64, i64, u64);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i64_to_f64, i64, f64);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u64_to_i64, u64, i64);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u64_to_f64, u64, f64);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f64_to_i64, f64, i64);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f64_to_u64, f64, u64);
+    //transmute between 16-byte primitives
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i128_to_u128, i128, u128);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u128_to_i128, u128, i128);
+    //transmute to type with potentially invalid bit patterns
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i8_to_bool, i8, bool);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u8_to_bool, u8, bool);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i32_to_char, i32, char);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u32_to_char, u32, char);
+    proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f32_to_char, f32, char);
+
+    //The follow are harnesses that check our function contract (specifically the weakness/strength
+    //of our generic validity precondition)
+    //In particular, should_succeed harnesses check that type-specific validity preconditions imply our generic precondition
+    //should_fail harnesses check that when we assume the negation of a type-specific validity
+    //precondition, the harness should trigger at least one failure
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    fn should_succeed_u32_to_char() {
+        let src: u32 = kani::any_where(|x| core::char::from_u32(*x).is_some());
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
     }
 
-    //We test the wrapper's validity clause on all combinations of primitives
-    //transmute between 1-byte primitives
-    transmute_unchecked_should_succeed!(transmute_unchecked_i8_to_u8, i8, u8);
-    transmute_unchecked_should_succeed!(transmute_unchecked_u8_to_i8, u8, i8);
-    transmute_unchecked_should_succeed!(transmute_unchecked_bool_to_i8, bool, i8);
-    transmute_unchecked_should_succeed!(transmute_unchecked_bool_to_u8, bool, u8);
-    //transmute between 2-byte primitives
-    transmute_unchecked_should_succeed!(transmute_unchecked_i16_to_u16, i16, u16);
-    transmute_unchecked_should_succeed!(transmute_unchecked_u16_to_i16, u16, i16);
-    //transmute between 4-byte primitives
-    transmute_unchecked_should_succeed!(transmute_unchecked_i32_to_u32, i32, u32);
-    transmute_unchecked_should_succeed!(transmute_unchecked_i32_to_f32, i32, f32);
-    transmute_unchecked_should_succeed!(transmute_unchecked_u32_to_i32, u32, i32);
-    transmute_unchecked_should_succeed!(transmute_unchecked_u32_to_f32, u32, f32);
-    transmute_unchecked_should_succeed!(transmute_unchecked_char_to_i32, char, i32);
-    transmute_unchecked_should_succeed!(transmute_unchecked_char_to_u32, char, u32);
-    transmute_unchecked_should_succeed!(transmute_unchecked_char_to_f32, char, f32);
-    transmute_unchecked_should_succeed!(transmute_unchecked_f32_to_i32, f32, i32);
-    transmute_unchecked_should_succeed!(transmute_unchecked_f32_to_u32, f32, u32);
-    //transmute between 8-byte primitives
-    transmute_unchecked_should_succeed!(transmute_unchecked_i64_to_u64, i64, u64);
-    transmute_unchecked_should_succeed!(transmute_unchecked_i64_to_f64, i64, f64);
-    transmute_unchecked_should_succeed!(transmute_unchecked_u64_to_i64, u64, i64);
-    transmute_unchecked_should_succeed!(transmute_unchecked_u64_to_f64, u64, f64);
-    transmute_unchecked_should_succeed!(transmute_unchecked_f64_to_i64, f64, i64);
-    transmute_unchecked_should_succeed!(transmute_unchecked_f64_to_u64, f64, u64);
-    //transmute between 16-byte primitives
-    transmute_unchecked_should_succeed!(transmute_unchecked_i128_to_u128, i128, u128);
-    transmute_unchecked_should_succeed!(transmute_unchecked_u128_to_i128, u128, i128);
-    //transmute to type with potentially invalid bit patterns
-    transmute_unchecked_should_fail!(transmute_unchecked_i8_to_bool, i8, bool);
-    transmute_unchecked_should_fail!(transmute_unchecked_u8_to_bool, u8, bool);
-    transmute_unchecked_should_fail!(transmute_unchecked_i32_to_char, i32, char);
-    transmute_unchecked_should_fail!(transmute_unchecked_u32_to_char, u32, char);
-    transmute_unchecked_should_fail!(transmute_unchecked_f32_to_char, f32, char);
-    //transmute to type with potentially invalid bit patterns, but filtering out invalid inputs
-    transmute_unchecked_should_succeed!(transmute_unchecked_valid_i8_to_bool, i8, bool);
-    transmute_unchecked_should_succeed!(transmute_unchecked_valid_u8_to_bool, u8, bool);
-    transmute_unchecked_should_succeed!(transmute_unchecked_valid_i32_to_char, i32, char);
-    transmute_unchecked_should_succeed!(transmute_unchecked_valid_u32_to_char, u32, char);
-    transmute_unchecked_should_succeed!(transmute_unchecked_valid_f32_to_char, f32, char);
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn should_fail_u32_to_char() {
+        let src: u32 = kani::any_where(|x| !core::char::from_u32(*x).is_some()
+);
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    } 
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    fn should_succeed_f32_to_char() {
+        let src: f32 = kani::any_where(|x| char::from_u32(unsafe { *(x as *const f32 as *const u32) }).is_some());
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn should_fail_f32_to_char() {
+        let src: f32 = kani::any_where(|x| !char::from_u32(unsafe { *(x as *const f32 as *const u32) }).is_some());
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    fn should_succeed_i32_to_char() {
+        let src: i32 = kani::any_where(|x| char::from_u32(*x as u32).is_some());
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn should_fail_i32_to_char() {
+        let src: i32 = kani::any_where(|x| !char::from_u32(*x as u32).is_some());
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    fn should_succeed_u8_to_bool() {
+        let src: u8 = kani::any_where(|x| *x <= 1);
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn should_fail_u8_to_bool() {
+        let src: u8 = kani::any_where(|x| *x > 1);
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    fn should_succeed_i8_to_bool() {
+        let src: u8 = kani::any_where(|x| *x as u8 <= 1);
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn should_fail_i8_to_bool() {
+        let src: u8 = kani::any_where(|x| *x as u8 > 1);
+        let dst: char = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    //The following harnesses do the same as above, but for compound types
+    //Since the goal is just to show that the generic precondition can work
+    //with compound types, we keep the examples of compound types simple, rather
+    //than attempting to enumerate them.
+
+    //This is 2-bytes large
+    #[cfg_attr(kani, derive(kani::Arbitrary))]
+    #[cfg_attr(kani, derive(PartialEq, Debug))]
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    struct struct_A {
+        x: u8,
+        y: bool,
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    fn should_succeed_tuple_to_struct() {
+        let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x <= 1));
+        let dst: struct_A = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn should_fail_tuple_to_struct() {
+        let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x > 1));
+        let dst: struct_A = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    fn should_succeed_tuple_to_tuple() {
+        let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x <= 1));
+        let dst: (u8, bool) = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn should_fail_tuple_to_tuple() {
+        let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x > 1));
+        let dst: (u8, bool) = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    fn should_succeed_tuple_to_array() {
+        let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x <= 1));
+        let dst: [bool; 2] = unsafe { transmute_unchecked_wrapper(src) };
+    }
+
+    #[kani::proof]
+    #[kani::stub_verified(transmute_unchecked_wrapper)]
+    #[kani::should_panic]
+    fn should_fail_tuple_to_array() {
+        let src: (u8, u8) = (kani::any(), kani::any_where(|x| *x > 1));
+        let dst: [bool; 2] = unsafe { transmute_unchecked_wrapper(src) };
+    }
 
     //Note: the following harness fails when it in theory should not
     //The problem is that ub_checks::can_dereference(), used in a validity precondition
@@ -4344,24 +4465,6 @@ mod verify {
         let int_ref2: &u8 = unsafe { transmute_unchecked_wrapper(int_ref) };
         assert!(*int_ref2 == 0 || *int_ref2 == 1);
     }*/
-
-    //This is 2-bytes large
-    #[cfg_attr(kani, derive(kani::Arbitrary))]
-    #[cfg_attr(kani, derive(PartialEq, Debug))]
-    #[derive(Clone, Copy)]
-    #[repr(C)]
-    struct struct_A {
-        x: u8,
-        y: bool,
-    }
-
-    //These demonstrate that the validity precondition catches invalid fields/members
-    //of more complex types
-    //Note: enumerating these compound types is not currently possible with Kani,
-    //we leave these merely as evidence that the validity precondition works
-    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_struct, u16, struct_A);
-    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_tuple, u16, (u8, bool));
-    transmute_unchecked_should_fail!(transmute_unchecked_to_invalid_array, u16, [bool; 2]);
 
     //tests that transmute works correctly when transmuting something with zero size
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
