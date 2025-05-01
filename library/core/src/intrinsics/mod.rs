@@ -4326,15 +4326,16 @@ mod verify {
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     #[kani::should_panic]
     fn should_fail_u32_to_char() {
-        let src: u32 = kani::any_where(|x| !core::char::from_u32(*x).is_some()
-);
+        let src: u32 = kani::any_where(|x| !core::char::from_u32(*x).is_some());
         let dst: char = unsafe { transmute_unchecked_wrapper(src) };
     } 
 
     #[kani::proof]
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     fn should_succeed_f32_to_char() {
-        let src: f32 = kani::any_where(|x| char::from_u32(unsafe { *(x as *const f32 as *const u32) }).is_some());
+        let src: f32 = kani::any_where(|x| {
+            char::from_u32(unsafe { *(x as *const f32 as *const u32) }).is_some()
+        });
         let dst: char = unsafe { transmute_unchecked_wrapper(src) };
     }
 
@@ -4342,7 +4343,9 @@ mod verify {
     #[kani::stub_verified(transmute_unchecked_wrapper)]
     #[kani::should_panic]
     fn should_fail_f32_to_char() {
-        let src: f32 = kani::any_where(|x| !char::from_u32(unsafe { *(x as *const f32 as *const u32) }).is_some());
+        let src: f32 = kani::any_where(|x| {
+            !char::from_u32(unsafe { *(x as *const f32 as *const u32) }).is_some()
+        });
         let dst: char = unsafe { transmute_unchecked_wrapper(src) };
     }
 
