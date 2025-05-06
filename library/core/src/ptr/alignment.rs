@@ -16,7 +16,9 @@ use crate::{cmp, fmt, hash, mem, num};
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
-#[invariant(self.as_usize().is_power_of_two())]
+// uses .0 instead of .as_usize() to permit proving as_usize so that its proof does not itself use
+// as_usize
+#[invariant((self.0 as usize).is_power_of_two())]
 pub struct Alignment(AlignmentEnum);
 
 // Alignment is `repr(usize)`, but via extra steps.
@@ -404,56 +406,10 @@ mod verify {
         }
     }
 
-    /// FIXME, c.f. https://github.com/model-checking/kani/issues/3905
+    // FIXME, c.f. https://github.com/model-checking/kani/issues/3905
     // // pub const fn of<T>() -> Self
     // #[kani::proof_for_contract(Alignment::of)]
     // pub fn check_of_i32() {
     //     let _ = Alignment::of::<i32>();
     // }
-
-    // pub const fn new(align: usize) -> Option<Self>
-    #[kani::proof_for_contract(Alignment::new)]
-    pub fn check_new() {
-        let a = kani::any::<usize>();
-        let _ = Alignment::new(a);
-    }
-
-    // pub const unsafe fn new_unchecked(align: usize) -> Self
-    #[kani::proof_for_contract(Alignment::new_unchecked)]
-    pub fn check_new_unchecked() {
-        let a = kani::any::<usize>();
-        unsafe {
-            let _ = Alignment::new_unchecked(a);
-        }
-    }
-
-    // pub const fn as_usize(self) -> usize
-    #[kani::proof_for_contract(Alignment::as_usize)]
-    pub fn check_as_usize() {
-        let a = kani::any::<usize>();
-        if let Some(alignment) = Alignment::new(a) {
-            assert_eq!(alignment.as_usize(), a);
-        }
-    }
-
-    // pub const fn as_nonzero(self) -> NonZero<usize>
-    #[kani::proof_for_contract(Alignment::as_nonzero)]
-    pub fn check_as_nonzero() {
-        let alignment = kani::any::<Alignment>();
-        let _ = alignment.as_nonzero();
-    }
-
-    // pub const fn log2(self) -> u32
-    #[kani::proof_for_contract(Alignment::log2)]
-    pub fn check_log2() {
-        let alignment = kani::any::<Alignment>();
-        let _ = alignment.log2();
-    }
-
-    // pub const fn mask(self) -> usize
-    #[kani::proof_for_contract(Alignment::mask)]
-    pub fn check_mask() {
-        let alignment = kani::any::<Alignment>();
-        let _ = alignment.mask();
-    }
 }

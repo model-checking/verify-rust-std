@@ -273,8 +273,8 @@ macro_rules! uint_impl {
         ///
         #[doc = concat!("assert_eq!(n.cast_signed(), -1", stringify!($SignedT), ");")]
         /// ```
-        #[stable(feature = "integer_sign_cast", since = "CURRENT_RUSTC_VERSION")]
-        #[rustc_const_stable(feature = "integer_sign_cast", since = "CURRENT_RUSTC_VERSION")]
+        #[stable(feature = "integer_sign_cast", since = "1.87.0")]
+        #[rustc_const_stable(feature = "integer_sign_cast", since = "1.87.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
@@ -1620,8 +1620,8 @@ macro_rules! uint_impl {
         #[doc = concat!("assert_eq!(0x1", stringify!($SelfT), ".unbounded_shl(4), 0x10);")]
         #[doc = concat!("assert_eq!(0x1", stringify!($SelfT), ".unbounded_shl(129), 0);")]
         /// ```
-        #[stable(feature = "unbounded_shifts", since = "CURRENT_RUSTC_VERSION")]
-        #[rustc_const_stable(feature = "unbounded_shifts", since = "CURRENT_RUSTC_VERSION")]
+        #[stable(feature = "unbounded_shifts", since = "1.87.0")]
+        #[rustc_const_stable(feature = "unbounded_shifts", since = "1.87.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -1742,8 +1742,8 @@ macro_rules! uint_impl {
         #[doc = concat!("assert_eq!(0x10", stringify!($SelfT), ".unbounded_shr(4), 0x1);")]
         #[doc = concat!("assert_eq!(0x10", stringify!($SelfT), ".unbounded_shr(129), 0);")]
         /// ```
-        #[stable(feature = "unbounded_shifts", since = "CURRENT_RUSTC_VERSION")]
-        #[rustc_const_stable(feature = "unbounded_shifts", since = "CURRENT_RUSTC_VERSION")]
+        #[stable(feature = "unbounded_shifts", since = "1.87.0")]
+        #[rustc_const_stable(feature = "unbounded_shifts", since = "1.87.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
@@ -1780,6 +1780,7 @@ macro_rules! uint_impl {
             let mut base = self;
             let mut acc: Self = 1;
 
+            #[safety::loop_invariant(true)]
             loop {
                 if (exp & 1) == 1 {
                     acc = try_opt!(acc.checked_mul(base));
@@ -2349,6 +2350,7 @@ macro_rules! uint_impl {
             let mut acc: Self = 1;
 
             if intrinsics::is_val_statically_known(exp) {
+                #[safety::loop_invariant(exp>=1)]
                 while exp > 1 {
                     if (exp & 1) == 1 {
                         acc = acc.wrapping_mul(base);
@@ -2366,6 +2368,7 @@ macro_rules! uint_impl {
                 // at compile time. We can't use the same code for the constant
                 // exponent case because LLVM is currently unable to unroll
                 // this loop.
+                #[safety::loop_invariant(true)]
                 loop {
                     if (exp & 1) == 1 {
                         acc = acc.wrapping_mul(base);
@@ -3044,6 +3047,7 @@ macro_rules! uint_impl {
             // Scratch space for storing results of overflowing_mul.
             let mut r;
 
+            #[safety::loop_invariant(true)]
             loop {
                 if (exp & 1) == 1 {
                     r = acc.overflowing_mul(base);
@@ -3338,8 +3342,8 @@ macro_rules! uint_impl {
         #[doc = concat!("assert!(0_", stringify!($SelfT), ".is_multiple_of(0));")]
         #[doc = concat!("assert!(!6_", stringify!($SelfT), ".is_multiple_of(0));")]
         /// ```
-        #[stable(feature = "unsigned_is_multiple_of", since = "CURRENT_RUSTC_VERSION")]
-        #[rustc_const_stable(feature = "unsigned_is_multiple_of", since = "CURRENT_RUSTC_VERSION")]
+        #[stable(feature = "unsigned_is_multiple_of", since = "1.87.0")]
+        #[rustc_const_stable(feature = "unsigned_is_multiple_of", since = "1.87.0")]
         #[must_use]
         #[inline]
         #[rustc_inherit_overflow_checks]
@@ -3350,7 +3354,7 @@ macro_rules! uint_impl {
             }
         }
 
-        /// Returns `true` if and only if `self == 2^k` for some `k`.
+        /// Returns `true` if and only if `self == 2^k` for some unsigned integer `k`.
         ///
         /// # Examples
         ///

@@ -1,6 +1,8 @@
 //! Definitions of `Wrapping<T>`.
 
 use crate::fmt;
+#[cfg(kani)]
+use crate::kani;
 use crate::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
@@ -41,6 +43,14 @@ use crate::ops::{
 #[repr(transparent)]
 #[rustc_diagnostic_item = "Wrapping"]
 pub struct Wrapping<T>(#[stable(feature = "rust1", since = "1.0.0")] pub T);
+
+#[cfg(kani)]
+#[stable(feature = "rust1", since = "1.0.0")]
+impl<T: kani::Arbitrary> kani::Arbitrary for Wrapping<T> {
+    fn any() -> Self {
+        Self { 0: kani::any() }
+    }
+}
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: fmt::Debug> fmt::Debug for Wrapping<T> {

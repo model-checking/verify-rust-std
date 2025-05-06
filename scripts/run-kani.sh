@@ -7,15 +7,17 @@ usage() {
     echo "Options:"
     echo "  -h, --help         Show this help message"
     echo "  -p, --path <path>  Optional: Specify a path to a copy of the std library. For example, if you want to run the script from an outside directory."
-    echo "  --run <verify-std|list|metrics>  Optional: Specify whether to run the 'kani verify-std' command, 'kani list' command, or collect Kani-specific metrics. Defaults to 'verify-std' if not specified."
+    echo "  --run <verify-std|list|metrics|autoharness|autoharness-analyzer>  Optional: Specify whether to run the 'kani verify-std' command, 'kani list' command, collect Kani-specific metrics, run verification with autoharness support, or summarize autoharness failure reasons. Defaults to 'verify-std' if not specified."
+    echo "  --with-autoharness Include autoharness information in list or metrics commands."
     echo "  --kani-args  <command arguments to kani>  Optional: Arguments to pass to the command. Simply pass them in the same way you would to the Kani binary. This should be the last argument."
     exit 1
 }
 
 # Initialize variables
-command_args=""
+declare -a command_args
 path=""
 run_command="verify-std"
+with_autoharness="false"
 
 # Parse command line arguments
 # TODO: Improve parsing with getopts
@@ -34,7 +36,7 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         --run)
-            if [[ -n $2 && ($2 == "verify-std" || $2 == "list" || $2 == "metrics") ]]; then
+            if [[ -n $2 && ($2 == "verify-std" || $2 == "list" || $2 == "metrics" || $2 == "autoharness" || $2 == "autoharness-analyzer") ]]; then
                 run_command=$2
                 shift 2
             else
@@ -42,9 +44,13 @@ while [[ $# -gt 0 ]]; do
                 usage
             fi
             ;;
+        --with-autoharness)
+            with_autoharness="true"
+            shift
+            ;;
         --kani-args)
             shift
-            command_args="$@"
+            command_args=("$@")
             break
             ;;
         *)
@@ -145,7 +151,7 @@ build_kani() {
     source "kani-dependencies"
     # Check if installed versions are correct.
     if ./scripts/check-cbmc-version.py \
-            --major ${CBMC_MAJOR} --minor ${CBMC_MINOR} --patch ${CBMC_PATCH} \
+            --major ${CBMC_MAJOR} --minor ${CBMC_MINOR} \
             && ./scripts/check_kissat_version.sh; then
         echo "Dependencies are up-to-date"
     else
@@ -211,7 +217,7 @@ run_verification_subset() {
         $harness_args --exact \
         -j \
         --output-format=terse \
-        $command_args \
+        "${command_args[@]}" \
         --enable-unstable \
         --cbmc-args --object-bits 12
 }
@@ -293,17 +299,35 @@ main() {
             "$kani_path" verify-std -Z unstable-options ./library \
                 $unstable_args \
                 --no-assert-contracts \
-                $command_args \
+                "${command_args[@]}" \
                 --enable-unstable \
                 --cbmc-args --object-bits 12
         fi
+      elif [[ "$run_command" == "autoharness" ]]; then
+          # Run verification for a subset of automatically generated harnesses
+          # (not in parallel)
+          echo "Running Kani autoharness command..."
+          "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
+              $unstable_args \
+              --no-assert-contracts \
+              "${command_args[@]}" \
+              --enable-unstable \
+              --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
-        "$kani_path" list -Z list $unstable_args ./library --std --format markdown
+        if [[ "$with_autoharness" == "true" ]]; then
+            "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format markdown
+        else
+            "$kani_path" list -Z list $unstable_args ./library --std --format markdown
+        fi
     elif [[ "$run_command" == "metrics" ]]; then
         local current_dir=$(pwd)
         echo "Running Kani list command..."
-        "$kani_path" list -Z list $unstable_args ./library --std --format json
+        if [[ "$with_autoharness" == "true" ]]; then
+            "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format json
+        else
+            "$kani_path" list -Z list $unstable_args ./library --std --format json
+        fi
         pushd scripts/kani-std-analysis
         echo "Running Kani's std-analysis command..."
         ./std-analysis.sh $build_dir
@@ -317,6 +341,31 @@ main() {
           --metrics-file metrics-data-std.json
         popd
         rm kani-list.json
+    elif [[ "$run_command" == "autoharness-analyzer" ]]; then
+        echo "Running Kani autoharness codegen command..."
+        "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
+            --only-codegen -j --output-format=terse \
+            $unstable_args \
+            --no-assert-contracts \
+            "${command_args[@]}" \
+            --enable-unstable \
+            --cbmc-args --object-bits 12
+        # remove metadata file for Kani-generated "dummy" crate that we won't
+        # get scanner data for
+        rm target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/dummy-*
+        echo "Running Kani's std-analysis command..."
+        pushd scripts/kani-std-analysis
+        ./std-analysis.sh $build_dir
+        popd
+        echo "Running autoharness-analyzer command..."
+        git clone --depth 1 https://github.com/carolynzech/autoharness_analyzer
+        cd autoharness_analyzer
+        cargo run -- --per-crate \
+          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          /tmp/std_lib_analysis/results/
+        cargo run -- --per-crate --unsafe-fns-only \
+          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          /tmp/std_lib_analysis/results/
     fi
 }
 
