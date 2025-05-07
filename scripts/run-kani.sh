@@ -360,10 +360,10 @@ main() {
         echo "Running autoharness-analyzer command..."
         pushd scripts/autoharness_analyzer
         cargo run -- --per-crate \
-          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          ../../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
           /tmp/std_lib_analysis/results/
         cargo run -- --per-crate --unsafe-fns-only \
-          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          ../../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
           /tmp/std_lib_analysis/results/
         popd
     fi
