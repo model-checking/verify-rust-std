@@ -14,335 +14,6 @@ use crate::sys::cmath;
 
 #[cfg(not(test))]
 impl f16 {
-    /// Returns the largest integer less than or equal to `self`.
-    ///
-    /// This function always returns the precise result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let f = 3.7_f16;
-    /// let g = 3.0_f16;
-    /// let h = -3.7_f16;
-    ///
-    /// assert_eq!(f.floor(), 3.0);
-    /// assert_eq!(g.floor(), 3.0);
-    /// assert_eq!(h.floor(), -4.0);
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn floor(self) -> f16 {
-        unsafe { intrinsics::floorf16(self) }
-    }
-
-    /// Returns the smallest integer greater than or equal to `self`.
-    ///
-    /// This function always returns the precise result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let f = 3.01_f16;
-    /// let g = 4.0_f16;
-    ///
-    /// assert_eq!(f.ceil(), 4.0);
-    /// assert_eq!(g.ceil(), 4.0);
-    /// # }
-    /// ```
-    #[inline]
-    #[doc(alias = "ceiling")]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn ceil(self) -> f16 {
-        unsafe { intrinsics::ceilf16(self) }
-    }
-
-    /// Returns the nearest integer to `self`. If a value is half-way between two
-    /// integers, round away from `0.0`.
-    ///
-    /// This function always returns the precise result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let f = 3.3_f16;
-    /// let g = -3.3_f16;
-    /// let h = -3.7_f16;
-    /// let i = 3.5_f16;
-    /// let j = 4.5_f16;
-    ///
-    /// assert_eq!(f.round(), 3.0);
-    /// assert_eq!(g.round(), -3.0);
-    /// assert_eq!(h.round(), -4.0);
-    /// assert_eq!(i.round(), 4.0);
-    /// assert_eq!(j.round(), 5.0);
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn round(self) -> f16 {
-        unsafe { intrinsics::roundf16(self) }
-    }
-
-    /// Returns the nearest integer to a number. Rounds half-way cases to the number
-    /// with an even least significant digit.
-    ///
-    /// This function always returns the precise result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let f = 3.3_f16;
-    /// let g = -3.3_f16;
-    /// let h = 3.5_f16;
-    /// let i = 4.5_f16;
-    ///
-    /// assert_eq!(f.round_ties_even(), 3.0);
-    /// assert_eq!(g.round_ties_even(), -3.0);
-    /// assert_eq!(h.round_ties_even(), 4.0);
-    /// assert_eq!(i.round_ties_even(), 4.0);
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn round_ties_even(self) -> f16 {
-        intrinsics::round_ties_even_f16(self)
-    }
-
-    /// Returns the integer part of `self`.
-    /// This means that non-integer numbers are always truncated towards zero.
-    ///
-    /// This function always returns the precise result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let f = 3.7_f16;
-    /// let g = 3.0_f16;
-    /// let h = -3.7_f16;
-    ///
-    /// assert_eq!(f.trunc(), 3.0);
-    /// assert_eq!(g.trunc(), 3.0);
-    /// assert_eq!(h.trunc(), -3.0);
-    /// # }
-    /// ```
-    #[inline]
-    #[doc(alias = "truncate")]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn trunc(self) -> f16 {
-        unsafe { intrinsics::truncf16(self) }
-    }
-
-    /// Returns the fractional part of `self`.
-    ///
-    /// This function always returns the precise result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let x = 3.6_f16;
-    /// let y = -3.6_f16;
-    /// let abs_difference_x = (x.fract() - 0.6).abs();
-    /// let abs_difference_y = (y.fract() - (-0.6)).abs();
-    ///
-    /// assert!(abs_difference_x <= f16::EPSILON);
-    /// assert!(abs_difference_y <= f16::EPSILON);
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn fract(self) -> f16 {
-        self - self.trunc()
-    }
-
-    /// Fused multiply-add. Computes `(self * a) + b` with only one rounding
-    /// error, yielding a more accurate result than an unfused multiply-add.
-    ///
-    /// Using `mul_add` *may* be more performant than an unfused multiply-add if
-    /// the target architecture has a dedicated `fma` CPU instruction. However,
-    /// this is not always true, and will be heavily dependant on designing
-    /// algorithms with specific target hardware in mind.
-    ///
-    /// # Precision
-    ///
-    /// The result of this operation is guaranteed to be the rounded
-    /// infinite-precision result. It is specified by IEEE 754 as
-    /// `fusedMultiplyAdd` and guaranteed not to change.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let m = 10.0_f16;
-    /// let x = 4.0_f16;
-    /// let b = 60.0_f16;
-    ///
-    /// assert_eq!(m.mul_add(x, b), 100.0);
-    /// assert_eq!(m * x + b, 100.0);
-    ///
-    /// let one_plus_eps = 1.0_f16 + f16::EPSILON;
-    /// let one_minus_eps = 1.0_f16 - f16::EPSILON;
-    /// let minus_one = -1.0_f16;
-    ///
-    /// // The exact result (1 + eps) * (1 - eps) = 1 - eps * eps.
-    /// assert_eq!(one_plus_eps.mul_add(one_minus_eps, minus_one), -f16::EPSILON * f16::EPSILON);
-    /// // Different rounding with the non-fused multiply and add.
-    /// assert_eq!(one_plus_eps * one_minus_eps + minus_one, 0.0);
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[doc(alias = "fmaf16", alias = "fusedMultiplyAdd")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn mul_add(self, a: f16, b: f16) -> f16 {
-        unsafe { intrinsics::fmaf16(self, a, b) }
-    }
-
-    /// Calculates Euclidean division, the matching method for `rem_euclid`.
-    ///
-    /// This computes the integer `n` such that
-    /// `self = n * rhs + self.rem_euclid(rhs)`.
-    /// In other words, the result is `self / rhs` rounded to the integer `n`
-    /// such that `self >= n * rhs`.
-    ///
-    /// # Precision
-    ///
-    /// The result of this operation is guaranteed to be the rounded
-    /// infinite-precision result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let a: f16 = 7.0;
-    /// let b = 4.0;
-    /// assert_eq!(a.div_euclid(b), 1.0); // 7.0 > 4.0 * 1.0
-    /// assert_eq!((-a).div_euclid(b), -2.0); // -7.0 >= 4.0 * -2.0
-    /// assert_eq!(a.div_euclid(-b), -1.0); // 7.0 >= -4.0 * -1.0
-    /// assert_eq!((-a).div_euclid(-b), 2.0); // -7.0 >= -4.0 * 2.0
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn div_euclid(self, rhs: f16) -> f16 {
-        let q = (self / rhs).trunc();
-        if self % rhs < 0.0 {
-            return if rhs > 0.0 { q - 1.0 } else { q + 1.0 };
-        }
-        q
-    }
-
-    /// Calculates the least nonnegative remainder of `self (mod rhs)`.
-    ///
-    /// In particular, the return value `r` satisfies `0.0 <= r < rhs.abs()` in
-    /// most cases. However, due to a floating point round-off error it can
-    /// result in `r == rhs.abs()`, violating the mathematical definition, if
-    /// `self` is much smaller than `rhs.abs()` in magnitude and `self < 0.0`.
-    /// This result is not an element of the function's codomain, but it is the
-    /// closest floating point number in the real numbers and thus fulfills the
-    /// property `self == self.div_euclid(rhs) * rhs + self.rem_euclid(rhs)`
-    /// approximately.
-    ///
-    /// # Precision
-    ///
-    /// The result of this operation is guaranteed to be the rounded
-    /// infinite-precision result.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let a: f16 = 7.0;
-    /// let b = 4.0;
-    /// assert_eq!(a.rem_euclid(b), 3.0);
-    /// assert_eq!((-a).rem_euclid(b), 1.0);
-    /// assert_eq!(a.rem_euclid(-b), 3.0);
-    /// assert_eq!((-a).rem_euclid(-b), 1.0);
-    /// // limitation due to round-off error
-    /// assert!((-f16::EPSILON).rem_euclid(3.0) != 0.0);
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[doc(alias = "modulo", alias = "mod")]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn rem_euclid(self, rhs: f16) -> f16 {
-        let r = self % rhs;
-        if r < 0.0 { r + rhs.abs() } else { r }
-    }
-
-    /// Raises a number to an integer power.
-    ///
-    /// Using this function is generally faster than using `powf`.
-    /// It might have a different sequence of rounding operations than `powf`,
-    /// so the results are not guaranteed to agree.
-    ///
-    /// # Unspecified precision
-    ///
-    /// The precision of this function is non-deterministic. This means it varies by platform,
-    /// Rust version, and can even differ within the same execution from one invocation to the next.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let x = 2.0_f16;
-    /// let abs_difference = (x.powi(2) - (x * x)).abs();
-    /// assert!(abs_difference <= f16::EPSILON);
-    ///
-    /// assert_eq!(f16::powi(f16::NAN, 0), 1.0);
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn powi(self, n: i32) -> f16 {
-        unsafe { intrinsics::powif16(self, n) }
-    }
-
     /// Raises a number to a floating point power.
     ///
     /// # Unspecified precision
@@ -354,7 +25,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0_f16;
     /// let abs_difference = (x.powf(2.0) - (x * x)).abs();
@@ -372,40 +46,6 @@ impl f16 {
         unsafe { intrinsics::powf16(self, n) }
     }
 
-    /// Returns the square root of a number.
-    ///
-    /// Returns NaN if `self` is a negative number other than `-0.0`.
-    ///
-    /// # Precision
-    ///
-    /// The result of this operation is guaranteed to be the rounded
-    /// infinite-precision result. It is specified by IEEE 754 as `squareRoot`
-    /// and guaranteed not to change.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let positive = 4.0_f16;
-    /// let negative = -4.0_f16;
-    /// let negative_zero = -0.0_f16;
-    ///
-    /// assert_eq!(positive.sqrt(), 2.0);
-    /// assert!(negative.sqrt().is_nan());
-    /// assert!(negative_zero.sqrt() == negative_zero);
-    /// # }
-    /// ```
-    #[inline]
-    #[doc(alias = "squareRoot")]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn sqrt(self) -> f16 {
-        unsafe { intrinsics::sqrtf16(self) }
-    }
-
     /// Returns `e^(self)`, (the exponential function).
     ///
     /// # Unspecified precision
@@ -417,7 +57,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let one = 1.0f16;
     /// // e^1
@@ -448,7 +91,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let f = 2.0f16;
     ///
@@ -479,7 +125,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let one = 1.0f16;
     /// // e^1
@@ -495,7 +144,10 @@ impl f16 {
     /// Non-positive values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!(0_f16.ln(), f16::NEG_INFINITY);
     /// assert!((-42_f16).ln().is_nan());
@@ -526,7 +178,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let five = 5.0f16;
     ///
@@ -540,7 +195,10 @@ impl f16 {
     /// Non-positive values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!(0_f16.log(10.0), f16::NEG_INFINITY);
     /// assert!((-42_f16).log(10.0).is_nan());
@@ -567,7 +225,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let two = 2.0f16;
     ///
@@ -581,7 +242,10 @@ impl f16 {
     /// Non-positive values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!(0_f16.log2(), f16::NEG_INFINITY);
     /// assert!((-42_f16).log2().is_nan());
@@ -608,7 +272,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let ten = 10.0f16;
     ///
@@ -622,7 +289,10 @@ impl f16 {
     /// Non-positive values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!(0_f16.log10(), f16::NEG_INFINITY);
     /// assert!((-42_f16).log10().is_nan());
@@ -634,38 +304,6 @@ impl f16 {
     #[must_use = "method returns a new number and does not mutate the original value"]
     pub fn log10(self) -> f16 {
         unsafe { intrinsics::log10f16(self) }
-    }
-
-    /// Returns the cube root of a number.
-    ///
-    /// # Unspecified precision
-    ///
-    /// The precision of this function is non-deterministic. This means it varies by platform,
-    /// Rust version, and can even differ within the same execution from one invocation to the next.
-    ///
-    /// This function currently corresponds to the `cbrtf` from libc on Unix
-    /// and Windows. Note that this might change in the future.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
-    ///
-    /// let x = 8.0f16;
-    ///
-    /// // x^(1/3) - 2 == 0
-    /// let abs_difference = (x.cbrt() - 2.0).abs();
-    ///
-    /// assert!(abs_difference <= f16::EPSILON);
-    /// # }
-    /// ```
-    #[inline]
-    #[rustc_allow_incoherent_impl]
-    #[unstable(feature = "f16", issue = "116909")]
-    #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn cbrt(self) -> f16 {
-        cmath::cbrtf(self as f32) as f16
     }
 
     /// Compute the distance between the origin and a point (`x`, `y`) on the
@@ -685,7 +323,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0f16;
     /// let y = 3.0f16;
@@ -715,7 +356,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = std::f16::consts::FRAC_PI_2;
     ///
@@ -743,7 +387,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0 * std::f16::consts::PI;
     ///
@@ -774,7 +421,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = std::f16::consts::FRAC_PI_4;
     /// let abs_difference = (x.tan() - 1.0).abs();
@@ -806,7 +456,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let f = std::f16::consts::FRAC_PI_2;
     ///
@@ -841,7 +494,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let f = std::f16::consts::FRAC_PI_4;
     ///
@@ -875,7 +531,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let f = 1.0f16;
     ///
@@ -913,7 +572,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// // Positive angles measured counter-clockwise
     /// // from positive x axis
@@ -955,7 +617,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = std::f16::consts::FRAC_PI_4;
     /// let f = x.sin_cos();
@@ -990,7 +655,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 1e-4_f16;
     ///
@@ -1026,7 +694,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 1e-4_f16;
     ///
@@ -1041,7 +712,10 @@ impl f16 {
     /// Out-of-range values:
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// assert_eq!((-1.0_f16).ln_1p(), f16::NEG_INFINITY);
     /// assert!((-2.0_f16).ln_1p().is_nan());
@@ -1070,7 +744,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let e = std::f16::consts::E;
     /// let x = 1.0f16;
@@ -1105,7 +782,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let e = std::f16::consts::E;
     /// let x = 1.0f16;
@@ -1140,7 +820,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let e = std::f16::consts::E;
     /// let x = 1.0f16;
@@ -1172,7 +855,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 1.0f16;
     /// let f = x.sinh().asinh();
@@ -1204,7 +890,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 1.0f16;
     /// let f = x.cosh().acosh();
@@ -1238,7 +927,10 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let e = std::f16::consts::E;
     /// let f = e.tanh().atanh();
@@ -1272,7 +964,10 @@ impl f16 {
     /// ```
     /// #![feature(f16)]
     /// #![feature(float_gamma)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 5.0f16;
     ///
@@ -1307,7 +1002,10 @@ impl f16 {
     /// ```
     /// #![feature(f16)]
     /// #![feature(float_gamma)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0f16;
     ///
@@ -1342,7 +1040,10 @@ impl f16 {
     /// ```
     /// #![feature(f16)]
     /// #![feature(float_erf)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     /// /// The error function relates what percent of a normal distribution lies
     /// /// within `x` standard deviations (scaled by `1/sqrt(2)`).
     /// fn within_standard_deviations(x: f16) -> f16 {
@@ -1381,7 +1082,10 @@ impl f16 {
     /// ```
     /// #![feature(f16)]
     /// #![feature(float_erf)]
-    /// # #[cfg(reliable_f16_math)] {
+    /// # #![feature(cfg_target_has_reliable_f16_f128)]
+    /// # #![expect(internal_features)]
+    /// # #[cfg(not(miri))]
+    /// # #[cfg(target_has_reliable_f16_math)] {
     /// let x: f16 = 0.123;
     ///
     /// let one = x.erf() + x.erfc();

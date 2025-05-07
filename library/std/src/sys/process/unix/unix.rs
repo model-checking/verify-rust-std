@@ -88,7 +88,7 @@ impl Command {
         // in its own process. Thus the parent drops the lock guard immediately.
         // The child calls `mem::forget` to leak the lock, which is crucial because
         // releasing a lock is not async-signal-safe.
-        let env_lock = sys::os::env_read_lock();
+        let env_lock = sys::env::env_read_lock();
         let pid = unsafe { self.do_fork()? };
 
         if pid == 0 {
@@ -162,11 +162,6 @@ impl Command {
         }
     }
 
-    pub fn output(&mut self) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-        let (proc, pipes) = self.spawn(Stdio::MakePipe, false)?;
-        crate::sys_common::process::wait_with_output(proc, pipes)
-    }
-
     // WatchOS and TVOS headers mark the `fork`/`exec*` functions with
     // `__WATCHOS_PROHIBITED __TVOS_PROHIBITED`, and indicate that the
     // `posix_spawn*` functions should be used instead. It isn't entirely clear
@@ -237,7 +232,7 @@ impl Command {
                     // Similar to when forking, we want to ensure that access to
                     // the environment is synchronized, so make sure to grab the
                     // environment lock before we try to exec.
-                    let _lock = sys::os::env_read_lock();
+                    let _lock = sys::env::env_read_lock();
 
                     let Err(e) = self.do_exec(theirs, envp.as_ref());
                     e
@@ -386,13 +381,13 @@ impl Command {
             impl Drop for Reset {
                 fn drop(&mut self) {
                     unsafe {
-                        *sys::os::environ() = self.0;
+                        *sys::env::environ() = self.0;
                     }
                 }
             }
 
-            _reset = Some(Reset(*sys::os::environ()));
-            *sys::os::environ() = envp.as_ptr();
+            _reset = Some(Reset(*sys::env::environ()));
+            *sys::env::environ() = envp.as_ptr();
         }
 
         libc::execvp(self.get_program_cstr().as_ptr(), self.get_argv().as_ptr());
@@ -442,7 +437,7 @@ impl Command {
         envp: Option<&CStringArray>,
     ) -> io::Result<Option<Process>> {
         #[cfg(target_os = "linux")]
-        use core::sync::atomic::{AtomicU8, Ordering};
+        use core::sync::atomic::{Atomic, AtomicU8, Ordering};
 
         use crate::mem::MaybeUninit;
         use crate::sys::{self, cvt_nz, on_broken_pipe_flag_used};
@@ -475,7 +470,7 @@ impl Command {
                     fn pidfd_getpid(pidfd: libc::c_int) -> libc::c_int;
                 );
 
-                static PIDFD_SUPPORTED: AtomicU8 = AtomicU8::new(0);
+                static PIDFD_SUPPORTED: Atomic<u8> = AtomicU8::new(0);
                 const UNKNOWN: u8 = 0;
                 const SPAWN: u8 = 1;
                 // Obtaining a pidfd via the fork+exec path might work
@@ -739,8 +734,8 @@ impl Command {
             cvt_nz(libc::posix_spawnattr_setflags(attrs.0.as_mut_ptr(), flags as _))?;
 
             // Make sure we synchronize access to the global `environ` resource
-            let _env_lock = sys::os::env_read_lock();
-            let envp = envp.map(|c| c.as_ptr()).unwrap_or_else(|| *sys::os::environ() as *const _);
+            let _env_lock = sys::env::env_read_lock();
+            let envp = envp.map(|c| c.as_ptr()).unwrap_or_else(|| *sys::env::environ() as *const _);
 
             #[cfg(not(target_os = "nto"))]
             let spawn_fn = libc::posix_spawnp;

@@ -78,15 +78,6 @@ pub mod simd;
 #[cfg(all(target_has_atomic = "8", target_has_atomic = "32", target_has_atomic = "ptr"))]
 use crate::sync::atomic::{self, AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
 
-#[stable(feature = "drop_in_place", since = "1.8.0")]
-#[rustc_allowed_through_unstable_modules = "import this function via `std::ptr` instead"]
-#[deprecated(note = "no longer an intrinsic - use `ptr::drop_in_place` directly", since = "1.52.0")]
-#[inline]
-pub unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T) {
-    // SAFETY: see `ptr::drop_in_place`
-    unsafe { crate::ptr::drop_in_place(to_drop) }
-}
-
 // N.B., these intrinsics take raw pointers because they mutate aliased
 // memory, which is not valid for either `&` or `&mut`.
 
@@ -443,12 +434,6 @@ pub unsafe fn atomic_load_acquire<T: Copy>(src: *const T) -> T;
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub unsafe fn atomic_load_relaxed<T: Copy>(src: *const T) -> T;
-/// Do NOT use this intrinsic; "unordered" operations do not exist in our memory model!
-/// In terms of the Rust Abstract Machine, this operation is equivalent to `src.read()`,
-/// i.e., it performs a non-atomic read.
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub unsafe fn atomic_load_unordered<T: Copy>(src: *const T) -> T;
 
 /// Stores the value at the specified memory location.
 /// `T` must be an integer or pointer type.
@@ -477,12 +462,6 @@ pub unsafe fn atomic_store_release<T: Copy>(dst: *mut T, val: T);
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub unsafe fn atomic_store_relaxed<T: Copy>(dst: *mut T, val: T);
-/// Do NOT use this intrinsic; "unordered" operations do not exist in our memory model!
-/// In terms of the Rust Abstract Machine, this operation is equivalent to `dst.write(val)`,
-/// i.e., it performs a non-atomic write.
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub unsafe fn atomic_store_unordered<T: Copy>(dst: *mut T, val: T);
 
 /// Stores the value at the specified memory location, returning the old value.
 /// `T` must be an integer or pointer type.
@@ -1501,6 +1480,7 @@ pub const fn forget<T: ?Sized>(_: T);
 /// Turning raw bytes (`[u8; SZ]`) into `u32`, `f64`, etc.:
 ///
 /// ```
+/// # #![allow(unnecessary_transmutes)]
 /// let raw_bytes = [0x78, 0x56, 0x34, 0x12];
 ///
 /// let num = unsafe {
@@ -2433,35 +2413,35 @@ pub unsafe fn float_to_int_unchecked<Float: Copy, Int: Copy>(value: Float) -> In
 /// Stabilized as [`f16::algebraic_add`], [`f32::algebraic_add`], [`f64::algebraic_add`] and [`f128::algebraic_add`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub fn fadd_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn fadd_algebraic<T: Copy>(a: T, b: T) -> T;
 
 /// Float subtraction that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_sub`], [`f32::algebraic_sub`], [`f64::algebraic_sub`] and [`f128::algebraic_sub`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub fn fsub_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn fsub_algebraic<T: Copy>(a: T, b: T) -> T;
 
 /// Float multiplication that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_mul`], [`f32::algebraic_mul`], [`f64::algebraic_mul`] and [`f128::algebraic_mul`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub fn fmul_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn fmul_algebraic<T: Copy>(a: T, b: T) -> T;
 
 /// Float division that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_div`], [`f32::algebraic_div`], [`f64::algebraic_div`] and [`f128::algebraic_div`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub fn fdiv_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn fdiv_algebraic<T: Copy>(a: T, b: T) -> T;
 
 /// Float remainder that allows optimizations based on algebraic rules.
 ///
 /// Stabilized as [`f16::algebraic_rem`], [`f32::algebraic_rem`], [`f64::algebraic_rem`] and [`f128::algebraic_rem`].
 #[rustc_nounwind]
 #[rustc_intrinsic]
-pub fn frem_algebraic<T: Copy>(a: T, b: T) -> T;
+pub const fn frem_algebraic<T: Copy>(a: T, b: T) -> T;
 
 /// Returns the number of bits set in an integer type `T`
 ///
@@ -2999,7 +2979,7 @@ pub unsafe fn nontemporal_store<T>(ptr: *mut T, val: T);
 #[rustc_intrinsic]
 pub const unsafe fn ptr_offset_from<T>(ptr: *const T, base: *const T) -> isize;
 
-/// See documentation of `<*const T>::sub_ptr` for details.
+/// See documentation of `<*const T>::offset_from_unsigned` for details.
 #[rustc_nounwind]
 #[rustc_intrinsic]
 #[rustc_intrinsic_const_stable_indirect]
@@ -3323,7 +3303,6 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[inline]
 #[rustc_intrinsic]
 #[rustc_intrinsic_const_stable_indirect]
-#[rustc_allow_const_fn_unstable(const_swap_nonoverlapping)] // this is anyway not called since CTFE implements the intrinsic
 #[cfg_attr(kani, kani::modifies(x))]
 #[cfg_attr(kani, kani::modifies(y))]
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
@@ -3445,7 +3424,6 @@ pub const fn contract_check_requires<C: Fn() -> bool + Copy>(cond: C) {
 /// returns false.
 ///
 /// Note that this function is a no-op during constant evaluation.
-#[cfg(not(bootstrap))]
 #[unstable(feature = "contracts_internals", issue = "128044")]
 // Similar to `contract_check_requires`, we need to use the user-facing
 // `contracts` feature rather than the perma-unstable `contracts_internals`.
@@ -3467,16 +3445,6 @@ pub const fn contract_check_ensures<C: Fn(&Ret) -> bool + Copy, Ret>(cond: C, re
             ret
         }
     )
-}
-
-/// This is the old version of contract_check_ensures kept here for bootstrap only.
-#[cfg(bootstrap)]
-#[unstable(feature = "contracts_internals", issue = "128044" /* compiler-team#759 */)]
-#[rustc_intrinsic]
-pub fn contract_check_ensures<'a, Ret, C: Fn(&'a Ret) -> bool>(ret: &'a Ret, cond: C) {
-    if contract_checks() && !cond(ret) {
-        crate::panicking::panic_nounwind("failed ensures check");
-    }
 }
 
 /// The intrinsic will return the size stored in that vtable.
@@ -3969,7 +3937,7 @@ pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     }
 }
 
-/// Returns the minimum of two `f16` values.
+/// Returns the minimum (IEEE 754-2008 minNum) of two `f16` values.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3982,7 +3950,7 @@ pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
 #[rustc_intrinsic]
 pub const fn minnumf16(x: f16, y: f16) -> f16;
 
-/// Returns the minimum of two `f32` values.
+/// Returns the minimum (IEEE 754-2008 minNum) of two `f32` values.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -3996,7 +3964,7 @@ pub const fn minnumf16(x: f16, y: f16) -> f16;
 #[rustc_intrinsic]
 pub const fn minnumf32(x: f32, y: f32) -> f32;
 
-/// Returns the minimum of two `f64` values.
+/// Returns the minimum (IEEE 754-2008 minNum) of two `f64` values.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -4010,7 +3978,7 @@ pub const fn minnumf32(x: f32, y: f32) -> f32;
 #[rustc_intrinsic]
 pub const fn minnumf64(x: f64, y: f64) -> f64;
 
-/// Returns the minimum of two `f128` values.
+/// Returns the minimum (IEEE 754-2008 minNum) of two `f128` values.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -4023,7 +3991,91 @@ pub const fn minnumf64(x: f64, y: f64) -> f64;
 #[rustc_intrinsic]
 pub const fn minnumf128(x: f128, y: f128) -> f128;
 
-/// Returns the maximum of two `f16` values.
+/// Returns the minimum (IEEE 754-2019 minimum) of two `f16` values.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+#[rustc_nounwind]
+#[cfg_attr(not(bootstrap), rustc_intrinsic)]
+pub const fn minimumf16(x: f16, y: f16) -> f16 {
+    if x < y {
+        x
+    } else if y < x {
+        y
+    } else if x == y {
+        if x.is_sign_negative() && y.is_sign_positive() { x } else { y }
+    } else {
+        // At least one input is NaN. Use `+` to perform NaN propagation and quieting.
+        x + y
+    }
+}
+
+/// Returns the minimum (IEEE 754-2019 minimum) of two `f32` values.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+#[rustc_nounwind]
+#[cfg_attr(not(bootstrap), rustc_intrinsic)]
+pub const fn minimumf32(x: f32, y: f32) -> f32 {
+    if x < y {
+        x
+    } else if y < x {
+        y
+    } else if x == y {
+        if x.is_sign_negative() && y.is_sign_positive() { x } else { y }
+    } else {
+        // At least one input is NaN. Use `+` to perform NaN propagation and quieting.
+        x + y
+    }
+}
+
+/// Returns the minimum (IEEE 754-2019 minimum) of two `f64` values.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+#[rustc_nounwind]
+#[cfg_attr(not(bootstrap), rustc_intrinsic)]
+pub const fn minimumf64(x: f64, y: f64) -> f64 {
+    if x < y {
+        x
+    } else if y < x {
+        y
+    } else if x == y {
+        if x.is_sign_negative() && y.is_sign_positive() { x } else { y }
+    } else {
+        // At least one input is NaN. Use `+` to perform NaN propagation and quieting.
+        x + y
+    }
+}
+
+/// Returns the minimum (IEEE 754-2019 minimum) of two `f128` values.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+#[rustc_nounwind]
+#[cfg_attr(not(bootstrap), rustc_intrinsic)]
+pub const fn minimumf128(x: f128, y: f128) -> f128 {
+    if x < y {
+        x
+    } else if y < x {
+        y
+    } else if x == y {
+        if x.is_sign_negative() && y.is_sign_positive() { x } else { y }
+    } else {
+        // At least one input is NaN. Use `+` to perform NaN propagation and quieting.
+        x + y
+    }
+}
+
+/// Returns the maximum (IEEE 754-2008 maxNum) of two `f16` values.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -4036,7 +4088,7 @@ pub const fn minnumf128(x: f128, y: f128) -> f128;
 #[rustc_intrinsic]
 pub const fn maxnumf16(x: f16, y: f16) -> f16;
 
-/// Returns the maximum of two `f32` values.
+/// Returns the maximum (IEEE 754-2008 maxNum) of two `f32` values.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -4050,7 +4102,7 @@ pub const fn maxnumf16(x: f16, y: f16) -> f16;
 #[rustc_intrinsic]
 pub const fn maxnumf32(x: f32, y: f32) -> f32;
 
-/// Returns the maximum of two `f64` values.
+/// Returns the maximum (IEEE 754-2008 maxNum) of two `f64` values.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -4064,7 +4116,7 @@ pub const fn maxnumf32(x: f32, y: f32) -> f32;
 #[rustc_intrinsic]
 pub const fn maxnumf64(x: f64, y: f64) -> f64;
 
-/// Returns the maximum of two `f128` values.
+/// Returns the maximum (IEEE 754-2008 maxNum) of two `f128` values.
 ///
 /// Note that, unlike most intrinsics, this is safe to call;
 /// it does not require an `unsafe` block.
@@ -4076,6 +4128,86 @@ pub const fn maxnumf64(x: f64, y: f64) -> f64;
 #[rustc_nounwind]
 #[rustc_intrinsic]
 pub const fn maxnumf128(x: f128, y: f128) -> f128;
+
+/// Returns the maximum (IEEE 754-2019 maximum) of two `f16` values.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+#[rustc_nounwind]
+#[cfg_attr(not(bootstrap), rustc_intrinsic)]
+pub const fn maximumf16(x: f16, y: f16) -> f16 {
+    if x > y {
+        x
+    } else if y > x {
+        y
+    } else if x == y {
+        if x.is_sign_positive() && y.is_sign_negative() { x } else { y }
+    } else {
+        x + y
+    }
+}
+
+/// Returns the maximum (IEEE 754-2019 maximum) of two `f32` values.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+#[rustc_nounwind]
+#[cfg_attr(not(bootstrap), rustc_intrinsic)]
+pub const fn maximumf32(x: f32, y: f32) -> f32 {
+    if x > y {
+        x
+    } else if y > x {
+        y
+    } else if x == y {
+        if x.is_sign_positive() && y.is_sign_negative() { x } else { y }
+    } else {
+        x + y
+    }
+}
+
+/// Returns the maximum (IEEE 754-2019 maximum) of two `f64` values.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+#[rustc_nounwind]
+#[cfg_attr(not(bootstrap), rustc_intrinsic)]
+pub const fn maximumf64(x: f64, y: f64) -> f64 {
+    if x > y {
+        x
+    } else if y > x {
+        y
+    } else if x == y {
+        if x.is_sign_positive() && y.is_sign_negative() { x } else { y }
+    } else {
+        x + y
+    }
+}
+
+/// Returns the maximum (IEEE 754-2019 maximum) of two `f128` values.
+///
+/// Note that, unlike most intrinsics, this is safe to call;
+/// it does not require an `unsafe` block.
+/// Therefore, implementations must not require the user to uphold
+/// any safety invariants.
+#[rustc_nounwind]
+#[cfg_attr(not(bootstrap), rustc_intrinsic)]
+pub const fn maximumf128(x: f128, y: f128) -> f128 {
+    if x > y {
+        x
+    } else if y > x {
+        y
+    } else if x == y {
+        if x.is_sign_positive() && y.is_sign_negative() { x } else { y }
+    } else {
+        x + y
+    }
+}
 
 /// Returns the absolute value of an `f16`.
 ///
