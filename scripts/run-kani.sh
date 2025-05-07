@@ -358,14 +358,14 @@ main() {
         ./std-analysis.sh $build_dir
         popd
         echo "Running autoharness-analyzer command..."
-        git clone --depth 1 https://github.com/carolynzech/autoharness_analyzer
-        cd autoharness_analyzer
+        pushd scripts/autoharness_analyzer
         cargo run -- --per-crate \
           ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
           /tmp/std_lib_analysis/results/
         cargo run -- --per-crate --unsafe-fns-only \
           ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
           /tmp/std_lib_analysis/results/
+        popd
     fi
 }
 
