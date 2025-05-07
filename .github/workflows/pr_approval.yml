@@ -73,6 +73,17 @@ jobs:
               return;
             }
 
+            // Get the list of changed files
+            const { data: changedFiles } = await github.rest.pulls.listFiles({
+              owner,
+              repo,
+              pull_number,
+            });
+
+            // Check if any files in library/ are modified
+            const affectsLibrary = changedFiles.some(file => file.filename.startsWith('library/'));
+            const requiredApprovals = affectsLibrary ? 2 : 1;
+
             // Get all reviews with pagination
             async function getAllReviews() {
               let allReviews = [];
@@ -113,15 +124,16 @@ jobs:
                 .map(review => review.user.login)
             );
 
-            const requiredApprovals = 2;
             const committeeApprovers = Array.from(approvers)
               .filter(approver => requiredApprovers.includes(approver));
             const currentCountfromCommittee = committeeApprovers.length;
 
-            // Core logic that checks if the approvers are in the committee
-            const conclusion = (currentCountfromCommittee >= 2) ? 'success' : 'failure';
+            // Check if we have enough approvals
+            const conclusion = (currentCountfromCommittee >= requiredApprovals) ? 'success' : 'failure';
 
             console.log('PR Approval Status');
+            console.log(`PR ${affectsLibrary ? 'affects' : 'does not affect'} library/ files`);
+            console.log(`Required approvals from committee: ${requiredApprovals}`);
             console.log(`PR has ${approvers.size} total approvals and ${currentCountfromCommittee} required approvals from the committee.`);
             
             console.log(`Committee Members: [${requiredApprovers.join(', ')}]`);
@@ -129,7 +141,7 @@ jobs:
             console.log(`All Approvers: ${approvers.size === 0 ? 'NONE' : `[${Array.from(approvers).join(', ')}]`}`);
             
             if (conclusion === 'failure') {
-              core.setFailed(`PR needs 2 approvals from committee members, but it has ${currentCountfromCommittee}`);
+              core.setFailed(`PR needs ${requiredApprovals} approval${requiredApprovals > 1 ? 's' : ''} from committee members, but it has ${currentCountfromCommittee}`);
             } else {
               core.info('PR approval check passed successfully.');
             }
