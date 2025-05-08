@@ -80,10 +80,12 @@ jobs:
               pull_number,
             });
 
-            // Check if any files in library/ or verifast-proofs/ are modified
+            // Check if any files in doc/, library/ or verifast-proofs/ are modified
+            const affectsDocs = changedFiles.some(file => file.filename.startsWith('doc/'));
             const affectsLibrary = changedFiles.some(file => file.filename.startsWith('library/'));
             const affectsVerifast = changedFiles.some(file => file.filename.startsWith('verifast-proofs/'));
-            const requiresTwoApprovals = affectsLibrary || affectsVerifast;
+            // Require two approvals iff one of the above folders are modified; otherwise, one is sufficient.
+            const requiresTwoApprovals = affectsDocs || affectsLibrary || affectsVerifast;
             const requiredApprovals = requiresTwoApprovals ? 2 : 1;
 
             // Get all reviews with pagination
@@ -135,6 +137,7 @@ jobs:
 
             console.log('PR Approval Status');
             console.log('Modified folders:');
+            console.log(`- doc/: ${affectsDocs ? 'yes' : 'no'}`);
             console.log(`- library/: ${affectsLibrary ? 'yes' : 'no'}`);
             console.log(`- verifast-proofs/: ${affectsVerifast ? 'yes' : 'no'}`);
             console.log(`Required approvals from committee: ${requiredApprovals}`);
