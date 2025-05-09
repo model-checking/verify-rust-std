@@ -755,7 +755,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
-            #[ensures(|result| result.get() > 0)]
+            #[ensures(|result| result.get() != 0)]
             #[ensures(|result| result.rotate_right(n).get() == old(self).get())]
             pub const fn rotate_left(self, n: u32) -> Self {
                 let result = self.get().rotate_left(n);
@@ -790,7 +790,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
-            #[ensures(|result| result.get() > 0)]
+            #[ensures(|result| result.get() != 0)]
             #[ensures(|result| result.rotate_left(n).get() == old(self).get())]
             pub const fn rotate_right(self, n: u32) -> Self {
                 let result = self.get().rotate_right(n);
