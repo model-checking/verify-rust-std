@@ -22,24 +22,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Start Tool Container
+      - name: Run Proofs in Tool Container
         run: |
-          docker run --detach --rm -t \
+          docker run --rm -t \
             --name ${{ env.container_name }} \
-            -w /workspace \
-            runtimeverificationinc/kmir:ubuntu-jammy-0.3.112_7.1.229-9e17ccd /bin/bash
-
-      - name: Copy KMIR proofs into container
-        run: |
-          docker cp kmir-proofs ${{ env.container_name }}:/workspace/kmir-proofs
-
-      - name: Run KMIR Verification for all proofs provided
-        run: |
-          for k_file in kmir-proofs/*/*-spec.k; do
-            echo "Running ${k_file}"
-            docker exec -t ${{ env.container_name }} kmir prove run ${k_file}
-          done
-
-      - name: Stop Tool Container
-        if: always()
-        run: docker stop ${{ env.container_name }}
+            -w /home/kmir/workspace \
+            -u $(id -u):$(id -g) \
+            -v $PWD:/home/kmir/workspace \
+            runtimeverificationinc/kmir:ubuntu-jammy-0.3.152 \
+            kmir-proofs/unchecked_arithmetic/run-proofs.sh
