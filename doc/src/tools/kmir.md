@@ -47,7 +47,7 @@ terminate normally or reach an exception or construct with undefined behaviour,
 which terminates the execution abnormally. KMIR is designed to provide sound 
 assurances about undefined behavior (UB) in Rust’s MIR. Rather than statically 
 over‑approximating or flagging UB at every unsafe block, KMIR models the full 
-MIR semantics, including UB transitions, use a **refusal-to-execute** strategy. 
+MIR semantics, including UB transitions, using a **refusal-to-execute** strategy.
 This means that if symbolic execution reaches a MIR instruction and cannot prove 
 that executing it would not result in UB (e.g., an out-of-bounds pointer dereference 
 or an unchecked arithmetic overflow), execution halts in a `UB DETECTED` state. 
@@ -170,7 +170,7 @@ requires an installation of `K Framework`, best done [using the `kup`
 tool](https://github.com/runtimeverification/kup/README.md), and includes a
 git submodule dependency on `stable-mir-json`.
 
-The `stable-mir-json` tool is a custom version of `rustc` which, while compiling
+The `stable-mir-json` tool is a custom driver for `rustc` which, while compiling
 Rust code, writes the code's Stable MIR, represented in a JSON format, to a
 file.  Just like `rustc` itself, `stable-mir-json` extracts MIR of a single
 crate and must be invoked via `cargo` for multi-crate programs. Besides the JSON
@@ -181,21 +181,28 @@ The `kmir` tool provides commands to work with the Stable MIR representation of
 Rust programs that `stable-mir-json` extracts.
 
 * Run Stable MIR code extracted from Rust programs (`kmir run my-program.smir.json`);
-* Prove a property about a Rust program, which is given as a K "claim" and
-  proven using an all-path reachability proof in K (`kmir prove run my-program-spec.k`);
-* Inspect the control flow graph of a program's proof constructed by the `kmir
-  prove run` command (`kmir prove view Module.Proof-Identifier`).
+* Prove that a given Rust program or function will terminate without panics or
+  undefined behaviour (`kmir prove-rs my-program.rs [--start-symbol my_function]`).
+  This command invokes `stable-mir-json` internally, and then performs an all-path
+  reachability proof that the program reaches normal termination  under all possible inputs.
+  Any statements that would panic or cause undefined behaviour will terminate execution
+  so this proves the successful execution. Pre-and post-conditions can be modelled
+  using assertions and conditional execution.
+* (Advanced use for K experts:) Prove a property about a Rust program, which is given
+  as a K "claim" and proven using an all-path reachability proof in K
+  (`kmir prove my-program-spec.k`);
+* Print or inspect the control flow graph of a program's proof constructed by the
+  `kmir prove` or `kmir prove-rs` commands (`kmir show module.proof_identifier`
+  and `kmir view module.proof_identifier`);
 
-Examples of proofs using KMIR, and how to derive them from a Rust program
-manually, are [provided in the `kmir-proofs`
+An example of proofs using KMIR, and how to construct them in Rust code,
+are [provided in the `kmir-proofs`
 directory](https://github.com/model-checking/verify-rust-std/tree/main/kmir-proofs).
 
 The `kmir` tool is under active development at the time of writing.
-Constructing a K claim from a given Rust program is currently a manual process
-but will be automated in a future version. Likewise, at the time of writing, the
-`kmir` tool does not automatically extract Stable MIR from a Rust program, the
-Stable MIR must be extracted by invoking `stable-mir-json` manually.
-
+Future development will include using source code annotations instead of explicit
+test functions to better integrate with Rust code bases, using a suitable annotation
+language to express pre- and post-conditions.
 
 ## Background Reading
 
