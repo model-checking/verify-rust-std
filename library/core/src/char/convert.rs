@@ -25,12 +25,9 @@ pub(super) const fn from_u32(i: u32) -> Option<char> {
 /// Converts a `u32` to a `char`, ignoring validity. See [`char::from_u32_unchecked`].
 #[inline]
 #[must_use]
-<<<<<<< HEAD
+#[cfg_attr(not(bootstrap), allow(unnecessary_transmutes))]
 #[requires(char_try_from_u32(i).is_ok())]
 #[ensures(|result| *result as u32 == i)]
-=======
-#[cfg_attr(not(bootstrap), allow(unnecessary_transmutes))]
->>>>>>> subtree/library
 pub(super) const unsafe fn from_u32_unchecked(i: u32) -> char {
     // SAFETY: the caller must guarantee that `i` is a valid char value.
     unsafe {
