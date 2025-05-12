@@ -2614,7 +2614,7 @@ mod verify {
     gen_const_byte_arith_harness_for_dyn!(byte_sub, check_const_byte_sub_dyn);
     gen_const_byte_arith_harness_for_dyn!(byte_offset, check_const_byte_offset_dyn);
 
-    // Proof for contact of byte_offset_from to verify unit type
+    // Proof for contract of byte_offset_from to verify unit type
     #[kani::proof_for_contract(<*const ()>::byte_offset_from)]
     pub fn check_const_byte_offset_from_unit() {
         let val: () = ();
