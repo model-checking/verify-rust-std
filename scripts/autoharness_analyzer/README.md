@@ -6,7 +6,7 @@ cargo run metadata/ scanner_results/
 The metadata/ folder contains the kani-metadata.json files produced by running:
 
 ```
-kani autoharness --std ./library -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts --only-codegen--no-assert-contracts -j --output-format=terse -Z unstable-options -Z autoharness --cbmc-args --object-bits 12
+kani autoharness --std ./library -Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts --only-codegen --no-assert-contracts -j --output-format=terse -Z unstable-options -Z autoharness --cbmc-args --object-bits 12
 ```
 
 on the standard library. The scanner_results/ directory contains the CSV files that the [scanner tool in Kani](https://github.com/model-checking/kani/tree/main/tools/scanner) produces.
