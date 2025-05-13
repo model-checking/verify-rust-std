@@ -3065,6 +3065,8 @@ mod verify {
             for (i, &item) in s.as_bytes().iter().enumerate() {
                 if item >= b'a' && item <= b'z' {
                     assert_eq!(s_uppercase[i], item - 32);
+                } else {
+                    assert_eq!(s_uppercase[i], item);
                 }
             }
         }
@@ -3086,6 +3088,8 @@ mod verify {
             for (i, &item) in s.as_bytes().iter().enumerate() {
                 if item >= b'A' && item <= b'Z' {
                     assert_eq!(s_lowercase[i], item + 32);
+                } else {
+                    assert_eq!(s_lowercase[i], item);
                 }
             }
         }
