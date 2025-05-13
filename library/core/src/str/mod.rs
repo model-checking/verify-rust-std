@@ -15,13 +15,11 @@ mod validations;
 
 use self::pattern::{DoubleEndedSearcher, Pattern, ReverseSearcher, Searcher};
 use crate::char::{self, EscapeDebugExtArgs};
+#[cfg(kani)]
+use crate::kani;
 use crate::ops::Range;
 use crate::slice::{self, SliceIndex};
 use crate::{ascii, mem};
-
-use safety::{ensures, requires};
-#[cfg(kani)]
-use crate::kani;
 
 pub mod pattern;
 
@@ -3094,5 +3092,4 @@ mod verify {
             }
         }
     }
-
 }
