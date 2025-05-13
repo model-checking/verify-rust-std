@@ -19,6 +19,10 @@ use crate::ops::Range;
 use crate::slice::{self, SliceIndex};
 use crate::{ascii, mem};
 
+use safety::{ensures, requires};
+#[cfg(kani)]
+use crate::kani;
+
 pub mod pattern;
 
 mod lossy;
@@ -3038,3 +3042,53 @@ impl_fn_for_zst! {
 // This is required to make `impl From<&str> for Box<dyn Error>` and `impl<E> From<E> for Box<dyn Error>` not overlap.
 #[stable(feature = "error_in_core_neg_impl", since = "1.65.0")]
 impl !crate::error::Error for &str {}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_make_ascii_uppercase() {
+        const MAX_SIZE: usize = 32;
+        let in_bytes: [u8; MAX_SIZE] = kani::any();
+
+        if let Ok(s) = from_utf8(&in_bytes) {
+            let mut in_bytes_copy = in_bytes;
+            //SAFETY: we know that in_bytes_copy is valid UTF-8
+            let mut s_copy = unsafe { from_utf8_unchecked_mut(&mut in_bytes_copy) };
+            s_copy.make_ascii_uppercase();
+            let s_uppercase = s_copy.as_bytes();
+
+            for (i, &item) in s.as_bytes().iter().enumerate() {
+                if item >= b'a' && item <= b'z' {
+                    assert_eq!(s_uppercase[i], item - 32);
+                }
+            }
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_make_ascii_lowercase() {
+        const MAX_SIZE: usize = 32;
+        let in_bytes: [u8; MAX_SIZE] = kani::any();
+
+        if let Ok(s) = from_utf8(&in_bytes) {
+            let mut in_bytes_copy = in_bytes;
+            //SAFETY: we know that in_bytes_copy is valid UTF-8
+            let mut s_copy = unsafe { from_utf8_unchecked_mut(&mut in_bytes_copy) };
+            s_copy.make_ascii_lowercase();
+            let s_lowercase = s_copy.as_bytes();
+
+            for (i, &item) in s.as_bytes().iter().enumerate() {
+                if item >= b'A' && item <= b'Z' {
+                    assert_eq!(s_lowercase[i], item + 32);
+                }
+            }
+        }
+    }
+
+}
