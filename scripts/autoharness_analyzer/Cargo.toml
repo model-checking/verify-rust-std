@@ -1,0 +1,13 @@
+[package]
+name = "autoharness_analyzer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.97"
+clap = {version = "4.5.37", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+strum = "0.27.1"
+strum_macros = "0.27.1"
+to_markdown_table = "0.1.5"
