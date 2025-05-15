@@ -10,6 +10,9 @@ use std::path::Path;
 // Parse the CSV files that the Kani `scanner` tool outputs
 // and store which functions are safe and unsafe
 
+// Number of columns in {crate_name}_scan_functions.csv.
+const SCANNER_COLS: usize = 6;
+
 /// Single row of data in {crate_name}_scan_functions.csv
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -58,9 +61,10 @@ fn parse_row(
     fields: Vec<&str>,
     line_number: usize,
 ) -> Result<()> {
-    if fields.len() != 5 {
+    if fields.len() != SCANNER_COLS {
         bail!(
-            "Expected 5 fields, got {} in line {}. Fields: {:?}",
+            "Expected {} fields, got {} in line {}. Fields: {:?}",
+            SCANNER_COLS,
             fields.len(),
             line_number,
             fields
