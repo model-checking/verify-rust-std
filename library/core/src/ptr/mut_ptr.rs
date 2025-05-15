@@ -2583,6 +2583,7 @@ mod verify {
             }
 
             // Below function is for large arrays
+            #[kani::proof_for_contract(<*mut $type>::offset_from)]
             pub fn $proof_name2() {
                 const gen_size: usize = mem::size_of::<$type>();
                 let mut generator1 = PointerGenerator::<{ gen_size * ARRAY_LEN }>::new();
