@@ -340,7 +340,6 @@ main() {
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-std.json
         popd
-        rm kani-list.json
     elif [[ "$run_command" == "autoharness-analyzer" ]]; then
         echo "Running Kani autoharness codegen command..."
         "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
