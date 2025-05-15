@@ -30,9 +30,8 @@ fn chosen_overview_table(
                 safe_count += 1;
             }
         } else {
-            // TODO: Note that we don't include these functions in the totals, so the metrics are still right,
-            // and thankfully it seems to affect a pretty small slice of the whole.
-            // (The todo is for Carolyn to investigate these mistakes).
+            // See https://github.com/model-checking/verify-rust-std/pull/350#discussion_r2091698600
+            // for examples of when such discrepancies appear
             println!(
                 "[WARNING] Function {} is in in autoharness metadata but absent in scanner tool output",
                 fn_name
