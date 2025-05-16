@@ -81,6 +81,7 @@ jobs:
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
+            --include-pattern alloc::__default_lib_allocator:: \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
