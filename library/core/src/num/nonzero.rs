@@ -452,6 +452,12 @@ where
     #[unstable(feature = "nonzero_from_mut", issue = "106290")]
     #[must_use]
     #[inline]
+    #[requires({
+        let size = core::mem::size_of::<T>();
+        let ptr = n as *const T as *const u8;
+        let slice = unsafe { core::slice::from_raw_parts(ptr, size) };
+        !slice.iter().all(|&byte| byte == 0)
+    })]
     pub unsafe fn from_mut_unchecked(n: &mut T) -> &mut Self {
         match Self::from_mut(n) {
             Some(n) => n,
@@ -2414,6 +2420,32 @@ mod verify {
     nonzero_check!(u64, core::num::NonZeroU64, nonzero_check_new_unchecked_for_u64);
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
+
+    macro_rules! nonzero_check_from_mut_unchecked {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(<T>::from_mut_unchecked)]
+            pub fn $harness_name() {
+                let mut x: $t = kani::any();
+                unsafe {
+                    <$nonzero_type>::from_mut_unchecked(&mut x);
+                }
+            }
+        };
+    }
+
+    // Generate harnesses for multiple types
+    nonzero_check_from_mut_unchecked!(i8, core::num::NonZeroI8, nonzero_check_from_mut_unchecked_i8);
+    nonzero_check_from_mut_unchecked!(i16, core::num::NonZeroI16, nonzero_check_from_mut_unchecked_i16);
+    nonzero_check_from_mut_unchecked!(i32, core::num::NonZeroI32, nonzero_check_from_mut_unchecked_i32);
+    nonzero_check_from_mut_unchecked!(i64, core::num::NonZeroI64, nonzero_check_from_mut_unchecked_i64);
+    nonzero_check_from_mut_unchecked!(i128, core::num::NonZeroI128, nonzero_check_from_mut_unchecked_i128);
+    nonzero_check_from_mut_unchecked!(isize, core::num::NonZeroIsize, nonzero_check_from_mut_unchecked_isize);
+    nonzero_check_from_mut_unchecked!(u8, core::num::NonZeroU8, nonzero_check_from_mut_unchecked_u8);
+    nonzero_check_from_mut_unchecked!(u16, core::num::NonZeroU16, nonzero_check_from_mut_unchecked_u16);
+    nonzero_check_from_mut_unchecked!(u32, core::num::NonZeroU32, nonzero_check_from_mut_unchecked_u32);
+    nonzero_check_from_mut_unchecked!(u64, core::num::NonZeroU64, nonzero_check_from_mut_unchecked_u64);
+    nonzero_check_from_mut_unchecked!(u128, core::num::NonZeroU128, nonzero_check_from_mut_unchecked_u128);
+    nonzero_check_from_mut_unchecked!(usize, core::num::NonZeroUsize, nonzero_check_from_mut_unchecked_usize);
 
     macro_rules! nonzero_check_cmp {
         ($nonzero_type:ty, $nonzero_check_cmp_for:ident) => {
