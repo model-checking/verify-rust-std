@@ -360,6 +360,8 @@ main() {
         echo "Running autoharness-analyzer command..."
         git clone --depth 1 https://github.com/carolynzech/autoharness_analyzer
         cd autoharness_analyzer
+        # TODO: remove with the autoharness analyzer PR
+        perl -p -i -e 's/\Qif fields.len() != 5\E/if fields.len() != 6/' src/parse_scanner_output.rs
         cargo run -- --per-crate \
           ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
           /tmp/std_lib_analysis/results/
