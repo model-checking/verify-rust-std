@@ -1,7 +1,11 @@
+use safety::requires;
+
 use super::{
     FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce, TrustedStep,
 };
 use crate::ascii::Char as AsciiChar;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem;
 use crate::net::{Ipv4Addr, Ipv6Addr};
 use crate::num::NonZero;
@@ -183,12 +187,14 @@ pub trait Step: Clone + PartialOrd + Sized {
 // than the signed::MAX value. Therefore `as` casting to the signed type would be incorrect.
 macro_rules! step_signed_methods {
     ($unsigned: ty) => {
+        #[requires(start.checked_add_unsigned(n as $unsigned).is_some())]
         #[inline]
         unsafe fn forward_unchecked(start: Self, n: usize) -> Self {
             // SAFETY: the caller has to guarantee that `start + n` doesn't overflow.
             unsafe { start.checked_add_unsigned(n as $unsigned).unwrap_unchecked() }
         }
 
+        #[requires(start.checked_sub_unsigned(n as $unsigned).is_some())]
         #[inline]
         unsafe fn backward_unchecked(start: Self, n: usize) -> Self {
             // SAFETY: the caller has to guarantee that `start - n` doesn't overflow.
@@ -199,12 +205,14 @@ macro_rules! step_signed_methods {
 
 macro_rules! step_unsigned_methods {
     () => {
+        #[requires(start.checked_add(n as Self).is_some())]
         #[inline]
         unsafe fn forward_unchecked(start: Self, n: usize) -> Self {
             // SAFETY: the caller has to guarantee that `start + n` doesn't overflow.
             unsafe { start.unchecked_add(n as Self) }
         }
 
+        #[requires(start >= (n as Self))]
         #[inline]
         unsafe fn backward_unchecked(start: Self, n: usize) -> Self {
             // SAFETY: the caller has to guarantee that `start - n` doesn't overflow.
@@ -494,6 +502,13 @@ impl Step for char {
         Some(unsafe { char::from_u32_unchecked(res) })
     }
 
+    #[requires((start as u32).checked_add(count as u32).is_some())]
+    #[requires({
+        let dist = (start as u32).checked_add(count as u32);
+        dist.is_some() &&
+            ((start as u32) >= 0xD800 || dist.unwrap() < 0xD800 ||
+             dist.unwrap().checked_add(0x800).is_some())
+    })]
     #[inline]
     unsafe fn forward_unchecked(start: char, count: usize) -> char {
         let start = start as u32;
@@ -510,6 +525,12 @@ impl Step for char {
         unsafe { char::from_u32_unchecked(res) }
     }
 
+    #[requires({
+        let dist = (start as u32).checked_sub(count as u32);
+        dist.is_some() &&
+            ((start as u32) < 0xE000 || dist.unwrap() >= 0xE000 ||
+             dist.unwrap().checked_sub(0x800).is_some())
+    })]
     #[inline]
     unsafe fn backward_unchecked(start: char, count: usize) -> char {
         let start = start as u32;
@@ -548,6 +569,7 @@ impl Step for AsciiChar {
         Some(unsafe { AsciiChar::from_u8_unchecked(end) })
     }
 
+    #[requires((start.to_u8() as u32).checked_add(count as u32).is_some())]
     #[inline]
     unsafe fn forward_unchecked(start: AsciiChar, count: usize) -> AsciiChar {
         // SAFETY: Caller asserts that result is a valid ASCII character,
@@ -558,6 +580,7 @@ impl Step for AsciiChar {
         unsafe { AsciiChar::from_u8_unchecked(end) }
     }
 
+    #[requires((start.to_u8() as u32).checked_sub(count as u32).is_some())]
     #[inline]
     unsafe fn backward_unchecked(start: AsciiChar, count: usize) -> AsciiChar {
         // SAFETY: Caller asserts that result is a valid ASCII character,
@@ -586,6 +609,7 @@ impl Step for Ipv4Addr {
         u32::backward_checked(start.to_bits(), count).map(Ipv4Addr::from_bits)
     }
 
+    #[requires(start.to_bits().checked_add(count as u32).is_some())]
     #[inline]
     unsafe fn forward_unchecked(start: Ipv4Addr, count: usize) -> Ipv4Addr {
         // SAFETY: Since u32 and Ipv4Addr are losslessly convertible,
@@ -593,6 +617,7 @@ impl Step for Ipv4Addr {
         Ipv4Addr::from_bits(unsafe { u32::forward_unchecked(start.to_bits(), count) })
     }
 
+    #[requires(start.to_bits().checked_sub(count as u32).is_some())]
     #[inline]
     unsafe fn backward_unchecked(start: Ipv4Addr, count: usize) -> Ipv4Addr {
         // SAFETY: Since u32 and Ipv4Addr are losslessly convertible,

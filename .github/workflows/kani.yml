@@ -81,6 +81,8 @@ jobs:
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
+            --include-pattern "iter::range::Step>::backward_unchecked" \
+            --include-pattern "iter::range::Step>::forward_unchecked" \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
