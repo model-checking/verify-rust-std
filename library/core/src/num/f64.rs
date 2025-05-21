@@ -14,13 +14,9 @@
 use safety::requires;
 
 use crate::convert::FloatToInt;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::num::FpCategory;
-=======
 use crate::num::{FpCategory, libm};
->>>>>>> subtree/library
 use crate::panic::const_assert;
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;

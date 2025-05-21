@@ -1301,14 +1301,10 @@ impl<T: ?Sized> NonNull<T> {
     /// [`ptr::replace`]: crate::ptr::replace()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-<<<<<<< HEAD
     #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self is aligned, initialized, and valid for read
     #[requires(ub_checks::can_write(self.as_ptr()))] // Ensure self is valid for write
-    #[rustc_const_stable(feature = "const_inherent_ptr_replace", since = "CURRENT_RUSTC_VERSION")]
-=======
     #[rustc_const_stable(feature = "const_inherent_ptr_replace", since = "1.88.0")]
->>>>>>> subtree/library
     pub const unsafe fn replace(self, src: T) -> T
     where
         T: Sized,
