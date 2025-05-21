@@ -16,8 +16,12 @@ bench = false
 
 [dependencies]
 core = { path = "../core", public = true }
+<<<<<<< HEAD
 safety = { path = "../contracts/safety" }
 compiler_builtins = { version = "=0.1.156", features = ['rustc-dep-of-std'] }
+=======
+compiler_builtins = { version = "=0.1.159", features = ['rustc-dep-of-std'] }
+>>>>>>> subtree/library
 
 [features]
 compiler-builtins-mem = ['compiler_builtins/mem']
