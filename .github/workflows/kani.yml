@@ -53,7 +53,7 @@ jobs:
       - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
    
-  kani-autoharness:
+  kani_autoharness:
     name: Verify std library using autoharness
     runs-on: ${{ matrix.os }}
     strategy:
@@ -81,6 +81,7 @@ jobs:
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
+            --include-pattern alloc::__default_lib_allocator:: \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
@@ -122,9 +123,123 @@ jobs:
             --exclude-pattern time::Duration::from_secs_f \
             --include-pattern unicode::unicode_data::conversions::to_ \
             --exclude-pattern ::precondition_check \
-            --harness-timeout 5m \
+            --harness-timeout 10m \
             --default-unwind 1000 \
-            --jobs=3 --output-format=terse
+            --jobs=3 --output-format=terse | tee autoharness-verification.log
+          gzip autoharness-verification.log
+
+      - name: Upload Autoharness Verification Log
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-autoharness-verification.log.gz
+          path: autoharness-verification.log.gz
+          if-no-files-found: error
+          # Aggressively short retention: we don't really need these
+          retention-days: 3
+
+  run_kani_metrics:
+    name: Kani Metrics
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
+      fail-fast: true
+
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # Step 2: Run list on the std library
+      - name: Run Kani Metrics
+        run: |
+          scripts/run-kani.sh --run metrics --with-autoharness
+          pushd /tmp/std_lib_analysis
+          tar czf results.tar.gz results
+          popd
+
+      - name: Upload kani-list.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-kani-list.json
+          path: kani-list.json
+          if-no-files-found: error
+          # Aggressively short retention: we don't really need these
+          retention-days: 3
+
+      - name: Upload scanner results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-results.tar.gz
+          path: /tmp/std_lib_analysis/results.tar.gz
+          if-no-files-found: error
+          # Aggressively short retention: we don't really need these
+          retention-days: 3
+
+  run-log-analysis:
+    name: Build JSON from logs
+    needs: [run_kani_metrics, kani_autoharness]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
+      fail-fast: false
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Download log
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-autoharness-verification.log.gz
+
+      - name: Download kani-list.json
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-kani-list.json
+
+      - name: Download scanner results
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-results.tar.gz
+
+      - name: Run log parser
+        run: |
+          gunzip autoharness-verification.log.gz
+          tar xzf results.tar.gz
+          python3 scripts/kani-std-analysis/log_parser.py \
+            --kani-list-file kani-list.json \
+            --analysis-results-dir results/ \
+            autoharness-verification.log \
+            -o results.json
+
+      - name: Upload JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-results.json
+          path: results.json
+          if-no-files-found: error
 
   run-kani-list:
     name: Kani List
