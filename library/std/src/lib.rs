@@ -288,6 +288,7 @@
 #![feature(cfi_encoding)]
 #![feature(char_max_len)]
 #![feature(concat_idents)]
+#![feature(core_float_math)]
 #![feature(decl_macro)]
 #![feature(deprecated_suggestion)]
 #![feature(doc_cfg)]
@@ -302,8 +303,9 @@
 #![feature(formatting_options)]
 #![feature(if_let_guard)]
 #![feature(intra_doc_pointers)]
+#![feature(iter_advance_by)]
+#![feature(iter_next_chunk)]
 #![feature(lang_items)]
-#![feature(let_chains)]
 #![feature(link_cfg)]
 #![feature(linkage)]
 #![feature(macro_metavar_expr_concat)]
@@ -322,7 +324,9 @@
 #![feature(strict_provenance_lints)]
 #![feature(thread_local)]
 #![feature(try_blocks)]
+#![feature(try_trait_v2)]
 #![feature(type_alias_impl_trait)]
+#![feature(unsigned_signed_diff)]
 // tidy-alphabetical-end
 //
 // Library features (core):
@@ -330,7 +334,6 @@
 #![feature(array_chunks)]
 #![feature(bstr)]
 #![feature(bstr_internals)]
-#![feature(c_str_module)]
 #![feature(char_internals)]
 #![feature(clone_to_uninit)]
 #![feature(core_intrinsics)]
@@ -345,6 +348,7 @@
 #![feature(float_gamma)]
 #![feature(float_minimum_maximum)]
 #![feature(fmt_internals)]
+#![feature(generic_atomic)]
 #![feature(hasher_prefixfree_extras)]
 #![feature(hashmap_internals)]
 #![feature(hint_must_use)]
@@ -705,8 +709,14 @@ pub use core::cfg_match;
     reason = "`concat_bytes` is not stable enough for use and is subject to change"
 )]
 pub use core::concat_bytes;
+#[stable(feature = "matches_macro", since = "1.42.0")]
+#[allow(deprecated, deprecated_in_future)]
+pub use core::matches;
 #[stable(feature = "core_primitive", since = "1.43.0")]
 pub use core::primitive;
+#[stable(feature = "todo_macro", since = "1.40.0")]
+#[allow(deprecated, deprecated_in_future)]
+pub use core::todo;
 // Re-export built-in macros defined through core.
 #[stable(feature = "builtin_macro_prelude", since = "1.38.0")]
 #[allow(deprecated)]
@@ -719,8 +729,8 @@ pub use core::{
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::{
-    assert_eq, assert_ne, debug_assert, debug_assert_eq, debug_assert_ne, matches, todo, r#try,
-    unimplemented, unreachable, write, writeln,
+    assert_eq, assert_ne, debug_assert, debug_assert_eq, debug_assert_ne, r#try, unimplemented,
+    unreachable, write, writeln,
 };
 
 // Include a number of private modules that exist solely to provide
