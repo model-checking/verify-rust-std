@@ -65,10 +65,10 @@ use safety::{ensures, requires};
 
 #[cfg(kani)]
 use crate::kani;
-#[cfg(kani)]
-use crate::ub_checks;
 use crate::marker::{DiscriminantKind, Tuple};
 use crate::ptr;
+#[cfg(kani)]
+use crate::ub_checks;
 
 pub mod fallback;
 pub mod mir;
