@@ -3071,6 +3071,9 @@ mod verify {
     use super::*;
     use crate::kani;
 
+    //for each char in input str, if char is lowercase, then
+    //that char in output str is corresponding uppercase char,
+    //and all other chars in the output are the same as input
     #[kani::proof]
     #[kani::unwind(33)]
     fn check_make_ascii_uppercase() {
@@ -3094,6 +3097,9 @@ mod verify {
         }
     }
 
+    //for each char in input str, if char is uppercase, then
+    //that char in output str is corresponding lowercase char,
+    //and all other chars in the output are the same as input
     #[kani::proof]
     #[kani::unwind(33)]
     fn check_make_ascii_lowercase() {
