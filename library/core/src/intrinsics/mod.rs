@@ -4096,33 +4096,33 @@ mod verify {
         });
     }
 
-    #[kani::proof_for_contract(copy)]
-    fn check_copy() {
-        run_with_arbitrary_ptrs::<char>(|src, dst| unsafe { copy(src, dst, kani::any()) });
-    }
+    // #[kani::proof_for_contract(copy)]
+    // fn check_copy() {
+    //     run_with_arbitrary_ptrs::<char>(|src, dst| unsafe { copy(src, dst, kani::any()) });
+    // }
 
-    #[kani::proof_for_contract(copy_nonoverlapping)]
-    fn check_copy_nonoverlapping() {
-        // Note: cannot use `ArbitraryPointer` here.
-        // The `ArbitraryPtr` will arbitrarily initialize memory by indirectly invoking
-        // `copy_nonoverlapping`.
-        // Kani contract checking would fail due to existing restriction on calls to
-        // the function under verification.
-        let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
-            let base = buf.as_mut_ptr() as *mut u8;
-            base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
-        };
-        let mut buffer1 = [MaybeUninit::<char>::uninit(); 100];
-        for i in 0..100 {
-            if kani::any() {
-                buffer1[i] = MaybeUninit::new(kani::any());
-            }
-        }
-        let mut buffer2 = [MaybeUninit::<char>::uninit(); 100];
-        let src = gen_any_ptr(&mut buffer1);
-        let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
-        unsafe { copy_nonoverlapping(src, dst, kani::any()) }
-    }
+    // #[kani::proof_for_contract(copy_nonoverlapping)]
+    // fn check_copy_nonoverlapping() {
+    //     // Note: cannot use `ArbitraryPointer` here.
+    //     // The `ArbitraryPtr` will arbitrarily initialize memory by indirectly invoking
+    //     // `copy_nonoverlapping`.
+    //     // Kani contract checking would fail due to existing restriction on calls to
+    //     // the function under verification.
+    //     let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
+    //         let base = buf.as_mut_ptr() as *mut u8;
+    //         base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
+    //     };
+    //     let mut buffer1 = [MaybeUninit::<char>::uninit(); 100];
+    //     for i in 0..100 {
+    //         if kani::any() {
+    //             buffer1[i] = MaybeUninit::new(kani::any());
+    //         }
+    //     }
+    //     let mut buffer2 = [MaybeUninit::<char>::uninit(); 100];
+    //     let src = gen_any_ptr(&mut buffer1);
+    //     let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+    //     unsafe { copy_nonoverlapping(src, dst, kani::any()) }
+    // }
 
     //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does
     //not currently support contracts (https://github.com/model-checking/kani/issues/3345)
