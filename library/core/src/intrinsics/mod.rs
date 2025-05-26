@@ -3624,27 +3624,18 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(ptr: *const
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_allowed_through_unstable_modules = "import this function via `std::ptr` instead"]
 #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
-<<<<<<< HEAD
-#[inline(always)]
-#[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-#[rustc_diagnostic_item = "ptr_copy_nonoverlapping"]
-// Copy is "untyped".
-#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
-#[requires(!count.overflowing_mul(size_of::<T>()).1
-  && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
-  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
-  && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
-#[ensures(|_| { check_copy_untyped(src, dst, count)})]
-pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
-    #[rustc_intrinsic_const_stable_indirect]
-    #[rustc_nounwind]
-    #[rustc_intrinsic]
-    const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize);
-=======
 #[rustc_nounwind]
 #[rustc_intrinsic]
+// Copy is "untyped".
+// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
+// function used to have a dummy body, but no longer has)
+// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+// #[requires(!count.overflowing_mul(size_of::<T>()).1
+//   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+//   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
+//   && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
+// #[ensures(|_| { check_copy_untyped(src, dst, count)})]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize);
->>>>>>> subtree/library
 
 /// This is an accidentally-stable alias to [`ptr::copy`]; use that instead.
 // Note (intentionally not in the doc comment): `ptr::copy` adds some extra
@@ -3653,25 +3644,16 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_allowed_through_unstable_modules = "import this function via `std::ptr` instead"]
 #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
-<<<<<<< HEAD
-#[inline(always)]
-#[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-#[rustc_diagnostic_item = "ptr_copy"]
-#[requires(!count.overflowing_mul(size_of::<T>()).1
-  && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
-  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-#[ensures(|_| { check_copy_untyped(src, dst, count) })]
-#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
-pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
-    #[rustc_intrinsic_const_stable_indirect]
-    #[rustc_nounwind]
-    #[rustc_intrinsic]
-    const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize);
-=======
 #[rustc_nounwind]
 #[rustc_intrinsic]
+// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
+// function used to have a dummy body, but no longer has)
+// #[requires(!count.overflowing_mul(size_of::<T>()).1
+//   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+//   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+// #[ensures(|_| { check_copy_untyped(src, dst, count) })]
+// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize);
->>>>>>> subtree/library
 
 /// This is an accidentally-stable alias to [`ptr::write_bytes`]; use that instead.
 // Note (intentionally not in the doc comment): `ptr::write_bytes` adds some extra
@@ -3679,43 +3661,18 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize);
 // that wants to avoid those debug assertions, directly call this intrinsic instead.
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_allowed_through_unstable_modules = "import this function via `std::ptr` instead"]
-<<<<<<< HEAD
-#[rustc_const_stable(feature = "const_ptr_write", since = "1.83.0")]
-#[inline(always)]
-#[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-#[rustc_diagnostic_item = "ptr_write_bytes"]
-#[requires(!count.overflowing_mul(size_of::<T>()).1
-  && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-#[requires(ub_checks::maybe_is_aligned_and_not_null(dst as *const (), align_of::<T>(), T::IS_ZST || count == 0))]
-#[ensures(|_|
-    ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(dst as *const u8, count * size_of::<T>())))]
-#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
-pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
-    #[rustc_intrinsic_const_stable_indirect]
-    #[rustc_nounwind]
-    #[rustc_intrinsic]
-    const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize);
-
-    // SAFETY: the safety contract for `write_bytes` must be upheld by the caller.
-    unsafe {
-        ub_checks::assert_unsafe_precondition!(
-            check_language_ub,
-            "ptr::write_bytes requires that the destination pointer is aligned and non-null",
-            (
-                addr: *const () = dst as *const (),
-                align: usize = align_of::<T>(),
-                zero_size: bool = T::IS_ZST || count == 0,
-            ) => ub_checks::maybe_is_aligned_and_not_null(addr, align, zero_size)
-        );
-        write_bytes(dst, val, count)
-    }
-}
-=======
 #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
+// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
+// function used to have a dummy body, but no longer has)
+// #[requires(!count.overflowing_mul(size_of::<T>()).1
+//   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+// #[requires(ub_checks::maybe_is_aligned_and_not_null(dst as *const (), align_of::<T>(), T::IS_ZST || count == 0))]
+// #[ensures(|_|
+//     ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(dst as *const u8, count * size_of::<T>())))]
+// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize);
->>>>>>> subtree/library
 
 /// Returns the minimum (IEEE 754-2008 minNum) of two `f16` values.
 ///
