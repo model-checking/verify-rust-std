@@ -12,7 +12,7 @@
 
 ## Goal
 
-The goal of this challenge is to verify Arc and its related Weak implementation. Arc is the library-provided building blocks that enable safe multiple ownership of data through reference counting for multi-threaded code, as opposed to the usual ownership types used by Rust. The Rc implementation is the subject of a related challenge.
+The goal of this challenge is to verify Arc and its related Weak implementation. Arc is the library-provided building block that enables safe multiple ownership of data through reference counting for multi-threaded code, as opposed to the usual ownership types used by Rust. The Rc implementation is the subject of a related challenge.
 
 ## Motivation
 
@@ -28,7 +28,7 @@ A key part of the Arc implementation is the Weak struct, which allows keeping a 
 
 Some properties needed for safety are beyond the ability of the Rust type system to express. This is true for all challenges, but we point out some of the properties that are relevant for this challenge.
 
-* It may be possible to use something analogous to the [can_dereference API](https://model-checking.github.io/kani/crates/doc/kani/mem/fn.can_dereference.html), which we introduce, to track that a pointer indeed originates from `into_raw`.
+* It may be possible to use a new construct analogous to the [can_dereference API](https://model-checking.github.io/kani/crates/doc/kani/mem/fn.can_dereference.html). Our new construct would track that a pointer indeed originates from `into_raw`.
 
 * It is unclear how to show that the reference count is greater than 0 when it is being decremented; the proposed `linked_list` [challenge](0005-linked-list.md) solution does not appear to check list length before performing operations either.
 
