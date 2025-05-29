@@ -194,6 +194,20 @@ jobs:
         sed -i "s/commit = .*/commit = \"${KANI_COMMIT_HASH}\"/" tool_config/kani-version.toml
         git -c user.name=gitbot -c user.email=git@bot \
           commit -m "Update Kani version to ${KANI_COMMIT_HASH}" tool_config/kani-version.toml
+        
+        # Try to automatically patch the VeriFast proofs
+        pushd verifast-proofs
+        if bash ./patch-verifast-proofs.sh; then
+          if ! git diff --quiet; then
+            git -c user.name=gitbot -c user.email=git@bot \
+              commit -a -m "Update VeriFast proofs"
+          else
+            # The original files have not changed; no updates to the VeriFast proofs are necessary.
+          fi
+        else
+          # Patching the VeriFast proofs failed; requires manual intervention.
+        fi
+        popd
 
     - name: Create Pull Request without conflicts
       if: ${{ env.MERGE_CONFLICTS == 'no' && env.MERGE_PR_EXISTS == 'no' }}
