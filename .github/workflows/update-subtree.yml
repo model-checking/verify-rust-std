@@ -200,7 +200,7 @@ jobs:
         if bash ./patch-verifast-proofs.sh; then
           if ! git diff --quiet; then
             git -c user.name=gitbot -c user.email=git@bot \
-              commit -a -m "Update VeriFast proofs"
+              commit . -m "Update VeriFast proofs"
           else
             # The original files have not changed; no updates to the VeriFast proofs are necessary.
           fi
