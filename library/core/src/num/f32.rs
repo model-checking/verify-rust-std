@@ -18,13 +18,9 @@ use crate::convert::FloatToInt;
 use crate::kani;
 use crate::num::FpCategory;
 use crate::panic::const_assert;
-<<<<<<< HEAD
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;
-use crate::{cfg_match, intrinsics, mem};
-=======
 use crate::{cfg_select, intrinsics, mem};
->>>>>>> subtree/library
 
 /// The radix or base of the internal representation of `f32`.
 /// Use [`f32::RADIX`] instead.
