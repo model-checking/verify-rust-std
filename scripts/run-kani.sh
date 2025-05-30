@@ -340,7 +340,6 @@ main() {
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-std.json
         popd
-        rm kani-list.json
     elif [[ "$run_command" == "autoharness-analyzer" ]]; then
         echo "Running Kani autoharness codegen command..."
         "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
@@ -358,16 +357,14 @@ main() {
         ./std-analysis.sh $build_dir
         popd
         echo "Running autoharness-analyzer command..."
-        git clone --depth 1 https://github.com/carolynzech/autoharness_analyzer
-        cd autoharness_analyzer
-        # TODO: remove with the autoharness analyzer PR
-        perl -p -i -e 's/\Qif fields.len() != 5\E/if fields.len() != 6/' src/parse_scanner_output.rs
+        pushd scripts/autoharness_analyzer
         cargo run -- --per-crate \
-          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          ../../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
           /tmp/std_lib_analysis/results/
         cargo run -- --per-crate --unsafe-fns-only \
-          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
+          ../../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
           /tmp/std_lib_analysis/results/
+        popd
     fi
 }
 

@@ -27,6 +27,12 @@ impl Command {
                 "nul byte found in provided data",
             ));
         }
+        if self.get_chroot().is_some() {
+            return Err(io::const_error!(
+                ErrorKind::Unsupported,
+                "chroot not supported by vxworks",
+            ));
+        }
         let (ours, theirs) = self.setup_io(default, needs_stdin)?;
         let mut p = Process { pid: 0, status: None };
 
@@ -110,11 +116,6 @@ impl Command {
                 Err(io::Error::last_os_error())
             }
         }
-    }
-
-    pub fn output(&mut self) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-        let (proc, pipes) = self.spawn(Stdio::MakePipe, false)?;
-        crate::sys_common::process::wait_with_output(proc, pipes)
     }
 
     pub fn exec(&mut self, default: Stdio) -> io::Error {
