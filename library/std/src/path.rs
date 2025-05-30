@@ -1529,11 +1529,13 @@ impl PathBuf {
         self.inner.truncate(end_file_stem.wrapping_sub(start));
 
         // add the new extension, if any
-        let new = extension;
+        let new = extension.as_encoded_bytes();
         if !new.is_empty() {
             self.inner.reserve_exact(new.len() + 1);
-            self.inner.push(OsStr::new("."));
-            self.inner.push(new);
+            self.inner.push(".");
+            // SAFETY: Since a UTF-8 string was just pushed, it is not possible
+            // for the buffer to end with a surrogate half.
+            unsafe { self.inner.extend_from_slice_unchecked(new) };
         }
 
         true
@@ -1597,7 +1599,7 @@ impl PathBuf {
             Some(f) => f.as_encoded_bytes(),
         };
 
-        let new = extension;
+        let new = extension.as_encoded_bytes();
         if !new.is_empty() {
             // truncate until right after the file name
             // this is necessary for trimming the trailing slash
@@ -1607,8 +1609,10 @@ impl PathBuf {
 
             // append the new extension
             self.inner.reserve_exact(new.len() + 1);
-            self.inner.push(OsStr::new("."));
-            self.inner.push(new);
+            self.inner.push(".");
+            // SAFETY: Since a UTF-8 string was just pushed, it is not possible
+            // for the buffer to end with a surrogate half.
+            unsafe { self.inner.extend_from_slice_unchecked(new) };
         }
 
         true
@@ -2769,7 +2773,8 @@ impl Path {
         };
 
         let mut new_path = PathBuf::with_capacity(new_capacity);
-        new_path.inner.extend_from_slice(slice_to_copy);
+        // SAFETY: The path is empty, so cannot have surrogate halves.
+        unsafe { new_path.inner.extend_from_slice_unchecked(slice_to_copy) };
         new_path.set_extension(extension);
         new_path
     }
@@ -3158,7 +3163,7 @@ impl Path {
     /// allocating.
     #[stable(feature = "into_boxed_path", since = "1.20.0")]
     #[must_use = "`self` will be dropped if the result is not used"]
-    pub fn into_path_buf(self: Box<Path>) -> PathBuf {
+    pub fn into_path_buf(self: Box<Self>) -> PathBuf {
         let rw = Box::into_raw(self) as *mut OsStr;
         let inner = unsafe { Box::from_raw(rw) };
         PathBuf { inner: OsString::from(inner) }

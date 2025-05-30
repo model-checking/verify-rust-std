@@ -27,6 +27,12 @@ impl Command {
                 "nul byte found in provided data",
             ));
         }
+        if self.get_chroot().is_some() {
+            return Err(io::const_error!(
+                ErrorKind::Unsupported,
+                "chroot not supported by vxworks",
+            ));
+        }
         let (ours, theirs) = self.setup_io(default, needs_stdin)?;
         let mut p = Process { pid: 0, status: None };
 
@@ -67,7 +73,7 @@ impl Command {
             let c_envp = envp
                 .as_ref()
                 .map(|c| c.as_ptr())
-                .unwrap_or_else(|| *sys::os::environ() as *const _);
+                .unwrap_or_else(|| *sys::env::environ() as *const _);
             let stack_size = crate::cmp::max(
                 crate::env::var_os("RUST_MIN_STACK")
                     .and_then(|s| s.to_str().and_then(|s| s.parse().ok()))
@@ -76,7 +82,7 @@ impl Command {
             );
 
             // ensure that access to the environment is synchronized
-            let _lock = sys::os::env_read_lock();
+            let _lock = sys::env::env_read_lock();
 
             let ret = libc::rtpSpawn(
                 self.get_program_cstr().as_ptr(),
@@ -110,11 +116,6 @@ impl Command {
                 Err(io::Error::last_os_error())
             }
         }
-    }
-
-    pub fn output(&mut self) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-        let (proc, pipes) = self.spawn(Stdio::MakePipe, false)?;
-        crate::sys_common::process::wait_with_output(proc, pipes)
     }
 
     pub fn exec(&mut self, default: Stdio) -> io::Error {

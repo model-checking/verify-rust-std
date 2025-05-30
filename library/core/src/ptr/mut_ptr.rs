@@ -52,6 +52,34 @@ impl<T: ?Sized> *mut T {
         self as _
     }
 
+    /// Try to cast to a pointer of another type by checking aligment.
+    ///
+    /// If the pointer is properly aligned to the target type, it will be
+    /// cast to the target type. Otherwise, `None` is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// #![feature(pointer_try_cast_aligned)]
+    ///
+    /// let aligned: *mut u8 = 0x1000 as _;
+    ///
+    /// // i32 has at most 4-byte alignment, so this will succeed
+    /// assert!(aligned.try_cast_aligned::<i32>().is_some());
+    ///
+    /// let unaligned: *mut u8 = 0x1001 as _;
+    ///
+    /// // i32 has at least 2-byte alignment, so this will fail
+    /// assert!(unaligned.try_cast_aligned::<i32>().is_none());
+    /// ```
+    #[unstable(feature = "pointer_try_cast_aligned", issue = "141221")]
+    #[must_use = "this returns the result of the operation, \
+                  without modifying the original"]
+    #[inline]
+    pub fn try_cast_aligned<U>(self) -> Option<*mut U> {
+        if self.is_aligned_to(align_of::<U>()) { Some(self.cast()) } else { None }
+    }
+
     /// Uses the address value in a new pointer of another type.
     ///
     /// This operation will ignore the address part of its `meta` operand and discard existing
@@ -513,8 +541,9 @@ impl<T: ?Sized> *mut T {
     ///
     /// This operation itself is always safe, but using the resulting pointer is not.
     ///
-    /// The resulting pointer "remembers" the [allocated object] that `self` points to; it must not
-    /// be used to read or write other allocated objects.
+    /// The resulting pointer "remembers" the [allocated object] that `self` points to
+    /// (this is called "[Provenance](ptr/index.html#provenance)").
+    /// The pointer must not be used to read or write other allocated objects.
     ///
     /// In other words, `let z = x.wrapping_offset((y as isize) - (x as isize))` does *not* make `z`
     /// the same as `y` even if we assume `T` has size `1` and there is no overflow: `z` is still
@@ -987,6 +1016,7 @@ impl<T: ?Sized> *mut T {
     ///
     /// // This would be incorrect, as the pointers are not correctly ordered:
     /// // ptr1.offset_from(ptr2)
+    /// ```
     #[stable(feature = "ptr_sub_ptr", since = "1.87.0")]
     #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "1.87.0")]
     #[inline]
@@ -995,7 +1025,7 @@ impl<T: ?Sized> *mut T {
     where
         T: Sized,
     {
-        // SAFETY: the caller must uphold the safety contract for `sub_ptr`.
+        // SAFETY: the caller must uphold the safety contract for `offset_from_unsigned`.
         unsafe { (self as *const T).offset_from_unsigned(origin) }
     }
 
@@ -1004,8 +1034,8 @@ impl<T: ?Sized> *mut T {
     /// units of **bytes**.
     ///
     /// This is purely a convenience for casting to a `u8` pointer and
-    /// using [`sub_ptr`][pointer::offset_from_unsigned] on it. See that method for
-    /// documentation and safety requirements.
+    /// using [`offset_from_unsigned`][pointer::offset_from_unsigned] on it.
+    /// See that method for documentation and safety requirements.
     ///
     /// For non-`Sized` pointees this operation considers only the data pointers,
     /// ignoring the metadata.
@@ -1014,7 +1044,7 @@ impl<T: ?Sized> *mut T {
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     pub const unsafe fn byte_offset_from_unsigned<U: ?Sized>(self, origin: *mut U) -> usize {
-        // SAFETY: the caller must uphold the safety contract for `byte_sub_ptr`.
+        // SAFETY: the caller must uphold the safety contract for `byte_offset_from_unsigned`.
         unsafe { (self as *const T).byte_offset_from_unsigned(origin) }
     }
 
@@ -1692,7 +1722,7 @@ impl<T: ?Sized> *mut T {
     ///
     /// [`ptr::replace`]: crate::ptr::replace()
     #[stable(feature = "pointer_methods", since = "1.26.0")]
-    #[rustc_const_stable(feature = "const_inherent_ptr_replace", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_inherent_ptr_replace", since = "1.88.0")]
     #[inline(always)]
     pub const unsafe fn replace(self, src: T) -> T
     where
@@ -2275,7 +2305,7 @@ impl<T: ?Sized> PartialOrd for *mut T {
     }
 }
 
-#[stable(feature = "raw_ptr_default", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "raw_ptr_default", since = "1.88.0")]
 impl<T: ?Sized + Thin> Default for *mut T {
     /// Returns the default value of [`null_mut()`][crate::ptr::null_mut].
     fn default() -> Self {

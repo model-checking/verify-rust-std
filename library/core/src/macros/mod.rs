@@ -1138,6 +1138,10 @@ pub(crate) mod builtin {
         issue = "29599",
         reason = "`concat_idents` is not stable enough for use and is subject to change"
     )]
+    #[deprecated(
+        since = "1.88.0",
+        note = "use `${concat(...)}` with the `macro_metavar_expr_concat` feature instead"
+    )]
     #[rustc_builtin_macro]
     #[macro_export]
     macro_rules! concat_idents {
@@ -1657,7 +1661,6 @@ pub(crate) mod builtin {
     #[unstable(
         feature = "test",
         issue = "50297",
-        soft,
         reason = "`bench` is a part of custom test frameworks which are unstable"
     )]
     #[allow_internal_unstable(test, rustc_attrs, coverage_attribute)]
@@ -1744,8 +1747,8 @@ pub(crate) mod builtin {
         /* compiler built-in */
     }
 
-    /// Provide a list of type aliases and other opaque-type-containing type definitions.
-    /// This list will be used in the body of the item it is applied to define opaque
+    /// Provide a list of type aliases and other opaque-type-containing type definitions
+    /// to an item with a body. This list will be used in that body to define opaque
     /// types' hidden types.
     /// Can only be applied to things that have bodies.
     #[unstable(

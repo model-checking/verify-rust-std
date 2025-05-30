@@ -277,7 +277,8 @@ impl<T: ?Sized> NonNull<T> {
     }
 
     /// Converts a reference to a `NonNull` pointer.
-    #[unstable(feature = "non_null_from_ref", issue = "130823")]
+    #[stable(feature = "non_null_from_ref", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "non_null_from_ref", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
     pub const fn from_ref(r: &T) -> Self {
         // SAFETY: A reference cannot be null.
@@ -285,7 +286,8 @@ impl<T: ?Sized> NonNull<T> {
     }
 
     /// Converts a mutable reference to a `NonNull` pointer.
-    #[unstable(feature = "non_null_from_ref", issue = "130823")]
+    #[stable(feature = "non_null_from_ref", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "non_null_from_ref", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
     pub const fn from_mut(r: &mut T) -> Self {
         // SAFETY: A mutable reference cannot be null.
@@ -516,6 +518,35 @@ impl<T: ?Sized> NonNull<T> {
     pub const fn cast<U>(self) -> NonNull<U> {
         // SAFETY: `self` is a `NonNull` pointer which is necessarily non-null
         unsafe { NonNull { pointer: self.as_ptr() as *mut U } }
+    }
+
+    /// Try to cast to a pointer of another type by checking aligment.
+    ///
+    /// If the pointer is properly aligned to the target type, it will be
+    /// cast to the target type. Otherwise, `None` is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// #![feature(pointer_try_cast_aligned)]
+    /// use std::ptr::NonNull;
+    ///
+    /// let aligned: NonNull<u8> = NonNull::new(0x1000 as _).unwrap();
+    ///
+    /// // i32 has at most 4-byte alignment, so this will succeed
+    /// assert!(aligned.try_cast_aligned::<i32>().is_some());
+    ///
+    /// let unaligned: NonNull<u8> = NonNull::new(0x1001 as _).unwrap();
+    ///
+    /// // i32 has at least 2-byte alignment, so this will fail
+    /// assert!(unaligned.try_cast_aligned::<i32>().is_none());
+    /// ```
+    #[unstable(feature = "pointer_try_cast_aligned", issue = "141221")]
+    #[must_use = "this returns the result of the operation, \
+                  without modifying the original"]
+    #[inline]
+    pub fn try_cast_aligned<U>(self) -> Option<NonNull<U>> {
+        if self.is_aligned_to(align_of::<U>()) { Some(self.cast()) } else { None }
     }
 
     /// Adds an offset to a pointer.
@@ -995,7 +1026,7 @@ impl<T: ?Sized> NonNull<T> {
     where
         T: Sized,
     {
-        // SAFETY: the caller must uphold the safety contract for `sub_ptr`.
+        // SAFETY: the caller must uphold the safety contract for `offset_from_unsigned`.
         unsafe { self.as_ptr().offset_from_unsigned(subtracted.as_ptr()) }
     }
 
@@ -1004,8 +1035,8 @@ impl<T: ?Sized> NonNull<T> {
     /// units of **bytes**.
     ///
     /// This is purely a convenience for casting to a `u8` pointer and
-    /// using [`sub_ptr`][NonNull::offset_from_unsigned] on it. See that method for
-    /// documentation and safety requirements.
+    /// using [`offset_from_unsigned`][NonNull::offset_from_unsigned] on it.
+    /// See that method for documentation and safety requirements.
     ///
     /// For non-`Sized` pointees this operation considers only the data pointers,
     /// ignoring the metadata.
@@ -1014,7 +1045,7 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "ptr_sub_ptr", since = "1.87.0")]
     #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "1.87.0")]
     pub const unsafe fn byte_offset_from_unsigned<U: ?Sized>(self, origin: NonNull<U>) -> usize {
-        // SAFETY: the caller must uphold the safety contract for `byte_sub_ptr`.
+        // SAFETY: the caller must uphold the safety contract for `byte_offset_from_unsigned`.
         unsafe { self.as_ptr().byte_offset_from_unsigned(origin.as_ptr()) }
     }
 
@@ -1302,7 +1333,7 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(kani, kani::modifies(self.as_ptr()))]
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self is aligned, initialized, and valid for read
     #[requires(ub_checks::can_write(self.as_ptr()))] // Ensure self is valid for write
-    #[rustc_const_stable(feature = "const_inherent_ptr_replace", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_inherent_ptr_replace", since = "1.88.0")]
     pub const unsafe fn replace(self, src: T) -> T
     where
         T: Sized,
