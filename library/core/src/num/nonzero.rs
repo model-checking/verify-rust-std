@@ -2606,6 +2606,7 @@ mod verify {
         };
     }
 
+    // Use for NonZero what already worked well for general numeric types (see num/mod.rs)
     macro_rules! check_mul_unchecked_intervals {
         ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident, $min:expr, $max:expr) => {
             #[kani::proof_for_contract(NonZero::<$t>::unchecked_mul)]
