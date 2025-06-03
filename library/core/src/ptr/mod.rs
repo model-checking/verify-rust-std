@@ -2167,12 +2167,8 @@ pub unsafe fn read_volatile<T>(src: *const T) -> T {
 #[inline]
 #[stable(feature = "volatile", since = "1.9.0")]
 #[rustc_diagnostic_item = "ptr_write_volatile"]
-<<<<<<< HEAD
-#[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-#[safety::requires(ub_checks::can_write(dst))]
-=======
 #[track_caller]
->>>>>>> subtree/library
+#[safety::requires(ub_checks::can_write(dst))]
 pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
     // SAFETY: the caller must uphold the safety contract for `volatile_store`.
     unsafe {

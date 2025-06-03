@@ -418,8 +418,7 @@ impl<T: ?Sized> *const T {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
-<<<<<<< HEAD
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: adding the computed offset to `self` does not cause overflow.
@@ -434,9 +433,6 @@ impl<T: ?Sized> *const T {
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
     #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self, *result as *const T))]
-=======
-    #[track_caller]
->>>>>>> subtree/library
     pub const unsafe fn offset(self, count: isize) -> *const T
     where
         T: Sized,
@@ -489,8 +485,7 @@ impl<T: ?Sized> *const T {
     #[inline(always)]
     #[stable(feature = "pointer_byte_offsets", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_pointer_byte_offsets", since = "1.75.0")]
-<<<<<<< HEAD
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         count == 0 ||
         (
@@ -500,9 +495,6 @@ impl<T: ?Sized> *const T {
         )
     )]
     #[ensures(|result| core::mem::size_of_val_raw(self) == 0 || core::ub_checks::same_allocation(self, *result))]
-=======
-    #[track_caller]
->>>>>>> subtree/library
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset`.
         unsafe { self.cast::<u8>().offset(count).with_metadata_of(self) }
@@ -949,8 +941,7 @@ impl<T: ?Sized> *const T {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
-<<<<<<< HEAD
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: adding the computed offset to `self` does not cause overflow.
@@ -968,9 +959,6 @@ impl<T: ?Sized> *const T {
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
     #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self, *result as *const T))]
-=======
-    #[track_caller]
->>>>>>> subtree/library
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
@@ -1022,8 +1010,7 @@ impl<T: ?Sized> *const T {
     #[inline(always)]
     #[stable(feature = "pointer_byte_offsets", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_pointer_byte_offsets", since = "1.75.0")]
-<<<<<<< HEAD
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         // If count is zero, any pointer is valid including null pointer.
         (count == 0) ||
@@ -1038,9 +1025,6 @@ impl<T: ?Sized> *const T {
         )
     )]
     #[ensures(|result| core::mem::size_of_val_raw(self) == 0 || core::ub_checks::same_allocation(self, *result))]
-=======
-    #[track_caller]
->>>>>>> subtree/library
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add`.
         unsafe { self.cast::<u8>().add(count).with_metadata_of(self) }
@@ -1094,8 +1078,7 @@ impl<T: ?Sized> *const T {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
-<<<<<<< HEAD
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: substracting the computed offset from `self` does not cause overflow.
@@ -1113,9 +1096,6 @@ impl<T: ?Sized> *const T {
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
     #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self, *result as *const T))]
-=======
-    #[track_caller]
->>>>>>> subtree/library
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
@@ -1173,8 +1153,7 @@ impl<T: ?Sized> *const T {
     #[inline(always)]
     #[stable(feature = "pointer_byte_offsets", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_pointer_byte_offsets", since = "1.75.0")]
-<<<<<<< HEAD
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         // If count is zero, any pointer is valid including null pointer.
         (count == 0) ||
@@ -1189,9 +1168,6 @@ impl<T: ?Sized> *const T {
         )
     )]
     #[ensures(|result| core::mem::size_of_val_raw(self) == 0 || core::ub_checks::same_allocation(self, *result))]
-=======
-    #[track_caller]
->>>>>>> subtree/library
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `sub`.
         unsafe { self.cast::<u8>().sub(count).with_metadata_of(self) }

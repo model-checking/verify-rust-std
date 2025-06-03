@@ -227,12 +227,9 @@ impl<T: ?Sized> NonNull<T> {
     #[stable(feature = "nonnull", since = "1.25.0")]
     #[rustc_const_stable(feature = "const_nonnull_new_unchecked", since = "1.25.0")]
     #[inline]
-<<<<<<< HEAD
+    #[track_caller]
     #[requires(!ptr.is_null())]
     #[ensures(|result| result.as_ptr() == ptr)]
-=======
-    #[track_caller]
->>>>>>> subtree/library
     pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
         // SAFETY: the caller must guarantee that `ptr` is non-null.
         unsafe {

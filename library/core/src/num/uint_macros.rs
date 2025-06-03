@@ -601,12 +601,8 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-<<<<<<< HEAD
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-        #[requires(!self.overflowing_add(rhs).1)]
-=======
         #[track_caller]
->>>>>>> subtree/library
+        #[requires(!self.overflowing_add(rhs).1)]
         pub const unsafe fn unchecked_add(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
                 check_language_ub,
@@ -796,12 +792,8 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-<<<<<<< HEAD
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-        #[requires(!self.overflowing_sub(rhs).1)] // Preconditions: No overflow should occur
-=======
         #[track_caller]
->>>>>>> subtree/library
+        #[requires(!self.overflowing_sub(rhs).1)] // Preconditions: No overflow should occur
         pub const unsafe fn unchecked_sub(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
                 check_language_ub,
@@ -984,12 +976,8 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-<<<<<<< HEAD
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-        #[requires(!self.overflowing_mul(rhs).1)]
-=======
         #[track_caller]
->>>>>>> subtree/library
+        #[requires(!self.overflowing_mul(rhs).1)]
         pub const unsafe fn unchecked_mul(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
                 check_language_ub,
@@ -1706,12 +1694,8 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-<<<<<<< HEAD
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-        #[requires(rhs < <$ActualT>::BITS)]
-=======
         #[track_caller]
->>>>>>> subtree/library
+        #[requires(rhs < <$ActualT>::BITS)]
         pub const unsafe fn unchecked_shl(self, rhs: u32) -> Self {
             assert_unsafe_precondition!(
                 check_language_ub,
@@ -1832,12 +1816,8 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-<<<<<<< HEAD
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
-        #[requires(rhs < <$ActualT>::BITS)]// i.e. requires the right hand side of the shift (rhs) to be less than the number of bits in the type. This prevents undefined behavior.
-=======
         #[track_caller]
->>>>>>> subtree/library
+        #[requires(rhs < <$ActualT>::BITS)]// i.e. requires the right hand side of the shift (rhs) to be less than the number of bits in the type. This prevents undefined behavior.
         pub const unsafe fn unchecked_shr(self, rhs: u32) -> Self {
             assert_unsafe_precondition!(
                 check_language_ub,
