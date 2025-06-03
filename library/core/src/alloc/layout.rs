@@ -141,11 +141,15 @@ impl Layout {
     #[rustc_const_stable(feature = "const_alloc_layout_unchecked", since = "1.36.0")]
     #[must_use]
     #[inline]
+<<<<<<< HEAD
     #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
     #[requires(Layout::from_size_align(size, align).is_ok())]
     #[ensures(|result| result.is_safe())]
     #[ensures(|result| result.size() == size)]
     #[ensures(|result| result.align() == align)]
+=======
+    #[track_caller]
+>>>>>>> subtree/library
     pub const unsafe fn from_size_align_unchecked(size: usize, align: usize) -> Self {
         assert_unsafe_precondition!(
             check_library_ub,

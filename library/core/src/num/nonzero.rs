@@ -392,6 +392,7 @@ where
     #[rustc_const_stable(feature = "nonzero", since = "1.28.0")]
     #[must_use]
     #[inline]
+<<<<<<< HEAD
     // #[rustc_allow_const_fn_unstable(const_refs_to_cell)] enables byte-level
     // comparisons within const functions. This is needed here to validate the
     // contents of `T` by converting a pointer to a `u8` slice for our `requires`
@@ -412,6 +413,9 @@ where
         let result_slice = unsafe { core::slice::from_raw_parts(result_ptr as *const u8, size) };
         n_slice == result_slice
     })]
+=======
+    #[track_caller]
+>>>>>>> subtree/library
     pub const unsafe fn new_unchecked(n: T) -> Self {
         match Self::new(n) {
             Some(n) => n,
@@ -452,6 +456,7 @@ where
     #[unstable(feature = "nonzero_from_mut", issue = "106290")]
     #[must_use]
     #[inline]
+    #[track_caller]
     pub unsafe fn from_mut_unchecked(n: &mut T) -> &mut Self {
         match Self::from_mut(n) {
             Some(n) => n,
