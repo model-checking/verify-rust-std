@@ -351,7 +351,9 @@ main() {
             --cbmc-args --object-bits 12
         # remove metadata file for Kani-generated "dummy" crate that we won't
         # get scanner data for
-        rm target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/dummy-*
+        local target=$(find "target/kani_verify_std/target/" -mindepth 1 \
+                         -type d -exec test -e '{}'/debug/deps/ \; -print)
+        rm $target/debug/deps/dummy-*
         echo "Running Kani's std-analysis command..."
         pushd scripts/kani-std-analysis
         ./std-analysis.sh $build_dir
@@ -359,11 +361,9 @@ main() {
         echo "Running autoharness-analyzer command..."
         pushd scripts/autoharness_analyzer
         cargo run -- --per-crate \
-          ../../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
-          /tmp/std_lib_analysis/results/
+          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
         cargo run -- --per-crate --unsafe-fns-only \
-          ../../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
-          /tmp/std_lib_analysis/results/
+          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
         popd
     fi
 }
