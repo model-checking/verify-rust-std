@@ -478,6 +478,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
 
     let mut i = 0;
 
+    #[safety::loop_invariant(i <= bytes.len())]
     while i + CHUNK_SIZE <= bytes.len() {
         let chunk_end = i + CHUNK_SIZE;
 
@@ -486,6 +487,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
         // ASCII bytes are less than 128 (0x80), so their most significant
         // bit is unset.
         let mut count = 0;
+        #[safety::loop_invariant(i <= chunk_end && chunk_end - i <= CHUNK_SIZE && i - (chunk_end - CHUNK_SIZE) >= count as usize)]
         while i < chunk_end {
             count += bytes[i].is_ascii() as u8;
             i += 1;
@@ -499,6 +501,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
 
     // Process the remaining `bytes.len() % N` bytes.
     let mut is_ascii = true;
+    #[safety::loop_invariant(i <= bytes.len())]
     while i < bytes.len() {
         is_ascii &= bytes[i].is_ascii();
         i += 1;
