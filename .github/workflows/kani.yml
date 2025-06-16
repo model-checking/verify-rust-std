@@ -109,6 +109,8 @@ jobs:
           scripts/run-kani.sh --run autoharness --kani-args \
             --include-pattern ">::disjoint_bitor" \
             --include-pattern ">::unchecked_disjoint_bitor" \
+            --include-pattern "iter::range::Step>::backward_unchecked" \
+            --include-pattern "iter::range::Step>::forward_unchecked" \
             --include-pattern alloc::__default_lib_allocator:: \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
