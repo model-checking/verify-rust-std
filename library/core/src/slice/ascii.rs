@@ -517,6 +517,10 @@ pub mod verify {
 
     #[kani::proof]
     #[kani::unwind(8)]
+    // FIXME: the loop invariant in the x_64 & sse2 version of is_ascii
+    // fails because Kani does not yet support modifies clauses for loop invariants.
+    // Once it does, remove this cfg.
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     pub fn check_is_ascii() {
         if kani::any() {
             // TODO: ARR_SIZE can be much larger with cbmc argument
