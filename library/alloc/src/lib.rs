@@ -66,7 +66,6 @@
 )]
 #![doc(cfg_hide(
     not(test),
-    not(any(test, bootstrap)),
     no_global_oom_handling,
     not(no_global_oom_handling),
     not(no_rc),
@@ -133,7 +132,6 @@
 #![feature(local_waker)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_uninit_array_transpose)]
-#![feature(nonnull_provenance)]
 #![feature(panic_internals)]
 #![feature(pattern)]
 #![feature(pin_coerce_unsized_trait)]

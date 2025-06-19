@@ -1428,6 +1428,18 @@ mod prim_i64 {}
 #[rustc_doc_primitive = "i128"]
 //
 /// The 128-bit signed integer type.
+///
+/// # ABI compatibility
+///
+/// Rust's `i128` is expected to be ABI-compatible with C's `__int128` on platforms where the type
+/// is available, which includes most 64-bit architectures. If any platforms that do not specify
+/// `__int128` are updated to introduce it, the Rust `i128` ABI on relevant targets will be changed
+/// to match.
+///
+/// It is important to note that in C, `__int128` is _not_ the same as `_BitInt(128)`, and the two
+/// types are allowed to have different ABIs. In particular, on x86, `__int128` and `_BitInt(128)`
+/// do not use the same alignment. `i128` is intended to always match `__int128` and does not
+/// attempt to match `_BitInt(128)` on platforms without `__int128`.
 #[stable(feature = "i128", since = "1.26.0")]
 mod prim_i128 {}
 
@@ -1458,6 +1470,8 @@ mod prim_u64 {}
 #[rustc_doc_primitive = "u128"]
 //
 /// The 128-bit unsigned integer type.
+///
+/// Please see [the documentation for `i128`](prim@i128) for information on ABI compatibility.
 #[stable(feature = "i128", since = "1.26.0")]
 mod prim_u128 {}
 
@@ -1833,6 +1847,8 @@ mod prim_ref {}
 /// - If `T` is guaranteed to be subject to the [null pointer
 ///   optimization](option/index.html#representation), and `E` is an enum satisfying the following
 ///   requirements, then `T` and `E` are ABI-compatible. Such an enum `E` is called "option-like".
+///   - The enum `E` uses the [`Rust` representation], and is not modified by the `align` or
+///     `packed` representation modifiers.
 ///   - The enum `E` has exactly two variants.
 ///   - One variant has exactly one field, of type `T`.
 ///   - All fields of the other variant are zero-sized with 1-byte alignment.
@@ -1906,6 +1922,7 @@ mod prim_ref {}
 /// [`Pointer`]: fmt::Pointer
 /// [`UnwindSafe`]: panic::UnwindSafe
 /// [`RefUnwindSafe`]: panic::RefUnwindSafe
+/// [`Rust` representation]: <https://doc.rust-lang.org/reference/type-layout.html#the-rust-representation>
 ///
 /// In addition, all *safe* function pointers implement [`Fn`], [`FnMut`], and [`FnOnce`], because
 /// these traits are specially known to the compiler.
