@@ -1201,30 +1201,30 @@ impl<T, A: Allocator + Clone> BTreeSet<T, A> {
     /// [`retain`]: BTreeSet::retain
     /// # Examples
     ///
-    /// Splitting a set into even and odd values, reusing the original set:
-    ///
     /// ```
     /// #![feature(btree_extract_if)]
     /// use std::collections::BTreeSet;
     ///
+    /// // Splitting a set into even and odd values, reusing the original set:
     /// let mut set: BTreeSet<i32> = (0..8).collect();
     /// let evens: BTreeSet<_> = set.extract_if(.., |v| v % 2 == 0).collect();
     /// let odds = set;
     /// assert_eq!(evens.into_iter().collect::<Vec<_>>(), vec![0, 2, 4, 6]);
     /// assert_eq!(odds.into_iter().collect::<Vec<_>>(), vec![1, 3, 5, 7]);
     ///
-    /// let mut map: BTreeSet<i32> = (0..8).collect();
-    /// let low: BTreeSet<_> = map.extract_if(0..4, |_v| true).collect();
-    /// let high = map;
+    /// // Splitting a set into low and high halves, reusing the original set:
+    /// let mut set: BTreeSet<i32> = (0..8).collect();
+    /// let low: BTreeSet<_> = set.extract_if(0..4, |_v| true).collect();
+    /// let high = set;
     /// assert_eq!(low.into_iter().collect::<Vec<_>>(), [0, 1, 2, 3]);
     /// assert_eq!(high.into_iter().collect::<Vec<_>>(), [4, 5, 6, 7]);
     /// ```
     #[unstable(feature = "btree_extract_if", issue = "70530")]
-    pub fn extract_if<'a, F, R>(&'a mut self, range: R, pred: F) -> ExtractIf<'a, T, R, F, A>
+    pub fn extract_if<F, R>(&mut self, range: R, pred: F) -> ExtractIf<'_, T, R, F, A>
     where
         T: Ord,
         R: RangeBounds<T>,
-        F: 'a + FnMut(&T) -> bool,
+        F: FnMut(&T) -> bool,
     {
         let (inner, alloc) = self.map.extract_if_inner(range);
         ExtractIf { pred, inner, alloc }
@@ -1585,11 +1585,11 @@ where
 }
 
 #[unstable(feature = "btree_extract_if", issue = "70530")]
-impl<'a, T, R, F, A: Allocator + Clone> Iterator for ExtractIf<'_, T, R, F, A>
+impl<T, R, F, A: Allocator + Clone> Iterator for ExtractIf<'_, T, R, F, A>
 where
     T: PartialOrd,
     R: RangeBounds<T>,
-    F: 'a + FnMut(&T) -> bool,
+    F: FnMut(&T) -> bool,
 {
     type Item = T;
 
