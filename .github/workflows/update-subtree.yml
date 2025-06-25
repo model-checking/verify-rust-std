@@ -198,8 +198,10 @@ jobs:
         # Set submodules to upstream versions
         git submodule update --init
         git submodule foreach 'grep $sm_path $toplevel/../submodule-heads | cut -f1 -d" " | xargs git checkout'
-        git -c user.name=gitbot -c user.email=git@bot \
-          commit -m "Update submodules" library/
+        if ! git diff --quiet; then
+          git -c user.name=gitbot -c user.email=git@bot \
+            commit -m "Update submodules" library/
+        fi
 
         sed -i "s/^channel = \"nightly-.*\"/channel = \"nightly-${NEXT_TOOLCHAIN_DATE}\"/" rust-toolchain.toml
         git -c user.name=gitbot -c user.email=git@bot \
