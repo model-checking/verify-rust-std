@@ -421,3 +421,6 @@ pub mod simd {
 }
 
 include!("primitive_docs.rs");
+
+#[cfg(flux)]
+mod flux_info;
