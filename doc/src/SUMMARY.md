@@ -37,5 +37,5 @@
   - [21: Verify the safety of substring-related functions in str::pattern](./challenges/0021-str-pattern-pt2.md)
   - [22: Verify the safety of str iter functions](./challenges/0022-str-iter.md)
   - [25: Verify the safety of `VecDeque` functions](./challenges/0025-vecdeque.md)
-  - [Challenge 26: Verify reference-counted Cell implementation](./challenges/0026-rc.md)
-  - [Challenge 27: Verify atomically reference-counted Cell implementation](./challenges/0027-arc.md)
+  - [26: Verify reference-counted Cell implementation](./challenges/0026-rc.md)
+  - [27: Verify atomically reference-counted Cell implementation](./challenges/0027-arc.md)
