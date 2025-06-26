@@ -114,6 +114,61 @@ jobs:
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
             --include-pattern core_arch::x86::__m128d::as_f64x2 \
+            --include-pattern "convert::num::<impl.convert::From<num::nonzero::NonZero<" \
+            --include-pattern "num::<impl.i8>::unchecked_add" \
+            --include-pattern "num::<impl.i16>::unchecked_add" \
+            --include-pattern "num::<impl.i32>::unchecked_add" \
+            --include-pattern "num::<impl.i64>::unchecked_add" \
+            --include-pattern "num::<impl.i128>::unchecked_add" \
+            --include-pattern "num::<impl.isize>::unchecked_add" \
+            --include-pattern "num::<impl.u8>::unchecked_add" \
+            --include-pattern "num::<impl.u16>::unchecked_add" \
+            --include-pattern "num::<impl.u32>::unchecked_add" \
+            --include-pattern "num::<impl.u64>::unchecked_add" \
+            --include-pattern "num::<impl.u128>::unchecked_add" \
+            --include-pattern "num::<impl.usize>::unchecked_add" \
+            --include-pattern "num::<impl.i8>::unchecked_neg" \
+            --include-pattern "num::<impl.i16>::unchecked_neg" \
+            --include-pattern "num::<impl.i32>::unchecked_neg" \
+            --include-pattern "num::<impl.i64>::unchecked_neg" \
+            --include-pattern "num::<impl.i128>::unchecked_neg" \
+            --include-pattern "num::<impl.isize>::unchecked_neg" \
+            --include-pattern "num::<impl.i8>::unchecked_sh" \
+            --include-pattern "num::<impl.i16>::unchecked_sh" \
+            --include-pattern "num::<impl.i32>::unchecked_sh" \
+            --include-pattern "num::<impl.i64>::unchecked_sh" \
+            --include-pattern "num::<impl.i128>::unchecked_sh" \
+            --include-pattern "num::<impl.isize>::unchecked_sh" \
+            --include-pattern "num::<impl.u8>::unchecked_sh" \
+            --include-pattern "num::<impl.u16>::unchecked_sh" \
+            --include-pattern "num::<impl.u32>::unchecked_sh" \
+            --include-pattern "num::<impl.u64>::unchecked_sh" \
+            --include-pattern "num::<impl.u128>::unchecked_sh" \
+            --include-pattern "num::<impl.usize>::unchecked_sh" \
+            --include-pattern "num::<impl.i8>::unchecked_sub" \
+            --include-pattern "num::<impl.i16>::unchecked_sub" \
+            --include-pattern "num::<impl.i32>::unchecked_sub" \
+            --include-pattern "num::<impl.i64>::unchecked_sub" \
+            --include-pattern "num::<impl.i128>::unchecked_sub" \
+            --include-pattern "num::<impl.isize>::unchecked_sub" \
+            --include-pattern "num::<impl.u8>::unchecked_sub" \
+            --include-pattern "num::<impl.u16>::unchecked_sub" \
+            --include-pattern "num::<impl.u32>::unchecked_sub" \
+            --include-pattern "num::<impl.u64>::unchecked_sub" \
+            --include-pattern "num::<impl.u128>::unchecked_sub" \
+            --include-pattern "num::<impl.usize>::unchecked_sub" \
+            --include-pattern "num::<impl.i8>::wrapping_sh" \
+            --include-pattern "num::<impl.i16>::wrapping_sh" \
+            --include-pattern "num::<impl.i32>::wrapping_sh" \
+            --include-pattern "num::<impl.i64>::wrapping_sh" \
+            --include-pattern "num::<impl.i128>::wrapping_sh" \
+            --include-pattern "num::<impl.isize>::wrapping_sh" \
+            --include-pattern "num::<impl.u8>::wrapping_sh" \
+            --include-pattern "num::<impl.u16>::wrapping_sh" \
+            --include-pattern "num::<impl.u32>::wrapping_sh" \
+            --include-pattern "num::<impl.u64>::wrapping_sh" \
+            --include-pattern "num::<impl.u128>::wrapping_sh" \
+            --include-pattern "num::<impl.usize>::wrapping_sh" \
             --include-pattern "num::nonzero::NonZero::<i8>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<i16>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<i32>::count_ones" \
