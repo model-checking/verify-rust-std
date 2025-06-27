@@ -1,13 +1,9 @@
 use safety::{ensures, requires};
 
 use crate::fmt;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{PhantomData, Unsize};
-=======
 use crate::marker::{PhantomData, PointeeSized, Unsize};
->>>>>>> subtree/library
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
 use crate::pin::PinCoerceUnsized;
 use crate::ptr::NonNull;
