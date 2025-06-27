@@ -54,11 +54,15 @@
 )]
 #![allow(missing_docs)]
 
+<<<<<<< HEAD
 use safety::{ensures, requires};
 
 #[cfg(kani)]
 use crate::kani;
 use crate::marker::{ConstParamTy, DiscriminantKind, Tuple};
+=======
+use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
+>>>>>>> subtree/library
 use crate::ptr;
 #[cfg(kani)]
 use crate::ub_checks;
@@ -2765,7 +2769,7 @@ where
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(ptr: *const P) -> M;
+pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: *const P) -> M;
 
 /// This is an accidentally-stable alias to [`ptr::copy_nonoverlapping`]; use that instead.
 // Note (intentionally not in the doc comment): `ptr::copy_nonoverlapping` adds some extra

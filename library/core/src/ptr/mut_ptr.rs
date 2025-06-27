@@ -3,12 +3,16 @@ use safety::{ensures, requires};
 use super::*;
 use crate::cmp::Ordering::{Equal, Greater, Less};
 use crate::intrinsics::const_eval_select;
+<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
+=======
+use crate::marker::PointeeSized;
+>>>>>>> subtree/library
 use crate::mem::{self, SizedTypeProperties};
 use crate::slice::{self, SliceIndex};
 
-impl<T: ?Sized> *mut T {
+impl<T: PointeeSized> *mut T {
     #[doc = include_str!("docs/is_null.md")]
     ///
     /// # Examples
@@ -114,7 +118,7 @@ impl<T: ?Sized> *mut T {
     #[inline]
     pub const fn with_metadata_of<U>(self, meta: *const U) -> *mut U
     where
-        U: ?Sized,
+        U: PointeeSized,
     {
         from_raw_parts_mut::<U>(self as *mut (), metadata(meta))
     }
@@ -2121,7 +2125,7 @@ impl<T, const N: usize> *mut [T; N] {
 
 /// Pointer equality is by address, as produced by the [`<*mut T>::addr`](pointer::addr) method.
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> PartialEq for *mut T {
+impl<T: PointeeSized> PartialEq for *mut T {
     #[inline(always)]
     #[allow(ambiguous_wide_pointer_comparisons)]
     fn eq(&self, other: &*mut T) -> bool {
@@ -2131,11 +2135,11 @@ impl<T: ?Sized> PartialEq for *mut T {
 
 /// Pointer equality is an equivalence relation.
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> Eq for *mut T {}
+impl<T: PointeeSized> Eq for *mut T {}
 
 /// Pointer comparison is by address, as produced by the [`<*mut T>::addr`](pointer::addr) method.
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> Ord for *mut T {
+impl<T: PointeeSized> Ord for *mut T {
     #[inline]
     #[allow(ambiguous_wide_pointer_comparisons)]
     fn cmp(&self, other: &*mut T) -> Ordering {
@@ -2151,7 +2155,7 @@ impl<T: ?Sized> Ord for *mut T {
 
 /// Pointer comparison is by address, as produced by the [`<*mut T>::addr`](pointer::addr) method.
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> PartialOrd for *mut T {
+impl<T: PointeeSized> PartialOrd for *mut T {
     #[inline(always)]
     #[allow(ambiguous_wide_pointer_comparisons)]
     fn partial_cmp(&self, other: &*mut T) -> Option<Ordering> {
