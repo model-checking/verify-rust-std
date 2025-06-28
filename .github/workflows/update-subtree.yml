@@ -11,6 +11,7 @@ defaults:
 
 jobs:
   update-subtree-library:
+    if: github.repository == 'model-checking/verify-rust-std'
     # Changing the host platform may alter the libgit2 version as used by
     # splitsh-lite, which will require changing the version of git2go.
     # See https://github.com/jeffWelling/git2go?tab=readme-ov-file#which-go-version-to-use
