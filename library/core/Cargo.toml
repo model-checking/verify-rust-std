@@ -51,4 +51,4 @@ check-cfg = [
 
 [package.metadata.flux]
 enabled = true
-include = [ "src/ascii/*" ]
+include = [ "src/ascii{*.rs,/**/*.rs}" ]
