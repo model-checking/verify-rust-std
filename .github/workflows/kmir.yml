@@ -1,0 +1,33 @@
+name: KMIR
+
+on:
+  workflow_dispatch:
+  merge_group:
+  pull_request:
+    branches: [ main ]
+  push:
+    paths:
+      - 'library/**'
+      - '.github/workflows/kmir.yml'
+      - 'kmir-proofs/**'
+
+jobs:
+  run-kmir-proofs:
+    name: Run supplied KMIR proofs
+    runs-on: ubuntu-latest
+    env:
+      container_name: "kmir-${{ github.run_id }}"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Proofs in Tool Container
+        run: |
+          docker run --rm -t \
+            --name ${{ env.container_name }} \
+            -w /home/kmir/workspace \
+            -u $(id -u):$(id -g) \
+            -v $PWD:/home/kmir/workspace \
+            runtimeverificationinc/kmir:ubuntu-jammy-0.3.152 \
+            kmir-proofs/unchecked_arithmetic/run-proofs.sh
