@@ -529,6 +529,7 @@ impl AsciiChar {
 
     /// Gets this ASCII character as a byte.
     #[unstable(feature = "ascii_char", issue = "110998")]
+    #[cfg_attr(flux, flux::spec(fn(Self) -> u8{v: v <= 127}))]
     #[inline]
     pub const fn to_u8(self) -> u8 {
         self as u8
