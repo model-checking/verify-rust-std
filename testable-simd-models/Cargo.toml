@@ -1,0 +1,17 @@
+[package]
+name = "core-models"
+version = "0.0.2"
+authors = ["Cryspen"]
+license = "Apache-2.0"
+homepage = "https://github.com/cryspen-ext/core-models"
+edition = "2021"
+repository = "https://github.com/cryspen-ext/core-models"
+readme = "README.md"
+
+[dependencies]
+rand = "0.9"
+hax-lib = { git = "https://github.com/cryspen/hax/" }
+pastey = "0.1.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(hax)'] }

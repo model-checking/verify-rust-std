@@ -52,3 +52,4 @@ package-lock.json
 # already existing elements were commented out
 
 #/target
+testable-simd-models/target

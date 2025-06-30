@@ -1,0 +1,11 @@
+{
+  "fstar_exe": "fstar.exe",
+  "include_dirs": [
+    "/home/sati/github-repos/cryspen-stuff/hacl-star/lib",
+    "",
+    "/home/sati/github-repos/cryspen-stuff/core-models/proofs/fstar/extraction",
+    "/home/sati/github-repos/cryspen-stuff/hax/hax-lib/proof-libs/fstar/core",
+    "/home/sati/github-repos/cryspen-stuff/hax/hax-lib/proof-libs/fstar/rust_primitives",
+    "/home/sati/github-repos/cryspen-stuff/hax/hax-lib/proofs/fstar/extraction"
+  ]
+}
