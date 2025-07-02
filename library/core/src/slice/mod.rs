@@ -4025,8 +4025,8 @@ impl<T> [T] {
             }
         }
     )]
-    //The following two ensures clauses guarantee that middle is of maximum size within self
-    //If U or T are ZST, then middle has size zero, so we adapt the check in that case
+    //The following clause guarantees that middle is of maximum size within self
+    //If U or T are ZSTs, then middle has size zero, so we adapt the check in that case
     #[ensures(|(prefix, _, suffix): &(&[T], &[U], &[T])|
         ((U::IS_ZST || T::IS_ZST) && prefix.len() == self.len()) || (
             (prefix.len() * size_of::<T>() < align_of::<U>()) &&
@@ -4170,8 +4170,8 @@ impl<T> [T] {
             }
         }
     )]
-    //The following two ensures clauses guarantee that middle is of maximum size within self
-    //If U or T are ZST, then middle has size zero, so we adapt the check in that case
+    //The following clause guarantees that middle is of maximum size within self
+    //If U or T are ZSTs, then middle has size zero, so we adapt the check in that case
     #[ensures(|(prefix, _, suffix): &(*const [T], *const [U], *const [T])|
         ((U::IS_ZST || T::IS_ZST) && prefix.len() == self.len()) || (
             (prefix.len() * size_of::<T>() < align_of::<U>()) &&
@@ -5376,6 +5376,7 @@ unsafe impl GetDisjointMutIndex for range::RangeInclusive<usize> {
 mod verify {
     use super::*;
 
+    //generates proof_of_contract harness for align_to given the T (src) and U (dst) types
     macro_rules! proof_of_contract_for_align_to {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof_for_contract(<[$src]>::align_to)]
@@ -5388,6 +5389,7 @@ mod verify {
         };
     }
 
+    //generates harnesses for align_to where T is a given src type and U is one of the main primitives
     macro_rules! gen_align_to_harnesses {
         ($mod_name:ident, $src_type:ty) => {
             mod $mod_name {
@@ -5414,6 +5416,8 @@ mod verify {
     gen_align_to_harnesses!(align_to_from_char, char);
     gen_align_to_harnesses!(align_to_from_unit, ());
 
+    //generates proof_of_contract harness for align_to_mut given the T (src) and U (dst) types
+    //this uses the contract for align_to_mut_wrapper (see comment there for why)
     macro_rules! proof_of_contract_for_align_to_mut {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof_for_contract(<[$src]>::align_to_mut_wrapper)]
@@ -5426,6 +5430,7 @@ mod verify {
         };
     }
 
+    //generates harnesses between a given src type and all the main primitives
     macro_rules! gen_align_to_mut_harnesses {
         ($mod_name:ident, $src_type:ty) => {
             mod $mod_name {
