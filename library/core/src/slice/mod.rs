@@ -6,8 +6,12 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::{ensures, requires};
+
 use crate::cmp::Ordering::{self, Equal, Greater, Less};
 use crate::intrinsics::{exact_div, unchecked_sub};
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{self, MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{OneSidedRange, OneSidedRangeBound, Range, RangeBounds, RangeInclusive};
@@ -21,6 +25,7 @@ use crate::{fmt, hint, ptr, range, slice};
     issue = "none",
     reason = "exposed from core to be reused in std; use the memchr crate"
 )]
+#[doc(hidden)]
 /// Pure Rust memchr implementation, taken from rust-memchr
 pub mod memchr;
 
@@ -4005,6 +4010,39 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_align_to", since = "1.30.0")]
     #[must_use]
+    //Checks if the part that will be transmuted from type T to U is valid for type U
+    //reuses most function logic up to use of from_raw_parts,
+    //where the potentially unsafe transmute occurs
+    #[requires(
+        U::IS_ZST || T::IS_ZST || {
+            let ptr = self.as_ptr();
+            let offset = crate::ptr::align_offset(ptr, align_of::<U>());
+            offset > self.len() || {
+                let (_, rest) = self.split_at(offset);
+                let (us_len, _) = rest.align_to_offsets::<U>();
+                let middle = crate::ptr::slice_from_raw_parts(rest.as_ptr() as *const U, us_len);
+                crate::ub_checks::can_dereference(middle)
+            }
+        }
+    )]
+    //The following two ensures clauses guarantee that middle is of maximum size within self
+    //If U or T are ZST, then middle has size zero, so we adapt the check in that case
+    #[ensures(|(prefix, _, suffix): &(&[T], &[U], &[T])|
+        ((U::IS_ZST || T::IS_ZST) && prefix.len() == self.len()) || (
+            (prefix.len() * size_of::<T>() < align_of::<U>()) &&
+            (suffix.len() * size_of::<T>() < size_of::<U>())
+        )
+    )]
+    //Either align_to just returns self in the prefix, or the 3 returned slices
+    //should be sequential, contiguous, and have same total length as self
+    #[ensures(|(prefix, middle, suffix): &(&[T], &[U], &[T])|
+        prefix.as_ptr() == self.as_ptr() &&
+        (prefix.len() == self.len() ||  (
+            ((prefix.as_ptr()).add(prefix.len()) as *const u8 == middle.as_ptr() as *const u8) &&
+            ((middle.as_ptr()).add(middle.len()) as *const u8 == suffix.as_ptr() as *const u8) &&
+            ((suffix.as_ptr()).add(suffix.len()) == (self.as_ptr()).add(self.len())) )
+        )
+    )]
     pub unsafe fn align_to<U>(&self) -> (&[T], &[U], &[T]) {
         // Note that most of this function will be constant-evaluated,
         if U::IS_ZST || T::IS_ZST {
@@ -4111,6 +4149,48 @@ impl<T> [T] {
                 )
             }
         }
+    }
+
+    //We need the following wrapper because it is not currently possible to write
+    //contracts for functions that return mut refs to input arguments
+    //see https://github.com/model-checking/kani/issues/3764
+    //----------------------------
+    //Checks if the part that will be transmuted from type T to U is valid for type U
+    //reuses most function logic up to use of from_raw_parts,
+    //where the potentially unsafe transmute occurs
+    #[requires(
+        U::IS_ZST || T::IS_ZST || {
+            let ptr = self.as_ptr();
+            let offset = crate::ptr::align_offset(ptr, align_of::<U>());
+            offset > self.len() || {
+                let (_, rest) = self.split_at(offset);
+                let (us_len, _) = rest.align_to_offsets::<U>();
+                let middle = crate::ptr::slice_from_raw_parts(rest.as_ptr() as *const U, us_len);
+                crate::ub_checks::can_dereference(middle)
+            }
+        }
+    )]
+    //The following two ensures clauses guarantee that middle is of maximum size within self
+    //If U or T are ZST, then middle has size zero, so we adapt the check in that case
+    #[ensures(|(prefix, _, suffix): &(*const [T], *const [U], *const [T])|
+        ((U::IS_ZST || T::IS_ZST) && prefix.len() == self.len()) || (
+            (prefix.len() * size_of::<T>() < align_of::<U>()) &&
+            (suffix.len() * size_of::<T>() < size_of::<U>())
+        )
+    )]
+    //Either align_to just returns self in the prefix, or the 3 returned slices
+    //should be sequential, contiguous, and have same total length as self
+    #[ensures(|(prefix, middle, suffix): &(*const [T], *const [U], *const [T])|
+        prefix.as_ptr() == self.as_ptr() &&
+        (prefix.len() == self.len() ||  (
+            ((prefix.as_ptr()).add(prefix.len()) as *const u8 == middle.as_ptr() as *const u8) &&
+            ((middle.as_ptr()).add(middle.len()) as *const u8 == suffix.as_ptr() as *const u8) &&
+            ((suffix.as_ptr()).add(suffix.len()) == (self.as_ptr()).add(self.len())) )
+        )
+    )]
+    unsafe fn align_to_mut_wrapper<U>(&mut self) -> (*const [T], *const [U], *const [T]) {
+        let (prefix_mut, mid_mut, suffix_mut) = self.align_to_mut::<U>();
+        (prefix_mut as *const [T], mid_mut as *const [U], suffix_mut as *const [T])
     }
 
     /// Splits a slice into a prefix, a middle of aligned SIMD types, and a suffix.
@@ -5289,4 +5369,86 @@ unsafe impl GetDisjointMutIndex for range::RangeInclusive<usize> {
     fn is_overlapping(&self, other: &Self) -> bool {
         RangeInclusive::from(*self).is_overlapping(&RangeInclusive::from(*other))
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    macro_rules! proof_of_contract_for_align_to {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof_for_contract(<[$src]>::align_to)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let src_arr: [$src; ARR_SIZE] = kani::any();
+                let src_slice = kani::slice::any_slice_of_array(&src_arr);
+                let dst_slice = unsafe { src_slice.align_to::<$dst>() };
+            }
+        };
+    }
+
+    macro_rules! gen_align_to_harnesses {
+        ($mod_name:ident, $src_type:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                proof_of_contract_for_align_to!(align_to_u8, $src_type, u8);
+                proof_of_contract_for_align_to!(align_to_u16, $src_type, u16);
+                proof_of_contract_for_align_to!(align_to_u32, $src_type, u32);
+                proof_of_contract_for_align_to!(align_to_u64, $src_type, u64);
+                proof_of_contract_for_align_to!(align_to_u128, $src_type, u128);
+                proof_of_contract_for_align_to!(align_to_bool, $src_type, bool);
+                proof_of_contract_for_align_to!(align_to_char, $src_type, char);
+                proof_of_contract_for_align_to!(align_to_unit, $src_type, ());
+            }
+        };
+    }
+
+    gen_align_to_harnesses!(align_to_from_u8, u8);
+    gen_align_to_harnesses!(align_to_from_u16, u16);
+    gen_align_to_harnesses!(align_to_from_u32, u32);
+    gen_align_to_harnesses!(align_to_from_u64, u64);
+    gen_align_to_harnesses!(align_to_from_u128, u128);
+    gen_align_to_harnesses!(align_to_from_bool, bool);
+    gen_align_to_harnesses!(align_to_from_char, char);
+    gen_align_to_harnesses!(align_to_from_unit, ());
+
+    macro_rules! proof_of_contract_for_align_to_mut {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof_for_contract(<[$src]>::align_to_mut_wrapper)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let mut src_arr: [$src; ARR_SIZE] = kani::any();
+                let src_slice = kani::slice::any_slice_of_array_mut(&mut src_arr);
+                let dst_slice = unsafe { src_slice.align_to_mut_wrapper::<$dst>() };
+            }
+        };
+    }
+
+    macro_rules! gen_align_to_mut_harnesses {
+        ($mod_name:ident, $src_type:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                proof_of_contract_for_align_to_mut!(align_to_mut_u8, $src_type, u8);
+                proof_of_contract_for_align_to_mut!(align_to_mut_u16, $src_type, u16);
+                proof_of_contract_for_align_to_mut!(align_to_mut_u32, $src_type, u32);
+                proof_of_contract_for_align_to_mut!(align_to_mut_u64, $src_type, u64);
+                proof_of_contract_for_align_to_mut!(align_to_mut_u128, $src_type, u128);
+                proof_of_contract_for_align_to_mut!(align_to_mut_bool, $src_type, bool);
+                proof_of_contract_for_align_to_mut!(align_to_mut_char, $src_type, char);
+                proof_of_contract_for_align_to_mut!(align_to_mut_unit, $src_type, ());
+            }
+        };
+    }
+
+    gen_align_to_mut_harnesses!(align_to_mut_from_u8, u8);
+    gen_align_to_mut_harnesses!(align_to_mut_from_u16, u16);
+    gen_align_to_mut_harnesses!(align_to_mut_from_u32, u32);
+    gen_align_to_mut_harnesses!(align_to_mut_from_u64, u64);
+    gen_align_to_mut_harnesses!(align_to_mut_from_u128, u128);
+    gen_align_to_mut_harnesses!(align_to_mut_from_bool, bool);
+    gen_align_to_mut_harnesses!(align_to_mut_from_char, char);
+    gen_align_to_mut_harnesses!(align_to_mut_from_unit, ());
 }

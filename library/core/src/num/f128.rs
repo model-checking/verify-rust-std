@@ -177,6 +177,7 @@ impl f128 {
     /// [Machine epsilon]: https://en.wikipedia.org/wiki/Machine_epsilon
     /// [`MANTISSA_DIGITS`]: f128::MANTISSA_DIGITS
     #[unstable(feature = "f128", issue = "116909")]
+    #[rustc_diagnostic_item = "f128_epsilon"]
     pub const EPSILON: f128 = 1.92592994438723585305597794258492732e-34_f128;
 
     /// Smallest finite `f128` value.
@@ -1429,6 +1430,7 @@ impl f128 {
 // due to https://github.com/llvm/llvm-project/issues/44744. aarch64 linux matches this.
 // #[unstable(feature = "core_float_math", issue = "137578")]
 #[cfg(not(test))]
+#[doc(test(attr(feature(cfg_target_has_reliable_f16_f128), expect(internal_features))))]
 impl f128 {
     /// Returns the largest integer less than or equal to `self`.
     ///
@@ -1438,8 +1440,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1471,8 +1471,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1504,8 +1502,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1542,8 +1538,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1577,8 +1571,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1611,8 +1603,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1653,8 +1643,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1701,8 +1689,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1746,8 +1732,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1786,8 +1770,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
@@ -1821,8 +1803,6 @@ impl f128 {
     ///
     /// ```
     /// #![feature(f128)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f128_math)] {
     ///
