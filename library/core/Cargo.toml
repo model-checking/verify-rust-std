@@ -45,4 +45,10 @@ check-cfg = [
     'cfg(target_has_reliable_f16_math)',
     'cfg(target_has_reliable_f128)',
     'cfg(target_has_reliable_f128_math)',
+    'cfg(kani)',
+    'cfg(flux)'
 ]
+
+[package.metadata.flux]
+enabled = true
+include = [ "src/ascii{*.rs,/**/*.rs}" ]
