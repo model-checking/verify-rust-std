@@ -99,16 +99,13 @@ jobs:
       # explicitly list all functions (or prefixes thereof) the proofs of which
       # are known to pass.
       # Notes:
-      # - We use >::disjoint_bitor (and >::unchecked_disjoint_bitor) as pattern
-      #   as whitespace is not supported, cf.
-      #   https://github.com/model-checking/kani/issues/4046
       # - core_arch::x86::__m128d::as_f64x2 is just one example of hundreds of
       #   core_arch::x86:: functions that are known to verify successfully.
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
-            --include-pattern ">::disjoint_bitor" \
-            --include-pattern ">::unchecked_disjoint_bitor" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::unchecked_disjoint_bitor" \
             --include-pattern alloc::__default_lib_allocator:: \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
