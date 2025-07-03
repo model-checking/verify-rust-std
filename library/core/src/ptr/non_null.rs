@@ -627,11 +627,12 @@ impl<T: PointeeSized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(
-        (self.as_ptr().addr() as isize).checked_add(count).is_some() &&
-        core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_offset(count))
-    )]
-    #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_byte_offset(count))]
+    // TODO: requires https://github.com/model-checking/kani/pull/4193
+    // #[requires(
+    //     (self.as_ptr().addr() as isize).checked_add(count).is_some() &&
+    //     core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_offset(count))
+    // )]
+    // #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_byte_offset(count))]
     pub const unsafe fn byte_offset(self, count: isize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `offset` and `byte_offset` has
         // the same safety contract.
@@ -2875,19 +2876,20 @@ mod verify {
     //     }
     // }
 
-    #[kani::proof_for_contract(NonNull::byte_offset)]
-    pub fn non_null_byte_offset_proof() {
-        const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
-        let mut generator = PointerGenerator::<ARR_SIZE>::new();
-
-        let count: isize = kani::any();
-        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
-
-        unsafe {
-            let ptr = NonNull::new(raw_ptr).unwrap();
-            let result = ptr.byte_offset(count);
-        }
-    }
+    // TODO: requires https://github.com/model-checking/kani/pull/4193
+    // #[kani::proof_for_contract(NonNull::byte_offset)]
+    // pub fn non_null_byte_offset_proof() {
+    //     const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
+    //     let mut generator = PointerGenerator::<ARR_SIZE>::new();
+    //
+    //     let count: isize = kani::any();
+    //     let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
+    //
+    //     unsafe {
+    //         let ptr = NonNull::new(raw_ptr).unwrap();
+    //         let result = ptr.byte_offset(count);
+    //     }
+    // }
 
     #[kani::proof_for_contract(NonNull::byte_offset_from)]
     pub fn non_null_byte_offset_from_proof() {
