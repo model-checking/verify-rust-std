@@ -998,8 +998,8 @@ impl<T: PointeeSized> *const T {
     // #[requires(
     //     // If count is zero, any pointer is valid including null pointer.
     //     (count == 0) ||
-    //     // Else if count is not zero, then ensure that adding `count` doesn't cause 
-    //     // overflow and that both pointers `self` and the result are in the same 
+    //     // Else if count is not zero, then ensure that adding `count` doesn't cause
+    //     // overflow and that both pointers `self` and the result are in the same
     //     // allocation
     //     (
     //         (count <= isize::MAX as usize) &&
@@ -1142,8 +1142,8 @@ impl<T: PointeeSized> *const T {
     // #[requires(
     //     // If count is zero, any pointer is valid including null pointer.
     //     (count == 0) ||
-    //     // Else if count is not zero, then ensure that subtracting `count` doesn't 
-    //     // cause overflow and that both pointers `self` and the result are in the 
+    //     // Else if count is not zero, then ensure that subtracting `count` doesn't
+    //     // cause overflow and that both pointers `self` and the result are in the
     //     // same allocation.
     //     (
     //         (count <= isize::MAX as usize) &&
