@@ -713,14 +713,15 @@ impl<T: PointeeSized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(
-        count == 0 || (
-            (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
-            (count <= (isize::MAX as usize)) &&
-            (self.as_ptr().addr().checked_add(count).is_some()) &&
-            (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_add(count)))
-        )
-    )]
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[requires(
+    //     count == 0 || (
+    //         (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
+    //         (count <= (isize::MAX as usize)) &&
+    //         (self.as_ptr().addr().checked_add(count).is_some()) &&
+    //         (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_add(count)))
+    //     )
+    // )]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add` and `byte_add` has the same
         // safety contract.
@@ -809,14 +810,15 @@ impl<T: PointeeSized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(
-        count == 0 || (
-            (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
-            (count <= (isize::MAX as usize)) &&
-            (self.as_ptr().addr().checked_sub(count).is_some()) &&
-            (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_sub(count)))
-        )
-    )]
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[requires(
+    //     count == 0 || (
+    //         (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
+    //         (count <= (isize::MAX as usize)) &&
+    //         (self.as_ptr().addr().checked_sub(count).is_some()) &&
+    //         (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_sub(count)))
+    //     )
+    // )]
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `sub` and `byte_sub` has the same
         // safety contract.
@@ -2465,17 +2467,18 @@ mod verify {
         let result = non_null_ptr.is_aligned_to(align);
     }
 
-    #[kani::proof_for_contract(NonNull::byte_sub)]
-    pub fn non_null_check_byte_sub() {
-        const SIZE: usize = mem::size_of::<i32>() * 10000;
-        let mut generator = PointerGenerator::<SIZE>::new();
-        let count: usize = kani::any();
-        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
-        let ptr = NonNull::new(raw_ptr).unwrap();
-        unsafe {
-            let result = ptr.byte_sub(count);
-        }
-    }
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[kani::proof_for_contract(NonNull::byte_sub)]
+    // pub fn non_null_check_byte_sub() {
+    //     const SIZE: usize = mem::size_of::<i32>() * 10000;
+    //     let mut generator = PointerGenerator::<SIZE>::new();
+    //     let count: usize = kani::any();
+    //     let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
+    //     let ptr = NonNull::new(raw_ptr).unwrap();
+    //     unsafe {
+    //         let result = ptr.byte_sub(count);
+    //     }
+    // }
 
     #[kani::proof_for_contract(NonNull::offset)]
     pub fn non_null_check_offset() {
@@ -2846,29 +2849,31 @@ mod verify {
     generate_write_bytes_harness!(u128, non_null_check_write_bytes_u128);
     generate_write_bytes_harness!(usize, non_null_check_write_bytes_usize);
 
-    #[kani::proof_for_contract(NonNull::byte_add)]
-    pub fn non_null_byte_add_proof() {
-        // Make size as 1000 to ensure the array is large enough to cover various senarios
-        // while maintaining a reasonable proof runtime
-        const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
-        let mut generator = PointerGenerator::<ARR_SIZE>::new();
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[kani::proof_for_contract(NonNull::byte_add)]
+    // pub fn non_null_byte_add_proof() {
+    //     // Make size as 1000 to ensure the array is large enough to cover various senarios
+    //     // while maintaining a reasonable proof runtime
+    //     const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
+    //     let mut generator = PointerGenerator::<ARR_SIZE>::new();
+    //
+    //     let count: usize = kani::any();
+    //     let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
+    //
+    //     unsafe {
+    //         let ptr = NonNull::new(raw_ptr).unwrap();
+    //         let result = ptr.byte_add(count);
+    //     }
+    // }
 
-        let count: usize = kani::any();
-        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
-
-        unsafe {
-            let ptr = NonNull::new(raw_ptr).unwrap();
-            let result = ptr.byte_add(count);
-        }
-    }
-
-    #[kani::proof_for_contract(NonNull::byte_add)]
-    pub fn non_null_byte_add_dangling_proof() {
-        let ptr = NonNull::<i32>::dangling();
-        unsafe {
-            let _ = ptr.byte_add(0);
-        }
-    }
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[kani::proof_for_contract(NonNull::byte_add)]
+    // pub fn non_null_byte_add_dangling_proof() {
+    //     let ptr = NonNull::<i32>::dangling();
+    //     unsafe {
+    //         let _ = ptr.byte_add(0);
+    //     }
+    // }
 
     #[kani::proof_for_contract(NonNull::byte_offset)]
     pub fn non_null_byte_offset_proof() {
