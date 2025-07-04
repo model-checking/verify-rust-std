@@ -25,9 +25,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: true
-    - name: Apply stdarch patch
-      run: cd library/stdarch && patch -p1 < ../../stdarch.patch
-
+    
     # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
     - name: Set up Python
       uses: actions/setup-python@v4
