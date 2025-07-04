@@ -1403,7 +1403,6 @@ macro_rules! from_str_int_impl {
             ///
             /// # Examples
             ///
-            /// Basic usage:
             /// ```
             /// use std::str::FromStr;
             ///
@@ -1449,7 +1448,6 @@ macro_rules! from_str_int_impl {
             ///
             /// # Examples
             ///
-            /// Basic usage:
             /// ```
             #[doc = concat!("assert_eq!(", stringify!($int_ty), "::from_str_radix(\"A\", 16), Ok(10));")]
             /// ```
@@ -1482,7 +1480,6 @@ macro_rules! from_str_int_impl {
             ///
             /// # Examples
             ///
-            /// Basic usage:
             /// ```
             /// #![feature(int_from_ascii)]
             ///
@@ -1527,7 +1524,6 @@ macro_rules! from_str_int_impl {
             ///
             /// # Examples
             ///
-            /// Basic usage:
             /// ```
             /// #![feature(int_from_ascii)]
             ///

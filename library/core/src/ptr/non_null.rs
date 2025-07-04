@@ -3,7 +3,7 @@ use safety::{ensures, requires};
 use crate::cmp::Ordering;
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::Unsize;
+use crate::marker::{PointeeSized, Unsize};
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
@@ -26,19 +26,24 @@ use crate::{fmt, hash, intrinsics, mem, ptr};
 /// as a discriminant -- `Option<NonNull<T>>` has the same size as `*mut T`.
 /// However the pointer may still dangle if it isn't dereferenced.
 ///
-/// Unlike `*mut T`, `NonNull<T>` was chosen to be covariant over `T`. This makes it
-/// possible to use `NonNull<T>` when building covariant types, but introduces the
-/// risk of unsoundness if used in a type that shouldn't actually be covariant.
-/// (The opposite choice was made for `*mut T` even though technically the unsoundness
-/// could only be caused by calling unsafe functions.)
+/// Unlike `*mut T`, `NonNull<T>` is covariant over `T`. This is usually the correct
+/// choice for most data structures and safe abstractions, such as `Box`, `Rc`, `Arc`, `Vec`,
+/// and `LinkedList`.
 ///
-/// Covariance is correct for most safe abstractions, such as `Box`, `Rc`, `Arc`, `Vec`,
-/// and `LinkedList`. This is the case because they provide a public API that follows the
-/// normal shared XOR mutable rules of Rust.
+/// In rare cases, if your type exposes a way to mutate the value of `T` through a `NonNull<T>`,
+/// and you need to prevent unsoundness from variance (for example, if `T` could be a reference
+/// with a shorter lifetime), you should add a field to make your type invariant, such as
+/// `PhantomData<Cell<T>>` or `PhantomData<&'a mut T>`.
 ///
-/// If your type cannot safely be covariant, you must ensure it contains some
-/// additional field to provide invariance. Often this field will be a [`PhantomData`]
-/// type like `PhantomData<Cell<T>>` or `PhantomData<&'a mut T>`.
+/// Example of a type that must be invariant:
+/// ```rust
+/// use std::cell::Cell;
+/// use std::marker::PhantomData;
+/// struct Invariant<T> {
+///     ptr: std::ptr::NonNull<T>,
+///     _invariant: PhantomData<Cell<T>>,
+/// }
+/// ```
 ///
 /// Notice that `NonNull<T>` has a `From` instance for `&T`. However, this does
 /// not change the fact that mutating through a (pointer derived from a) shared
@@ -73,7 +78,7 @@ use crate::{fmt, hash, intrinsics, mem, ptr};
 #[rustc_layout_scalar_valid_range_start(1)]
 #[rustc_nonnull_optimization_guaranteed]
 #[rustc_diagnostic_item = "NonNull"]
-pub struct NonNull<T: ?Sized> {
+pub struct NonNull<T: PointeeSized> {
     // Remember to use `.as_ptr()` instead of `.pointer`, as field projecting to
     // this is banned by <https://github.com/rust-lang/compiler-team/issues/807>.
     pointer: *const T,
@@ -82,12 +87,12 @@ pub struct NonNull<T: ?Sized> {
 /// `NonNull` pointers are not `Send` because the data they reference may be aliased.
 // N.B., this impl is unnecessary, but should provide better error messages.
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> !Send for NonNull<T> {}
+impl<T: PointeeSized> !Send for NonNull<T> {}
 
 /// `NonNull` pointers are not `Sync` because the data they reference may be aliased.
 // N.B., this impl is unnecessary, but should provide better error messages.
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> !Sync for NonNull<T> {}
+impl<T: PointeeSized> !Sync for NonNull<T> {}
 
 impl<T: Sized> NonNull<T> {
     /// Creates a pointer with the given address and no [provenance][crate::ptr#provenance].
@@ -201,7 +206,7 @@ impl<T: Sized> NonNull<T> {
     }
 }
 
-impl<T: ?Sized> NonNull<T> {
+impl<T: PointeeSized> NonNull<T> {
     /// Creates a new `NonNull`.
     ///
     /// # Safety
@@ -708,14 +713,15 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(
-        count == 0 || (
-            (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
-            (count <= (isize::MAX as usize)) &&
-            (self.as_ptr().addr().checked_add(count).is_some()) &&
-            (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_add(count)))
-        )
-    )]
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[requires(
+    //     count == 0 || (
+    //         (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
+    //         (count <= (isize::MAX as usize)) &&
+    //         (self.as_ptr().addr().checked_add(count).is_some()) &&
+    //         (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_add(count)))
+    //     )
+    // )]
     pub const unsafe fn byte_add(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `add` and `byte_add` has the same
         // safety contract.
@@ -804,14 +810,15 @@ impl<T: ?Sized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(
-        count == 0 || (
-            (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
-            (count <= (isize::MAX as usize)) &&
-            (self.as_ptr().addr().checked_sub(count).is_some()) &&
-            (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_sub(count)))
-        )
-    )]
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[requires(
+    //     count == 0 || (
+    //         (core::mem::size_of_val_raw(self.as_ptr() as * const _) > 0) &&
+    //         (count <= (isize::MAX as usize)) &&
+    //         (self.as_ptr().addr().checked_sub(count).is_some()) &&
+    //         (core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_sub(count)))
+    //     )
+    // )]
     pub const unsafe fn byte_sub(self, count: usize) -> Self {
         // SAFETY: the caller must uphold the safety contract for `sub` and `byte_sub` has the same
         // safety contract.
@@ -1802,7 +1809,7 @@ impl<T> NonNull<[T]> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> Clone for NonNull<T> {
+impl<T: PointeeSized> Clone for NonNull<T> {
     #[inline(always)]
     fn clone(&self) -> Self {
         *self
@@ -1810,39 +1817,39 @@ impl<T: ?Sized> Clone for NonNull<T> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> Copy for NonNull<T> {}
+impl<T: PointeeSized> Copy for NonNull<T> {}
 
 #[unstable(feature = "coerce_unsized", issue = "18598")]
-impl<T: ?Sized, U: ?Sized> CoerceUnsized<NonNull<U>> for NonNull<T> where T: Unsize<U> {}
+impl<T: PointeeSized, U: PointeeSized> CoerceUnsized<NonNull<U>> for NonNull<T> where T: Unsize<U> {}
 
 #[unstable(feature = "dispatch_from_dyn", issue = "none")]
-impl<T: ?Sized, U: ?Sized> DispatchFromDyn<NonNull<U>> for NonNull<T> where T: Unsize<U> {}
+impl<T: PointeeSized, U: PointeeSized> DispatchFromDyn<NonNull<U>> for NonNull<T> where T: Unsize<U> {}
 
 #[stable(feature = "pin", since = "1.33.0")]
-unsafe impl<T: ?Sized> PinCoerceUnsized for NonNull<T> {}
+unsafe impl<T: PointeeSized> PinCoerceUnsized for NonNull<T> {}
 
 #[unstable(feature = "pointer_like_trait", issue = "none")]
 impl<T> core::marker::PointerLike for NonNull<T> {}
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> fmt::Debug for NonNull<T> {
+impl<T: PointeeSized> fmt::Debug for NonNull<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Pointer::fmt(&self.as_ptr(), f)
     }
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> fmt::Pointer for NonNull<T> {
+impl<T: PointeeSized> fmt::Pointer for NonNull<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Pointer::fmt(&self.as_ptr(), f)
     }
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> Eq for NonNull<T> {}
+impl<T: PointeeSized> Eq for NonNull<T> {}
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> PartialEq for NonNull<T> {
+impl<T: PointeeSized> PartialEq for NonNull<T> {
     #[inline]
     #[allow(ambiguous_wide_pointer_comparisons)]
     fn eq(&self, other: &Self) -> bool {
@@ -1851,7 +1858,7 @@ impl<T: ?Sized> PartialEq for NonNull<T> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> Ord for NonNull<T> {
+impl<T: PointeeSized> Ord for NonNull<T> {
     #[inline]
     #[allow(ambiguous_wide_pointer_comparisons)]
     fn cmp(&self, other: &Self) -> Ordering {
@@ -1860,7 +1867,7 @@ impl<T: ?Sized> Ord for NonNull<T> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> PartialOrd for NonNull<T> {
+impl<T: PointeeSized> PartialOrd for NonNull<T> {
     #[inline]
     #[allow(ambiguous_wide_pointer_comparisons)]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -1869,7 +1876,7 @@ impl<T: ?Sized> PartialOrd for NonNull<T> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> hash::Hash for NonNull<T> {
+impl<T: PointeeSized> hash::Hash for NonNull<T> {
     #[inline]
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         self.as_ptr().hash(state)
@@ -1877,7 +1884,7 @@ impl<T: ?Sized> hash::Hash for NonNull<T> {
 }
 
 #[unstable(feature = "ptr_internals", issue = "none")]
-impl<T: ?Sized> From<Unique<T>> for NonNull<T> {
+impl<T: PointeeSized> From<Unique<T>> for NonNull<T> {
     #[inline]
     fn from(unique: Unique<T>) -> Self {
         unique.as_non_null_ptr()
@@ -1885,7 +1892,7 @@ impl<T: ?Sized> From<Unique<T>> for NonNull<T> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> From<&mut T> for NonNull<T> {
+impl<T: PointeeSized> From<&mut T> for NonNull<T> {
     /// Converts a `&mut T` to a `NonNull<T>`.
     ///
     /// This conversion is safe and infallible since references cannot be null.
@@ -1896,7 +1903,7 @@ impl<T: ?Sized> From<&mut T> for NonNull<T> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: ?Sized> From<&T> for NonNull<T> {
+impl<T: PointeeSized> From<&T> for NonNull<T> {
     /// Converts a `&T` to a `NonNull<T>`.
     ///
     /// This conversion is safe and infallible since references cannot be null.
@@ -2460,17 +2467,18 @@ mod verify {
         let result = non_null_ptr.is_aligned_to(align);
     }
 
-    #[kani::proof_for_contract(NonNull::byte_sub)]
-    pub fn non_null_check_byte_sub() {
-        const SIZE: usize = mem::size_of::<i32>() * 10000;
-        let mut generator = PointerGenerator::<SIZE>::new();
-        let count: usize = kani::any();
-        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
-        let ptr = NonNull::new(raw_ptr).unwrap();
-        unsafe {
-            let result = ptr.byte_sub(count);
-        }
-    }
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[kani::proof_for_contract(NonNull::byte_sub)]
+    // pub fn non_null_check_byte_sub() {
+    //     const SIZE: usize = mem::size_of::<i32>() * 10000;
+    //     let mut generator = PointerGenerator::<SIZE>::new();
+    //     let count: usize = kani::any();
+    //     let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
+    //     let ptr = NonNull::new(raw_ptr).unwrap();
+    //     unsafe {
+    //         let result = ptr.byte_sub(count);
+    //     }
+    // }
 
     #[kani::proof_for_contract(NonNull::offset)]
     pub fn non_null_check_offset() {
@@ -2841,29 +2849,31 @@ mod verify {
     generate_write_bytes_harness!(u128, non_null_check_write_bytes_u128);
     generate_write_bytes_harness!(usize, non_null_check_write_bytes_usize);
 
-    #[kani::proof_for_contract(NonNull::byte_add)]
-    pub fn non_null_byte_add_proof() {
-        // Make size as 1000 to ensure the array is large enough to cover various senarios
-        // while maintaining a reasonable proof runtime
-        const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
-        let mut generator = PointerGenerator::<ARR_SIZE>::new();
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[kani::proof_for_contract(NonNull::byte_add)]
+    // pub fn non_null_byte_add_proof() {
+    //     // Make size as 1000 to ensure the array is large enough to cover various senarios
+    //     // while maintaining a reasonable proof runtime
+    //     const ARR_SIZE: usize = mem::size_of::<i32>() * 1000;
+    //     let mut generator = PointerGenerator::<ARR_SIZE>::new();
+    //
+    //     let count: usize = kani::any();
+    //     let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
+    //
+    //     unsafe {
+    //         let ptr = NonNull::new(raw_ptr).unwrap();
+    //         let result = ptr.byte_add(count);
+    //     }
+    // }
 
-        let count: usize = kani::any();
-        let raw_ptr: *mut i32 = generator.any_in_bounds().ptr as *mut i32;
-
-        unsafe {
-            let ptr = NonNull::new(raw_ptr).unwrap();
-            let result = ptr.byte_add(count);
-        }
-    }
-
-    #[kani::proof_for_contract(NonNull::byte_add)]
-    pub fn non_null_byte_add_dangling_proof() {
-        let ptr = NonNull::<i32>::dangling();
-        unsafe {
-            let _ = ptr.byte_add(0);
-        }
-    }
+    // TODO: we can no longer use size_of_val_raw with the Sized hierarchy
+    // #[kani::proof_for_contract(NonNull::byte_add)]
+    // pub fn non_null_byte_add_dangling_proof() {
+    //     let ptr = NonNull::<i32>::dangling();
+    //     unsafe {
+    //         let _ = ptr.byte_add(0);
+    //     }
+    // }
 
     #[kani::proof_for_contract(NonNull::byte_offset)]
     pub fn non_null_byte_offset_proof() {
