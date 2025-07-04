@@ -54,15 +54,11 @@
 )]
 #![allow(missing_docs)]
 
-<<<<<<< HEAD
 use safety::{ensures, requires};
 
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{ConstParamTy, DiscriminantKind, Tuple};
-=======
 use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
->>>>>>> subtree/library
 use crate::ptr;
 #[cfg(kani)]
 use crate::ub_checks;

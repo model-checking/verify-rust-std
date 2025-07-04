@@ -1,13 +1,9 @@
 use safety::{ensures, requires};
 
 use crate::cmp::Ordering;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::Unsize;
-=======
 use crate::marker::{PointeeSized, Unsize};
->>>>>>> subtree/library
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
