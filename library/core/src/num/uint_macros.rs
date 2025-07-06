@@ -213,6 +213,30 @@ macro_rules! uint_impl {
             (!self).trailing_zeros()
         }
 
+        /// Returns the minimum number of bits required to represent `self`.
+        ///
+        /// This method returns zero if `self` is zero.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        ///
+        /// ```
+        /// #![feature(uint_bit_width)]
+        ///
+        #[doc = concat!("assert_eq!(0_", stringify!($SelfT), ".bit_width(), 0);")]
+        #[doc = concat!("assert_eq!(0b111_", stringify!($SelfT), ".bit_width(), 3);")]
+        #[doc = concat!("assert_eq!(0b1110_", stringify!($SelfT), ".bit_width(), 4);")]
+        #[doc = concat!("assert_eq!(", stringify!($SelfT), "::MAX.bit_width(), ", stringify!($BITS), ");")]
+        /// ```
+        #[unstable(feature = "uint_bit_width", issue = "142326")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline(always)]
+        pub const fn bit_width(self) -> u32 {
+            Self::BITS - self.leading_zeros()
+        }
+
         /// Returns `self` with only the most significant bit set, or `0` if
         /// the input is `0`.
         ///
@@ -601,7 +625,7 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+        #[track_caller]
         #[requires(!self.overflowing_add(rhs).1)]
         pub const unsafe fn unchecked_add(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
@@ -792,7 +816,7 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+        #[track_caller]
         #[requires(!self.overflowing_sub(rhs).1)] // Preconditions: No overflow should occur
         pub const unsafe fn unchecked_sub(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
@@ -976,7 +1000,7 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+        #[track_caller]
         #[requires(!self.overflowing_mul(rhs).1)]
         pub const unsafe fn unchecked_mul(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
@@ -1111,6 +1135,108 @@ macro_rules! uint_impl {
         #[track_caller]
         pub const fn strict_div_euclid(self, rhs: Self) -> Self {
             self / rhs
+        }
+
+        /// Checked integer division without remainder. Computes `self / rhs`.
+        ///
+        /// # Panics
+        ///
+        /// This function will panic  if `rhs == 0` or `self % rhs != 0`.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        ///
+        /// ```
+        /// #![feature(exact_div)]
+        #[doc = concat!("assert_eq!(64", stringify!($SelfT), ".exact_div(2), 32);")]
+        #[doc = concat!("assert_eq!(64", stringify!($SelfT), ".exact_div(32), 2);")]
+        /// ```
+        ///
+        /// ```should_panic
+        /// #![feature(exact_div)]
+        #[doc = concat!("let _ = 65", stringify!($SelfT), ".exact_div(2);")]
+        /// ```
+        #[unstable(
+            feature = "exact_div",
+            issue = "139911",
+        )]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn checked_exact_div(self, rhs: Self) -> Option<Self> {
+            if intrinsics::unlikely(rhs == 0) {
+                None
+            } else {
+                // SAFETY: division by zero is checked above
+                unsafe {
+                    if intrinsics::unlikely(intrinsics::unchecked_rem(self, rhs) != 0) {
+                        None
+                    } else {
+                        Some(intrinsics::exact_div(self, rhs))
+                    }
+                }
+            }
+        }
+
+        /// Checked integer division without remainder. Computes `self / rhs`.
+        ///
+        /// # Panics
+        ///
+        /// This function will panic  if `rhs == 0` or `self % rhs != 0`.
+        ///
+        /// # Examples
+        ///
+        /// Basic usage:
+        ///
+        /// ```
+        /// #![feature(exact_div)]
+        #[doc = concat!("assert_eq!(64", stringify!($SelfT), ".exact_div(2), 32);")]
+        #[doc = concat!("assert_eq!(64", stringify!($SelfT), ".exact_div(32), 2);")]
+        /// ```
+        ///
+        /// ```should_panic
+        /// #![feature(exact_div)]
+        #[doc = concat!("let _ = 65", stringify!($SelfT), ".exact_div(2);")]
+        /// ```
+        #[unstable(
+            feature = "exact_div",
+            issue = "139911",
+        )]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const fn exact_div(self, rhs: Self) -> Self {
+            match self.checked_exact_div(rhs) {
+                Some(x) => x,
+                None => panic!("Failed to divide without remainder"),
+            }
+        }
+
+        /// Unchecked integer division without remainder. Computes `self / rhs`.
+        ///
+        /// # Safety
+        ///
+        /// This results in undefined behavior when `rhs == 0` or `self % rhs != 0`,
+        /// i.e. when [`checked_exact_div`](Self::checked_exact_div) would return `None`.
+        #[unstable(
+            feature = "exact_div",
+            issue = "139911",
+        )]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline]
+        pub const unsafe fn unchecked_exact_div(self, rhs: Self) -> Self {
+            assert_unsafe_precondition!(
+                check_language_ub,
+                concat!(stringify!($SelfT), "::unchecked_exact_div divide by zero or leave a remainder"),
+                (
+                    lhs: $SelfT = self,
+                    rhs: $SelfT = rhs,
+                ) => rhs > 0 && lhs % rhs == 0,
+            );
+            // SAFETY: Same precondition
+            unsafe { intrinsics::exact_div(self, rhs) }
         }
 
         /// Checked integer remainder. Computes `self % rhs`, returning `None`
@@ -1592,7 +1718,7 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+        #[track_caller]
         #[requires(rhs < <$ActualT>::BITS)]
         pub const unsafe fn unchecked_shl(self, rhs: u32) -> Self {
             assert_unsafe_precondition!(
@@ -1714,7 +1840,7 @@ macro_rules! uint_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline(always)]
-        #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+        #[track_caller]
         #[requires(rhs < <$ActualT>::BITS)]// i.e. requires the right hand side of the shift (rhs) to be less than the number of bits in the type. This prevents undefined behavior.
         pub const unsafe fn unchecked_shr(self, rhs: u32) -> Self {
             assert_unsafe_precondition!(

@@ -169,10 +169,12 @@ impl fmt::Display for FromBytesUntilNulError {
     }
 }
 
+/// Shows the underlying bytes as a normal string, with invalid UTF-8
+/// presented as hex escape sequences.
 #[stable(feature = "cstr_debug", since = "1.3.0")]
 impl fmt::Debug for CStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "\"{}\"", self.to_bytes().escape_ascii())
+        fmt::Debug::fmt(crate::bstr::ByteStr::from_bytes(self.to_bytes()), f)
     }
 }
 
@@ -249,7 +251,7 @@ impl CStr {
     /// * `ptr` must be [valid] for reads of bytes up to and including the nul terminator.
     ///   This means in particular:
     ///
-    ///     * The entire memory range of this `CStr` must be contained within a single allocated object!
+    ///     * The entire memory range of this `CStr` must be contained within a single allocation!
     ///     * `ptr` must be non-null even for a zero-length cstr.
     ///
     /// * The memory referenced by the returned `CStr` must not be mutated for
@@ -679,6 +681,30 @@ impl CStr {
         // be rewritten to do the UTF-8 check inline with the length calculation
         // instead of doing it afterwards.
         str::from_utf8(self.to_bytes())
+    }
+
+    /// Returns an object that implements [`Display`] for safely printing a [`CStr`] that may
+    /// contain non-Unicode data.
+    ///
+    /// Behaves as if `self` were first lossily converted to a `str`, with invalid UTF-8 presented
+    /// as the Unicode replacement character: �.
+    ///
+    /// [`Display`]: fmt::Display
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(cstr_display)]
+    ///
+    /// let cstr = c"Hello, world!";
+    /// println!("{}", cstr.display());
+    /// ```
+    #[unstable(feature = "cstr_display", issue = "139984")]
+    #[must_use = "this does not display the `CStr`; \
+                  it returns an object that can be displayed"]
+    #[inline]
+    pub fn display(&self) -> impl fmt::Display {
+        crate::bstr::ByteStr::from_bytes(self.to_bytes())
     }
 }
 

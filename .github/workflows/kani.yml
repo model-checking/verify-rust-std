@@ -282,6 +282,13 @@ jobs:
     name: Kani List
     runs-on: ubuntu-latest
     steps:
+      - name: Remove unnecessary software to free up disk space
+        run: |
+          # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+          df -h
+
       # Step 1: Check out the repository
       - name: Checkout Repository
         uses: actions/checkout@v4

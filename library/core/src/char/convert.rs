@@ -26,6 +26,7 @@ pub(super) const fn from_u32(i: u32) -> Option<char> {
 #[inline]
 #[must_use]
 #[allow(unnecessary_transmutes)]
+#[track_caller]
 #[requires(char_try_from_u32(i).is_ok())]
 #[ensures(|result| *result as u32 == i)]
 pub(super) const unsafe fn from_u32_unchecked(i: u32) -> char {

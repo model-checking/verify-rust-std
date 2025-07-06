@@ -189,18 +189,15 @@
 //
 // Target features:
 // tidy-alphabetical-start
-#![cfg_attr(bootstrap, feature(avx512_target_feature))]
 #![feature(aarch64_unstable_target_feature)]
 #![feature(arm_target_feature)]
 #![feature(hexagon_target_feature)]
-#![feature(keylocker_x86)]
 #![feature(loongarch_target_feature)]
 #![feature(mips_target_feature)]
 #![feature(powerpc_target_feature)]
 #![feature(riscv_target_feature)]
 #![feature(rtm_target_feature)]
 #![feature(s390x_target_feature)]
-#![feature(sha512_sm_x86)]
 #![feature(sse4a_target_feature)]
 #![feature(tbm_target_feature)]
 #![feature(wasm_target_feature)]
@@ -230,7 +227,7 @@ pub mod assert_matches {
 /// Unstable module containing the unstable `autodiff` macro.
 pub mod autodiff {
     #[unstable(feature = "autodiff", issue = "124509")]
-    pub use crate::macros::builtin::autodiff;
+    pub use crate::macros::builtin::{autodiff_forward, autodiff_reverse};
 }
 
 #[unstable(feature = "contracts", issue = "128044")]

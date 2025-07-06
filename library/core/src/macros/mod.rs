@@ -1273,6 +1273,19 @@ pub(crate) mod builtin {
     /// first macro invocation leading up to the invocation of the `file!`
     /// macro.
     ///
+    /// The file name is derived from the crate root's source path passed to the Rust compiler
+    /// and the sequence the compiler takes to get from the crate root to the
+    /// module containing `file!`, modified by any flags passed to the Rust compiler (e.g.
+    /// `--remap-path-prefix`).  If the crate's source path is relative, the initial base
+    /// directory will be the working directory of the Rust compiler.  For example, if the source
+    /// path passed to the compiler is `./src/lib.rs` which has a `mod foo;` with a source path of
+    /// `src/foo/mod.rs`, then calling `file!` inside `mod foo;` will return `./src/foo/mod.rs`.
+    ///
+    /// Future compiler options might make further changes to the behavior of `file!`,
+    /// including potentially making it entirely empty. Code (e.g. test libraries)
+    /// relying on `file!` producing an openable file path would be incompatible
+    /// with such options, and might wish to recommend not using those options.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1519,20 +1532,39 @@ pub(crate) mod builtin {
         ($file:expr $(,)?) => {{ /* compiler built-in */ }};
     }
 
-    /// Automatic Differentiation macro which allows generating a new function to compute
-    /// the derivative of a given function. It may only be applied to a function.
-    /// The expected usage syntax is
-    /// `#[autodiff(NAME, MODE, INPUT_ACTIVITIES, OUTPUT_ACTIVITY)]`
-    /// where:
-    /// NAME is a string that represents a valid function name.
-    /// MODE is any of Forward, Reverse, ForwardFirst, ReverseFirst.
-    /// INPUT_ACTIVITIES consists of one valid activity for each input parameter.
-    /// OUTPUT_ACTIVITY must not be set if we implicitly return nothing (or explicitly return
-    /// `-> ()`). Otherwise it must be set to one of the allowed activities.
+    /// This macro uses forward-mode automatic differentiation to generate a new function.
+    /// It may only be applied to a function. The new function will compute the derivative
+    /// of the function to which the macro was applied.
+    ///
+    /// The expected usage syntax is:
+    /// `#[autodiff_forward(NAME, INPUT_ACTIVITIES, OUTPUT_ACTIVITY)]`
+    ///
+    /// - `NAME`: A string that represents a valid function name.
+    /// - `INPUT_ACTIVITIES`: Specifies one valid activity for each input parameter.
+    /// - `OUTPUT_ACTIVITY`: Must not be set if the function implicitly returns nothing
+    ///   (or explicitly returns `-> ()`). Otherwise, it must be set to one of the allowed activities.
     #[unstable(feature = "autodiff", issue = "124509")]
     #[allow_internal_unstable(rustc_attrs)]
     #[rustc_builtin_macro]
-    pub macro autodiff($item:item) {
+    pub macro autodiff_forward($item:item) {
+        /* compiler built-in */
+    }
+
+    /// This macro uses reverse-mode automatic differentiation to generate a new function.
+    /// It may only be applied to a function. The new function will compute the derivative
+    /// of the function to which the macro was applied.
+    ///
+    /// The expected usage syntax is:
+    /// `#[autodiff_reverse(NAME, INPUT_ACTIVITIES, OUTPUT_ACTIVITY)]`
+    ///
+    /// - `NAME`: A string that represents a valid function name.
+    /// - `INPUT_ACTIVITIES`: Specifies one valid activity for each input parameter.
+    /// - `OUTPUT_ACTIVITY`: Must not be set if the function implicitly returns nothing
+    ///   (or explicitly returns `-> ()`). Otherwise, it must be set to one of the allowed activities.
+    #[unstable(feature = "autodiff", issue = "124509")]
+    #[allow_internal_unstable(rustc_attrs)]
+    #[rustc_builtin_macro]
+    pub macro autodiff_reverse($item:item) {
         /* compiler built-in */
     }
 

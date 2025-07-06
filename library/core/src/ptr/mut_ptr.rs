@@ -9,24 +9,7 @@ use crate::mem::{self, SizedTypeProperties};
 use crate::slice::{self, SliceIndex};
 
 impl<T: ?Sized> *mut T {
-    /// Returns `true` if the pointer is null.
-    ///
-    /// Note that unsized types have many possible null pointers, as only the
-    /// raw data pointer is considered, not their length, vtable, etc.
-    /// Therefore, two pointers that are null may still not compare equal to
-    /// each other.
-    ///
-    /// # Panics during const evaluation
-    ///
-    /// If this method is used during const evaluation, and `self` is a pointer
-    /// that is offset beyond the bounds of the memory it initially pointed to,
-    /// then there might not be enough information to determine whether the
-    /// pointer is null. This is because the absolute address in memory is not
-    /// known at compile time. If the nullness of the pointer cannot be
-    /// determined, this method will panic.
-    ///
-    /// In-bounds pointers are never null, so the method will never panic for
-    /// such pointers.
+    #[doc = include_str!("docs/is_null.md")]
     ///
     /// # Examples
     ///
@@ -398,34 +381,7 @@ impl<T: ?Sized> *mut T {
         if self.is_null() { None } else { Some(unsafe { &*(self as *const MaybeUninit<T>) }) }
     }
 
-    /// Adds a signed offset to a pointer.
-    ///
-    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
-    /// offset of `3 * size_of::<T>()` bytes.
-    ///
-    /// # Safety
-    ///
-    /// If any of the following conditions are violated, the result is Undefined Behavior:
-    ///
-    /// * The offset in bytes, `count * size_of::<T>()`, computed on mathematical integers (without
-    ///   "wrapping around"), must fit in an `isize`.
-    ///
-    /// * If the computed offset is non-zero, then `self` must be [derived from][crate::ptr#provenance] a pointer to some
-    ///   [allocated object], and the entire memory range between `self` and the result must be in
-    ///   bounds of that allocated object. In particular, this range must not "wrap around" the edge
-    ///   of the address space.
-    ///
-    /// Allocated objects can never be larger than `isize::MAX` bytes, so if the computed offset
-    /// stays in bounds of the allocated object, it is guaranteed to satisfy the first requirement.
-    /// This implies, for instance, that `vec.as_ptr().add(vec.len())` (for `vec: Vec<T>`) is always
-    /// safe.
-    ///
-    /// Consider using [`wrapping_offset`] instead if these constraints are
-    /// difficult to satisfy. The only advantage of this method is that it
-    /// enables more aggressive compiler optimizations.
-    ///
-    /// [`wrapping_offset`]: #method.wrapping_offset
-    /// [allocated object]: crate::ptr#allocated-object
+    #[doc = include_str!("./docs/offset.md")]
     ///
     /// # Examples
     ///
@@ -442,8 +398,7 @@ impl<T: ?Sized> *mut T {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)]
-    // even without panics, this helps for Miri backtraces
+    #[track_caller]
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
@@ -497,7 +452,7 @@ impl<T: ?Sized> *mut T {
 
         // SAFETY: the caller must uphold the safety contract for `offset`.
         // The obtained pointer is valid for writes since the caller must
-        // guarantee that it points to the same allocated object as `self`.
+        // guarantee that it points to the same allocation as `self`.
         unsafe { intrinsics::offset(self, count) }
     }
 
@@ -515,7 +470,7 @@ impl<T: ?Sized> *mut T {
     #[inline(always)]
     #[stable(feature = "pointer_byte_offsets", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_pointer_byte_offsets", since = "1.75.0")]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         count == 0 ||
         (
@@ -539,17 +494,17 @@ impl<T: ?Sized> *mut T {
     ///
     /// This operation itself is always safe, but using the resulting pointer is not.
     ///
-    /// The resulting pointer "remembers" the [allocated object] that `self` points to
+    /// The resulting pointer "remembers" the [allocation] that `self` points to
     /// (this is called "[Provenance](ptr/index.html#provenance)").
-    /// The pointer must not be used to read or write other allocated objects.
+    /// The pointer must not be used to read or write other allocations.
     ///
     /// In other words, `let z = x.wrapping_offset((y as isize) - (x as isize))` does *not* make `z`
     /// the same as `y` even if we assume `T` has size `1` and there is no overflow: `z` is still
     /// attached to the object `x` is attached to, and dereferencing it is Undefined Behavior unless
-    /// `x` and `y` point into the same allocated object.
+    /// `x` and `y` point into the same allocation.
     ///
     /// Compared to [`offset`], this method basically delays the requirement of staying within the
-    /// same allocated object: [`offset`] is immediate Undefined Behavior when crossing object
+    /// same allocation: [`offset`] is immediate Undefined Behavior when crossing object
     /// boundaries; `wrapping_offset` produces a pointer but still leads to Undefined Behavior if a
     /// pointer is dereferenced when it is out-of-bounds of the object it is attached to. [`offset`]
     /// can be optimized better and is thus preferable in performance-sensitive code.
@@ -557,10 +512,10 @@ impl<T: ?Sized> *mut T {
     /// The delayed check only considers the value of the pointer that was dereferenced, not the
     /// intermediate values used during the computation of the final result. For example,
     /// `x.wrapping_offset(o).wrapping_offset(o.wrapping_neg())` is always the same as `x`. In other
-    /// words, leaving the allocated object and then re-entering it later is permitted.
+    /// words, leaving the allocation and then re-entering it later is permitted.
     ///
     /// [`offset`]: #method.offset
-    /// [allocated object]: crate::ptr#allocated-object
+    /// [allocation]: crate::ptr#allocation
     ///
     /// # Examples
     ///
@@ -849,7 +804,7 @@ impl<T: ?Sized> *mut T {
     /// * `self` and `origin` must either
     ///
     ///   * point to the same address, or
-    ///   * both be [derived from][crate::ptr#provenance] a pointer to the same [allocated object], and the memory range between
+    ///   * both be [derived from][crate::ptr#provenance] a pointer to the same [allocation], and the memory range between
     ///     the two pointers must be in bounds of that object. (See below for an example.)
     ///
     /// * The distance between the pointers, in bytes, must be an exact multiple
@@ -857,10 +812,10 @@ impl<T: ?Sized> *mut T {
     ///
     /// As a consequence, the absolute distance between the pointers, in bytes, computed on
     /// mathematical integers (without "wrapping around"), cannot overflow an `isize`. This is
-    /// implied by the in-bounds requirement, and the fact that no allocated object can be larger
+    /// implied by the in-bounds requirement, and the fact that no allocation can be larger
     /// than `isize::MAX` bytes.
     ///
-    /// The requirement for pointers to be derived from the same allocated object is primarily
+    /// The requirement for pointers to be derived from the same allocation is primarily
     /// needed for `const`-compatibility: the distance between pointers into *different* allocated
     /// objects is not known at compile-time. However, the requirement also exists at
     /// runtime and may be exploited by optimizations. If you wish to compute the difference between
@@ -869,7 +824,7 @@ impl<T: ?Sized> *mut T {
     // FIXME: recommend `addr()` instead of `as usize` once that is stable.
     ///
     /// [`add`]: #method.add
-    /// [allocated object]: crate::ptr#allocated-object
+    /// [allocation]: crate::ptr#allocation
     ///
     /// # Panics
     ///
@@ -1018,7 +973,7 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "ptr_sub_ptr", since = "1.87.0")]
     #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "1.87.0")]
     #[inline]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn offset_from_unsigned(self, origin: *const T) -> usize
     where
         T: Sized,
@@ -1040,50 +995,19 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "ptr_sub_ptr", since = "1.87.0")]
     #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "1.87.0")]
     #[inline]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn byte_offset_from_unsigned<U: ?Sized>(self, origin: *mut U) -> usize {
         // SAFETY: the caller must uphold the safety contract for `byte_offset_from_unsigned`.
         unsafe { (self as *const T).byte_offset_from_unsigned(origin) }
     }
 
-    /// Adds an unsigned offset to a pointer.
-    ///
-    /// This can only move the pointer forward (or not move it). If you need to move forward or
-    /// backward depending on the value, then you might want [`offset`](#method.offset) instead
-    /// which takes a signed offset.
-    ///
-    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
-    /// offset of `3 * size_of::<T>()` bytes.
-    ///
-    /// # Safety
-    ///
-    /// If any of the following conditions are violated, the result is Undefined Behavior:
-    ///
-    /// * The offset in bytes, `count * size_of::<T>()`, computed on mathematical integers (without
-    ///   "wrapping around"), must fit in an `isize`.
-    ///
-    /// * If the computed offset is non-zero, then `self` must be [derived from][crate::ptr#provenance] a pointer to some
-    ///   [allocated object], and the entire memory range between `self` and the result must be in
-    ///   bounds of that allocated object. In particular, this range must not "wrap around" the edge
-    ///   of the address space.
-    ///
-    /// Allocated objects can never be larger than `isize::MAX` bytes, so if the computed offset
-    /// stays in bounds of the allocated object, it is guaranteed to satisfy the first requirement.
-    /// This implies, for instance, that `vec.as_ptr().add(vec.len())` (for `vec: Vec<T>`) is always
-    /// safe.
-    ///
-    /// Consider using [`wrapping_add`] instead if these constraints are
-    /// difficult to satisfy. The only advantage of this method is that it
-    /// enables more aggressive compiler optimizations.
-    ///
-    /// [`wrapping_add`]: #method.wrapping_add
-    /// [allocated object]: crate::ptr#allocated-object
+    #[doc = include_str!("./docs/add.md")]
     ///
     /// # Examples
     ///
     /// ```
-    /// let s: &str = "123";
-    /// let ptr: *const u8 = s.as_ptr();
+    /// let mut s: String = "123".to_string();
+    /// let ptr: *mut u8 = s.as_mut_ptr();
     ///
     /// unsafe {
     ///     assert_eq!('2', *ptr.add(1) as char);
@@ -1094,8 +1018,7 @@ impl<T: ?Sized> *mut T {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)]
-    // even without panics, this helps for Miri backtraces
+    #[track_caller]
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
@@ -1166,7 +1089,7 @@ impl<T: ?Sized> *mut T {
     #[inline(always)]
     #[stable(feature = "pointer_byte_offsets", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_pointer_byte_offsets", since = "1.75.0")]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         // If count is zero, any pointer is valid including null pointer.
         (count == 0) ||
@@ -1203,12 +1126,12 @@ impl<T: ?Sized> *mut T {
     ///   "wrapping around"), must fit in an `isize`.
     ///
     /// * If the computed offset is non-zero, then `self` must be [derived from][crate::ptr#provenance] a pointer to some
-    ///   [allocated object], and the entire memory range between `self` and the result must be in
-    ///   bounds of that allocated object. In particular, this range must not "wrap around" the edge
+    ///   [allocation], and the entire memory range between `self` and the result must be in
+    ///   bounds of that allocation. In particular, this range must not "wrap around" the edge
     ///   of the address space.
     ///
-    /// Allocated objects can never be larger than `isize::MAX` bytes, so if the computed offset
-    /// stays in bounds of the allocated object, it is guaranteed to satisfy the first requirement.
+    /// Allocations can never be larger than `isize::MAX` bytes, so if the computed offset
+    /// stays in bounds of the allocation, it is guaranteed to satisfy the first requirement.
     /// This implies, for instance, that `vec.as_ptr().add(vec.len())` (for `vec: Vec<T>`) is always
     /// safe.
     ///
@@ -1217,7 +1140,7 @@ impl<T: ?Sized> *mut T {
     /// enables more aggressive compiler optimizations.
     ///
     /// [`wrapping_sub`]: #method.wrapping_sub
-    /// [allocated object]: crate::ptr#allocated-object
+    /// [allocation]: crate::ptr#allocation
     ///
     /// # Examples
     ///
@@ -1234,8 +1157,7 @@ impl<T: ?Sized> *mut T {
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)]
-    // even without panics, this helps for Miri backtraces
+    #[track_caller]
     // Note: It is the caller's responsibility to ensure that `self` is non-null and properly aligned.
     // These conditions are not verified as part of the preconditions.
     #[requires(
@@ -1312,7 +1234,7 @@ impl<T: ?Sized> *mut T {
     #[inline(always)]
     #[stable(feature = "pointer_byte_offsets", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_pointer_byte_offsets", since = "1.75.0")]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     #[requires(
         // If count is zero, any pointer is valid including null pointer.
         (count == 0) ||
@@ -1341,16 +1263,16 @@ impl<T: ?Sized> *mut T {
     ///
     /// This operation itself is always safe, but using the resulting pointer is not.
     ///
-    /// The resulting pointer "remembers" the [allocated object] that `self` points to; it must not
-    /// be used to read or write other allocated objects.
+    /// The resulting pointer "remembers" the [allocation] that `self` points to; it must not
+    /// be used to read or write other allocations.
     ///
     /// In other words, `let z = x.wrapping_add((y as usize) - (x as usize))` does *not* make `z`
     /// the same as `y` even if we assume `T` has size `1` and there is no overflow: `z` is still
     /// attached to the object `x` is attached to, and dereferencing it is Undefined Behavior unless
-    /// `x` and `y` point into the same allocated object.
+    /// `x` and `y` point into the same allocation.
     ///
     /// Compared to [`add`], this method basically delays the requirement of staying within the
-    /// same allocated object: [`add`] is immediate Undefined Behavior when crossing object
+    /// same allocation: [`add`] is immediate Undefined Behavior when crossing object
     /// boundaries; `wrapping_add` produces a pointer but still leads to Undefined Behavior if a
     /// pointer is dereferenced when it is out-of-bounds of the object it is attached to. [`add`]
     /// can be optimized better and is thus preferable in performance-sensitive code.
@@ -1358,10 +1280,10 @@ impl<T: ?Sized> *mut T {
     /// The delayed check only considers the value of the pointer that was dereferenced, not the
     /// intermediate values used during the computation of the final result. For example,
     /// `x.wrapping_add(o).wrapping_sub(o)` is always the same as `x`. In other words, leaving the
-    /// allocated object and then re-entering it later is permitted.
+    /// allocation and then re-entering it later is permitted.
     ///
     /// [`add`]: #method.add
-    /// [allocated object]: crate::ptr#allocated-object
+    /// [allocation]: crate::ptr#allocation
     ///
     /// # Examples
     ///
@@ -1417,16 +1339,16 @@ impl<T: ?Sized> *mut T {
     ///
     /// This operation itself is always safe, but using the resulting pointer is not.
     ///
-    /// The resulting pointer "remembers" the [allocated object] that `self` points to; it must not
-    /// be used to read or write other allocated objects.
+    /// The resulting pointer "remembers" the [allocation] that `self` points to; it must not
+    /// be used to read or write other allocations.
     ///
     /// In other words, `let z = x.wrapping_sub((x as usize) - (y as usize))` does *not* make `z`
     /// the same as `y` even if we assume `T` has size `1` and there is no overflow: `z` is still
     /// attached to the object `x` is attached to, and dereferencing it is Undefined Behavior unless
-    /// `x` and `y` point into the same allocated object.
+    /// `x` and `y` point into the same allocation.
     ///
     /// Compared to [`sub`], this method basically delays the requirement of staying within the
-    /// same allocated object: [`sub`] is immediate Undefined Behavior when crossing object
+    /// same allocation: [`sub`] is immediate Undefined Behavior when crossing object
     /// boundaries; `wrapping_sub` produces a pointer but still leads to Undefined Behavior if a
     /// pointer is dereferenced when it is out-of-bounds of the object it is attached to. [`sub`]
     /// can be optimized better and is thus preferable in performance-sensitive code.
@@ -1434,10 +1356,10 @@ impl<T: ?Sized> *mut T {
     /// The delayed check only considers the value of the pointer that was dereferenced, not the
     /// intermediate values used during the computation of the final result. For example,
     /// `x.wrapping_add(o).wrapping_sub(o)` is always the same as `x`. In other words, leaving the
-    /// allocated object and then re-entering it later is permitted.
+    /// allocation and then re-entering it later is permitted.
     ///
     /// [`sub`]: #method.sub
-    /// [allocated object]: crate::ptr#allocated-object
+    /// [allocation]: crate::ptr#allocation
     ///
     /// # Examples
     ///
@@ -1493,7 +1415,7 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_ptr_read", since = "1.71.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn read(self) -> T
     where
         T: Sized,
@@ -1514,7 +1436,7 @@ impl<T: ?Sized> *mut T {
     /// [`ptr::read_volatile`]: crate::ptr::read_volatile()
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub unsafe fn read_volatile(self) -> T
     where
         T: Sized,
@@ -1534,7 +1456,7 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_ptr_read", since = "1.71.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn read_unaligned(self) -> T
     where
         T: Sized,
@@ -1554,7 +1476,7 @@ impl<T: ?Sized> *mut T {
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn copy_to(self, dest: *mut T, count: usize)
     where
         T: Sized,
@@ -1574,7 +1496,7 @@ impl<T: ?Sized> *mut T {
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn copy_to_nonoverlapping(self, dest: *mut T, count: usize)
     where
         T: Sized,
@@ -1594,7 +1516,7 @@ impl<T: ?Sized> *mut T {
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn copy_from(self, src: *const T, count: usize)
     where
         T: Sized,
@@ -1614,7 +1536,7 @@ impl<T: ?Sized> *mut T {
     #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn copy_from_nonoverlapping(self, src: *const T, count: usize)
     where
         T: Sized,
@@ -1644,7 +1566,7 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_ptr_write", since = "1.83.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn write(self, val: T)
     where
         T: Sized,
@@ -1663,7 +1585,7 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_ptr_write", since = "1.83.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn write_bytes(self, val: u8, count: usize)
     where
         T: Sized,
@@ -1684,7 +1606,7 @@ impl<T: ?Sized> *mut T {
     /// [`ptr::write_volatile`]: crate::ptr::write_volatile()
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub unsafe fn write_volatile(self, val: T)
     where
         T: Sized,
@@ -1704,7 +1626,7 @@ impl<T: ?Sized> *mut T {
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_ptr_write", since = "1.83.0")]
     #[inline(always)]
-    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[track_caller]
     pub const unsafe fn write_unaligned(self, val: T)
     where
         T: Sized,
@@ -1946,7 +1868,7 @@ impl<T> *mut [T] {
     ///
     /// # Safety
     ///
-    /// `mid` must be [in-bounds] of the underlying [allocated object].
+    /// `mid` must be [in-bounds] of the underlying [allocation].
     /// Which means `self` must be dereferenceable and span a single allocation
     /// that is at least `mid * size_of::<T>()` bytes long. Not upholding these
     /// requirements is *[undefined behavior]* even if the resulting pointers are not used.
@@ -1957,7 +1879,7 @@ impl<T> *mut [T] {
     ///
     /// [`split_at_mut_unchecked`]: #method.split_at_mut_unchecked
     /// [in-bounds]: #method.add
-    /// [allocated object]: crate::ptr#allocated-object
+    /// [allocation]: crate::ptr#allocation
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     ///
     /// # Examples
@@ -1992,13 +1914,14 @@ impl<T> *mut [T] {
     ///
     /// # Safety
     ///
-    /// `mid` must be [in-bounds] of the underlying [allocated object].
+    /// `mid` must be [in-bounds] of the underlying [allocation].
     /// Which means `self` must be dereferenceable and span a single allocation
     /// that is at least `mid * size_of::<T>()` bytes long. Not upholding these
     /// requirements is *[undefined behavior]* even if the resulting pointers are not used.
     ///
     /// [in-bounds]: #method.add
     /// [out-of-bounds index]: #method.add
+    /// [allocation]: crate::ptr#allocation
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     ///
     /// # Examples
@@ -2081,53 +2004,10 @@ impl<T> *mut [T] {
         unsafe { index.get_unchecked_mut(self) }
     }
 
-    /// Returns `None` if the pointer is null, or else returns a shared slice to
-    /// the value wrapped in `Some`. In contrast to [`as_ref`], this does not require
-    /// that the value has to be initialized.
+    #[doc = include_str!("docs/as_uninit_slice.md")]
     ///
-    /// For the mutable counterpart see [`as_uninit_slice_mut`].
-    ///
-    /// [`as_ref`]: pointer#method.as_ref-1
-    /// [`as_uninit_slice_mut`]: #method.as_uninit_slice_mut
-    ///
-    /// # Safety
-    ///
-    /// When calling this method, you have to ensure that *either* the pointer is null *or*
-    /// all of the following is true:
-    ///
-    /// * The pointer must be [valid] for reads for `ptr.len() * size_of::<T>()` many bytes,
-    ///   and it must be properly aligned. This means in particular:
-    ///
-    ///     * The entire memory range of this slice must be contained within a single [allocated object]!
-    ///       Slices can never span across multiple allocated objects.
-    ///
-    ///     * The pointer must be aligned even for zero-length slices. One
-    ///       reason for this is that enum layout optimizations may rely on references
-    ///       (including slices of any length) being aligned and non-null to distinguish
-    ///       them from other data. You can obtain a pointer that is usable as `data`
-    ///       for zero-length slices using [`NonNull::dangling()`].
-    ///
-    /// * The total size `ptr.len() * size_of::<T>()` of the slice must be no larger than `isize::MAX`.
-    ///   See the safety documentation of [`pointer::offset`].
-    ///
-    /// * You must enforce Rust's aliasing rules, since the returned lifetime `'a` is
-    ///   arbitrarily chosen and does not necessarily reflect the actual lifetime of the data.
-    ///   In particular, while this reference exists, the memory the pointer points to must
-    ///   not get mutated (except inside `UnsafeCell`).
-    ///
-    /// This applies even if the result of this method is unused!
-    ///
-    /// See also [`slice::from_raw_parts`][].
-    ///
-    /// [valid]: crate::ptr#safety
-    /// [allocated object]: crate::ptr#allocated-object
-    ///
-    /// # Panics during const evaluation
-    ///
-    /// This method will panic during const evaluation if the pointer cannot be
-    /// determined to be null or not. See [`is_null`] for more information.
-    ///
-    /// [`is_null`]: #method.is_null-1
+    /// # See Also
+    /// For the mutable counterpart see [`as_uninit_slice_mut`](pointer::as_uninit_slice_mut).
     #[inline]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     pub const unsafe fn as_uninit_slice<'a>(self) -> Option<&'a [MaybeUninit<T>]> {
@@ -2156,8 +2036,8 @@ impl<T> *mut [T] {
     /// * The pointer must be [valid] for reads and writes for `ptr.len() * size_of::<T>()`
     ///   many bytes, and it must be properly aligned. This means in particular:
     ///
-    ///     * The entire memory range of this slice must be contained within a single [allocated object]!
-    ///       Slices can never span across multiple allocated objects.
+    ///     * The entire memory range of this slice must be contained within a single [allocation]!
+    ///       Slices can never span across multiple allocations.
     ///
     ///     * The pointer must be aligned even for zero-length slices. One
     ///       reason for this is that enum layout optimizations may rely on references
@@ -2178,7 +2058,7 @@ impl<T> *mut [T] {
     /// See also [`slice::from_raw_parts_mut`][].
     ///
     /// [valid]: crate::ptr#safety
-    /// [allocated object]: crate::ptr#allocated-object
+    /// [allocation]: crate::ptr#allocation
     ///
     /// # Panics during const evaluation
     ///
