@@ -10,6 +10,10 @@ box, Flux checks for various issues such as
 - division by zero
 - array bounds violations
 
+Currently, Flux does not distinguish between logic errors (e.g., those that may cause a panic)
+and errors that can lead to undefined behavior. They both manifest
+as contract violations.
+
 ## Installation
 
 See the [installation section of the Flux book](https://flux-rs.github.io/flux/install.html)
@@ -237,3 +241,16 @@ various `flux::trusted` annotations [as shown here](https://github.com/flux-rs/v
 You can find more information on using Flux—especially on how to write different
 kinds of specifications and configuration options—in [the Flux book](https://flux-rs.github.io/flux).
 Happy proving!
+
+## Caveats and Current Limitations
+
+Flux is aimed to be a lightweight verifier that is predictable and fully automated. To achieve this,
+it restricts refinement predicates to decidable fragments of first-order logic
+(i.e., without quantifiers). As a result, some properties (such as sortedness of arrays) may be
+hard to specify.
+
+Flux also has limited and conservative support for unsafe code. It can track properties of
+pointers (e.g., alignment and provenance) but not the values of data written through
+them.
+
+Lastly, Flux is under active development, and many Rust features are not yet supported.
