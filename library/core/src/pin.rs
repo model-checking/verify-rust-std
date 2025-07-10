@@ -1092,7 +1092,6 @@ pub use self::unsafe_pinned::UnsafePinned;
 #[rustc_pub_transparent]
 #[derive(Copy, Clone)]
 pub struct Pin<Ptr> {
-    /// Only public for bootstrap.
     pointer: Ptr,
 }
 
@@ -1936,6 +1935,7 @@ unsafe impl<T: ?Sized> PinCoerceUnsized for *mut T {}
 #[stable(feature = "pin_macro", since = "1.68.0")]
 #[rustc_macro_transparency = "semitransparent"]
 #[allow_internal_unstable(super_let)]
+#[rustc_diagnostic_item = "pin_macro"]
 // `super` gets removed by rustfmt
 #[rustfmt::skip]
 pub macro pin($value:expr $(,)?) {

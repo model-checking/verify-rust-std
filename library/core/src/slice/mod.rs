@@ -21,6 +21,7 @@ use crate::{fmt, hint, ptr, range, slice};
     issue = "none",
     reason = "exposed from core to be reused in std; use the memchr crate"
 )]
+#[doc(hidden)]
 /// Pure Rust memchr implementation, taken from rust-memchr
 pub mod memchr;
 
@@ -631,6 +632,7 @@ impl<T> [T] {
     #[rustc_no_implicit_autorefs]
     #[inline]
     #[must_use]
+    #[track_caller]
     pub unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
         I: SliceIndex<Self>,
@@ -674,6 +676,7 @@ impl<T> [T] {
     #[rustc_no_implicit_autorefs]
     #[inline]
     #[must_use]
+    #[track_caller]
     pub unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: SliceIndex<Self>,
@@ -935,6 +938,7 @@ impl<T> [T] {
     /// [`swap`]: slice::swap
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
+    #[track_caller]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -1307,6 +1311,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "slice_as_chunks", since = "1.88.0")]
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1502,6 +1507,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "slice_as_chunks", since = "1.88.0")]
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -2061,6 +2067,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_split_at_unchecked", since = "1.77.0")]
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2114,6 +2121,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_split_at_mut", since = "1.83.0")]
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -2756,6 +2764,89 @@ impl<T> [T] {
         None
     }
 
+    /// Returns a subslice with the optional prefix removed.
+    ///
+    /// If the slice starts with `prefix`, returns the subslice after the prefix.  If `prefix`
+    /// is empty or the slice does not start with `prefix`, simply returns the original slice.
+    /// If `prefix` is equal to the original slice, returns an empty slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(trim_prefix_suffix)]
+    ///
+    /// let v = &[10, 40, 30];
+    ///
+    /// // Prefix present - removes it
+    /// assert_eq!(v.trim_prefix(&[10]), &[40, 30][..]);
+    /// assert_eq!(v.trim_prefix(&[10, 40]), &[30][..]);
+    /// assert_eq!(v.trim_prefix(&[10, 40, 30]), &[][..]);
+    ///
+    /// // Prefix absent - returns original slice
+    /// assert_eq!(v.trim_prefix(&[50]), &[10, 40, 30][..]);
+    /// assert_eq!(v.trim_prefix(&[10, 50]), &[10, 40, 30][..]);
+    ///
+    /// let prefix : &str = "he";
+    /// assert_eq!(b"hello".trim_prefix(prefix.as_bytes()), b"llo".as_ref());
+    /// ```
+    #[must_use = "returns the subslice without modifying the original"]
+    #[unstable(feature = "trim_prefix_suffix", issue = "142312")]
+    pub fn trim_prefix<P: SlicePattern<Item = T> + ?Sized>(&self, prefix: &P) -> &[T]
+    where
+        T: PartialEq,
+    {
+        // This function will need rewriting if and when SlicePattern becomes more sophisticated.
+        let prefix = prefix.as_slice();
+        let n = prefix.len();
+        if n <= self.len() {
+            let (head, tail) = self.split_at(n);
+            if head == prefix {
+                return tail;
+            }
+        }
+        self
+    }
+
+    /// Returns a subslice with the optional suffix removed.
+    ///
+    /// If the slice ends with `suffix`, returns the subslice before the suffix.  If `suffix`
+    /// is empty or the slice does not end with `suffix`, simply returns the original slice.
+    /// If `suffix` is equal to the original slice, returns an empty slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(trim_prefix_suffix)]
+    ///
+    /// let v = &[10, 40, 30];
+    ///
+    /// // Suffix present - removes it
+    /// assert_eq!(v.trim_suffix(&[30]), &[10, 40][..]);
+    /// assert_eq!(v.trim_suffix(&[40, 30]), &[10][..]);
+    /// assert_eq!(v.trim_suffix(&[10, 40, 30]), &[][..]);
+    ///
+    /// // Suffix absent - returns original slice
+    /// assert_eq!(v.trim_suffix(&[50]), &[10, 40, 30][..]);
+    /// assert_eq!(v.trim_suffix(&[50, 30]), &[10, 40, 30][..]);
+    /// ```
+    #[must_use = "returns the subslice without modifying the original"]
+    #[unstable(feature = "trim_prefix_suffix", issue = "142312")]
+    pub fn trim_suffix<P: SlicePattern<Item = T> + ?Sized>(&self, suffix: &P) -> &[T]
+    where
+        T: PartialEq,
+    {
+        // This function will need rewriting if and when SlicePattern becomes more sophisticated.
+        let suffix = suffix.as_slice();
+        let (len, n) = (self.len(), suffix.len());
+        if n <= len {
+            let (head, tail) = self.split_at(len - n);
+            if tail == suffix {
+                return head;
+            }
+        }
+        self
+    }
+
     /// Binary searches this slice for a given element.
     /// If the slice is not sorted, the returned result is unspecified and
     /// meaningless.
@@ -2986,7 +3077,7 @@ impl<T> [T] {
         self.binary_search_by(|k| f(k).cmp(b))
     }
 
-    /// Sorts the slice **without** preserving the initial order of equal elements.
+    /// Sorts the slice in ascending order **without** preserving the initial order of equal elements.
     ///
     /// This sort is unstable (i.e., may reorder equal elements), in-place (i.e., does not
     /// allocate), and *O*(*n* \* log(*n*)) worst-case.
@@ -3047,8 +3138,8 @@ impl<T> [T] {
         sort::unstable::sort(self, &mut T::lt);
     }
 
-    /// Sorts the slice with a comparison function, **without** preserving the initial order of
-    /// equal elements.
+    /// Sorts the slice in ascending order with a comparison function, **without** preserving the
+    /// initial order of equal elements.
     ///
     /// This sort is unstable (i.e., may reorder equal elements), in-place (i.e., does not
     /// allocate), and *O*(*n* \* log(*n*)) worst-case.
@@ -3102,8 +3193,8 @@ impl<T> [T] {
         sort::unstable::sort(self, &mut |a, b| compare(a, b) == Ordering::Less);
     }
 
-    /// Sorts the slice with a key extraction function, **without** preserving the initial order of
-    /// equal elements.
+    /// Sorts the slice in ascending order with a key extraction function, **without** preserving
+    /// the initial order of equal elements.
     ///
     /// This sort is unstable (i.e., may reorder equal elements), in-place (i.e., does not
     /// allocate), and *O*(*n* \* log(*n*)) worst-case.
@@ -4642,6 +4733,7 @@ impl<T> [T] {
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[stable(feature = "get_many_mut", since = "1.86.0")]
     #[inline]
+    #[track_caller]
     pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
         &mut self,
         indices: [I; N],

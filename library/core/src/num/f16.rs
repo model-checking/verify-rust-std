@@ -174,6 +174,7 @@ impl f16 {
     /// [Machine epsilon]: https://en.wikipedia.org/wiki/Machine_epsilon
     /// [`MANTISSA_DIGITS`]: f16::MANTISSA_DIGITS
     #[unstable(feature = "f16", issue = "116909")]
+    #[rustc_diagnostic_item = "f16_epsilon"]
     pub const EPSILON: f16 = 9.7656e-4_f16;
 
     /// Smallest finite `f16` value.
@@ -1404,6 +1405,7 @@ impl f16 {
 // Functions in this module fall into `core_float_math`
 // #[unstable(feature = "core_float_math", issue = "137578")]
 #[cfg(not(test))]
+#[doc(test(attr(feature(cfg_target_has_reliable_f16_f128), expect(internal_features))))]
 impl f16 {
     /// Returns the largest integer less than or equal to `self`.
     ///
@@ -1413,8 +1415,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1430,8 +1430,10 @@ impl f16 {
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f16", issue = "116909")]
+    #[rustc_const_unstable(feature = "f16", issue = "116909")]
+    // #[rustc_const_unstable(feature = "const_float_round_methods", issue = "141555")]
     #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn floor(self) -> f16 {
+    pub const fn floor(self) -> f16 {
         // SAFETY: intrinsic with no preconditions
         unsafe { intrinsics::floorf16(self) }
     }
@@ -1444,8 +1446,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1460,8 +1460,10 @@ impl f16 {
     #[doc(alias = "ceiling")]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f16", issue = "116909")]
+    #[rustc_const_unstable(feature = "f16", issue = "116909")]
+    // #[rustc_const_unstable(feature = "const_float_round_methods", issue = "141555")]
     #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn ceil(self) -> f16 {
+    pub const fn ceil(self) -> f16 {
         // SAFETY: intrinsic with no preconditions
         unsafe { intrinsics::ceilf16(self) }
     }
@@ -1475,8 +1477,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1496,8 +1496,10 @@ impl f16 {
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f16", issue = "116909")]
+    #[rustc_const_unstable(feature = "f16", issue = "116909")]
+    // #[rustc_const_unstable(feature = "const_float_round_methods", issue = "141555")]
     #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn round(self) -> f16 {
+    pub const fn round(self) -> f16 {
         // SAFETY: intrinsic with no preconditions
         unsafe { intrinsics::roundf16(self) }
     }
@@ -1511,8 +1513,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1530,8 +1530,10 @@ impl f16 {
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f16", issue = "116909")]
+    #[rustc_const_unstable(feature = "f16", issue = "116909")]
+    // #[rustc_const_unstable(feature = "const_float_round_methods", issue = "141555")]
     #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn round_ties_even(self) -> f16 {
+    pub const fn round_ties_even(self) -> f16 {
         intrinsics::round_ties_even_f16(self)
     }
 
@@ -1544,8 +1546,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1562,8 +1562,10 @@ impl f16 {
     #[doc(alias = "truncate")]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f16", issue = "116909")]
+    #[rustc_const_unstable(feature = "f16", issue = "116909")]
+    // #[rustc_const_unstable(feature = "const_float_round_methods", issue = "141555")]
     #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn trunc(self) -> f16 {
+    pub const fn trunc(self) -> f16 {
         // SAFETY: intrinsic with no preconditions
         unsafe { intrinsics::truncf16(self) }
     }
@@ -1576,8 +1578,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1593,8 +1593,10 @@ impl f16 {
     #[inline]
     #[rustc_allow_incoherent_impl]
     #[unstable(feature = "f16", issue = "116909")]
+    #[rustc_const_unstable(feature = "f16", issue = "116909")]
+    // #[rustc_const_unstable(feature = "const_float_round_methods", issue = "141555")]
     #[must_use = "method returns a new number and does not mutate the original value"]
-    pub fn fract(self) -> f16 {
+    pub const fn fract(self) -> f16 {
         self - self.trunc()
     }
 
@@ -1616,8 +1618,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1664,8 +1664,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1709,8 +1707,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1749,8 +1745,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1784,8 +1778,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///
@@ -1822,8 +1814,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #![feature(cfg_target_has_reliable_f16_f128)]
-    /// # #![expect(internal_features)]
     /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16_math)] {
     ///

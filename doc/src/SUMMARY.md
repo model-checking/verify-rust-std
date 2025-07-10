@@ -36,4 +36,6 @@
   - [20: Verify the safety of char-related functions in str::pattern](./challenges/0020-str-pattern-pt1.md)
   - [21: Verify the safety of substring-related functions in str::pattern](./challenges/0021-str-pattern-pt2.md)
   - [22: Verify the safety of str iter functions](./challenges/0022-str-iter.md)
+  - [23: Verify the safety of Vec functions part 1](./challenges/0023-vec-pt1.md)
+  - [24: Verify the safety of Vec functions part 2](./challenges/0024-vec-pt2.md)
   - [25: Verify the safety of `VecDeque` functions](./challenges/0025-vecdeque.md)

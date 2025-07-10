@@ -93,15 +93,15 @@ pub unsafe auto trait Send {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> !Send for *const T {}
+impl<T: PointeeSized> !Send for *const T {}
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> !Send for *mut T {}
+impl<T: PointeeSized> !Send for *mut T {}
 
 // Most instances arise automatically, but this instance is needed to link up `T: Sync` with
 // `&T: Send` (and it also removes the unsound default instance `T Send` -> `&T: Send` that would
 // otherwise exist).
 #[stable(feature = "rust1", since = "1.0.0")]
-unsafe impl<T: Sync + ?Sized> Send for &T {}
+unsafe impl<T: Sync + PointeeSized> Send for &T {}
 
 /// Types with a constant size known at compile time.
 ///
@@ -151,9 +151,46 @@ unsafe impl<T: Sync + ?Sized> Send for &T {}
 #[rustc_specialization_trait]
 #[rustc_deny_explicit_impl]
 #[rustc_do_not_implement_via_object]
+// `Sized` being coinductive, despite having supertraits, is okay as there are no user-written impls,
+// and we know that the supertraits are always implemented if the subtrait is just by looking at
+// the builtin impls.
 #[rustc_coinductive]
-pub trait Sized {
+pub trait Sized: MetaSized {
     // Empty.
+}
+
+/// Types with a size that can be determined from pointer metadata.
+#[unstable(feature = "sized_hierarchy", issue = "none")]
+#[lang = "meta_sized"]
+#[diagnostic::on_unimplemented(
+    message = "the size for values of type `{Self}` cannot be known",
+    label = "doesn't have a known size"
+)]
+#[fundamental]
+#[rustc_specialization_trait]
+#[rustc_deny_explicit_impl]
+#[rustc_do_not_implement_via_object]
+// `MetaSized` being coinductive, despite having supertraits, is okay for the same reasons as
+// `Sized` above.
+#[rustc_coinductive]
+pub trait MetaSized: PointeeSized {
+    // Empty
+}
+
+/// Types that may or may not have a size.
+#[unstable(feature = "sized_hierarchy", issue = "none")]
+#[lang = "pointee_sized"]
+#[diagnostic::on_unimplemented(
+    message = "values of type `{Self}` may or may not have a size",
+    label = "may or may not have a known size"
+)]
+#[fundamental]
+#[rustc_specialization_trait]
+#[rustc_deny_explicit_impl]
+#[rustc_do_not_implement_via_object]
+#[rustc_coinductive]
+pub trait PointeeSized {
+    // Empty
 }
 
 /// Types that can be "unsized" to a dynamically-sized type.
@@ -192,7 +229,7 @@ pub trait Sized {
 #[lang = "unsize"]
 #[rustc_deny_explicit_impl]
 #[rustc_do_not_implement_via_object]
-pub trait Unsize<T: ?Sized> {
+pub trait Unsize<T: PointeeSized>: PointeeSized {
     // Empty.
 }
 
@@ -200,7 +237,7 @@ pub trait Unsize<T: ?Sized> {
 ///
 /// Constants are only allowed as patterns if (a) their type implements
 /// `PartialEq`, and (b) interpreting the value of the constant as a pattern
-/// is equialent to calling `PartialEq`. This ensures that constants used as
+/// is equivalent to calling `PartialEq`. This ensures that constants used as
 /// patterns cannot expose implementation details in an unexpected way or
 /// cause semver hazards.
 ///
@@ -229,7 +266,7 @@ marker_impls! {
         (),
         {T, const N: usize} [T; N],
         {T} [T],
-        {T: ?Sized} &T,
+        {T: PointeeSized} &T,
 }
 
 /// Types whose values can be duplicated simply by copying bits.
@@ -442,8 +479,8 @@ marker_impls! {
         isize, i8, i16, i32, i64, i128,
         f16, f32, f64, f128,
         bool, char,
-        {T: ?Sized} *const T,
-        {T: ?Sized} *mut T,
+        {T: PointeeSized} *const T,
+        {T: PointeeSized} *mut T,
 
 }
 
@@ -452,7 +489,7 @@ impl Copy for ! {}
 
 /// Shared references can be copied, but mutable references *cannot*!
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> Copy for &T {}
+impl<T: PointeeSized> Copy for &T {}
 
 /// Marker trait for the types that are allowed in union fields and unsafe
 /// binder types.
@@ -550,72 +587,72 @@ pub trait BikeshedGuaranteedNoDrop {}
 #[lang = "sync"]
 #[rustc_on_unimplemented(
     on(
-        _Self = "core::cell::once::OnceCell<T>",
+        Self = "core::cell::once::OnceCell<T>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::OnceLock` instead"
     ),
     on(
-        _Self = "core::cell::Cell<u8>",
+        Self = "core::cell::Cell<u8>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU8` instead",
     ),
     on(
-        _Self = "core::cell::Cell<u16>",
+        Self = "core::cell::Cell<u16>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU16` instead",
     ),
     on(
-        _Self = "core::cell::Cell<u32>",
+        Self = "core::cell::Cell<u32>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU32` instead",
     ),
     on(
-        _Self = "core::cell::Cell<u64>",
+        Self = "core::cell::Cell<u64>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU64` instead",
     ),
     on(
-        _Self = "core::cell::Cell<usize>",
+        Self = "core::cell::Cell<usize>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicUsize` instead",
     ),
     on(
-        _Self = "core::cell::Cell<i8>",
+        Self = "core::cell::Cell<i8>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicI8` instead",
     ),
     on(
-        _Self = "core::cell::Cell<i16>",
+        Self = "core::cell::Cell<i16>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicI16` instead",
     ),
     on(
-        _Self = "core::cell::Cell<i32>",
+        Self = "core::cell::Cell<i32>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicI32` instead",
     ),
     on(
-        _Self = "core::cell::Cell<i64>",
+        Self = "core::cell::Cell<i64>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicI64` instead",
     ),
     on(
-        _Self = "core::cell::Cell<isize>",
+        Self = "core::cell::Cell<isize>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicIsize` instead",
     ),
     on(
-        _Self = "core::cell::Cell<bool>",
+        Self = "core::cell::Cell<bool>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicBool` instead",
     ),
     on(
         all(
-            _Self = "core::cell::Cell<T>",
-            not(_Self = "core::cell::Cell<u8>"),
-            not(_Self = "core::cell::Cell<u16>"),
-            not(_Self = "core::cell::Cell<u32>"),
-            not(_Self = "core::cell::Cell<u64>"),
-            not(_Self = "core::cell::Cell<usize>"),
-            not(_Self = "core::cell::Cell<i8>"),
-            not(_Self = "core::cell::Cell<i16>"),
-            not(_Self = "core::cell::Cell<i32>"),
-            not(_Self = "core::cell::Cell<i64>"),
-            not(_Self = "core::cell::Cell<isize>"),
-            not(_Self = "core::cell::Cell<bool>")
+            Self = "core::cell::Cell<T>",
+            not(Self = "core::cell::Cell<u8>"),
+            not(Self = "core::cell::Cell<u16>"),
+            not(Self = "core::cell::Cell<u32>"),
+            not(Self = "core::cell::Cell<u64>"),
+            not(Self = "core::cell::Cell<usize>"),
+            not(Self = "core::cell::Cell<i8>"),
+            not(Self = "core::cell::Cell<i16>"),
+            not(Self = "core::cell::Cell<i32>"),
+            not(Self = "core::cell::Cell<i64>"),
+            not(Self = "core::cell::Cell<isize>"),
+            not(Self = "core::cell::Cell<bool>")
         ),
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock`",
     ),
     on(
-        _Self = "core::cell::RefCell<T>",
+        Self = "core::cell::RefCell<T>",
         note = "if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` instead",
     ),
     message = "`{Self}` cannot be shared between threads safely",
@@ -636,9 +673,9 @@ pub unsafe auto trait Sync {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> !Sync for *const T {}
+impl<T: PointeeSized> !Sync for *const T {}
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> !Sync for *mut T {}
+impl<T: PointeeSized> !Sync for *mut T {}
 
 /// Zero-sized type used to mark things that "act like" they own a `T`.
 ///
@@ -775,57 +812,57 @@ impl<T: ?Sized> !Sync for *mut T {}
 /// [drop check]: Drop#drop-check
 #[lang = "phantom_data"]
 #[stable(feature = "rust1", since = "1.0.0")]
-pub struct PhantomData<T: ?Sized>;
+pub struct PhantomData<T: PointeeSized>;
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> Hash for PhantomData<T> {
+impl<T: PointeeSized> Hash for PhantomData<T> {
     #[inline]
     fn hash<H: Hasher>(&self, _: &mut H) {}
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> cmp::PartialEq for PhantomData<T> {
+impl<T: PointeeSized> cmp::PartialEq for PhantomData<T> {
     fn eq(&self, _other: &PhantomData<T>) -> bool {
         true
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> cmp::Eq for PhantomData<T> {}
+impl<T: PointeeSized> cmp::Eq for PhantomData<T> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> cmp::PartialOrd for PhantomData<T> {
+impl<T: PointeeSized> cmp::PartialOrd for PhantomData<T> {
     fn partial_cmp(&self, _other: &PhantomData<T>) -> Option<cmp::Ordering> {
         Option::Some(cmp::Ordering::Equal)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> cmp::Ord for PhantomData<T> {
+impl<T: PointeeSized> cmp::Ord for PhantomData<T> {
     fn cmp(&self, _other: &PhantomData<T>) -> cmp::Ordering {
         cmp::Ordering::Equal
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> Copy for PhantomData<T> {}
+impl<T: PointeeSized> Copy for PhantomData<T> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> Clone for PhantomData<T> {
+impl<T: PointeeSized> Clone for PhantomData<T> {
     fn clone(&self) -> Self {
         Self
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: ?Sized> Default for PhantomData<T> {
+impl<T: PointeeSized> Default for PhantomData<T> {
     fn default() -> Self {
         Self
     }
 }
 
 #[unstable(feature = "structural_match", issue = "31434")]
-impl<T: ?Sized> StructuralPartialEq for PhantomData<T> {}
+impl<T: PointeeSized> StructuralPartialEq for PhantomData<T> {}
 
 /// Compiler-internal trait used to indicate the type of enum discriminants.
 ///
@@ -868,15 +905,15 @@ pub trait DiscriminantKind {
 pub unsafe auto trait Freeze {}
 
 #[unstable(feature = "freeze", issue = "121675")]
-impl<T: ?Sized> !Freeze for UnsafeCell<T> {}
+impl<T: PointeeSized> !Freeze for UnsafeCell<T> {}
 marker_impls! {
     #[unstable(feature = "freeze", issue = "121675")]
     unsafe Freeze for
-        {T: ?Sized} PhantomData<T>,
-        {T: ?Sized} *const T,
-        {T: ?Sized} *mut T,
-        {T: ?Sized} &T,
-        {T: ?Sized} &mut T,
+        {T: PointeeSized} PhantomData<T>,
+        {T: PointeeSized} *const T,
+        {T: PointeeSized} *mut T,
+        {T: PointeeSized} &T,
+        {T: PointeeSized} &mut T,
 }
 
 /// Used to determine whether a type contains any `UnsafePinned` (or `PhantomPinned`) internally,
@@ -991,15 +1028,15 @@ impl !UnsafeUnpin for PhantomPinned {}
 marker_impls! {
     #[stable(feature = "pin", since = "1.33.0")]
     Unpin for
-        {T: ?Sized} &T,
-        {T: ?Sized} &mut T,
+        {T: PointeeSized} &T,
+        {T: PointeeSized} &mut T,
 }
 
 marker_impls! {
     #[stable(feature = "pin_raw", since = "1.38.0")]
     Unpin for
-        {T: ?Sized} *const T,
-        {T: ?Sized} *mut T,
+        {T: PointeeSized} *const T,
+        {T: PointeeSized} *mut T,
 }
 
 /// A marker for types that can be dropped.

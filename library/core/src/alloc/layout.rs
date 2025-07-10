@@ -141,7 +141,7 @@ impl Layout {
     #[rustc_const_stable(feature = "const_alloc_layout_unchecked", since = "1.36.0")]
     #[must_use]
     #[inline]
-    #[rustc_allow_const_fn_unstable(ptr_alignment_type)]
+    #[track_caller]
     #[requires(Layout::from_size_align(size, align).is_ok())]
     #[ensures(|result| result.is_safe())]
     #[ensures(|result| result.size() == size)]

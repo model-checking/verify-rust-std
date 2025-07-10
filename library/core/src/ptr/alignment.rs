@@ -86,6 +86,7 @@ impl Alignment {
     /// It must *not* be zero.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
+    #[track_caller]
     #[requires(align > 0 && (align & (align - 1)) == 0)]
     #[ensures(|result| result.as_usize() == align)]
     #[ensures(|result| result.as_usize().is_power_of_two())]

@@ -246,8 +246,6 @@ impl str {
     ///
     /// # Examples
     ///
-    /// Basic usage:
-    ///
     /// ```
     /// let s = "this is old";
     ///
@@ -303,8 +301,6 @@ impl str {
     ///
     /// # Examples
     ///
-    /// Basic usage:
-    ///
     /// ```
     /// let s = "foo foo 123 foo";
     /// assert_eq!("new new 123 foo", s.replacen("foo", "new", 2));
@@ -320,6 +316,7 @@ impl str {
     /// ```
     #[cfg(not(no_global_oom_handling))]
     #[rustc_allow_incoherent_impl]
+    #[doc(alias = "replace_first")]
     #[must_use = "this returns the replaced string as a new allocation, \
                   without modifying the original"]
     #[stable(feature = "str_replacen", since = "1.16.0")]
