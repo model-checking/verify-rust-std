@@ -2403,7 +2403,7 @@ mod verify {
 
     macro_rules! nonzero_check_from_mut_unchecked {
         ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
-            #[kani::proof_for_contract(<T>::from_mut_unchecked)]
+            #[kani::proof_for_contract(NonZero::<$t>::from_mut_unchecked)]
             pub fn $harness_name() {
                 let mut x: $t = kani::any();
                 unsafe {
