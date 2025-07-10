@@ -408,24 +408,22 @@ pub trait OpenOptionsExt {
     /// Pass custom flags to the `flags` argument of `open`.
     ///
     /// The bits that define the access mode are masked out with `O_ACCMODE`, to
-    /// ensure they do not interfere with the access mode set by Rusts options.
+    /// ensure they do not interfere with the access mode set by Rust's options.
     ///
-    /// Custom flags can only set flags, not remove flags set by Rusts options.
-    /// This options overwrites any previously set custom flags.
+    /// Custom flags can only set flags, not remove flags set by Rust's options.
+    /// This function overwrites any previously-set custom flags.
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// # #![feature(rustc_private)]
+    /// # mod libc { pub const O_NOFOLLOW: i32 = 0; }
     /// use std::fs::OpenOptions;
     /// use std::os::unix::fs::OpenOptionsExt;
     ///
     /// # fn main() {
     /// let mut options = OpenOptions::new();
     /// options.write(true);
-    /// if cfg!(unix) {
-    ///     options.custom_flags(libc::O_NOFOLLOW);
-    /// }
+    /// options.custom_flags(libc::O_NOFOLLOW);
     /// let file = options.open("foo.txt");
     /// # }
     /// ```
@@ -1099,4 +1097,40 @@ pub fn lchown<P: AsRef<Path>>(dir: P, uid: Option<u32>, gid: Option<u32>) -> io:
 #[cfg(not(target_os = "fuchsia"))]
 pub fn chroot<P: AsRef<Path>>(dir: P) -> io::Result<()> {
     sys::fs::chroot(dir.as_ref())
+}
+
+/// Create a FIFO special file at the specified path with the specified mode.
+///
+/// # Examples
+///
+/// ```no_run
+/// # #![feature(unix_mkfifo)]
+/// # #[cfg(not(unix))]
+/// # fn main() {}
+/// # #[cfg(unix)]
+/// # fn main() -> std::io::Result<()> {
+/// # use std::{
+/// #     os::unix::fs::{mkfifo, PermissionsExt},
+/// #     fs::{File, Permissions, remove_file},
+/// #     io::{Write, Read},
+/// # };
+/// # let _ = remove_file("/tmp/fifo");
+/// mkfifo("/tmp/fifo", Permissions::from_mode(0o774))?;
+///
+/// let mut wx = File::options().read(true).write(true).open("/tmp/fifo")?;
+/// let mut rx = File::open("/tmp/fifo")?;
+///
+/// wx.write_all(b"hello, world!")?;
+/// drop(wx);
+///
+/// let mut s = String::new();
+/// rx.read_to_string(&mut s)?;
+///
+/// assert_eq!(s, "hello, world!");
+/// # Ok(())
+/// # }
+/// ```
+#[unstable(feature = "unix_mkfifo", issue = "139324")]
+pub fn mkfifo<P: AsRef<Path>>(path: P, permissions: Permissions) -> io::Result<()> {
+    sys::fs::mkfifo(path.as_ref(), permissions.mode())
 }

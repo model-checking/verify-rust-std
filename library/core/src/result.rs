@@ -259,8 +259,14 @@
 //! The [`is_ok`] and [`is_err`] methods return [`true`] if the [`Result`]
 //! is [`Ok`] or [`Err`], respectively.
 //!
+//! The [`is_ok_and`] and [`is_err_and`] methods apply the provided function
+//! to the contents of the [`Result`] to produce a boolean value. If the [`Result`] does not have the expected variant
+//! then [`false`] is returned instead without executing the function.
+//!
 //! [`is_err`]: Result::is_err
 //! [`is_ok`]: Result::is_ok
+//! [`is_ok_and`]: Result::is_ok_and
+//! [`is_err_and`]: Result::is_err_and
 //!
 //! ## Adapters for working with references
 //!
@@ -287,6 +293,7 @@
 //!   (which must implement the [`Default`] trait)
 //! * [`unwrap_or_else`] returns the result of evaluating the provided
 //!   function
+//! * [`unwrap_unchecked`] produces *[undefined behavior]*
 //!
 //! The panicking methods [`expect`] and [`unwrap`] require `E` to
 //! implement the [`Debug`] trait.
@@ -297,6 +304,8 @@
 //! [`unwrap_or`]: Result::unwrap_or
 //! [`unwrap_or_default`]: Result::unwrap_or_default
 //! [`unwrap_or_else`]: Result::unwrap_or_else
+//! [`unwrap_unchecked`]: Result::unwrap_unchecked
+//! [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
 //!
 //! These methods extract the contained value in a [`Result<T, E>`] when it
 //! is the [`Err`] variant. They require `T` to implement the [`Debug`]
@@ -304,10 +313,13 @@
 //!
 //! * [`expect_err`] panics with a provided custom message
 //! * [`unwrap_err`] panics with a generic message
+//! * [`unwrap_err_unchecked`] produces *[undefined behavior]*
 //!
 //! [`Debug`]: crate::fmt::Debug
 //! [`expect_err`]: Result::expect_err
 //! [`unwrap_err`]: Result::unwrap_err
+//! [`unwrap_err_unchecked`]: Result::unwrap_err_unchecked
+//! [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
 //!
 //! ## Transforming contained values
 //!
@@ -330,21 +342,29 @@
 //! [`Some(v)`]: Option::Some
 //! [`transpose`]: Result::transpose
 //!
-//! This method transforms the contained value of the [`Ok`] variant:
+//! These methods transform the contained value of the [`Ok`] variant:
 //!
 //! * [`map`] transforms [`Result<T, E>`] into [`Result<U, E>`] by applying
 //!   the provided function to the contained value of [`Ok`] and leaving
 //!   [`Err`] values unchanged
+//! * [`inspect`] takes ownership of the [`Result`], applies the
+//!   provided function to the contained value by reference,
+//!   and then returns the [`Result`]
 //!
 //! [`map`]: Result::map
+//! [`inspect`]: Result::inspect
 //!
-//! This method transforms the contained value of the [`Err`] variant:
+//! These methods transform the contained value of the [`Err`] variant:
 //!
 //! * [`map_err`] transforms [`Result<T, E>`] into [`Result<T, F>`] by
 //!   applying the provided function to the contained value of [`Err`] and
 //!   leaving [`Ok`] values unchanged
+//! * [`inspect_err`] takes ownership of the [`Result`], applies the
+//!   provided function to the contained value of [`Err`] by reference,
+//!   and then returns the [`Result`]
 //!
 //! [`map_err`]: Result::map_err
+//! [`inspect_err`]: Result::inspect_err
 //!
 //! These methods transform a [`Result<T, E>`] into a value of a possibly
 //! different type `U`:
@@ -578,6 +598,10 @@ impl<T, E> Result<T, E> {
     ///
     /// let x: Result<u32, &str> = Err("hey");
     /// assert_eq!(x.is_ok_and(|x| x > 1), false);
+    ///
+    /// let x: Result<String, &str> = Ok("ownership".to_string());
+    /// assert_eq!(x.as_ref().is_ok_and(|x| x.len() > 1), true);
+    /// println!("still alive {:?}", x);
     /// ```
     #[must_use]
     #[inline]
@@ -623,6 +647,10 @@ impl<T, E> Result<T, E> {
     ///
     /// let x: Result<u32, Error> = Ok(123);
     /// assert_eq!(x.is_err_and(|x| x.kind() == ErrorKind::NotFound), false);
+    ///
+    /// let x: Result<u32, String> = Err("ownership".to_string());
+    /// assert_eq!(x.as_ref().is_err_and(|x| x.len() > 1), true);
+    /// println!("still alive {:?}", x);
     /// ```
     #[must_use]
     #[inline]
@@ -827,6 +855,36 @@ impl<T, E> Result<T, E> {
         match self {
             Ok(t) => f(t),
             Err(e) => default(e),
+        }
+    }
+
+    /// Maps a `Result<T, E>` to a `U` by applying function `f` to the contained
+    /// value if the result is [`Ok`], otherwise if [`Err`], returns the
+    /// [default value] for the type `U`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(result_option_map_or_default)]
+    ///
+    /// let x: Result<_, &str> = Ok("foo");
+    /// let y: Result<&str, _> = Err("bar");
+    ///
+    /// assert_eq!(x.map_or_default(|x| x.len()), 3);
+    /// assert_eq!(y.map_or_default(|y| y.len()), 0);
+    /// ```
+    ///
+    /// [default value]: Default::default
+    #[inline]
+    #[unstable(feature = "result_option_map_or_default", issue = "138099")]
+    pub fn map_or_default<U, F>(self, f: F) -> U
+    where
+        U: Default,
+        F: FnOnce(T) -> U,
+    {
+        match self {
+            Ok(t) => f(t),
+            Err(_) => U::default(),
         }
     }
 
@@ -1664,7 +1722,6 @@ impl<T, E> Result<Result<T, E>, E> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(result_flattening)]
     /// let x: Result<Result<&'static str, u32>, u32> = Ok(Ok("hello"));
     /// assert_eq!(Ok("hello"), x.flatten());
     ///
@@ -1678,14 +1735,14 @@ impl<T, E> Result<Result<T, E>, E> {
     /// Flattening only removes one level of nesting at a time:
     ///
     /// ```
-    /// #![feature(result_flattening)]
     /// let x: Result<Result<Result<&'static str, u32>, u32>, u32> = Ok(Ok(Ok("hello")));
     /// assert_eq!(Ok(Ok("hello")), x.flatten());
     /// assert_eq!(Ok("hello"), x.flatten().flatten());
     /// ```
     #[inline]
-    #[unstable(feature = "result_flattening", issue = "70142")]
-    #[rustc_const_unstable(feature = "result_flattening", issue = "70142")]
+    #[stable(feature = "result_flattening", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_allow_const_fn_unstable(const_precise_live_drops)]
+    #[rustc_const_stable(feature = "result_flattening", since = "CURRENT_RUSTC_VERSION")]
     pub const fn flatten(self) -> Result<T, E> {
         // FIXME(const-hack): could be written with `and_then`
         match self {
@@ -1994,7 +2051,7 @@ impl<A, E, V: FromIterator<A>> FromIterator<Result<A, E>> for Result<V, E> {
     }
 }
 
-#[unstable(feature = "try_trait_v2", issue = "84277")]
+#[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
 impl<T, E> ops::Try for Result<T, E> {
     type Output = T;
     type Residual = Result<convert::Infallible, E>;
@@ -2013,7 +2070,7 @@ impl<T, E> ops::Try for Result<T, E> {
     }
 }
 
-#[unstable(feature = "try_trait_v2", issue = "84277")]
+#[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
 impl<T, E, F: From<E>> ops::FromResidual<Result<convert::Infallible, E>> for Result<T, F> {
     #[inline]
     #[track_caller]

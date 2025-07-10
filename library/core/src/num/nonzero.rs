@@ -83,6 +83,7 @@ impl_zeroable_primitive!(
     NonZeroI64Inner(i64),
     NonZeroI128Inner(i128),
     NonZeroIsizeInner(isize),
+    NonZeroCharInner(char),
 );
 
 /// A value that is known not to equal zero.
@@ -392,11 +393,7 @@ where
     #[rustc_const_stable(feature = "nonzero", since = "1.28.0")]
     #[must_use]
     #[inline]
-    // #[rustc_allow_const_fn_unstable(const_refs_to_cell)] enables byte-level
-    // comparisons within const functions. This is needed here to validate the
-    // contents of `T` by converting a pointer to a `u8` slice for our `requires`
-    // and `ensures` checks.
-    #[rustc_allow_const_fn_unstable(const_refs_to_cell)]
+    #[track_caller]
     #[requires({
         let size = core::mem::size_of::<T>();
         let ptr = &n as *const T as *const u8;
@@ -452,6 +449,7 @@ where
     #[unstable(feature = "nonzero_from_mut", issue = "106290")]
     #[must_use]
     #[inline]
+    #[track_caller]
     #[requires({
         let size = core::mem::size_of::<T>();
         let ptr = n as *const T as *const u8;
@@ -579,8 +577,6 @@ macro_rules! nonzero_integer {
             ///
             /// # Examples
             ///
-            /// Basic usage:
-            ///
             /// ```
             /// # use std::num::NonZero;
             /// #
@@ -611,8 +607,6 @@ macro_rules! nonzero_integer {
             ///
             /// # Examples
             ///
-            /// Basic usage:
-            ///
             /// ```
             /// # use std::num::NonZero;
             /// #
@@ -639,8 +633,6 @@ macro_rules! nonzero_integer {
             /// Returns `self` with only the most significant bit set.
             ///
             /// # Example
-            ///
-            /// Basic usage:
             ///
             /// ```
             /// #![feature(isolate_most_least_significant_one)]
@@ -672,8 +664,6 @@ macro_rules! nonzero_integer {
             ///
             /// # Example
             ///
-            /// Basic usage:
-            ///
             /// ```
             /// #![feature(isolate_most_least_significant_one)]
             ///
@@ -703,8 +693,6 @@ macro_rules! nonzero_integer {
             /// Returns the number of ones in the binary representation of `self`.
             ///
             /// # Examples
-            ///
-            /// Basic usage:
             ///
             /// ```
             /// # use std::num::NonZero;
@@ -742,8 +730,6 @@ macro_rules! nonzero_integer {
             ///
             /// # Examples
             ///
-            /// Basic usage:
-            ///
             /// ```
             /// #![feature(nonzero_bitwise)]
             /// # use std::num::NonZero;
@@ -761,7 +747,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
-            #[ensures(|result| result.get() > 0)]
+            #[ensures(|result| result.get() != 0)]
             #[ensures(|result| result.rotate_right(n).get() == old(self).get())]
             pub const fn rotate_left(self, n: u32) -> Self {
                 let result = self.get().rotate_left(n);
@@ -776,8 +762,6 @@ macro_rules! nonzero_integer {
             /// Please note this isn't the same operation as the `>>` shifting operator!
             ///
             /// # Examples
-            ///
-            /// Basic usage:
             ///
             /// ```
             /// #![feature(nonzero_bitwise)]
@@ -796,7 +780,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
-            #[ensures(|result| result.get() > 0)]
+            #[ensures(|result| result.get() != 0)]
             #[ensures(|result| result.rotate_left(n).get() == old(self).get())]
             pub const fn rotate_right(self, n: u32) -> Self {
                 let result = self.get().rotate_right(n);
@@ -807,8 +791,6 @@ macro_rules! nonzero_integer {
             /// Reverses the byte order of the integer.
             ///
             /// # Examples
-            ///
-            /// Basic usage:
             ///
             /// ```
             /// #![feature(nonzero_bitwise)]
@@ -837,8 +819,6 @@ macro_rules! nonzero_integer {
             /// second least-significant bit becomes second most-significant bit, etc.
             ///
             /// # Examples
-            ///
-            /// Basic usage:
             ///
             /// ```
             /// #![feature(nonzero_bitwise)]
@@ -869,8 +849,6 @@ macro_rules! nonzero_integer {
             /// swapped.
             ///
             /// # Examples
-            ///
-            /// Basic usage:
             ///
             /// ```
             /// #![feature(nonzero_bitwise)]
@@ -905,8 +883,6 @@ macro_rules! nonzero_integer {
             ///
             /// # Examples
             ///
-            /// Basic usage:
-            ///
             /// ```
             /// #![feature(nonzero_bitwise)]
             /// # use std::num::NonZero;
@@ -940,8 +916,6 @@ macro_rules! nonzero_integer {
             ///
             /// # Examples
             ///
-            /// Basic usage:
-            ///
             /// ```
             /// #![feature(nonzero_bitwise)]
             /// # use std::num::NonZero;
@@ -974,8 +948,6 @@ macro_rules! nonzero_integer {
             /// swapped.
             ///
             /// # Examples
-            ///
-            /// Basic usage:
             ///
             /// ```
             /// #![feature(nonzero_bitwise)]
@@ -1121,6 +1093,12 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
+            #[requires({
+                self.get().checked_mul(other.get()).is_some()
+            })]
+            #[ensures(|result: &Self| {
+                self.get().checked_mul(other.get()).is_some_and(|product| product == result.get())
+            })]
             pub const unsafe fn unchecked_mul(self, other: Self) -> Self {
                 // SAFETY: The caller ensures there is no overflow.
                 unsafe { Self::new_unchecked(self.get().unchecked_mul(other.get())) }
@@ -1523,6 +1501,13 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[requires({
+            self.get().checked_add(other).is_some()
+        })]
+        #[ensures(|result: &Self| {
+            // Postcondition: the result matches the expected addition
+            self.get().checked_add(other).is_some_and(|sum| sum == result.get())
+        })]
         pub const unsafe fn unchecked_add(self, other: $Int) -> Self {
             // SAFETY: The caller ensures there is no overflow.
             unsafe { Self::new_unchecked(self.get().unchecked_add(other)) }
@@ -1624,7 +1609,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
             super::int_log10::$Int(self.get())
         }
 
-        /// Calculates the middle point of `self` and `rhs`.
+        /// Calculates the midpoint (average) between `self` and `rhs`.
         ///
         /// `midpoint(a, b)` is `(a + b) >> 1` as if it were performed in a
         /// sufficiently-large signed integral type. This implies that the result is
@@ -1650,6 +1635,8 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[rustc_const_stable(feature = "num_midpoint", since = "1.85.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
+        #[doc(alias = "average_floor")]
+        #[doc(alias = "average")]
         #[inline]
         pub const fn midpoint(self, rhs: Self) -> Self {
             // SAFETY: The only way to get `0` with midpoint is to have two opposite or
@@ -1665,8 +1652,6 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         /// on the underlying integer type, as special handling of zero can be avoided.
         ///
         /// # Examples
-        ///
-        /// Basic usage:
         ///
         /// ```
         /// # use std::num::NonZero;
@@ -1697,7 +1682,6 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         ///
         /// # Examples
         ///
-        /// Basic usage:
         /// ```
         /// # use std::num::NonZero;
         /// #
@@ -1729,8 +1713,6 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         /// Returns the bit pattern of `self` reinterpreted as a signed integer of the same size.
         ///
         /// # Examples
-        ///
-        /// Basic usage:
         ///
         /// ```
         /// # use std::num::NonZero;
@@ -2169,8 +2151,6 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         ///
         /// # Examples
         ///
-        /// Basic usage:
-        ///
         /// ```
         /// # use std::num::NonZero;
         ///
@@ -2608,4 +2588,306 @@ mod verify {
     nonzero_check_clamp_panic!(core::num::NonZeroU64, nonzero_check_clamp_panic_for_u64);
     nonzero_check_clamp_panic!(core::num::NonZeroU128, nonzero_check_clamp_panic_for_u128);
     nonzero_check_clamp_panic!(core::num::NonZeroUsize, nonzero_check_clamp_panic_for_usize);
+
+    macro_rules! check_mul_unchecked_small {
+        ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_mul_for:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::unchecked_mul)]
+            pub fn $nonzero_check_unchecked_mul_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+
+                unsafe {
+                    x.unchecked_mul(y);
+                }
+            }
+        };
+    }
+
+    // Use for NonZero what already worked well for general numeric types (see num/mod.rs)
+    macro_rules! check_mul_unchecked_intervals {
+        ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident, $min:expr, $max:expr) => {
+            #[kani::proof_for_contract(NonZero::<$t>::unchecked_mul)]
+            pub fn $nonzero_check_mul_for() {
+                let x = kani::any::<$t>();
+                let y = kani::any::<$t>();
+
+                kani::assume(x != 0 && x >= $min && x <= $max);
+                kani::assume(y != 0 && y >= $min && y <= $max);
+
+                let x = <$nonzero_type>::new(x).unwrap();
+                let y = <$nonzero_type>::new(y).unwrap();
+
+                unsafe {
+                    x.unchecked_mul(y);
+                }
+            }
+        };
+    }
+
+    //Calls for i32
+    check_mul_unchecked_intervals!(
+        i32,
+        NonZeroI32,
+        check_mul_i32_small,
+        NonZeroI32::new(-10i32).unwrap().into(),
+        NonZeroI32::new(10i32).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i32,
+        NonZeroI32,
+        check_mul_i32_large_pos,
+        NonZeroI32::new(i32::MAX - 1000i32).unwrap().into(),
+        NonZeroI32::new(i32::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i32,
+        NonZeroI32,
+        check_mul_i32_large_neg,
+        NonZeroI32::new(i32::MIN + 1000i32).unwrap().into(),
+        NonZeroI32::new(i32::MIN + 1).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i32,
+        NonZeroI32,
+        check_mul_i32_edge_pos,
+        NonZeroI32::new(i32::MAX / 2).unwrap().into(),
+        NonZeroI32::new(i32::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i32,
+        NonZeroI32,
+        check_mul_i32_edge_neg,
+        NonZeroI32::new(i32::MIN / 2).unwrap().into(),
+        NonZeroI32::new(i32::MIN + 1).unwrap().into()
+    );
+
+    //Calls for i64
+    check_mul_unchecked_intervals!(
+        i64,
+        NonZeroI64,
+        check_mul_i64_small,
+        NonZeroI64::new(-10i64).unwrap().into(),
+        NonZeroI64::new(10i64).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i64,
+        NonZeroI64,
+        check_mul_i64_large_pos,
+        NonZeroI64::new(i64::MAX - 1000i64).unwrap().into(),
+        NonZeroI64::new(i64::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i64,
+        NonZeroI64,
+        check_mul_i64_large_neg,
+        NonZeroI64::new(i64::MIN + 1000i64).unwrap().into(),
+        NonZeroI64::new(i64::MIN + 1).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i64,
+        NonZeroI64,
+        check_mul_i64_edge_pos,
+        NonZeroI64::new(i64::MAX / 2).unwrap().into(),
+        NonZeroI64::new(i64::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i64,
+        NonZeroI64,
+        check_mul_i64_edge_neg,
+        NonZeroI64::new(i64::MIN / 2).unwrap().into(),
+        NonZeroI64::new(i64::MIN + 1).unwrap().into()
+    );
+
+    //calls for i128
+    check_mul_unchecked_intervals!(
+        i128,
+        NonZeroI128,
+        check_mul_i128_small,
+        NonZeroI128::new(-10i128).unwrap().into(),
+        NonZeroI128::new(10i128).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i128,
+        NonZeroI128,
+        check_mul_i128_large_pos,
+        NonZeroI128::new(i128::MAX - 1000i128).unwrap().into(),
+        NonZeroI128::new(i128::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i128,
+        NonZeroI128,
+        check_mul_i128_large_neg,
+        NonZeroI128::new(i128::MIN + 1000i128).unwrap().into(),
+        NonZeroI128::new(i128::MIN + 1).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i128,
+        NonZeroI128,
+        check_mul_i128_edge_pos,
+        NonZeroI128::new(i128::MAX / 2).unwrap().into(),
+        NonZeroI128::new(i128::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        i128,
+        NonZeroI128,
+        check_mul_i128_edge_neg,
+        NonZeroI128::new(i128::MIN / 2).unwrap().into(),
+        NonZeroI128::new(i128::MIN + 1).unwrap().into()
+    );
+
+    //calls for isize
+    check_mul_unchecked_intervals!(
+        isize,
+        NonZeroIsize,
+        check_mul_isize_small,
+        NonZeroIsize::new(-10isize).unwrap().into(),
+        NonZeroIsize::new(10isize).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        isize,
+        NonZeroIsize,
+        check_mul_isize_large_pos,
+        NonZeroIsize::new(isize::MAX - 1000isize).unwrap().into(),
+        NonZeroIsize::new(isize::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        isize,
+        NonZeroIsize,
+        check_mul_isize_large_neg,
+        NonZeroIsize::new(isize::MIN + 1000isize).unwrap().into(),
+        NonZeroIsize::new(isize::MIN + 1).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        isize,
+        NonZeroIsize,
+        check_mul_isize_edge_pos,
+        NonZeroIsize::new(isize::MAX / 2).unwrap().into(),
+        NonZeroIsize::new(isize::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        isize,
+        NonZeroIsize,
+        check_mul_isize_edge_neg,
+        NonZeroIsize::new(isize::MIN / 2).unwrap().into(),
+        NonZeroIsize::new(isize::MIN + 1).unwrap().into()
+    );
+
+    //calls for u32
+    check_mul_unchecked_intervals!(
+        u32,
+        NonZeroU32,
+        check_mul_u32_small,
+        NonZeroU32::new(1u32).unwrap().into(),
+        NonZeroU32::new(10u32).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        u32,
+        NonZeroU32,
+        check_mul_u32_large,
+        NonZeroU32::new(u32::MAX - 1000u32).unwrap().into(),
+        NonZeroU32::new(u32::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        u32,
+        NonZeroU32,
+        check_mul_u32_edge,
+        NonZeroU32::new(u32::MAX / 2).unwrap().into(),
+        NonZeroU32::new(u32::MAX).unwrap().into()
+    );
+
+    //calls for u64
+    check_mul_unchecked_intervals!(
+        u64,
+        NonZeroU64,
+        check_mul_u64_small,
+        NonZeroU64::new(1u64).unwrap().into(),
+        NonZeroU64::new(10u64).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        u64,
+        NonZeroU64,
+        check_mul_u64_large,
+        NonZeroU64::new(u64::MAX - 1000u64).unwrap().into(),
+        NonZeroU64::new(u64::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        u64,
+        NonZeroU64,
+        check_mul_u64_edge,
+        NonZeroU64::new(u64::MAX / 2).unwrap().into(),
+        NonZeroU64::new(u64::MAX).unwrap().into()
+    );
+
+    //calls for u128
+    check_mul_unchecked_intervals!(
+        u128,
+        NonZeroU128,
+        check_mul_u128_small,
+        NonZeroU128::new(1u128).unwrap().into(),
+        NonZeroU128::new(10u128).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        u128,
+        NonZeroU128,
+        check_mul_u128_large,
+        NonZeroU128::new(u128::MAX - 1000u128).unwrap().into(),
+        NonZeroU128::new(u128::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        u128,
+        NonZeroU128,
+        check_mul_u128_edge,
+        NonZeroU128::new(u128::MAX / 2).unwrap().into(),
+        NonZeroU128::new(u128::MAX).unwrap().into()
+    );
+
+    //calls for usize
+    check_mul_unchecked_intervals!(
+        usize,
+        NonZeroUsize,
+        check_mul_usize_small,
+        NonZeroUsize::new(1usize).unwrap().into(),
+        NonZeroUsize::new(10usize).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        usize,
+        NonZeroUsize,
+        check_mul_usize_large,
+        NonZeroUsize::new(usize::MAX - 1000usize).unwrap().into(),
+        NonZeroUsize::new(usize::MAX).unwrap().into()
+    );
+    check_mul_unchecked_intervals!(
+        usize,
+        NonZeroUsize,
+        check_mul_usize_edge,
+        NonZeroUsize::new(usize::MAX / 2).unwrap().into(),
+        NonZeroUsize::new(usize::MAX).unwrap().into()
+    );
+
+    //calls for i8, i16, u8, u16
+    check_mul_unchecked_small!(i8, NonZeroI8, nonzero_check_mul_for_i8);
+    check_mul_unchecked_small!(i16, NonZeroI16, nonzero_check_mul_for_i16);
+    check_mul_unchecked_small!(u8, NonZeroU8, nonzero_check_mul_for_u8);
+    check_mul_unchecked_small!(u16, NonZeroU16, nonzero_check_mul_for_u16);
+
+    macro_rules! nonzero_check_add {
+        ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_add_for:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::unchecked_add)]
+            pub fn $nonzero_check_unchecked_add_for() {
+                let x: $nonzero_type = kani::any();
+                let y: $t = kani::any();
+
+                unsafe {
+                    x.unchecked_add(y);
+                }
+            }
+        };
+    }
+
+    nonzero_check_add!(u8, core::num::NonZeroU8, nonzero_check_unchecked_add_for_u8);
+    nonzero_check_add!(u16, core::num::NonZeroU16, nonzero_check_unchecked_add_for_u16);
+    nonzero_check_add!(u32, core::num::NonZeroU32, nonzero_check_unchecked_add_for_u32);
+    nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
+    nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
+    nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
 }

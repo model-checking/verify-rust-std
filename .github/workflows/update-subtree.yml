@@ -11,6 +11,7 @@ defaults:
 
 jobs:
   update-subtree-library:
+    if: github.repository == 'model-checking/verify-rust-std'
     # Changing the host platform may alter the libgit2 version as used by
     # splitsh-lite, which will require changing the version of git2go.
     # See https://github.com/jeffWelling/git2go?tab=readme-ov-file#which-go-version-to-use
@@ -85,6 +86,7 @@ jobs:
       if: ${{ env.SUBTREE_PR_EXISTS == 'no' }}
       run: |
         cd splitsh-lite
+        sudo apt-get update
         sudo apt-get install -y golang libgit2-dev
         # git2go upstream hasn't been updated to more recent versions of
         # libgit2, so using a fork that does stay up to date
@@ -110,6 +112,10 @@ jobs:
         fi
 
         git checkout ${NEXT_COMMIT_HASH}
+        # Collect submodule commits; note that submodules (intentionally!)
+        # aren't initialized, hence lines will be prefixed with "-" (see git
+        # submodule --help).
+        git submodule status  -- library/ | sed 's/^-//' > ../submodule-heads
         /usr/bin/time -v ../splitsh-lite/splitsh-lite --progress --prefix=library --target subtree/library
         git checkout -b subtree/library subtree/library
 
@@ -165,6 +171,7 @@ jobs:
           fi
         fi
         git checkout main
+        git submodule foreach 'git fetch'
 
         # Tell git about the correct merge base to use, which is the subtree
         # head that we last merged from.
@@ -178,6 +185,8 @@ jobs:
             -c user.name=gitbot -c user.email=git@bot \
             merge -Xsubtree=library subtree/library; then
           echo "MERGE_CONFLICTS=yes" >> $GITHUB_ENV
+          # Ignore submodule conflicts, those are dealt with below.
+          for d in $(cat ../submodule-heads | cut -f2 -d" ") ; do git reset HEAD $d ; done
           git -c user.name=gitbot -c user.email=git@bot commit -a -m "Merge from $NEXT_COMMIT_HASH with conflicts"
         else
           echo "MERGE_CONFLICTS=no" >> $GITHUB_ENV
@@ -187,6 +196,14 @@ jobs:
         NEW_SUBTREE_HEAD=$(git rev-parse subtree/library)
         echo "NEW_SUBTREE_HEAD=${NEW_SUBTREE_HEAD}" >> $GITHUB_ENV
 
+        # Set submodules to upstream versions
+        git submodule update --init
+        git submodule foreach 'grep $sm_path $toplevel/../submodule-heads | cut -f1 -d" " | xargs git checkout'
+        if ! git diff --quiet; then
+          git -c user.name=gitbot -c user.email=git@bot \
+            commit -m "Update submodules" library/
+        fi
+
         sed -i "s/^channel = \"nightly-.*\"/channel = \"nightly-${NEXT_TOOLCHAIN_DATE}\"/" rust-toolchain.toml
         git -c user.name=gitbot -c user.email=git@bot \
           commit -m "Update toolchain to ${NEXT_TOOLCHAIN_DATE}" rust-toolchain.toml
@@ -194,6 +211,22 @@ jobs:
         sed -i "s/commit = .*/commit = \"${KANI_COMMIT_HASH}\"/" tool_config/kani-version.toml
         git -c user.name=gitbot -c user.email=git@bot \
           commit -m "Update Kani version to ${KANI_COMMIT_HASH}" tool_config/kani-version.toml
+
+        # Try to automatically patch the VeriFast proofs
+        pushd verifast-proofs
+        if bash ./patch-verifast-proofs.sh; then
+          if ! git diff --quiet; then
+            git -c user.name=gitbot -c user.email=git@bot \
+              commit . -m "Update VeriFast proofs"
+          else
+            # The original files have not changed; no updates to the VeriFast proofs are necessary.
+            true
+          fi
+        else
+          # Patching the VeriFast proofs failed; requires manual intervention.
+          true
+        fi
+        popd
 
     - name: Create Pull Request without conflicts
       if: ${{ env.MERGE_CONFLICTS == 'no' && env.MERGE_PR_EXISTS == 'no' }}

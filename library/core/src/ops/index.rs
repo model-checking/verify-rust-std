@@ -67,6 +67,7 @@ pub trait Index<Idx: ?Sized> {
     ///
     /// May panic if the index is out of bounds.
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_no_implicit_autorefs]
     #[track_caller]
     fn index(&self, index: Idx) -> &Self::Output;
 }
@@ -143,17 +144,17 @@ pub trait Index<Idx: ?Sized> {
 #[lang = "index_mut"]
 #[rustc_on_unimplemented(
     on(
-        _Self = "&str",
+        Self = "&str",
         note = "you can use `.chars().nth()` or `.bytes().nth()`
 see chapter in The Book <https://doc.rust-lang.org/book/ch08-02-strings.html#indexing-into-strings>"
     ),
     on(
-        _Self = "str",
+        Self = "str",
         note = "you can use `.chars().nth()` or `.bytes().nth()`
 see chapter in The Book <https://doc.rust-lang.org/book/ch08-02-strings.html#indexing-into-strings>"
     ),
     on(
-        _Self = "alloc::string::String",
+        Self = "alloc::string::String",
         note = "you can use `.chars().nth()` or `.bytes().nth()`
 see chapter in The Book <https://doc.rust-lang.org/book/ch08-02-strings.html#indexing-into-strings>"
     ),
@@ -171,6 +172,7 @@ pub trait IndexMut<Idx: ?Sized>: Index<Idx> {
     ///
     /// May panic if the index is out of bounds.
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_no_implicit_autorefs]
     #[track_caller]
     fn index_mut(&mut self, index: Idx) -> &mut Self::Output;
 }

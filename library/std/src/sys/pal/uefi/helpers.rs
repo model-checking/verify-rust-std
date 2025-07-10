@@ -22,7 +22,7 @@ use crate::os::uefi::{self};
 use crate::path::Path;
 use crate::ptr::NonNull;
 use crate::slice;
-use crate::sync::atomic::{AtomicPtr, Ordering};
+use crate::sync::atomic::{Atomic, AtomicPtr, Ordering};
 use crate::sys_common::wstr::WStrUnits;
 
 type BootInstallMultipleProtocolInterfaces =
@@ -157,7 +157,7 @@ pub(crate) fn device_path_to_text(path: NonNull<device_path::Protocol>) -> io::R
         Ok(path)
     }
 
-    static LAST_VALID_HANDLE: AtomicPtr<crate::ffi::c_void> =
+    static LAST_VALID_HANDLE: Atomic<*mut crate::ffi::c_void> =
         AtomicPtr::new(crate::ptr::null_mut());
 
     if let Some(handle) = NonNull::new(LAST_VALID_HANDLE.load(Ordering::Acquire)) {
@@ -269,7 +269,7 @@ impl OwnedDevicePath {
                 .ok_or_else(|| const_error!(io::ErrorKind::InvalidFilename, "invalid Device Path"))
         }
 
-        static LAST_VALID_HANDLE: AtomicPtr<crate::ffi::c_void> =
+        static LAST_VALID_HANDLE: Atomic<*mut crate::ffi::c_void> =
             AtomicPtr::new(crate::ptr::null_mut());
 
         if let Some(handle) = NonNull::new(LAST_VALID_HANDLE.load(Ordering::Acquire)) {
@@ -606,7 +606,7 @@ pub(crate) fn os_string_to_raw(s: &OsStr) -> Option<Box<[r_efi::efi::Char16]>> {
 }
 
 pub(crate) fn open_shell() -> Option<NonNull<shell::Protocol>> {
-    static LAST_VALID_HANDLE: AtomicPtr<crate::ffi::c_void> =
+    static LAST_VALID_HANDLE: Atomic<*mut crate::ffi::c_void> =
         AtomicPtr::new(crate::ptr::null_mut());
 
     if let Some(handle) = NonNull::new(LAST_VALID_HANDLE.load(Ordering::Acquire)) {
@@ -653,7 +653,6 @@ pub(crate) struct ServiceProtocol {
 }
 
 impl ServiceProtocol {
-    #[expect(dead_code)]
     pub(crate) fn open(service_guid: r_efi::efi::Guid) -> io::Result<Self> {
         let handles = locate_handles(service_guid)?;
 
@@ -670,7 +669,6 @@ impl ServiceProtocol {
         Err(io::const_error!(io::ErrorKind::NotFound, "no service binding protocol found"))
     }
 
-    #[expect(dead_code)]
     pub(crate) fn child_handle(&self) -> NonNull<crate::ffi::c_void> {
         self.child_handle
     }
@@ -732,6 +730,10 @@ impl OwnedEvent {
         }
     }
 
+    pub(crate) fn as_ptr(&self) -> efi::Event {
+        self.0.as_ptr()
+    }
+
     pub(crate) fn into_raw(self) -> *mut crate::ffi::c_void {
         let r = self.0.as_ptr();
         crate::mem::forget(self);
@@ -754,4 +756,8 @@ impl Drop for OwnedEvent {
             };
         }
     }
+}
+
+pub(crate) const fn ipv4_to_r_efi(addr: crate::net::Ipv4Addr) -> efi::Ipv4Address {
+    efi::Ipv4Address { addr: addr.octets() }
 }

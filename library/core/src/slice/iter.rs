@@ -2387,7 +2387,6 @@ pub struct ArrayChunks<'a, T: 'a, const N: usize> {
 
 impl<'a, T, const N: usize> ArrayChunks<'a, T, N> {
     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
-    // #[rustc_const_unstable(feature = "slice_as_chunks", issue = "74985")]
     #[inline]
     pub(super) const fn new(slice: &'a [T]) -> Self {
         let (array_slice, rem) = slice.as_chunks();
@@ -3428,6 +3427,13 @@ where
 
 #[stable(feature = "slice_group_by", since = "1.77.0")]
 impl<'a, T: 'a, P> FusedIterator for ChunkBy<'a, T, P> where P: FnMut(&T, &T) -> bool {}
+
+#[stable(feature = "slice_group_by_clone", since = "CURRENT_RUSTC_VERSION")]
+impl<'a, T: 'a, P: Clone> Clone for ChunkBy<'a, T, P> {
+    fn clone(&self) -> Self {
+        Self { slice: self.slice, predicate: self.predicate.clone() }
+    }
+}
 
 #[stable(feature = "slice_group_by", since = "1.77.0")]
 impl<'a, T: 'a + fmt::Debug, P> fmt::Debug for ChunkBy<'a, T, P> {

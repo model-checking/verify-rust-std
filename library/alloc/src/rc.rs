@@ -3004,7 +3004,6 @@ pub struct Weak<
     // `Weak::new` sets this to `usize::MAX` so that it doesn’t need
     // to allocate space on the heap. That's not a value a real pointer
     // will ever have because RcInner has alignment at least 2.
-    // This is only possible when `T: Sized`; unsized `T` never dangle.
     ptr: NonNull<RcInner<T>>,
     alloc: A,
 }
@@ -3536,11 +3535,11 @@ impl<T> Default for Weak<T> {
     }
 }
 
-// NOTE: We checked_add here to deal with mem::forget safely. In particular
-// if you mem::forget Rcs (or Weaks), the ref-count can overflow, and then
-// you can free the allocation while outstanding Rcs (or Weaks) exist.
-// We abort because this is such a degenerate scenario that we don't care about
-// what happens -- no real program should ever experience this.
+// NOTE: If you mem::forget Rcs (or Weaks), drop is skipped and the ref-count
+// is not decremented, meaning the ref-count can overflow, and then you can
+// free the allocation while outstanding Rcs (or Weaks) exist, which would be
+// unsound. We abort because this is such a degenerate scenario that we don't
+// care about what happens -- no real program should ever experience this.
 //
 // This should have negligible overhead since you don't actually need to
 // clone these much in Rust thanks to ownership and move-semantics.

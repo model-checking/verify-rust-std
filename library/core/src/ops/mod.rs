@@ -176,7 +176,6 @@ pub use self::deref::Receiver;
 pub use self::deref::{Deref, DerefMut};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::drop::Drop;
-pub(crate) use self::drop::fallback_surface_drop;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::function::{Fn, FnMut, FnOnce};
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -195,7 +194,7 @@ pub use self::try_trait::Residual;
 #[unstable(feature = "try_trait_v2_yeet", issue = "96374")]
 pub use self::try_trait::Yeet;
 pub(crate) use self::try_trait::{ChangeOutputType, NeverShortCircuit};
-#[unstable(feature = "try_trait_v2", issue = "84277")]
+#[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
 pub use self::try_trait::{FromResidual, Try};
 #[unstable(feature = "coerce_unsized", issue = "18598")]
 pub use self::unsize::CoerceUnsized;

@@ -218,7 +218,6 @@ run_verification_subset() {
         -j \
         --output-format=terse \
         "${command_args[@]}" \
-        --enable-unstable \
         --cbmc-args --object-bits 12
 }
 
@@ -300,7 +299,6 @@ main() {
                 $unstable_args \
                 --no-assert-contracts \
                 "${command_args[@]}" \
-                --enable-unstable \
                 --cbmc-args --object-bits 12
         fi
       elif [[ "$run_command" == "autoharness" ]]; then
@@ -311,7 +309,6 @@ main() {
               $unstable_args \
               --no-assert-contracts \
               "${command_args[@]}" \
-              --enable-unstable \
               --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
@@ -340,7 +337,6 @@ main() {
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-std.json
         popd
-        rm kani-list.json
     elif [[ "$run_command" == "autoharness-analyzer" ]]; then
         echo "Running Kani autoharness codegen command..."
         "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
@@ -348,24 +344,23 @@ main() {
             $unstable_args \
             --no-assert-contracts \
             "${command_args[@]}" \
-            --enable-unstable \
             --cbmc-args --object-bits 12
         # remove metadata file for Kani-generated "dummy" crate that we won't
         # get scanner data for
-        rm target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/dummy-*
+        local target=$(find "target/kani_verify_std/target/" -mindepth 1 \
+                         -type d -exec test -e '{}'/debug/deps/ \; -print)
+        rm $target/debug/deps/dummy-*
         echo "Running Kani's std-analysis command..."
         pushd scripts/kani-std-analysis
         ./std-analysis.sh $build_dir
         popd
         echo "Running autoharness-analyzer command..."
-        git clone --depth 1 https://github.com/carolynzech/autoharness_analyzer
-        cd autoharness_analyzer
+        pushd scripts/autoharness_analyzer
         cargo run -- --per-crate \
-          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
-          /tmp/std_lib_analysis/results/
+          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
         cargo run -- --per-crate --unsafe-fns-only \
-          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
-          /tmp/std_lib_analysis/results/
+          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
+        popd
     fi
 }
 

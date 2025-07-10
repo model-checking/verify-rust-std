@@ -1,6 +1,6 @@
 // tidy-alphabetical-start
 #![cfg_attr(target_has_atomic = "128", feature(integer_atomics))]
-#![cfg_attr(test, feature(cfg_match))]
+#![cfg_attr(test, feature(cfg_select))]
 #![feature(alloc_layout_extra)]
 #![feature(array_chunks)]
 #![feature(array_ptr_get)]
@@ -12,24 +12,35 @@
 #![feature(async_iterator)]
 #![feature(bigint_helper_methods)]
 #![feature(bstr)]
-#![feature(cell_update)]
+#![feature(cfg_target_has_reliable_f16_f128)]
 #![feature(char_max_len)]
 #![feature(clone_to_uninit)]
+#![feature(const_deref)]
+#![feature(const_destruct)]
 #![feature(const_eval_select)]
-#![feature(const_swap_nonoverlapping)]
+#![feature(const_float_round_methods)]
+#![feature(const_ref_cell)]
 #![feature(const_trait_impl)]
+#![feature(core_float_math)]
 #![feature(core_intrinsics)]
 #![feature(core_intrinsics_fallbacks)]
 #![feature(core_io_borrowed_buf)]
 #![feature(core_private_bignum)]
 #![feature(core_private_diy_float)]
+#![feature(cstr_display)]
 #![feature(dec2flt)]
 #![feature(duration_constants)]
 #![feature(duration_constructors)]
+#![feature(duration_constructors_lite)]
 #![feature(error_generic_member_access)]
+#![feature(exact_div)]
 #![feature(exact_size_is_empty)]
 #![feature(extend_one)]
 #![feature(extern_types)]
+#![feature(f16)]
+#![feature(f128)]
+#![feature(float_algebraic)]
+#![feature(float_gamma)]
 #![feature(float_minimum_maximum)]
 #![feature(flt2dec)]
 #![feature(fmt_internals)]
@@ -69,7 +80,6 @@
 #![feature(pointer_is_aligned_to)]
 #![feature(portable_simd)]
 #![feature(ptr_metadata)]
-#![feature(select_unpredictable)]
 #![feature(slice_from_ptr_range)]
 #![feature(slice_internals)]
 #![feature(slice_partition_dedup)]
@@ -87,6 +97,7 @@
 #![feature(try_blocks)]
 #![feature(try_find)]
 #![feature(try_trait_v2)]
+#![feature(uint_bit_width)]
 #![feature(unsize)]
 #![feature(unwrap_infallible)]
 // tidy-alphabetical-end
@@ -146,6 +157,7 @@ mod cmp;
 mod const_ptr;
 mod convert;
 mod ffi;
+mod floats;
 mod fmt;
 mod future;
 mod hash;

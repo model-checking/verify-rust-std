@@ -75,6 +75,7 @@ use libc::{dirent64, fstat64, ftruncate64, lseek64, lstat64, off64_t, open64, st
 
 use crate::ffi::{CStr, OsStr, OsString};
 use crate::fmt::{self, Write as _};
+use crate::fs::TryLockError;
 use crate::io::{self, BorrowedCursor, Error, IoSlice, IoSliceMut, SeekFrom};
 use crate::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd};
 use crate::os::unix::prelude::*;
@@ -147,14 +148,14 @@ cfg_has_statx! {{
         flags: i32,
         mask: u32,
     ) -> Option<io::Result<FileAttr>> {
-        use crate::sync::atomic::{AtomicU8, Ordering};
+        use crate::sync::atomic::{Atomic, AtomicU8, Ordering};
 
         // Linux kernel prior to 4.11 or glibc prior to glibc 2.28 don't support `statx`.
         // We check for it on first failure and remember availability to avoid having to
         // do it again.
         #[repr(u8)]
         enum STATX_STATE{ Unknown = 0, Present, Unavailable }
-        static STATX_SAVED_STATE: AtomicU8 = AtomicU8::new(STATX_STATE::Unknown as u8);
+        static STATX_SAVED_STATE: Atomic<u8> = AtomicU8::new(STATX_STATE::Unknown as u8);
 
         syscall!(
             fn statx(
@@ -1310,15 +1311,17 @@ impl File {
         target_os = "netbsd",
         target_vendor = "apple",
     ))]
-    pub fn try_lock(&self) -> io::Result<bool> {
+    pub fn try_lock(&self) -> Result<(), TryLockError> {
         let result = cvt(unsafe { libc::flock(self.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) });
-        if let Err(ref err) = result {
+        if let Err(err) = result {
             if err.kind() == io::ErrorKind::WouldBlock {
-                return Ok(false);
+                Err(TryLockError::WouldBlock)
+            } else {
+                Err(TryLockError::Error(err))
             }
+        } else {
+            Ok(())
         }
-        result?;
-        return Ok(true);
     }
 
     #[cfg(not(any(
@@ -1328,8 +1331,11 @@ impl File {
         target_os = "netbsd",
         target_vendor = "apple",
     )))]
-    pub fn try_lock(&self) -> io::Result<bool> {
-        Err(io::const_error!(io::ErrorKind::Unsupported, "try_lock() not supported"))
+    pub fn try_lock(&self) -> Result<(), TryLockError> {
+        Err(TryLockError::Error(io::const_error!(
+            io::ErrorKind::Unsupported,
+            "try_lock() not supported"
+        )))
     }
 
     #[cfg(any(
@@ -1339,15 +1345,17 @@ impl File {
         target_os = "netbsd",
         target_vendor = "apple",
     ))]
-    pub fn try_lock_shared(&self) -> io::Result<bool> {
+    pub fn try_lock_shared(&self) -> Result<(), TryLockError> {
         let result = cvt(unsafe { libc::flock(self.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) });
-        if let Err(ref err) = result {
+        if let Err(err) = result {
             if err.kind() == io::ErrorKind::WouldBlock {
-                return Ok(false);
+                Err(TryLockError::WouldBlock)
+            } else {
+                Err(TryLockError::Error(err))
             }
+        } else {
+            Ok(())
         }
-        result?;
-        return Ok(true);
     }
 
     #[cfg(not(any(
@@ -1357,8 +1365,11 @@ impl File {
         target_os = "netbsd",
         target_vendor = "apple",
     )))]
-    pub fn try_lock_shared(&self) -> io::Result<bool> {
-        Err(io::const_error!(io::ErrorKind::Unsupported, "try_lock_shared() not supported"))
+    pub fn try_lock_shared(&self) -> Result<(), TryLockError> {
+        Err(TryLockError::Error(io::const_error!(
+            io::ErrorKind::Unsupported,
+            "try_lock_shared() not supported"
+        )))
     }
 
     #[cfg(any(
@@ -1453,6 +1464,15 @@ impl File {
         Ok(n as u64)
     }
 
+    pub fn size(&self) -> Option<io::Result<u64>> {
+        match self.file_attr().map(|attr| attr.size()) {
+            // Fall back to default implementation if the returned size is 0,
+            // we might be in a proc mount.
+            Ok(0) => None,
+            result => Some(result),
+        }
+    }
+
     pub fn tell(&self) -> io::Result<u64> {
         self.seek(SeekFrom::Current(0))
     }
@@ -1487,11 +1507,10 @@ impl File {
             None => Ok(libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT as _ }),
         };
         cfg_if::cfg_if! {
-            if #[cfg(any(target_os = "redox", target_os = "espidf", target_os = "horizon", target_os = "vxworks", target_os = "nuttx"))] {
+            if #[cfg(any(target_os = "redox", target_os = "espidf", target_os = "horizon", target_os = "nuttx"))] {
                 // Redox doesn't appear to support `UTIME_OMIT`.
                 // ESP-IDF and HorizonOS do not support `futimens` at all and the behavior for those OS is therefore
                 // the same as for Redox.
-                // `futimens` and `UTIME_OMIT` are a work in progress for vxworks.
                 let _ = times;
                 Err(io::const_error!(
                     io::ErrorKind::Unsupported,
@@ -2135,6 +2154,12 @@ pub fn chroot(dir: &Path) -> io::Result<()> {
 pub fn chroot(dir: &Path) -> io::Result<()> {
     let _ = dir;
     Err(io::const_error!(io::ErrorKind::Unsupported, "chroot not supported by vxworks"))
+}
+
+pub fn mkfifo(path: &Path, mode: u32) -> io::Result<()> {
+    run_path_with_cstr(path, &|path| {
+        cvt(unsafe { libc::mkfifo(path.as_ptr(), mode.try_into().unwrap()) }).map(|_| ())
+    })
 }
 
 pub use remove_dir_impl::remove_dir_all;
