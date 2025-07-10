@@ -645,6 +645,7 @@ impl Step for Ipv6Addr {
         u128::backward_checked(start.to_bits(), count).map(Ipv6Addr::from_bits)
     }
 
+    #[requires(start.to_bits().checked_add(count as u128).is_some())]
     #[inline]
     unsafe fn forward_unchecked(start: Ipv6Addr, count: usize) -> Ipv6Addr {
         // SAFETY: Since u128 and Ipv6Addr are losslessly convertible,
@@ -652,6 +653,7 @@ impl Step for Ipv6Addr {
         Ipv6Addr::from_bits(unsafe { u128::forward_unchecked(start.to_bits(), count) })
     }
 
+    #[requires(start.to_bits().checked_sub(count as u128).is_some())]
     #[inline]
     unsafe fn backward_unchecked(start: Ipv6Addr, count: usize) -> Ipv6Addr {
         // SAFETY: Since u128 and Ipv6Addr are losslessly convertible,
