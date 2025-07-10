@@ -58,7 +58,7 @@ use safety::{ensures, requires};
 
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{ConstParamTy, DiscriminantKind, Tuple};
+use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
 use crate::ptr;
 #[cfg(kani)]
 use crate::ub_checks;
@@ -845,10 +845,10 @@ pub const unsafe fn transmute_unchecked<Src, Dst>(src: Src) -> Dst;
 /// If the actual type neither requires drop glue nor implements
 /// `Copy`, then the return value of this function is unspecified.
 ///
-/// Note that, unlike most intrinsics, this is safe to call;
-/// it does not require an `unsafe` block.
-/// Therefore, implementations must not require the user to uphold
-/// any safety invariants.
+/// Note that, unlike most intrinsics, this can only be called at compile-time
+/// as backends do not have an implementation for it. The only caller (its
+/// stable counterpart) wraps this intrinsic call in a `const` block so that
+/// backends only see an evaluated constant.
 ///
 /// The stabilized version of this intrinsic is [`mem::needs_drop`](crate::mem::needs_drop).
 #[rustc_intrinsic_const_stable_indirect]
@@ -2680,10 +2680,10 @@ pub const fn align_of<T>() -> usize;
 /// Returns the number of variants of the type `T` cast to a `usize`;
 /// if `T` has no variants, returns `0`. Uninhabited variants will be counted.
 ///
-/// Note that, unlike most intrinsics, this is safe to call;
-/// it does not require an `unsafe` block.
-/// Therefore, implementations must not require the user to uphold
-/// any safety invariants.
+/// Note that, unlike most intrinsics, this can only be called at compile-time
+/// as backends do not have an implementation for it. The only caller (its
+/// stable counterpart) wraps this intrinsic call in a `const` block so that
+/// backends only see an evaluated constant.
 ///
 /// The to-be-stabilized version of this intrinsic is [`crate::mem::variant_count`].
 #[rustc_nounwind]
@@ -2719,10 +2719,10 @@ pub const unsafe fn align_of_val<T: ?Sized>(ptr: *const T) -> usize;
 
 /// Gets a static string slice containing the name of a type.
 ///
-/// Note that, unlike most intrinsics, this is safe to call;
-/// it does not require an `unsafe` block.
-/// Therefore, implementations must not require the user to uphold
-/// any safety invariants.
+/// Note that, unlike most intrinsics, this can only be called at compile-time
+/// as backends do not have an implementation for it. The only caller (its
+/// stable counterpart) wraps this intrinsic call in a `const` block so that
+/// backends only see an evaluated constant.
 ///
 /// The stabilized version of this intrinsic is [`core::any::type_name`].
 #[rustc_nounwind]
@@ -2734,10 +2734,10 @@ pub const fn type_name<T: ?Sized>() -> &'static str;
 /// function will return the same value for a type regardless of whichever
 /// crate it is invoked in.
 ///
-/// Note that, unlike most intrinsics, this is safe to call;
-/// it does not require an `unsafe` block.
-/// Therefore, implementations must not require the user to uphold
-/// any safety invariants.
+/// Note that, unlike most intrinsics, this can only be called at compile-time
+/// as backends do not have an implementation for it. The only caller (its
+/// stable counterpart) wraps this intrinsic call in a `const` block so that
+/// backends only see an evaluated constant.
 ///
 /// The stabilized version of this intrinsic is [`core::any::TypeId::of`].
 #[rustc_nounwind]
@@ -2765,7 +2765,7 @@ where
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
 #[rustc_intrinsic]
-pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + ?Sized, M>(ptr: *const P) -> M;
+pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: *const P) -> M;
 
 /// This is an accidentally-stable alias to [`ptr::copy_nonoverlapping`]; use that instead.
 // Note (intentionally not in the doc comment): `ptr::copy_nonoverlapping` adds some extra
