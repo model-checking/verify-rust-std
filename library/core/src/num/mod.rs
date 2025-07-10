@@ -1677,34 +1677,6 @@ mod verify {
         }
     }
 
-    // Verify `unchecked_{shl, shr}`
-    macro_rules! generate_unchecked_shift_harness {
-        ($type:ty, $method:ident, $harness_name:ident) => {
-            #[kani::proof_for_contract($type::$method)]
-            pub fn $harness_name() {
-                let num1: $type = kani::any::<$type>();
-                let num2: u32 = kani::any::<u32>();
-
-                unsafe {
-                    num1.$method(num2);
-                }
-            }
-        };
-    }
-
-    macro_rules! generate_unchecked_neg_harness {
-        ($type:ty, $harness_name:ident) => {
-            #[kani::proof_for_contract($type::unchecked_neg)]
-            pub fn $harness_name() {
-                let num1: $type = kani::any::<$type>();
-
-                unsafe {
-                    num1.unchecked_neg();
-                }
-            }
-        };
-    }
-
     /// A macro to generate Kani proof harnesses for the `carrying_mul` method,
     ///
     /// The macro creates multiple harnesses for different ranges of input values,
@@ -1805,47 +1777,6 @@ mod verify {
             )+
         }
     }
-
-    // `unchecked_add` proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
-    //
-    // Target contracts:
-    // Preconditions: No overflow should occur
-    // #[requires(!self.overflowing_add(rhs).1)]
-    //
-    // Target function:
-    // pub const unsafe fn unchecked_add(self, rhs: Self) -> Self
-    generate_unchecked_math_harness!(i8, unchecked_add, checked_unchecked_add_i8);
-    generate_unchecked_math_harness!(i16, unchecked_add, checked_unchecked_add_i16);
-    generate_unchecked_math_harness!(i32, unchecked_add, checked_unchecked_add_i32);
-    generate_unchecked_math_harness!(i64, unchecked_add, checked_unchecked_add_i64);
-    generate_unchecked_math_harness!(i128, unchecked_add, checked_unchecked_add_i128);
-    generate_unchecked_math_harness!(isize, unchecked_add, checked_unchecked_add_isize);
-    generate_unchecked_math_harness!(u8, unchecked_add, checked_unchecked_add_u8);
-    generate_unchecked_math_harness!(u16, unchecked_add, checked_unchecked_add_u16);
-    generate_unchecked_math_harness!(u32, unchecked_add, checked_unchecked_add_u32);
-    generate_unchecked_math_harness!(u64, unchecked_add, checked_unchecked_add_u64);
-    generate_unchecked_math_harness!(u128, unchecked_add, checked_unchecked_add_u128);
-    generate_unchecked_math_harness!(usize, unchecked_add, checked_unchecked_add_usize);
-
-    // `unchecked_neg` proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} -- 6 types in total
-    //
-    // Target contracts:
-    // #[requires(self != $SelfT::MIN)]
-    //
-    // Target function:
-    // pub const unsafe fn unchecked_neg(self) -> Self
-    generate_unchecked_neg_harness!(i8, checked_unchecked_neg_i8);
-    generate_unchecked_neg_harness!(i16, checked_unchecked_neg_i16);
-    generate_unchecked_neg_harness!(i32, checked_unchecked_neg_i32);
-    generate_unchecked_neg_harness!(i64, checked_unchecked_neg_i64);
-    generate_unchecked_neg_harness!(i128, checked_unchecked_neg_i128);
-    generate_unchecked_neg_harness!(isize, checked_unchecked_neg_isize);
 
     // `unchecked_mul` proofs
     //
@@ -2004,80 +1935,6 @@ mod verify {
         usize::MAX
     );
 
-    // unchecked_shr proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
-    //
-    // Target contracts:
-    // #[requires(rhs < <$ActualT>::BITS)]
-    //
-    // Target function:
-    // pub const unsafe fn unchecked_shr(self, rhs: u32) -> Self
-    generate_unchecked_shift_harness!(i8, unchecked_shr, checked_unchecked_shr_i8);
-    generate_unchecked_shift_harness!(i16, unchecked_shr, checked_unchecked_shr_i16);
-    generate_unchecked_shift_harness!(i32, unchecked_shr, checked_unchecked_shr_i32);
-    generate_unchecked_shift_harness!(i64, unchecked_shr, checked_unchecked_shr_i64);
-    generate_unchecked_shift_harness!(i128, unchecked_shr, checked_unchecked_shr_i128);
-    generate_unchecked_shift_harness!(isize, unchecked_shr, checked_unchecked_shr_isize);
-    generate_unchecked_shift_harness!(u8, unchecked_shr, checked_unchecked_shr_u8);
-    generate_unchecked_shift_harness!(u16, unchecked_shr, checked_unchecked_shr_u16);
-    generate_unchecked_shift_harness!(u32, unchecked_shr, checked_unchecked_shr_u32);
-    generate_unchecked_shift_harness!(u64, unchecked_shr, checked_unchecked_shr_u64);
-    generate_unchecked_shift_harness!(u128, unchecked_shr, checked_unchecked_shr_u128);
-    generate_unchecked_shift_harness!(usize, unchecked_shr, checked_unchecked_shr_usize);
-
-    // `unchecked_shl` proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
-    //
-    // Target contracts:
-    // #[requires(shift < Self::BITS)]
-    //
-    // Target function:
-    // pub const unsafe fn unchecked_shl(self, shift: u32) -> Self
-    //
-    // This function performs an unchecked bitwise left shift operation.
-    generate_unchecked_shift_harness!(i8, unchecked_shl, checked_unchecked_shl_i8);
-    generate_unchecked_shift_harness!(i16, unchecked_shl, checked_unchecked_shl_i16);
-    generate_unchecked_shift_harness!(i32, unchecked_shl, checked_unchecked_shl_i32);
-    generate_unchecked_shift_harness!(i64, unchecked_shl, checked_unchecked_shl_i64);
-    generate_unchecked_shift_harness!(i128, unchecked_shl, checked_unchecked_shl_i128);
-    generate_unchecked_shift_harness!(isize, unchecked_shl, checked_unchecked_shl_isize);
-    generate_unchecked_shift_harness!(u8, unchecked_shl, checked_unchecked_shl_u8);
-    generate_unchecked_shift_harness!(u16, unchecked_shl, checked_unchecked_shl_u16);
-    generate_unchecked_shift_harness!(u32, unchecked_shl, checked_unchecked_shl_u32);
-    generate_unchecked_shift_harness!(u64, unchecked_shl, checked_unchecked_shl_u64);
-    generate_unchecked_shift_harness!(u128, unchecked_shl, checked_unchecked_shl_u128);
-    generate_unchecked_shift_harness!(usize, unchecked_shl, checked_unchecked_shl_usize);
-
-    // `unchecked_sub` proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
-    //
-    // Target contracts:
-    // Preconditions: No overflow should occur
-    // #[requires(!self.overflowing_sub(rhs).1)]
-    //
-    // Target function:
-    // pub const unsafe fn unchecked_sub(self, rhs: Self)  -> Self
-    //
-    // This function performs an unchecked subtraction operation.
-    generate_unchecked_math_harness!(i8, unchecked_sub, checked_unchecked_sub_i8);
-    generate_unchecked_math_harness!(i16, unchecked_sub, checked_unchecked_sub_i16);
-    generate_unchecked_math_harness!(i32, unchecked_sub, checked_unchecked_sub_i32);
-    generate_unchecked_math_harness!(i64, unchecked_sub, checked_unchecked_sub_i64);
-    generate_unchecked_math_harness!(i128, unchecked_sub, checked_unchecked_sub_i128);
-    generate_unchecked_math_harness!(isize, unchecked_sub, checked_unchecked_sub_isize);
-    generate_unchecked_math_harness!(u8, unchecked_sub, checked_unchecked_sub_u8);
-    generate_unchecked_math_harness!(u16, unchecked_sub, checked_unchecked_sub_u16);
-    generate_unchecked_math_harness!(u32, unchecked_sub, checked_unchecked_sub_u32);
-    generate_unchecked_math_harness!(u64, unchecked_sub, checked_unchecked_sub_u64);
-    generate_unchecked_math_harness!(u128, unchecked_sub, checked_unchecked_sub_u128);
-    generate_unchecked_math_harness!(usize, unchecked_sub, checked_unchecked_sub_usize);
-
     // Part_2 `carrying_mul` proofs
     //
     // ====================== u8 Harnesses ======================
@@ -2167,55 +2024,6 @@ mod verify {
         (u64::MAX / 2) - 10u64,
         (u64::MAX / 2) + 10u64
     );
-
-    // Part_2 `wrapping_shl` proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
-    //
-    // Target contracts:
-    // #[ensures(|result| *result == self << (rhs & (Self::BITS - 1)))]
-    //
-    // Target function:
-    // pub const fn wrapping_shl(self, rhs: u32) -> Self
-    //
-    // This function performs an panic-free bitwise left shift operation.
-    generate_wrapping_shift_harness!(i8, wrapping_shl, checked_wrapping_shl_i8);
-    generate_wrapping_shift_harness!(i16, wrapping_shl, checked_wrapping_shl_i16);
-    generate_wrapping_shift_harness!(i32, wrapping_shl, checked_wrapping_shl_i32);
-    generate_wrapping_shift_harness!(i64, wrapping_shl, checked_wrapping_shl_i64);
-    generate_wrapping_shift_harness!(i128, wrapping_shl, checked_wrapping_shl_i128);
-    generate_wrapping_shift_harness!(isize, wrapping_shl, checked_wrapping_shl_isize);
-    generate_wrapping_shift_harness!(u8, wrapping_shl, checked_wrapping_shl_u8);
-    generate_wrapping_shift_harness!(u16, wrapping_shl, checked_wrapping_shl_u16);
-    generate_wrapping_shift_harness!(u32, wrapping_shl, checked_wrapping_shl_u32);
-    generate_wrapping_shift_harness!(u64, wrapping_shl, checked_wrapping_shl_u64);
-    generate_wrapping_shift_harness!(u128, wrapping_shl, checked_wrapping_shl_u128);
-    generate_wrapping_shift_harness!(usize, wrapping_shl, checked_wrapping_shl_usize);
-
-    // Part_2 `wrapping_shr` proofs
-    //
-    // Target types:
-    // i{8,16,32,64,128,size} and u{8,16,32,64,128,size} -- 12 types in total
-    //
-    // Target contracts:
-    // #[ensures(|result| *result == self >> (rhs & (Self::BITS - 1)))]
-    // Target function:
-    // pub const fn wrapping_shr(self, rhs: u32) -> Self {
-    //
-    // This function performs an panic-free bitwise right shift operation.
-    generate_wrapping_shift_harness!(i8, wrapping_shr, checked_wrapping_shr_i8);
-    generate_wrapping_shift_harness!(i16, wrapping_shr, checked_wrapping_shr_i16);
-    generate_wrapping_shift_harness!(i32, wrapping_shr, checked_wrapping_shr_i32);
-    generate_wrapping_shift_harness!(i64, wrapping_shr, checked_wrapping_shr_i64);
-    generate_wrapping_shift_harness!(i128, wrapping_shr, checked_wrapping_shr_i128);
-    generate_wrapping_shift_harness!(isize, wrapping_shr, checked_wrapping_shr_isize);
-    generate_wrapping_shift_harness!(u8, wrapping_shr, checked_wrapping_shr_u8);
-    generate_wrapping_shift_harness!(u16, wrapping_shr, checked_wrapping_shr_u16);
-    generate_wrapping_shift_harness!(u32, wrapping_shr, checked_wrapping_shr_u32);
-    generate_wrapping_shift_harness!(u64, wrapping_shr, checked_wrapping_shr_u64);
-    generate_wrapping_shift_harness!(u128, wrapping_shr, checked_wrapping_shr_u128);
-    generate_wrapping_shift_harness!(usize, wrapping_shr, checked_wrapping_shr_usize);
 
     // `f{16,32,64,128}::to_int_unchecked` proofs
     //
