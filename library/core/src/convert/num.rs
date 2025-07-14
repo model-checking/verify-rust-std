@@ -69,21 +69,20 @@ macro_rules! impl_from {
             ),
         );
     };
-    ($Small:ty => $Large:ty, #[$attr:meta] $(, #[$flux_attr:meta])? $(,)?) => {
+    ($Small:ty => $Large:ty, #[$attr:meta] $(,)?) => {
         impl_from!(
             $Small => $Large,
             #[$attr],
             concat!("Converts [`", stringify!($Small), "`] to [`", stringify!($Large), "`] losslessly."),
-            $(#[$flux_attr],)?
         );
     };
-    ($Small:ty => $Large:ty, #[$attr:meta], $doc:expr $(,  #[$flux_attr:meta])? $(,)?) => {
+    ($Small:ty => $Large:ty, #[$attr:meta], $doc:expr $(,)?) => {
         #[$attr]
         impl From<$Small> for $Large {
             // Rustdocs on the impl block show a "[+] show undocumented items" toggle.
             // Rustdocs on functions do not.
             #[doc = $doc]
-            $(#[$flux_attr])?
+            #[cfg_attr(flux, flux::spec(fn(small:$Small) -> $Large[cast(small)]))]
             #[inline(always)]
             fn from(small: $Small) -> Self {
                 small as Self
@@ -111,7 +110,7 @@ impl_from!(u8 => u16, #[stable(feature = "lossless_int_conv", since = "1.5.0")])
 impl_from!(u8 => u32, #[stable(feature = "lossless_int_conv", since = "1.5.0")]);
 impl_from!(u8 => u64, #[stable(feature = "lossless_int_conv", since = "1.5.0")]);
 impl_from!(u8 => u128, #[stable(feature = "i128", since = "1.26.0")]);
-impl_from!(u8 => usize, #[stable(feature = "lossless_int_conv", since = "1.5.0")], #[cfg_attr(flux, flux::spec(fn(x:u8) -> usize[x]))]);
+impl_from!(u8 => usize, #[stable(feature = "lossless_int_conv", since = "1.5.0")]);
 impl_from!(u16 => u32, #[stable(feature = "lossless_int_conv", since = "1.5.0")]);
 impl_from!(u16 => u64, #[stable(feature = "lossless_int_conv", since = "1.5.0")]);
 impl_from!(u16 => u128, #[stable(feature = "i128", since = "1.26.0")]);
