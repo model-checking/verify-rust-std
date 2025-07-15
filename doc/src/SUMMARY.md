@@ -10,6 +10,7 @@
   - [Kani](./tools/kani.md)
   - [GOTO Transcoder](./tools/goto-transcoder.md)
   - [VeriFast](./tools/verifast.md)
+  - [KMIR](./tools/kmir.md)
 
 ---
 
