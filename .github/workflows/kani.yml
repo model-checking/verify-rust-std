@@ -51,9 +51,7 @@ jobs:
         with:
           path: head
           submodules: true
-      - name: Apply stdarch patch
-        run: cd head/library/stdarch && patch -p1 < ../../stdarch.patch
-
+      
       # Step 2: Install jq
       - name: Install jq
         if: matrix.os == 'ubuntu-latest'
@@ -90,8 +88,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Apply stdarch patch
-        run: cd library/stdarch && patch -p1 < ../../stdarch.patch
 
       # Step 2: Run Kani autoharness on the std library for selected functions.
       # Uses "--include-pattern" to make sure we do not try to run across all
@@ -99,21 +95,75 @@ jobs:
       # explicitly list all functions (or prefixes thereof) the proofs of which
       # are known to pass.
       # Notes:
-      # - We use >::disjoint_bitor (and >::unchecked_disjoint_bitor) as pattern
-      #   as whitespace is not supported, cf.
-      #   https://github.com/model-checking/kani/issues/4046
       # - core_arch::x86::__m128d::as_f64x2 is just one example of hundreds of
       #   core_arch::x86:: functions that are known to verify successfully.
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
-            --include-pattern ">::disjoint_bitor" \
-            --include-pattern ">::unchecked_disjoint_bitor" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::unchecked_disjoint_bitor" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]]iter::range::Step>::backward_unchecked" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]]iter::range::Step>::forward_unchecked" \
             --include-pattern alloc::__default_lib_allocator:: \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
             --include-pattern core_arch::x86::__m128d::as_f64x2 \
+            --include-pattern "convert::num::<impl.convert::From<num::nonzero::NonZero<" \
+            --include-pattern "num::<impl.i8>::unchecked_add" \
+            --include-pattern "num::<impl.i16>::unchecked_add" \
+            --include-pattern "num::<impl.i32>::unchecked_add" \
+            --include-pattern "num::<impl.i64>::unchecked_add" \
+            --include-pattern "num::<impl.i128>::unchecked_add" \
+            --include-pattern "num::<impl.isize>::unchecked_add" \
+            --include-pattern "num::<impl.u8>::unchecked_add" \
+            --include-pattern "num::<impl.u16>::unchecked_add" \
+            --include-pattern "num::<impl.u32>::unchecked_add" \
+            --include-pattern "num::<impl.u64>::unchecked_add" \
+            --include-pattern "num::<impl.u128>::unchecked_add" \
+            --include-pattern "num::<impl.usize>::unchecked_add" \
+            --include-pattern "num::<impl.i8>::unchecked_neg" \
+            --include-pattern "num::<impl.i16>::unchecked_neg" \
+            --include-pattern "num::<impl.i32>::unchecked_neg" \
+            --include-pattern "num::<impl.i64>::unchecked_neg" \
+            --include-pattern "num::<impl.i128>::unchecked_neg" \
+            --include-pattern "num::<impl.isize>::unchecked_neg" \
+            --include-pattern "num::<impl.i8>::unchecked_sh" \
+            --include-pattern "num::<impl.i16>::unchecked_sh" \
+            --include-pattern "num::<impl.i32>::unchecked_sh" \
+            --include-pattern "num::<impl.i64>::unchecked_sh" \
+            --include-pattern "num::<impl.i128>::unchecked_sh" \
+            --include-pattern "num::<impl.isize>::unchecked_sh" \
+            --include-pattern "num::<impl.u8>::unchecked_sh" \
+            --include-pattern "num::<impl.u16>::unchecked_sh" \
+            --include-pattern "num::<impl.u32>::unchecked_sh" \
+            --include-pattern "num::<impl.u64>::unchecked_sh" \
+            --include-pattern "num::<impl.u128>::unchecked_sh" \
+            --include-pattern "num::<impl.usize>::unchecked_sh" \
+            --include-pattern "num::<impl.i8>::unchecked_sub" \
+            --include-pattern "num::<impl.i16>::unchecked_sub" \
+            --include-pattern "num::<impl.i32>::unchecked_sub" \
+            --include-pattern "num::<impl.i64>::unchecked_sub" \
+            --include-pattern "num::<impl.i128>::unchecked_sub" \
+            --include-pattern "num::<impl.isize>::unchecked_sub" \
+            --include-pattern "num::<impl.u8>::unchecked_sub" \
+            --include-pattern "num::<impl.u16>::unchecked_sub" \
+            --include-pattern "num::<impl.u32>::unchecked_sub" \
+            --include-pattern "num::<impl.u64>::unchecked_sub" \
+            --include-pattern "num::<impl.u128>::unchecked_sub" \
+            --include-pattern "num::<impl.usize>::unchecked_sub" \
+            --include-pattern "num::<impl.i8>::wrapping_sh" \
+            --include-pattern "num::<impl.i16>::wrapping_sh" \
+            --include-pattern "num::<impl.i32>::wrapping_sh" \
+            --include-pattern "num::<impl.i64>::wrapping_sh" \
+            --include-pattern "num::<impl.i128>::wrapping_sh" \
+            --include-pattern "num::<impl.isize>::wrapping_sh" \
+            --include-pattern "num::<impl.u8>::wrapping_sh" \
+            --include-pattern "num::<impl.u16>::wrapping_sh" \
+            --include-pattern "num::<impl.u32>::wrapping_sh" \
+            --include-pattern "num::<impl.u64>::wrapping_sh" \
+            --include-pattern "num::<impl.u128>::wrapping_sh" \
+            --include-pattern "num::<impl.usize>::wrapping_sh" \
             --include-pattern "num::nonzero::NonZero::<i8>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<i16>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<i32>::count_ones" \
@@ -295,8 +345,6 @@ jobs:
         with:
           path: head
           submodules: true
-      - name: Apply stdarch patch
-        run: cd head/library/stdarch && patch -p1 < ../../stdarch.patch
 
       # Step 2: Run list on the std library
       - name: Run Kani List
@@ -329,8 +377,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Apply stdarch patch
-        run: cd library/stdarch && patch -p1 < ../../stdarch.patch
 
       # Step 2: Run autoharness analyzer on the std library
       - name: Run Autoharness Analyzer

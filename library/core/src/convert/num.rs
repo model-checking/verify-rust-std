@@ -82,6 +82,7 @@ macro_rules! impl_from {
             // Rustdocs on the impl block show a "[+] show undocumented items" toggle.
             // Rustdocs on functions do not.
             #[doc = $doc]
+            #[cfg_attr(flux, flux::spec(fn(small:$Small) -> $Large[cast(small)]))]
             #[inline(always)]
             fn from(small: $Small) -> Self {
                 small as Self
@@ -599,74 +600,6 @@ impl_nonzero_int_try_from_nonzero_int!(isize => u8, u16, u32, u64, u128, usize);
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
-
-    // Generate harnesses for `NonZero::<Large>::from(NonZero<Small>)`.
-    macro_rules! generate_nonzero_int_from_nonzero_int_harness {
-        ($Small:ty => $Large:ty, $harness:ident) => {
-            #[kani::proof]
-            pub fn $harness() {
-                let x: NonZero<$Small> = kani::any();
-                let _ = NonZero::<$Large>::from(x);
-            }
-        };
-    }
-
-    // This bundles the calls to `generate_nonzero_int_from_nonzero_int_harness`
-    // macro into segregated namespaces for better organization and usability.
-    macro_rules! generate_nonzero_int_from_nonzero_int_harnesses {
-        ($ns:ident, $Small:ty => $($Large:tt),+ $(,)?) => {
-            mod $ns {
-                use super::*;
-
-                $(
-                    mod $Large {
-                        use super::*;
-
-                        generate_nonzero_int_from_nonzero_int_harness!(
-                            $Small => $Large,
-                            check_nonzero_int_from_nonzero_int
-                        );
-                    }
-                )+
-            }
-        };
-    }
-
-    // non-zero unsigned integer -> non-zero integer, infallible
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_u8,
-        u8 => u16, u32, u64, u128, usize, i16, i32, i64, i128, isize,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_u16,
-        u16 => u32, u64, u128, usize, i32, i64, i128,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_u32,
-        u32 => u64, u128, i64, i128,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_u64,
-        u64 => u128, i128,
-    );
-
-    // non-zero signed integer -> non-zero signed integer, infallible
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_i8,
-        i8 => i16, i32, i64, i128, isize,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_i16,
-        i16 => i32, i64, i128, isize,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_i32,
-        i32 => i64, i128,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_i64,
-        i64 => i128,
-    );
 
     // Generates harnesses for `NonZero::<target>::try_from(NonZero<source>)`.
     // Since the function may be fallible or infallible depending on `source` and `target`,
