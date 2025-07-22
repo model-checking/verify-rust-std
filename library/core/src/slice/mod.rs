@@ -4124,7 +4124,7 @@ impl<T> [T] {
         }
     )]
     //The following clause guarantees that middle is of maximum size within self
-    //If U or T are ZSTs, then middle has size zero, so we adapt the check in that case    
+    //If U or T are ZSTs, then middle has size zero, so we adapt the check in that case
     #[ensures(|(prefix, _, suffix): &(&mut [T], &mut [U], &mut [T])|
         ((U::IS_ZST || T::IS_ZST) && prefix.len() == old(self.len())) || (
             (prefix.len() * size_of::<T>() < align_of::<U>()) &&
