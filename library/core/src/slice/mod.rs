@@ -1320,7 +1320,7 @@ impl<T> [T] {
         assert_unsafe_precondition!(
             check_language_ub,
             "slice::as_chunks_unchecked requires `N != 0` and the slice to split exactly into `N`-element chunks",
-            (n: usize = N, len: usize = self.len()) => n != 0 && len.is_multiple_of(n),
+            (n: usize = N, len: usize = self.len()) => n != 0 && len % n == 0,
         );
         // SAFETY: Caller must guarantee that `N` is nonzero and exactly divides the slice length
         let new_len = unsafe { exact_div(self.len(), N) };
@@ -1516,7 +1516,7 @@ impl<T> [T] {
         assert_unsafe_precondition!(
             check_language_ub,
             "slice::as_chunks_unchecked requires `N != 0` and the slice to split exactly into `N`-element chunks",
-            (n: usize = N, len: usize = self.len()) => n != 0 && len.is_multiple_of(n)
+            (n: usize = N, len: usize = self.len()) => n != 0 && len % n == 0
         );
         // SAFETY: Caller must guarantee that `N` is nonzero and exactly divides the slice length
         let new_len = unsafe { exact_div(self.len(), N) };
@@ -2766,89 +2766,6 @@ impl<T> [T] {
             }
         }
         None
-    }
-
-    /// Returns a subslice with the optional prefix removed.
-    ///
-    /// If the slice starts with `prefix`, returns the subslice after the prefix.  If `prefix`
-    /// is empty or the slice does not start with `prefix`, simply returns the original slice.
-    /// If `prefix` is equal to the original slice, returns an empty slice.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(trim_prefix_suffix)]
-    ///
-    /// let v = &[10, 40, 30];
-    ///
-    /// // Prefix present - removes it
-    /// assert_eq!(v.trim_prefix(&[10]), &[40, 30][..]);
-    /// assert_eq!(v.trim_prefix(&[10, 40]), &[30][..]);
-    /// assert_eq!(v.trim_prefix(&[10, 40, 30]), &[][..]);
-    ///
-    /// // Prefix absent - returns original slice
-    /// assert_eq!(v.trim_prefix(&[50]), &[10, 40, 30][..]);
-    /// assert_eq!(v.trim_prefix(&[10, 50]), &[10, 40, 30][..]);
-    ///
-    /// let prefix : &str = "he";
-    /// assert_eq!(b"hello".trim_prefix(prefix.as_bytes()), b"llo".as_ref());
-    /// ```
-    #[must_use = "returns the subslice without modifying the original"]
-    #[unstable(feature = "trim_prefix_suffix", issue = "142312")]
-    pub fn trim_prefix<P: SlicePattern<Item = T> + ?Sized>(&self, prefix: &P) -> &[T]
-    where
-        T: PartialEq,
-    {
-        // This function will need rewriting if and when SlicePattern becomes more sophisticated.
-        let prefix = prefix.as_slice();
-        let n = prefix.len();
-        if n <= self.len() {
-            let (head, tail) = self.split_at(n);
-            if head == prefix {
-                return tail;
-            }
-        }
-        self
-    }
-
-    /// Returns a subslice with the optional suffix removed.
-    ///
-    /// If the slice ends with `suffix`, returns the subslice before the suffix.  If `suffix`
-    /// is empty or the slice does not end with `suffix`, simply returns the original slice.
-    /// If `suffix` is equal to the original slice, returns an empty slice.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(trim_prefix_suffix)]
-    ///
-    /// let v = &[10, 40, 30];
-    ///
-    /// // Suffix present - removes it
-    /// assert_eq!(v.trim_suffix(&[30]), &[10, 40][..]);
-    /// assert_eq!(v.trim_suffix(&[40, 30]), &[10][..]);
-    /// assert_eq!(v.trim_suffix(&[10, 40, 30]), &[][..]);
-    ///
-    /// // Suffix absent - returns original slice
-    /// assert_eq!(v.trim_suffix(&[50]), &[10, 40, 30][..]);
-    /// assert_eq!(v.trim_suffix(&[50, 30]), &[10, 40, 30][..]);
-    /// ```
-    #[must_use = "returns the subslice without modifying the original"]
-    #[unstable(feature = "trim_prefix_suffix", issue = "142312")]
-    pub fn trim_suffix<P: SlicePattern<Item = T> + ?Sized>(&self, suffix: &P) -> &[T]
-    where
-        T: PartialEq,
-    {
-        // This function will need rewriting if and when SlicePattern becomes more sophisticated.
-        let suffix = suffix.as_slice();
-        let (len, n) = (self.len(), suffix.len());
-        if n <= len {
-            let (head, tail) = self.split_at(len - n);
-            if tail == suffix {
-                return head;
-            }
-        }
-        self
     }
 
     /// Binary searches this slice for a given element.
@@ -4191,6 +4108,39 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_align_to", since = "1.30.0")]
     #[must_use]
+    //Checks if the part that will be transmuted from type T to U is valid for type U
+    //reuses most function logic up to use of from_raw_parts,
+    //where the potentially unsafe transmute occurs
+    #[requires(
+        U::IS_ZST || T::IS_ZST || {
+            let ptr = self.as_ptr();
+            let offset = crate::ptr::align_offset(ptr, align_of::<U>());
+            offset > self.len() || {
+                let (_, rest) = self.split_at(offset);
+                let (us_len, _) = rest.align_to_offsets::<U>();
+                let middle = crate::ptr::slice_from_raw_parts(rest.as_ptr() as *const U, us_len);
+                crate::ub_checks::can_dereference(middle)
+            }
+        }
+    )]
+    //The following clause guarantees that middle is of maximum size within self
+    //If U or T are ZSTs, then middle has size zero, so we adapt the check in that case    
+    #[ensures(|(prefix, _, suffix): &(&mut [T], &mut [U], &mut [T])|
+        ((U::IS_ZST || T::IS_ZST) && prefix.len() == old(self.len())) || (
+            (prefix.len() * size_of::<T>() < align_of::<U>()) &&
+            (suffix.len() * size_of::<T>() < size_of::<U>())
+        )
+    )]
+    //Either align_to just returns self in the prefix, or the 3 returned slices
+    //should be sequential, contiguous, and have same total length as self
+    #[ensures(|(prefix, middle, suffix): &(&mut [T], &mut [U], &mut [T])|
+        prefix.as_ptr() == old(self.as_ptr()) &&
+        (prefix.len() == old(self.len()) ||  (
+            ((prefix.as_ptr()).add(prefix.len()) as *const u8 == middle.as_ptr() as *const u8) &&
+            ((middle.as_ptr()).add(middle.len()) as *const u8 == suffix.as_ptr() as *const u8) &&
+            ((suffix.as_ptr()).add(suffix.len()) == old((self.as_ptr()).add(self.len())))
+        ))
+    )]
     pub unsafe fn align_to_mut<U>(&mut self) -> (&mut [T], &mut [U], &mut [T]) {
         // Note that most of this function will be constant-evaluated,
         if U::IS_ZST || T::IS_ZST {
@@ -4232,48 +4182,6 @@ impl<T> [T] {
                 )
             }
         }
-    }
-
-    //We need the following wrapper because it is not currently possible to write
-    //contracts for functions that return mut refs to input arguments
-    //see https://github.com/model-checking/kani/issues/3764
-    //----------------------------
-    //Checks if the part that will be transmuted from type T to U is valid for type U
-    //reuses most function logic up to use of from_raw_parts,
-    //where the potentially unsafe transmute occurs
-    #[requires(
-        U::IS_ZST || T::IS_ZST || {
-            let ptr = self.as_ptr();
-            let offset = crate::ptr::align_offset(ptr, align_of::<U>());
-            offset > self.len() || {
-                let (_, rest) = self.split_at(offset);
-                let (us_len, _) = rest.align_to_offsets::<U>();
-                let middle = crate::ptr::slice_from_raw_parts(rest.as_ptr() as *const U, us_len);
-                crate::ub_checks::can_dereference(middle)
-            }
-        }
-    )]
-    //The following clause guarantees that middle is of maximum size within self
-    //If U or T are ZSTs, then middle has size zero, so we adapt the check in that case
-    #[ensures(|(prefix, _, suffix): &(*const [T], *const [U], *const [T])|
-        ((U::IS_ZST || T::IS_ZST) && prefix.len() == self.len()) || (
-            (prefix.len() * size_of::<T>() < align_of::<U>()) &&
-            (suffix.len() * size_of::<T>() < size_of::<U>())
-        )
-    )]
-    //Either align_to just returns self in the prefix, or the 3 returned slices
-    //should be sequential, contiguous, and have same total length as self
-    #[ensures(|(prefix, middle, suffix): &(*const [T], *const [U], *const [T])|
-        prefix.as_ptr() == self.as_ptr() &&
-        (prefix.len() == self.len() ||  (
-            ((prefix.as_ptr()).add(prefix.len()) as *const u8 == middle.as_ptr() as *const u8) &&
-            ((middle.as_ptr()).add(middle.len()) as *const u8 == suffix.as_ptr() as *const u8) &&
-            ((suffix.as_ptr()).add(suffix.len()) == (self.as_ptr()).add(self.len())) )
-        )
-    )]
-    unsafe fn align_to_mut_wrapper<U>(&mut self) -> (*const [T], *const [U], *const [T]) {
-        let (prefix_mut, mid_mut, suffix_mut) = self.align_to_mut::<U>();
-        (prefix_mut as *const [T], mid_mut as *const [U], suffix_mut as *const [T])
     }
 
     /// Splits a slice into a prefix, a middle of aligned SIMD types, and a suffix.
@@ -4945,7 +4853,7 @@ impl<T> [T] {
 
         let byte_offset = elem_start.wrapping_sub(self_start);
 
-        if !byte_offset.is_multiple_of(size_of::<T>()) {
+        if byte_offset % size_of::<T>() != 0 {
             return None;
         }
 
@@ -4999,7 +4907,7 @@ impl<T> [T] {
 
         let byte_start = subslice_start.wrapping_sub(self_start);
 
-        if !byte_start.is_multiple_of(size_of::<T>()) {
+        if byte_start % size_of::<T>() != 0 {
             return None;
         }
 
@@ -5237,8 +5145,7 @@ where
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
-impl<T> const Default for &[T] {
+impl<T> Default for &[T] {
     /// Creates an empty slice.
     fn default() -> Self {
         &[]
@@ -5246,8 +5153,7 @@ impl<T> const Default for &[T] {
 }
 
 #[stable(feature = "mut_slice_default", since = "1.5.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
-impl<T> const Default for &mut [T] {
+impl<T> Default for &mut [T] {
     /// Creates a mutable empty slice.
     fn default() -> Self {
         &mut []
@@ -5502,15 +5408,14 @@ mod verify {
     gen_align_to_harnesses!(align_to_from_unit, ());
 
     //generates proof_of_contract harness for align_to_mut given the T (src) and U (dst) types
-    //this uses the contract for align_to_mut_wrapper (see comment there for why)
     macro_rules! proof_of_contract_for_align_to_mut {
         ($harness:ident, $src:ty, $dst:ty) => {
-            #[kani::proof_for_contract(<[$src]>::align_to_mut_wrapper)]
+            #[kani::proof_for_contract(<[$src]>::align_to_mut)]
             fn $harness() {
                 const ARR_SIZE: usize = 100;
                 let mut src_arr: [$src; ARR_SIZE] = kani::any();
                 let src_slice = kani::slice::any_slice_of_array_mut(&mut src_arr);
-                let dst_slice = unsafe { src_slice.align_to_mut_wrapper::<$dst>() };
+                let dst_slice = unsafe { src_slice.align_to_mut::<$dst>() };
             }
         };
     }
