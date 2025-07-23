@@ -1336,7 +1336,7 @@ impl<T> [T] {
         assert_unsafe_precondition!(
             check_language_ub,
             "slice::as_chunks_unchecked requires `N != 0` and the slice to split exactly into `N`-element chunks",
-            (n: usize = N, len: usize = self.len()) => n != 0 && len % n == 0,
+            (n: usize = N, len: usize = self.len()) => n != 0 && len.is_multiple_of(n),
         );
         // SAFETY: Caller must guarantee that `N` is nonzero and exactly divides the slice length
         let new_len = unsafe { exact_div(self.len(), N) };
@@ -1532,7 +1532,7 @@ impl<T> [T] {
         assert_unsafe_precondition!(
             check_language_ub,
             "slice::as_chunks_unchecked requires `N != 0` and the slice to split exactly into `N`-element chunks",
-            (n: usize = N, len: usize = self.len()) => n != 0 && len % n == 0
+            (n: usize = N, len: usize = self.len()) => n != 0 && len.is_multiple_of(n)
         );
         // SAFETY: Caller must guarantee that `N` is nonzero and exactly divides the slice length
         let new_len = unsafe { exact_div(self.len(), N) };
@@ -2798,6 +2798,89 @@ impl<T> [T] {
             }
         }
         None
+    }
+
+    /// Returns a subslice with the optional prefix removed.
+    ///
+    /// If the slice starts with `prefix`, returns the subslice after the prefix.  If `prefix`
+    /// is empty or the slice does not start with `prefix`, simply returns the original slice.
+    /// If `prefix` is equal to the original slice, returns an empty slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(trim_prefix_suffix)]
+    ///
+    /// let v = &[10, 40, 30];
+    ///
+    /// // Prefix present - removes it
+    /// assert_eq!(v.trim_prefix(&[10]), &[40, 30][..]);
+    /// assert_eq!(v.trim_prefix(&[10, 40]), &[30][..]);
+    /// assert_eq!(v.trim_prefix(&[10, 40, 30]), &[][..]);
+    ///
+    /// // Prefix absent - returns original slice
+    /// assert_eq!(v.trim_prefix(&[50]), &[10, 40, 30][..]);
+    /// assert_eq!(v.trim_prefix(&[10, 50]), &[10, 40, 30][..]);
+    ///
+    /// let prefix : &str = "he";
+    /// assert_eq!(b"hello".trim_prefix(prefix.as_bytes()), b"llo".as_ref());
+    /// ```
+    #[must_use = "returns the subslice without modifying the original"]
+    #[unstable(feature = "trim_prefix_suffix", issue = "142312")]
+    pub fn trim_prefix<P: SlicePattern<Item = T> + ?Sized>(&self, prefix: &P) -> &[T]
+    where
+        T: PartialEq,
+    {
+        // This function will need rewriting if and when SlicePattern becomes more sophisticated.
+        let prefix = prefix.as_slice();
+        let n = prefix.len();
+        if n <= self.len() {
+            let (head, tail) = self.split_at(n);
+            if head == prefix {
+                return tail;
+            }
+        }
+        self
+    }
+
+    /// Returns a subslice with the optional suffix removed.
+    ///
+    /// If the slice ends with `suffix`, returns the subslice before the suffix.  If `suffix`
+    /// is empty or the slice does not end with `suffix`, simply returns the original slice.
+    /// If `suffix` is equal to the original slice, returns an empty slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(trim_prefix_suffix)]
+    ///
+    /// let v = &[10, 40, 30];
+    ///
+    /// // Suffix present - removes it
+    /// assert_eq!(v.trim_suffix(&[30]), &[10, 40][..]);
+    /// assert_eq!(v.trim_suffix(&[40, 30]), &[10][..]);
+    /// assert_eq!(v.trim_suffix(&[10, 40, 30]), &[][..]);
+    ///
+    /// // Suffix absent - returns original slice
+    /// assert_eq!(v.trim_suffix(&[50]), &[10, 40, 30][..]);
+    /// assert_eq!(v.trim_suffix(&[50, 30]), &[10, 40, 30][..]);
+    /// ```
+    #[must_use = "returns the subslice without modifying the original"]
+    #[unstable(feature = "trim_prefix_suffix", issue = "142312")]
+    pub fn trim_suffix<P: SlicePattern<Item = T> + ?Sized>(&self, suffix: &P) -> &[T]
+    where
+        T: PartialEq,
+    {
+        // This function will need rewriting if and when SlicePattern becomes more sophisticated.
+        let suffix = suffix.as_slice();
+        let (len, n) = (self.len(), suffix.len());
+        if n <= len {
+            let (head, tail) = self.split_at(len - n);
+            if tail == suffix {
+                return head;
+            }
+        }
+        self
     }
 
     /// Binary searches this slice for a given element.
@@ -4887,7 +4970,7 @@ impl<T> [T] {
 
         let byte_offset = elem_start.wrapping_sub(self_start);
 
-        if byte_offset % size_of::<T>() != 0 {
+        if !byte_offset.is_multiple_of(size_of::<T>()) {
             return None;
         }
 
@@ -4941,7 +5024,7 @@ impl<T> [T] {
 
         let byte_start = subslice_start.wrapping_sub(self_start);
 
-        if byte_start % size_of::<T>() != 0 {
+        if !byte_start.is_multiple_of(size_of::<T>()) {
             return None;
         }
 
@@ -5179,7 +5262,8 @@ where
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T> Default for &[T] {
+#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+impl<T> const Default for &[T] {
     /// Creates an empty slice.
     fn default() -> Self {
         &[]
@@ -5187,7 +5271,8 @@ impl<T> Default for &[T] {
 }
 
 #[stable(feature = "mut_slice_default", since = "1.5.0")]
-impl<T> Default for &mut [T] {
+#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+impl<T> const Default for &mut [T] {
     /// Creates a mutable empty slice.
     fn default() -> Self {
         &mut []
