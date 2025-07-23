@@ -483,6 +483,7 @@ pub fn min_align_of_val<T: ?Sized>(val: &T) -> usize {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_promotable]
 #[rustc_const_stable(feature = "const_align_of", since = "1.24.0")]
+#[rustc_diagnostic_item = "mem_align_of"]
 pub const fn align_of<T>() -> usize {
     intrinsics::align_of::<T>()
 }
@@ -617,7 +618,7 @@ pub const unsafe fn align_of_val_raw<T: ?Sized>(val: *const T) -> usize {
 #[rustc_const_stable(feature = "const_mem_needs_drop", since = "1.36.0")]
 #[rustc_diagnostic_item = "needs_drop"]
 pub const fn needs_drop<T: ?Sized>() -> bool {
-    intrinsics::needs_drop::<T>()
+    const { intrinsics::needs_drop::<T>() }
 }
 
 /// Returns the value of type `T` represented by the all-zero byte-pattern.
@@ -1218,7 +1219,7 @@ pub const fn discriminant<T>(v: &T) -> Discriminant<T> {
 #[rustc_const_unstable(feature = "variant_count", issue = "73662")]
 #[rustc_diagnostic_item = "mem_variant_count"]
 pub const fn variant_count<T>() -> usize {
-    intrinsics::variant_count::<T>()
+    const { intrinsics::variant_count::<T>() }
 }
 
 /// Provides associated constants for various useful properties of types,

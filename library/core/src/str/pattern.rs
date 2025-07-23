@@ -1958,11 +1958,11 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
     unsafe {
         let (mut px, mut py) = (x.as_ptr(), y.as_ptr());
         let (pxend, pyend) = (px.add(x.len() - 4), py.add(y.len() - 4));
-        #[loop_invariant(crate::ub_checks::same_allocation(x.as_ptr(), px)
-        && crate::ub_checks::same_allocation(y.as_ptr(), py)
-        && px.addr() >= x.as_ptr().addr()
-        && py.addr() >= y.as_ptr().addr()
-        && px.addr() - x.as_ptr().addr() == py.addr() - y.as_ptr().addr())]
+        #[loop_invariant(crate::ub_checks::same_allocation(on_entry(px), px)
+        && crate::ub_checks::same_allocation(on_entry(py), py)
+        && px.addr() >= on_entry(px).addr()
+        && py.addr() >= on_entry(py).addr()
+        && px.addr() - on_entry(px).addr() == py.addr() - on_entry(py).addr())]
         while px < pxend {
             let vx = (px as *const u32).read_unaligned();
             let vy = (py as *const u32).read_unaligned();
