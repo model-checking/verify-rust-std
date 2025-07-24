@@ -23,7 +23,7 @@ use super::SpecExtend;
 use crate::alloc::{Allocator, Global};
 use crate::boxed::Box;
 
-//@ use std::alloc::{alloc_block_in, Layout, Global, Allocator};
+//@ use std::alloc::{alloc_id_t, alloc_block_in, Layout, Global, Allocator};
 //@ use std::option::{Option, Option::None, Option::Some};
 //@ use std::ptr::{NonNull, NonNull_ptr};
 
@@ -70,7 +70,7 @@ struct Node<T> {
 
 /*@
 
-pred Nodes<T>(alloc_id: any, n: Option<NonNull<Node<T>>>, prev: Option<NonNull<Node<T>>>, last: Option<NonNull<Node<T>>>, next: Option<NonNull<Node<T>>>; nodes: list<NonNull<Node<T>>>) =
+pred Nodes<T>(alloc_id: alloc_id_t, n: Option<NonNull<Node<T>>>, prev: Option<NonNull<Node<T>>>, last: Option<NonNull<Node<T>>>, next: Option<NonNull<Node<T>>>; nodes: list<NonNull<Node<T>>>) =
     if n == next {
         nodes == [] &*& last == prev
     } else {
