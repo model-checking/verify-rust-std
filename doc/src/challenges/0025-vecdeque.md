@@ -38,6 +38,8 @@ Write and prove the contract for the safety of the following unsafe functions:
 
 Prove the absence of undefined behavior for following safe abstractions:
 
+| Function |
+|---------|
 |get|
 |get_mut|
 |swap|
