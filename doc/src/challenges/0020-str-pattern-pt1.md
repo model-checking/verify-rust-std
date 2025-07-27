@@ -39,6 +39,7 @@ The following str library functions are generic over the `Pattern` trait (https:
 - `strip_prefix`
 - `strip_suffix`
 - `trim_end_matches`
+
 These functions accept a pattern as input, then call [into_searcher](https://doc.rust-lang.org/std/str/pattern/trait.Pattern.html#tymethod.into_searcher) to create a [Searcher](https://doc.rust-lang.org/std/str/pattern/trait.Pattern.html#associatedtype.Searcher) for the pattern. They use this `Searcher` to perform their desired operations (split, find, etc.).
 Those functions are implemented in (library/core/src/str/mod.rs), but the core of them are the searching algorithms which are implemented in (library/core/src/str/pattern.rs).
 
@@ -72,6 +73,7 @@ Verify the safety of the following functions in (library/core/src/str/pattern.rs
 - `next_match_back`
 - `next_reject`
 - `next_back_reject`
+
 for the following `Searcher`s: 
 - `CharSearcher`
 - `MultiCharEqSearcher`
