@@ -142,15 +142,19 @@ pub enum FromBytesWithNulError {
 }
 
 #[stable(feature = "frombyteswithnulerror_impls", since = "1.17.0")]
-impl Error for FromBytesWithNulError {
-    #[allow(deprecated)]
-    fn description(&self) -> &str {
+impl fmt::Display for FromBytesWithNulError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InteriorNul { .. } => "data provided contains an interior nul byte",
-            Self::NotNulTerminated => "data provided is not nul terminated",
+            Self::InteriorNul { position } => {
+                write!(f, "data provided contains an interior nul byte at byte position {position}")
+            }
+            Self::NotNulTerminated => write!(f, "data provided is not nul terminated"),
         }
     }
 }
+
+#[stable(feature = "frombyteswithnulerror_impls", since = "1.17.0")]
+impl Error for FromBytesWithNulError {}
 
 /// An error indicating that no nul byte was present.
 ///
@@ -188,6 +192,7 @@ impl Default for &CStr {
     }
 }
 
+<<<<<<< HEAD
 #[stable(feature = "frombyteswithnulerror_impls", since = "1.17.0")]
 impl fmt::Display for FromBytesWithNulError {
     #[allow(deprecated, deprecated_in_future)]
@@ -235,6 +240,8 @@ fn is_null_terminated(ptr: *const c_char) -> bool {
     found_null
 }
 
+=======
+>>>>>>> subtree/library
 impl CStr {
     /// Wraps a raw C string with a safe C string wrapper.
     ///
