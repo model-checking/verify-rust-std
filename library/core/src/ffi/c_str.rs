@@ -192,18 +192,6 @@ impl Default for &CStr {
     }
 }
 
-#[stable(feature = "frombyteswithnulerror_impls", since = "1.17.0")]
-impl fmt::Display for FromBytesWithNulError {
-    #[allow(deprecated, deprecated_in_future)]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.description())?;
-        if let Self::InteriorNul { position } = self {
-            write!(f, " at byte pos {position}")?;
-        }
-        Ok(())
-    }
-}
-
 #[unstable(feature = "ub_checks", issue = "none")]
 impl Invariant for &CStr {
     /**
