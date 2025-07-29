@@ -192,7 +192,6 @@ impl Default for &CStr {
     }
 }
 
-<<<<<<< HEAD
 #[stable(feature = "frombyteswithnulerror_impls", since = "1.17.0")]
 impl fmt::Display for FromBytesWithNulError {
     #[allow(deprecated, deprecated_in_future)]
@@ -240,8 +239,6 @@ fn is_null_terminated(ptr: *const c_char) -> bool {
     found_null
 }
 
-=======
->>>>>>> subtree/library
 impl CStr {
     /// Wraps a raw C string with a safe C string wrapper.
     ///
