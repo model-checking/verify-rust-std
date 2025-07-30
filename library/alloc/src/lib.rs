@@ -95,7 +95,6 @@
 #![cfg_attr(kani, feature(kani))]
 #![feature(alloc_layout_extra)]
 #![feature(allocator_api)]
-#![feature(array_chunks)]
 #![feature(array_into_iter_constructors)]
 #![feature(array_windows)]
 #![feature(ascii_char)]

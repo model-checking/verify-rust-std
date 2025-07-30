@@ -214,7 +214,8 @@ impl TryFrom<usize> for Alignment {
 }
 
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-impl From<Alignment> for NonZero<usize> {
+#[rustc_const_unstable(feature = "const_try", issue = "74935")]
+impl const From<Alignment> for NonZero<usize> {
     #[inline]
     fn from(align: Alignment) -> NonZero<usize> {
         align.as_nonzero()
@@ -222,7 +223,8 @@ impl From<Alignment> for NonZero<usize> {
 }
 
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
-impl From<Alignment> for usize {
+#[rustc_const_unstable(feature = "const_try", issue = "74935")]
+impl const From<Alignment> for usize {
     #[inline]
     fn from(align: Alignment) -> usize {
         align.as_usize()
