@@ -23,14 +23,8 @@ unwind = { path = "../unwind" }
 hashbrown = { version = "0.15", default-features = false, features = [
     'rustc-dep-of-std',
 ] }
-<<<<<<< HEAD
-std_detect = { path = "../stdarch/crates/std_detect", public = true, default-features = false, features = [
-    'rustc-dep-of-std',
-] }
-safety = { path = "../contracts/safety" }
-=======
 std_detect = { path = "../std_detect", public = true }
->>>>>>> subtree/library
+safety = { path = "../contracts/safety" }
 
 # Dependencies of the `backtrace` crate
 rustc-demangle = { version = "0.1.24", features = ['rustc-dep-of-std'] }

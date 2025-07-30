@@ -1921,14 +1921,10 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
 /// # Safety
 ///
 /// Both slices must have the same length.
-<<<<<<< HEAD
-#[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))] // only called on x86
-=======
 #[cfg(any(
-    all(target_arch = "x86_64", target_feature = "sse2"),
+    all(target_arch = "x86_64", any(kani, target_feature = "sse2")),
     all(target_arch = "loongarch64", target_feature = "lsx")
 ))]
->>>>>>> subtree/library
 #[inline]
 #[requires(x.len() == y.len())]
 unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
