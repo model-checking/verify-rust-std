@@ -35,7 +35,7 @@
         }
 
         impl BuildHasherDefault {
-            #[trusted]         // https://github.com/flux-rs/flux/issues/1185
+            #[trusted(reason="https://github.com/flux-rs/flux/issues/1185")]
             fn new() -> Self;
         }
     }
@@ -45,13 +45,13 @@
     }
 
     impl Clone for hash::BuildHasherDefault {
-        #[trusted]         // https://github.com/flux-rs/flux/issues/1185
+        #[trusted(reason="https://github.com/flux-rs/flux/issues/1185")]
         fn clone(self: &Self) -> Self;
     }
 
     impl Debug for time::Duration {
-        #[trusted]         // modular arithmetic invariant inside nested fmt_decimal
+        #[trusted(reason="modular arithmetic invariant inside nested fmt_decimal")]         
         fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result;
     }
 }]
-const _: () = ();
+const _: () = {};
