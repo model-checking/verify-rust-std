@@ -54,4 +54,4 @@
         fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result;
     }
 }]
-const _: () = {};
+const _: () = ();
