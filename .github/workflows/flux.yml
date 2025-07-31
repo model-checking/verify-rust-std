@@ -9,7 +9,7 @@ on:
 
 env:
   FIXPOINT_VERSION: "556104ba5508891c357b0bdf819ce706e93d9349"
-  FLUX_VERSION: "ebafb8d0ca32d8c0fcd2a0cfef6b1b4bd4dc4a6f"
+  FLUX_VERSION: "eb448b89b2caf3bb9d3e1ee41d1087d4651934c6"
 
 jobs:
   check-flux-on-core:

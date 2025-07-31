@@ -16,6 +16,7 @@ macro_rules! pattern_type {
 /// A trait implemented for integer types and `char`.
 /// Useful in the future for generic pattern types, but
 /// used right now to simplify ast lowering of pattern type ranges.
+#[cfg_attr(flux, flux::assoc(fn sub_ok(self: Self) -> bool { true }))]
 #[unstable(feature = "pattern_type_range_trait", issue = "123646")]
 #[rustc_const_unstable(feature = "pattern_type_range_trait", issue = "123646")]
 #[const_trait]
@@ -33,6 +34,7 @@ pub trait RangePattern {
     const MAX: Self;
 
     /// A compile-time helper to subtract 1 for exclusive ranges.
+    #[cfg_attr(flux, flux::spec(fn (self: Self{<Self as RangePattern>::sub_ok(self)}) -> Self))]
     #[lang = "RangeSub"]
     #[track_caller]
     fn sub_one(self) -> Self;
@@ -61,12 +63,14 @@ impl_range_pat! {
     u8, u16, u32, u64, u128, usize,
 }
 
+#[cfg_attr(flux, flux::assoc(fn sub_ok(self: char) -> bool { 0 < char_to_int(self)}))]
 #[rustc_const_unstable(feature = "pattern_type_range_trait", issue = "123646")]
 impl const RangePattern for char {
     const MIN: Self = char::MIN;
 
     const MAX: Self = char::MAX;
 
+    #[cfg_attr(flux, flux::spec(fn (self: char{<char as RangePattern>::sub_ok(self)}) -> char))]
     fn sub_one(self) -> Self {
         match char::from_u32(self as u32 - 1) {
             None => panic!("exclusive range to start of valid chars"),
