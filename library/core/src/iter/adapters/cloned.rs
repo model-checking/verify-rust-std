@@ -1,3 +1,9 @@
+use safety::{ensures,requires};
+#[cfg(kani)]
+use crate::kani;
+#[allow(unused_imports)]
+use crate::ub_checks::*;
+
 use core::num::NonZero;
 
 use crate::iter::adapters::zip::try_get_unchecked;
@@ -61,6 +67,7 @@ where
         self.it.map(T::clone).fold(init, f)
     }
 
+    #[requires(idx < self.it.size_hint().0)]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> T
     where
         Self: TrustedRandomAccessNoCoerce,

@@ -41,6 +41,12 @@ pub use self::methods::encode_utf16_raw; // perma-unstable
 pub use self::methods::{encode_utf8_raw, encode_utf8_raw_unchecked}; // perma-unstable
 
 #[rustfmt::skip]
+use safety::{ensures,requires};
+#[cfg(kani)]
+use crate::kani;
+#[allow(unused_imports)]
+use crate::ub_checks::*;
+
 use crate::ascii;
 pub(crate) use self::methods::EscapeDebugExtArgs;
 use crate::error::Error;
@@ -138,6 +144,7 @@ pub const fn from_u32(i: u32) -> Option<char> {
 #[rustc_const_stable(feature = "const_char_from_u32_unchecked", since = "1.81.0")]
 #[must_use]
 #[inline]
+#[requires(i <= 0x10FFFF && (i < 0xD800 || i > 0xDFFF))]
 pub const unsafe fn from_u32_unchecked(i: u32) -> char {
     // SAFETY: the safety contract must be upheld by the caller.
     unsafe { self::convert::from_u32_unchecked(i) }
@@ -533,6 +540,8 @@ impl Iterator for CaseMappingIter {
         self.0.advance_by(n)
     }
 
+    #[requires(idx < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
         // SAFETY: just forwarding requirements to caller
         unsafe { self.0.__iterator_get_unchecked(idx) }

@@ -1,3 +1,12 @@
+#![feature(ub_checks)]
+use safety::{ensures,requires};
+#[cfg(kani)]
+#[unstable(feature="kani", issue="none")]
+use core::kani;
+#[allow(unused_imports)]
+#[unstable(feature = "ub_checks", issue = "none")]
+use core::ub_checks::*;
+
 use core::iter::{
     FusedIterator, InPlaceIterable, SourceIter, TrustedFused, TrustedLen,
     TrustedRandomAccessNoCoerce,
@@ -354,6 +363,8 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         R::from_output(accum)
     }
 
+    #[requires(i < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, i: usize) -> Self::Item
     where
         Self: TrustedRandomAccessNoCoerce,

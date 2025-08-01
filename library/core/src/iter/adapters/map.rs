@@ -1,3 +1,9 @@
+use safety::{ensures,requires};
+#[cfg(kani)]
+use crate::kani;
+#[allow(unused_imports)]
+use crate::ub_checks::*;
+
 use crate::fmt;
 use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
@@ -129,6 +135,7 @@ where
     }
 
     #[inline]
+    #[requires(idx < self.iter.size_hint().0)]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> B
     where
         Self: TrustedRandomAccessNoCoerce,
