@@ -479,6 +479,7 @@ impl AsciiChar {
     /// `b` must be in `0..=127`, or else this is UB.
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
+    #[cfg_attr(flux, flux::spec(fn(b: u8{b <= 127}) -> Self))]
     #[requires(b <= 127)]
     #[ensures(|result| *result as u8 == b)]
     pub const unsafe fn from_u8_unchecked(b: u8) -> Self {
@@ -516,6 +517,7 @@ impl AsciiChar {
     /// when writing code using this method, since the implementation doesn't
     /// need something really specific, not to make those other arguments do
     /// something useful. It might be tightened before stabilization.)
+    #[cfg_attr(flux, flux::spec(fn(d: u8{d < 10}) -> Self))]
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
     #[track_caller]
