@@ -25,7 +25,7 @@
 //! By providing a readable, testable, well-specified version of `core`'s behavior, it serves as a foundation for
 //! proof assistants and other verification tools.
 
-// This recursion limit is necessary for mk! macro sued for tests.
+// This recursion limit is necessary for mk! macro used for tests.
 // We test functions with const generics, the macro generate a test per possible (const generic) control value.
 #![recursion_limit = "4096"]
 pub mod abstractions;

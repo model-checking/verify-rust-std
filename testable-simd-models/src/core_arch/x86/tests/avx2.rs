@@ -1,3 +1,4 @@
+use super::types::*;
 use super::upstream;
 use crate::abstractions::bitvec::BitVec;
 use crate::helpers::test::HasRandom;
@@ -80,7 +81,6 @@ mk!(_mm256_cvtepu8_epi64(a: BitVec));
 mk!(_mm256_extracti128_si256{<0>,<1>}(a: BitVec));
 mk!(_mm256_hadd_epi16(a: BitVec, b: BitVec));
 mk!(_mm256_hadd_epi32(a: BitVec, b: BitVec));
-mk!(_mm256_hadds_epi16(a: BitVec, b: BitVec));
 mk!(_mm256_hsub_epi16(a: BitVec, b: BitVec));
 mk!(_mm256_hsub_epi32(a: BitVec, b: BitVec));
 mk!(_mm256_hsubs_epi16(a: BitVec, b: BitVec));
@@ -182,6 +182,7 @@ mk!(_mm256_unpacklo_epi32(a: BitVec, b: BitVec));
 mk!(_mm256_unpackhi_epi64(a: BitVec, b: BitVec));
 mk!(_mm256_unpacklo_epi64(a: BitVec, b: BitVec));
 mk!(_mm256_xor_si256(a: BitVec, b: BitVec));
+
 #[test]
 fn _mm256_extract_epi8() {
     let n = 100;
@@ -529,3 +530,12 @@ fn _mm256_extract_epi16() {
         );
     }
 }
+
+mk!(_mm256_and_si256(a: __m256i, b: __m256i));
+mk!(_mm256_andnot_si256(a: __m256i, b: __m256i));
+mk!(_mm256_avg_epu16(a: __m256i, b: __m256i));
+mk!(_mm256_avg_epu8(a: __m256i, b: __m256i));
+mk!(_mm_broadcastsd_pd(a: __m128d));
+mk!(_mm256_broadcastsd_pd(a: __m128d));
+mk!(_mm_broadcastss_ps(a: __m128));
+mk!(_mm256_broadcastss_ps(a: __m128));

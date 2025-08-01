@@ -20,7 +20,7 @@
 //! use testable_simd_models::abstractions::bit::{Bit, MachineInteger};
 //!
 //! // Extract the 3rd bit (0-indexed) from an integer.
-//! let bit = Bit::of_int(42, 2);
+//! let bit = Bit::nth_bit(42, 2);
 //! println!("The extracted bit is: {:?}", bit);
 //!
 //! // Convert Bit to a primitive integer type.
@@ -68,6 +68,16 @@ impl std::ops::BitXor for Bit {
     }
 }
 
+impl std::ops::Not for Bit {
+    type Output = Self;
+    fn not(self) -> Self {
+        match self {
+            Bit::One => Bit::Zero,
+            Bit::Zero => Bit::One,
+        }
+    }
+}
+
 impl std::ops::Neg for Bit {
     type Output = Self;
     fn neg(self) -> Self {
@@ -106,11 +116,11 @@ impl From<bool> for Bit {
     }
 }
 
-/// A trait for types that represent machine integers.
-pub trait MachineInteger {
-    /// The size of this integer type in bits.
-    fn bits() -> u32;
+/// A trait for integers and floats
 
+pub trait MachineNumeric {
+    /// The size of this integer type in bits.
+    const BITS: u32;
     /// The signedness of this integer type.
     const SIGNED: bool;
     /// Element of the integer type with every bit as 0.
@@ -121,7 +131,14 @@ pub trait MachineInteger {
     const MIN: Self;
     /// Maximum value of the integer type.
     const MAX: Self;
+    /// Raw transmutation of bits to u128
+    fn to_u128(self) -> u128;
+    /// Raw transmutation of bits from u128
+    fn from_u128(x: u128) -> Self;
+}
 
+/// A trait for types that represent machine integers.
+pub trait MachineInteger: MachineNumeric {
     /// Implements functionality for `simd_add` in `crate::abstractions::simd`.
     fn wrapping_add(self, rhs: Self) -> Self;
     /// Implements functionality for `simd_sub` in `crate::abstractions::simd`.
@@ -133,28 +150,32 @@ pub trait MachineInteger {
     /// Implements functionality for `simd_saturating_sub` in `crate::abstractions::simd`.
     fn saturating_sub(self, rhs: Self) -> Self;
     /// Implements functionality for `simd_abs_diff` in `crate::abstractions::simd`.
-    fn absolute_diff(self, rhs: Self) -> Self;
+    fn wrapping_abs_diff(self, rhs: Self) -> Self;
     /// Implements functionality for `simd_abs` in `crate::abstractions::simd`.
-    fn absolute_val(self) -> Self;
+    fn wrapping_abs(self) -> Self;
 }
 
 macro_rules! generate_imachine_integer_impls {
     ($($ty:ident),*) => {
         $(
-	    impl MachineInteger for $ty {
+        impl MachineNumeric for $ty {
+        const BITS: u32 = $ty::BITS;
 		const SIGNED: bool = true;
 		const ZEROS: $ty = 0;
 		const ONES: $ty = -1;
 		const MIN: $ty = $ty::MIN;
 		const MAX: $ty = $ty::MAX;
-		fn bits() -> u32 { $ty::BITS }
+        fn to_u128(self) -> u128 {self as u128}
+        fn from_u128(x:u128) -> Self {x as $ty}
+        }
+	    impl MachineInteger for $ty {
 		fn wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
 		fn wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
 		fn overflowing_mul(self, rhs: Self) -> Self { self.overflowing_mul(rhs).0 }
 		fn saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs)}
 		fn saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs) }
-		fn absolute_diff(self, rhs: Self) -> Self {if self > rhs {$ty::wrapping_sub(self, rhs)} else {$ty::wrapping_sub(rhs, self)}}
-		fn absolute_val(self) -> Self {if self == $ty::MIN {self} else {self.abs()}}
+		fn wrapping_abs_diff(self, rhs: Self) -> Self {if self > rhs {$ty::wrapping_sub(self, rhs)} else {$ty::wrapping_sub(rhs, self)}}
+		fn wrapping_abs(self) -> Self {if self == $ty::MIN {self} else {self.abs()}}
             })*
     };
 }
@@ -162,43 +183,66 @@ macro_rules! generate_imachine_integer_impls {
 macro_rules! generate_umachine_integer_impls {
     ($($ty:ident),*) => {
         $(
-	    impl MachineInteger for $ty {
+        impl MachineNumeric for $ty {
+        const BITS: u32 = $ty::BITS;
 		const SIGNED: bool = false;
 		const ZEROS: $ty = 0;
 		const ONES: $ty = $ty::MAX;
 		const MIN: $ty = $ty::MIN;
 		const MAX: $ty = $ty::MAX;
-
-
-		fn bits() -> u32 { $ty::BITS }
+        fn to_u128(self) -> u128 {self as u128}
+        fn from_u128(x:u128) -> Self {x as $ty}
+        }
+	    impl MachineInteger for $ty {
 		fn wrapping_add(self, rhs: Self) -> Self { self.wrapping_add(rhs) }
 		fn wrapping_sub(self, rhs: Self) -> Self { self.wrapping_sub(rhs) }
 		fn overflowing_mul(self, rhs: Self) -> Self { self.overflowing_mul(rhs).0 }
 		fn saturating_add(self, rhs: Self) -> Self { self.saturating_add(rhs)}
 		fn saturating_sub(self, rhs: Self) -> Self { self.saturating_sub(rhs)}
-		fn absolute_diff(self, rhs: Self) -> Self {if self > rhs {self - rhs} else {rhs - self}}
-		fn absolute_val(self) -> Self {self}
+		fn wrapping_abs_diff(self, rhs: Self) -> Self {if self > rhs {self - rhs} else {rhs - self}}
+		fn wrapping_abs(self) -> Self {self}
         })*
     };
 }
 generate_imachine_integer_impls!(i8, i16, i32, i64, i128);
 generate_umachine_integer_impls!(u8, u16, u32, u64, u128);
 
+impl MachineNumeric for f32 {
+    const BITS: u32 = 32;
+    const SIGNED: bool = false;
+    const ZEROS: f32 = 0.0;
+    const ONES: f32 = f32::from_bits(0xffffffffu32);
+    const MIN: f32 = f32::MIN;
+    const MAX: f32 = f32::MAX;
+    fn to_u128(self) -> u128 {
+        self.to_bits() as u128
+    }
+    fn from_u128(x: u128) -> Self {
+        f32::from_bits(x as u32)
+    }
+}
+
+impl MachineNumeric for f64 {
+    const BITS: u32 = 64;
+    const SIGNED: bool = false;
+    const ZEROS: f64 = 0.0;
+    const ONES: f64 = f64::from_bits(0xffffffffffffffffu64);
+    const MIN: f64 = f64::MIN;
+    const MAX: f64 = f64::MAX;
+    fn to_u128(self) -> u128 {
+        self.to_bits() as u128
+    }
+    fn from_u128(x: u128) -> Self {
+        f64::from_bits(x as u64)
+    }
+}
+
 impl Bit {
-    fn of_raw_int(x: u128, nth: u32) -> Self {
-        if x / 2u128.pow(nth) % 2 == 1 {
+    pub fn nth_bit<T: MachineNumeric>(x: T, nth: usize) -> Self {
+        if (x.to_u128() >> nth) % 2 == 1 {
             Self::One
         } else {
             Self::Zero
-        }
-    }
-
-    pub fn of_int<T: Into<i128> + MachineInteger>(x: T, nth: u32) -> Bit {
-        let x: i128 = x.into();
-        if x >= 0 {
-            Self::of_raw_int(x as u128, nth)
-        } else {
-            Self::of_raw_int((2i128.pow(T::bits()) + x) as u128, nth)
         }
     }
 }

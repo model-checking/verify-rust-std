@@ -33,18 +33,30 @@ pub mod test {
         }
     }
 
+    impl HasRandom for f32 {
+        fn random() -> Self {
+            u32::random() as f32
+        }
+    }
+
+    impl HasRandom for f64 {
+        fn random() -> Self {
+            u64::random() as f64
+        }
+    }
+
     impl HasRandom for Bit {
         fn random() -> Self {
             crate::abstractions::bit::Bit::from(bool::random())
         }
     }
-    impl<const N: u64> HasRandom for BitVec<N> {
+    impl<const N: u32> HasRandom for BitVec<N> {
         fn random() -> Self {
             Self::from_fn(|_| Bit::random())
         }
     }
 
-    impl<const N: u64, T: HasRandom> HasRandom for FunArray<N, T> {
+    impl<const N: u32, T: HasRandom> HasRandom for FunArray<N, T> {
         fn random() -> Self {
             FunArray::from_fn(|_| T::random())
         }

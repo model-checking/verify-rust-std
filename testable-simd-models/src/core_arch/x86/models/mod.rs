@@ -22,8 +22,13 @@
 
 pub mod avx;
 pub mod avx2;
+pub mod avx2_handwritten;
+pub mod avx_handwritten;
+pub mod sse;
 pub mod sse2;
+pub mod sse2_handwritten;
 pub mod ssse3;
+pub mod ssse3_handwritten;
 
 pub(crate) mod types {
     use crate::abstractions::bitvec::*;
@@ -33,5 +38,11 @@ pub(crate) mod types {
     #[allow(non_camel_case_types)]
     pub type __m256 = BitVec<256>;
     #[allow(non_camel_case_types)]
+    pub type __m256d = BitVec<256>;
+    #[allow(non_camel_case_types)]
+    pub type __m128 = BitVec<128>;
+    #[allow(non_camel_case_types)]
     pub type __m128i = BitVec<128>;
+    #[allow(non_camel_case_types)]
+    pub type __m128d = BitVec<128>;
 }

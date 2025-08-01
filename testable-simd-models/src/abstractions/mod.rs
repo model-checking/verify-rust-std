@@ -24,3 +24,4 @@ pub mod bit;
 pub mod bitvec;
 pub mod funarr;
 pub mod simd;
+pub mod utilities;

@@ -14,9 +14,9 @@
 //!
 //! For example, some valid invocations are
 //!
-//! `mk!([100]_mm256_extracti128_si256{<0>,<1>}(a: BitVec));`
-//! `mk!(_mm256_extracti128_si256{<0>,<1>}(a: BitVec));`
-//! `mk!(_mm256_abs_epi16(a: BitVec));`
+//! `mk!([100]_mm256_extracti128_si256{<0>,<1>}(a: __m256i));`
+//! `mk!(_mm256_extracti128_si256{<0>,<1>}(a: __m256i));`
+//! `mk!(_mm256_abs_epi16(a: __m256i));`
 //!
 //! The number of random tests is optional. If not provided, it is taken to be 1000 by default.
 //! The const values are necessary if the function has constant arguments, but should be discarded if not.
@@ -45,6 +45,12 @@ pub(crate) mod types {
     pub type __m256 = BitVec<256>;
     #[allow(non_camel_case_types)]
     pub type __m128i = BitVec<128>;
+    #[allow(non_camel_case_types)]
+    pub type __m256d = BitVec<256>;
+    #[allow(non_camel_case_types)]
+    pub type __m128 = BitVec<128>;
+    #[allow(non_camel_case_types)]
+    pub type __m128d = BitVec<128>;
 }
 
 pub(crate) mod upstream {
@@ -56,8 +62,10 @@ pub(crate) mod upstream {
 
 mod conversions {
     use super::upstream::{
-        __m128i, __m256, __m256i, _mm256_castps_si256, _mm256_castsi256_ps, _mm256_loadu_si256,
-        _mm256_storeu_si256, _mm_loadu_si128, _mm_storeu_si128,
+        __m128, __m128d, __m128i, __m256, __m256d, __m256i, _mm256_castpd_si256,
+        _mm256_castps_si256, _mm256_castsi256_pd, _mm256_castsi256_ps, _mm256_loadu_si256,
+        _mm256_storeu_si256, _mm_castpd_si128, _mm_castps_si128, _mm_castsi128_pd,
+        _mm_castsi128_ps, _mm_loadu_si128, _mm_storeu_si128,
     };
     use super::BitVec;
 
@@ -81,6 +89,27 @@ mod conversions {
         }
     }
 
+    impl From<BitVec<128>> for __m128 {
+        fn from(bv: BitVec<128>) -> __m128 {
+            let slice: &[u8] = &bv.to_vec()[..];
+            unsafe { _mm_castsi128_ps(_mm_loadu_si128(slice.as_ptr() as *const __m128i)) }
+        }
+    }
+
+    impl From<BitVec<128>> for __m128d {
+        fn from(bv: BitVec<128>) -> __m128d {
+            let slice: &[u8] = &bv.to_vec()[..];
+            unsafe { _mm_castsi128_pd(_mm_loadu_si128(slice.as_ptr() as *const __m128i)) }
+        }
+    }
+
+    impl From<BitVec<256>> for __m256d {
+        fn from(bv: BitVec<256>) -> __m256d {
+            let bv: &[u8] = &bv.to_vec()[..];
+            unsafe { _mm256_castsi256_pd(_mm256_loadu_si256(bv.as_ptr() as *const _)) }
+        }
+    }
+
     impl From<__m256i> for BitVec<256> {
         fn from(vec: __m256i) -> BitVec<256> {
             let mut v = [0u8; 32];
@@ -101,11 +130,41 @@ mod conversions {
         }
     }
 
+    impl From<__m256d> for BitVec<256> {
+        fn from(vec: __m256d) -> BitVec<256> {
+            let mut v = [0u8; 32];
+            unsafe {
+                _mm256_storeu_si256(v.as_mut_ptr() as *mut _, _mm256_castpd_si256(vec));
+            }
+            BitVec::from_slice(&v[..], 8)
+        }
+    }
+
     impl From<__m128i> for BitVec<128> {
         fn from(vec: __m128i) -> BitVec<128> {
             let mut v = [0u8; 16];
             unsafe {
                 _mm_storeu_si128(v.as_mut_ptr() as *mut _, vec);
+            }
+            BitVec::from_slice(&v[..], 8)
+        }
+    }
+
+    impl From<__m128> for BitVec<128> {
+        fn from(vec: __m128) -> BitVec<128> {
+            let mut v = [0u8; 16];
+            unsafe {
+                _mm_storeu_si128(v.as_mut_ptr() as *mut _, _mm_castps_si128(vec));
+            }
+            BitVec::from_slice(&v[..], 8)
+        }
+    }
+
+    impl From<__m128d> for BitVec<128> {
+        fn from(vec: __m128d) -> BitVec<128> {
+            let mut v = [0u8; 16];
+            unsafe {
+                _mm_storeu_si128(v.as_mut_ptr() as *mut _, _mm_castpd_si128(vec));
             }
             BitVec::from_slice(&v[..], 8)
         }

@@ -3,6 +3,12 @@ use super::upstream;
 use crate::abstractions::bitvec::BitVec;
 use crate::helpers::test::HasRandom;
 
+macro_rules! assert_feq {
+    ($lhs:expr, $rhs:expr) => {
+        assert!(($lhs.is_nan() && $rhs.is_nan()) || $lhs == $rhs)
+    };
+}
+
 /// Derives tests for a given intrinsics. Test that a given intrinsics and its model compute the same thing over random values (1000 by default).
 macro_rules! mk {
     ($([$N:literal])?$name:ident$({$(<$($c:literal),*>),*})?($($x:ident : $ty:ident),*)) => {
@@ -49,6 +55,19 @@ fn _mm256_movemask_ps() {
 }
 
 #[test]
+fn _mm256_movemask_pd() {
+    let n = 1000;
+
+    for _ in 0..n {
+        let a: BitVec<256> = BitVec::random();
+        assert_eq!(
+            super::super::models::avx::_mm256_movemask_pd(a.into()),
+            unsafe { upstream::_mm256_movemask_pd(a.into()) }
+        );
+    }
+}
+
+#[test]
 fn _mm256_testz_si256() {
     let n = 1000;
 
@@ -58,6 +77,59 @@ fn _mm256_testz_si256() {
         assert_eq!(
             super::super::models::avx::_mm256_testz_si256(a.into(), b.into()),
             unsafe { upstream::_mm256_testz_si256(a.into(), b.into()) }
+        );
+    }
+}
+
+#[test]
+fn _mm256_testc_si256() {
+    let n = 1000;
+
+    for _ in 0..n {
+        let a: BitVec<256> = BitVec::random();
+        let b: BitVec<256> = BitVec::random();
+        assert_eq!(
+            super::super::models::avx::_mm256_testc_si256(a.into(), b.into()),
+            unsafe { upstream::_mm256_testc_si256(a.into(), b.into()) }
+        );
+    }
+}
+
+#[test]
+fn _mm256_cvtsd_f64() {
+    let n = 1000;
+
+    for _ in 0..n {
+        let a: BitVec<256> = BitVec::random();
+        assert_feq!(
+            super::super::models::avx::_mm256_cvtsd_f64(a.into()),
+            unsafe { upstream::_mm256_cvtsd_f64(a.into()) }
+        );
+    }
+}
+
+#[test]
+fn _mm256_cvtsi256_si32() {
+    let n = 1000;
+
+    for _ in 0..n {
+        let a: BitVec<256> = BitVec::random();
+        assert_eq!(
+            super::super::models::avx::_mm256_cvtsi256_si32(a.into()),
+            unsafe { upstream::_mm256_cvtsi256_si32(a.into()) }
+        );
+    }
+}
+
+#[test]
+fn _mm256_cvtss_f32() {
+    let n = 1000;
+
+    for _ in 0..n {
+        let a: BitVec<256> = BitVec::random();
+        assert_feq!(
+            super::super::models::avx::_mm256_cvtss_f32(a.into()),
+            unsafe { upstream::_mm256_cvtss_f32(a.into()) }
         );
     }
 }
@@ -130,3 +202,57 @@ mk!(_mm256_set_epi64x(a: i64, b: i64, c: i64, d: i64));
 mk!(_mm256_set1_epi8(a: i8));
 mk!(_mm256_set1_epi16(a: i16));
 mk!(_mm256_set1_epi32(a: i32));
+mk!(_mm256_set1_epi64x(a: i64));
+mk!(_mm256_set_pd(a: f64, b: f64, c: f64, d: f64));
+mk!(_mm256_set_ps(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32));
+mk!(_mm256_setr_pd(a: f64, b: f64, c: f64, d: f64));
+mk!(_mm256_setr_ps(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32, g: f32, h: f32));
+mk!(_mm256_setr_epi64x(a: i64, b: i64, c: i64, d: i64));
+mk!(_mm256_set1_pd(a: f64));
+mk!(_mm256_set1_ps(a: f32));
+
+mk!(_mm256_and_pd(a: __m256d, b: __m256d));
+mk!(_mm256_and_ps(a: __m256, b: __m256));
+mk!(_mm256_or_pd(a: __m256d, b: __m256d));
+mk!(_mm256_or_ps(a: __m256, b: __m256));
+mk!(_mm256_andnot_pd(a: __m256d, b: __m256d));
+mk!(_mm256_andnot_ps(a: __m256, b: __m256));
+mk!(_mm256_blendv_pd(a: __m256d, b: __m256d, c: __m256d));
+mk!(_mm256_xor_pd(a: __m256d, b: __m256d));
+mk!(_mm256_xor_ps(a: __m256, b: __m256));
+mk!(_mm256_cvtepi32_pd(a: __m128i));
+mk!(_mm256_cvtepi32_ps(a: __m256i));
+mk!(_mm256_cvtpd_ps(a: __m256d));
+mk!(_mm256_cvtps_pd(a: __m128));
+mk!(_mm256_movehdup_ps(a: __m256));
+mk!(_mm256_moveldup_ps(a: __m256));
+mk!(_mm256_movedup_pd(a: __m256d));
+mk!(_mm256_unpackhi_pd(a: __m256d, b: __m256d));
+mk!(_mm256_unpackhi_ps(a: __m256, b: __m256));
+mk!(_mm256_unpacklo_pd(a: __m256d, b: __m256d));
+mk!(_mm256_unpacklo_ps(a: __m256, b: __m256));
+mk!(_mm256_setzero_pd());
+mk!(_mm256_castpd_ps(a: __m256d));
+mk!(_mm256_castps_pd(a: __m256));
+mk!(_mm256_castps_si256(a: __m256));
+mk!(_mm256_castsi256_ps(a: __m256i));
+mk!(_mm256_castpd_si256(a: __m256d));
+mk!(_mm256_castsi256_pd(a: __m256i));
+mk!(_mm256_castps256_ps128(a: __m256));
+mk!(_mm256_castpd256_pd128(a: __m256d));
+mk!(_mm256_castsi256_si128(a: __m256i));
+mk!(_mm256_castps128_ps256(a: __m128));
+mk!(_mm256_castpd128_pd256(a: __m128d));
+mk!(_mm256_castsi128_si256(a: __m128i));
+mk!(_mm256_zextps128_ps256(a: __m128));
+mk!(_mm256_zextsi128_si256(a: __m128i));
+mk!(_mm256_zextpd128_pd256(a: __m128d));
+mk!(_mm256_undefined_ps());
+mk!(_mm256_undefined_pd());
+mk!(_mm256_undefined_si256());
+mk!(_mm256_set_m128(hi: __m128, lo: __m128));
+mk!(_mm256_set_m128d(hi: __m128d, lo: __m128d));
+mk!(_mm256_set_m128i(hi: __m128i, lo: __m128i));
+mk!(_mm256_setr_m128(lo: __m128, hi: __m128));
+mk!(_mm256_setr_m128d(lo: __m128d, hi: __m128d));
+mk!(_mm256_setr_m128i(lo: __m128i, hi: __m128i));
