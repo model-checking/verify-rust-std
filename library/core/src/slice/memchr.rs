@@ -36,6 +36,7 @@ const fn memchr_naive(x: u8, text: &[u8]) -> Option<usize> {
     let mut i = 0;
 
     // FIXME(const-hack): Replace with `text.iter().pos(|c| *c == x)`.
+    #[safety::loop_invariant(i <= text.len() && kani::forall!(|j in (0,i)| unsafe {*text.as_ptr().wrapping_add(j)} != x))]
     while i < text.len() {
         if text[i] == x {
             return Some(i);
@@ -78,6 +79,8 @@ const fn memchr_aligned(x: u8, text: &[u8]) -> Option<usize> {
 
             // search the body of the text
             let repeated_x = usize::repeat_u8(x);
+            #[safety::loop_invariant(len >= 2 * USIZE_BYTES && offset <= len &&
+                kani::forall!(|j in (0,offset)| unsafe {*text.as_ptr().wrapping_add(j)} != x))]
             while offset <= len - 2 * USIZE_BYTES {
                 // SAFETY: the while's predicate guarantees a distance of at least 2 * usize_bytes
                 // between the offset and the end of the slice.
@@ -139,6 +142,7 @@ pub fn memrchr(x: u8, text: &[u8]) -> Option<usize> {
     let repeated_x = usize::repeat_u8(x);
     let chunk_bytes = size_of::<Chunk>();
 
+    #[safety::loop_invariant(true)]
     while offset > min_aligned_offset {
         // SAFETY: offset starts at len - suffix.len(), as long as it is greater than
         // min_aligned_offset (prefix.len()) the remaining distance is at least 2 * chunk_bytes.
@@ -158,4 +162,30 @@ pub fn memrchr(x: u8, text: &[u8]) -> Option<usize> {
 
     // Find the byte before the point the body loop stopped.
     text[..offset].iter().rposition(|elt| *elt == x)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+    use crate::kani;
+
+    #[kani::proof]
+    #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    pub fn check_memchr_naive() {
+        const ARR_SIZE: usize = 64;
+        let x: u8 = kani::any();
+        let text: [u8; ARR_SIZE] = kani::any();
+        let _result = memchr_naive(x, &text);
+    }
+
+    #[kani::proof]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    pub fn check_memchr() {
+        const ARR_SIZE: usize = 64;
+        let x: u8 = kani::any();
+        let text: [u8; ARR_SIZE] = kani::any();
+        let _result = memrchr(x, &text);
+    }
 }
