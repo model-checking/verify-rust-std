@@ -517,6 +517,9 @@ impl AsciiChar {
     /// when writing code using this method, since the implementation doesn't
     /// need something really specific, not to make those other arguments do
     /// something useful. It might be tightened before stabilization.)
+    // Only `d < 64` is required for safety as described above, but we use `d < 10` as
+    // in the `assert_unsafe_precondition` inside. See https://github.com/rust-lang/rust/pull/129374
+    // for some context about the discrepancy.
     #[cfg_attr(flux, flux::spec(fn(d: u8{d < 10}) -> Self))]
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]

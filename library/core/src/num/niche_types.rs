@@ -53,7 +53,7 @@ macro_rules! define_valid_range_type {
             /// Immediate language UB if `val` is not within the valid range for this
             /// type, as it violates the validity invariant.
             #[inline]
-            #[cfg_attr(flux, flux::spec(fn (val: $int{ $low <= cast(val) && cast(val) <= $high }) -> Self[{val:cast(val)}]))] // NOTE: `val == 0` comments are stale(?)
+            #[cfg_attr(flux, flux::spec(fn (val: $int{ $low <= cast(val) && cast(val) <= $high }) -> Self[{val:cast(val)}]))]
             pub const unsafe fn new_unchecked(val: $int) -> Self {
                 // SAFETY: Caller promised that `val` is within the valid range.
                 unsafe { $name(val) }
