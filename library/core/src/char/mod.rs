@@ -24,6 +24,8 @@ mod convert;
 mod decode;
 mod methods;
 
+use safety::requires;
+
 // stable re-exports
 #[rustfmt::skip]
 #[stable(feature = "try_from", since = "1.34.0")]
@@ -47,6 +49,8 @@ use crate::error::Error;
 use crate::escape::{AlwaysEscaped, EscapeIterInner, MaybeEscaped};
 use crate::fmt::{self, Write};
 use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 
 // UTF-8 ranges and tags for encoding characters
@@ -138,6 +142,7 @@ pub const fn from_u32(i: u32) -> Option<char> {
 #[rustc_const_stable(feature = "const_char_from_u32_unchecked", since = "1.81.0")]
 #[must_use]
 #[inline]
+#[requires(i <= 0x10FFFF && (i < 0xD800 || i > 0xDFFF))]
 pub const unsafe fn from_u32_unchecked(i: u32) -> char {
     // SAFETY: the safety contract must be upheld by the caller.
     unsafe { self::convert::from_u32_unchecked(i) }
@@ -399,6 +404,7 @@ macro_rules! casemappingiter_impls {
                 self.0.advance_by(n)
             }
 
+            #[requires(idx < self.0.len())]
             unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
                 // SAFETY: just forwarding requirements to caller
                 unsafe { self.0.__iterator_get_unchecked(idx) }
@@ -533,6 +539,8 @@ impl Iterator for CaseMappingIter {
         self.0.advance_by(n)
     }
 
+    #[requires(idx < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
         // SAFETY: just forwarding requirements to caller
         unsafe { self.0.__iterator_get_unchecked(idx) }

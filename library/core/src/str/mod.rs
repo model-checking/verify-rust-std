@@ -407,17 +407,22 @@ impl str {
     /// ```
     #[unstable(feature = "round_char_boundary", issue = "93743")]
     #[inline]
-    pub fn floor_char_boundary(&self, index: usize) -> usize {
+    pub const fn floor_char_boundary(&self, index: usize) -> usize {
         if index >= self.len() {
             self.len()
         } else {
-            let lower_bound = index.saturating_sub(3);
-            let new_index = self.as_bytes()[lower_bound..=index]
-                .iter()
-                .rposition(|b| b.is_utf8_char_boundary());
+            let mut i = index;
+            while i > 0 {
+                if self.as_bytes()[i].is_utf8_char_boundary() {
+                    break;
+                }
+                i -= 1;
+            }
 
-            // SAFETY: we know that the character boundary will be within four bytes
-            unsafe { lower_bound + new_index.unwrap_unchecked() }
+            //  The character boundary will be within four bytes of the index
+            debug_assert!(i >= index.saturating_sub(3));
+
+            i
         }
     }
 
@@ -445,15 +450,22 @@ impl str {
     /// ```
     #[unstable(feature = "round_char_boundary", issue = "93743")]
     #[inline]
-    pub fn ceil_char_boundary(&self, index: usize) -> usize {
+    pub const fn ceil_char_boundary(&self, index: usize) -> usize {
         if index >= self.len() {
             self.len()
         } else {
-            let upper_bound = Ord::min(index + 4, self.len());
-            self.as_bytes()[index..upper_bound]
-                .iter()
-                .position(|b| b.is_utf8_char_boundary())
-                .map_or(upper_bound, |pos| pos + index)
+            let mut i = index;
+            while i < self.len() {
+                if self.as_bytes()[i].is_utf8_char_boundary() {
+                    break;
+                }
+                i += 1;
+            }
+
+            //  The character boundary will be within four bytes of the index
+            debug_assert!(i <= index + 3);
+
+            i
         }
     }
 
@@ -589,8 +601,9 @@ impl str {
     /// assert!(v.get(..42).is_none());
     /// ```
     #[stable(feature = "str_checked_slicing", since = "1.20.0")]
+    #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     #[inline]
-    pub fn get<I: SliceIndex<str>>(&self, i: I) -> Option<&I::Output> {
+    pub const fn get<I: ~const SliceIndex<str>>(&self, i: I) -> Option<&I::Output> {
         i.get(self)
     }
 
@@ -621,8 +634,9 @@ impl str {
     /// assert_eq!("HEllo", v);
     /// ```
     #[stable(feature = "str_checked_slicing", since = "1.20.0")]
+    #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     #[inline]
-    pub fn get_mut<I: SliceIndex<str>>(&mut self, i: I) -> Option<&mut I::Output> {
+    pub const fn get_mut<I: ~const SliceIndex<str>>(&mut self, i: I) -> Option<&mut I::Output> {
         i.get_mut(self)
     }
 
@@ -952,6 +966,7 @@ impl str {
     ///
     /// The caller must ensure that `mid` is a valid byte offset from the start
     /// of the string and falls on the boundary of a UTF-8 code point.
+    #[inline]
     const unsafe fn split_at_unchecked(&self, mid: usize) -> (&str, &str) {
         let len = self.len();
         let ptr = self.as_ptr();
@@ -2648,7 +2663,6 @@ impl str {
     /// you're trying to parse into.
     ///
     /// `parse` can parse into any type that implements the [`FromStr`] trait.
-
     ///
     /// # Errors
     ///
@@ -3072,7 +3086,7 @@ impl AsRef<[u8]> for str {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl const Default for &str {
     /// Creates an empty str
     #[inline]
@@ -3082,7 +3096,7 @@ impl const Default for &str {
 }
 
 #[stable(feature = "default_mut_str", since = "1.28.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl const Default for &mut str {
     /// Creates an empty mutable str
     #[inline]
