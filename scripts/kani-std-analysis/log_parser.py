@@ -137,7 +137,7 @@ def read_kani_list(kani_list_file, scanner_data):
                     }
             elif len(fn_info.keys()) > 1:
                 crates = list(fn_info.keys())
-                target_safenesses = [e['target_safenesses']
+                target_safenesses = [e['target_safeness']
                                      for _, e in fn_info.items()]
                 public_targets = [e['public_target']
                                      for _, e in fn_info.items()]
@@ -185,7 +185,7 @@ def read_kani_list(kani_list_file, scanner_data):
             if fn_info is not None:
                 if len(fn_info.keys()) > 1:
                     crates = list(fn_info.keys())
-                    target_safenesses = [e['target_safenesses']
+                    target_safenesses = [e['target_safeness']
                                          for _, e in fn_info.items()]
                     public_targets = [e['public_target']
                                          for _, e in fn_info.items()]
@@ -236,14 +236,19 @@ def init_entry(
         if crate is None:
             print(f'No autoharness info for {harness}', file=sys.stderr)
         else:
-            if autoharness_info.get(crate) is None:
-                print(f'No autoharness info for {crate}',
-                        file=sys.stderr)
+            if isinstance(crate, list):
+                crate_list = crate
             else:
-                if autoharness_info[crate][harness] != 'ok':
-                    print(f'Unexpected autoharness info for {harness} in {crate}',
+                crate_list = [crate]
+            for c in crate_list:
+                if autoharness_info.get(c) is None:
+                    print(f'No autoharness info for {c}',
                             file=sys.stderr)
-                del autoharness_info[crate][harness]
+                else:
+                    if autoharness_info[c][harness] != 'ok':
+                        print(f'Unexpected autoharness info for {harness} in {c}',
+                                file=sys.stderr)
+                    del autoharness_info[c][harness]
         autoharness_result = 'ok'
     else:
         fn = harness_map_entry['function']
@@ -304,7 +309,7 @@ def create_autoharness_result(
                 }
         elif len(fn_info.keys()) > 1:
             crates = list(fn_info.keys())
-            target_safenesses = [e['target_safenesses']
+            target_safenesses = [e['target_safeness']
                                  for _, e in fn_info.items()]
             public_targets = [e['public_target']
                                  for _, e in fn_info.items()]
@@ -505,7 +510,7 @@ def parse_log_lines(
             del active_threads[thread_id]
             thread_id = None
         elif property_match := property_pattern.match(line):
-            assert thread_id is not None
+            assert thread_id is not None, f'No known thread id at line {i}'
             active_threads[thread_id]['n_failed_properties'] = int(
                     property_match.group(1))
             active_threads[thread_id]['n_total_properties'] = int(

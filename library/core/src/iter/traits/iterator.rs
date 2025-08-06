@@ -1,3 +1,5 @@
+use safety::requires;
+
 use super::super::{
     ArrayChunks, ByRefSized, Chain, Cloned, Copied, Cycle, Enumerate, Filter, FilterMap, FlatMap,
     Flatten, Fuse, Inspect, Intersperse, IntersperseWith, Map, MapWhile, MapWindows, Peekable,
@@ -6,6 +8,8 @@ use super::super::{
 };
 use crate::array;
 use crate::cmp::{self, Ordering};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ChangeOutputType, ControlFlow, FromResidual, Residual, Try};
 
@@ -1709,6 +1713,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[unstable(feature = "iter_map_windows", reason = "recently added", issue = "87155")]
+    #[requires(N > 0)]
     fn map_windows<F, R, const N: usize>(self, f: F) -> MapWindows<Self, F, N>
     where
         Self: Sized,
