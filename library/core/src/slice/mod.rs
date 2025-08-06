@@ -6,8 +6,12 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::{ensures, requires};
+
 use crate::cmp::Ordering::{self, Equal, Greater, Less};
 use crate::intrinsics::{exact_div, unchecked_sub};
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{self, MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{OneSidedRange, OneSidedRangeBound, Range, RangeBounds, RangeInclusive};
@@ -52,8 +56,6 @@ pub use index::SliceIndex;
 pub use index::{range, try_range};
 #[unstable(feature = "array_windows", issue = "75027")]
 pub use iter::ArrayWindows;
-#[unstable(feature = "array_chunks", issue = "74985")]
-pub use iter::{ArrayChunks, ArrayChunksMut};
 #[stable(feature = "slice_group_by", since = "1.77.0")]
 pub use iter::{ChunkBy, ChunkByMut};
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -568,9 +570,10 @@ impl<T> [T] {
     #[rustc_no_implicit_autorefs]
     #[inline]
     #[must_use]
-    pub fn get<I>(&self, index: I) -> Option<&I::Output>
+    #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    pub const fn get<I>(&self, index: I) -> Option<&I::Output>
     where
-        I: SliceIndex<Self>,
+        I: ~const SliceIndex<Self>,
     {
         index.get(self)
     }
@@ -594,9 +597,10 @@ impl<T> [T] {
     #[rustc_no_implicit_autorefs]
     #[inline]
     #[must_use]
-    pub fn get_mut<I>(&mut self, index: I) -> Option<&mut I::Output>
+    #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    pub const fn get_mut<I>(&mut self, index: I) -> Option<&mut I::Output>
     where
-        I: SliceIndex<Self>,
+        I: ~const SliceIndex<Self>,
     {
         index.get_mut(self)
     }
@@ -633,9 +637,10 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
-    pub unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
+    #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
-        I: SliceIndex<Self>,
+        I: ~const SliceIndex<Self>,
     {
         // SAFETY: the caller must uphold most of the safety requirements for `get_unchecked`;
         // the slice is dereferenceable because `self` is a safe reference.
@@ -677,9 +682,10 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
-    pub unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
+    #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
-        I: SliceIndex<Self>,
+        I: ~const SliceIndex<Self>,
     {
         // SAFETY: the caller must uphold the safety requirements for `get_unchecked_mut`;
         // the slice is dereferenceable because `self` is a safe reference.
@@ -967,7 +973,7 @@ impl<T> [T] {
     /// assert!(v == [3, 2, 1]);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_unstable(feature = "const_slice_reverse", issue = "135120")]
+    #[rustc_const_stable(feature = "const_slice_reverse", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
     pub const fn reverse(&mut self) {
         let half_len = self.len() / 2;
@@ -1000,6 +1006,7 @@ impl<T> [T] {
             // this check tells LLVM that the indexing below is
             // in-bounds. Then after inlining -- once the actual
             // lengths of the slices are known -- it's removed.
+            // FIXME(const_trait_impl) replace with let (a, b) = (&mut a[..n], &mut b[..n]);
             let (a, _) = a.split_at_mut(n);
             let (b, _) = b.split_at_mut(n);
 
@@ -1227,7 +1234,7 @@ impl<T> [T] {
     ///
     /// [`chunks`]: slice::chunks
     /// [`rchunks_exact`]: slice::rchunks_exact
-    /// [`as_chunks`]: slice::chunks
+    /// [`as_chunks`]: slice::as_chunks
     #[stable(feature = "chunks_exact", since = "1.31.0")]
     #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
     #[inline]
@@ -1443,42 +1450,6 @@ impl<T> [T] {
         (remainder, array_slice)
     }
 
-    /// Returns an iterator over `N` elements of the slice at a time, starting at the
-    /// beginning of the slice.
-    ///
-    /// The chunks are array references and do not overlap. If `N` does not divide the
-    /// length of the slice, then the last up to `N-1` elements will be omitted and can be
-    /// retrieved from the `remainder` function of the iterator.
-    ///
-    /// This method is the const generic equivalent of [`chunks_exact`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if `N` is zero. This check will most probably get changed to a compile time
-    /// error before this method gets stabilized.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(array_chunks)]
-    /// let slice = ['l', 'o', 'r', 'e', 'm'];
-    /// let mut iter = slice.array_chunks();
-    /// assert_eq!(iter.next().unwrap(), &['l', 'o']);
-    /// assert_eq!(iter.next().unwrap(), &['r', 'e']);
-    /// assert!(iter.next().is_none());
-    /// assert_eq!(iter.remainder(), &['m']);
-    /// ```
-    ///
-    /// [`chunks_exact`]: slice::chunks_exact
-    #[unstable(feature = "array_chunks", issue = "74985")]
-    #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
-    #[inline]
-    #[track_caller]
-    pub const fn array_chunks<const N: usize>(&self) -> ArrayChunks<'_, T, N> {
-        assert!(N != 0, "chunk size must be non-zero");
-        ArrayChunks::new(self)
-    }
-
     /// Splits the slice into a slice of `N`-element arrays,
     /// assuming that there's no remainder.
     ///
@@ -1639,44 +1610,6 @@ impl<T> [T] {
         // that the length of the subslice is a multiple of N.
         let array_slice = unsafe { multiple_of_n.as_chunks_unchecked_mut() };
         (remainder, array_slice)
-    }
-
-    /// Returns an iterator over `N` elements of the slice at a time, starting at the
-    /// beginning of the slice.
-    ///
-    /// The chunks are mutable array references and do not overlap. If `N` does not divide
-    /// the length of the slice, then the last up to `N-1` elements will be omitted and
-    /// can be retrieved from the `into_remainder` function of the iterator.
-    ///
-    /// This method is the const generic equivalent of [`chunks_exact_mut`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if `N` is zero. This check will most probably get changed to a compile time
-    /// error before this method gets stabilized.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(array_chunks)]
-    /// let v = &mut [0, 0, 0, 0, 0];
-    /// let mut count = 1;
-    ///
-    /// for chunk in v.array_chunks_mut() {
-    ///     *chunk = [count; 2];
-    ///     count += 1;
-    /// }
-    /// assert_eq!(v, &[1, 1, 2, 2, 0]);
-    /// ```
-    ///
-    /// [`chunks_exact_mut`]: slice::chunks_exact_mut
-    #[unstable(feature = "array_chunks", issue = "74985")]
-    #[rustc_const_unstable(feature = "const_slice_make_iter", issue = "137737")]
-    #[inline]
-    #[track_caller]
-    pub const fn array_chunks_mut<const N: usize>(&mut self) -> ArrayChunksMut<'_, T, N> {
-        assert!(N != 0, "chunk size must be non-zero");
-        ArrayChunksMut::new(self)
     }
 
     /// Returns an iterator over overlapping windows of `N` elements of a slice,
@@ -4123,6 +4056,39 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_align_to", since = "1.30.0")]
     #[must_use]
+    //Checks if the part that will be transmuted from type T to U is valid for type U
+    //reuses most function logic up to use of from_raw_parts,
+    //where the potentially unsafe transmute occurs
+    #[requires(
+        U::IS_ZST || T::IS_ZST || {
+            let ptr = self.as_ptr();
+            let offset = crate::ptr::align_offset(ptr, align_of::<U>());
+            offset > self.len() || {
+                let (_, rest) = self.split_at(offset);
+                let (us_len, _) = rest.align_to_offsets::<U>();
+                let middle = crate::ptr::slice_from_raw_parts(rest.as_ptr() as *const U, us_len);
+                crate::ub_checks::can_dereference(middle)
+            }
+        }
+    )]
+    //The following clause guarantees that middle is of maximum size within self
+    //If U or T are ZSTs, then middle has size zero, so we adapt the check in that case
+    #[ensures(|(prefix, _, suffix): &(&[T], &[U], &[T])|
+        ((U::IS_ZST || T::IS_ZST) && prefix.len() == self.len()) || (
+            (prefix.len() * size_of::<T>() < align_of::<U>()) &&
+            (suffix.len() * size_of::<T>() < size_of::<U>())
+        )
+    )]
+    //Either align_to just returns self in the prefix, or the 3 returned slices
+    //should be sequential, contiguous, and have same total length as self
+    #[ensures(|(prefix, middle, suffix): &(&[T], &[U], &[T])|
+        prefix.as_ptr() == self.as_ptr() &&
+        (prefix.len() == self.len() ||  (
+            ((prefix.as_ptr()).add(prefix.len()) as *const u8 == middle.as_ptr() as *const u8) &&
+            ((middle.as_ptr()).add(middle.len()) as *const u8 == suffix.as_ptr() as *const u8) &&
+            ((suffix.as_ptr()).add(suffix.len()) == (self.as_ptr()).add(self.len())) )
+        )
+    )]
     pub unsafe fn align_to<U>(&self) -> (&[T], &[U], &[T]) {
         // Note that most of this function will be constant-evaluated,
         if U::IS_ZST || T::IS_ZST {
@@ -4188,6 +4154,39 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_align_to", since = "1.30.0")]
     #[must_use]
+    //Checks if the part that will be transmuted from type T to U is valid for type U
+    //reuses most function logic up to use of from_raw_parts,
+    //where the potentially unsafe transmute occurs
+    #[requires(
+        U::IS_ZST || T::IS_ZST || {
+            let ptr = self.as_ptr();
+            let offset = crate::ptr::align_offset(ptr, align_of::<U>());
+            offset > self.len() || {
+                let (_, rest) = self.split_at(offset);
+                let (us_len, _) = rest.align_to_offsets::<U>();
+                let middle = crate::ptr::slice_from_raw_parts(rest.as_ptr() as *const U, us_len);
+                crate::ub_checks::can_dereference(middle)
+            }
+        }
+    )]
+    //The following clause guarantees that middle is of maximum size within self
+    //If U or T are ZSTs, then middle has size zero, so we adapt the check in that case
+    #[ensures(|(prefix, _, suffix): &(&mut [T], &mut [U], &mut [T])|
+        ((U::IS_ZST || T::IS_ZST) && prefix.len() == old(self.len())) || (
+            (prefix.len() * size_of::<T>() < align_of::<U>()) &&
+            (suffix.len() * size_of::<T>() < size_of::<U>())
+        )
+    )]
+    //Either align_to just returns self in the prefix, or the 3 returned slices
+    //should be sequential, contiguous, and have same total length as self
+    #[ensures(|(prefix, middle, suffix): &(&mut [T], &mut [U], &mut [T])|
+        prefix.as_ptr() == old(self.as_ptr()) &&
+        (prefix.len() == old(self.len()) ||  (
+            ((prefix.as_ptr()).add(prefix.len()) as *const u8 == middle.as_ptr() as *const u8) &&
+            ((middle.as_ptr()).add(middle.len()) as *const u8 == suffix.as_ptr() as *const u8) &&
+            ((suffix.as_ptr()).add(suffix.len()) == old((self.as_ptr()).add(self.len())))
+        ))
+    )]
     pub unsafe fn align_to_mut<U>(&mut self) -> (&mut [T], &mut [U], &mut [T]) {
         // Note that most of this function will be constant-evaluated,
         if U::IS_ZST || T::IS_ZST {
@@ -5192,7 +5191,7 @@ where
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl<T> const Default for &[T] {
     /// Creates an empty slice.
     fn default() -> Self {
@@ -5201,7 +5200,7 @@ impl<T> const Default for &[T] {
 }
 
 #[stable(feature = "mut_slice_default", since = "1.5.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl<T> const Default for &mut [T] {
     /// Creates a mutable empty slice.
     fn default() -> Self {
@@ -5409,4 +5408,90 @@ unsafe impl GetDisjointMutIndex for range::RangeInclusive<usize> {
     fn is_overlapping(&self, other: &Self) -> bool {
         RangeInclusive::from(*self).is_overlapping(&RangeInclusive::from(*other))
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    //generates proof_of_contract harness for align_to given the T (src) and U (dst) types
+    macro_rules! proof_of_contract_for_align_to {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof_for_contract(<[$src]>::align_to)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let src_arr: [$src; ARR_SIZE] = kani::any();
+                let src_slice = kani::slice::any_slice_of_array(&src_arr);
+                let dst_slice = unsafe { src_slice.align_to::<$dst>() };
+            }
+        };
+    }
+
+    //generates harnesses for align_to where T is a given src type and U is one of the main primitives
+    macro_rules! gen_align_to_harnesses {
+        ($mod_name:ident, $src_type:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                proof_of_contract_for_align_to!(align_to_u8, $src_type, u8);
+                proof_of_contract_for_align_to!(align_to_u16, $src_type, u16);
+                proof_of_contract_for_align_to!(align_to_u32, $src_type, u32);
+                proof_of_contract_for_align_to!(align_to_u64, $src_type, u64);
+                proof_of_contract_for_align_to!(align_to_u128, $src_type, u128);
+                proof_of_contract_for_align_to!(align_to_bool, $src_type, bool);
+                proof_of_contract_for_align_to!(align_to_char, $src_type, char);
+                proof_of_contract_for_align_to!(align_to_unit, $src_type, ());
+            }
+        };
+    }
+
+    gen_align_to_harnesses!(align_to_from_u8, u8);
+    gen_align_to_harnesses!(align_to_from_u16, u16);
+    gen_align_to_harnesses!(align_to_from_u32, u32);
+    gen_align_to_harnesses!(align_to_from_u64, u64);
+    gen_align_to_harnesses!(align_to_from_u128, u128);
+    gen_align_to_harnesses!(align_to_from_bool, bool);
+    gen_align_to_harnesses!(align_to_from_char, char);
+    gen_align_to_harnesses!(align_to_from_unit, ());
+
+    //generates proof_of_contract harness for align_to_mut given the T (src) and U (dst) types
+    macro_rules! proof_of_contract_for_align_to_mut {
+        ($harness:ident, $src:ty, $dst:ty) => {
+            #[kani::proof_for_contract(<[$src]>::align_to_mut)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let mut src_arr: [$src; ARR_SIZE] = kani::any();
+                let src_slice = kani::slice::any_slice_of_array_mut(&mut src_arr);
+                let dst_slice = unsafe { src_slice.align_to_mut::<$dst>() };
+            }
+        };
+    }
+
+    //generates harnesses between a given src type and all the main primitives
+    macro_rules! gen_align_to_mut_harnesses {
+        ($mod_name:ident, $src_type:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                proof_of_contract_for_align_to_mut!(align_to_mut_u8, $src_type, u8);
+                proof_of_contract_for_align_to_mut!(align_to_mut_u16, $src_type, u16);
+                proof_of_contract_for_align_to_mut!(align_to_mut_u32, $src_type, u32);
+                proof_of_contract_for_align_to_mut!(align_to_mut_u64, $src_type, u64);
+                proof_of_contract_for_align_to_mut!(align_to_mut_u128, $src_type, u128);
+                proof_of_contract_for_align_to_mut!(align_to_mut_bool, $src_type, bool);
+                proof_of_contract_for_align_to_mut!(align_to_mut_char, $src_type, char);
+                proof_of_contract_for_align_to_mut!(align_to_mut_unit, $src_type, ());
+            }
+        };
+    }
+
+    gen_align_to_mut_harnesses!(align_to_mut_from_u8, u8);
+    gen_align_to_mut_harnesses!(align_to_mut_from_u16, u16);
+    gen_align_to_mut_harnesses!(align_to_mut_from_u32, u32);
+    gen_align_to_mut_harnesses!(align_to_mut_from_u64, u64);
+    gen_align_to_mut_harnesses!(align_to_mut_from_u128, u128);
+    gen_align_to_mut_harnesses!(align_to_mut_from_bool, bool);
+    gen_align_to_mut_harnesses!(align_to_mut_from_char, char);
+    gen_align_to_mut_harnesses!(align_to_mut_from_unit, ());
 }
