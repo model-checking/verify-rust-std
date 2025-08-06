@@ -1,12 +1,9 @@
-<<<<<<< HEAD
+#![allow(clippy::enum_clike_unportable_variant)]
+
 use safety::{ensures, invariant, requires};
 
 #[cfg(kani)]
 use crate::kani;
-=======
-#![allow(clippy::enum_clike_unportable_variant)]
-
->>>>>>> subtree/library
 use crate::num::NonZero;
 #[cfg(kani)]
 use crate::ub_checks::Invariant;
@@ -271,12 +268,8 @@ impl const Default for Alignment {
 
 #[cfg(target_pointer_width = "16")]
 #[derive(Copy, Clone, PartialEq, Eq)]
-<<<<<<< HEAD
-#[repr(u16)]
-#[cfg_attr(kani, derive(kani::Arbitrary))]
-=======
 #[repr(usize)]
->>>>>>> subtree/library
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -298,12 +291,8 @@ enum AlignmentEnum {
 
 #[cfg(target_pointer_width = "32")]
 #[derive(Copy, Clone, PartialEq, Eq)]
-<<<<<<< HEAD
-#[repr(u32)]
-#[cfg_attr(kani, derive(kani::Arbitrary))]
-=======
 #[repr(usize)]
->>>>>>> subtree/library
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
@@ -341,12 +330,8 @@ enum AlignmentEnum {
 
 #[cfg(target_pointer_width = "64")]
 #[derive(Copy, Clone, PartialEq, Eq)]
-<<<<<<< HEAD
-#[repr(u64)]
-#[cfg_attr(kani, derive(kani::Arbitrary))]
-=======
 #[repr(usize)]
->>>>>>> subtree/library
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
     _Align1Shl1 = 1 << 1,
