@@ -68,6 +68,11 @@ impl [u8] {
         let mut a = self;
         let mut b = other;
 
+        #[safety::loop_invariant(
+            a.len() <= self.len() && b.len() <= other.len() &&
+            (a.len() == 0 || self.as_ptr().wrapping_add(self.len()-a.len()) == a.as_ptr()) &&
+            (b.len() == 0 || other.as_ptr().wrapping_add(other.len()-b.len()) == b.as_ptr())
+        )]
         while let ([first_a, rest_a @ ..], [first_b, rest_b @ ..]) = (a, b) {
             if first_a.eq_ignore_ascii_case(&first_b) {
                 a = rest_a;
@@ -160,6 +165,10 @@ impl [u8] {
         let mut bytes = self;
         // Note: A pattern matching based approach (instead of indexing) allows
         // making the function const.
+        #[safety::loop_invariant(
+            bytes.len() <= self.len() &&
+            (bytes.len() == 0 || self.as_ptr().wrapping_add(self.len()-bytes.len()) == bytes.as_ptr())
+        )]
         while let [first, rest @ ..] = bytes {
             if first.is_ascii_whitespace() {
                 bytes = rest;
@@ -189,6 +198,10 @@ impl [u8] {
         let mut bytes = self;
         // Note: A pattern matching based approach (instead of indexing) allows
         // making the function const.
+        #[safety::loop_invariant(
+            bytes.len() <= self.len() &&
+            (bytes.len() == 0 || self.as_ptr() == bytes.as_ptr())
+        )]
         while let [rest @ .., last] = bytes {
             if last.is_ascii_whitespace() {
                 bytes = rest;
@@ -338,6 +351,12 @@ impl<'a> fmt::Debug for EscapeAscii<'a> {
 #[doc(hidden)]
 #[inline]
 pub const fn is_ascii_simple(mut bytes: &[u8]) -> bool {
+    #[cfg(kani)]
+    let on_entry_bytes = bytes;
+    #[safety::loop_invariant(
+            bytes.len() <= on_entry_bytes.len() &&
+            (bytes.len() == 0 || bytes.as_ptr() == on_entry_bytes.as_ptr())
+    )]
     while let [rest @ .., last] = bytes {
         if !last.is_ascii() {
             break;
@@ -536,4 +555,29 @@ pub mod verify {
             }
         }
     }
+
+    #[kani::proof]
+    pub fn check_trim_ascii_start() {
+        let a: [u8; 100] = kani::any();
+        let _ret = a.trim_ascii_start();
+    }
+
+    #[kani::proof]
+    pub fn check_eq_ignore_ascii_case() {
+        let a: [u8; 100] = kani::any();
+        let b: [u8; 100] = kani::any();
+        let _ret = a.eq_ignore_ascii_case(b.as_slice());
+    } 
+
+    #[kani::proof]
+    fn check_is_ascii_simple() {
+        let mut bytes: [u8; 100] = kani::any();
+        let _ret = is_ascii_simple(bytes.as_slice());
+    }
+
+    #[kani::proof]
+    fn check_trim_ascii_end() {
+        let mut a: [u8; 100] = kani::any();
+        let _ret = a.trim_ascii_end();
+    } 
 }
