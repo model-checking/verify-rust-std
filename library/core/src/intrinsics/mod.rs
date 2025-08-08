@@ -2692,7 +2692,7 @@ pub unsafe fn vtable_align(_ptr: *const ()) -> usize;
 /// More specifically, this is the offset in bytes between successive
 /// items of the same type, including alignment padding.
 ///
-/// The stabilized version of this intrinsic is [`size_of`].
+/// The stabilized version of this intrinsic is [`core::mem::size_of`].
 #[rustc_nounwind]
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
@@ -2706,7 +2706,7 @@ pub const fn size_of<T>() -> usize;
 /// Therefore, implementations must not require the user to uphold
 /// any safety invariants.
 ///
-/// The stabilized version of this intrinsic is [`align_of`].
+/// The stabilized version of this intrinsic is [`core::mem::align_of`].
 #[rustc_nounwind]
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_intrinsic_const_stable_indirect]
@@ -2729,7 +2729,7 @@ pub const fn variant_count<T>() -> usize;
 
 /// The size of the referenced value in bytes.
 ///
-/// The stabilized version of this intrinsic is [`size_of_val`].
+/// The stabilized version of this intrinsic is [`core::mem::size_of_val`].
 ///
 /// # Safety
 ///
@@ -2742,7 +2742,7 @@ pub const unsafe fn size_of_val<T: ?Sized>(ptr: *const T) -> usize;
 
 /// The required alignment of the referenced value.
 ///
-/// The stabilized version of this intrinsic is [`align_of_val`].
+/// The stabilized version of this intrinsic is [`core::mem::align_of_val`].
 ///
 /// # Safety
 ///
