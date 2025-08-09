@@ -1,3 +1,5 @@
+#![allow(clippy::enum_clike_unportable_variant)]
+
 use safety::{ensures, invariant, requires};
 
 #[cfg(kani)]
@@ -266,7 +268,7 @@ impl const Default for Alignment {
 
 #[cfg(target_pointer_width = "16")]
 #[derive(Copy, Clone, PartialEq, Eq)]
-#[repr(u16)]
+#[repr(usize)]
 #[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
@@ -289,7 +291,7 @@ enum AlignmentEnum {
 
 #[cfg(target_pointer_width = "32")]
 #[derive(Copy, Clone, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(usize)]
 #[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
@@ -328,7 +330,7 @@ enum AlignmentEnum {
 
 #[cfg(target_pointer_width = "64")]
 #[derive(Copy, Clone, PartialEq, Eq)]
-#[repr(u64)]
+#[repr(usize)]
 #[cfg_attr(kani, derive(kani::Arbitrary))]
 enum AlignmentEnum {
     _Align1Shl0 = 1 << 0,
