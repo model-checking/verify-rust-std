@@ -333,7 +333,7 @@ impl<T: Copy> Clone for Cell<T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl<T: ~const Default> const Default for Cell<T> {
     /// Creates a `Cell<T>`, with the `Default` value for T.
     #[inline]
@@ -1324,7 +1324,7 @@ impl<T: Clone> Clone for RefCell<T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl<T: ~const Default> const Default for RefCell<T> {
     /// Creates a `RefCell<T>`, with the `Default` value for T.
     #[inline]
@@ -2068,9 +2068,9 @@ impl<T: ?Sized + fmt::Display> fmt::Display for RefMut<'_, T> {
 /// implies exclusive access to its `T`:
 ///
 /// ```rust
-/// #![forbid(unsafe_code)] // with exclusive accesses,
-///                         // `UnsafeCell` is a transparent no-op wrapper,
-///                         // so no need for `unsafe` here.
+/// #![forbid(unsafe_code)]
+/// // with exclusive accesses, `UnsafeCell` is a transparent no-op wrapper, so no need for
+/// // `unsafe` here.
 /// use std::cell::UnsafeCell;
 ///
 /// let mut x: UnsafeCell<i32> = 42.into();
@@ -2332,7 +2332,7 @@ impl<T: ?Sized> UnsafeCell<T> {
 }
 
 #[stable(feature = "unsafe_cell_default", since = "1.10.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl<T: ~const Default> const Default for UnsafeCell<T> {
     /// Creates an `UnsafeCell`, with the `Default` value for T.
     fn default() -> UnsafeCell<T> {
@@ -2437,7 +2437,7 @@ impl<T: ?Sized> SyncUnsafeCell<T> {
 }
 
 #[unstable(feature = "sync_unsafe_cell", issue = "95439")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl<T: ~const Default> const Default for SyncUnsafeCell<T> {
     /// Creates an `SyncUnsafeCell`, with the `Default` value for T.
     fn default() -> SyncUnsafeCell<T> {

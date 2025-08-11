@@ -138,8 +138,7 @@ unsafe impl<T: Sync + PointeeSized> Send for &T {}
 /// impl Bar for Impl { }
 ///
 /// let x: &dyn Foo = &Impl;    // OK
-/// // let y: &dyn Bar = &Impl; // error: the trait `Bar` cannot
-///                             // be made into an object
+/// // let y: &dyn Bar = &Impl; // error: the trait `Bar` cannot be made into an object
 /// ```
 ///
 /// [trait object]: ../../book/ch17-02-trait-objects.html
@@ -863,7 +862,7 @@ impl<T: PointeeSized> Clone for PhantomData<T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "67792")]
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
 impl<T: PointeeSized> const Default for PhantomData<T> {
     fn default() -> Self {
         Self

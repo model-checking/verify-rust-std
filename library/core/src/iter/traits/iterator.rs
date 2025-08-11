@@ -1,3 +1,5 @@
+use safety::requires;
+
 use super::super::{
     ArrayChunks, ByRefSized, Chain, Cloned, Copied, Cycle, Enumerate, Filter, FilterMap, FlatMap,
     Flatten, Fuse, Inspect, Intersperse, IntersperseWith, Map, MapWhile, MapWindows, Peekable,
@@ -6,6 +8,8 @@ use super::super::{
 };
 use crate::array;
 use crate::cmp::{self, Ordering};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ChangeOutputType, ControlFlow, FromResidual, Residual, Try};
 
@@ -807,7 +811,7 @@ pub trait Iterator {
     /// might be preferable to keep a functional style with longer iterators:
     ///
     /// ```
-    /// (0..5).flat_map(|x| x * 100 .. x * 110)
+    /// (0..5).flat_map(|x| (x * 100)..(x * 110))
     ///       .enumerate()
     ///       .filter(|&(i, x)| (i + x) % 3 == 0)
     ///       .for_each(|(i, x)| println!("{i}:{x}"));
@@ -1709,6 +1713,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[unstable(feature = "iter_map_windows", reason = "recently added", issue = "87155")]
+    #[requires(N > 0)]
     fn map_windows<F, R, const N: usize>(self, f: F) -> MapWindows<Self, F, N>
     where
         Self: Sized,
@@ -3414,10 +3419,10 @@ pub trait Iterator {
     /// ```
     #[stable(feature = "iter_copied", since = "1.36.0")]
     #[rustc_diagnostic_item = "iter_copied"]
-    fn copied<'a, T: 'a>(self) -> Copied<Self>
+    fn copied<'a, T>(self) -> Copied<Self>
     where
+        T: Copy + 'a,
         Self: Sized + Iterator<Item = &'a T>,
-        T: Copy,
     {
         Copied::new(self)
     }
@@ -3462,10 +3467,10 @@ pub trait Iterator {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_diagnostic_item = "iter_cloned"]
-    fn cloned<'a, T: 'a>(self) -> Cloned<Self>
+    fn cloned<'a, T>(self) -> Cloned<Self>
     where
+        T: Clone + 'a,
         Self: Sized + Iterator<Item = &'a T>,
-        T: Clone,
     {
         Cloned::new(self)
     }
