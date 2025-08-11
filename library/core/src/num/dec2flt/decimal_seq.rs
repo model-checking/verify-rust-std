@@ -101,7 +101,7 @@ impl DecimalSeq {
         let dp = self.decimal_point as usize;
         let mut n = 0_u64;
 
-        #[kani::loop_invariant(n < 10u64.pow(kaniindex as u32))]
+        #[kani::loop_invariant(n < 10u64.pow(kani::index as u32))]
         for i in 0..dp {
             n *= 10;
             if i < self.num_digits {
