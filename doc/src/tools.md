@@ -13,6 +13,6 @@ please see the [Tool Application](general-rules.md#tool-applications) section.
 |---------------------|-------|
  | Flux  | [![Flux](https://github.com/model-checking/verify-rust-std/actions/workflows/flux.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/flux.yml)      |
  | VeriFast for Rust   | [![VeriFast](https://github.com/model-checking/verify-rust-std/actions/workflows/verifast.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/verifast.yml)      |
- | GOTO-Transcoder (ESBMC) | [![GOTO-Transcoder](https://github.com/model-checking/verify-rust-std/actions/workflows/goto-transcoder.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/goto-transcoder.yml)      |
+ | ESBMC (GOTO-Transcoder) | [![ESBMC](https://github.com/model-checking/verify-rust-std/actions/workflows/goto-transcoder.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/goto-transcoder.yml)      |
  | Kani Rust Verifier  | [![Kani](https://github.com/model-checking/verify-rust-std/actions/workflows/kani.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/kani.yml)      |
  | VeriFast for Rust   | [![VeriFast](https://github.com/model-checking/verify-rust-std/actions/workflows/verifast.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/verifast.yml)      |
