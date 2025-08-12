@@ -2275,7 +2275,9 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     #[safety::requires(m.is_power_of_two())]
     #[safety::requires(x < m)]
     #[safety::requires(x % 2 != 0)]
-    #[safety::ensures(|result| wrapping_mul(*result, x) % m == 1)]
+    // for Kani (v0.65.0), the below multiplication is too costly to prove
+    #[cfg_attr(not(kani),
+        safety::ensures(|result| wrapping_mul(*result, x) % m == 1))]
     #[inline]
     const unsafe fn mod_inv(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
