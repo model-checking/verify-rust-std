@@ -11,6 +11,7 @@ defaults:
 
 jobs:
   update-kani-metrics:
+    if: github.repository == 'model-checking/verify-rust-std'
     runs-on: ubuntu-latest
     
     steps:

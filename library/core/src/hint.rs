@@ -4,6 +4,10 @@
 //!
 //! Hints may be compile time or runtime.
 
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::{intrinsics, ub_checks};
 
@@ -99,6 +103,7 @@ use crate::{intrinsics, ub_checks};
 #[stable(feature = "unreachable", since = "1.27.0")]
 #[rustc_const_stable(feature = "const_unreachable_unchecked", since = "1.57.0")]
 #[track_caller]
+#[requires(false)]
 pub const unsafe fn unreachable_unchecked() -> ! {
     ub_checks::assert_unsafe_precondition!(
         check_language_ub,
@@ -198,6 +203,7 @@ pub const unsafe fn unreachable_unchecked() -> ! {
 #[doc(alias = "assume")]
 #[stable(feature = "hint_assert_unchecked", since = "1.81.0")]
 #[rustc_const_stable(feature = "hint_assert_unchecked", since = "1.81.0")]
+#[requires(cond)]
 pub const unsafe fn assert_unchecked(cond: bool) {
     // SAFETY: The caller promised `cond` is true.
     unsafe {

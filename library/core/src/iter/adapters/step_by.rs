@@ -1,7 +1,10 @@
 use crate::intrinsics;
 use crate::iter::{TrustedLen, TrustedRandomAccess, from_fn};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{Range, Try};
+use crate::ub_checks::Invariant;
 
 /// An iterator for stepping iterators by a custom amount.
 ///
@@ -27,6 +30,13 @@ pub struct StepBy<I> {
     /// don't need to check for division-by-zero, for example.)
     step_minus_one: usize,
     first_take: bool,
+}
+
+#[unstable(feature = "ub_checks", issue = "none")]
+impl<I> Invariant for StepBy<I> {
+    fn is_safe(&self) -> bool {
+        self.step_minus_one < usize::MAX
+    }
 }
 
 impl<I> StepBy<I> {
