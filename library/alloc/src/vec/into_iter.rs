@@ -2,6 +2,8 @@ use core::iter::{
     FusedIterator, InPlaceIterable, SourceIter, TrustedFused, TrustedLen,
     TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use core::kani;
 use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit, SizedTypeProperties};
 use core::num::NonZero;
@@ -10,6 +12,8 @@ use core::ops::Deref;
 use core::ptr::{self, NonNull};
 use core::slice::{self};
 use core::{array, fmt};
+
+use safety::requires;
 
 #[cfg(not(no_global_oom_handling))]
 use super::AsVecIntoIter;
@@ -354,6 +358,8 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         R::from_output(accum)
     }
 
+    #[requires(i < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, i: usize) -> Self::Item
     where
         Self: TrustedRandomAccessNoCoerce,

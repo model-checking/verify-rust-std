@@ -1,8 +1,12 @@
+use safety::requires;
+
 use crate::cmp;
 use crate::fmt::{self, Debug};
 use crate::iter::{
     FusedIterator, InPlaceIterable, SourceIter, TrustedFused, TrustedLen, UncheckedIterator,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 
 /// An iterator that iterates two other iterators simultaneously.
@@ -104,6 +108,8 @@ where
     }
 
     #[inline]
+    #[requires(idx < self.size_hint().0)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
     where
         Self: TrustedRandomAccessNoCoerce,
@@ -264,6 +270,7 @@ where
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item {
         let idx = self.index + idx;
         // SAFETY: the caller must uphold the contract for
