@@ -4,7 +4,7 @@
 - **Tracking Issue:** [#29](https://github.com/model-checking/verify-rust-std/issues/29)
 - **Start date:** *2024/07/01*
 - **End date:** *2025/04/10*
-- **Reward:** *5,000 USD*
+- **Reward:** *20000 USD*
 
 -------------------
 
