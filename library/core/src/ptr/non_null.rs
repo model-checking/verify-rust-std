@@ -1801,7 +1801,7 @@ impl<T> NonNull<[T]> {
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self can be dereferenced
     pub const unsafe fn get_unchecked_mut<I>(self, index: I) -> NonNull<I::Output>
     where
-        I: ~const SliceIndex<[T]>,
+        I: [const] SliceIndex<[T]>,
     {
         // SAFETY: the caller ensures that `self` is dereferenceable and `index` in-bounds.
         // As a consequence, the resulting pointer cannot be null.
