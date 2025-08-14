@@ -1,10 +1,11 @@
 # Challenge 5: Verify functions iterating over inductive data type: `linked_list`
 
-- **Status:** Open
+- **Status:** Resolved
 - **Tracking Issue:** [#29](https://github.com/model-checking/verify-rust-std/issues/29)
 - **Start date:** *2024/07/01*
-- **End date:** *2025/04/10*
+- **End date:** *2025/08/12*
 - **Reward:** *5,000 USD*
+- **Contributors:** [Bart Jacobs](https://github.com/btj)
 
 -------------------
 
