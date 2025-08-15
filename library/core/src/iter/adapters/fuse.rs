@@ -1,9 +1,13 @@
+use safety::requires;
+
 use crate::intrinsics;
 use crate::iter::adapters::SourceIter;
 use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::{
     FusedIterator, TrustedFused, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::ops::Try;
 
 /// An iterator that yields `None` forever after the underlying iterator
@@ -109,6 +113,8 @@ where
     }
 
     #[inline]
+    #[requires(self.iter.is_some() && idx < self.iter.as_ref().unwrap().size_hint().0)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
     where
         Self: TrustedRandomAccessNoCoerce,

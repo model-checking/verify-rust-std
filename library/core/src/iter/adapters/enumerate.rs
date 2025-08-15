@@ -1,6 +1,10 @@
+use safety::requires;
+
 use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::Try;
 
@@ -160,6 +164,8 @@ where
 
     #[rustc_inherit_overflow_checks]
     #[inline]
+    #[requires(idx < self.iter.size_hint().0)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item
     where
         Self: TrustedRandomAccessNoCoerce,

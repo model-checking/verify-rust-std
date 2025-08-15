@@ -1,5 +1,7 @@
 //! Iterators for `str` methods.
 
+use safety::requires;
+
 use super::pattern::{DoubleEndedSearcher, Pattern, ReverseSearcher, Searcher};
 use super::validations::{next_code_point, next_code_point_reverse};
 use super::{
@@ -11,6 +13,8 @@ use crate::iter::{
     Chain, Copied, Filter, FlatMap, Flatten, FusedIterator, Map, TrustedLen, TrustedRandomAccess,
     TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::Try;
 use crate::slice::{self, Split as SliceSplit};
@@ -52,7 +56,7 @@ impl<'a> Iterator for Chars<'a> {
         const CHUNK_SIZE: usize = 32;
 
         if remainder >= CHUNK_SIZE {
-            let mut chunks = self.iter.as_slice().array_chunks::<CHUNK_SIZE>();
+            let mut chunks = self.iter.as_slice().as_chunks::<CHUNK_SIZE>().0.iter();
             let mut bytes_skipped: usize = 0;
 
             while remainder > CHUNK_SIZE
@@ -356,6 +360,7 @@ impl Iterator for Bytes<'_> {
     }
 
     #[inline]
+    #[requires(idx < self.0.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> u8 {
         // SAFETY: the caller must uphold the safety contract
         // for `Iterator::__iterator_get_unchecked`.

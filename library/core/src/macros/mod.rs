@@ -196,16 +196,14 @@ pub macro assert_matches {
     },
 }
 
-/// A macro for defining `#[cfg]` match-like statements.
+/// Selects code at compile-time based on `cfg` predicates.
 ///
-/// It is similar to the `if/elif` C preprocessor macro by allowing definition of a cascade of
-/// `#[cfg]` cases, emitting the implementation which matches first.
+/// This macro evaluates, at compile-time, a series of `cfg` predicates,
+/// selects the first that is true, and emits the code guarded by that
+/// predicate. The code guarded by other predicates is not emitted.
 ///
-/// This allows you to conveniently provide a long list `#[cfg]`'d blocks of code
-/// without having to rewrite each clause multiple times.
-///
-/// Trailing `_` wildcard match arms are **optional** and they indicate a fallback branch when
-/// all previous declarations do not evaluate to true.
+/// An optional trailing `_` wildcard can be used to specify a fallback. If
+/// none of the predicates are true, a [`compile_error`] is emitted.
 ///
 /// # Example
 ///
@@ -225,7 +223,7 @@ pub macro assert_matches {
 /// }
 /// ```
 ///
-/// If desired, it is possible to return expressions through the use of surrounding braces:
+/// The `cfg_select!` macro can also be used in expression position:
 ///
 /// ```
 /// #![feature(cfg_select)]
@@ -273,7 +271,10 @@ pub macro cfg_select($($tt:tt)*) {
 /// // expression given.
 /// debug_assert!(true);
 ///
-/// fn some_expensive_computation() -> bool { true } // a very simple function
+/// fn some_expensive_computation() -> bool {
+///     // Some expensive computation here
+///     true
+/// }
 /// debug_assert!(some_expensive_computation());
 ///
 /// // assert with a custom message
@@ -428,8 +429,10 @@ pub macro debug_assert_matches($($arg:tt)*) {
 #[macro_export]
 #[stable(feature = "matches_macro", since = "1.42.0")]
 #[rustc_diagnostic_item = "matches_macro"]
+#[allow_internal_unstable(non_exhaustive_omitted_patterns_lint, stmt_expr_attributes)]
 macro_rules! matches {
     ($expression:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
+        #[allow(non_exhaustive_omitted_patterns)]
         match $expression {
             $pattern $(if $guard)? => true,
             _ => false
@@ -1547,7 +1550,10 @@ pub(crate) mod builtin {
     /// // expression given.
     /// assert!(true);
     ///
-    /// fn some_computation() -> bool { true } // a very simple function
+    /// fn some_computation() -> bool {
+    ///     // Some expensive computation here
+    ///     true
+    /// }
     ///
     /// assert!(some_computation());
     ///
@@ -1617,7 +1623,7 @@ pub(crate) mod builtin {
     /// See [the reference] for more info.
     ///
     /// [the reference]: ../../../reference/attributes/derive.html
-    #[unstable(feature = "derive_const", issue = "none")]
+    #[unstable(feature = "derive_const", issue = "118304")]
     #[rustc_builtin_macro]
     pub macro derive_const($item:item) {
         /* compiler built-in */
