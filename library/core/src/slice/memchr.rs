@@ -1,9 +1,9 @@
 // Original implementation taken from rust-memchr.
 // Copyright 2015 Andrew Gallant, bluss and Nicolas Koch
 
-use crate::intrinsics::const_eval_select;
 #[cfg(kani)]
 use crate::forall;
+use crate::intrinsics::const_eval_select;
 #[cfg(kani)]
 use crate::kani;
 
@@ -40,7 +40,7 @@ const fn memchr_naive(x: u8, text: &[u8]) -> Option<usize> {
     let mut i = 0;
 
     // FIXME(const-hack): Replace with `text.iter().pos(|c| *c == x)`.
-    #[kani::loop_invariant(i <= text.len() && forall!(|j in (0,i)| unsafe {*text.as_ptr().wrapping_add(j)} != x))]
+    #[cfg_attr(kani, kani::loop_invariant(i <= text.len() && forall!(|j in (0,i)| unsafe {*text.as_ptr().wrapping_add(j)} != x)))]
     while i < text.len() {
         if text[i] == x {
             return Some(i);
@@ -83,8 +83,8 @@ const fn memchr_aligned(x: u8, text: &[u8]) -> Option<usize> {
 
             // search the body of the text
             let repeated_x = usize::repeat_u8(x);
-            #[kani::loop_invariant(len >= 2 * USIZE_BYTES && offset <= len &&
-                forall!(|j in (0,offset)| unsafe {*text.as_ptr().wrapping_add(j)} != x))]
+            #[cfg_attr(kani, kani::loop_invariant(len >= 2 * USIZE_BYTES && offset <= len &&
+                forall!(|j in (0,offset)| unsafe {*text.as_ptr().wrapping_add(j)} != x)))]
             while offset <= len - 2 * USIZE_BYTES {
                 // SAFETY: the while's predicate guarantees a distance of at least 2 * usize_bytes
                 // between the offset and the end of the slice.
@@ -146,7 +146,7 @@ pub fn memrchr(x: u8, text: &[u8]) -> Option<usize> {
     let repeated_x = usize::repeat_u8(x);
     let chunk_bytes = size_of::<Chunk>();
 
-    #[kani::loop_invariant(true)]
+    #[cfg_attr(kani, kani::loop_invariant(true))]
     while offset > min_aligned_offset {
         // SAFETY: offset starts at len - suffix.len(), as long as it is greater than
         // min_aligned_offset (prefix.len()) the remaining distance is at least 2 * chunk_bytes.
