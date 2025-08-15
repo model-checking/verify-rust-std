@@ -3,6 +3,8 @@
 
 use crate::intrinsics::const_eval_select;
 #[cfg(kani)]
+use crate::forall;
+#[cfg(kani)]
 use crate::kani;
 
 const LO_USIZE: usize = usize::repeat_u8(0x01);
@@ -38,7 +40,7 @@ const fn memchr_naive(x: u8, text: &[u8]) -> Option<usize> {
     let mut i = 0;
 
     // FIXME(const-hack): Replace with `text.iter().pos(|c| *c == x)`.
-    #[kani::loop_invariant(i <= text.len() && kani::forall!(|j in (0,i)| unsafe {*text.as_ptr().wrapping_add(j)} != x))]
+    #[kani::loop_invariant(i <= text.len() && forall!(|j in (0,i)| unsafe {*text.as_ptr().wrapping_add(j)} != x))]
     while i < text.len() {
         if text[i] == x {
             return Some(i);
@@ -82,7 +84,7 @@ const fn memchr_aligned(x: u8, text: &[u8]) -> Option<usize> {
             // search the body of the text
             let repeated_x = usize::repeat_u8(x);
             #[kani::loop_invariant(len >= 2 * USIZE_BYTES && offset <= len &&
-                kani::forall!(|j in (0,offset)| unsafe {*text.as_ptr().wrapping_add(j)} != x))]
+                forall!(|j in (0,offset)| unsafe {*text.as_ptr().wrapping_add(j)} != x))]
             while offset <= len - 2 * USIZE_BYTES {
                 // SAFETY: the while's predicate guarantees a distance of at least 2 * usize_bytes
                 // between the offset and the end of the slice.
