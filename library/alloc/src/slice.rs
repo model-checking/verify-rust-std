@@ -52,6 +52,10 @@ pub use core::slice::{from_mut_ptr_range, from_ptr_range};
 pub use core::slice::{from_raw_parts, from_raw_parts_mut};
 #[unstable(feature = "slice_range", issue = "76393")]
 pub use core::slice::{range, try_range};
+#[cfg(kani)]
+use crate::kani;
+#[cfg(kani)]
+use core::ptr::slice_from_raw_parts;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic slice extension methods
@@ -524,6 +528,18 @@ impl<T> [T] {
         {
             let mut m = n >> 1;
             // If `m > 0`, there are remaining bits up to the leftmost '1'.
+            #[cfg(kani)]
+            let buf_ptr= slice_from_raw_parts(buf.as_ptr(), capacity);
+            #[cfg(kani)]
+            let len_ptr  = unsafe {(&buf as *const Vec<T>  as *const usize).add(2)};
+            #[kani::loop_invariant(
+                kani::mem::same_allocation(buf.as_ptr(), buf.as_ptr().wrapping_add(capacity)) &&
+                unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
+                unsafe {*len_ptr <= capacity} &&
+                m.leading_zeros() > n.leading_zeros() &&
+                unsafe {*len_ptr == sef.len() * (1usize << (m.leading_zeros() - n.leading_zeros() - 1))}
+            )]
+            #[kani::loop_modifies(&m, buf_ptr, len_ptr)]
             while m > 0 {
                 // `buf.extend(buf)`:
                 unsafe {
@@ -865,5 +881,25 @@ impl<T> sort::stable::BufGuard<T> for Vec<T> {
 
     fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<T>] {
         self.spare_capacity_mut()
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod slice_verify {
+    use super::*;
+
+    #[kani::proof]
+    fn check_repeat_u8() {
+        let mut a: [u8; 10] = kani::any();
+        let n = kani::any_where(|i| *i < 10);
+        let _result = repeat(a.as_slice(), n);
+    }
+
+    #[kani::proof]
+    fn check_repeat_u16() {
+        let mut a: [u16; 10] = kani::any();
+        let n = kani::any_where(|i| *i < 10);
+        let _result = repeat(a.as_slice(), n);
     }
 }
