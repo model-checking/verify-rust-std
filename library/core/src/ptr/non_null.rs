@@ -1798,7 +1798,10 @@ impl<T> NonNull<[T]> {
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     #[inline]
-    #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self can be dereferenced
+    // TODO: const_trait parsing weirdly interacts with attaching contracts, see
+    // https://github.com/model-checking/verify-rust-std/issues/465,
+    // https://github.com/model-checking/kani/issues/4303
+    // #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure self can be dereferenced
     pub const unsafe fn get_unchecked_mut<I>(self, index: I) -> NonNull<I::Output>
     where
         I: [const] SliceIndex<[T]>,
@@ -2294,24 +2297,27 @@ mod verify {
         }
     }
 
-    #[kani::proof_for_contract(NonNull::get_unchecked_mut)]
-    pub fn non_null_check_get_unchecked_mut() {
-        const ARR_SIZE: usize = 100000;
-        let mut arr: [i32; ARR_SIZE] = kani::any();
-        let raw_ptr = arr.as_mut_ptr();
-        let ptr = NonNull::slice_from_raw_parts(NonNull::new(raw_ptr).unwrap(), ARR_SIZE);
-        let lower = kani::any_where(|x| *x < ARR_SIZE);
-        let upper = kani::any_where(|x| *x < ARR_SIZE && *x >= lower);
-        unsafe {
-            // NOTE: The `index` parameter cannot be used in the function contracts without being moved.
-            // Since the `SliceIndex` trait does not guarantee that `index` implements `Clone` or `Copy`,
-            // it cannot be reused after being consumed in the precondition. To comply with Rust's ownership
-            // rules and ensure `index` is only used once, the in-bounds check is moved to the proof harness
-            // as a workaround.
-            kani::assume(ptr.as_ref().get(lower..upper).is_some());
-            let _ = ptr.get_unchecked_mut(lower..upper);
-        }
-    }
+    // TODO: const_trait parsing weirdly interacts with attaching contracts, see
+    // https://github.com/model-checking/verify-rust-std/issues/465,
+    // https://github.com/model-checking/kani/issues/4303
+    // #[kani::proof_for_contract(NonNull::get_unchecked_mut)]
+    // pub fn non_null_check_get_unchecked_mut() {
+    //     const ARR_SIZE: usize = 100000;
+    //     let mut arr: [i32; ARR_SIZE] = kani::any();
+    //     let raw_ptr = arr.as_mut_ptr();
+    //     let ptr = NonNull::slice_from_raw_parts(NonNull::new(raw_ptr).unwrap(), ARR_SIZE);
+    //     let lower = kani::any_where(|x| *x < ARR_SIZE);
+    //     let upper = kani::any_where(|x| *x < ARR_SIZE && *x >= lower);
+    //     unsafe {
+    //         // NOTE: The `index` parameter cannot be used in the function contracts without being moved.
+    //         // Since the `SliceIndex` trait does not guarantee that `index` implements `Clone` or `Copy`,
+    //         // it cannot be reused after being consumed in the precondition. To comply with Rust's ownership
+    //         // rules and ensure `index` is only used once, the in-bounds check is moved to the proof harness
+    //         // as a workaround.
+    //         kani::assume(ptr.as_ref().get(lower..upper).is_some());
+    //         let _ = ptr.get_unchecked_mut(lower..upper);
+    //     }
+    // }
 
     #[kani::proof_for_contract(NonNull::replace)]
     pub fn non_null_check_replace() {
