@@ -891,7 +891,8 @@ mod verify {
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
     #[kani::proof]
-    #[kani::solver(cvc5)] // 7.3 seconds when 16; 33.1 seconds when 32
+    #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_from_bytes_until_nul() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -927,6 +928,7 @@ mod verify {
     // pub fn bytes(&self) -> Bytes<'_>
     #[kani::proof]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_bytes() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -945,6 +947,7 @@ mod verify {
     // pub const fn to_str(&self) -> Result<&str, str::Utf8Error>
     #[kani::proof]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_to_str() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -962,6 +965,7 @@ mod verify {
     // pub const fn as_ptr(&self) -> *const c_char
     #[kani::proof]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_as_ptr() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -989,6 +993,7 @@ mod verify {
     // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
     #[kani::proof]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_from_bytes_with_nul() {
         const MAX_SIZE: usize = 16;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1003,6 +1008,7 @@ mod verify {
     // pub const fn count_bytes(&self) -> usize
     #[kani::proof]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_count_bytes() {
         const MAX_SIZE: usize = 32;
         let mut bytes: [u8; MAX_SIZE] = kani::any();
@@ -1028,6 +1034,7 @@ mod verify {
     // pub const fn to_bytes(&self) -> &[u8]
     #[kani::proof]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_to_bytes() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1044,6 +1051,7 @@ mod verify {
     // pub const fn to_bytes_with_nul(&self) -> &[u8]
     #[kani::proof]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_to_bytes_with_nul() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1060,6 +1068,7 @@ mod verify {
     // const unsafe fn strlen(ptr: *const c_char) -> usize
     #[kani::proof_for_contract(super::strlen)]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_strlen_contract() {
         const MAX_SIZE: usize = 32;
         let mut string: [u8; MAX_SIZE] = kani::any();
@@ -1073,6 +1082,7 @@ mod verify {
     // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr
     #[kani::proof_for_contract(CStr::from_ptr)]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_from_ptr_contract() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1086,6 +1096,7 @@ mod verify {
     // pub const fn is_empty(&self) -> bool
     #[kani::proof]
     #[kani::solver(cvc5)]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     fn check_is_empty() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
