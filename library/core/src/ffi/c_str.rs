@@ -961,7 +961,7 @@ mod verify {
 
     // pub const fn as_ptr(&self) -> *const c_char
     #[kani::proof]
-    #[kani::unwind(33)]
+    #[kani::solver(cvc5)]
     fn check_as_ptr() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1002,7 +1002,7 @@ mod verify {
 
     // pub const fn count_bytes(&self) -> usize
     #[kani::proof]
-    #[kani::unwind(32)]
+    #[kani::solver(cvc5)]
     fn check_count_bytes() {
         const MAX_SIZE: usize = 32;
         let mut bytes: [u8; MAX_SIZE] = kani::any();
@@ -1043,7 +1043,7 @@ mod verify {
 
     // pub const fn to_bytes_with_nul(&self) -> &[u8]
     #[kani::proof]
-    #[kani::unwind(33)]
+    #[kani::solver(cvc5)]
     fn check_to_bytes_with_nul() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1059,7 +1059,7 @@ mod verify {
 
     // const unsafe fn strlen(ptr: *const c_char) -> usize
     #[kani::proof_for_contract(super::strlen)]
-    #[kani::unwind(33)]
+    #[kani::solver(cvc5)]
     fn check_strlen_contract() {
         const MAX_SIZE: usize = 32;
         let mut string: [u8; MAX_SIZE] = kani::any();
