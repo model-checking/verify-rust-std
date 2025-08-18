@@ -2810,6 +2810,36 @@ where
 #[rustc_intrinsic]
 pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: *const P) -> M;
 
+/// Return whether the initialization state is preserved.
+///
+/// For untyped copy, done via `copy` and `copy_nonoverlapping`, the copies of non-initialized
+/// bytes (such as padding bytes) should result in a non-initialized copy, while copies of
+/// initialized bytes result in initialized bytes.
+///
+/// It is UB to read the uninitialized bytes, so we cannot compare their values only their
+/// initialization state.
+///
+/// This is used for contracts only.
+///
+/// FIXME: Change this once we add support to quantifiers.
+#[allow(dead_code)]
+#[allow(unused_variables)]
+fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
+    #[cfg(kani)]
+    if count > 0 {
+        let byte = kani::any_where(|sz: &usize| *sz < size_of::<T>());
+        let elem = kani::any_where(|val: &usize| *val < count);
+        let src_data = src as *const u8;
+        let dst_data = unsafe { dst.add(elem) } as *const u8;
+        ub_checks::can_dereference(unsafe { src_data.add(byte) })
+            == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
+    } else {
+        true
+    }
+    #[cfg(not(kani))]
+    false
+}
+
 /// This is an accidentally-stable alias to [`ptr::copy_nonoverlapping`]; use that instead.
 // Note (intentionally not in the doc comment): `ptr::copy_nonoverlapping` adds some extra
 // debug assertions; if you are writing compiler tests or code inside the standard library
@@ -3206,37 +3236,6 @@ pub const unsafe fn copysignf64(x: f64, y: f64) -> f64;
 #[rustc_intrinsic]
 pub const unsafe fn copysignf128(x: f128, y: f128) -> f128;
 
-<<<<<<< HEAD
-/// Return whether the initialization state is preserved.
-///
-/// For untyped copy, done via `copy` and `copy_nonoverlapping`, the copies of non-initialized
-/// bytes (such as padding bytes) should result in a non-initialized copy, while copies of
-/// initialized bytes result in initialized bytes.
-///
-/// It is UB to read the uninitialized bytes, so we cannot compare their values only their
-/// initialization state.
-///
-/// This is used for contracts only.
-///
-/// FIXME: Change this once we add support to quantifiers.
-#[allow(dead_code)]
-#[allow(unused_variables)]
-fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
-    #[cfg(kani)]
-    if count > 0 {
-        let byte = kani::any_where(|sz: &usize| *sz < size_of::<T>());
-        let elem = kani::any_where(|val: &usize| *val < count);
-        let src_data = src as *const u8;
-        let dst_data = unsafe { dst.add(elem) } as *const u8;
-        ub_checks::can_dereference(unsafe { src_data.add(byte) })
-            == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
-    } else {
-        true
-    }
-    #[cfg(not(kani))]
-    false
-}
-=======
 /// Generates the LLVM body for the automatic differentiation of `f` using Enzyme,
 /// with `df` as the derivative function and `args` as its arguments.
 ///
@@ -3274,7 +3273,6 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
 #[rustc_nounwind]
 #[rustc_intrinsic]
 pub const fn autodiff<F, G, T: crate::marker::Tuple, R>(f: F, df: G, args: T) -> R;
->>>>>>> subtree/library
 
 /// Inform Miri that a given pointer definitely has a certain alignment.
 #[cfg(miri)]
