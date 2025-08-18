@@ -1,5 +1,11 @@
 //! Thread-local channel context.
 
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+use core::kani;
+
+use safety::requires;
+
 use super::select::Selected;
 use super::waker::current_thread_id;
 use crate::cell::Cell;
@@ -116,6 +122,7 @@ impl Context {
     /// # Safety
     /// This may only be called from the thread this `Context` belongs to.
     #[inline]
+    #[requires(self.thread_id() == current_thread_id())]
     pub unsafe fn wait_until(&self, deadline: Option<Instant>) -> Selected {
         loop {
             // Check whether an operation has been selected.
