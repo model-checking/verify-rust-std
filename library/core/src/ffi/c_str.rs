@@ -889,7 +889,7 @@ mod verify {
         kani::assume(forall!(|i in (0,len-1)| unsafe {*slice.as_ptr().wrapping_add(i)} != 0));
         let ptr = slice.as_ptr() as *const c_char;
         unsafe {
-            CStr::from_ptr(ptr);
+            CStr::from_ptr(ptr)
         }
     }
 
