@@ -529,7 +529,7 @@ impl<T> [T] {
             #[cfg(kani)]
             let buf_ptr = ptr::slice_from_raw_parts(buf.as_ptr(), capacity);
             #[cfg(kani)]
-            let len_ptr = unsafe { (&buf as *const Vec<T>  as *const usize).add(2) };
+            let len_ptr = unsafe { (&buf as *const Vec<T> as *const usize).add(2) };
             #[kani::loop_invariant(
                 kani::mem::same_allocation(buf.as_ptr(), buf.as_ptr().wrapping_add(capacity)) &&
                 unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
