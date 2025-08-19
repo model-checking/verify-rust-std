@@ -2,6 +2,15 @@
 pub mod test {
     use crate::abstractions::{bit::Bit, bitvec::BitVec, funarr::FunArray};
     use rand::prelude::*;
+    use std::sync::Mutex;
+
+    lazy_static::lazy_static! {
+        static ref RNG : Mutex<StdRng> = {
+            let seed = rand::rng().random();
+            println!("\nRandomness seed set to: {:?}", seed);
+            Mutex::new(StdRng::from_seed(seed))
+        };
+    }
 
     /// Helper trait to generate random values
     pub trait HasRandom {
@@ -11,8 +20,7 @@ pub mod test {
         ($($ty:ty),*) => {
             $(impl HasRandom for $ty {
                 fn random() -> Self {
-                    let mut rng = rand::rng();
-                    rng.random()
+                    RNG.lock().unwrap().random()
                 }
             })*
         };

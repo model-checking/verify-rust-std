@@ -419,7 +419,6 @@ pub fn psravd(a: i32x4, count: i32x4) -> i32x4 {
 }
 
 pub fn psravd256(a: i32x8, count: i32x8) -> i32x8 {
-    dbg!(a, count);
     i32x8::from_fn(|i| {
         if count[i] > 31 || count[i] < 0 {
             if a[i] < 0 {

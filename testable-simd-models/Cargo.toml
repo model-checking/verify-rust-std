@@ -11,6 +11,7 @@ readme = "README.md"
 [dependencies]
 rand = "0.9"
 pastey = "0.1.0"
+lazy_static = "1.5.0"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn" }
