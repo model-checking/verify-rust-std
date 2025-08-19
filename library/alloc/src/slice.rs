@@ -14,8 +14,6 @@ use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering::{self, Less};
 #[cfg(kani)]
 use core::kani;
-#[cfg(kani)]
-use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
 #[cfg(kani)]
@@ -541,7 +539,7 @@ impl<T> [T] {
                 unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
                 unsafe {*len_ptr <= capacity} &&
                 m.leading_zeros() > n.leading_zeros() &&
-                unsafe {*len_ptr == sef.len() * (1usize << (m.leading_zeros() - n.leading_zeros() - 1))}
+                unsafe {*len_ptr == self.len() * (1usize << (m.leading_zeros() - n.leading_zeros() - 1))}
             ))]
             #[cfg_attr(kani, kani::loop_modifies(&m, buf_ptr, len_ptr))]
             while m > 0 {

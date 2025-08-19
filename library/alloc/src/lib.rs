@@ -94,7 +94,6 @@
 // tidy-alphabetical-start
 #![cfg_attr(kani, feature(kani))]
 #![cfg_attr(kani, feature(proc_macro_hygiene))]
-#![cfg_attr(kani, feature(stmt_expr_attributes))]
 #![feature(alloc_layout_extra)]
 #![feature(allocator_api)]
 #![feature(array_into_iter_constructors)]
