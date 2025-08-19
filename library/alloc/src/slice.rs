@@ -12,6 +12,8 @@
 use core::borrow::{Borrow, BorrowMut};
 #[cfg(not(no_global_oom_handling))]
 use core::cmp::Ordering::{self, Less};
+#[cfg(kani)]
+use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
 #[cfg(not(no_global_oom_handling))]
@@ -62,8 +64,6 @@ use crate::alloc::Global;
 #[cfg(not(no_global_oom_handling))]
 use crate::borrow::ToOwned;
 use crate::boxed::Box;
-#[cfg(kani)]
-use crate::kani;
 use crate::vec::Vec;
 
 impl<T> [T] {
