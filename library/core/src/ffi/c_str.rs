@@ -5,6 +5,8 @@ use safety::{ensures, requires};
 use crate::cmp::Ordering;
 use crate::error::Error;
 use crate::ffi::c_char;
+#[cfg(kani)]
+use crate::forall;
 use crate::intrinsics::const_eval_select;
 use crate::iter::FusedIterator;
 #[cfg(kani)]
