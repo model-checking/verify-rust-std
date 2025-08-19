@@ -14,6 +14,8 @@ use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering::{self, Less};
 #[cfg(kani)]
 use core::kani;
+#[cfg(kani)]
+use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
 #[cfg(kani)]
@@ -68,8 +70,6 @@ use crate::alloc::Global;
 #[cfg(not(no_global_oom_handling))]
 use crate::borrow::ToOwned;
 use crate::boxed::Box;
-#[cfg(kani)]
-use crate::kani;
 use crate::vec::Vec;
 
 impl<T> [T] {
@@ -536,14 +536,14 @@ impl<T> [T] {
             let buf_ptr = ptr::slice_from_raw_parts(buf.as_ptr(), capacity);
             #[cfg(kani)]
             let len_ptr = unsafe { (&buf as *const Vec<T> as *const usize).add(2) };
-            #[safety::loop_invariant(
+            #[cfg_attr(kani, kani::loop_invariant(
                 kani::mem::same_allocation(buf.as_ptr(), buf.as_ptr().wrapping_add(capacity)) &&
                 unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
                 unsafe {*len_ptr <= capacity} &&
                 m.leading_zeros() > n.leading_zeros() &&
                 unsafe {*len_ptr == sef.len() * (1usize << (m.leading_zeros() - n.leading_zeros() - 1))}
-            )]
-            #[safety::loop_modifies(&m, buf_ptr, len_ptr)]
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies(&m, buf_ptr, len_ptr))]
             while m > 0 {
                 // `buf.extend(buf)`:
                 unsafe {
@@ -897,13 +897,13 @@ pub mod slice_verify {
     fn check_repeat_u8() {
         let mut a: [u8; 10] = kani::any();
         let n = kani::any_where(|i| *i < 10);
-        let _result = repeat(a.as_slice(), n);
+        let _result = a.repeat(n);
     }
 
     #[kani::proof]
     fn check_repeat_u16() {
         let mut a: [u16; 10] = kani::any();
         let n = kani::any_where(|i| *i < 10);
-        let _result = repeat(a.as_slice(), n);
+        let _result = a.repeat(n);
     }
 }
