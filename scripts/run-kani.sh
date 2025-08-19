@@ -84,7 +84,7 @@ REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
 # Unstable arguments to pass to Kani
-unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts"
+unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts -Z stubbing"
 
 # Variables used for parallel harness verification
 # When we say "parallel," we mean two dimensions of parallelization:
@@ -182,7 +182,7 @@ get_kani_path() {
 # then update EXPECTED_JSON_FILE_VERSION.
 get_harnesses() {
     local kani_path="$1"
-    "$kani_path" list -Z list $unstable_args ./library --std --format json
+    "$kani_path" list $unstable_args ./library --std --format json
     local json_file_version=$(jq -r '.["file-version"]' "$WORK_DIR/kani-list.json")
     if [[ $json_file_version != $EXPECTED_JSON_FILE_VERSION ]]; then
         echo "Error: The JSON file-version in kani-list.json does not equal $EXPECTED_JSON_FILE_VERSION"
@@ -313,17 +313,17 @@ main() {
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format markdown
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown
         else
-            "$kani_path" list -Z list $unstable_args ./library --std --format markdown
+            "$kani_path" list $unstable_args ./library --std --format markdown
         fi
     elif [[ "$run_command" == "metrics" ]]; then
         local current_dir=$(pwd)
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format json
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json
         else
-            "$kani_path" list -Z list $unstable_args ./library --std --format json
+            "$kani_path" list $unstable_args ./library --std --format json
         fi
         pushd scripts/kani-std-analysis
         echo "Running Kani's std-analysis command..."

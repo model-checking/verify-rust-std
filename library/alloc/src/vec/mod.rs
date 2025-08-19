@@ -49,7 +49,27 @@
 //! v[1] = v[1] + 5;
 //! ```
 //!
+//! # Memory layout
+//!
+//! When the type is non-zero-sized and the capacity is nonzero, [`Vec`] uses the [`Global`]
+//! allocator for its allocation. It is valid to convert both ways between such a [`Vec`] and a raw
+//! pointer allocated with the [`Global`] allocator, provided that the [`Layout`] used with the
+//! allocator is correct for a sequence of `capacity` elements of the type, and the first `len`
+//! values pointed to by the raw pointer are valid. More precisely, a `ptr: *mut T` that has been
+//! allocated with the [`Global`] allocator with [`Layout::array::<T>(capacity)`][Layout::array] may
+//! be converted into a vec using
+//! [`Vec::<T>::from_raw_parts(ptr, len, capacity)`](Vec::from_raw_parts). Conversely, the memory
+//! backing a `value: *mut T` obtained from [`Vec::<T>::as_mut_ptr`] may be deallocated using the
+//! [`Global`] allocator with the same layout.
+//!
+//! For zero-sized types (ZSTs), or when the capacity is zero, the `Vec` pointer must be non-null
+//! and sufficiently aligned. The recommended way to build a `Vec` of ZSTs if [`vec!`] cannot be
+//! used is to use [`ptr::NonNull::dangling`].
+//!
 //! [`push`]: Vec::push
+//! [`ptr::NonNull::dangling`]: NonNull::dangling
+//! [`Layout`]: crate::alloc::Layout
+//! [Layout::array]: crate::alloc::Layout::array
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
@@ -523,18 +543,23 @@ impl<T> Vec<T> {
     /// This is highly unsafe, due to the number of invariants that aren't
     /// checked:
     ///
-    /// * `ptr` must have been allocated using the global allocator, such as via
-    ///   the [`alloc::alloc`] function.
-    /// * `T` needs to have the same alignment as what `ptr` was allocated with.
+    /// * If `T` is not a zero-sized type and the capacity is nonzero, `ptr` must have
+    ///   been allocated using the global allocator, such as via the [`alloc::alloc`]
+    ///   function. If `T` is a zero-sized type or the capacity is zero, `ptr` need
+    ///   only be non-null and aligned.
+    /// * `T` needs to have the same alignment as what `ptr` was allocated with,
+    ///   if the pointer is required to be allocated.
     ///   (`T` having a less strict alignment is not sufficient, the alignment really
     ///   needs to be equal to satisfy the [`dealloc`] requirement that memory must be
     ///   allocated and deallocated with the same layout.)
-    /// * The size of `T` times the `capacity` (ie. the allocated size in bytes) needs
-    ///   to be the same size as the pointer was allocated with. (Because similar to
-    ///   alignment, [`dealloc`] must be called with the same layout `size`.)
+    /// * The size of `T` times the `capacity` (ie. the allocated size in bytes), if
+    ///   nonzero, needs to be the same size as the pointer was allocated with.
+    ///   (Because similar to alignment, [`dealloc`] must be called with the same
+    ///   layout `size`.)
     /// * `length` needs to be less than or equal to `capacity`.
     /// * The first `length` values must be properly initialized values of type `T`.
-    /// * `capacity` needs to be the capacity that the pointer was allocated with.
+    /// * `capacity` needs to be the capacity that the pointer was allocated with,
+    ///   if the pointer is required to be allocated.
     /// * The allocated size in bytes must be no larger than `isize::MAX`.
     ///   See the safety documentation of [`pointer::offset`].
     ///
@@ -566,13 +591,13 @@ impl<T> Vec<T> {
     ///
     /// # Examples
     ///
+    // FIXME Update this when vec_into_raw_parts is stabilized
     /// ```
     /// use std::ptr;
     /// use std::mem;
     ///
     /// let v = vec![1, 2, 3];
     ///
-    // FIXME Update this when vec_into_raw_parts is stabilized
     /// // Prevent running `v`'s destructor so we are in complete control
     /// // of the allocation.
     /// let mut v = mem::ManuallyDrop::new(v);
@@ -674,6 +699,7 @@ impl<T> Vec<T> {
     ///
     /// # Examples
     ///
+    // FIXME Update this when vec_into_raw_parts is stabilized
     /// ```
     /// #![feature(box_vec_non_null)]
     ///
@@ -682,7 +708,6 @@ impl<T> Vec<T> {
     ///
     /// let v = vec![1, 2, 3];
     ///
-    // FIXME Update this when vec_into_raw_parts is stabilized
     /// // Prevent running `v`'s destructor so we are in complete control
     /// // of the allocation.
     /// let mut v = mem::ManuallyDrop::new(v);
@@ -770,12 +795,16 @@ impl<T> Vec<T> {
     /// order as the arguments to [`from_raw_parts`].
     ///
     /// After calling this function, the caller is responsible for the
-    /// memory previously managed by the `Vec`. The only way to do
-    /// this is to convert the raw pointer, length, and capacity back
-    /// into a `Vec` with the [`from_raw_parts`] function, allowing
-    /// the destructor to perform the cleanup.
+    /// memory previously managed by the `Vec`. Most often, one does
+    /// this by converting the raw pointer, length, and capacity back
+    /// into a `Vec` with the [`from_raw_parts`] function; more generally,
+    /// if `T` is non-zero-sized and the capacity is nonzero, one may use
+    /// any method that calls [`dealloc`] with a layout of
+    /// `Layout::array::<T>(capacity)`; if `T` is zero-sized or the
+    /// capacity is zero, nothing needs to be done.
     ///
     /// [`from_raw_parts`]: Vec::from_raw_parts
+    /// [`dealloc`]: crate::alloc::GlobalAlloc::dealloc
     ///
     /// # Examples
     ///
@@ -994,6 +1023,7 @@ impl<T, A: Allocator> Vec<T, A> {
     ///
     /// # Examples
     ///
+    // FIXME Update this when vec_into_raw_parts is stabilized
     /// ```
     /// #![feature(allocator_api)]
     ///
@@ -1007,7 +1037,6 @@ impl<T, A: Allocator> Vec<T, A> {
     /// v.push(2);
     /// v.push(3);
     ///
-    // FIXME Update this when vec_into_raw_parts is stabilized
     /// // Prevent running `v`'s destructor so we are in complete control
     /// // of the allocation.
     /// let mut v = mem::ManuallyDrop::new(v);
@@ -1114,6 +1143,7 @@ impl<T, A: Allocator> Vec<T, A> {
     ///
     /// # Examples
     ///
+    // FIXME Update this when vec_into_raw_parts is stabilized
     /// ```
     /// #![feature(allocator_api, box_vec_non_null)]
     ///
@@ -1127,7 +1157,6 @@ impl<T, A: Allocator> Vec<T, A> {
     /// v.push(2);
     /// v.push(3);
     ///
-    // FIXME Update this when vec_into_raw_parts is stabilized
     /// // Prevent running `v`'s destructor so we are in complete control
     /// // of the allocation.
     /// let mut v = mem::ManuallyDrop::new(v);
@@ -1755,6 +1784,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// may still invalidate this pointer.
     /// See the second example below for how this guarantee can be used.
     ///
+    /// The method also guarantees that, as long as `T` is not zero-sized and the capacity is
+    /// nonzero, the pointer may be passed into [`dealloc`] with a layout of
+    /// `Layout::array::<T>(capacity)` in order to deallocate the backing memory. If this is done,
+    /// be careful not to run the destructor of the `Vec`, as dropping it will result in
+    /// double-frees. Wrapping the `Vec` in a [`ManuallyDrop`] is the typical way to achieve this.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1787,9 +1822,24 @@ impl<T, A: Allocator> Vec<T, A> {
     /// }
     /// ```
     ///
+    /// Deallocating a vector using [`Box`] (which uses [`dealloc`] internally):
+    ///
+    /// ```
+    /// use std::mem::{ManuallyDrop, MaybeUninit};
+    ///
+    /// let mut v = ManuallyDrop::new(vec![0, 1, 2]);
+    /// let ptr = v.as_mut_ptr();
+    /// let capacity = v.capacity();
+    /// let slice_ptr: *mut [MaybeUninit<i32>] =
+    ///     std::ptr::slice_from_raw_parts_mut(ptr.cast(), capacity);
+    /// drop(unsafe { Box::from_raw(slice_ptr) });
+    /// ```
+    ///
     /// [`as_mut_ptr`]: Vec::as_mut_ptr
     /// [`as_ptr`]: Vec::as_ptr
     /// [`as_non_null`]: Vec::as_non_null
+    /// [`dealloc`]: crate::alloc::GlobalAlloc::dealloc
+    /// [`ManuallyDrop`]: core::mem::ManuallyDrop
     #[stable(feature = "vec_as_ptr", since = "1.37.0")]
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     #[rustc_never_returns_null_ptr]
@@ -2046,6 +2096,38 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[track_caller]
     pub fn insert(&mut self, index: usize, element: T) {
+        let _ = self.insert_mut(index, element);
+    }
+
+    /// Inserts an element at position `index` within the vector, shifting all
+    /// elements after it to the right, and returning a reference to the new
+    /// element.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > len`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(push_mut)]
+    /// let mut vec = vec![1, 3, 5, 9];
+    /// let x = vec.insert_mut(3, 6);
+    /// *x += 1;
+    /// assert_eq!(vec, [1, 3, 5, 7, 9]);
+    /// ```
+    ///
+    /// # Time complexity
+    ///
+    /// Takes *O*([`Vec::len`]) time. All items after the insertion index must be
+    /// shifted to the right. In the worst case, all elements are shifted when
+    /// the insertion index is 0.
+    #[cfg(not(no_global_oom_handling))]
+    #[inline]
+    #[unstable(feature = "push_mut", issue = "135974")]
+    #[track_caller]
+    #[must_use = "if you don't need a reference to the value, use `Vec::insert` instead"]
+    pub fn insert_mut(&mut self, index: usize, element: T) -> &mut T {
         #[cold]
         #[cfg_attr(not(feature = "panic_immediate_abort"), inline(never))]
         #[track_caller]
@@ -2067,8 +2149,8 @@ impl<T, A: Allocator> Vec<T, A> {
         unsafe {
             // infallible
             // The spot to put the new value
+            let p = self.as_mut_ptr().add(index);
             {
-                let p = self.as_mut_ptr().add(index);
                 if index < len {
                     // Shift everything over to make space. (Duplicating the
                     // `index`th element into two consecutive places.)
@@ -2079,6 +2161,7 @@ impl<T, A: Allocator> Vec<T, A> {
                 ptr::write(p, element);
             }
             self.set_len(len + 1);
+            &mut *p
         }
     }
 
@@ -2486,18 +2569,7 @@ impl<T, A: Allocator> Vec<T, A> {
     #[rustc_confusables("push_back", "put", "append")]
     #[track_caller]
     pub fn push(&mut self, value: T) {
-        // Inform codegen that the length does not change across grow_one().
-        let len = self.len;
-        // This will panic or abort if we would allocate > isize::MAX bytes
-        // or if the length increment would overflow for zero-sized types.
-        if len == self.buf.capacity() {
-            self.buf.grow_one();
-        }
-        unsafe {
-            let end = self.as_mut_ptr().add(len);
-            ptr::write(end, value);
-            self.len = len + 1;
-        }
+        let _ = self.push_mut(value);
     }
 
     /// Appends an element if there is sufficient spare capacity, otherwise an error is returned
@@ -2538,6 +2610,77 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "vec_push_within_capacity", issue = "100486")]
     pub fn push_within_capacity(&mut self, value: T) -> Result<(), T> {
+        self.push_mut_within_capacity(value).map(|_| ())
+    }
+
+    /// Appends an element to the back of a collection, returning a reference to it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new capacity exceeds `isize::MAX` _bytes_.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(push_mut)]
+    ///
+    ///
+    /// let mut vec = vec![1, 2];
+    /// let last = vec.push_mut(3);
+    /// assert_eq!(*last, 3);
+    /// assert_eq!(vec, [1, 2, 3]);
+    ///
+    /// let last = vec.push_mut(3);
+    /// *last += 1;
+    /// assert_eq!(vec, [1, 2, 3, 4]);
+    /// ```
+    ///
+    /// # Time complexity
+    ///
+    /// Takes amortized *O*(1) time. If the vector's length would exceed its
+    /// capacity after the push, *O*(*capacity*) time is taken to copy the
+    /// vector's elements to a larger allocation. This expensive operation is
+    /// offset by the *capacity* *O*(1) insertions it allows.
+    #[cfg(not(no_global_oom_handling))]
+    #[inline]
+    #[unstable(feature = "push_mut", issue = "135974")]
+    #[track_caller]
+    #[must_use = "if you don't need a reference to the value, use `Vec::push` instead"]
+    pub fn push_mut(&mut self, value: T) -> &mut T {
+        // Inform codegen that the length does not change across grow_one().
+        let len = self.len;
+        // This will panic or abort if we would allocate > isize::MAX bytes
+        // or if the length increment would overflow for zero-sized types.
+        if len == self.buf.capacity() {
+            self.buf.grow_one();
+        }
+        unsafe {
+            let end = self.as_mut_ptr().add(len);
+            ptr::write(end, value);
+            self.len = len + 1;
+            // SAFETY: We just wrote a value to the pointer that will live the lifetime of the reference.
+            &mut *end
+        }
+    }
+
+    /// Appends an element and returns a reference to it if there is sufficient spare capacity,
+    /// otherwise an error is returned with the element.
+    ///
+    /// Unlike [`push_mut`] this method will not reallocate when there's insufficient capacity.
+    /// The caller should use [`reserve`] or [`try_reserve`] to ensure that there is enough capacity.
+    ///
+    /// [`push_mut`]: Vec::push_mut
+    /// [`reserve`]: Vec::reserve
+    /// [`try_reserve`]: Vec::try_reserve
+    ///
+    /// # Time complexity
+    ///
+    /// Takes *O*(1) time.
+    #[unstable(feature = "push_mut", issue = "135974")]
+    // #[unstable(feature = "vec_push_within_capacity", issue = "100486")]
+    #[inline]
+    #[must_use = "if you don't need a reference to the value, use `Vec::push_within_capacity` instead"]
+    pub fn push_mut_within_capacity(&mut self, value: T) -> Result<&mut T, T> {
         if self.len == self.buf.capacity() {
             return Err(value);
         }
@@ -2545,8 +2688,9 @@ impl<T, A: Allocator> Vec<T, A> {
             let end = self.as_mut_ptr().add(self.len);
             ptr::write(end, value);
             self.len += 1;
+            // SAFETY: We just wrote a value to the pointer that will live the lifetime of the reference.
+            Ok(&mut *end)
         }
-        Ok(())
     }
 
     /// Removes the last element from a vector and returns it, or [`None`] if it
@@ -3032,7 +3176,7 @@ impl<T, A: Allocator> Vec<T, A> {
         // - but the allocation extends out to `self.buf.capacity()` elements, possibly
         // uninitialized
         let spare_ptr = unsafe { ptr.add(self.len) };
-        let spare_ptr = spare_ptr.cast::<MaybeUninit<T>>();
+        let spare_ptr = spare_ptr.cast_uninit();
         let spare_len = self.buf.capacity() - self.len;
 
         // SAFETY:
@@ -3778,8 +3922,8 @@ impl<T, A: Allocator> Vec<T, A> {
     /// while i < vec.len() - end_items {
     ///     if some_predicate(&mut vec[i]) {
     ///         let val = vec.remove(i);
-    /// #         extracted.push(val);
     ///         // your code here
+    /// #         extracted.push(val);
     ///     } else {
     ///         i += 1;
     ///     }
