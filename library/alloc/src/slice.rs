@@ -54,15 +54,12 @@ pub use core::slice::{from_mut_ptr_range, from_ptr_range};
 pub use core::slice::{from_raw_parts, from_raw_parts_mut};
 #[unstable(feature = "slice_range", issue = "76393")]
 pub use core::slice::{range, try_range};
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
 #[cfg(kani)]
 use core::ptr::slice_from_raw_parts;
 #[cfg(kani)]
 use core::mem::SizedTypeProperties;
-=======
->>>>>>> 8f660c49eee63e8bdf50507bdf58dc88312d691e
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic slice extension methods
