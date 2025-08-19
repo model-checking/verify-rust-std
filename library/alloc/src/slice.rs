@@ -16,8 +16,12 @@ use core::cmp::Ordering::{self, Less};
 use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
+#[cfg(kani)]
+use core::mem::SizedTypeProperties;
 #[cfg(not(no_global_oom_handling))]
 use core::ptr;
+#[cfg(kani)]
+use core::ptr::slice_from_raw_parts;
 #[unstable(feature = "array_windows", issue = "75027")]
 pub use core::slice::ArrayWindows;
 #[stable(feature = "inherent_ascii_escape", since = "1.60.0")]
@@ -54,12 +58,6 @@ pub use core::slice::{from_mut_ptr_range, from_ptr_range};
 pub use core::slice::{from_raw_parts, from_raw_parts_mut};
 #[unstable(feature = "slice_range", issue = "76393")]
 pub use core::slice::{range, try_range};
-#[cfg(kani)]
-use crate::kani;
-#[cfg(kani)]
-use core::ptr::slice_from_raw_parts;
-#[cfg(kani)]
-use core::mem::SizedTypeProperties;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic slice extension methods
@@ -70,6 +68,8 @@ use crate::alloc::Global;
 #[cfg(not(no_global_oom_handling))]
 use crate::borrow::ToOwned;
 use crate::boxed::Box;
+#[cfg(kani)]
+use crate::kani;
 use crate::vec::Vec;
 
 impl<T> [T] {
@@ -535,7 +535,7 @@ impl<T> [T] {
             #[cfg(kani)]
             let buf_ptr = ptr::slice_from_raw_parts(buf.as_ptr(), capacity);
             #[cfg(kani)]
-            let len_ptr  = unsafe {(&buf as *const Vec<T>  as *const usize).add(2)};
+            let len_ptr = unsafe { (&buf as *const Vec<T> as *const usize).add(2) };
             #[safety::loop_invariant(
                 kani::mem::same_allocation(buf.as_ptr(), buf.as_ptr().wrapping_add(capacity)) &&
                 unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
