@@ -197,12 +197,11 @@
 #![feature(hexagon_target_feature)]
 #![feature(loongarch_target_feature)]
 #![feature(mips_target_feature)]
+#![feature(nvptx_target_feature)]
 #![feature(powerpc_target_feature)]
 #![feature(riscv_target_feature)]
 #![feature(rtm_target_feature)]
 #![feature(s390x_target_feature)]
-#![feature(sse4a_target_feature)]
-#![feature(tbm_target_feature)]
 #![feature(wasm_target_feature)]
 #![feature(x86_amx_intrinsics)]
 // tidy-alphabetical-end
@@ -210,6 +209,10 @@
 // allow using `core::` in intra-doc links
 #[allow(unused_extern_crates)]
 extern crate self as core;
+
+/* The core prelude, not as all-encompassing as the std prelude */
+// The compiler expects the prelude definition to be defined before it's use statement.
+pub mod prelude;
 
 #[prelude_import]
 #[allow(unused)]
@@ -295,10 +298,6 @@ pub mod f64;
 
 #[macro_use]
 pub mod num;
-
-/* The core prelude, not as all-encompassing as the std prelude */
-
-pub mod prelude;
 
 /* Core modules for ownership management */
 
