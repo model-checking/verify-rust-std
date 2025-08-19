@@ -332,7 +332,7 @@ impl<T> [T] {
         } else {
             // SAFETY: We explicitly check for the correct number of elements,
             //   and do not let the reference outlive the slice.
-            Some(unsafe { &*(self.as_ptr().cast::<[T; N]>()) })
+            Some(unsafe { &*(self.as_ptr().cast_array()) })
         }
     }
 
@@ -363,7 +363,7 @@ impl<T> [T] {
             // SAFETY: We explicitly check for the correct number of elements,
             //   do not let the reference outlive the slice,
             //   and require exclusive access to the entire slice to mutate the chunk.
-            Some(unsafe { &mut *(self.as_mut_ptr().cast::<[T; N]>()) })
+            Some(unsafe { &mut *(self.as_mut_ptr().cast_array()) })
         }
     }
 
@@ -391,7 +391,7 @@ impl<T> [T] {
 
         // SAFETY: We explicitly check for the correct number of elements,
         //   and do not let the references outlive the slice.
-        Some((unsafe { &*(first.as_ptr().cast::<[T; N]>()) }, tail))
+        Some((unsafe { &*(first.as_ptr().cast_array()) }, tail))
     }
 
     /// Returns a mutable array reference to the first `N` items in the slice and the remaining
@@ -424,7 +424,7 @@ impl<T> [T] {
         // SAFETY: We explicitly check for the correct number of elements,
         //   do not let the reference outlive the slice,
         //   and enforce exclusive mutability of the chunk by the split.
-        Some((unsafe { &mut *(first.as_mut_ptr().cast::<[T; N]>()) }, tail))
+        Some((unsafe { &mut *(first.as_mut_ptr().cast_array()) }, tail))
     }
 
     /// Returns an array reference to the last `N` items in the slice and the remaining slice.
@@ -452,7 +452,7 @@ impl<T> [T] {
 
         // SAFETY: We explicitly check for the correct number of elements,
         //   and do not let the references outlive the slice.
-        Some((init, unsafe { &*(last.as_ptr().cast::<[T; N]>()) }))
+        Some((init, unsafe { &*(last.as_ptr().cast_array()) }))
     }
 
     /// Returns a mutable array reference to the last `N` items in the slice and the remaining
@@ -486,7 +486,7 @@ impl<T> [T] {
         // SAFETY: We explicitly check for the correct number of elements,
         //   do not let the reference outlive the slice,
         //   and enforce exclusive mutability of the chunk by the split.
-        Some((init, unsafe { &mut *(last.as_mut_ptr().cast::<[T; N]>()) }))
+        Some((init, unsafe { &mut *(last.as_mut_ptr().cast_array()) }))
     }
 
     /// Returns an array reference to the last `N` items in the slice.
@@ -515,7 +515,7 @@ impl<T> [T] {
 
         // SAFETY: We explicitly check for the correct number of elements,
         //   and do not let the references outlive the slice.
-        Some(unsafe { &*(last.as_ptr().cast::<[T; N]>()) })
+        Some(unsafe { &*(last.as_ptr().cast_array()) })
     }
 
     /// Returns a mutable array reference to the last `N` items in the slice.
@@ -546,7 +546,7 @@ impl<T> [T] {
         // SAFETY: We explicitly check for the correct number of elements,
         //   do not let the reference outlive the slice,
         //   and require exclusive access to the entire slice to mutate the chunk.
-        Some(unsafe { &mut *(last.as_mut_ptr().cast::<[T; N]>()) })
+        Some(unsafe { &mut *(last.as_mut_ptr().cast_array()) })
     }
 
     /// Returns a reference to an element or subslice depending on the type of
@@ -573,7 +573,7 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     pub const fn get<I>(&self, index: I) -> Option<&I::Output>
     where
-        I: ~const SliceIndex<Self>,
+        I: [const] SliceIndex<Self>,
     {
         index.get(self)
     }
@@ -600,7 +600,7 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     pub const fn get_mut<I>(&mut self, index: I) -> Option<&mut I::Output>
     where
-        I: ~const SliceIndex<Self>,
+        I: [const] SliceIndex<Self>,
     {
         index.get_mut(self)
     }
@@ -640,7 +640,7 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
-        I: ~const SliceIndex<Self>,
+        I: [const] SliceIndex<Self>,
     {
         // SAFETY: the caller must uphold most of the safety requirements for `get_unchecked`;
         // the slice is dereferenceable because `self` is a safe reference.
@@ -685,7 +685,7 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
-        I: ~const SliceIndex<Self>,
+        I: [const] SliceIndex<Self>,
     {
         // SAFETY: the caller must uphold the safety requirements for `get_unchecked_mut`;
         // the slice is dereferenceable because `self` is a safe reference.
@@ -850,7 +850,7 @@ impl<T> [T] {
     #[must_use]
     pub const fn as_array<const N: usize>(&self) -> Option<&[T; N]> {
         if self.len() == N {
-            let ptr = self.as_ptr() as *const [T; N];
+            let ptr = self.as_ptr().cast_array();
 
             // SAFETY: The underlying array of a slice can be reinterpreted as an actual array `[T; N]` if `N` is not greater than the slice's length.
             let me = unsafe { &*ptr };
@@ -868,7 +868,7 @@ impl<T> [T] {
     #[must_use]
     pub const fn as_mut_array<const N: usize>(&mut self) -> Option<&mut [T; N]> {
         if self.len() == N {
-            let ptr = self.as_mut_ptr() as *mut [T; N];
+            let ptr = self.as_mut_ptr().cast_array();
 
             // SAFETY: The underlying array of a slice can be reinterpreted as an actual array `[T; N]` if `N` is not greater than the slice's length.
             let me = unsafe { &mut *ptr };
@@ -973,7 +973,7 @@ impl<T> [T] {
     /// assert!(v == [3, 2, 1]);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_const_stable(feature = "const_slice_reverse", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_slice_reverse", since = "1.90.0")]
     #[inline]
     pub const fn reverse(&mut self) {
         let half_len = self.len() / 2;
