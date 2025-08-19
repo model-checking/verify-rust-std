@@ -888,9 +888,7 @@ mod verify {
         kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
         kani::assume(forall!(|i in (0,len-1)| unsafe {*slice.as_ptr().wrapping_add(i)} != 0));
         let ptr = slice.as_ptr() as *const c_char;
-        unsafe {
-            CStr::from_ptr(ptr)
-        }
+        unsafe { CStr::from_ptr(ptr) }
     }
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
