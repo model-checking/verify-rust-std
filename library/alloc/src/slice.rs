@@ -56,6 +56,8 @@ pub use core::slice::{range, try_range};
 use crate::kani;
 #[cfg(kani)]
 use core::ptr::slice_from_raw_parts;
+#[cfg(kani)]
+use core::mem::SizedTypeProperties;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic slice extension methods
@@ -532,14 +534,14 @@ impl<T> [T] {
             let buf_ptr= slice_from_raw_parts(buf.as_ptr(), capacity);
             #[cfg(kani)]
             let len_ptr  = unsafe {(&buf as *const Vec<T>  as *const usize).add(2)};
-            #[kani::loop_invariant(
+            #[safety::loop_invariant(
                 kani::mem::same_allocation(buf.as_ptr(), buf.as_ptr().wrapping_add(capacity)) &&
                 unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
                 unsafe {*len_ptr <= capacity} &&
                 m.leading_zeros() > n.leading_zeros() &&
                 unsafe {*len_ptr == sef.len() * (1usize << (m.leading_zeros() - n.leading_zeros() - 1))}
             )]
-            #[kani::loop_modifies(&m, buf_ptr, len_ptr)]
+            #[safety::loop_modifies(&m, buf_ptr, len_ptr)]
             while m > 0 {
                 // `buf.extend(buf)`:
                 unsafe {
