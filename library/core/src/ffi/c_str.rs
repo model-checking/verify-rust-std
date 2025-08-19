@@ -204,7 +204,9 @@ impl Invariant for &CStr {
         let bytes: &[c_char] = &self.inner;
         let len = bytes.len();
 
-        !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len - 1].contains(&0)
+        !bytes.is_empty()
+            && bytes[len - 1] == 0
+            && forall!(|i in (0,len - 1)| unsafe {*bytes.as_ptr().wrapping_add(i)} != 0)
     }
 }
 
@@ -880,13 +882,13 @@ mod verify {
     // Helper function
     fn arbitrary_cstr(slice: &[u8]) -> &CStr {
         // At a minimum, the slice has a null terminator to form a valid CStr.
+        let len = slice.len();
         kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
-        let result = CStr::from_bytes_until_nul(&slice);
-        // Given the assumption, from_bytes_until_nul should never fail
-        assert!(result.is_ok());
-        let c_str = result.unwrap();
-        assert!(c_str.is_safe());
-        c_str
+        kani::assume(forall!(|i in (0,len-1)| unsafe {*slice.as_ptr().wrapping_add(i)} != 0));
+        let ptr = slice.as_ptr() as *const c_char;
+        unsafe {
+            CStr::from_ptr(ptr);
+        }
     }
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
@@ -908,7 +910,7 @@ mod verify {
 
     //  pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr
     #[kani::proof_for_contract(CStr::from_bytes_with_nul_unchecked)]
-    #[kani::solver(cvc5)]
+    #[kani::unwind(33)]
     fn check_from_bytes_with_nul_unchecked() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -927,8 +929,7 @@ mod verify {
 
     // pub fn bytes(&self) -> Bytes<'_>
     #[kani::proof]
-    #[kani::solver(cvc5)]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    #[kani::unwind(32)]
     fn check_bytes() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -946,8 +947,7 @@ mod verify {
 
     // pub const fn to_str(&self) -> Result<&str, str::Utf8Error>
     #[kani::proof]
-    #[kani::solver(cvc5)]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    #[kani::unwind(32)]
     fn check_to_str() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -964,8 +964,7 @@ mod verify {
 
     // pub const fn as_ptr(&self) -> *const c_char
     #[kani::proof]
-    #[kani::solver(cvc5)]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    #[kani::unwind(33)]
     fn check_as_ptr() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1015,15 +1014,8 @@ mod verify {
 
         // Non-deterministically generate a length within the valid range [0, MAX_SIZE]
         let mut len: usize = kani::any_where(|&x| x < MAX_SIZE);
-
-        // If a null byte exists before the generated length
-        // adjust len to its position
-        if let Some(pos) = bytes[..len].iter().position(|&x| x == 0) {
-            len = pos;
-        } else {
-            // If no null byte, insert one at the chosen length
-            bytes[len] = 0;
-        }
+        kani::assume(forall!(|i in (0,len)| unsafe {*bytes.as_ptr().wrapping_add(i)} != 0));
+        bytes[len] = 0;
 
         let c_str = CStr::from_bytes_until_nul(&bytes).unwrap();
         // Verify that count_bytes matches the adjusted length
@@ -1033,8 +1025,7 @@ mod verify {
 
     // pub const fn to_bytes(&self) -> &[u8]
     #[kani::proof]
-    #[kani::solver(cvc5)]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    #[kani::unwind(32)]
     fn check_to_bytes() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1050,8 +1041,7 @@ mod verify {
 
     // pub const fn to_bytes_with_nul(&self) -> &[u8]
     #[kani::proof]
-    #[kani::solver(cvc5)]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    #[kani::unwind(33)]
     fn check_to_bytes_with_nul() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1067,8 +1057,7 @@ mod verify {
 
     // const unsafe fn strlen(ptr: *const c_char) -> usize
     #[kani::proof_for_contract(super::strlen)]
-    #[kani::solver(cvc5)]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    #[kani::unwind(33)]
     fn check_strlen_contract() {
         const MAX_SIZE: usize = 32;
         let mut string: [u8; MAX_SIZE] = kani::any();
@@ -1081,8 +1070,7 @@ mod verify {
 
     // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr
     #[kani::proof_for_contract(CStr::from_ptr)]
-    #[kani::solver(cvc5)]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    #[kani::unwind(33)]
     fn check_from_ptr_contract() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1095,8 +1083,7 @@ mod verify {
 
     // pub const fn is_empty(&self) -> bool
     #[kani::proof]
-    #[kani::solver(cvc5)]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    #[kani::unwind(33)]
     fn check_is_empty() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
