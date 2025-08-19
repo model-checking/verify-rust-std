@@ -535,7 +535,7 @@ impl<T> [T] {
             #[cfg(kani)]
             let len_ptr = unsafe { (&buf as *const Vec<T> as *const usize).add(2) };
             #[cfg_attr(kani, kani::loop_invariant(
-                kani::mem::same_allocation(buf.as_ptr(), buf.as_ptr().wrapping_add(capacity)) &&
+                kani::mem::same_allocation(buf.as_ptr() as *const T, (buf.as_ptr() as *const T).wrapping_add(capacity)) &&
                 unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
                 unsafe {*len_ptr <= capacity} &&
                 m.leading_zeros() > n.leading_zeros() &&
