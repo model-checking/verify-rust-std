@@ -12,6 +12,8 @@
 use core::borrow::{Borrow, BorrowMut};
 #[cfg(not(no_global_oom_handling))]
 use core::cmp::Ordering::{self, Less};
+#[cfg(kani)]
+use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
 #[cfg(not(no_global_oom_handling))]
@@ -52,12 +54,15 @@ pub use core::slice::{from_mut_ptr_range, from_ptr_range};
 pub use core::slice::{from_raw_parts, from_raw_parts_mut};
 #[unstable(feature = "slice_range", issue = "76393")]
 pub use core::slice::{range, try_range};
+<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
 #[cfg(kani)]
 use core::ptr::slice_from_raw_parts;
 #[cfg(kani)]
 use core::mem::SizedTypeProperties;
+=======
+>>>>>>> 8f660c49eee63e8bdf50507bdf58dc88312d691e
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic slice extension methods
@@ -531,7 +536,7 @@ impl<T> [T] {
             let mut m = n >> 1;
             // If `m > 0`, there are remaining bits up to the leftmost '1'.
             #[cfg(kani)]
-            let buf_ptr= slice_from_raw_parts(buf.as_ptr(), capacity);
+            let buf_ptr = ptr::slice_from_raw_parts(buf.as_ptr(), capacity);
             #[cfg(kani)]
             let len_ptr  = unsafe {(&buf as *const Vec<T>  as *const usize).add(2)};
             #[safety::loop_invariant(
