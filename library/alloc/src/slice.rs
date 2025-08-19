@@ -54,8 +54,6 @@ pub use core::slice::{from_raw_parts, from_raw_parts_mut};
 pub use core::slice::{range, try_range};
 #[cfg(kani)]
 use crate::kani;
-#[cfg(kani)]
-use core::ptr::slice_from_raw_parts;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic slice extension methods
@@ -529,9 +527,9 @@ impl<T> [T] {
             let mut m = n >> 1;
             // If `m > 0`, there are remaining bits up to the leftmost '1'.
             #[cfg(kani)]
-            let buf_ptr= slice_from_raw_parts(buf.as_ptr(), capacity);
+            let buf_ptr = ptr::slice_from_raw_parts(buf.as_ptr(), capacity);
             #[cfg(kani)]
-            let len_ptr  = unsafe {(&buf as *const Vec<T>  as *const usize).add(2)};
+            let len_ptr = unsafe {(&buf as *const Vec<T>  as *const usize).add(2)};
             #[kani::loop_invariant(
                 kani::mem::same_allocation(buf.as_ptr(), buf.as_ptr().wrapping_add(capacity)) &&
                 unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
