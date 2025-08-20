@@ -887,8 +887,7 @@ mod verify {
         let len = slice.len();
         kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
         kani::assume(forall!(|i in (0,len-1)| unsafe {*slice.as_ptr().wrapping_add(i)} != 0));
-        let ptr = slice.as_ptr() as *const c_char;
-        unsafe { CStr::from_ptr(ptr) }
+        unsafe { &*(slice as *const [u8] as *const CStr) }
     }
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
@@ -942,7 +941,8 @@ mod verify {
         // Compare the bytes obtained from the iterator and the slice
         // bytes_expected.iter().copied() converts the slice into an iterator over u8
         assert!(bytes_iterator.eq(bytes_expected.iter().copied()));
-        assert!(c_str.is_safe());
+        //Will be added after https://github.com/model-checking/kani/issues/4310 is fixed
+        //assert!(c_str.is_safe());
     }
 
     // pub const fn to_str(&self) -> Result<&str, str::Utf8Error>
@@ -959,7 +959,8 @@ mod verify {
         if let Ok(s) = str_result {
             assert_eq!(s.as_bytes(), c_str.to_bytes());
         }
-        assert!(c_str.is_safe());
+        //Will be added after https://github.com/model-checking/kani/issues/4310 is fixed
+        //assert!(c_str.is_safe());
     }
 
     // pub const fn as_ptr(&self) -> *const c_char
@@ -986,7 +987,8 @@ mod verify {
                 assert_eq!(byte_at_ptr as u8, byte_in_cstr);
             }
         }
-        assert!(c_str.is_safe());
+        //Will be added after https://github.com/model-checking/kani/issues/4310 is fixed
+        //assert!(c_str.is_safe());
     }
 
     // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
@@ -1036,7 +1038,8 @@ mod verify {
         let end_idx = bytes.len();
         // Comparison does not include the null byte
         assert_eq!(bytes, &slice[..end_idx]);
-        assert!(c_str.is_safe());
+        //Will be added after https://github.com/model-checking/kani/issues/4310 is fixed
+        //assert!(c_str.is_safe());
     }
 
     // pub const fn to_bytes_with_nul(&self) -> &[u8]
@@ -1052,7 +1055,8 @@ mod verify {
         let end_idx = bytes.len();
         // Comparison includes the null byte
         assert_eq!(bytes, &slice[..end_idx]);
-        assert!(c_str.is_safe());
+        //Will be added after https://github.com/model-checking/kani/issues/4310 is fixed
+        //assert!(c_str.is_safe());
     }
 
     // const unsafe fn strlen(ptr: *const c_char) -> usize
@@ -1093,6 +1097,7 @@ mod verify {
         let bytes = c_str.to_bytes(); // does not include null terminator
         let expected_is_empty = bytes.len() == 0;
         assert_eq!(expected_is_empty, c_str.is_empty());
-        assert!(c_str.is_safe());
+        //Will be added after https://github.com/model-checking/kani/issues/4310 is fixed
+        //assert!(c_str.is_safe());
     }
 }
