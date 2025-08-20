@@ -903,7 +903,8 @@ mod verify {
 
         let result = CStr::from_bytes_until_nul(slice);
         if let Ok(c_str) = result {
-            assert!(c_str.is_safe());
+            //Will be added after https://github.com/model-checking/kani/issues/4310 is fixed
+            //assert!(c_str.is_safe());
         }
     }
 
