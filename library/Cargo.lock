@@ -120,9 +120,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.15.4"
+version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
  "rustc-std-workspace-alloc",
  "rustc-std-workspace-core",
@@ -337,7 +337,6 @@ name = "std_detect"
 version = "0.1.5"
 dependencies = [
  "alloc",
- "cfg-if",
  "core",
  "libc",
 ]
@@ -376,7 +375,6 @@ dependencies = [
 name = "unwind"
 version = "0.0.0"
 dependencies = [
- "cfg-if",
  "libc",
  "rustc-std-workspace-core",
  "unwinding",
