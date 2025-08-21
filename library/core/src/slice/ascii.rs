@@ -567,7 +567,7 @@ pub mod verify {
         let a: [u8; 100] = kani::any();
         let b: [u8; 100] = kani::any();
         let _ret = a.eq_ignore_ascii_case(b.as_slice());
-    } 
+    }
 
     #[kani::proof]
     fn check_is_ascii_simple() {
@@ -579,5 +579,5 @@ pub mod verify {
     fn check_trim_ascii_end() {
         let mut a: [u8; 100] = kani::any();
         let _ret = a.trim_ascii_end();
-    } 
+    }
 }
