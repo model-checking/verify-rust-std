@@ -141,7 +141,7 @@ impl DecimalSeq {
             n < 10u64 << (shift - 1) &&
             self.num_digits <= Self::MAX_DIGITS &&
             self.decimal_point <= self.num_digits as i32 &&
-            kani::forall!(|i in (0,DecimalSeq::MAX_DIGITS)| self.digits[i] <= 9)
+            forall!(|i in (0,DecimalSeq::MAX_DIGITS)| self.digits[i] <= 9)
         )]
         while read_index != 0 {
             read_index -= 1;
@@ -414,7 +414,7 @@ pub mod decimal_seq_verify {
                 digits: kani::any(),
             };
             kani::assume(ret.decimal_point <= ret.num_digits as i32);
-            kani::assume(kani::forall!(|i in (0,DecimalSeq::MAX_DIGITS)| ret.digits[i] <= 9));
+            kani::assume(forall!(|i in (0,DecimalSeq::MAX_DIGITS)| ret.digits[i] <= 9));
             ret
         }
     }
