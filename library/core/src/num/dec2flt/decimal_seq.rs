@@ -10,9 +10,9 @@
 //! available online: <https://nigeltao.github.io/blog/2020/parse-number-f64-simple.html>.
 
 #[cfg(kani)]
-use crate::kani;
-#[cfg(kani)]
 use crate::forall;
+#[cfg(kani)]
+use crate::kani;
 use crate::num::dec2flt::common::{ByteSlice, is_8digits};
 
 /// A decimal floating-point number, represented as a sequence of decimal digits.
