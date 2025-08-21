@@ -183,7 +183,7 @@ mod current;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use current::current;
-pub(crate) use current::{current_id, current_or_unnamed, drop_current};
+pub(crate) use current::{current_id, current_or_unnamed, current_os_id, drop_current};
 use current::{set_current, try_with_current};
 
 mod spawnhook;
@@ -1212,8 +1212,8 @@ impl ThreadId {
             panic!("failed to generate unique thread ID: bitspace exhausted")
         }
 
-        cfg_if::cfg_if! {
-            if #[cfg(target_has_atomic = "64")] {
+        cfg_select! {
+            target_has_atomic = "64" => {
                 use crate::sync::atomic::{Atomic, AtomicU64};
 
                 static COUNTER: Atomic<u64> = AtomicU64::new(0);
@@ -1229,7 +1229,8 @@ impl ThreadId {
                         Err(id) => last = id,
                     }
                 }
-            } else {
+            }
+            _ => {
                 use crate::sync::{Mutex, PoisonError};
 
                 static COUNTER: Mutex<u64> = Mutex::new(0);
@@ -1318,8 +1319,8 @@ use thread_name_string::ThreadNameString;
 /// Note however that this also means that the name reported in pre-main functions
 /// will be incorrect, but that's just something we have to live with.
 pub(crate) mod main_thread {
-    cfg_if::cfg_if! {
-        if #[cfg(target_has_atomic = "64")] {
+    cfg_select! {
+        target_has_atomic = "64" => {
             use super::ThreadId;
             use crate::sync::atomic::{Atomic, AtomicU64};
             use crate::sync::atomic::Ordering::Relaxed;
@@ -1335,7 +1336,8 @@ pub(crate) mod main_thread {
             pub(crate) unsafe fn set(id: ThreadId) {
                 MAIN.store(id.as_u64().get(), Relaxed)
             }
-        } else {
+        }
+        _ => {
             use super::ThreadId;
             use crate::mem::MaybeUninit;
             use crate::sync::atomic::{Atomic, AtomicBool};
@@ -2018,6 +2020,9 @@ fn _assert_sync_and_send() {
 ///   which may take time on systems with large numbers of mountpoints.
 ///   (This does not apply to cgroup v2, or to processes not in a
 ///   cgroup.)
+/// - It does not attempt to take `ulimit` into account. If there is a limit set on the number of
+///   threads, `available_parallelism` cannot know how much of that limit a Rust program should
+///   take, or know in a reliable and race-free way how much of that limit is already taken.
 ///
 /// On all targets:
 /// - It may overcount the amount of parallelism available when running in a VM

@@ -207,7 +207,7 @@ impl<T> Copy for NonZero<T> where T: ZeroablePrimitive {}
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
 impl<T> const PartialEq for NonZero<T>
 where
-    T: ZeroablePrimitive + ~const PartialEq,
+    T: ZeroablePrimitive + [const] PartialEq,
 {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -314,9 +314,10 @@ where
 }
 
 #[stable(feature = "nonzero_bitor", since = "1.45.0")]
-impl<T> BitOr for NonZero<T>
+#[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+impl<T> const BitOr for NonZero<T>
 where
-    T: ZeroablePrimitive + BitOr<Output = T>,
+    T: ZeroablePrimitive + [const] BitOr<Output = T>,
 {
     type Output = Self;
 
@@ -328,9 +329,10 @@ where
 }
 
 #[stable(feature = "nonzero_bitor", since = "1.45.0")]
-impl<T> BitOr<T> for NonZero<T>
+#[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+impl<T> const BitOr<T> for NonZero<T>
 where
-    T: ZeroablePrimitive + BitOr<Output = T>,
+    T: ZeroablePrimitive + [const] BitOr<Output = T>,
 {
     type Output = Self;
 
@@ -342,9 +344,10 @@ where
 }
 
 #[stable(feature = "nonzero_bitor", since = "1.45.0")]
-impl<T> BitOr<NonZero<T>> for T
+#[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+impl<T> const BitOr<NonZero<T>> for T
 where
-    T: ZeroablePrimitive + BitOr<Output = T>,
+    T: ZeroablePrimitive + [const] BitOr<Output = T>,
 {
     type Output = NonZero<T>;
 
@@ -356,10 +359,11 @@ where
 }
 
 #[stable(feature = "nonzero_bitor", since = "1.45.0")]
-impl<T> BitOrAssign for NonZero<T>
+#[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+impl<T> const BitOrAssign for NonZero<T>
 where
     T: ZeroablePrimitive,
-    Self: BitOr<Output = Self>,
+    Self: [const] BitOr<Output = Self>,
 {
     #[inline]
     fn bitor_assign(&mut self, rhs: Self) {
@@ -368,10 +372,11 @@ where
 }
 
 #[stable(feature = "nonzero_bitor", since = "1.45.0")]
-impl<T> BitOrAssign<T> for NonZero<T>
+#[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+impl<T> const BitOrAssign<T> for NonZero<T>
 where
     T: ZeroablePrimitive,
-    Self: BitOr<T, Output = Self>,
+    Self: [const] BitOr<T, Output = Self>,
 {
     #[inline]
     fn bitor_assign(&mut self, rhs: T) {
@@ -654,7 +659,7 @@ macro_rules! nonzero_integer {
             #[doc = concat!("let a = NonZero::<", stringify!($Int), ">::new(0b_01100100)?;")]
             #[doc = concat!("let b = NonZero::<", stringify!($Int), ">::new(0b_01000000)?;")]
             ///
-            /// assert_eq!(a.isolate_most_significant_one(), b);
+            /// assert_eq!(a.isolate_highest_one(), b);
             /// # Some(())
             /// # }
             /// ```
@@ -662,7 +667,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
-            pub const fn isolate_most_significant_one(self) -> Self {
+            pub const fn isolate_highest_one(self) -> Self {
                 let n = self.get() & (((1 as $Int) << (<$Int>::BITS - 1)).wrapping_shr(self.leading_zeros()));
 
                 // SAFETY:
@@ -684,7 +689,7 @@ macro_rules! nonzero_integer {
             #[doc = concat!("let a = NonZero::<", stringify!($Int), ">::new(0b_01100100)?;")]
             #[doc = concat!("let b = NonZero::<", stringify!($Int), ">::new(0b_00000100)?;")]
             ///
-            /// assert_eq!(a.isolate_least_significant_one(), b);
+            /// assert_eq!(a.isolate_lowest_one(), b);
             /// # Some(())
             /// # }
             /// ```
@@ -692,7 +697,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
-            pub const fn isolate_least_significant_one(self) -> Self {
+            pub const fn isolate_lowest_one(self) -> Self {
                 let n = self.get();
                 let n = n & n.wrapping_neg();
 
@@ -1275,7 +1280,8 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
     // Impls for unsigned nonzero types only.
     (unsigned $Int:ty) => {
         #[stable(feature = "nonzero_div", since = "1.51.0")]
-        impl Div<NonZero<$Int>> for $Int {
+        #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+        impl const Div<NonZero<$Int>> for $Int {
             type Output = $Int;
 
             /// Same as `self / other.get()`, but because `other` is a `NonZero<_>`,
@@ -1293,7 +1299,8 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
         }
 
         #[stable(feature = "nonzero_div_assign", since = "1.79.0")]
-        impl DivAssign<NonZero<$Int>> for $Int {
+        #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+        impl const DivAssign<NonZero<$Int>> for $Int {
             /// Same as `self /= other.get()`, but because `other` is a `NonZero<_>`,
             /// there's never a runtime check for division-by-zero.
             ///
@@ -1306,7 +1313,8 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
         }
 
         #[stable(feature = "nonzero_div", since = "1.51.0")]
-        impl Rem<NonZero<$Int>> for $Int {
+        #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+        impl const Rem<NonZero<$Int>> for $Int {
             type Output = $Int;
 
             /// This operation satisfies `n % d == n - (n / d) * d`, and cannot panic.
@@ -1319,7 +1327,8 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
         }
 
         #[stable(feature = "nonzero_div_assign", since = "1.79.0")]
-        impl RemAssign<NonZero<$Int>> for $Int {
+        #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+        impl const RemAssign<NonZero<$Int>> for $Int {
             /// This operation satisfies `n % d == n - (n / d) * d`, and cannot panic.
             #[inline]
             fn rem_assign(&mut self, other: NonZero<$Int>) {
@@ -1359,7 +1368,8 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
     // Impls for signed nonzero types only.
     (signed $Int:ty) => {
         #[stable(feature = "signed_nonzero_neg", since = "1.71.0")]
-        impl Neg for NonZero<$Int> {
+        #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
+        impl const Neg for NonZero<$Int> {
             type Output = Self;
 
             #[inline]
@@ -1370,7 +1380,8 @@ macro_rules! nonzero_integer_signedness_dependent_impls {
         }
 
         forward_ref_unop! { impl Neg, neg for NonZero<$Int>,
-        #[stable(feature = "signed_nonzero_neg", since = "1.71.0")] }
+        #[stable(feature = "signed_nonzero_neg", since = "1.71.0")]
+        #[rustc_const_unstable(feature = "const_ops", issue = "143802")] }
     };
 }
 

@@ -1191,7 +1191,7 @@ impl PathBuf {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
     #[inline]
-    #[rustc_const_unstable(feature = "const_pathbuf_osstring_new", issue = "141520")]
+    #[rustc_const_stable(feature = "const_pathbuf_osstring_new", since = "CURRENT_RUSTC_VERSION")]
     pub const fn new() -> PathBuf {
         PathBuf { inner: OsString::new() }
     }
@@ -2105,6 +2105,38 @@ impl PartialEq for PathBuf {
     }
 }
 
+#[stable(feature = "eq_str_for_path", since = "CURRENT_RUSTC_VERSION")]
+impl cmp::PartialEq<str> for PathBuf {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        &*self == other
+    }
+}
+
+#[stable(feature = "eq_str_for_path", since = "CURRENT_RUSTC_VERSION")]
+impl cmp::PartialEq<PathBuf> for str {
+    #[inline]
+    fn eq(&self, other: &PathBuf) -> bool {
+        other == self
+    }
+}
+
+#[stable(feature = "eq_str_for_path", since = "CURRENT_RUSTC_VERSION")]
+impl cmp::PartialEq<String> for PathBuf {
+    #[inline]
+    fn eq(&self, other: &String) -> bool {
+        **self == **other
+    }
+}
+
+#[stable(feature = "eq_str_for_path", since = "CURRENT_RUSTC_VERSION")]
+impl cmp::PartialEq<PathBuf> for String {
+    #[inline]
+    fn eq(&self, other: &PathBuf) -> bool {
+        other == self
+    }
+}
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Hash for PathBuf {
     fn hash<H: Hasher>(&self, h: &mut H) {
@@ -2678,11 +2710,12 @@ impl Path {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(path_file_prefix)]
     /// use std::path::Path;
     ///
     /// assert_eq!("foo", Path::new("foo.rs").file_prefix().unwrap());
     /// assert_eq!("foo", Path::new("foo.tar.gz").file_prefix().unwrap());
+    /// assert_eq!(".config", Path::new(".config").file_prefix().unwrap());
+    /// assert_eq!(".config", Path::new(".config.toml").file_prefix().unwrap());
     /// ```
     ///
     /// # See Also
@@ -2691,7 +2724,7 @@ impl Path {
     ///
     /// [`Path::file_stem`]: Path::file_stem
     ///
-    #[unstable(feature = "path_file_prefix", issue = "86319")]
+    #[stable(feature = "path_file_prefix", since = "CURRENT_RUSTC_VERSION")]
     #[must_use]
     pub fn file_prefix(&self) -> Option<&OsStr> {
         self.file_name().map(split_file_at_dot).and_then(|(before, _after)| Some(before))
@@ -3259,8 +3292,8 @@ impl Path {
     ///
     /// # Examples
     ///
-    #[cfg_attr(unix, doc = "```no_run")]
-    #[cfg_attr(not(unix), doc = "```ignore")]
+    /// ```rust,no_run
+    /// # #[cfg(unix)] {
     /// use std::path::Path;
     /// use std::os::unix::fs::symlink;
     ///
@@ -3268,6 +3301,7 @@ impl Path {
     /// symlink("/origin_does_not_exist/", link_path).unwrap();
     /// assert_eq!(link_path.is_symlink(), true);
     /// assert_eq!(link_path.exists(), false);
+    /// # }
     /// ```
     ///
     /// # See Also
@@ -3361,6 +3395,39 @@ impl PartialEq for Path {
     #[inline]
     fn eq(&self, other: &Path) -> bool {
         self.components() == other.components()
+    }
+}
+
+#[stable(feature = "eq_str_for_path", since = "CURRENT_RUSTC_VERSION")]
+impl cmp::PartialEq<str> for Path {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        let other: &OsStr = other.as_ref();
+        self == other
+    }
+}
+
+#[stable(feature = "eq_str_for_path", since = "CURRENT_RUSTC_VERSION")]
+impl cmp::PartialEq<Path> for str {
+    #[inline]
+    fn eq(&self, other: &Path) -> bool {
+        other == self
+    }
+}
+
+#[stable(feature = "eq_str_for_path", since = "CURRENT_RUSTC_VERSION")]
+impl cmp::PartialEq<String> for Path {
+    #[inline]
+    fn eq(&self, other: &String) -> bool {
+        self == &*other
+    }
+}
+
+#[stable(feature = "eq_str_for_path", since = "CURRENT_RUSTC_VERSION")]
+impl cmp::PartialEq<Path> for String {
+    #[inline]
+    fn eq(&self, other: &Path) -> bool {
+        other == self
     }
 }
 

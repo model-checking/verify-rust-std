@@ -40,3 +40,5 @@
   - [23: Verify the safety of Vec functions part 1](./challenges/0023-vec-pt1.md)
   - [24: Verify the safety of Vec functions part 2](./challenges/0024-vec-pt2.md)
   - [25: Verify the safety of `VecDeque` functions](./challenges/0025-vecdeque.md)
+  - [26: Verify reference-counted Cell implementation](./challenges/0026-rc.md)
+  - [27: Verify atomically reference-counted Cell implementation](./challenges/0027-arc.md)
