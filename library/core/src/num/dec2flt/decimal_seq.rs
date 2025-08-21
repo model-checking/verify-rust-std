@@ -11,6 +11,8 @@
 
 #[cfg(kani)]
 use crate::kani;
+#[cfg(kani)]
+use crate::forall;
 use crate::num::dec2flt::common::{ByteSlice, is_8digits};
 
 /// A decimal floating-point number, represented as a sequence of decimal digits.
@@ -85,7 +87,7 @@ impl DecimalSeq {
         //
         // Trim is only called in `right_shift` and `left_shift`.
         debug_assert!(self.num_digits <= Self::MAX_DIGITS);
-        #[kani::loop_invariant(self.num_digits <= Self::MAX_DIGITS)]
+        #[safety::loop_invariant(self.num_digits <= Self::MAX_DIGITS)]
         while self.num_digits != 0 && self.digits[self.num_digits - 1] == 0 {
             self.num_digits -= 1;
         }
@@ -101,7 +103,7 @@ impl DecimalSeq {
         let dp = self.decimal_point as usize;
         let mut n = 0_u64;
 
-        #[kani::loop_invariant(n < 10u64.pow(kani::index as u32))]
+        #[safety::loop_invariant(n < 10u64.pow(kani::index as u32))]
         for i in 0..dp {
             n *= 10;
             if i < self.num_digits {
@@ -134,7 +136,7 @@ impl DecimalSeq {
         let mut write_index = self.num_digits + num_new_digits;
         let mut n = 0_u64;
 
-        #[kani::loop_invariant(read_index <= Self::MAX_DIGITS &&
+        #[safety::loop_invariant(read_index <= Self::MAX_DIGITS &&
             write_index == read_index + num_new_digits &&
             n < 10u64 << (shift - 1) &&
             self.num_digits <= Self::MAX_DIGITS &&
@@ -155,7 +157,7 @@ impl DecimalSeq {
             n = quotient;
         }
 
-        #[kani::loop_invariant(self.num_digits <= Self::MAX_DIGITS && self.decimal_point <= self.num_digits as i32)]
+        #[safety::loop_invariant(self.num_digits <= Self::MAX_DIGITS && self.decimal_point <= self.num_digits as i32)]
         while n > 0 {
             write_index -= 1;
             let quotient = n / 10;
@@ -183,7 +185,7 @@ impl DecimalSeq {
         let mut read_index = 0;
         let mut write_index = 0;
         let mut n = 0_u64;
-        #[kani::loop_invariant( n == 0 || (read_index > 0 && read_index <= self.num_digits + 64 - n.leading_zeros() as usize))]
+        #[safety::loop_invariant( n == 0 || (read_index > 0 && read_index <= self.num_digits + 64 - n.leading_zeros() as usize))]
         while (n >> shift) == 0 {
             if read_index < self.num_digits {
                 n = (10 * n) + self.digits[read_index] as u64;
@@ -191,7 +193,7 @@ impl DecimalSeq {
             } else if n == 0 {
                 return;
             } else {
-                #[kani::loop_invariant(n > 0 && read_index <= self.num_digits + 64 - n.leading_zeros() as usize && read_index > 0)]
+                #[safety::loop_invariant(n > 0 && read_index <= self.num_digits + 64 - n.leading_zeros() as usize && read_index > 0)]
                 while (n >> shift) == 0 {
                     n *= 10;
                     read_index += 1;
@@ -208,7 +210,7 @@ impl DecimalSeq {
             return;
         }
         let mask = (1_u64 << shift) - 1;
-        #[kani::loop_invariant(self.num_digits <= Self::MAX_DIGITS &&
+        #[safety::loop_invariant(self.num_digits <= Self::MAX_DIGITS &&
             write_index < read_index &&
             write_index < Self::MAX_DIGITS - self.num_digits.saturating_sub(read_index)
         )]
@@ -219,7 +221,7 @@ impl DecimalSeq {
             self.digits[write_index] = new_digit;
             write_index += 1;
         }
-        #[kani::loop_invariant(write_index <= Self::MAX_DIGITS)]
+        #[safety::loop_invariant(write_index <= Self::MAX_DIGITS)]
         while n > 0 {
             let new_digit = (n >> shift) as u8;
             n = 10 * (n & mask);
@@ -382,7 +384,7 @@ fn number_of_digits_decimal_left_shift(d: &DecimalSeq, mut shift: usize) -> usiz
     let pow5_b = (0x7FF & x_b) as usize;
     let pow5 = &TABLE_POW5[pow5_a..];
 
-    #[kani::loop_invariant(true)]
+    #[safety::loop_invariant(true)]
     for (i, &p5) in pow5.iter().enumerate().take(pow5_b - pow5_a) {
         if i >= d.num_digits {
             return num_new_digits - 1;
