@@ -2122,8 +2122,7 @@ macro_rules! uint_impl {
         ///
         /// # Examples
         ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u8` is used here.
+        /// Please note that this example is shared among integer types, which is why `u8` is used.
         ///
         /// ```
         /// assert_eq!(10u8.wrapping_mul(12), 120);
@@ -2617,8 +2616,8 @@ macro_rules! uint_impl {
         ///
         /// # Examples
         ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u32` is used here.
+        /// Please note that this example is shared among integer types, which is why why `u32`
+        /// is used.
         ///
         /// ```
         /// assert_eq!(5u32.overflowing_mul(2), (10, false));
@@ -2644,8 +2643,7 @@ macro_rules! uint_impl {
         ///
         /// # Examples
         ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u32` is used here.
+        /// Please note that this example is shared among integer types, which is why `u32` is used.
         ///
         /// ```
         /// #![feature(bigint_helper_methods)]
@@ -2675,8 +2673,7 @@ macro_rules! uint_impl {
         ///
         /// # Examples
         ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u32` is used here.
+        /// Please note that this example is shared among integer types, which is why `u32` is used.
         ///
         /// ```
         /// #![feature(bigint_helper_methods)]
