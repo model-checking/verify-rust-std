@@ -68,11 +68,11 @@ impl [u8] {
         let mut a = self;
         let mut b = other;
 
-        #[safety::loop_invariant(
+        #[cfg_attr(kani, kani::loop_invariant(
             a.len() <= self.len() && b.len() <= other.len() &&
             (a.len() == 0 || self.as_ptr().wrapping_add(self.len()-a.len()) == a.as_ptr()) &&
             (b.len() == 0 || other.as_ptr().wrapping_add(other.len()-b.len()) == b.as_ptr())
-        )]
+        ))]
         while let ([first_a, rest_a @ ..], [first_b, rest_b @ ..]) = (a, b) {
             if first_a.eq_ignore_ascii_case(&first_b) {
                 a = rest_a;
@@ -165,10 +165,10 @@ impl [u8] {
         let mut bytes = self;
         // Note: A pattern matching based approach (instead of indexing) allows
         // making the function const.
-        #[safety::loop_invariant(
+        #[cfg_attr(kani, kani::loop_invariant(
             bytes.len() <= self.len() &&
             (bytes.len() == 0 || self.as_ptr().wrapping_add(self.len()-bytes.len()) == bytes.as_ptr())
-        )]
+        ))]
         while let [first, rest @ ..] = bytes {
             if first.is_ascii_whitespace() {
                 bytes = rest;
@@ -198,10 +198,10 @@ impl [u8] {
         let mut bytes = self;
         // Note: A pattern matching based approach (instead of indexing) allows
         // making the function const.
-        #[safety::loop_invariant(
+        #[cfg_attr(kani, kani::loop_invariant(
             bytes.len() <= self.len() &&
             (bytes.len() == 0 || self.as_ptr() == bytes.as_ptr())
-        )]
+        ))]
         while let [rest @ .., last] = bytes {
             if last.is_ascii_whitespace() {
                 bytes = rest;
@@ -353,10 +353,10 @@ impl<'a> fmt::Debug for EscapeAscii<'a> {
 pub const fn is_ascii_simple(mut bytes: &[u8]) -> bool {
     #[cfg(kani)]
     let on_entry_bytes = bytes;
-    #[safety::loop_invariant(
+    #[cfg_attr(kani, kani::loop_invariant(
             bytes.len() <= on_entry_bytes.len() &&
             (bytes.len() == 0 || bytes.as_ptr() == on_entry_bytes.as_ptr())
-    )]
+    ))]
     while let [rest @ .., last] = bytes {
         if !last.is_ascii() {
             break;
@@ -445,10 +445,10 @@ const fn is_ascii(s: &[u8]) -> bool {
             // Read subsequent words until the last aligned word, excluding the last
             // aligned word by itself to be done in tail check later, to ensure that
             // tail is always one `usize` at most to extra branch `byte_pos == len`.
-            #[safety::loop_invariant(byte_pos <= len
+            #[cfg_attr(kani, kani::loop_invariant(byte_pos <= len
                                     && byte_pos >= offset_to_aligned
                                     && word_ptr.addr() >= start.addr() + offset_to_aligned
-                                    && byte_pos == word_ptr.addr() - start.addr())]
+                                    && byte_pos == word_ptr.addr() - start.addr()))]
             while byte_pos < len - USIZE_SIZE {
                 // Sanity check that the read is in bounds
                 debug_assert!(byte_pos + USIZE_SIZE <= len);
@@ -496,7 +496,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
 
     let mut i = 0;
 
-    #[safety::loop_invariant(i <= bytes.len())]
+    #[cfg_attr(kani, kani::loop_invariant(i <= bytes.len()))]
     while i + CHUNK_SIZE <= bytes.len() {
         let chunk_end = i + CHUNK_SIZE;
 
@@ -505,7 +505,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
         // ASCII bytes are less than 128 (0x80), so their most significant
         // bit is unset.
         let mut count = 0;
-        #[safety::loop_invariant(i <= chunk_end && chunk_end - i <= CHUNK_SIZE && i - (chunk_end - CHUNK_SIZE) >= count as usize)]
+        #[cfg_attr(kani, kani::loop_invariant(i <= chunk_end && chunk_end - i <= CHUNK_SIZE && i - (chunk_end - CHUNK_SIZE) >= count as usize))]
         while i < chunk_end {
             count += bytes[i].is_ascii() as u8;
             i += 1;
@@ -519,7 +519,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
 
     // Process the remaining `bytes.len() % N` bytes.
     let mut is_ascii = true;
-    #[safety::loop_invariant(i <= bytes.len())]
+    #[cfg_attr(kani, kani::loop_invariant(i <= bytes.len()))]
     while i < bytes.len() {
         is_ascii &= bytes[i].is_ascii();
         i += 1;
