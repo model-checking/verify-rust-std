@@ -139,6 +139,7 @@ impl DecimalSeq {
         #[safety::loop_invariant(read_index <= Self::MAX_DIGITS &&
             write_index == read_index + num_new_digits &&
             n < 10u64 << (shift - 1) &&
+            (n == 0 || write_index > 0) &&
             self.num_digits <= Self::MAX_DIGITS &&
             self.decimal_point <= self.num_digits as i32 &&
             forall!(|i in (0,DecimalSeq::MAX_DIGITS)| self.digits[i] <= 9)
