@@ -892,6 +892,7 @@ pub mod slice_verify {
     use super::*;
 
     #[kani::proof]
+    #[kani::solver(z3)]
     fn check_repeat_u8() {
         let mut a: [u8; 10] = kani::any();
         let n = kani::any_where(|i| *i < 10);
