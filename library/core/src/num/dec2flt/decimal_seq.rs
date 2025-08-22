@@ -157,7 +157,7 @@ impl DecimalSeq {
             n = quotient;
         }
 
-        #[safety::loop_invariant(self.num_digits <= Self::MAX_DIGITS && self.decimal_point <= self.num_digits as i32 && prev(write_index) > 0)]
+        #[safety::loop_invariant(self.num_digits <= Self::MAX_DIGITS && self.decimal_point <= self.num_digits as i32 && (write_index > 0 || prev(write_index) == 1))]
         while n > 0 {
             //true but hard to write proof with kani currently
             // kani::assume(write_index > 0);
