@@ -12,10 +12,16 @@
 use core::borrow::{Borrow, BorrowMut};
 #[cfg(not(no_global_oom_handling))]
 use core::cmp::Ordering::{self, Less};
+#[cfg(kani)]
+use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
+#[cfg(kani)]
+use core::mem::SizedTypeProperties;
 #[cfg(not(no_global_oom_handling))]
 use core::ptr;
+#[cfg(kani)]
+use core::ptr::slice_from_raw_parts;
 #[unstable(feature = "array_windows", issue = "75027")]
 pub use core::slice::ArrayWindows;
 #[stable(feature = "inherent_ascii_escape", since = "1.60.0")]
@@ -524,6 +530,18 @@ impl<T> [T] {
         {
             let mut m = n >> 1;
             // If `m > 0`, there are remaining bits up to the leftmost '1'.
+            #[cfg(kani)]
+            let buf_ptr = ptr::slice_from_raw_parts(buf.as_ptr(), capacity);
+            #[cfg(kani)]
+            let len_ptr = unsafe { (&buf as *const Vec<T> as *const usize).add(2) };
+            #[cfg_attr(kani, kani::loop_invariant(
+                kani::mem::same_allocation(buf.as_ptr() as *const T, (buf.as_ptr() as *const T).wrapping_add(capacity)) &&
+                unsafe {*len_ptr <= T::MAX_SLICE_LEN} &&
+                unsafe {*len_ptr <= capacity} &&
+                m.leading_zeros() > n.leading_zeros() &&
+                unsafe {*len_ptr == self.len() * (1usize << (m.leading_zeros() - n.leading_zeros() - 1))}
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies(&m, buf_ptr, len_ptr))]
             while m > 0 {
                 // `buf.extend(buf)`:
                 unsafe {
@@ -865,5 +883,26 @@ impl<T> sort::stable::BufGuard<T> for Vec<T> {
 
     fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<T>] {
         self.spare_capacity_mut()
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod slice_verify {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::solver(z3)]
+    fn check_repeat_u8() {
+        let mut a: [u8; 10] = kani::any();
+        let n = kani::any_where(|i| *i < 10);
+        let _result = a.repeat(n);
+    }
+
+    #[kani::proof]
+    fn check_repeat_u16() {
+        let mut a: [u16; 10] = kani::any();
+        let n = kani::any_where(|i| *i < 10);
+        let _result = a.repeat(n);
     }
 }
