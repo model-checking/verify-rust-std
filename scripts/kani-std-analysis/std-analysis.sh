@@ -78,6 +78,7 @@ export RUST_BACKTRACE=1
 export RUSTC_LOG=error
 
 RUST_FLAGS=(
+    "--cfg=kani"
     "-Cpanic=abort"
     "-Zalways-encode-mir"
 )
