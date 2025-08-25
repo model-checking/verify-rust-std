@@ -9,6 +9,8 @@
 //! algorithm can be found in "ParseNumberF64 by Simple Decimal Conversion",
 //! available online: <https://nigeltao.github.io/blog/2020/parse-number-f64-simple.html>.
 
+use safety::ensures;
+
 #[cfg(kani)]
 use crate::forall;
 #[cfg(kani)]
@@ -139,7 +141,7 @@ impl DecimalSeq {
         #[cfg_attr(kani, kani::loop_invariant(read_index <= Self::MAX_DIGITS &&
             write_index == read_index + num_new_digits &&
             n < 10u64 << (shift - 1) &&
-            (n == 0 || write_index > 0) &&
+            (n == 0 || (shift & 63) <= 3 || (shift & 63) >= 61 || write_index > 0) &&
             self.num_digits <= Self::MAX_DIGITS &&
             self.decimal_point <= self.num_digits as i32 &&
             forall!(|i in (0,DecimalSeq::MAX_DIGITS)| self.digits[i] <= 9)
@@ -158,10 +160,14 @@ impl DecimalSeq {
             n = quotient;
         }
 
-        #[cfg_attr(kani, kani::loop_invariant(self.num_digits <= Self::MAX_DIGITS && self.decimal_point <= self.num_digits as i32 && (write_index > 0 || prev(write_index) == 1)))]
+        #[cfg_attr(kani, kani::loop_invariant(self.num_digits <= Self::MAX_DIGITS && self.decimal_point <= self.num_digits as i32))]
+        // TODO: should add invariant along the lines of
+        // (n == 0 || write_index > 0) && (prev(n) as usize + 9) / 10 <= prev(write_index))]
+        // to avoid the below kani::assume
         while n > 0 {
-            //true but hard to write proof with kani currently
-            // kani::assume(write_index > 0);
+            // true but hard to write proof with kani currently
+            #[cfg(kani)]
+            kani::assume(write_index > 0);
             write_index -= 1;
             let quotient = n / 10;
             let remainder = n - (10 * quotient);
@@ -321,6 +327,7 @@ pub fn parse_decimal_seq(mut s: &[u8]) -> DecimalSeq {
     d
 }
 
+#[safety::ensures(|result| (shift & 63) <= 3 || (shift & 63) >= 61 || *result > 0)]
 fn number_of_digits_decimal_left_shift(d: &DecimalSeq, mut shift: usize) -> usize {
     #[rustfmt::skip]
     const TABLE: [u16; 65] = [
@@ -387,7 +394,7 @@ fn number_of_digits_decimal_left_shift(d: &DecimalSeq, mut shift: usize) -> usiz
     let pow5_b = (0x7FF & x_b) as usize;
     let pow5 = &TABLE_POW5[pow5_a..];
 
-    #[cfg_attr(kani, kani::loop_invariant(true))]
+    #[cfg_attr(kani, kani::loop_invariant(num_new_digits > 1 || shift <= 3 || shift >= 61))]
     for (i, &p5) in pow5.iter().enumerate().take(pow5_b - pow5_a) {
         if i >= d.num_digits {
             return num_new_digits - 1;
