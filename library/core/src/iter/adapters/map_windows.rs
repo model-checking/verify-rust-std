@@ -1,5 +1,6 @@
 use crate::iter::FusedIterator;
 use crate::mem::MaybeUninit;
+use crate::ub_checks::Invariant;
 use crate::{fmt, ptr};
 
 /// An iterator over the mapped windows of another iterator.
@@ -287,5 +288,12 @@ where
 {
     fn clone(&self) -> Self {
         Self { f: self.f.clone(), inner: self.inner.clone() }
+    }
+}
+
+#[unstable(feature = "ub_checks", issue = "none")]
+impl<T, const N: usize> Invariant for Buffer<T, N> {
+    fn is_safe(&self) -> bool {
+        self.start + N <= 2 * N
     }
 }
