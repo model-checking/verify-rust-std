@@ -5,6 +5,7 @@
 - **Start date:** *2024/06/12*
 - **End date:** *2025/04/10*
 - **Reward:** *N/A*
+- **Contributors**: [Alex Le Blanc](https://github.com/AlexLB99), [Patrick Lam](https://github.com/patricklam)
 
 -------------------
 
