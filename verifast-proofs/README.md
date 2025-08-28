@@ -2,8 +2,18 @@
 
 This directory contains [VeriFast](../doc/src/tools/verifast.md) proofs for (currently a very, very small) part of the standard library.
 
-> [!NOTE]  
-> TL;DR: If the VeriFast CI action fails because of a failing diff, please run `verifast-proofs/patch-verifast-proofs.sh` to fix the problem.
+Specifically, it currently contains the following proofs:
+
+- Partial proof of [LinkedList](alloc/collections/linked_list.rs/)
+- Partial proof of [RawVec](alloc/raw_vec/mod.rs/)
+
+See each proof's accompanying README for a tour of the proof and applicable caveats.
+
+## Maintaining the proofs
+
+ If the VeriFast CI action fails because of a failing diff, please run `cd verifast-proofs; ./patch-verifast-proofs.sh` to fix the problem.
+
+## `-skip_specless_fns`
 
 VeriFast supports selecting the code to verify on a function-by-function basis. By default, when given a `.rs` file VeriFast will try to verify [semantic well-typedness](https://verifast.github.io/verifast/rust-reference/non-unsafe-funcs.html) of all non-`unsafe` functions in that file (and in any submodules), and will require that the user provide specifications for all `unsafe` functions, which it will then verify against those specifications. However, when given the `-skip_specless_fns` command-line flag, VeriFast will skip all functions for which the user did not provide a specification.
 
