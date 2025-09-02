@@ -125,10 +125,11 @@ pub fn phaddw(a: i16x16, b: i16x16) -> i16x16 {
 
 ### Modeling defined intrinsics semi-automatically
 
-To model a defined intrinsic, we essentially copy the Rust code of
-the intrinsic from `core::arch` and adapt it to use our underlying abstractions.  The
-changes needed to the code are sometimes scriptable, and indeed most
-of our models were generated from a script, but some changes are still
+To model a defined intrinsic, we essentially copy the Rust code of the
+intrinsic from `core::arch` and adapt it to use our underlying
+abstractions.  The changes needed to the code are sometimes
+scriptable, and indeed most of our models were generated from a script
+(see the ANNEX at the bottom of this file), but some changes are still
 needed by hand.
 
 For example, let us say the intrinsic we are modeling is
@@ -176,8 +177,19 @@ pub fn _mm256_bsrli_epi128<const IMM8: i32>(a: __m256i) -> __m256i {
 ```
 
 Thus, we then go to `core_arch/x86/models/avx2.rs`, and add this implementation.
-The only change it requires here is that the `simd_shuffle` macro is a function in our model,
-and we discard all the function attributes.
+The only changes it requires here are that the `simd_shuffle` macro is a function in our model,
+the `ZERO` constant is now a function, and we discard all the function attributes.
+
+The exact diff between the original and edited code for this function is:
+
+```diff
+13,14c13,14
+<         let r: i8x32 = simd_shuffle(
+<             i8x32::ZERO(),
+---
+>         let r: i8x32 = simd_shuffle!(
+>             i8x32::ZERO,
+```
 
 For other intrinsics, we sometimes need to make more changes. Since our model of the builtin intrinsics
 is more precise concerning the type of their arguments compared to their Rust counterparts, we
@@ -224,3 +236,84 @@ us](https://github.com/rust-lang/stdarch/issues/1822) using a failing
 test case generated from the testable model and then fixed by [our
 PR](https://github.com/rust-lang/stdarch/pull/1823) in the 2025-06-30
 version of `stdarch`.
+
+
+## ANNEX: Extraction Script
+
+The following Rust program is a simple script that uses the `syn` crate to process an input Rust file 
+containing SIMD intrinsics into one suitable for the models described in this document. This code
+is provided as illustration; for each set of core libraries we wish to model and test, there will
+likely be need for a similar (or extended) script to automate the modeling process.
+
+```rust
+use syn::*;
+use std::fs;
+use std::env;
+
+fn extract_model(input_file_path: &str, output_file_path: &str) -> Result<()> {
+    let source_code = fs::read_to_string(input_file_path).expect("unable to read file");
+    let mut syntax_tree: File = parse_file(&source_code)?;
+
+    syntax_tree.items.retain(|item|
+        match item {
+            Item::Use(_) => false,
+            _ => true
+        }
+    );
+
+    // Clear attributes from the file's top-level items
+    for item in &mut syntax_tree.items {
+        match item {
+            Item::Const(const_item) => {
+                const_item.attrs.retain(|attr| attr.path().is_ident("doc"));
+            },            
+            Item::Fn(item_fn) => {
+                item_fn.attrs.retain(|attr| attr.path().is_ident("doc"));
+                item_fn.block.stmts.retain(|stmt|
+                    match stmt {
+                        Stmt::Item(Item::ForeignMod(_)) => false,
+                        _ => true
+                    }
+                );
+                for stmt in &mut item_fn.block.stmts {
+                    match stmt {
+                        Stmt::Expr(Expr::Unsafe(u), tok) => *stmt = Stmt::Expr(Expr::Block(
+                                ExprBlock {attrs : Vec::new(), label : None, block : u.block.clone()}), *tok),
+                        _ => ()
+                    }
+                }
+            },
+            Item::Struct(item_struct) => {
+                item_struct.attrs.clear();
+                for field in &mut item_struct.fields {
+                    field.attrs.retain(|attr| attr.path().is_ident("doc"));
+                }
+            },
+            Item::Enum(item_enum) => {
+                item_enum.attrs.clear();
+                for variant in &mut item_enum.variants {
+                    variant.attrs.retain(|attr| attr.path().is_ident("doc"));
+                }
+            },
+            // Add more cases for other Item types (e.g., Item::Mod, Item::Impl, etc.)
+            _ => {
+                // For other item types, if they have an 'attrs' field, clear it.
+                // This requires more specific matching or a helper trait.
+            }
+        }
+    }
+
+    let formatted_string = prettyplease::unparse(&syntax_tree);
+    fs::write(output_file_path, formatted_string).expect("unable to write file");
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 3 {
+        println!("usage: modelize <path to input Rust file> <path to output Rust file>")
+    }
+    extract_model(&args[1], &args[2])
+}
+```

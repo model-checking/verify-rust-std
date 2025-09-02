@@ -49,7 +49,9 @@ fn _mm256_movemask_ps() {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx::_mm256_movemask_ps(a.into()),
-            unsafe { upstream::_mm256_movemask_ps(a.into()) }
+            unsafe { upstream::_mm256_movemask_ps(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
 }
@@ -62,7 +64,9 @@ fn _mm256_movemask_pd() {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx::_mm256_movemask_pd(a.into()),
-            unsafe { upstream::_mm256_movemask_pd(a.into()) }
+            unsafe { upstream::_mm256_movemask_pd(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
 }
@@ -76,7 +80,10 @@ fn _mm256_testz_si256() {
         let b: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx::_mm256_testz_si256(a.into(), b.into()),
-            unsafe { upstream::_mm256_testz_si256(a.into(), b.into()) }
+            unsafe { upstream::_mm256_testz_si256(a.into(), b.into()) },
+            "Failed with input values: {:?}, {:?}",
+            a,
+            b
         );
     }
 }
@@ -90,7 +97,10 @@ fn _mm256_testc_si256() {
         let b: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx::_mm256_testc_si256(a.into(), b.into()),
-            unsafe { upstream::_mm256_testc_si256(a.into(), b.into()) }
+            unsafe { upstream::_mm256_testc_si256(a.into(), b.into()) },
+            "Failed with input values: {:?}, {:?}",
+            a,
+            b
         );
     }
 }
@@ -116,7 +126,9 @@ fn _mm256_cvtsi256_si32() {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx::_mm256_cvtsi256_si32(a.into()),
-            unsafe { upstream::_mm256_cvtsi256_si32(a.into()) }
+            unsafe { upstream::_mm256_cvtsi256_si32(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
 }

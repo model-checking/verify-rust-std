@@ -120,7 +120,9 @@ fn _mm256_movemask_epi8() {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_movemask_epi8(a.into()),
-            unsafe { upstream::_mm256_movemask_epi8(a.into()) }
+            unsafe { upstream::_mm256_movemask_epi8(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
 }
@@ -191,224 +193,288 @@ fn _mm256_extract_epi8() {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<0>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<0>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<0>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<1>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<1>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<1>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<2>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<2>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<2>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<3>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<3>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<3>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<4>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<4>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<4>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<5>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<5>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<5>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<6>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<6>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<6>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<7>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<7>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<7>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<8>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<8>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<8>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<9>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<9>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<9>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<10>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<10>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<10>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<11>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<11>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<11>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<12>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<12>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<12>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<13>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<13>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<13>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<14>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<14>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<14>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<15>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<15>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<15>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<16>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<16>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<16>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<17>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<17>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<17>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<18>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<18>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<18>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<19>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<19>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<19>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<20>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<20>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<20>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<21>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<21>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<21>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<22>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<22>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<22>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<23>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<23>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<23>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<24>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<24>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<24>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<25>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<25>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<25>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<26>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<26>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<26>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<27>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<27>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<27>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<28>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<28>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<28>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<29>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<29>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<29>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<30>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<30>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<30>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi8::<31>(a.into()),
-            unsafe { upstream::_mm256_extract_epi8::<31>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi8::<31>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
 }
@@ -421,112 +487,144 @@ fn _mm256_extract_epi16() {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<0>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<0>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<0>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<1>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<1>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<1>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<2>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<2>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<2>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<3>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<3>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<3>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<4>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<4>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<4>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<5>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<5>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<5>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<6>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<6>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<6>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<7>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<7>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<7>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<8>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<8>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<8>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<9>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<9>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<9>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<10>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<10>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<10>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<11>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<11>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<11>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<12>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<12>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<12>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<13>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<13>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<13>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<14>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<14>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<14>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
     for _ in 0..n {
         let a: BitVec<256> = BitVec::random();
         assert_eq!(
             super::super::models::avx2::_mm256_extract_epi16::<15>(a.into()),
-            unsafe { upstream::_mm256_extract_epi16::<15>(a.into()) }
+            unsafe { upstream::_mm256_extract_epi16::<15>(a.into()) },
+            "Failed with input value: {:?}",
+            a
         );
     }
 }

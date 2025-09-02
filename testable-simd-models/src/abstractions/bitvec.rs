@@ -106,16 +106,6 @@ impl<const N: u32> BitVec<N> {
             .map(int_from_bit_slice)
             .collect()
     }
-
-    /// Generate a random BitVec.
-    pub fn rand() -> Self {
-        use rand::prelude::*;
-        let random_source: Vec<_> = {
-            let mut rng = rand::rng();
-            (0..N).map(|_| rng.random::<bool>()).collect()
-        };
-        Self::from_fn(|i| random_source[i as usize].into())
-    }
 }
 
 impl<const N: u32> BitVec<N> {
