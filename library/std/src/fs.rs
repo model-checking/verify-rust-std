@@ -814,7 +814,7 @@ impl File {
     ///
     /// If this file handle/descriptor, or a clone of it, already holds a lock, the exact behavior
     /// is unspecified and platform dependent, including the possibility that it will deadlock.
-    /// However, if this method returns `Ok(true)`, then it has acquired an exclusive lock.
+    /// However, if this method returns `Ok(())`, then it has acquired an exclusive lock.
     ///
     /// If the file is not open for writing, it is unspecified whether this function returns an error.
     ///
@@ -879,7 +879,7 @@ impl File {
     ///
     /// If this file handle, or a clone of it, already holds a lock, the exact behavior is
     /// unspecified and platform dependent, including the possibility that it will deadlock.
-    /// However, if this method returns `Ok(true)`, then it has acquired a shared lock.
+    /// However, if this method returns `Ok(())`, then it has acquired a shared lock.
     ///
     /// The lock will be released when this file (along with any other file descriptors/handles
     /// duplicated or inherited from it) is closed, or if the [`unlock`] method is called.
@@ -1111,6 +1111,11 @@ impl File {
     /// `futimes` on macOS before 10.13) and the `SetFileTime` function on Windows. Note that this
     /// [may change in the future][changes].
     ///
+    /// On most platforms, including UNIX and Windows platforms, this function can also change the
+    /// timestamps of a directory. To get a `File` representing a directory in order to call
+    /// `set_times`, open the directory with `File::open` without attempting to obtain write
+    /// permission.
+    ///
     /// [changes]: io#platform-specific-behavior
     ///
     /// # Errors
@@ -1128,7 +1133,7 @@ impl File {
     ///     use std::fs::{self, File, FileTimes};
     ///
     ///     let src = fs::metadata("src")?;
-    ///     let dest = File::options().write(true).open("dest")?;
+    ///     let dest = File::open("dest")?;
     ///     let times = FileTimes::new()
     ///         .set_accessed(src.accessed()?)
     ///         .set_modified(src.modified()?);
@@ -3114,7 +3119,7 @@ pub fn read_dir<P: AsRef<Path>>(path: P) -> io::Result<ReadDir> {
 /// On UNIX-like systems, this function will update the permission bits
 /// of the file pointed to by the symlink.
 ///
-/// Note that this behavior can lead to privalage escalation vulnerabilities,
+/// Note that this behavior can lead to privilege escalation vulnerabilities,
 /// where the ability to create a symlink in one directory allows you to
 /// cause the permissions of another file or directory to be modified.
 ///
@@ -3149,6 +3154,25 @@ pub fn read_dir<P: AsRef<Path>>(path: P) -> io::Result<ReadDir> {
 #[stable(feature = "set_permissions", since = "1.1.0")]
 pub fn set_permissions<P: AsRef<Path>>(path: P, perm: Permissions) -> io::Result<()> {
     fs_imp::set_permissions(path.as_ref(), perm.0)
+}
+
+/// Set the permissions of a file, unless it is a symlink.
+///
+/// Note that the non-final path elements are allowed to be symlinks.
+///
+/// # Platform-specific behavior
+///
+/// Currently unimplemented on Windows.
+///
+/// On Unix platforms, this results in a [`FilesystemLoop`] error if the last element is a symlink.
+///
+/// This behavior may change in the future.
+///
+/// [`FilesystemLoop`]: crate::io::ErrorKind::FilesystemLoop
+#[doc(alias = "chmod", alias = "SetFileAttributes")]
+#[unstable(feature = "set_permissions_nofollow", issue = "141607")]
+pub fn set_permissions_nofollow<P: AsRef<Path>>(path: P, perm: Permissions) -> io::Result<()> {
+    fs_imp::set_permissions_nofollow(path.as_ref(), perm)
 }
 
 impl DirBuilder {
