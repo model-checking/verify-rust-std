@@ -1,0 +1,66 @@
+name: RAPx
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main,rapx-verify-std]
+  pull_request:
+    branches: [main,rapx-verify-std]
+
+env:
+  RAPx_VERSION: "2f8cefc8a4bbd7c347e02e97c61de1d8224776ba"
+  SAFETY_TOOL_VERSION: "6b77419da66865bb5a36b6c9baec71b3e833d3c9"
+
+jobs:
+  check-with-rapx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Clone and setup safety_tool
+        run: |
+          git clone https://github.com/Artisan-Lab/tag-std.git
+          cd tag-std
+          git checkout $SAFETY_TOOL_VERSION
+          cargo install cargo-expand
+          cd safety-tool
+          TOOL_DIR=$(pwd)
+          echo "TOOL_DIR=$TOOL_DIR" >> $GITHUB_ENV
+          rm -f rust-toolchain.toml
+          ./gen_rust_toolchain_toml.rs std
+
+      - name: Install safety_tool
+        run: |
+          export VERIFY_RUST_STD=1
+          export LD_LIBRARY_PATH=$(rustc --print sysroot)/lib
+          cd tag-std/safety-tool
+          cargo install --path . --locked -Fstd
+          safety-tool --version
+          safety-tool-rfl build-dev
+          safety-tool-rfl --display-extra-rustc-args
+
+      - name: Clone and install RAPx
+        run: |
+          rm -rf RAPx
+          git clone https://github.com/Artisan-Lab/RAPx.git
+          cd RAPx
+          git checkout $RAPx_VERSION
+          ./install.sh
+
+      - name: Set up RAPx environment
+        run: |
+            RUSTUP_TOOLCHAIN=$(rustup show active-toolchain | cut -d ' ' -f 1)
+            echo "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN" >> $GITHUB_ENV
+            CURRENT_DIR=$(pwd)
+            RUST_SRC_PATH="$CURRENT_DIR/library"
+            echo "__CARGO_TESTS_ONLY_SRC_ROOT=$RUST_SRC_PATH" >> $GITHUB_ENV
+
+      - name: Run RAPx verification
+        run: |
+          cargo new dummy_crate
+          cd dummy_crate
+          export LD_LIBRARY_PATH=$(rustc --print sysroot)/lib
+          export RUSTFLAGS="--cfg=rapx -L $TOOL_DIR/target/safety-tool/lib --extern=safety_macro -Zcrate-attr=feature(register_tool) -Zcrate-attr=register_tool(rapx)"
+          cargo +$RUSTUP_TOOLCHAIN rapx -verify-std -- -Zbuild-std=panic_abort,core,std --target x86_64-unknown-linux-gnu

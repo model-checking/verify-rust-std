@@ -234,6 +234,11 @@ pub mod sync;
 pub mod task;
 pub mod vec;
 
+#[cfg(rapx)]
+mod rapx_macro {
+    pub use safety_macro::safety;
+}
+
 #[doc(hidden)]
 #[unstable(feature = "liballoc_internals", issue = "none", reason = "implementation detail")]
 pub mod __export {
