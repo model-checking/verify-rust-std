@@ -49,6 +49,7 @@ check-cfg = [
 enabled = true
 check_overflow = "lazy"
 include = [ "src/ascii*.rs",
+            "src/num/mod.rs",
             "src/pat.rs",
             "src/bstr/*.rs",
             "src/hash/*.rs",
