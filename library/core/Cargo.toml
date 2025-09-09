@@ -47,4 +47,11 @@ check-cfg = [
 
 [package.metadata.flux]
 enabled = true
-include = [ "src/ascii{*.rs,/**/*.rs}" ]
+check_overflow = "lazy"
+include = [ "src/ascii*.rs",
+            "src/num/mod.rs",
+            "src/pat.rs",
+            "src/bstr/*.rs",
+            "src/hash/*.rs",
+            "src/time.rs",
+          ]

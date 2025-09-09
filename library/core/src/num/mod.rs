@@ -503,6 +503,7 @@ impl u8 {
     /// # Safety
     ///
     /// This byte must be valid ASCII, or else this is UB.
+    #[cfg_attr(flux, flux::spec(fn({&Self[@n] | n <= 127}) -> _))]
     #[must_use]
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
@@ -533,6 +534,7 @@ impl u8 {
     /// ```
     ///
     /// [`make_ascii_uppercase`]: Self::make_ascii_uppercase
+    #[cfg_attr(flux, flux::spec(fn(&u8[@n]) -> u8[to_ascii_uppercase(n)]))]
     #[must_use = "to uppercase the value in-place, use `make_ascii_uppercase()`"]
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[rustc_const_stable(feature = "const_ascii_methods_on_intrinsics", since = "1.52.0")]
@@ -558,6 +560,7 @@ impl u8 {
     /// ```
     ///
     /// [`make_ascii_lowercase`]: Self::make_ascii_lowercase
+    #[cfg_attr(flux, flux::spec(fn(&u8[@n]) -> u8[to_ascii_lowercase(n)]))]
     #[must_use = "to lowercase the value in-place, use `make_ascii_lowercase()`"]
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[rustc_const_stable(feature = "const_ascii_methods_on_intrinsics", since = "1.52.0")]
@@ -706,6 +709,7 @@ impl u8 {
     /// assert!(!lf.is_ascii_uppercase());
     /// assert!(!esc.is_ascii_uppercase());
     /// ```
+    #[cfg_attr(flux, flux::spec(fn(&Self[@n]) -> bool[is_ascii_uppercase(n)]))]
     #[must_use]
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[rustc_const_stable(feature = "const_ascii_ctype_on_intrinsics", since = "1.47.0")]
@@ -740,6 +744,7 @@ impl u8 {
     /// assert!(!lf.is_ascii_lowercase());
     /// assert!(!esc.is_ascii_lowercase());
     /// ```
+    #[cfg_attr(flux, flux::spec(fn(&u8[@n]) -> bool[is_ascii_lowercase(n)]))]
     #[must_use]
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[rustc_const_stable(feature = "const_ascii_ctype_on_intrinsics", since = "1.47.0")]

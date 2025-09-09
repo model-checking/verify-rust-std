@@ -132,7 +132,9 @@ setup_kani_repo() {
 
     git fetch --depth 1 origin "$commit" --quiet
     git checkout "$commit" --quiet
-    git submodule update --init --recursive --depth 1 --quiet
+    # Workaround for occasionally failing to copy a file in s2n-quic that we
+    # don't actually care about
+    GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --quiet
     popd > /dev/null
 }
 
