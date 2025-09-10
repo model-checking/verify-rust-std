@@ -7,15 +7,11 @@
 )]
 #![allow(missing_docs)]
 
-<<<<<<< HEAD
 use safety::requires;
 
 #[cfg(kani)]
 use crate::kani;
 
-#[const_trait]
-=======
->>>>>>> subtree/library
 #[rustc_const_unstable(feature = "core_intrinsics_fallbacks", issue = "none")]
 pub const trait CarryingMulAdd: Copy + 'static {
     type Unsigned: Copy + 'static;
