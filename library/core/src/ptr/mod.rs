@@ -2207,9 +2207,8 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
     }
 
     // Checking if the answer should indeed be usize::MAX when a % stride != 0
-    // requires computing gcd(a, stride), which is too expensive without
-    // quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html).
-    // This should be updated once quantifiers are available.
+    // requires computing gcd(a, stride), which could be done using cttz as the implementation
+    // does.
     if (a % stride != 0 && *result == usize::MAX) {
         return true;
     }
@@ -2240,12 +2239,10 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     /// Implementation of this function shall not panic. Ever.
     #[safety::requires(m.is_power_of_two())]
     #[safety::requires(x < m)]
-    // TODO: add ensures contract to check that the answer is indeed correct
-    // This will require quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html)
-    // so that we can add a precondition that gcd(x, m) = 1 like so:
-    // ∀d, d > 0 ∧ x % d = 0 ∧ m % d = 0 → d = 1
-    // With this precondition, we can then write this postcondition to check the correctness of the answer:
-    // #[safety::ensures(|result| wrapping_mul(*result, x) % m == 1)]
+    #[safety::requires(x % 2 != 0)]
+    // for Kani (v0.65.0), the below multiplication is too costly to prove
+    #[cfg_attr(not(kani),
+        safety::ensures(|result| wrapping_mul(*result, x) % m == 1))]
     #[inline]
     const unsafe fn mod_inv(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.

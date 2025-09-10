@@ -1441,10 +1441,9 @@ impl<T: PointeeSized> NonNull<T> {
         if (align % stride == 0) && (self.pointer.addr() % stride != 0) {
             return *result == usize::MAX;
         }
-        // Checking if the answer should indeed be usize::MAX when align % stride != 0
-        // requires computing gcd(a, stride), which is too expensive without
-        // quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html).
-        // This should be updated once quantifiers are available.
+        // Checking if the answer should indeed be usize::MAX when a % stride != 0 requires
+        // computing gcd(align, stride), which could be done using cttz as the implementation of
+        // ptr::align_offset does.
         if (align % stride != 0 && *result == usize::MAX) {
             return true;
         }
