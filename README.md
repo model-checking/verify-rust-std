@@ -25,7 +25,7 @@ These are the challenges:
 
 | Challenge | Reward | Status | Proof |
 | --------- | ------ | ------ | ----- |
-| [1: Verify core transmuting methods](https://model-checking.github.io/verify-rust-std/challenges/0001-core-transmutation.html) | N/A | Open | |
+| [1: Verify core transmuting methods](https://model-checking.github.io/verify-rust-std/challenges/0001-core-transmutation.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/issues/19) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/intrinsics/mod.rs) |
 | [2: Verify the memory safety of core intrinsics using raw pointers](https://model-checking.github.io/verify-rust-std/challenges/0002-intrinsics-memory.html) | N/A | Open | |
 | [3: Verifying Raw Pointer Arithmetic Operations](https://model-checking.github.io/verify-rust-std/challenges/0003-pointer-arithmentic.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/212) | [Kani](https://github.com/model-checking/verify-rust-std/pull/212/files) |
 | [4: Memory safety of BTreeMap's `btree::node` module](https://model-checking.github.io/verify-rust-std/challenges/0004-btree-node.html) | 10,000 USD | Open | |
