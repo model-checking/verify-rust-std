@@ -1,142 +1,220 @@
-use syn::ImplItem;
-use syn::Item::Impl;
-use syn::ItemImpl;
-
-use syn::Item::Trait;
-use syn::ItemTrait;
-use syn::TraitItem;
-
-use syn::visit;
-use syn::visit::Visit;
-
 use std::env;
 use std::fs;
+use std::error::Error;
 use std::io;
 use std::process;
 use std::path::Path;
 
-struct StmtVisitor {
-    found_unsafe: bool,
+use std::collections::HashMap;
+
+use itertools::Itertools;
+
+use serde::Serialize;
+use serde::Deserialize;
+
+use regex::Regex;
+
+// from kani repo's tools/scanner/src/analysis.rs:
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct FnStats {
+    name: String,
+    is_unsafe: Option<bool>,
+    has_unsafe_ops: Option<bool>,
+    has_unsupported_input: Option<bool>,
+    has_loop_or_iterator: Option<bool>,
+    is_public: Option<bool>,
 }
 
-impl<'ast> Visit<'ast> for StmtVisitor {
-    fn visit_expr_unsafe(&mut self, i: &'ast syn::ExprUnsafe) {
-        self.found_unsafe = true;
-        visit::visit_expr_unsafe(self, i);
+#[derive(Clone)]
+struct StructuredFnName {
+    krate: String,
+    module_path: Vec<String>,
+    type_parameters: Vec<String>,
+    item: String,
+}
+
+#[derive(PartialOrd, Ord, Hash, Eq, PartialEq)]
+struct CrateAndModules {
+    krate: String,
+    module_path: Vec<String>
+}
+
+fn split_by_double_colons(s:&str) -> Vec<String> {
+    let mut bracket_level = 0;
+    let mut current_string = String::new();
+    let mut previous_strings = vec![];
+    let mut colons = 0;
+    for c in s.chars() {
+	current_string.push(c);
+	match c {
+	    '<' => bracket_level += 1,
+	    '>' => bracket_level -= 1,
+	    ':' => {
+		if bracket_level > 0 { continue; }
+		colons += 1;
+		if colons == 2 {
+		    colons = 0;
+		    previous_strings.push(current_string[..current_string.len()-2].to_string());
+		    current_string.clear();
+		}},
+	    _ => ()
+	}
+    }
+    previous_strings.push(current_string.clone());
+    previous_strings
+}
+
+fn split_by_commas(s:&str) -> Vec<String> {
+    let mut bracket_level = 0;
+    let mut parens_level = 0;
+    let mut current_string = String::new();
+    let mut previous_strings = vec![];
+    for c in s.chars() {
+	current_string.push(c);
+	match c {
+	    '<' => bracket_level += 1,
+	    '>' => bracket_level -= 1,
+	    '(' => parens_level += 1,
+	    ')' => parens_level -= 1,
+	    ',' => {
+		if bracket_level > 0 || parens_level > 0 { continue; }
+		previous_strings.push(current_string[..current_string.len()-1].trim().to_string());
+		current_string.clear();
+	    },
+	    _ => ()
+	}
+    }
+    previous_strings.push(current_string.trim().to_string().clone());
+    previous_strings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn colons_singleton() {
+	let result = split_by_double_colons("a");
+	assert_eq!(result, ["a"]);
+    }
+
+    #[test]
+    fn colons_no_brackets() {
+	let result = split_by_double_colons("one::two");
+	assert_eq!(result, ["one", "two"]);
+    }
+
+    #[test]
+    fn colons_brackets_no_colons() {
+	let result = split_by_double_colons("one::<two>::three");
+	assert_eq!(result, ["one", "<two>", "three"]);
+    }
+
+    #[test]
+    fn colons_brackets_with_colons() {
+	let result = split_by_double_colons("one::<two::four>::three");
+	assert_eq!(result, ["one", "<two::four>", "three"]);
+    }
+
+    #[test]
+    fn commas_singleton() {
+	let result = split_by_commas("a");
+	assert_eq!(result, ["a"]);
+    }
+
+    #[test]
+    fn commas_brackets() {
+	let result = split_by_commas("<a,b>");
+	assert_eq!(result, ["<a,b>"]);
+    }
+
+    #[test]
+    fn commas_no_brackets() {
+	let result = split_by_commas("a, b");
+	assert_eq!(result, ["a","b"]);
+    }
+
+    #[test]
+    fn commas_parens() {
+	let result = split_by_commas("(a,b)");
+	assert_eq!(result, ["(a,b)"]);
+    }
+
+    #[test]
+    fn commas_unmatched() {
+	let result = split_by_commas("<a,b),c");
+	assert_eq!(result, ["<a,b),c"]);
     }
 }
 
-fn print_pub_unsafe_and_unsafe_containing_fns(ii: ItemImpl) {
-    let mut interesting = false;
-    let mut pub_unsafe_fns = Vec::new();
-    let mut unsafe_containing_fns = Vec::new();
-    for item in &ii.items {
-        match item {
-            ImplItem::Fn(f) =>
-            {
-		// record all pub unsafe functions
-                if matches!(f.vis, syn::Visibility::Public(_)) && matches!(f.sig.unsafety, Some(_))
-                {
-                    interesting = true;
-                    pub_unsafe_fns.push(format!("--- pub unsafe fn {}", f.sig.ident));
-                }
-                // record functions that contain unsafe code in their bodies but that are not marked unsafe
-                else if matches!(f.sig.unsafety, None) {
-                    let mut sv = StmtVisitor {
-                        found_unsafe: false,
-                    };
-                    sv.visit_block(&f.block);
-                    if sv.found_unsafe {
-                        interesting = true;
-                        unsafe_containing_fns
-                            .push(format!("--- unsafe-containing fn {}", f.sig.ident));
-                    }
-                }
-            }
-            _ => (),
-        }
-    }
-    if interesting {
-	// create an empty impl with the same name as ii
-	let mut i_copy = ii.clone();
-	i_copy.items = Vec::new();
-        let file = syn::File {
-            attrs: vec![],
-            items: vec![Impl(i_copy)],
-            shebang: None,
-        };
-        print!("{}", prettyplease::unparse(&file));
-        pub_unsafe_fns.iter().for_each(|s| {
-            println!("{}", s);
-        });
-        unsafe_containing_fns.iter().for_each(|s| {
-            println!("{}", s);
-        });
-        println!();
+fn parse_fn_name(raw_name:String) -> StructuredFnName {
+    let brackets_re = Regex::new(r"<(.+)>").unwrap();
+    
+    let parts:Vec<String> = split_by_double_colons(&raw_name).into_iter().rev().collect();
+    let mut parts_index = 0;
+    let item = &parts[parts_index]; parts_index += 1;
+    let tp = &parts[parts_index].as_str();
+    let type_parameters = if brackets_re.is_match(tp) {
+        let tp_commas = &brackets_re.captures(tp).unwrap();
+	parts_index += 1;
+        split_by_commas(&tp_commas[1]).into_iter().map(|x| x.to_string()).collect()
     } else {
-        // println!("--- nothing interesting here");
+        vec![]
+    };
+    let mut mp = vec![];
+    while parts_index < parts.len() {
+	mp.push(parts[parts_index].to_string());
+	parts_index += 1;
+    }
+    let kr = match mp.pop() {
+	Some(k) => k,
+	None => "".to_string()
+    };
+
+    StructuredFnName {
+	krate: kr,
+	module_path: mp.into_iter().rev().collect(),
+	type_parameters: type_parameters.into_iter().map(|x| x.to_string()).collect(),
+	item: item.to_string()
     }
 }
 
-fn print_trait_unsafe_containing_fns(it: ItemTrait) {
-    let mut interesting = false;
-    let mut unsafe_containing_fns = Vec::new();
-    for item in &it.items {
-        match item {
-            TraitItem::Fn(f) =>
-            // record functions that contain unsafe code in their bodies but that are not marked unsafe
-            {
-                if matches!(f.sig.unsafety, None) {
-                    let mut sv = StmtVisitor {
-                        found_unsafe: false,
-                    };
-                    if let Some(d) = &f.default {
-                        sv.visit_block(&d);
-                    }
-                    if sv.found_unsafe {
-                        interesting = true;
-                        unsafe_containing_fns
-                            .push(format!("--- unsafe-containing fn {}", f.sig.ident));
-                    }
-                }
-            }
-            _ => (),
-        }
-    }
-    if interesting {
-	let mut i_copy = it.clone();
-	i_copy.items = Vec::new();
-        let file = syn::File {
-            attrs: vec![],
-            items: vec![Trait(i_copy)],
-            shebang: None,
-        };
-        print!("{}", prettyplease::unparse(&file));
-        unsafe_containing_fns.iter().for_each(|s| {
-            println!("{}", s);
-        });
-        println!();
-    } else {
-        // println!("--- nothing interesting here");
-    }
-}
-
-fn handle_file(path:&Path) {
-    if !path.to_str().unwrap().ends_with(".rs") {
-	return;
-    }
+fn handle_file(path:&Path) -> Result<(), Box<dyn Error>> {
+    let path_contents = fs::read_to_string(&path).expect("unable to read file");
+    let mut rdr = csv::ReaderBuilder::new().delimiter(b';').from_reader(path_contents.as_bytes());
 
     println!("# Unsafe usages in file {}", path.display());
-    let src = fs::read_to_string(&path).expect("unable to read file");
-    let syntax = syn::parse_file(&src).expect("unable to parse file");
 
-    for item in syntax.items {
-        match item {
-	    Impl(im) => print_pub_unsafe_and_unsafe_containing_fns(im),
-	    Trait(t) => print_trait_unsafe_containing_fns(t),
-	    _ => (),
-        }
+    let mut fns_by_crate_and_modules: HashMap<CrateAndModules, Vec<StructuredFnName>> = HashMap::new();
+    
+    for result in rdr.deserialize() {
+        let fn_stats: FnStats = result?;
+	if matches!(fn_stats.is_unsafe, Some(true)) {
+	    let structured_fn_name = parse_fn_name(fn_stats.name);
+	    let krate_and_module_path = CrateAndModules {
+		krate: structured_fn_name.krate.clone(),
+		module_path: structured_fn_name.module_path.clone()
+	    };
+	    match fns_by_crate_and_modules.get_mut(&krate_and_module_path) {
+		Some(fns) => fns.push(structured_fn_name.clone()),
+		None => { fns_by_crate_and_modules.insert(krate_and_module_path, vec![structured_fn_name.clone()]); }
+	    }
+	}
     }
+
+    for krm in fns_by_crate_and_modules.keys().sorted() {
+	println!("crate {}, modules {:?}", krm.krate, krm.module_path);
+	if let Some(fns) = fns_by_crate_and_modules.get(krm) {
+	    for structured_fn_name in fns {
+		println!("--- unsafe-containing fn {}", structured_fn_name.item);
+		if !structured_fn_name.type_parameters.is_empty() {
+		    println!("    type parameters {:?}", structured_fn_name.type_parameters);
+		}
+	    }
+	}
+    }
+    
+    Ok(())
 }
 
 fn handle_dir(path:&Path) -> io::Result<()> {
@@ -156,13 +234,20 @@ fn handle_dir(path:&Path) -> io::Result<()> {
 		}
 
 		if cur_path.is_file() {
-		    handle_file(&cur_path);
+		    if let Err(err) = handle_file(&cur_path) {
+			println!("error processing {}: {}", cur_path.display(), err);
+			process::exit(1);
+		    }
 		    continue;
 		}
 	    }
 	    _ => {
 		if !had_files && !dirs.is_empty() {
-		    handle_file(&dirs[(dir_index - 1).max(0)].to_owned());
+		    let target = dirs[(dir_index - 1).max(0)].to_owned(); 
+		    if let Err(err) = handle_file(&target) {
+			println!("error processing {}: {}", target.display(), err);
+			process::exit(1);
+		    }
 		}
 		if dir_index == dirs.len() {
 		    break;
@@ -182,16 +267,22 @@ fn main() {
     let _ = args.next(); // executable name
 
     if args.len() == 0 {
-        eprintln!("Usage: unsafe-finder [directory | filename.rs]*");
+	// should we only handle files named "_scan_functions.csv"?
+        eprintln!("Usage: unsafe-finder [[prefix]_scan_functions.csv]*");
         process::exit(1);
     }
 
     for arg in args {
 	let path = Path::new(&arg);
 	if path.is_file() {
-	    handle_file(&path);
+	    if let Err(err) = handle_file(&path) {
+		eprintln!("error processing {}: {}", arg, err);
+		process::exit(1);
+	    }
 	} else if path.is_dir() {
 	    handle_dir(&path).unwrap();
+	} else {
+	    eprintln!("could not open {}", arg);
 	}
     }
 }
