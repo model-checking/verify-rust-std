@@ -198,6 +198,7 @@ jobs:
             --include-pattern time::Duration::from_micros \
             --include-pattern time::Duration::from_millis \
             --include-pattern time::Duration::from_nanos \
+            --exclude-pattern time::Duration::from_nanos_u128 \
             --include-pattern time::Duration::from_secs \
             --exclude-pattern time::Duration::from_secs_f \
             --include-pattern unicode::unicode_data::conversions::to_ \
