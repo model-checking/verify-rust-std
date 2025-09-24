@@ -27,6 +27,7 @@ struct FnStats {
 
 #[derive(Clone)]
 struct StructuredFnName {
+    trait_impl: Option<(String, String)>,
     krate: String,
     module_path: Vec<String>,
     type_parameters: Vec<String>,
@@ -148,9 +149,22 @@ mod tests {
 }
 
 fn parse_fn_name(raw_name:String) -> StructuredFnName {
+    let trait_impl_re = Regex::new(r"<(.+) as (.+)>").unwrap();
     let brackets_re = Regex::new(r"<(.+)>").unwrap();
     
     let parts:Vec<String> = split_by_double_colons(&raw_name).into_iter().rev().collect();
+
+    if parts.len() == 2 && trait_impl_re.is_match(&parts[1]) {
+        let ti_captures = trait_impl_re.captures(&parts[1]).unwrap();
+        return StructuredFnName {
+            trait_impl: Some((ti_captures[1].to_string(), ti_captures[2].to_string())),
+            krate: "".to_string(),
+            module_path: vec![],
+            type_parameters: vec![],
+            item: parts[0].to_string()
+        }
+    }
+
     let mut parts_index = 0;
     let item = &parts[parts_index]; parts_index += 1;
     let tp = &parts[parts_index].as_str();
@@ -172,10 +186,11 @@ fn parse_fn_name(raw_name:String) -> StructuredFnName {
     };
 
     StructuredFnName {
-	krate: kr,
-	module_path: mp.into_iter().rev().collect(),
-	type_parameters: type_parameters.into_iter().map(|x| x.to_string()).collect(),
-	item: item.to_string()
+        trait_impl: None,
+        krate: kr,
+        module_path: mp.into_iter().rev().collect(),
+        type_parameters: type_parameters.into_iter().map(|x| x.to_string()).collect(),
+        item: item.to_string()
     }
 }
 
@@ -189,7 +204,7 @@ fn handle_file(path:&Path) -> Result<(), Box<dyn Error>> {
     
     for result in rdr.deserialize() {
         let fn_stats: FnStats = result?;
-	if matches!(fn_stats.is_unsafe, Some(true)) {
+	if matches!(fn_stats.is_unsafe, Some(true)) || matches!(fn_stats.has_unsafe_ops, Some(true)) {
 	    let structured_fn_name = parse_fn_name(fn_stats.name);
 	    let krate_and_module_path = CrateAndModules {
 		krate: structured_fn_name.krate.clone(),
@@ -207,6 +222,9 @@ fn handle_file(path:&Path) -> Result<(), Box<dyn Error>> {
 	if let Some(fns) = fns_by_crate_and_modules.get(krm) {
 	    for structured_fn_name in fns {
 		println!("--- unsafe-containing fn {}", structured_fn_name.item);
+                if let Some(ti) = &structured_fn_name.trait_impl {
+                    println!("    trait {} as {}", ti.0, ti.1);
+                } else {}
 		if !structured_fn_name.type_parameters.is_empty() {
 		    println!("    type parameters {:?}", structured_fn_name.type_parameters);
 		}
