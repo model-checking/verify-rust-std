@@ -27,17 +27,10 @@ struct FnStats {
 
 #[derive(Clone)]
 struct StructuredFnName {
-    trait_impl: Option<(String, String)>,
-    krate: String,
+    trait_impl: Option<(String, String)>, // type as trait
     module_path: Vec<String>,
     type_parameters: Vec<String>,
     item: String,
-}
-
-#[derive(PartialOrd, Ord, Hash, Eq, PartialEq)]
-struct CrateAndModules {
-    krate: String,
-    module_path: Vec<String>
 }
 
 fn split_by_double_colons(s:&str) -> Vec<String> {
@@ -158,7 +151,6 @@ fn parse_fn_name(raw_name:String) -> StructuredFnName {
         let ti_captures = trait_impl_re.captures(&parts[1]).unwrap();
         return StructuredFnName {
             trait_impl: Some((ti_captures[1].to_string(), ti_captures[2].to_string())),
-            krate: "".to_string(),
             module_path: vec![],
             type_parameters: vec![],
             item: parts[0].to_string()
@@ -180,14 +172,9 @@ fn parse_fn_name(raw_name:String) -> StructuredFnName {
 	mp.push(parts[parts_index].to_string());
 	parts_index += 1;
     }
-    let kr = match mp.pop() {
-	Some(k) => k,
-	None => "".to_string()
-    };
 
     StructuredFnName {
         trait_impl: None,
-        krate: kr,
         module_path: mp.into_iter().rev().collect(),
         type_parameters: type_parameters.into_iter().map(|x| x.to_string()).collect(),
         item: item.to_string()
@@ -200,30 +187,26 @@ fn handle_file(path:&Path) -> Result<(), Box<dyn Error>> {
 
     println!("# Unsafe usages in file {}", path.display());
 
-    let mut fns_by_crate_and_modules: HashMap<CrateAndModules, Vec<StructuredFnName>> = HashMap::new();
+    let mut fns_by_modules: HashMap<Vec<String>, Vec<StructuredFnName>> = HashMap::new();
     
     for result in rdr.deserialize() {
         let fn_stats: FnStats = result?;
 	if matches!(fn_stats.is_unsafe, Some(true)) || matches!(fn_stats.has_unsafe_ops, Some(true)) {
 	    let structured_fn_name = parse_fn_name(fn_stats.name);
-	    let krate_and_module_path = CrateAndModules {
-		krate: structured_fn_name.krate.clone(),
-		module_path: structured_fn_name.module_path.clone()
-	    };
-	    match fns_by_crate_and_modules.get_mut(&krate_and_module_path) {
+	    match fns_by_modules.get_mut(&structured_fn_name.module_path) {
 		Some(fns) => fns.push(structured_fn_name.clone()),
-		None => { fns_by_crate_and_modules.insert(krate_and_module_path, vec![structured_fn_name.clone()]); }
+		None => { fns_by_modules.insert(structured_fn_name.module_path.clone(), vec![structured_fn_name.clone()]); }
 	    }
 	}
     }
 
-    for krm in fns_by_crate_and_modules.keys().sorted() {
-	println!("crate {}, modules {:?}", krm.krate, krm.module_path);
-	if let Some(fns) = fns_by_crate_and_modules.get(krm) {
+    for mp in fns_by_modules.keys().sorted() {
+	println!("modules {:?}", mp);
+	if let Some(fns) = fns_by_modules.get(mp) {
 	    for structured_fn_name in fns {
 		println!("--- unsafe-containing fn {}", structured_fn_name.item);
                 if let Some(ti) = &structured_fn_name.trait_impl {
-                    println!("    trait {} as {}", ti.0, ti.1);
+                    println!("    trait impl: type {} as trait {}", ti.0, ti.1);
                 } else {}
 		if !structured_fn_name.type_parameters.is_empty() {
 		    println!("    type parameters {:?}", structured_fn_name.type_parameters);
