@@ -1,7 +1,6 @@
 use std::env;
 use std::fs;
 use std::error::Error;
-use std::io;
 use std::process;
 use std::path::Path;
 
@@ -218,51 +217,6 @@ fn handle_file(path:&Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn handle_dir(path:&Path) -> io::Result<()> {
-    // https://users.rust-lang.org/t/testable-way-to-iterate-over-a-directory/81440
-    let mut dirs = Vec::new();
-    let mut dir_index = 0;
-    let mut dir_reader = fs::read_dir(path)?;
-    let mut had_files = false;
-    loop {
-	match dir_reader.next() {
-	    Some(entry) => {
-		let cur_path = entry?.path();
-		had_files = true;
-		if cur_path.is_dir() {
-		    dirs.push(cur_path);
-		    continue;
-		}
-
-		if cur_path.is_file() {
-		    if let Err(err) = handle_file(&cur_path) {
-			println!("error processing {}: {}", cur_path.display(), err);
-			process::exit(1);
-		    }
-		    continue;
-		}
-	    }
-	    _ => {
-		if !had_files && !dirs.is_empty() {
-		    let target = dirs[(dir_index - 1).max(0)].to_owned(); 
-		    if let Err(err) = handle_file(&target) {
-			println!("error processing {}: {}", target.display(), err);
-			process::exit(1);
-		    }
-		}
-		if dir_index == dirs.len() {
-		    break;
-		}
-		dir_reader = dirs[dir_index].read_dir()?;
-		had_files = false;
-		dir_index += 1;
-	    }
-	}
-    }
-
-    Ok(())
-}
-
 fn main() {
     let mut args = env::args();
     let _ = args.next(); // executable name
@@ -274,16 +228,10 @@ fn main() {
     }
 
     for arg in args {
-	let path = Path::new(&arg);
-	if path.is_file() {
-	    if let Err(err) = handle_file(&path) {
-		eprintln!("error processing {}: {}", arg, err);
-		process::exit(1);
-	    }
-	} else if path.is_dir() {
-	    handle_dir(&path).unwrap();
-	} else {
-	    eprintln!("could not open {}", arg);
+        let path = Path::new(&arg);
+        if let Err(err) = handle_file(&path) {
+	    eprintln!("error processing {}: {}", arg, err);
+	    process::exit(1);
 	}
     }
 }
