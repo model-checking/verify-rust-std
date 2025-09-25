@@ -30,6 +30,7 @@ struct StructuredFnName {
     module_path: Vec<String>,
     type_parameters: Vec<String>,
     item: String,
+    is_public: bool
 }
 
 fn split_by_double_colons(s:&str) -> Vec<String> {
@@ -140,7 +141,7 @@ mod tests {
     }
 }
 
-fn parse_fn_name(raw_name:String) -> StructuredFnName {
+fn parse_fn_name(raw_name:String, is_public:bool) -> StructuredFnName {
     let trait_impl_re = Regex::new(r"<(.+) as (.+)>").unwrap();
     let brackets_re = Regex::new(r"<(.+)>").unwrap();
     
@@ -152,7 +153,8 @@ fn parse_fn_name(raw_name:String) -> StructuredFnName {
             trait_impl: Some((ti_captures[1].to_string(), ti_captures[2].to_string())),
             module_path: vec![],
             type_parameters: vec![],
-            item: parts[0].to_string()
+            item: parts[0].to_string(),
+            is_public: is_public
         }
     }
 
@@ -176,7 +178,8 @@ fn parse_fn_name(raw_name:String) -> StructuredFnName {
         trait_impl: None,
         module_path: mp.into_iter().rev().collect(),
         type_parameters: type_parameters.into_iter().map(|x| x.to_string()).collect(),
-        item: item.to_string()
+        item: item.to_string(),
+        is_public: is_public
     }
 }
 
@@ -191,7 +194,7 @@ fn handle_file(path:&Path) -> Result<(), Box<dyn Error>> {
     for result in rdr.deserialize() {
         let fn_stats: FnStats = result?;
 	if matches!(fn_stats.is_unsafe, Some(true)) || matches!(fn_stats.has_unsafe_ops, Some(true)) {
-	    let structured_fn_name = parse_fn_name(fn_stats.name);
+	    let structured_fn_name = parse_fn_name(fn_stats.name, fn_stats.is_public.is_some() && fn_stats.is_public.unwrap());
 	    match fns_by_modules.get_mut(&structured_fn_name.module_path) {
 		Some(fns) => fns.push(structured_fn_name.clone()),
 		None => { fns_by_modules.insert(structured_fn_name.module_path.clone(), vec![structured_fn_name.clone()]); }
@@ -203,7 +206,7 @@ fn handle_file(path:&Path) -> Result<(), Box<dyn Error>> {
 	println!("modules {:?}", mp);
 	if let Some(fns) = fns_by_modules.get(mp) {
 	    for structured_fn_name in fns {
-		println!("--- unsafe-containing fn {}", structured_fn_name.item);
+		println!("--- unsafe-containing fn {} {}", structured_fn_name.item, if structured_fn_name.is_public { "[pub]" } else { "" } );
                 if let Some(ti) = &structured_fn_name.trait_impl {
                     println!("    trait impl: type {} as trait {}", ti.0, ti.1);
                 } else {}
