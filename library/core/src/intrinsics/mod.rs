@@ -2839,14 +2839,16 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: 
 /// initialization state.
 ///
 /// This is used for contracts only.
-///
-/// FIXME: Change this once we add support to quantifiers.
 #[allow(dead_code)]
 #[allow(unused_variables)]
 fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
     #[cfg(kani)]
     if count > 0 {
+        // Inspect a non-deterministically chosen byte in the copy.
         let byte = kani::any_where(|sz: &usize| *sz < size_of::<T>());
+        // Instead of checking each of the `count`-many copies, non-deterministically pick one of
+        // them and check it. Using quantifiers would not add value as we can rely on the solver to
+        // pick an uninitialized element if such an element exists.
         let elem = kani::any_where(|val: &usize| *val < count);
         let src_data = src as *const u8;
         let dst_data = unsafe { dst.add(elem) } as *const u8;
