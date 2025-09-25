@@ -19,7 +19,7 @@ struct FnStats {
     name: String,
     is_unsafe: Option<bool>,
     has_unsafe_ops: Option<bool>,
-    has_unsupported_input: Option<bool>,
+    has_unsupported_input: Option<bool>, // i.e. a function contains coroutines, floats, fn defs, fn ptrs, interior mut, raw pointers, recursive types, and mut refs
     has_loop_or_iterator: Option<bool>,
     is_public: Option<bool>,
 }
