@@ -56,3 +56,4 @@ goto-transcoder
 # already existing elements were commented out
 
 #/target
+testable-simd-models/target
