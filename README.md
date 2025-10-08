@@ -29,29 +29,29 @@ These are the challenges:
 | [2: Verify the memory safety of core intrinsics using raw pointers](https://model-checking.github.io/verify-rust-std/challenges/0002-intrinsics-memory.html) | N/A | Open | |
 | [3: Verifying Raw Pointer Arithmetic Operations](https://model-checking.github.io/verify-rust-std/challenges/0003-pointer-arithmentic.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/212) | [Kani](https://github.com/model-checking/verify-rust-std/pull/212/files) |
 | [4: Memory safety of BTreeMap's `btree::node` module](https://model-checking.github.io/verify-rust-std/challenges/0004-btree-node.html) | 10,000 USD | Open | |
-| [5: Verify functions iterating over inductive data type: `linked_list`](./challenges/0005-linked-list.md) | 5,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/238) | [VeriFast](https://github.com/model-checking/verify-rust-std/tree/main/verifast-proofs/alloc/collections/linked_list.rs) |
-| [6: Safety of `NonNull`](./challenges/0006-nonnull.md) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/247) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/ptr/non_null.rs) |
-| [7: Safety of Methods for Atomic Types & Atomic Intrinsics](./challenges/0007-atomic-types.md) | 10,000 USD | Open | |
-| [8: Contracts for SmallSort](./challenges/0008-smallsort.md) | 10,000 USD | Open | |
-| [9: Safe abstractions for `core::time::Duration`](./challenges/0009-duration.md) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/136) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/time.rs) |
-| [10: Memory safety of String](./challenges/0010-string.md) | N/A | Open | |
-| [11: Safety of Methods for Numeric Primitive Types](./challenges/0011-floats-ints.md) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/issues/59) | [Kani](https://github.com/model-checking/verify-rust-std/tree/main/library/core/src/num) |
-| [12: Safety of `NonZero`](./challenges/0012-nonzero.md) | N/A | Open | |
-| [13: Safety of `CStr`](./challenges/0013-cstr.md) | N/A | Open | |
-| [14: Safety of Primitive Conversions](./challenges/0014-convert-num.md) | TBD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/247) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/convert/num.rs) |
-| [15: Contracts and Tests for SIMD Intrinsics](./challenges/0015-intrinsics-simd.md) | | Open | |
-| [16: Verify the safety of Iterator functions](./challenges/0016-iter.md) | 10,000 USD | Open | |
-| [17: Verify the safety of slice functions](./challenges/0017-slice.md) | 10,000 USD | Open | |
-| [18: Verify the safety of slice iter functions](./challenges/0018-slice-iter.md) | 10,000 USD | Open | |
-| [19: Safety of `RawVec`](./challenges/0019-rawvec.md) | 10,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/422) | [VeriFast](https://github.com/model-checking/verify-rust-std/tree/main/verifast-proofs/alloc/raw_vec/mod.rs) |
-| [20: Verify the safety of char-related functions in str::pattern](./challenges/0020-str-pattern-pt1.md) | 25,000 USD | Open | |
-| [21: Verify the safety of substring-related functions in str::pattern](./challenges/0021-str-pattern-pt2.md) | 25,000 USD | Open | |
-| [22: Verify the safety of str iter functions](./challenges/0022-str-iter.md) | 10,000 USD | Open | |
-| [23: Verify the safety of Vec functions part 1](./challenges/0023-vec-pt1.md) | 15,000 USD | Open | |
-| [24: Verify the safety of Vec functions part 2](./challenges/0024-vec-pt2.md) | 15,000 USD | Open | |
-| [25: Verify the safety of `VecDeque` functions](./challenges/0025-vecdeque.md) | 10,000 USD | Open | |
-| [26: Verify reference-counted Cell implementation](./challenges/0026-rc.md) | 10,000 USD | Open | |
-| [27: Verify atomically reference-counted Cell implementation](./challenges/0027-arc.md) | 10,000 USD | Open | |
+| [5: Verify functions iterating over inductive data type: `linked_list`](https://model-checking.github.io/verify-rust-std/challenges/0005-linked-list.html) | 5,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/238) | [VeriFast](https://github.com/model-checking/verify-rust-std/tree/main/verifast-proofs/alloc/collections/linked_list.rs) |
+| [6: Safety of `NonNull`](https://model-checking.github.io/verify-rust-std/challenges/0006-nonnull.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/247) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/ptr/non_null.rs) |
+| [7: Safety of Methods for Atomic Types & Atomic Intrinsics](https://model-checking.github.io/verify-rust-std/challenges/0007-atomic-types.html) | 10,000 USD | Open | |
+| [8: Contracts for SmallSort](https://model-checking.github.io/verify-rust-std/challenges/0008-smallsort.html) | 10,000 USD | Open | |
+| [9: Safe abstractions for `core::time::Duration`](https://model-checking.github.io/verify-rust-std/challenges/0009-duration.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/136) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/time.rs) |
+| [10: Memory safety of String](https://model-checking.github.io/verify-rust-std/challenges/0010-string.html) | N/A | Open | |
+| [11: Safety of Methods for Numeric Primitive Types](https://model-checking.github.io/verify-rust-std/challenges/0011-floats-ints.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/issues/59) | [Kani](https://github.com/model-checking/verify-rust-std/tree/main/library/core/src/num) |
+| [12: Safety of `NonZero`](https://model-checking.github.io/verify-rust-std/challenges/0012-nonzero.html) | N/A | Open | |
+| [13: Safety of `CStr`](https://model-checking.github.io/verify-rust-std/challenges/0013-cstr.html) | N/A | Open | |
+| [14: Safety of Primitive Conversions](https://model-checking.github.io/verify-rust-std/challenges/0014-convert-num.html) | TBD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/247) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/convert/num.rs) |
+| [15: Contracts and Tests for SIMD Intrinsics](https://model-checking.github.io/verify-rust-std/challenges/0015-intrinsics-simd.html) | | Open | |
+| [16: Verify the safety of Iterator functions](https://model-checking.github.io/verify-rust-std/challenges/0016-iter.html) | 10,000 USD | Open | |
+| [17: Verify the safety of slice functions](https://model-checking.github.io/verify-rust-std/challenges/0017-slice.html) | 10,000 USD | Open | |
+| [18: Verify the safety of slice iter functions](https://model-checking.github.io/verify-rust-std/challenges/0018-slice-iter.html) | 10,000 USD | Open | |
+| [19: Safety of `RawVec`](https://model-checking.github.io/verify-rust-std/challenges/0019-rawvec.html) | 10,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/422) | [VeriFast](https://github.com/model-checking/verify-rust-std/tree/main/verifast-proofs/alloc/raw_vec/mod.rs) |
+| [20: Verify the safety of char-related functions in str::pattern](https://model-checking.github.io/verify-rust-std/challenges/0020-str-pattern-pt1.html) | 25,000 USD | Open | |
+| [21: Verify the safety of substring-related functions in str::pattern](https://model-checking.github.io/verify-rust-std/challenges/0021-str-pattern-pt2.html) | 25,000 USD | Open | |
+| [22: Verify the safety of str iter functions](https://model-checking.github.io/verify-rust-std/challenges/0022-str-iter.html) | 10,000 USD | Open | |
+| [23: Verify the safety of Vec functions part 1](https://model-checking.github.io/verify-rust-std/challenges/0023-vec-pt1.html) | 15,000 USD | Open | |
+| [24: Verify the safety of Vec functions part 2](https://model-checking.github.io/verify-rust-std/challenges/0024-vec-pt2.html) | 15,000 USD | Open | |
+| [25: Verify the safety of `VecDeque` functions](https://model-checking.github.io/verify-rust-std/challenges/0025-vecdeque.html) | 10,000 USD | Open | |
+| [26: Verify reference-counted Cell implementation](https://model-checking.github.io/verify-rust-std/challenges/0026-rc.html) | 10,000 USD | Open | |
+| [27: Verify atomically reference-counted Cell implementation](https://model-checking.github.io/verify-rust-std/challenges/0027-arc.html) | 10,000 USD | Open | |
 
 See [our book](https://model-checking.github.io/verify-rust-std/intro.html) for more details on the challenge rules.
 
