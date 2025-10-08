@@ -4,7 +4,6 @@
 - **Tracking Issue:** [#71](https://github.com/model-checking/verify-rust-std/issues/71)
 - **Start date:** *2024/08/23*
 - **End date:** *2025/04/10*
-- **Reward:** *N/A*
 - **Reward:** *10000 USD*
 
 -------------------
