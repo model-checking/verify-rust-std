@@ -629,6 +629,7 @@ macro_rules! uint_impl {
                       without modifying the original"]
         #[inline(always)]
         #[track_caller]
+        #[cfg_attr(flux, flux::spec(fn(self: Self, rhs: Self{self + rhs <= $MaxV}) -> Self[self + rhs]))]
         #[requires(!self.overflowing_add(rhs).1)]
         pub const unsafe fn unchecked_add(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
