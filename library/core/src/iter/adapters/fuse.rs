@@ -1,9 +1,13 @@
+use safety::requires;
+
 use crate::intrinsics;
 use crate::iter::adapters::SourceIter;
 use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::{
     FusedIterator, TrustedFused, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::ops::Try;
 
 /// An iterator that yields `None` forever after the underlying iterator
@@ -109,6 +113,8 @@ where
     }
 
     #[inline]
+    #[requires(self.iter.is_some() && idx < self.iter.as_ref().unwrap().size_hint().0)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
     where
         Self: TrustedRandomAccessNoCoerce,
@@ -198,8 +204,30 @@ impl<I: Default> Default for Fuse<I> {
     /// let iter: Fuse<slice::Iter<'_, u8>> = Default::default();
     /// assert_eq!(iter.len(), 0);
     /// ```
+    ///
+    /// This is equivalent to `I::default().fuse()`[^fuse_note]; e.g. if
+    /// `I::default()` is not an empty iterator, then this will not be
+    /// an empty iterator.
+    ///
+    /// ```
+    /// # use std::iter::Fuse;
+    /// #[derive(Default)]
+    /// struct Fourever;
+    ///
+    /// impl Iterator for Fourever {
+    ///     type Item = u32;
+    ///     fn next(&mut self) -> Option<u32> {
+    ///         Some(4)
+    ///     }
+    /// }
+    ///
+    /// let mut iter: Fuse<Fourever> = Default::default();
+    /// assert_eq!(iter.next(), Some(4));
+    /// ```
+    ///
+    /// [^fuse_note]: if `I` does not override `Iterator::fuse`'s default implementation
     fn default() -> Self {
-        Fuse { iter: Default::default() }
+        Fuse { iter: Some(I::default()) }
     }
 }
 

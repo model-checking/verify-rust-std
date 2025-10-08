@@ -84,7 +84,7 @@ REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
 # Unstable arguments to pass to Kani
-unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts"
+unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts -Z stubbing"
 
 # Variables used for parallel harness verification
 # When we say "parallel," we mean two dimensions of parallelization:
@@ -132,7 +132,9 @@ setup_kani_repo() {
 
     git fetch --depth 1 origin "$commit" --quiet
     git checkout "$commit" --quiet
-    git submodule update --init --recursive --depth 1 --quiet
+    # Workaround for occasionally failing to copy a file in s2n-quic that we
+    # don't actually care about
+    GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --quiet
     popd > /dev/null
 }
 
@@ -182,7 +184,7 @@ get_kani_path() {
 # then update EXPECTED_JSON_FILE_VERSION.
 get_harnesses() {
     local kani_path="$1"
-    "$kani_path" list -Z list $unstable_args ./library --std --format json
+    "$kani_path" list $unstable_args ./library --std --format json
     local json_file_version=$(jq -r '.["file-version"]' "$WORK_DIR/kani-list.json")
     if [[ $json_file_version != $EXPECTED_JSON_FILE_VERSION ]]; then
         echo "Error: The JSON file-version in kani-list.json does not equal $EXPECTED_JSON_FILE_VERSION"
@@ -218,7 +220,6 @@ run_verification_subset() {
         -j \
         --output-format=terse \
         "${command_args[@]}" \
-        --enable-unstable \
         --cbmc-args --object-bits 12
 }
 
@@ -300,7 +301,6 @@ main() {
                 $unstable_args \
                 --no-assert-contracts \
                 "${command_args[@]}" \
-                --enable-unstable \
                 --cbmc-args --object-bits 12
         fi
       elif [[ "$run_command" == "autoharness" ]]; then
@@ -311,22 +311,21 @@ main() {
               $unstable_args \
               --no-assert-contracts \
               "${command_args[@]}" \
-              --enable-unstable \
               --cbmc-args --object-bits 12
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format markdown
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown
         else
-            "$kani_path" list -Z list $unstable_args ./library --std --format markdown
+            "$kani_path" list $unstable_args ./library --std --format markdown
         fi
     elif [[ "$run_command" == "metrics" ]]; then
         local current_dir=$(pwd)
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list -Z list $unstable_args --std ./library --format json
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json
         else
-            "$kani_path" list -Z list $unstable_args ./library --std --format json
+            "$kani_path" list $unstable_args ./library --std --format json
         fi
         pushd scripts/kani-std-analysis
         echo "Running Kani's std-analysis command..."
@@ -340,7 +339,6 @@ main() {
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-std.json
         popd
-        rm kani-list.json
     elif [[ "$run_command" == "autoharness-analyzer" ]]; then
         echo "Running Kani autoharness codegen command..."
         "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
@@ -348,24 +346,23 @@ main() {
             $unstable_args \
             --no-assert-contracts \
             "${command_args[@]}" \
-            --enable-unstable \
             --cbmc-args --object-bits 12
         # remove metadata file for Kani-generated "dummy" crate that we won't
         # get scanner data for
-        rm target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/dummy-*
+        local target=$(find "target/kani_verify_std/target/" -mindepth 1 \
+                         -type d -exec test -e '{}'/debug/deps/ \; -print)
+        rm $target/debug/deps/dummy-*
         echo "Running Kani's std-analysis command..."
         pushd scripts/kani-std-analysis
         ./std-analysis.sh $build_dir
         popd
         echo "Running autoharness-analyzer command..."
-        git clone --depth 1 https://github.com/carolynzech/autoharness_analyzer
-        cd autoharness_analyzer
+        pushd scripts/autoharness_analyzer
         cargo run -- --per-crate \
-          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
-          /tmp/std_lib_analysis/results/
+          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
         cargo run -- --per-crate --unsafe-fns-only \
-          ../target/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps/ \
-          /tmp/std_lib_analysis/results/
+          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
+        popd
     fi
 }
 

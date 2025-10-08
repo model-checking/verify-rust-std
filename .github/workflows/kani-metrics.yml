@@ -11,9 +11,17 @@ defaults:
 
 jobs:
   update-kani-metrics:
+    if: github.repository == 'model-checking/verify-rust-std'
     runs-on: ubuntu-latest
     
     steps:
+    - name: Remove unnecessary software to free up disk space
+      run: |
+        # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
+        df -h
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+        df -h
+
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
@@ -26,7 +34,9 @@ jobs:
         python-version: '3.x'
 
     - name: Compute Kani Metrics
-      run: ./scripts/run-kani.sh --run metrics --with-autoharness --path ${{github.workspace}}
+      run: |
+        ./scripts/run-kani.sh --run metrics --with-autoharness --path ${{github.workspace}}
+        rm kani-list.json
 
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v7

@@ -1,0 +1,77 @@
+name: Flux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  FIXPOINT_VERSION: "556104ba5508891c357b0bdf819ce706e93d9349"
+  FLUX_VERSION: "b0cec81c42bc6e210f675b46dd5b4b16774b0d0e"
+
+jobs:
+  check-flux-on-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Local Binaries
+        run: |
+          mkdir -p ~/.local/bin
+          echo ~/.cargo/bin >> $GITHUB_PATH
+          echo ~/.local/bin >> $GITHUB_PATH
+
+      - name: Cache fixpoint
+        uses: actions/cache@v4
+        id: cache-fixpoint
+        with:
+          path: ~/.local/bin/fixpoint
+          key: fixpoint-bin-${{ runner.os }}-${{ env.FIXPOINT_VERSION }}
+
+      - name: Install Haskell
+        if: steps.cache-fixpoint.outputs.cache-hit != 'true'
+        uses: haskell-actions/setup@v2.7.0
+        with:
+          enable-stack: true
+          stack-version: "2.15.7"
+
+      - name: Install fixpoint
+        if: steps.cache-fixpoint.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/ucsd-progsys/liquid-fixpoint.git
+          cd liquid-fixpoint
+          git checkout $FIXPOINT_VERSION
+          stack install --fast --flag liquid-fixpoint:-link-z3-as-a-library
+
+      - name: Install Z3
+        uses: cda-tum/setup-z3@v1.6.1
+        with:
+          version: 4.12.1
+          platform: linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clone Flux
+        run: |
+          git clone https://github.com/flux-rs/flux.git
+          cd flux
+          git checkout $FLUX_VERSION
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.7.8
+        with:
+          workspaces: flux
+
+      - name: Install Flux
+        run: |
+          cd flux
+          cargo x install
+
+      - name: Verify Core
+        run: |
+          cd library
+          FLUXFLAGS="-Ftimings" cargo flux -p core

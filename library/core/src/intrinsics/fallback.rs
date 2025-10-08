@@ -7,6 +7,11 @@
 )]
 #![allow(missing_docs)]
 
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
+
 #[const_trait]
 #[rustc_const_unstable(feature = "core_intrinsics_fallbacks", issue = "none")]
 pub trait CarryingMulAdd: Copy + 'static {
@@ -132,6 +137,7 @@ macro_rules! impl_disjoint_bitor {
         impl const DisjointBitOr for $t {
             #[cfg_attr(miri, track_caller)]
             #[inline]
+            #[requires((self & other) == zero!($t))]
             unsafe fn disjoint_bitor(self, other: Self) -> Self {
                 // Note that the assume here is required for UB detection in Miri!
 

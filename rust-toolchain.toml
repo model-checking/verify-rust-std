@@ -2,5 +2,5 @@
 # standard library we currently track.
 
 [toolchain]
-channel = "nightly-2025-04-24"
+channel = "nightly-2025-08-26"
 components = ["llvm-tools-preview", "rustc-dev", "rust-src", "rustfmt"]

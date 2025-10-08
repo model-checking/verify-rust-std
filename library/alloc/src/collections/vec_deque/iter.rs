@@ -1,7 +1,11 @@
 use core::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
+#[cfg(kani)]
+use core::kani;
 use core::num::NonZero;
 use core::ops::Try;
 use core::{fmt, mem, slice};
+
+use safety::requires;
 
 /// An iterator over the elements of a `VecDeque`.
 ///
@@ -144,6 +148,8 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 
     #[inline]
+    #[requires(idx < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
         // Safety: The TrustedRandomAccess contract requires that callers only pass an index
         // that is in bounds.

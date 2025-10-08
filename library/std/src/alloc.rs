@@ -56,13 +56,16 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![stable(feature = "alloc_module", since = "1.28.0")]
 
+#[cfg(kani)]
+use core::kani;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicPtr, Ordering};
+use core::sync::atomic::{Atomic, AtomicPtr, Ordering};
 use core::{hint, mem, ptr};
 
 #[stable(feature = "alloc_module", since = "1.28.0")]
 #[doc(inline)]
 pub use alloc_crate::alloc::*;
+use safety::requires;
 
 /// The default memory allocator provided by the operating system.
 ///
@@ -150,6 +153,10 @@ impl System {
     }
 
     // SAFETY: Same as `Allocator::grow`
+    #[requires(new_layout.size() >= old_layout.size())]
+    #[requires(ptr.as_ptr().is_aligned_to(old_layout.align()))]
+    #[requires(old_layout.size() == 0 || old_layout.align() != 0)]
+    #[requires(new_layout.size() == 0 || new_layout.align() != 0)]
     #[inline]
     unsafe fn grow_impl(
         &self,
@@ -212,6 +219,7 @@ unsafe impl Allocator for System {
         self.alloc_impl(layout, true)
     }
 
+    #[requires(layout.size() != 0)]
     #[inline]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         if layout.size() != 0 {
@@ -221,6 +229,7 @@ unsafe impl Allocator for System {
         }
     }
 
+    #[requires(new_layout.size() >= old_layout.size())]
     #[inline]
     unsafe fn grow(
         &self,
@@ -232,6 +241,7 @@ unsafe impl Allocator for System {
         unsafe { self.grow_impl(ptr, old_layout, new_layout, false) }
     }
 
+    #[requires(new_layout.size() >= old_layout.size())]
     #[inline]
     unsafe fn grow_zeroed(
         &self,
@@ -243,6 +253,7 @@ unsafe impl Allocator for System {
         unsafe { self.grow_impl(ptr, old_layout, new_layout, true) }
     }
 
+    #[requires(new_layout.size() <= old_layout.size())]
     #[inline]
     unsafe fn shrink(
         &self,
@@ -287,7 +298,7 @@ unsafe impl Allocator for System {
     }
 }
 
-static HOOK: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
+static HOOK: Atomic<*mut ()> = AtomicPtr::new(ptr::null_mut());
 
 /// Registers a custom allocation error hook, replacing any that was previously registered.
 ///
@@ -349,10 +360,10 @@ fn default_alloc_error_hook(layout: Layout) {
         // This symbol is emitted by rustc next to __rust_alloc_error_handler.
         // Its value depends on the -Zoom={panic,abort} compiler option.
         #[rustc_std_internal_symbol]
-        static __rust_alloc_error_handler_should_panic: u8;
+        fn __rust_alloc_error_handler_should_panic_v2() -> u8;
     }
 
-    if unsafe { __rust_alloc_error_handler_should_panic != 0 } {
+    if unsafe { __rust_alloc_error_handler_should_panic_v2() != 0 } {
         panic!("memory allocation of {} bytes failed", layout.size());
     } else {
         // This is the default path taken on OOM, and the only path taken on stable with std.
@@ -382,6 +393,11 @@ pub fn rust_oom(layout: Layout) -> ! {
 #[allow(unused_attributes)]
 #[unstable(feature = "alloc_internals", issue = "none")]
 pub mod __default_lib_allocator {
+    #[cfg(kani)]
+    use core::kani;
+
+    use safety::requires;
+
     use super::{GlobalAlloc, Layout, System};
     // These magic symbol names are used as a fallback for implementing the
     // `__rust_alloc` etc symbols (see `src/liballoc/alloc.rs`) when there is
@@ -393,6 +409,7 @@ pub mod __default_lib_allocator {
     // linkage directives are provided as part of the current compiler allocator
     // ABI
 
+    #[requires(align.is_power_of_two())]
     #[rustc_std_internal_symbol]
     pub unsafe extern "C" fn __rdl_alloc(size: usize, align: usize) -> *mut u8 {
         // SAFETY: see the guarantees expected by `Layout::from_size_align` and
@@ -403,6 +420,7 @@ pub mod __default_lib_allocator {
         }
     }
 
+    #[requires(align.is_power_of_two())]
     #[rustc_std_internal_symbol]
     pub unsafe extern "C" fn __rdl_dealloc(ptr: *mut u8, size: usize, align: usize) {
         // SAFETY: see the guarantees expected by `Layout::from_size_align` and
@@ -410,6 +428,7 @@ pub mod __default_lib_allocator {
         unsafe { System.dealloc(ptr, Layout::from_size_align_unchecked(size, align)) }
     }
 
+    #[requires(align.is_power_of_two())]
     #[rustc_std_internal_symbol]
     pub unsafe extern "C" fn __rdl_realloc(
         ptr: *mut u8,
@@ -425,6 +444,7 @@ pub mod __default_lib_allocator {
         }
     }
 
+    #[requires(align.is_power_of_two())]
     #[rustc_std_internal_symbol]
     pub unsafe extern "C" fn __rdl_alloc_zeroed(size: usize, align: usize) -> *mut u8 {
         // SAFETY: see the guarantees expected by `Layout::from_size_align` and

@@ -1,7 +1,11 @@
 //! Defines the `IntoIter` owned iterator for arrays.
 
+use safety::requires;
+
 use crate::intrinsics::transmute_unchecked;
 use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccessNoCoerce};
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::num::NonZero;
 use crate::ops::{IndexRange, Range, Try};
@@ -138,6 +142,8 @@ impl<T, const N: usize> IntoIter<T, N> {
     /// ```
     #[unstable(feature = "array_into_iter_constructors", issue = "91583")]
     #[inline]
+    #[requires(initialized.start <= initialized.end)]
+    #[requires(initialized.end <= N)]
     pub const unsafe fn new_unchecked(
         buffer: [MaybeUninit<T>; N],
         initialized: Range<usize>,
@@ -224,6 +230,13 @@ impl<T, const N: usize> IntoIter<T, N> {
     }
 }
 
+#[stable(feature = "array_value_iter_default", since = "1.89.0")]
+impl<T, const N: usize> Default for IntoIter<T, N> {
+    fn default() -> Self {
+        IntoIter::empty()
+    }
+}
+
 #[stable(feature = "array_value_iter_impls", since = "1.40.0")]
 impl<T, const N: usize> Iterator for IntoIter<T, N> {
     type Item = T;
@@ -272,6 +285,8 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
     }
 
     #[inline]
+    #[requires(idx < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
         // SAFETY: The caller must provide an idx that is in bound of the remainder.
         let elem_ref = unsafe { self.as_mut_slice().get_unchecked_mut(idx) };

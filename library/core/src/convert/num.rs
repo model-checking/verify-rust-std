@@ -78,10 +78,12 @@ macro_rules! impl_from {
     };
     ($Small:ty => $Large:ty, #[$attr:meta], $doc:expr $(,)?) => {
         #[$attr]
-        impl From<$Small> for $Large {
+        #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+        impl const From<$Small> for $Large {
             // Rustdocs on the impl block show a "[+] show undocumented items" toggle.
             // Rustdocs on functions do not.
             #[doc = $doc]
+            #[cfg_attr(flux, flux::spec(fn(small:$Small) -> $Large[cast(small)]))]
             #[inline(always)]
             fn from(small: $Small) -> Self {
                 small as Self
@@ -184,7 +186,6 @@ impl_from!(u8 => f16, #[stable(feature = "lossless_float_conv", since = "1.6.0")
 impl_from!(u8 => f32, #[stable(feature = "lossless_float_conv", since = "1.6.0")]);
 impl_from!(u8 => f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")]);
 impl_from!(u8 => f128, #[stable(feature = "lossless_float_conv", since = "1.6.0")]);
-impl_from!(u16 => f16, #[stable(feature = "lossless_float_conv", since = "1.6.0")]);
 impl_from!(u16 => f32, #[stable(feature = "lossless_float_conv", since = "1.6.0")]);
 impl_from!(u16 => f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")]);
 impl_from!(u16 => f128, #[stable(feature = "lossless_float_conv", since = "1.6.0")]);
@@ -210,7 +211,8 @@ macro_rules! impl_float_from_bool {
         )?
     ) => {
         #[stable(feature = "float_from_bool", since = "1.68.0")]
-        impl From<bool> for $float {
+        #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+            impl const From<bool> for $float {
             #[doc = concat!("Converts a [`bool`] to [`", stringify!($float),"`] losslessly.")]
             /// The resulting value is positive `0.0` for `false` and `1.0` for `true` values.
             ///
@@ -260,7 +262,8 @@ impl_float_from_bool!(
 macro_rules! impl_try_from_unbounded {
     ($source:ty => $($target:ty),+) => {$(
         #[stable(feature = "try_from", since = "1.34.0")]
-        impl TryFrom<$source> for $target {
+        #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+        impl const TryFrom<$source> for $target {
             type Error = TryFromIntError;
 
             /// Tries to create the target number type from a source
@@ -278,7 +281,8 @@ macro_rules! impl_try_from_unbounded {
 macro_rules! impl_try_from_lower_bounded {
     ($source:ty => $($target:ty),+) => {$(
         #[stable(feature = "try_from", since = "1.34.0")]
-        impl TryFrom<$source> for $target {
+        #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+        impl const TryFrom<$source> for $target {
             type Error = TryFromIntError;
 
             /// Tries to create the target number type from a source
@@ -300,7 +304,8 @@ macro_rules! impl_try_from_lower_bounded {
 macro_rules! impl_try_from_upper_bounded {
     ($source:ty => $($target:ty),+) => {$(
         #[stable(feature = "try_from", since = "1.34.0")]
-        impl TryFrom<$source> for $target {
+        #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+        impl const TryFrom<$source> for $target {
             type Error = TryFromIntError;
 
             /// Tries to create the target number type from a source
@@ -322,7 +327,8 @@ macro_rules! impl_try_from_upper_bounded {
 macro_rules! impl_try_from_both_bounded {
     ($source:ty => $($target:ty),+) => {$(
         #[stable(feature = "try_from", since = "1.34.0")]
-        impl TryFrom<$source> for $target {
+        #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+        impl const TryFrom<$source> for $target {
             type Error = TryFromIntError;
 
             /// Tries to create the target number type from a source
@@ -460,7 +466,8 @@ use crate::num::NonZero;
 macro_rules! impl_nonzero_int_from_nonzero_int {
     ($Small:ty => $Large:ty) => {
         #[stable(feature = "nz_int_conv", since = "1.41.0")]
-        impl From<NonZero<$Small>> for NonZero<$Large> {
+        #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+        impl const From<NonZero<$Small>> for NonZero<$Large> {
             // Rustdocs on the impl block show a "[+] show undocumented items" toggle.
             // Rustdocs on functions do not.
             #[doc = concat!("Converts <code>[NonZero]\\<[", stringify!($Small), "]></code> ")]
@@ -550,7 +557,8 @@ impl_nonzero_int_try_from_int!(isize);
 macro_rules! impl_nonzero_int_try_from_nonzero_int {
     ($source:ty => $($target:ty),+) => {$(
         #[stable(feature = "nzint_try_from_nzint_conv", since = "1.49.0")]
-        impl TryFrom<NonZero<$source>> for NonZero<$target> {
+        #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+        impl const TryFrom<NonZero<$source>> for NonZero<$target> {
             type Error = TryFromIntError;
 
             // Rustdocs on the impl block show a "[+] show undocumented items" toggle.
@@ -600,74 +608,6 @@ impl_nonzero_int_try_from_nonzero_int!(isize => u8, u16, u32, u64, u128, usize);
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
-
-    // Generate harnesses for `NonZero::<Large>::from(NonZero<Small>)`.
-    macro_rules! generate_nonzero_int_from_nonzero_int_harness {
-        ($Small:ty => $Large:ty, $harness:ident) => {
-            #[kani::proof]
-            pub fn $harness() {
-                let x: NonZero<$Small> = kani::any();
-                let _ = NonZero::<$Large>::from(x);
-            }
-        };
-    }
-
-    // This bundles the calls to `generate_nonzero_int_from_nonzero_int_harness`
-    // macro into segregated namespaces for better organization and usability.
-    macro_rules! generate_nonzero_int_from_nonzero_int_harnesses {
-        ($ns:ident, $Small:ty => $($Large:tt),+ $(,)?) => {
-            mod $ns {
-                use super::*;
-
-                $(
-                    mod $Large {
-                        use super::*;
-
-                        generate_nonzero_int_from_nonzero_int_harness!(
-                            $Small => $Large,
-                            check_nonzero_int_from_nonzero_int
-                        );
-                    }
-                )+
-            }
-        };
-    }
-
-    // non-zero unsigned integer -> non-zero integer, infallible
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_u8,
-        u8 => u16, u32, u64, u128, usize, i16, i32, i64, i128, isize,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_u16,
-        u16 => u32, u64, u128, usize, i32, i64, i128,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_u32,
-        u32 => u64, u128, i64, i128,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_u64,
-        u64 => u128, i128,
-    );
-
-    // non-zero signed integer -> non-zero signed integer, infallible
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_i8,
-        i8 => i16, i32, i64, i128, isize,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_i16,
-        i16 => i32, i64, i128, isize,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_i32,
-        i32 => i64, i128,
-    );
-    generate_nonzero_int_from_nonzero_int_harnesses!(
-        check_nonzero_int_from_i64,
-        i64 => i128,
-    );
 
     // Generates harnesses for `NonZero::<target>::try_from(NonZero<source>)`.
     // Since the function may be fallible or infallible depending on `source` and `target`,

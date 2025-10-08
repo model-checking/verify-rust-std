@@ -1,5 +1,7 @@
 //! Iterators for `str` methods.
 
+use safety::requires;
+
 use super::pattern::{DoubleEndedSearcher, Pattern, ReverseSearcher, Searcher};
 use super::validations::{next_code_point, next_code_point_reverse};
 use super::{
@@ -11,6 +13,8 @@ use crate::iter::{
     Chain, Copied, Filter, FlatMap, Flatten, FusedIterator, Map, TrustedLen, TrustedRandomAccess,
     TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::Try;
 use crate::slice::{self, Split as SliceSplit};
@@ -52,7 +56,7 @@ impl<'a> Iterator for Chars<'a> {
         const CHUNK_SIZE: usize = 32;
 
         if remainder >= CHUNK_SIZE {
-            let mut chunks = self.iter.as_slice().array_chunks::<CHUNK_SIZE>();
+            let mut chunks = self.iter.as_slice().as_chunks::<CHUNK_SIZE>().0.iter();
             let mut bytes_skipped: usize = 0;
 
             while remainder > CHUNK_SIZE
@@ -102,7 +106,7 @@ impl<'a> Iterator for Chars<'a> {
         // `(len + 3)` can't overflow, because we know that the `slice::Iter`
         // belongs to a slice in memory which has a maximum length of
         // `isize::MAX` (that's well below `usize::MAX`).
-        ((len + 3) / 4, Some(len))
+        (len.div_ceil(4), Some(len))
     }
 
     #[inline]
@@ -356,6 +360,7 @@ impl Iterator for Bytes<'_> {
     }
 
     #[inline]
+    #[requires(idx < self.0.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> u8 {
         // SAFETY: the caller must uphold the safety contract
         // for `Iterator::__iterator_get_unchecked`.
@@ -1532,11 +1537,11 @@ impl<'a> Iterator for EncodeUtf16<'a> {
         // belongs to a slice in memory which has a maximum length of
         // `isize::MAX` (that's well below `usize::MAX`)
         if self.extra == 0 {
-            ((len + 2) / 3, Some(len))
+            (len.div_ceil(3), Some(len))
         } else {
             // We're in the middle of a surrogate pair, so add the remaining
             // surrogate to the bounds.
-            ((len + 2) / 3 + 1, Some(len + 1))
+            (len.div_ceil(3) + 1, Some(len + 1))
         }
     }
 }

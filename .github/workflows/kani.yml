@@ -37,6 +37,14 @@ jobs:
       WORKER_TOTAL: 4
     
     steps:
+      - name: Remove unnecessary software to free up disk space
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+          df -h
+
       # Step 1: Check out the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -53,7 +61,7 @@ jobs:
       - name: Run Kani Verification
         run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
    
-  kani-autoharness:
+  kani_autoharness:
     name: Verify std library using autoharness
     runs-on: ${{ matrix.os }}
     strategy:
@@ -67,6 +75,14 @@ jobs:
       fail-fast: false
 
     steps:
+      - name: Remove unnecessary software to free up disk space
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+          df -h
+
       # Step 1: Check out the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -78,12 +94,76 @@ jobs:
       # possible functions as that may take a lot longer than expected. Instead,
       # explicitly list all functions (or prefixes thereof) the proofs of which
       # are known to pass.
+      # Notes:
+      # - core_arch::x86::__m128d::as_f64x2 is just one example of hundreds of
+      #   core_arch::x86:: functions that are known to verify successfully.
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::unchecked_disjoint_bitor" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]]iter::range::Step>::backward_unchecked" \
+            --include-pattern "<(.+)[[:space:]]as[[:space:]]iter::range::Step>::forward_unchecked" \
+            --include-pattern alloc::__default_lib_allocator:: \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern char::convert::from_u32_unchecked \
+            --include-pattern core_arch::x86::__m128d::as_f64x2 \
+            --include-pattern "convert::num::<impl.convert::From<num::nonzero::NonZero<" \
+            --include-pattern "num::<impl.i8>::unchecked_add" \
+            --include-pattern "num::<impl.i16>::unchecked_add" \
+            --include-pattern "num::<impl.i32>::unchecked_add" \
+            --include-pattern "num::<impl.i64>::unchecked_add" \
+            --include-pattern "num::<impl.i128>::unchecked_add" \
+            --include-pattern "num::<impl.isize>::unchecked_add" \
+            --include-pattern "num::<impl.u8>::unchecked_add" \
+            --include-pattern "num::<impl.u16>::unchecked_add" \
+            --include-pattern "num::<impl.u32>::unchecked_add" \
+            --include-pattern "num::<impl.u64>::unchecked_add" \
+            --include-pattern "num::<impl.u128>::unchecked_add" \
+            --include-pattern "num::<impl.usize>::unchecked_add" \
+            --include-pattern "num::<impl.i8>::unchecked_neg" \
+            --include-pattern "num::<impl.i16>::unchecked_neg" \
+            --include-pattern "num::<impl.i32>::unchecked_neg" \
+            --include-pattern "num::<impl.i64>::unchecked_neg" \
+            --include-pattern "num::<impl.i128>::unchecked_neg" \
+            --include-pattern "num::<impl.isize>::unchecked_neg" \
+            --include-pattern "num::<impl.i8>::unchecked_sh" \
+            --include-pattern "num::<impl.i16>::unchecked_sh" \
+            --include-pattern "num::<impl.i32>::unchecked_sh" \
+            --include-pattern "num::<impl.i64>::unchecked_sh" \
+            --include-pattern "num::<impl.i128>::unchecked_sh" \
+            --include-pattern "num::<impl.isize>::unchecked_sh" \
+            --include-pattern "num::<impl.u8>::unchecked_sh" \
+            --include-pattern "num::<impl.u16>::unchecked_sh" \
+            --include-pattern "num::<impl.u32>::unchecked_sh" \
+            --include-pattern "num::<impl.u64>::unchecked_sh" \
+            --include-pattern "num::<impl.u128>::unchecked_sh" \
+            --include-pattern "num::<impl.usize>::unchecked_sh" \
+            --include-pattern "num::<impl.i8>::unchecked_sub" \
+            --include-pattern "num::<impl.i16>::unchecked_sub" \
+            --include-pattern "num::<impl.i32>::unchecked_sub" \
+            --include-pattern "num::<impl.i64>::unchecked_sub" \
+            --include-pattern "num::<impl.i128>::unchecked_sub" \
+            --include-pattern "num::<impl.isize>::unchecked_sub" \
+            --include-pattern "num::<impl.u8>::unchecked_sub" \
+            --include-pattern "num::<impl.u16>::unchecked_sub" \
+            --include-pattern "num::<impl.u32>::unchecked_sub" \
+            --include-pattern "num::<impl.u64>::unchecked_sub" \
+            --include-pattern "num::<impl.u128>::unchecked_sub" \
+            --include-pattern "num::<impl.usize>::unchecked_sub" \
+            --include-pattern "num::<impl.i8>::wrapping_sh" \
+            --include-pattern "num::<impl.i16>::wrapping_sh" \
+            --include-pattern "num::<impl.i32>::wrapping_sh" \
+            --include-pattern "num::<impl.i64>::wrapping_sh" \
+            --include-pattern "num::<impl.i128>::wrapping_sh" \
+            --include-pattern "num::<impl.isize>::wrapping_sh" \
+            --include-pattern "num::<impl.u8>::wrapping_sh" \
+            --include-pattern "num::<impl.u16>::wrapping_sh" \
+            --include-pattern "num::<impl.u32>::wrapping_sh" \
+            --include-pattern "num::<impl.u64>::wrapping_sh" \
+            --include-pattern "num::<impl.u128>::wrapping_sh" \
+            --include-pattern "num::<impl.usize>::wrapping_sh" \
             --include-pattern "num::nonzero::NonZero::<i8>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<i16>::count_ones" \
             --include-pattern "num::nonzero::NonZero::<i32>::count_ones" \
@@ -122,14 +202,143 @@ jobs:
             --exclude-pattern time::Duration::from_secs_f \
             --include-pattern unicode::unicode_data::conversions::to_ \
             --exclude-pattern ::precondition_check \
-            --harness-timeout 5m \
+            --harness-timeout 10m \
             --default-unwind 1000 \
-            --jobs=3 --output-format=terse
+            --jobs=3 --output-format=terse | tee autoharness-verification.log
+          gzip autoharness-verification.log
+
+      - name: Upload Autoharness Verification Log
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-autoharness-verification.log.gz
+          path: autoharness-verification.log.gz
+          if-no-files-found: error
+          # Aggressively short retention: we don't really need these
+          retention-days: 3
+
+  run_kani_metrics:
+    name: Kani Metrics
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
+      fail-fast: true
+
+    steps:
+      - name: Remove unnecessary software to free up disk space
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+          df -h
+
+      # Step 1: Check out the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      # Step 2: Run list on the std library
+      - name: Run Kani Metrics
+        run: |
+          scripts/run-kani.sh --run metrics --with-autoharness
+          pushd /tmp/std_lib_analysis
+          tar czf results.tar.gz results
+          popd
+
+      - name: Upload kani-list.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-kani-list.json
+          path: kani-list.json
+          if-no-files-found: error
+          # Aggressively short retention: we don't really need these
+          retention-days: 3
+
+      - name: Upload scanner results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-results.tar.gz
+          path: /tmp/std_lib_analysis/results.tar.gz
+          if-no-files-found: error
+          # Aggressively short retention: we don't really need these
+          retention-days: 3
+
+  run-log-analysis:
+    name: Build JSON from logs
+    needs: [run_kani_metrics, kani_autoharness]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            base: ubuntu
+          - os: macos-latest
+            base: macos
+      fail-fast: false
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Download log
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-autoharness-verification.log.gz
+
+      - name: Download kani-list.json
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-kani-list.json
+
+      - name: Download scanner results
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-results.tar.gz
+
+      - name: Run log parser
+        run: |
+          gunzip autoharness-verification.log.gz
+          tar xzf results.tar.gz
+          python3 scripts/kani-std-analysis/log_parser.py \
+            --kani-list-file kani-list.json \
+            --analysis-results-dir results/ \
+            autoharness-verification.log \
+            -o results.json
+
+      - name: Upload JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-results.json
+          path: results.json
+          if-no-files-found: error
 
   run-kani-list:
     name: Kani List
     runs-on: ubuntu-latest
     steps:
+      - name: Remove unnecessary software to free up disk space
+        run: |
+          # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+          df -h
+
       # Step 1: Check out the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -176,12 +385,14 @@ jobs:
       # Step 3: Add output to job summary
       - name: Add Autoharness Analyzer output to job summary
         run: |
+          pushd scripts/autoharness_analyzer
           echo "# Autoharness Failure Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "## Crate core, all functions" >> "$GITHUB_STEP_SUMMARY"
-          cat autoharness_analyzer/core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          cat core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
           echo "## Crate core, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
-          cat autoharness_analyzer/core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          cat core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
           echo "## Crate std, all functions" >> "$GITHUB_STEP_SUMMARY"
-          cat autoharness_analyzer/std_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          cat std_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
           echo "## Crate std, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
-          cat autoharness_analyzer/std_unsafe_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          cat std_unsafe_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          popd
