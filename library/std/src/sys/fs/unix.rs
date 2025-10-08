@@ -1264,6 +1264,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     ))]
     pub fn lock(&self) -> io::Result<()> {
@@ -1276,6 +1278,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     )))]
     pub fn lock(&self) -> io::Result<()> {
@@ -1287,6 +1291,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     ))]
     pub fn lock_shared(&self) -> io::Result<()> {
@@ -1299,6 +1305,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     )))]
     pub fn lock_shared(&self) -> io::Result<()> {
@@ -1310,6 +1318,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     ))]
     pub fn try_lock(&self) -> Result<(), TryLockError> {
@@ -1330,6 +1340,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     )))]
     pub fn try_lock(&self) -> Result<(), TryLockError> {
@@ -1344,6 +1356,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     ))]
     pub fn try_lock_shared(&self) -> Result<(), TryLockError> {
@@ -1364,6 +1378,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     )))]
     pub fn try_lock_shared(&self) -> Result<(), TryLockError> {
@@ -1378,6 +1394,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     ))]
     pub fn unlock(&self) -> io::Result<()> {
@@ -1390,6 +1408,8 @@ impl File {
         target_os = "fuchsia",
         target_os = "linux",
         target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "cygwin",
         target_vendor = "apple",
     )))]
     pub fn unlock(&self) -> io::Result<()> {

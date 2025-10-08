@@ -261,6 +261,54 @@ macro_rules! uint_impl {
             self & self.wrapping_neg()
         }
 
+        /// Returns the index of the highest bit set to one in `self`, or `None`
+        /// if `self` is `0`.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// #![feature(int_lowest_highest_one)]
+        ///
+        #[doc = concat!("assert_eq!(0x0_", stringify!($SelfT), ".highest_one(), None);")]
+        #[doc = concat!("assert_eq!(0x1_", stringify!($SelfT), ".highest_one(), Some(0));")]
+        #[doc = concat!("assert_eq!(0x10_", stringify!($SelfT), ".highest_one(), Some(4));")]
+        #[doc = concat!("assert_eq!(0x1f_", stringify!($SelfT), ".highest_one(), Some(4));")]
+        /// ```
+        #[unstable(feature = "int_lowest_highest_one", issue = "145203")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline(always)]
+        pub const fn highest_one(self) -> Option<u32> {
+            match NonZero::new(self) {
+                Some(v) => Some(v.highest_one()),
+                None => None,
+            }
+        }
+
+        /// Returns the index of the lowest bit set to one in `self`, or `None`
+        /// if `self` is `0`.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// #![feature(int_lowest_highest_one)]
+        ///
+        #[doc = concat!("assert_eq!(0x0_", stringify!($SelfT), ".lowest_one(), None);")]
+        #[doc = concat!("assert_eq!(0x1_", stringify!($SelfT), ".lowest_one(), Some(0));")]
+        #[doc = concat!("assert_eq!(0x10_", stringify!($SelfT), ".lowest_one(), Some(4));")]
+        #[doc = concat!("assert_eq!(0x1f_", stringify!($SelfT), ".lowest_one(), Some(0));")]
+        /// ```
+        #[unstable(feature = "int_lowest_highest_one", issue = "145203")]
+        #[must_use = "this returns the result of the operation, \
+                      without modifying the original"]
+        #[inline(always)]
+        pub const fn lowest_one(self) -> Option<u32> {
+            match NonZero::new(self) {
+                Some(v) => Some(v.lowest_one()),
+                None => None,
+            }
+        }
+
         /// Returns the bit pattern of `self` reinterpreted as a signed integer of the same size.
         ///
         /// This produces the same result as an `as` cast, but ensures that the bit-width remains
@@ -581,6 +629,7 @@ macro_rules! uint_impl {
                       without modifying the original"]
         #[inline(always)]
         #[track_caller]
+        #[cfg_attr(flux, flux::spec(fn(self: Self, rhs: Self{self + rhs <= $MaxV}) -> Self[self + rhs]))]
         #[requires(!self.overflowing_add(rhs).1)]
         pub const unsafe fn unchecked_add(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
@@ -2122,8 +2171,7 @@ macro_rules! uint_impl {
         ///
         /// # Examples
         ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u8` is used here.
+        /// Please note that this example is shared among integer types, which is why `u8` is used.
         ///
         /// ```
         /// assert_eq!(10u8.wrapping_mul(12), 120);
@@ -2617,8 +2665,8 @@ macro_rules! uint_impl {
         ///
         /// # Examples
         ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u32` is used here.
+        /// Please note that this example is shared among integer types, which is why why `u32`
+        /// is used.
         ///
         /// ```
         /// assert_eq!(5u32.overflowing_mul(2), (10, false));
@@ -2644,8 +2692,7 @@ macro_rules! uint_impl {
         ///
         /// # Examples
         ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u32` is used here.
+        /// Please note that this example is shared among integer types, which is why `u32` is used.
         ///
         /// ```
         /// #![feature(bigint_helper_methods)]
@@ -2675,8 +2722,7 @@ macro_rules! uint_impl {
         ///
         /// # Examples
         ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u32` is used here.
+        /// Please note that this example is shared among integer types, which is why `u32` is used.
         ///
         /// ```
         /// #![feature(bigint_helper_methods)]
