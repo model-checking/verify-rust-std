@@ -204,6 +204,7 @@ where
     I: UncheckedIterator,
     F: FnMut(I::Item) -> B,
 {
+    #[requires(self.iter.size_hint().0 > 0)]
     unsafe fn next_unchecked(&mut self) -> B {
         // SAFETY: `Map` is 1:1 with the inner iterator, so if the caller promised
         // that there's an element left, the inner iterator has one too.
