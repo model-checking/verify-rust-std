@@ -1413,40 +1413,6 @@ pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
     {builtin # offset_of($Container, $($fields)+)}
 }
 
-<<<<<<< HEAD
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify {
-    use super::*;
-    use crate::kani;
-
-    /// Use this type to ensure that mem swap does not drop the value.
-    #[derive(kani::Arbitrary)]
-    struct CannotDrop<T: kani::Arbitrary> {
-        inner: T,
-    }
-
-    impl<T: kani::Arbitrary> Drop for CannotDrop<T> {
-        fn drop(&mut self) {
-            unreachable!("Cannot drop")
-        }
-    }
-
-    #[kani::proof_for_contract(swap)]
-    pub fn check_swap_primitive() {
-        let mut x: u8 = kani::any();
-        let mut y: u8 = kani::any();
-        swap(&mut x, &mut y)
-    }
-
-    #[kani::proof_for_contract(swap)]
-    pub fn check_swap_adt_no_drop() {
-        let mut x: CannotDrop<char> = kani::any();
-        let mut y: CannotDrop<char> = kani::any();
-        swap(&mut x, &mut y);
-        forget(x);
-        forget(y);
-=======
 /// Create a fresh instance of the inhabited ZST type `T`.
 ///
 /// Prefer this to [`zeroed`] or [`uninitialized`] or [`transmute_copy`]
@@ -1501,6 +1467,40 @@ pub const unsafe fn conjure_zst<T>() -> T {
     unsafe {
         #[allow(clippy::uninit_assumed_init)]
         MaybeUninit::uninit().assume_init()
->>>>>>> subtree/library
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    /// Use this type to ensure that mem swap does not drop the value.
+    #[derive(kani::Arbitrary)]
+    struct CannotDrop<T: kani::Arbitrary> {
+        inner: T,
+    }
+
+    impl<T: kani::Arbitrary> Drop for CannotDrop<T> {
+        fn drop(&mut self) {
+            unreachable!("Cannot drop")
+        }
+    }
+
+    #[kani::proof_for_contract(swap)]
+    pub fn check_swap_primitive() {
+        let mut x: u8 = kani::any();
+        let mut y: u8 = kani::any();
+        swap(&mut x, &mut y)
+    }
+
+    #[kani::proof_for_contract(swap)]
+    pub fn check_swap_adt_no_drop() {
+        let mut x: CannotDrop<char> = kani::any();
+        let mut y: CannotDrop<char> = kani::any();
+        swap(&mut x, &mut y);
+        forget(x);
+        forget(y);
     }
 }

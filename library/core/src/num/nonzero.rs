@@ -6,13 +6,9 @@ use super::{IntErrorKind, ParseIntError};
 use crate::clone::UseCloned;
 use crate::cmp::Ordering;
 use crate::hash::{Hash, Hasher};
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{Freeze, StructuralPartialEq};
-=======
 use crate::marker::{Destruct, Freeze, StructuralPartialEq};
->>>>>>> subtree/library
 use crate::ops::{BitOr, BitOrAssign, Div, DivAssign, Neg, Rem, RemAssign};
 use crate::panic::{RefUnwindSafe, UnwindSafe};
 use crate::str::FromStr;
