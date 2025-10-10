@@ -148,7 +148,7 @@ macro_rules! saturating_integer_sum_product {
         saturating_integer_sum_product!(@impls Saturating(0), Saturating(1),
                 "The short-circuiting behavior of this implementation is unspecified. If you care about \
                 short-circuiting, use [`Iterator::fold`] directly.",
-                #[stable(feature = "saturating_iter_arith", since = "CURRENT_RUSTC_VERSION")],
+                #[stable(feature = "saturating_iter_arith", since = "1.91.0")],
                 $(Saturating<$a>)*);
     );
 }
@@ -203,7 +203,7 @@ macro_rules! float_sum_product {
 
 integer_sum_product! { i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize }
 saturating_integer_sum_product! { u8 u16 u32 u64 u128 usize }
-float_sum_product! { f32 f64 }
+float_sum_product! { f16 f32 f64 f128 }
 
 #[stable(feature = "iter_arith_traits_result", since = "1.16.0")]
 impl<T, U, E> Sum<Result<U, E>> for Result<T, E>
