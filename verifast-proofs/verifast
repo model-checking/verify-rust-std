@@ -1,0 +1,5 @@
+#!/bin/bash
+
+set -e -x
+. "$(dirname "$0")/setup-verifast-home"
+"$VERIFAST_HOME/bin/verifast" "$@"

@@ -214,7 +214,7 @@ jobs:
 
         # Try to automatically patch the VeriFast proofs
         pushd verifast-proofs
-        if bash ./patch-verifast-proofs.sh; then
+          ./patch-verifast-proofs.sh
           if ! git diff --quiet; then
             git -c user.name=gitbot -c user.email=git@bot \
               commit . -m "Update VeriFast proofs"
@@ -222,10 +222,6 @@ jobs:
             # The original files have not changed; no updates to the VeriFast proofs are necessary.
             true
           fi
-        else
-          # Patching the VeriFast proofs failed; requires manual intervention.
-          true
-        fi
         popd
 
     - name: Create Pull Request without conflicts
