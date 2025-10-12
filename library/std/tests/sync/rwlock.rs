@@ -50,7 +50,7 @@ nonpoison_and_poison_unwrap_test!(
 // FIXME: On macOS we use a provenance-incorrect implementation and Miri
 // catches that issue with a chance of around 1/1000.
 // See <https://github.com/rust-lang/rust/issues/121950> for details.
-#[cfg_attr(all(miri, target_os = "macos"), ignore)]
+#[cfg(not(all(miri, target_os = "macos")))]
 nonpoison_and_poison_unwrap_test!(
     name: frob,
     test_body: {
@@ -124,7 +124,7 @@ nonpoison_and_poison_unwrap_test!(
     }
 );
 
-#[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
+#[cfg(panic = "unwind")] // Requires unwinding support.
 nonpoison_and_poison_unwrap_test!(
     name: test_rw_arc_access_in_unwind,
     test_body: {
@@ -315,7 +315,7 @@ nonpoison_and_poison_unwrap_test!(
 
 // FIXME: On macOS we use a provenance-incorrect implementation and Miri catches that issue.
 // See <https://github.com/rust-lang/rust/issues/121950> for details.
-#[cfg_attr(all(miri, target_os = "macos"), ignore)]
+#[cfg(not(all(miri, target_os = "macos")))]
 nonpoison_and_poison_unwrap_test!(
     name: test_downgrade_observe,
     test_body: {
@@ -362,7 +362,7 @@ nonpoison_and_poison_unwrap_test!(
 
 // FIXME: On macOS we use a provenance-incorrect implementation and Miri catches that issue.
 // See <https://github.com/rust-lang/rust/issues/121950> for details.
-#[cfg_attr(all(miri, target_os = "macos"), ignore)]
+#[cfg(not(all(miri, target_os = "macos")))]
 nonpoison_and_poison_unwrap_test!(
     name: test_downgrade_atomic,
     test_body: {
@@ -860,4 +860,26 @@ fn panic_while_mapping_write_unlocked_poison() {
     }
 
     drop(lock);
+}
+
+#[test]
+fn test_rwlock_with() {
+    let rwlock = std::sync::nonpoison::RwLock::new(2);
+    let result = rwlock.with(|value| *value + 3);
+
+    assert_eq!(result, 5);
+}
+
+#[test]
+fn test_rwlock_with_mut() {
+    let rwlock = std::sync::nonpoison::RwLock::new(2);
+
+    let result = rwlock.with_mut(|value| {
+        *value += 3;
+
+        *value + 5
+    });
+
+    assert_eq!(*rwlock.read(), 5);
+    assert_eq!(result, 10);
 }

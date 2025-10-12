@@ -49,7 +49,7 @@ pub use iter::IntoIter;
 /// ```
 #[inline]
 #[must_use = "cloning is often expensive and is not expected to have side effects"]
-#[stable(feature = "array_repeat", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "array_repeat", since = "1.91.0")]
 pub fn repeat<T: Clone, const N: usize>(val: T) -> [T; N] {
     from_trusted_iterator(repeat_n(val, N))
 }
@@ -472,6 +472,11 @@ impl<T: Copy> SpecArrayClone for T {
 // The Default impls cannot be done with const generics because `[T; 0]` doesn't
 // require Default to be implemented, and having different impl blocks for
 // different numbers isn't supported yet.
+//
+// Trying to improve the `[T; 0]` situation has proven to be difficult.
+// Please see these issues for more context on past attempts and crater runs:
+// - https://github.com/rust-lang/rust/issues/61415
+// - https://github.com/rust-lang/rust/pull/145457
 
 macro_rules! array_impl_default {
     {$n:expr, $t:ident $($ts:ident)*} => {
@@ -622,7 +627,7 @@ impl<T, const N: usize> [T; N] {
     /// assert_eq!(strings.len(), 3);
     /// ```
     #[stable(feature = "array_methods", since = "1.77.0")]
-    #[rustc_const_stable(feature = "const_array_each_ref", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_array_each_ref", since = "1.91.0")]
     pub const fn each_ref(&self) -> [&T; N] {
         let mut buf = [null::<T>(); N];
 
@@ -653,7 +658,7 @@ impl<T, const N: usize> [T; N] {
     /// assert_eq!(floats, [0.0, 2.7, -1.0]);
     /// ```
     #[stable(feature = "array_methods", since = "1.77.0")]
-    #[rustc_const_stable(feature = "const_array_each_ref", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "const_array_each_ref", since = "1.91.0")]
     pub const fn each_mut(&mut self) -> [&mut T; N] {
         let mut buf = [null_mut::<T>(); N];
 
