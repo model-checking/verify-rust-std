@@ -31,7 +31,7 @@ pub(crate) trait UncheckedIterator: TrustedLen {
     /// point you might want to implement this manually instead.
     #[unstable(feature = "trusted_len_next_unchecked", issue = "37572")]
     #[inline]
-    #[requires(self.size_hint().0 > 0)]
+    #[requires(self.size_hint().0 != 0 && self.size_hint().1 != Some(0))]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn next_unchecked(&mut self) -> Self::Item {
         let opt = self.next();
@@ -39,4 +39,32 @@ pub(crate) trait UncheckedIterator: TrustedLen {
         // `Self: TrustedLen` so we can actually trust the `size_hint`.
         unsafe { opt.unwrap_unchecked() }
     }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn verify_next_unchecked() {
+    const N: usize = 1024;
+
+    let arr: [u8; N] = [kani::any(); N];
+
+    let idx = kani::any::<usize>() % (N - 1);
+
+    let mut it = arr[..=idx].iter();
+
+    let (lo, hi) = it.size_hint();
+
+    kani::assume(lo != 0);
+    kani::assume(hi != Some(0));
+
+    let _ = unsafe { it.next_unchecked() };
+
+    let mut it = arr[idx..].iter();
+
+    let (lo, hi) = it.size_hint();
+
+    kani::assume(lo != 0);
+    kani::assume(hi != Some(0));
+
+    let _ = unsafe { it.next_unchecked() };
 }
