@@ -84,7 +84,7 @@ REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
 # Unstable arguments to pass to Kani
-unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts -Z stubbing"
+unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts -Z quantifiers -Z stubbing"
 
 # Variables used for parallel harness verification
 # When we say "parallel," we mean two dimensions of parallelization:
@@ -132,7 +132,9 @@ setup_kani_repo() {
 
     git fetch --depth 1 origin "$commit" --quiet
     git checkout "$commit" --quiet
-    git submodule update --init --recursive --depth 1 --quiet
+    # Workaround for occasionally failing to copy a file in s2n-quic that we
+    # don't actually care about
+    GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --quiet
     popd > /dev/null
 }
 

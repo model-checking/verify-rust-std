@@ -1,4 +1,8 @@
+use safety::requires;
+
 use crate::iter::TrustedLen;
+#[cfg(kani)]
+use crate::kani;
 
 /// [`TrustedLen`] cannot have methods, so this allows augmenting it.
 ///
@@ -27,6 +31,8 @@ pub(crate) trait UncheckedIterator: TrustedLen {
     /// point you might want to implement this manually instead.
     #[unstable(feature = "trusted_len_next_unchecked", issue = "37572")]
     #[inline]
+    #[requires(self.size_hint().0 > 0)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn next_unchecked(&mut self) -> Self::Item {
         let opt = self.next();
         // SAFETY: The caller promised that we're not empty, and

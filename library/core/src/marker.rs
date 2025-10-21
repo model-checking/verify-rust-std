@@ -1049,7 +1049,7 @@ marker_impls! {
 
 /// A marker for types that can be dropped.
 ///
-/// This should be used for `~const` bounds,
+/// This should be used for `[const]` bounds,
 /// as non-const bounds will always hold for every type.
 #[unstable(feature = "const_destruct", issue = "133214")]
 #[rustc_const_unstable(feature = "const_destruct", issue = "133214")]
@@ -1057,8 +1057,7 @@ marker_impls! {
 #[rustc_on_unimplemented(message = "can't drop `{Self}`", append_const_msg)]
 #[rustc_deny_explicit_impl]
 #[rustc_do_not_implement_via_object]
-#[const_trait]
-pub trait Destruct {}
+pub const trait Destruct {}
 
 /// A marker for tuple types.
 ///
@@ -1364,4 +1363,12 @@ pub macro CoercePointee($item:item) {
 #[doc(hidden)]
 pub trait CoercePointeeValidated {
     /* compiler built-in */
+}
+
+/// Allows value to be reborrowed as exclusive, creating a copy of the value
+/// that disables the source for reads and writes for the lifetime of the copy.
+#[lang = "reborrow"]
+#[unstable(feature = "reborrow", issue = "145612")]
+pub trait Reborrow {
+    // Empty.
 }

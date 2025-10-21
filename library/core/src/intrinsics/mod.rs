@@ -267,53 +267,72 @@ pub unsafe fn atomic_fence<const ORD: AtomicOrdering>();
 pub unsafe fn atomic_singlethreadfence<const ORD: AtomicOrdering>();
 
 /// The `prefetch` intrinsic is a hint to the code generator to insert a prefetch instruction
-/// if supported; otherwise, it is a no-op.
+/// for the given address if supported; otherwise, it is a no-op.
 /// Prefetches have no effect on the behavior of the program but can change its performance
 /// characteristics.
 ///
-/// The `locality` argument must be a constant integer and is a temporal locality specifier
-/// ranging from (0) - no locality, to (3) - extremely local keep in cache.
+/// The `LOCALITY` argument is a temporal locality specifier ranging from (0) - no locality,
+/// to (3) - extremely local keep in cache.
 ///
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn prefetch_read_data<T>(data: *const T, locality: i32);
+#[miri::intrinsic_fallback_is_spec]
+pub const fn prefetch_read_data<T, const LOCALITY: i32>(data: *const T) {
+    // This operation is a no-op, unless it is overridden by the backend.
+    let _ = data;
+}
+
 /// The `prefetch` intrinsic is a hint to the code generator to insert a prefetch instruction
-/// if supported; otherwise, it is a no-op.
+/// for the given address if supported; otherwise, it is a no-op.
 /// Prefetches have no effect on the behavior of the program but can change its performance
 /// characteristics.
 ///
-/// The `locality` argument must be a constant integer and is a temporal locality specifier
-/// ranging from (0) - no locality, to (3) - extremely local keep in cache.
+/// The `LOCALITY` argument is a temporal locality specifier ranging from (0) - no locality,
+/// to (3) - extremely local keep in cache.
 ///
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn prefetch_write_data<T>(data: *const T, locality: i32);
+#[miri::intrinsic_fallback_is_spec]
+pub const fn prefetch_write_data<T, const LOCALITY: i32>(data: *const T) {
+    // This operation is a no-op, unless it is overridden by the backend.
+    let _ = data;
+}
+
 /// The `prefetch` intrinsic is a hint to the code generator to insert a prefetch instruction
-/// if supported; otherwise, it is a no-op.
+/// for the given address if supported; otherwise, it is a no-op.
 /// Prefetches have no effect on the behavior of the program but can change its performance
 /// characteristics.
 ///
-/// The `locality` argument must be a constant integer and is a temporal locality specifier
-/// ranging from (0) - no locality, to (3) - extremely local keep in cache.
+/// The `LOCALITY` argument is a temporal locality specifier ranging from (0) - no locality,
+/// to (3) - extremely local keep in cache.
 ///
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn prefetch_read_instruction<T>(data: *const T, locality: i32);
+#[miri::intrinsic_fallback_is_spec]
+pub const fn prefetch_read_instruction<T, const LOCALITY: i32>(data: *const T) {
+    // This operation is a no-op, unless it is overridden by the backend.
+    let _ = data;
+}
+
 /// The `prefetch` intrinsic is a hint to the code generator to insert a prefetch instruction
-/// if supported; otherwise, it is a no-op.
+/// for the given address if supported; otherwise, it is a no-op.
 /// Prefetches have no effect on the behavior of the program but can change its performance
 /// characteristics.
 ///
-/// The `locality` argument must be a constant integer and is a temporal locality specifier
-/// ranging from (0) - no locality, to (3) - extremely local keep in cache.
+/// The `LOCALITY` argument is a temporal locality specifier ranging from (0) - no locality,
+/// to (3) - extremely local keep in cache.
 ///
 /// This intrinsic does not have a stable counterpart.
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub unsafe fn prefetch_write_instruction<T>(data: *const T, locality: i32);
+#[miri::intrinsic_fallback_is_spec]
+pub const fn prefetch_write_instruction<T, const LOCALITY: i32>(data: *const T) {
+    // This operation is a no-op, unless it is overridden by the backend.
+    let _ = data;
+}
 
 /// Executes a breakpoint trap, for inspection by a debugger.
 ///
@@ -2089,6 +2108,61 @@ pub const fn saturating_add<T: Copy>(a: T, b: T) -> T;
 #[rustc_intrinsic]
 pub const fn saturating_sub<T: Copy>(a: T, b: T) -> T;
 
+/// Funnel Shift left.
+///
+/// Concatenates `a` and `b` (with `a` in the most significant half),
+/// creating an integer twice as wide. Then shift this integer left
+/// by `shift`), and extract the most significant half. If `a` and `b`
+/// are the same, this is equivalent to a rotate left operation.
+///
+/// It is undefined behavior if `shift` is greater than or equal to the
+/// bit size of `T`.
+///
+/// Safe versions of this intrinsic are available on the integer primitives
+/// via the `funnel_shl` method. For example, [`u32::funnel_shl`].
+#[rustc_intrinsic]
+#[rustc_nounwind]
+#[rustc_const_unstable(feature = "funnel_shifts", issue = "145686")]
+#[unstable(feature = "funnel_shifts", issue = "145686")]
+#[track_caller]
+#[miri::intrinsic_fallback_is_spec]
+pub const unsafe fn unchecked_funnel_shl<T: [const] fallback::FunnelShift>(
+    a: T,
+    b: T,
+    shift: u32,
+) -> T {
+    // SAFETY: caller ensures that `shift` is in-range
+    unsafe { a.unchecked_funnel_shl(b, shift) }
+}
+
+/// Funnel Shift right.
+///
+/// Concatenates `a` and `b` (with `a` in the most significant half),
+/// creating an integer twice as wide. Then shift this integer right
+/// by `shift` (taken modulo the bit size of `T`), and extract the
+/// least significant half. If `a` and `b` are the same, this is equivalent
+/// to a rotate right operation.
+///
+/// It is undefined behavior if `shift` is greater than or equal to the
+/// bit size of `T`.
+///
+/// Safer versions of this intrinsic are available on the integer primitives
+/// via the `funnel_shr` method. For example, [`u32::funnel_shr`]
+#[rustc_intrinsic]
+#[rustc_nounwind]
+#[rustc_const_unstable(feature = "funnel_shifts", issue = "145686")]
+#[unstable(feature = "funnel_shifts", issue = "145686")]
+#[track_caller]
+#[miri::intrinsic_fallback_is_spec]
+pub const unsafe fn unchecked_funnel_shr<T: [const] fallback::FunnelShift>(
+    a: T,
+    b: T,
+    shift: u32,
+) -> T {
+    // SAFETY: caller ensures that `shift` is in-range
+    unsafe { a.unchecked_funnel_shr(b, shift) }
+}
+
 /// This is an implementation detail of [`crate::ptr::read`] and should
 /// not be used anywhere else.  See its comments for why this exists.
 ///
@@ -2820,14 +2894,16 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: 
 /// initialization state.
 ///
 /// This is used for contracts only.
-///
-/// FIXME: Change this once we add support to quantifiers.
 #[allow(dead_code)]
 #[allow(unused_variables)]
 fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
     #[cfg(kani)]
     if count > 0 {
+        // Inspect a non-deterministically chosen byte in the copy.
         let byte = kani::any_where(|sz: &usize| *sz < size_of::<T>());
+        // Instead of checking each of the `count`-many copies, non-deterministically pick one of
+        // them and check it. Using quantifiers would not add value as we can rely on the solver to
+        // pick an uninitialized element if such an element exists.
         let elem = kani::any_where(|val: &usize| *val < count);
         let src_data = src as *const u8;
         let dst_data = unsafe { dst.add(elem) } as *const u8;

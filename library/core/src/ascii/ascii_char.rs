@@ -479,6 +479,7 @@ impl AsciiChar {
     /// `b` must be in `0..=127`, or else this is UB.
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
+    #[cfg_attr(flux, flux::spec(fn(b: u8{b <= 127}) -> Self))]
     #[requires(b <= 127)]
     #[ensures(|result| *result as u8 == b)]
     pub const unsafe fn from_u8_unchecked(b: u8) -> Self {
@@ -516,6 +517,10 @@ impl AsciiChar {
     /// when writing code using this method, since the implementation doesn't
     /// need something really specific, not to make those other arguments do
     /// something useful. It might be tightened before stabilization.)
+    // Only `d < 64` is required for safety as described above, but we use `d < 10` as
+    // in the `assert_unsafe_precondition` inside. See https://github.com/rust-lang/rust/pull/129374
+    // for some context about the discrepancy.
+    #[cfg_attr(flux, flux::spec(fn(d: u8{d < 10}) -> Self))]
     #[unstable(feature = "ascii_char", issue = "110998")]
     #[inline]
     #[track_caller]
@@ -536,8 +541,8 @@ impl AsciiChar {
     }
 
     /// Gets this ASCII character as a byte.
+    #[cfg_attr(flux, flux::spec(fn (Self) -> u8{v: v <= 127}))]
     #[unstable(feature = "ascii_char", issue = "110998")]
-    #[cfg_attr(flux, flux::spec(fn(Self) -> u8{v: v <= 127}))]
     #[inline]
     pub const fn to_u8(self) -> u8 {
         self as u8
@@ -1164,7 +1169,7 @@ macro_rules! into_int_impl {
     ($($ty:ty)*) => {
         $(
             #[unstable(feature = "ascii_char", issue = "110998")]
-            #[rustc_const_unstable(feature = "const_try", issue = "74935")]
+            #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
             impl const From<AsciiChar> for $ty {
                 #[inline]
                 fn from(chr: AsciiChar) -> $ty {

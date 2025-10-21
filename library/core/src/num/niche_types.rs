@@ -14,6 +14,9 @@ macro_rules! define_valid_range_type {
         $(#[$m:meta])*
         $vis:vis struct $name:ident($int:ident as $uint:ident in $low:literal..=$high:literal);
     )+) => {$(
+        #[cfg_attr(flux, flux::opaque)]
+        #[cfg_attr(flux, flux::refined_by(val: int))]
+        #[cfg_attr(flux, flux::invariant($low <= cast(val) && cast(val) <= $high))]
         #[derive(Clone, Copy, Eq)]
         #[repr(transparent)]
         #[rustc_layout_scalar_valid_range_start($low)]
@@ -33,6 +36,7 @@ macro_rules! define_valid_range_type {
 
         impl $name {
             #[inline]
+            #[cfg_attr(flux, flux::spec(fn (val: $int) -> Option<Self[{val: cast(val)}]>))]
             pub const fn new(val: $int) -> Option<Self> {
                 if (val as $uint) >= ($low as $uint) && (val as $uint) <= ($high as $uint) {
                     // SAFETY: just checked the inclusive range
@@ -49,12 +53,14 @@ macro_rules! define_valid_range_type {
             /// Immediate language UB if `val` is not within the valid range for this
             /// type, as it violates the validity invariant.
             #[inline]
+            #[cfg_attr(flux, flux::spec(fn (val: $int{ $low <= cast(val) && cast(val) <= $high }) -> Self[{val:cast(val)}]))]
             pub const unsafe fn new_unchecked(val: $int) -> Self {
                 // SAFETY: Caller promised that `val` is within the valid range.
                 unsafe { $name(val) }
             }
 
             #[inline]
+            #[cfg_attr(flux, flux::spec(fn (self: Self) -> $int[cast(self.val)] ensures $low <= cast(self.val) && cast(self.val) <= $high))]
             pub const fn as_inner(self) -> $int {
                 // SAFETY: This is a transparent wrapper, so unwrapping it is sound
                 // (Not using `.0` due to MCP#807.)
@@ -177,4 +183,19 @@ impl NotAllOnesHelper for u64 {
 }
 impl NotAllOnesHelper for i64 {
     type Type = I64NotAllOnes;
+}
+
+define_valid_range_type! {
+    pub struct CodePointInner(u32 as u32 in 0..=0x10ffff);
+}
+
+impl CodePointInner {
+    pub const ZERO: Self = CodePointInner::new(0).unwrap();
+}
+
+impl Default for CodePointInner {
+    #[inline]
+    fn default() -> Self {
+        Self::ZERO
+    }
 }

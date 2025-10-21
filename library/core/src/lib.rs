@@ -156,6 +156,7 @@
 #![feature(f128)]
 #![feature(freeze_impls)]
 #![feature(fundamental)]
+#![feature(funnel_shifts)]
 #![feature(if_let_guard)]
 #![feature(intra_doc_pointers)]
 #![feature(intrinsics)]
@@ -172,6 +173,7 @@
 #![feature(no_core)]
 #![feature(optimize_attribute)]
 #![feature(prelude_import)]
+#![feature(reborrow)]
 #![feature(repr_simd)]
 #![feature(rustc_allow_const_fn_unstable)]
 #![feature(rustc_attrs)]
@@ -363,6 +365,8 @@ pub mod hash;
 pub mod slice;
 pub mod str;
 pub mod time;
+
+pub mod wtf8;
 
 pub mod unicode;
 
