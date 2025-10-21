@@ -437,3 +437,8 @@ include!("primitive_docs.rs");
 
 #[cfg(flux)]
 mod flux_info;
+
+#[cfg(rapx)]
+mod rapx_macro {
+    pub use safety_macro::safety;
+}
