@@ -9,6 +9,12 @@
 //! algorithm can be found in "ParseNumberF64 by Simple Decimal Conversion",
 //! available online: <https://nigeltao.github.io/blog/2020/parse-number-f64-simple.html>.
 
+use safety::ensures;
+
+#[cfg(kani)]
+use crate::forall;
+#[cfg(kani)]
+use crate::kani;
 use crate::num::dec2flt::common::{ByteSlice, is_8digits};
 
 /// A decimal floating-point number, represented as a sequence of decimal digits.
@@ -83,6 +89,7 @@ impl DecimalSeq {
         //
         // Trim is only called in `right_shift` and `left_shift`.
         debug_assert!(self.num_digits <= Self::MAX_DIGITS);
+        #[cfg_attr(kani, kani::loop_invariant(self.num_digits <= Self::MAX_DIGITS))]
         while self.num_digits != 0 && self.digits[self.num_digits - 1] == 0 {
             self.num_digits -= 1;
         }
@@ -98,6 +105,7 @@ impl DecimalSeq {
         let dp = self.decimal_point as usize;
         let mut n = 0_u64;
 
+        #[cfg_attr(kani, kani::loop_invariant(n < 10u64.pow(kani::index as u32)))]
         for i in 0..dp {
             n *= 10;
             if i < self.num_digits {
@@ -130,6 +138,14 @@ impl DecimalSeq {
         let mut write_index = self.num_digits + num_new_digits;
         let mut n = 0_u64;
 
+        #[cfg_attr(kani, kani::loop_invariant(read_index <= Self::MAX_DIGITS &&
+            write_index == read_index + num_new_digits &&
+            n < 10u64 << (shift - 1) &&
+            (n == 0 || (shift & 63) <= 3 || (shift & 63) >= 61 || write_index > 0) &&
+            self.num_digits <= Self::MAX_DIGITS &&
+            self.decimal_point <= self.num_digits as i32 &&
+            forall!(|i in (0,DecimalSeq::MAX_DIGITS)| self.digits[i] <= 9)
+        ))]
         while read_index != 0 {
             read_index -= 1;
             write_index -= 1;
@@ -144,7 +160,14 @@ impl DecimalSeq {
             n = quotient;
         }
 
+        #[cfg_attr(kani, kani::loop_invariant(self.num_digits <= Self::MAX_DIGITS && self.decimal_point <= self.num_digits as i32))]
+        // TODO: should add invariant along the lines of
+        // (n == 0 || write_index > 0) && (prev(n) as usize + 9) / 10 <= prev(write_index))]
+        // to avoid the below kani::assume
         while n > 0 {
+            // true but hard to write proof with kani currently
+            #[cfg(kani)]
+            kani::assume(write_index > 0);
             write_index -= 1;
             let quotient = n / 10;
             let remainder = n - (10 * quotient);
@@ -171,6 +194,7 @@ impl DecimalSeq {
         let mut read_index = 0;
         let mut write_index = 0;
         let mut n = 0_u64;
+        #[cfg_attr(kani, kani::loop_invariant( n == 0 || (read_index > 0 && read_index <= self.num_digits + 64 - n.leading_zeros() as usize)))]
         while (n >> shift) == 0 {
             if read_index < self.num_digits {
                 n = (10 * n) + self.digits[read_index] as u64;
@@ -178,6 +202,7 @@ impl DecimalSeq {
             } else if n == 0 {
                 return;
             } else {
+                #[cfg_attr(kani, kani::loop_invariant(n > 0 && read_index <= self.num_digits + 64 - n.leading_zeros() as usize && read_index > 0))]
                 while (n >> shift) == 0 {
                     n *= 10;
                     read_index += 1;
@@ -194,6 +219,10 @@ impl DecimalSeq {
             return;
         }
         let mask = (1_u64 << shift) - 1;
+        #[cfg_attr(kani, kani::loop_invariant(self.num_digits <= Self::MAX_DIGITS &&
+            write_index < read_index &&
+            write_index < Self::MAX_DIGITS - self.num_digits.saturating_sub(read_index)
+        ))]
         while read_index < self.num_digits {
             let new_digit = (n >> shift) as u8;
             n = (10 * (n & mask)) + self.digits[read_index] as u64;
@@ -201,6 +230,7 @@ impl DecimalSeq {
             self.digits[write_index] = new_digit;
             write_index += 1;
         }
+        #[cfg_attr(kani, kani::loop_invariant(write_index <= Self::MAX_DIGITS))]
         while n > 0 {
             let new_digit = (n >> shift) as u8;
             n = 10 * (n & mask);
@@ -297,6 +327,7 @@ pub fn parse_decimal_seq(mut s: &[u8]) -> DecimalSeq {
     d
 }
 
+#[safety::ensures(|result| (shift & 63) <= 3 || (shift & 63) >= 61 || *result > 0)]
 fn number_of_digits_decimal_left_shift(d: &DecimalSeq, mut shift: usize) -> usize {
     #[rustfmt::skip]
     const TABLE: [u16; 65] = [
@@ -363,6 +394,7 @@ fn number_of_digits_decimal_left_shift(d: &DecimalSeq, mut shift: usize) -> usiz
     let pow5_b = (0x7FF & x_b) as usize;
     let pow5 = &TABLE_POW5[pow5_a..];
 
+    #[cfg_attr(kani, kani::loop_invariant(num_new_digits > 1 || shift <= 3 || shift >= 61))]
     for (i, &p5) in pow5.iter().enumerate().take(pow5_b - pow5_a) {
         if i >= d.num_digits {
             return num_new_digits - 1;
@@ -376,4 +408,56 @@ fn number_of_digits_decimal_left_shift(d: &DecimalSeq, mut shift: usize) -> usiz
     }
 
     num_new_digits
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod decimal_seq_verify {
+    use super::*;
+
+    impl kani::Arbitrary for DecimalSeq {
+        fn any() -> DecimalSeq {
+            let mut ret = DecimalSeq {
+                num_digits: kani::any_where(|x| *x <= DecimalSeq::MAX_DIGITS),
+                decimal_point: kani::any_where(|x| *x >= 0),
+                truncated: kani::any(),
+                digits: kani::any(),
+            };
+            kani::assume(ret.decimal_point <= ret.num_digits as i32);
+            kani::assume(forall!(|i in (0,DecimalSeq::MAX_DIGITS)| ret.digits[i] <= 9));
+            ret
+        }
+    }
+
+    #[kani::proof]
+    fn check_round() {
+        let mut a: DecimalSeq = kani::any();
+        a.round();
+    }
+
+    #[kani::proof]
+    fn check_number_of_digits_decimal_left_shift() {
+        let mut a: DecimalSeq = kani::any();
+        let shift: usize = kani::any_where(|x| *x > 0 && *x <= 60);
+        let n = number_of_digits_decimal_left_shift(&a, shift);
+        // 19 is the greatest number x such that 10u64^x does not overflow
+        // It is also TABLE.max << 11
+        assert!(n <= 19);
+        assert!(n == 19 || 1u64 << shift < 10u64.pow(n as u32 + 1))
+    }
+
+    #[kani::proof]
+    fn check_right_shift() {
+        let mut a: DecimalSeq = kani::any();
+        //This function is called in parse_long_mantissa function (slow.rs), in which the maximum of shift is 60
+        let shift: usize = kani::any_where(|x| *x > 0 && *x <= 60);
+        a.right_shift(shift);
+    }
+
+    #[kani::proof]
+    fn check_left_shift() {
+        let mut a: DecimalSeq = kani::any();
+        let shift: usize = kani::any_where(|x| *x > 0 && *x <= 60);
+        a.left_shift(shift);
+    }
 }

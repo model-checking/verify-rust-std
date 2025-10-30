@@ -84,7 +84,7 @@ REPO_URL=${KANI_REPO_URL:-$DEFAULT_REPO_URL}
 BRANCH_NAME=${KANI_BRANCH_NAME:-$DEFAULT_BRANCH_NAME}
 
 # Unstable arguments to pass to Kani
-unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts -Z stubbing"
+unstable_args="-Z function-contracts -Z mem-predicates -Z float-lib -Z c-ffi -Z loop-contracts -Z quantifiers -Z stubbing"
 
 # Variables used for parallel harness verification
 # When we say "parallel," we mean two dimensions of parallelization:

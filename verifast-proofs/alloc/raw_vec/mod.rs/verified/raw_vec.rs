@@ -465,7 +465,7 @@ impl RawVecInner<Global> {
 }
 
 // Tiny Vecs are dumb. Skip to:
-// - 8 if the element size is 1, because any heap allocators is likely
+// - 8 if the element size is 1, because any heap allocator is likely
 //   to round up a request of less than 8 bytes to at least 8 bytes.
 // - 4 if elements are moderate-sized (<= 1 KiB).
 // - 1 otherwise, to avoid wasting too much space for very short Vecs.
@@ -1134,11 +1134,6 @@ impl<A: Allocator> RawVecInner<A> {
             return Ok(r);
         }
         
-        if let Err(err) = alloc_guard(layout.size()) {
-            //@ std::alloc::Allocator_to_own(alloc);
-            return Err(err);
-        }
-
         let result = match init {
             AllocInit::Uninitialized => {
                 let r;
@@ -1638,7 +1633,7 @@ impl<A: Allocator> RawVecInner<A> {
                 core::ops::FromResidual::from_residual(residual)
             }
             core::ops::ControlFlow::Continue(ptr) => {
-                // SAFETY: finish_grow would have resulted in a capacity overflow if we tried to allocate more than `isize::MAX` items
+                // SAFETY: layout_array would have resulted in a capacity overflow if we tried to allocate more than `isize::MAX` items
                 unsafe {
                     self.set_ptr_and_cap(ptr, cap);
                     //@ let self1 = *self;
@@ -1737,7 +1732,7 @@ impl<A: Allocator> RawVecInner<A> {
                 core::ops::FromResidual::from_residual(residual)
             }
             core::ops::ControlFlow::Continue(ptr) => {
-                // SAFETY: finish_grow would have resulted in a capacity overflow if we tried to allocate more than `isize::MAX` items
+                // SAFETY: layout_array would have resulted in a capacity overflow if we tried to allocate more than `isize::MAX` items
                 unsafe {
                     //@ assert Layout::size_(new_layout) == Layout::size_(elem_layout) * cap;
                     //@ mul_mono_l(1, Layout::size_(elem_layout), cap);
@@ -2015,8 +2010,6 @@ ens thread_token(t) &*& *alloc |-> ?alloc1 &*& Allocator(t, alloc1, alloc_id) &*
 @*/
 //@ safety_proof { assume(false); }
 {
-    alloc_guard(new_layout.size())?;
-
     let memory = if let Some((ptr, old_layout)) = current_memory {
         // debug_assert_eq!(old_layout.align(), new_layout.align());
         if cfg!(debug_assertions) { //~allow_dead_code // FIXME: The source location associated
@@ -2085,33 +2078,6 @@ fn handle_error(e: TryReserveError) -> !
     match e.kind() {
         CapacityOverflow => capacity_overflow(),
         AllocError { layout, .. } => handle_alloc_error(layout),
-    }
-}
-
-// We need to guarantee the following:
-// * We don't ever allocate `> isize::MAX` byte-size objects.
-// * We don't overflow `usize::MAX` and actually allocate too little.
-//
-// On 64-bit we just need to check for overflow since trying to allocate
-// `> isize::MAX` bytes will surely fail. On 32-bit and 16-bit we need to add
-// an extra guard for this in case we're running on a platform which can use
-// all 4GB in user-space, e.g., PAE or x32.
-#[inline]
-fn alloc_guard(alloc_size: usize) -> Result<(), TryReserveError>
-//@ req thread_token(currentThread);
-/*@
-ens thread_token(currentThread) &*&
-    match result {
-        Result::Ok(dummy) => true,
-        Result::Err(err) => <std::collections::TryReserveError>.own(currentThread, err)
-    };
-@*/
-//@ safety_proof { assume(false); }
-{
-    if usize::BITS < 64 && alloc_size > isize::MAX as usize { //~allow_dead_code
-        Err(CapacityOverflow.into()) //~allow_dead_code
-    } else {
-        Ok(())
     }
 }
 

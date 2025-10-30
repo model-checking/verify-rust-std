@@ -6,9 +6,14 @@
 //!
 //! Do not modify them without understanding the consequences for the format_args!() macro.
 
+use safety::requires;
+
 use super::*;
 use crate::hint::unreachable_unchecked;
+#[cfg(kani)]
+use crate::kani;
 use crate::ptr::NonNull;
+use crate::ub_checks::Invariant;
 
 #[lang = "format_placeholder"]
 #[derive(Copy, Clone)]
@@ -161,6 +166,7 @@ impl Argument<'_> {
     ///
     /// This argument must actually be a placeholder argument.
     #[inline]
+    #[requires(matches!(self.ty, ArgumentType::Placeholder { .. }))]
     pub(super) unsafe fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self.ty {
             // SAFETY:
@@ -228,6 +234,7 @@ impl<'a> Arguments<'a> {
     /// const _: () = if false { panic!("a {:1}", "a") };
     /// ```
     #[inline]
+    #[requires(pieces.len() >= fmt.len())]
     pub unsafe fn new_v1_formatted(
         pieces: &'a [&'static str],
         args: &'a [rt::Argument<'a>],

@@ -1441,10 +1441,9 @@ impl<T: PointeeSized> NonNull<T> {
         if (align % stride == 0) && (self.pointer.addr() % stride != 0) {
             return *result == usize::MAX;
         }
-        // Checking if the answer should indeed be usize::MAX when align % stride != 0
-        // requires computing gcd(a, stride), which is too expensive without
-        // quantifiers (https://model-checking.github.io/kani/rfc/rfcs/0010-quantifiers.html).
-        // This should be updated once quantifiers are available.
+        // Checking if the answer should indeed be usize::MAX when a % stride != 0 requires
+        // computing gcd(align, stride), which could be done using cttz as the implementation of
+        // ptr::align_offset does.
         if (align % stride != 0 && *result == usize::MAX) {
             return true;
         }
@@ -1911,7 +1910,8 @@ impl<T: PointeeSized> hash::Hash for NonNull<T> {
 }
 
 #[unstable(feature = "ptr_internals", issue = "none")]
-impl<T: PointeeSized> From<Unique<T>> for NonNull<T> {
+#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+impl<T: PointeeSized> const From<Unique<T>> for NonNull<T> {
     #[inline]
     fn from(unique: Unique<T>) -> Self {
         unique.as_non_null_ptr()
@@ -1919,7 +1919,8 @@ impl<T: PointeeSized> From<Unique<T>> for NonNull<T> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: PointeeSized> From<&mut T> for NonNull<T> {
+#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+impl<T: PointeeSized> const From<&mut T> for NonNull<T> {
     /// Converts a `&mut T` to a `NonNull<T>`.
     ///
     /// This conversion is safe and infallible since references cannot be null.
@@ -1930,7 +1931,8 @@ impl<T: PointeeSized> From<&mut T> for NonNull<T> {
 }
 
 #[stable(feature = "nonnull", since = "1.25.0")]
-impl<T: PointeeSized> From<&T> for NonNull<T> {
+#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+impl<T: PointeeSized> const From<&T> for NonNull<T> {
     /// Converts a `&T` to a `NonNull<T>`.
     ///
     /// This conversion is safe and infallible since references cannot be null.
