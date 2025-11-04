@@ -1,5 +1,10 @@
 //! This file contains auxiliary definitions for Flux
 
+
+use crate::hash;
+use crate::time;
+
+
 /// List of properties tracked for the result of primitive bitwise operations.
 /// See the following link for more information on how extensible properties for primitive operations work:
 /// <https://flux-rs.github.io/flux/guide/specifications.html#extensible-properties-for-primitive-ops>
@@ -65,26 +70,28 @@
               ntail: usize{v: v <= 8}, // how many bytes in tail are valid
               _marker: PhantomData<S>,
             }
+
+            impl hash::Hasher for Hasher {
+                fn write(self: &mut Self, msg: &[u8]) ensures self: Self; // mut-ref-unfolding
+            }
         }
 
         impl BuildHasherDefault {
             #[trusted(reason="https://github.com/flux-rs/flux/issues/1185")]
             fn new() -> Self;
         }
+
+        impl clone::Clone for BuildHasherDefault {
+            #[trusted(reason="https://github.com/flux-rs/flux/issues/1185")]
+            fn clone(self: &Self) -> Self;
+        }
     }
 
-    impl Hasher for hash::sip::Hasher {
-        fn write(self: &mut Self, msg: &[u8]) ensures self: Self; // mut-ref-unfolding
-    }
-
-    impl Clone for hash::BuildHasherDefault {
-        #[trusted(reason="https://github.com/flux-rs/flux/issues/1185")]
-        fn clone(self: &Self) -> Self;
-    }
-
-    impl Debug for time::Duration {
-        #[trusted(reason="modular arithmetic invariant inside nested fmt_decimal")]
-        fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result;
+    mod time {
+        impl fmt::Debug for Duration {
+            #[trusted(reason="modular arithmetic invariant inside nested fmt_decimal")]
+            fn fmt(self: &Self, f: &mut fmt::Formatter) -> fmt::Result;
+        }
     }
 }]
 const _: () = {};
