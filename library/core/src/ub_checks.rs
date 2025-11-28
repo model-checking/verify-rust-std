@@ -193,7 +193,7 @@ pub use predicates::*;
 #[cfg(not(kani))]
 mod predicates {
     /// Checks if a pointer can be dereferenced, ensuring:
-    ///   * `src` is valid for reads (see [`crate::ptr`] documentation).
+    ///   * `src` is valid for reads and writes (see [`crate::ptr`] documentation).
     ///   * `src` is properly aligned (use `read_unaligned` if not).
     ///   * `src` points to a properly initialized value of type `T`.
     ///
