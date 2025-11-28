@@ -196,7 +196,7 @@ lem RawVecInner_send<A>(t1: thread_id_t)
     close RawVecInner_own::<A>(t1, v);
 }
 
-lem_auto RawVecInner_inv<A>()
+lem_auto RawVecInner_inv<A: ?Sized>()
     req RawVecInner::<A>(?t, ?self_, ?elemLayout, ?alloc_id, ?ptr, ?capacity);
     ens RawVecInner::<A>(t, self_, elemLayout, alloc_id, ptr, capacity) &*&
         ptr != 0 &*& ptr as usize % elemLayout.align() == 0 &*&
@@ -954,7 +954,7 @@ impl<T, A: Allocator> RawVec<T, A> {
     /// an allocator could overallocate and return a greater memory block than requested.
     pub(crate) unsafe fn into_box(self, len: usize) -> Box<[MaybeUninit<T>], A>
     //@ req thread_token(?t) &*& RawVec(t, self, ?alloc_id, ?ptr, len) &*& array_at_lft_(alloc_id.lft, ptr as *T, len, ?vs);
-    //@ ens thread_token(t) &*& std::boxed::Box_slice_in::<std::mem::MaybeUninit<T>, A>(t, result, alloc_id, map(std::mem::MaybeUninit::new_maybe_uninit, vs));
+    //@ ens thread_token(t) &*& std::boxed::Box_in::<[std::mem::MaybeUninit<T>], A>(t, result, alloc_id, slice_of_elems(map(std::mem::MaybeUninit::new_maybe_uninit, vs)));
     //@ on_unwind_ens thread_token(t);
     {
         // Sanity-check one half of the safety requirement (we cannot check the other half).
@@ -1005,11 +1005,12 @@ impl<T, A: Allocator> RawVec<T, A> {
             //@ close_points_to(me_ref1, 1/2);
             //@ end_ref_readonly(me_ref1);
             //@ open_points_to(&me);
-            //@ std::mem::array_at_lft__to_array_at_lft_MaybeUninit(slice.ptr as *T);
+            //@ std::mem::array_at_lft__to_array_at_lft_MaybeUninit(slice as *T);
             //@ open RawVec(_, _, _, _, _);
             //@ open RawVecInner(_, _, _, _, _, _);
             //@ size_align::<T>();
             //@ if len * std::mem::size_of::<T>() != 0 { std::alloc::Layout_repeat_some_size_aligned(Layout::new::<T>(), len); }
+            //@ close_points_to_slice_at_lft(slice);
             Box::from_raw_in(slice, alloc)
         }
     }
@@ -1090,6 +1091,7 @@ impl<T, A: Allocator> RawVec<T, A> {
         // SAFETY: Precondition passed to the caller
         unsafe {
             let ptr = ptr.cast();
+            //@ std::ptr::NonNull_Sized_as_ptr(ptr);
             //@ std::alloc::Layout_inv(Layout::new::<T>());
             /*@
             if 1 <= std::mem::size_of::<T>() && capacity != 0 {
@@ -1538,10 +1540,10 @@ impl<A: Allocator> RawVecInner<A> {
                 RawVecInner(t, v, elem_layout, alloc_id, ?ptr, ?capacity_) &*&
                 capacity <= capacity_ &*&
                 match init {
-                    raw_vec::AllocInit::Uninitialized =>
+                    AllocInit::Uninitialized =>
                         array_at_lft_(alloc_id.lft, ptr, ?n, _) &*&
                         elem_layout.size() % elem_layout.align() != 0 || n == capacity_ * elem_layout.size(),
-                    raw_vec::AllocInit::Zeroed =>
+                    AllocInit::Zeroed =>
                         array_at_lft(alloc_id.lft, ptr, ?n, ?bs) &*&
                         elem_layout.size() % elem_layout.align() != 0 || n == capacity_ * elem_layout.size() &*&
                         forall(bs, (eq)(0)) == true
@@ -1564,8 +1566,8 @@ impl<A: Allocator> RawVecInner<A> {
                 close RawVecInner0(r, elem_layout, ptr, capacity_);
                 close <RawVecInner<A>>.own(_t, r);
                 match init {
-                    raw_vec::AllocInit::Uninitialized => { leak array_at_lft_(_, _, _, _); }
-                    raw_vec::AllocInit::Zeroed => { leak array_at_lft(_, _, _, _); }
+                    AllocInit::Uninitialized => { leak array_at_lft_(_, _, _, _); }
+                    AllocInit::Zeroed => { leak array_at_lft(_, _, _, _); }
                 }
             }
             Result::Err(e) => { }
@@ -1604,8 +1606,8 @@ impl<A: Allocator> RawVecInner<A> {
             //@ mul_zero(capacity, elem_layout.size());
             /*@
             match init {
-                raw_vec::AllocInit::Uninitialized => { close array_at_lft_(alloc_id.lft, ptr_, 0, []); }
-                raw_vec::AllocInit::Zeroed => { close array_at_lft(alloc_id.lft, ptr_, 0, []); }
+                AllocInit::Uninitialized => { close array_at_lft_(alloc_id.lft, ptr_, 0, []); }
+                AllocInit::Zeroed => { close array_at_lft(alloc_id.lft, ptr_, 0, []); }
             }
             @*/
             return Ok(r);
@@ -1684,8 +1686,8 @@ impl<A: Allocator> RawVecInner<A> {
             cap: unsafe { Cap::new_unchecked(capacity) },
             alloc,
         };
-        //@ std::alloc::alloc_block_in_aligned(ptr.ptr.as_ptr());
-        //@ close RawVecInner(t, res, elem_layout, alloc_id, ptr.ptr.as_ptr(), _);
+        //@ std::alloc::alloc_block_in_aligned(ptr.as_ptr() as *u8);
+        //@ close RawVecInner(t, res, elem_layout, alloc_id, ptr.as_ptr() as *u8, _);
         Ok(res)
     }
 
@@ -1936,7 +1938,6 @@ impl<A: Allocator> RawVecInner<A> {
                 <std::collections::TryReserveError>.own(t, e)
         };
     @*/
-    //@ safety_proof { assume(false); } // This function should be marked `unsafe`; see https://github.com/rust-lang/rust/pull/145067
     {
         //@ let k = begin_lifetime();
         //@ share_RawVecInner(k, self);
@@ -2019,7 +2020,6 @@ impl<A: Allocator> RawVecInner<A> {
                 <std::collections::TryReserveError>.own(t, e)
         };
     @*/
-    //@ safety_proof { assume(false); } // This function should be marked `unsafe`; see https://github.com/rust-lang/rust/pull/145067
     {
         //@ let k = begin_lifetime();
         //@ share_RawVecInner(k, self);
@@ -2100,9 +2100,9 @@ impl<A: Allocator> RawVecInner<A> {
     #[inline]
     unsafe fn set_ptr_and_cap(&mut self, ptr: NonNull<[u8]>, cap: usize)
     //@ req (*self).ptr |-> _ &*& (*self).cap |-> _ &*& cap <= isize::MAX;
-    //@ ens (*self).ptr |-> Unique::from_non_null::<u8>(ptr.ptr) &*& (*self).cap |-> UsizeNoHighBit::new(cap);
+    //@ ens (*self).ptr |-> Unique::from_non_null::<u8>(ptr.as_non_null_ptr()) &*& (*self).cap |-> UsizeNoHighBit::new(cap);
     {
-        //@ std::ptr::NonNull_new_as_ptr(ptr.ptr);
+        //@ std::ptr::NonNull_new_as_ptr(ptr.as_non_null_ptr());
         // Allocators currently return a `NonNull<[u8]>` whose length matches
         // the size requested. If that ever changes, the capacity here should
         // change to `ptr.len() / size_of::<T>()`.
@@ -2144,7 +2144,6 @@ impl<A: Allocator> RawVecInner<A> {
                 <std::collections::TryReserveError>.own(t, e)
         };
     @*/
-    //@ safety_proof { assume(false); } // This function should be marked `unsafe`; see https://github.com/rust-lang/rust/pull/145067
     {
         // This is ensured by the calling contexts.
         if cfg!(debug_assertions) { //~allow_dead_code // FIXME: The source location associated with a dead `else` branch is the entire `if` statement :-(
@@ -2229,7 +2228,7 @@ impl<A: Allocator> RawVecInner<A> {
                 unsafe {
                     self.set_ptr_and_cap(ptr, cap);
                     //@ let self1 = *self;
-                    //@ std::alloc::alloc_block_in_aligned(ptr.ptr.as_ptr());
+                    //@ std::alloc::alloc_block_in_aligned(ptr.as_ptr() as *u8);
                     //@ std::num::niche_types::UsizeNoHighBit_as_inner_new(cap);
                     //@ mul_zero(elem_layout.size(), cap);
                     //@ assert 0 <= self0.cap.as_inner();
@@ -2277,7 +2276,6 @@ impl<A: Allocator> RawVecInner<A> {
                 <std::collections::TryReserveError>.own(t, e)
         };
     @*/
-    //@ safety_proof { assume(false); } // This function should be marked `unsafe`; see https://github.com/rust-lang/rust/pull/145067
     {
         if elem_layout.size() == 0 {
             // Since we return a capacity of `usize::MAX` when the type size is
@@ -2348,7 +2346,7 @@ impl<A: Allocator> RawVecInner<A> {
                     //@ mul_mono_l(1, elem_layout.size(), cap);
                     self.set_ptr_and_cap(ptr, cap);
                     //@ let self1 = *self;
-                    //@ std::alloc::alloc_block_in_aligned(ptr.ptr.as_ptr());
+                    //@ std::alloc::alloc_block_in_aligned(ptr.as_ptr() as *u8);
                     //@ std::num::niche_types::UsizeNoHighBit_as_inner_new(cap);
                     //@ mul_zero(elem_layout.size(), cap);
                     //@ assert 0 <= self0.cap.as_inner();
@@ -2537,7 +2535,7 @@ impl<A: Allocator> RawVecInner<A> {
             unsafe {
                 //@ std::num::niche_types::UsizeNoHighBit_inv(self01.cap);
                 self.set_ptr_and_cap(ptr, cap);
-                //@ std::alloc::alloc_block_in_aligned(ptr_1.ptr.as_ptr());
+                //@ std::alloc::alloc_block_in_aligned(ptr_1.as_ptr() as *u8);
                 //@ mul_zero(cap, elem_layout.size());
                 //@ std::alloc::Layout_repeat_size_aligned_intro(elem_layout, cap);
                 //@ close RawVecInner(t, *self, elem_layout, alloc_id, _, _);
@@ -2631,8 +2629,8 @@ req thread_token(?t) &*& t == currentThread &*&
 ens thread_token(t) &*& *alloc |-> ?alloc1 &*& Allocator(t, alloc1, alloc_id) &*&
     match result {
         Result::Ok(ptr) =>
-            alloc_block_in(alloc_id, ptr.ptr.as_ptr(), new_layout) &*&
-            array_at_lft_(alloc_id.lft, ptr.ptr.as_ptr(), new_layout.size(), _) &*&
+            alloc_block_in(alloc_id, ptr.as_ptr() as *u8, new_layout) &*&
+            array_at_lft_(alloc_id.lft, ptr.as_ptr() as *u8, new_layout.size(), _) &*&
             new_layout.size() <= isize::MAX,
         Result::Err(e) =>
             match current_memory {
@@ -2644,7 +2642,6 @@ ens thread_token(t) &*& *alloc |-> ?alloc1 &*& Allocator(t, alloc1, alloc_id) &*
             <std::collections::TryReserveError>.own(currentThread, e)
     };
 @*/
-//@ safety_proof { assume(false); } // This function should be marked `unsafe`; see https://github.com/rust-lang/rust/pull/145067
 {
     let memory = if let Some((ptr, old_layout)) = current_memory {
         // debug_assert_eq!(old_layout.align(), new_layout.align());

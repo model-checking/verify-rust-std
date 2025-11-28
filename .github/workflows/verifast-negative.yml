@@ -30,16 +30,16 @@ jobs:
       - name: Install VeriFast
         run: |
           cd ~
-          curl -OL https://github.com/verifast/verifast/releases/download/25.08/verifast-25.08-linux.tar.gz
-          # https://github.com/verifast/verifast/attestations/10123891
-          echo '1e40019d6add91bf72141c86f4007f2fe1eef67f453cb7fb8f1f5ab7d31d509f  verifast-25.08-linux.tar.gz' | shasum -a 256 -c
-          tar xf verifast-25.08-linux.tar.gz
+          curl -OL https://github.com/verifast/verifast/releases/download/25.11/verifast-25.11-linux.tar.gz
+          # https://github.com/verifast/verifast/attestations/14103492
+          echo '990c3cadba7cfc9ef9c19d5f1ff039fd746155164fe4a5ec365c625182400f3e  verifast-25.11-linux.tar.gz' | shasum -a 256 -c
+          tar xf verifast-25.11-linux.tar.gz
 
       - name: Install the Rust toolchain used by VeriFast
-        run: rustup toolchain install nightly-2025-04-09
+        run: rustup toolchain install nightly-2025-10-09
 
       - name: Run VeriFast Verification
         run: |
-          export PATH=~/verifast-25.08/bin:$PATH
+          export PATH=~/verifast-25.11/bin:$PATH
           cd verifast-proofs
           bash check-verifast-proofs-negative.sh
