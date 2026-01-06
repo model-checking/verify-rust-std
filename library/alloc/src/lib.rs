@@ -93,6 +93,7 @@
 // Library features:
 // tidy-alphabetical-start
 #![cfg_attr(kani, feature(kani))]
+#![cfg_attr(kani, feature(proc_macro_hygiene))]
 #![feature(alloc_layout_extra)]
 #![feature(allocator_api)]
 #![feature(array_into_iter_constructors)]
