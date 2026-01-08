@@ -46,8 +46,10 @@ For functions taking inputs of generic type 'T', the proofs can be limited to pr
 *List of UBs*
 
 In addition to any properties called out as SAFETY comments in the source code, all proofs must automatically ensure the absence of the following [undefined behaviors](https://github.com/rust-lang/reference/blob/142b2ed77d33f37a9973772bd95e6144ed9dce43/src/behavior-considered-undefined.md):
-
 * Accessing (loading from or storing to) a place that is dangling or based on a misaligned pointer.
 * Invoking undefined behavior via compiler intrinsics.
 * Mutating immutable bytes.
 * Producing an invalid value.
+
+Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](../general-rules.md)
+in addition to the ones listed above.
