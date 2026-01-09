@@ -16,9 +16,7 @@ The goal of this challenge is to verify the [boxed](https://doc.rust-lang.org/st
 
 ## Motivation
 
-A Box allows the storage of data on the heap rather than the stack. This has several applications, a common example being for using dynamically-sized types in contexts requiring an exact size (e.g., recursive types). While this type is useful and diverse in its applications, it also extensively uses unsafe code, meaning it is important to verify that this module is free of undefined behaviour.
-
-Using Box<T> to Point to Data on the Heap - The Rust Programming Language
+A Box allows the storage of data on the heap rather than the stack. This has several applications, a common [example](https://doc.rust-lang.org/book/ch15-01-box.html#enabling-recursive-types-with-boxes) being for using dynamically-sized types in contexts requiring an exact size (e.g., recursive types). While this type is useful and diverse in its applications, it also extensively uses unsafe code, meaning it is important to verify that this module is free of undefined behaviour.
 
 ### Success Criteria
 
