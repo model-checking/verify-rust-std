@@ -26,20 +26,20 @@ All of the functions targeted in this challenge are safe functions whose bodies 
 
 The following functions contain unsafe code in their bodies but are not themselves marked unsafe. All of these should be proven unconditionally safe, or safety contracts should be added:
 
-| Function | Defined in |
+| Function | Location |
 |---------|---------|
-| `digits_to_dec_str` | `mod.rs` |
-| `digits_to_exp_str` | `mod.rs` |
-| `to_shortest_str` | `mod.rs` |
-| `to_shortest_exp_str` | `mod.rs` |
-| `to_exact_exp_str` | `mod.rs` |
-| `to_exact_fixed_str` | `mod.rs` |
-| `format_shortest_opt` | `strategy/grisu.rs` |
-| `format_shortest` | `strategy/grisu.rs` |
-| `format_exact_opt` | `strategy/grisu.rs` |
-| `format_exact` | `strategy/grisu.rs` |
-| `format_shortest` | `strategy/dragon.rs` |
-| `format_exact` | `strategy/dragon.rs` |
+| `digits_to_dec_str` | `flt2dec` |
+| `digits_to_exp_str` | `flt2dec` |
+| `to_shortest_str` | `flt2dec` |
+| `to_shortest_exp_str` | `flt2dec` |
+| `to_exact_exp_str` | `flt2dec` |
+| `to_exact_fixed_str` | `flt2dec` |
+| `format_shortest_opt` | `flt2dec::strategy::grisu` |
+| `format_shortest` | `flt2dec::strategy::grisu` |
+| `format_exact_opt` | `flt2dec::strategy::grisu` |
+| `format_exact` | `flt2dec::strategy::grisu` |
+| `format_shortest` | `flt2dec::strategy::dragon` |
+| `format_exact` | `flt2dec::strategy::dragon` |
 
 For functions taking inputs of generic type 'T', the proofs can be limited to primitive types only.
 
