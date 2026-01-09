@@ -1,4 +1,4 @@
-# Challenge 29: Safety of Boxed
+# Challenge 29: Safety of boxed
 
 - **Status:** *Open*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
