@@ -2,7 +2,7 @@
 
 - **Status:** *Open*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
-- **Tracking Issue:** *Link to issue*
+- **Tracking Issue:** [#526](https://github.com/model-checking/verify-rust-std/issues/526)
 - **Start date:** *2026/01/01*
 - **End date:** *2026/12/31*
 - **Reward:** *15,000 USD*
