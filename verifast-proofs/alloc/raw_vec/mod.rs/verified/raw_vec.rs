@@ -2114,8 +2114,7 @@ impl<A: Allocator> RawVecInner<A> {
     /// - `elem_layout` must be valid for `self`, i.e. it must be the same `elem_layout` used to
     ///   initially construct `self`
     /// - `elem_layout`'s size must be a multiple of its alignment
-    /// - The sum of `len` and `additional` must be greater than or equal to
-    ///   `self.capacity(elem_layout.size())`
+    /// - The sum of `len` and `additional` must be greater than the current capacity
     unsafe fn grow_amortized(
         &mut self,
         len: usize,
@@ -2246,8 +2245,7 @@ impl<A: Allocator> RawVecInner<A> {
     /// - `elem_layout` must be valid for `self`, i.e. it must be the same `elem_layout` used to
     ///   initially construct `self`
     /// - `elem_layout`'s size must be a multiple of its alignment
-    /// - The sum of `len` and `additional` must be greater than or equal to
-    ///   `self.capacity(elem_layout.size())`
+    /// - The sum of `len` and `additional` must be greater than the current capacity
     unsafe fn grow_exact(
         &mut self,
         len: usize,
@@ -2288,7 +2286,6 @@ impl<A: Allocator> RawVecInner<A> {
         //@ close <std::collections::TryReserveErrorKind>.own(t, std::collections::TryReserveErrorKind::CapacityOverflow);
         let cap = len.checked_add(additional).ok_or(CapacityOverflow)?;
         //@ leak <std::collections::TryReserveErrorKind>.own(t, std::collections::TryReserveErrorKind::CapacityOverflow);
-        let new_layout = layout_array(cap, elem_layout)?;
         //@ std::alloc::Layout_repeat_some_size_aligned(elem_layout, cap);
 
         //@ let k = begin_lifetime();
@@ -2307,6 +2304,35 @@ impl<A: Allocator> RawVecInner<A> {
         
         //@ open RawVecInner(t, *self, elem_layout, alloc_id, ptr0, capacity0);
         //@ let ptr0_ = (*self).ptr;
+    /// - `cap` must be greater than the current capacity
+    // not marked inline(never) since we want optimizers to be able to observe the specifics of this
+    // function, see tests/codegen-llvm/vec-reserve-extend.rs.
+    #[cold]
+    unsafe fn finish_grow(
+        &self,
+        cap: usize,
+        elem_layout: Layout,
+    ) -> Result<NonNull<[u8]>, TryReserveError> {
+        let new_layout = layout_array(cap, elem_layout)?;
+
+        let memory = if let Some((ptr, old_layout)) = unsafe { self.current_memory(elem_layout) } {
+            debug_assert_eq!(old_layout.align(), new_layout.align());
+            unsafe {
+                // The allocator checks for alignment equality
+                hint::assert_unchecked(old_layout.align() == new_layout.align());
+                self.alloc.grow(ptr, old_layout, new_layout)
+            }
+        } else {
+            self.alloc.allocate(new_layout)
+        };
+
+        memory.map_err(|_| AllocError { layout: new_layout, non_exhaustive: () }.into())
+    }
+
+    /// # Safety
+    /// - `elem_layout` must be valid for `self`, i.e. it must be the same `elem_layout` used to
+    ///   initially construct `self`
+    /// - `elem_layout`'s size must be a multiple of its alignment
         //@ let cap0_ = (*self).cap;
         //@ assert ptr0_.as_non_null_ptr().as_ptr() == ptr0;
         //@ std::alloc::Layout_inv(elem_layout);

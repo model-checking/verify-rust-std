@@ -882,7 +882,8 @@ impl<T> Clone for Iter<'_, T> {
 ///
 /// This `struct` is created by [`LinkedList::iter_mut()`]. See its
 /// documentation for more.
-#[must_use = "iterators are lazy and do nothing unless consumed"]
+#[must_use = "iterators are lazy and do nothing unless consumed; \
+    use `extract_if().for_each(drop)` to remove and discard elements"]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct IterMut<'a, T: 'a> {
     head: Option<NonNull<Node<T>>>,
