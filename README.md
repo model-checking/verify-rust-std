@@ -25,21 +25,21 @@ These are the challenges:
 
 | Challenge | Reward | Status | Proof |
 | --------- | ------ | ------ | ----- |
-| [1: Verify core transmuting methods](https://model-checking.github.io/verify-rust-std/challenges/0001-core-transmutation.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/issues/19) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/intrinsics/mod.rs) |
-| [2: Verify the memory safety of core intrinsics using raw pointers](https://model-checking.github.io/verify-rust-std/challenges/0002-intrinsics-memory.html) | N/A | Open | |
+| [1: Verify core transmuting methods](https://model-checking.github.io/verify-rust-std/challenges/0001-core-transmutation.html) | 10,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/issues/19) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/intrinsics/mod.rs) |
+| [2: Verify the memory safety of core intrinsics using raw pointers](https://model-checking.github.io/verify-rust-std/challenges/0002-intrinsics-memory.html) | 10,000 USD | Open | |
 | [3: Verifying Raw Pointer Arithmetic Operations](https://model-checking.github.io/verify-rust-std/challenges/0003-pointer-arithmentic.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/212) | [Kani](https://github.com/model-checking/verify-rust-std/pull/212/files) |
 | [4: Memory safety of BTreeMap's `btree::node` module](https://model-checking.github.io/verify-rust-std/challenges/0004-btree-node.html) | 10,000 USD | Open | |
-| [5: Verify functions iterating over inductive data type: `linked_list`](https://model-checking.github.io/verify-rust-std/challenges/0005-linked-list.html) | 5,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/238) | [VeriFast](https://github.com/model-checking/verify-rust-std/tree/main/verifast-proofs/alloc/collections/linked_list.rs) |
+| [5: Verify functions iterating over inductive data type: `linked_list`](https://model-checking.github.io/verify-rust-std/challenges/0005-linked-list.html) | 20,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/238) | [VeriFast](https://github.com/model-checking/verify-rust-std/tree/main/verifast-proofs/alloc/collections/linked_list.rs) |
 | [6: Safety of `NonNull`](https://model-checking.github.io/verify-rust-std/challenges/0006-nonnull.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/247) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/ptr/non_null.rs) |
 | [7: Safety of Methods for Atomic Types & Atomic Intrinsics](https://model-checking.github.io/verify-rust-std/challenges/0007-atomic-types.html) | 10,000 USD | Open | |
 | [8: Contracts for SmallSort](https://model-checking.github.io/verify-rust-std/challenges/0008-smallsort.html) | 10,000 USD | Open | |
 | [9: Safe abstractions for `core::time::Duration`](https://model-checking.github.io/verify-rust-std/challenges/0009-duration.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/136) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/time.rs) |
-| [10: Memory safety of String](https://model-checking.github.io/verify-rust-std/challenges/0010-string.html) | N/A | Open | |
+| [10: Memory safety of String](https://model-checking.github.io/verify-rust-std/challenges/0010-string.html) | 10,000 USD | Open | |
 | [11: Safety of Methods for Numeric Primitive Types](https://model-checking.github.io/verify-rust-std/challenges/0011-floats-ints.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/issues/59) | [Kani](https://github.com/model-checking/verify-rust-std/tree/main/library/core/src/num) |
-| [12: Safety of `NonZero`](https://model-checking.github.io/verify-rust-std/challenges/0012-nonzero.html) | N/A | Open | |
-| [13: Safety of `CStr`](https://model-checking.github.io/verify-rust-std/challenges/0013-cstr.html) | N/A | Open | |
+| [12: Safety of `NonZero`](https://model-checking.github.io/verify-rust-std/challenges/0012-nonzero.html) | 10,000 USD | Open | |
+| [13: Safety of `CStr`](https://model-checking.github.io/verify-rust-std/challenges/0013-cstr.html) | 10,000 USD | Open | |
 | [14: Safety of Primitive Conversions](https://model-checking.github.io/verify-rust-std/challenges/0014-convert-num.html) | TBD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/247) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/convert/num.rs) |
-| [15: Contracts and Tests for SIMD Intrinsics](https://model-checking.github.io/verify-rust-std/challenges/0015-intrinsics-simd.html) | | Open | |
+| [15: Contracts and Tests for SIMD Intrinsics](https://model-checking.github.io/verify-rust-std/challenges/0015-intrinsics-simd.html) | 20,000 USD | Open | |
 | [16: Verify the safety of Iterator functions](https://model-checking.github.io/verify-rust-std/challenges/0016-iter.html) | 10,000 USD | Open | |
 | [17: Verify the safety of slice functions](https://model-checking.github.io/verify-rust-std/challenges/0017-slice.html) | 10,000 USD | Open | |
 | [18: Verify the safety of slice iter functions](https://model-checking.github.io/verify-rust-std/challenges/0018-slice-iter.html) | 10,000 USD | Open | |
