@@ -90,7 +90,7 @@ cfg_select! {
         mod wasip1;
         pub use wasip1::fill_bytes;
     }
-    all(target_os = "wasi", target_env = "p2") => {
+    all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
         mod wasip2;
         pub use wasip2::{fill_bytes, hashmap_random_keys};
     }
@@ -101,6 +101,7 @@ cfg_select! {
     any(
         all(target_family = "wasm", target_os = "unknown"),
         target_os = "xous",
+        target_os = "vexos",
     ) => {
         // FIXME: finally remove std support for wasm32-unknown-unknown
         // FIXME: add random data generation to xous
@@ -114,8 +115,9 @@ cfg_select! {
     target_os = "linux",
     target_os = "android",
     all(target_family = "wasm", target_os = "unknown"),
-    all(target_os = "wasi", target_env = "p2"),
+    all(target_os = "wasi", not(target_env = "p1")),
     target_os = "xous",
+    target_os = "vexos",
 )))]
 pub fn hashmap_random_keys() -> (u64, u64) {
     let mut buf = [0; 16];
