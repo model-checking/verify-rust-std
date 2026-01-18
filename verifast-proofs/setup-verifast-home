@@ -1,0 +1,68 @@
+set -e -x
+
+: "${VFTOOLCHAINS=$HOME/.verifast/toolchains}"
+: "${VERIFAST_HOME=$VFTOOLCHAINS/verifast-$VFVERSION}"
+
+if [[ ! -d "$VERIFAST_HOME" ]]; then
+
+  if [[ -z $VFPLATFORM ]]; then
+    if [[ "$(uname)" == "Darwin" ]]; then
+      if [[ "$(uname -m)" == "arm64" ]]; then
+        : "${VFPLATFORM=macos-aarch}"
+      else
+        : "${VFPLATFORM=macos}"
+      fi
+    else
+      : "${VFPLATFORM=linux}"
+    fi
+  fi
+
+  case "$VFVERSION,$VFPLATFORM" in
+    25.11,linux)
+      # https://github.com/verifast/verifast/attestations/14103492
+      VFHASH=990c3cadba7cfc9ef9c19d5f1ff039fd746155164fe4a5ec365c625182400f3e
+      RUST_VERSION=nightly-2025-10-09
+      ;;
+    25.08,macos-aarch)
+      # https://github.com/verifast/verifast/attestations/10123874
+      VFHASH=fd489c4e5038945464dce06072c892f18b431a66fb47b77acde54b668e3d1d5f
+      RUST_VERSION=nightly-2025-04-09
+      ;;
+    25.08,linux)
+      # https://github.com/verifast/verifast/attestations/10123891
+      VFHASH=1e40019d6add91bf72141c86f4007f2fe1eef67f453cb7fb8f1f5ab7d31d509f
+      RUST_VERSION=nightly-2025-04-09
+      ;;
+    25.07,macos-aarch)
+      # https://github.com/verifast/verifast/attestations/8998438
+      VFHASH=6129fe538fb0b47ddf57e223dd628d991c74d9c835c991dd65871d5dc56c6d3f
+      RUST_VERSION=nightly-2025-04-09
+      ;;
+    25.07,linux)
+      # https://github.com/verifast/verifast/attestations/8998468
+      VFHASH=48d2c53b4a6e4ba6bf03bd6303dbd92a02bfb896253c06266b29739c78bad23b
+      RUST_VERSION=nightly-2025-04-09
+      ;;
+    *)
+      echo 'Unknown VeriFast version "'"$VFVERSION"'". Please set VFVERSION to a support version'
+      false
+      ;;
+  esac
+
+  if ! rustup toolchain list | grep $RUST_VERSION; then
+    rustup toolchain install $RUST_VERSION
+  fi
+
+  VFASSET=verifast-$VFVERSION-$VFPLATFORM.tar.gz
+  pushd "${TMPDIR:-/tmp}"
+    if [[ ! -d verifast-$VFVERSION ]]; then
+      if [[ ! -e $VFASSET ]]; then
+        curl -OL https://github.com/verifast/verifast/releases/download/$VFVERSION/$VFASSET
+      fi
+      echo "$VFHASH  $VFASSET" | shasum -a 256 -c
+      tar xf $VFASSET
+    fi
+    mkdir -p "$VFTOOLCHAINS"
+    mv verifast-$VFVERSION "$VFTOOLCHAINS"
+  popd
+fi
