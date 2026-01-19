@@ -6,12 +6,9 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-<<<<<<< HEAD
 use safety::{ensures, requires};
 
-=======
 use crate::clone::TrivialClone;
->>>>>>> subtree/library
 use crate::cmp::Ordering::{self, Equal, Greater, Less};
 use crate::intrinsics::{exact_div, unchecked_sub};
 #[cfg(kani)]

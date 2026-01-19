@@ -57,17 +57,12 @@
 use safety::{ensures, requires};
 
 use crate::ffi::va_list::{VaArgSafe, VaListImpl};
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
-use crate::ptr;
-#[cfg(kani)]
-use crate::ub_checks;
-=======
 use crate::marker::{ConstParamTy, Destruct, DiscriminantKind, PointeeSized, Tuple};
 use crate::{mem, ptr};
->>>>>>> subtree/library
+#[cfg(kani)]
+use crate::ub_checks;
 
 mod bounds;
 pub mod fallback;

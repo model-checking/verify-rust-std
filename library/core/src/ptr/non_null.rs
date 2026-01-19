@@ -1,15 +1,10 @@
-<<<<<<< HEAD
 use safety::{ensures, requires};
 
+use crate::clone::TrivialClone;
 use crate::cmp::Ordering;
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{PointeeSized, Unsize};
-=======
-use crate::clone::TrivialClone;
-use crate::cmp::Ordering;
 use crate::marker::{Destruct, PointeeSized, Unsize};
->>>>>>> subtree/library
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
@@ -1244,17 +1239,13 @@ impl<T: PointeeSized> NonNull<T> {
     /// [`ptr::drop_in_place`]: crate::ptr::drop_in_place()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-<<<<<<< HEAD
+    #[rustc_const_unstable(feature = "const_drop_in_place", issue = "109342")]
     #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure self is aligned, initialized, and valid for read
     #[requires(ub_checks::can_write(self.as_ptr() as *mut()))] // Ensure self is valid for write
-    pub unsafe fn drop_in_place(self) {
-=======
-    #[rustc_const_unstable(feature = "const_drop_in_place", issue = "109342")]
     pub const unsafe fn drop_in_place(self)
     where
         T: [const] Destruct,
     {
->>>>>>> subtree/library
         // SAFETY: the caller must uphold the safety contract for `drop_in_place`.
         unsafe { ptr::drop_in_place(self.as_ptr()) }
     }

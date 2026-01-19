@@ -403,13 +403,9 @@
 
 use crate::cmp::Ordering;
 use crate::intrinsics::const_eval_select;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{FnPtr, PointeeSized};
-=======
 use crate::marker::{Destruct, FnPtr, PointeeSized};
->>>>>>> subtree/library
 use crate::mem::{self, MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::{fmt, hash, intrinsics, ub_checks};

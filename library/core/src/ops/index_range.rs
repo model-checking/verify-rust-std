@@ -60,13 +60,9 @@ impl IndexRange {
     /// # Safety
     /// - Can only be called when `start < end`, aka when `len > 0`.
     #[inline]
-<<<<<<< HEAD
     #[requires(self.start < self.end)]
     #[cfg_attr(kani, kani::modifies(self))]
-    unsafe fn next_unchecked(&mut self) -> usize {
-=======
     const unsafe fn next_unchecked(&mut self) -> usize {
->>>>>>> subtree/library
         debug_assert!(self.start < self.end);
 
         let value = self.start;
@@ -78,13 +74,9 @@ impl IndexRange {
     /// # Safety
     /// - Can only be called when `start < end`, aka when `len > 0`.
     #[inline]
-<<<<<<< HEAD
     #[requires(self.start < self.end)]
     #[cfg_attr(kani, kani::modifies(self))]
-    unsafe fn next_back_unchecked(&mut self) -> usize {
-=======
     const unsafe fn next_back_unchecked(&mut self) -> usize {
->>>>>>> subtree/library
         debug_assert!(self.start < self.end);
 
         // SAFETY: The range isn't empty, so this cannot overflow

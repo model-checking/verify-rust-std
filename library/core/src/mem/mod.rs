@@ -6,14 +6,10 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 use crate::alloc::Layout;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::DiscriminantKind;
-=======
 use crate::clone::TrivialClone;
 use crate::marker::{Destruct, DiscriminantKind};
->>>>>>> subtree/library
 use crate::panic::const_assert;
 use crate::{clone, cmp, fmt, hash, intrinsics, ptr};
 

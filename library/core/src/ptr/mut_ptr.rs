@@ -3,13 +3,9 @@ use safety::{ensures, requires};
 use super::*;
 use crate::cmp::Ordering::{Equal, Greater, Less};
 use crate::intrinsics::const_eval_select;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::PointeeSized;
-=======
 use crate::marker::{Destruct, PointeeSized};
->>>>>>> subtree/library
 use crate::mem::{self, SizedTypeProperties};
 use crate::slice::{self, SliceIndex};
 

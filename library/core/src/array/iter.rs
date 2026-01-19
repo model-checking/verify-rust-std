@@ -4,13 +4,9 @@ use safety::requires;
 
 use crate::intrinsics::transmute_unchecked;
 use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccessNoCoerce};
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::mem::MaybeUninit;
-=======
 use crate::mem::{ManuallyDrop, MaybeUninit};
->>>>>>> subtree/library
 use crate::num::NonZero;
 use crate::ops::{Deref as _, DerefMut as _, IndexRange, Range, Try};
 use crate::{fmt, ptr};

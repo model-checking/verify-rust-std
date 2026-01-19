@@ -1,9 +1,6 @@
-<<<<<<< HEAD
 use safety::{ensures, requires};
 
-=======
 use crate::clone::TrivialClone;
->>>>>>> subtree/library
 use crate::fmt;
 #[cfg(kani)]
 use crate::kani;

@@ -4,14 +4,11 @@
 //!
 //! Hints may be compile time or runtime.
 
-<<<<<<< HEAD
 use safety::requires;
 
 #[cfg(kani)]
 use crate::kani;
-=======
 use crate::marker::Destruct;
->>>>>>> subtree/library
 use crate::mem::MaybeUninit;
 use crate::{intrinsics, ub_checks};
 

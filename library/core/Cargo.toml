@@ -42,13 +42,9 @@ check-cfg = [
     'cfg(target_has_reliable_f16_math)',
     'cfg(target_has_reliable_f128)',
     'cfg(target_has_reliable_f128_math)',
-<<<<<<< HEAD
+    'cfg(llvm_enzyme)',
     'cfg(kani)',
     'cfg(flux)'
-=======
-    'cfg(llvm_enzyme)',
-
->>>>>>> subtree/library
 ]
 
 [package.metadata.flux]

@@ -85,11 +85,8 @@
 //
 // Library features:
 // tidy-alphabetical-start
-<<<<<<< HEAD
 #![cfg_attr(kani, feature(kani))]
-=======
 #![cfg_attr(not(no_global_oom_handling), feature(string_replace_in_place))]
->>>>>>> subtree/library
 #![feature(alloc_layout_extra)]
 #![feature(allocator_api)]
 #![feature(array_into_iter_constructors)]
