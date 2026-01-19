@@ -6,9 +6,9 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 use crate::alloc::Layout;
+use crate::clone::TrivialClone;
 #[cfg(kani)]
 use crate::kani;
-use crate::clone::TrivialClone;
 use crate::marker::{Destruct, DiscriminantKind};
 use crate::panic::const_assert;
 use crate::{clone, cmp, fmt, hash, intrinsics, ptr};

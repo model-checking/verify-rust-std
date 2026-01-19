@@ -60,9 +60,9 @@ use crate::ffi::va_list::{VaArgSafe, VaListImpl};
 #[cfg(kani)]
 use crate::kani;
 use crate::marker::{ConstParamTy, Destruct, DiscriminantKind, PointeeSized, Tuple};
-use crate::{mem, ptr};
 #[cfg(kani)]
 use crate::ub_checks;
+use crate::{mem, ptr};
 
 mod bounds;
 pub mod fallback;
