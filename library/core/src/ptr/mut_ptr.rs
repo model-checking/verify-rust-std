@@ -5,7 +5,7 @@ use crate::cmp::Ordering::{Equal, Greater, Less};
 use crate::intrinsics::const_eval_select;
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::PointeeSized;
+use crate::marker::{Destruct, PointeeSized};
 use crate::mem::{self, SizedTypeProperties};
 use crate::slice::{self, SliceIndex};
 
@@ -1509,8 +1509,12 @@ impl<T: PointeeSized> *mut T {
     ///
     /// [`ptr::drop_in_place`]: crate::ptr::drop_in_place()
     #[stable(feature = "pointer_methods", since = "1.26.0")]
+    #[rustc_const_unstable(feature = "const_drop_in_place", issue = "109342")]
     #[inline(always)]
-    pub unsafe fn drop_in_place(self) {
+    pub const unsafe fn drop_in_place(self)
+    where
+        T: [const] Destruct,
+    {
         // SAFETY: the caller must uphold the safety contract for `drop_in_place`.
         unsafe { drop_in_place(self) }
     }
@@ -1827,7 +1831,8 @@ impl<T> *mut [T] {
     /// Gets a raw, mutable pointer to the underlying array.
     ///
     /// If `N` is not exactly equal to the length of `self`, then this method returns `None`.
-    #[unstable(feature = "slice_as_array", issue = "133508")]
+    #[stable(feature = "core_slice_as_array", since = "CURRENT_RUSTC_VERSION")]
+    #[rustc_const_stable(feature = "core_slice_as_array", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
     #[must_use]
     pub const fn as_mut_array<const N: usize>(self) -> Option<*mut [T; N]> {
