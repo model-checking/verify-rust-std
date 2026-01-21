@@ -1,6 +1,6 @@
 set -e -x
 
-export VFVERSION=25.11
+export VFVERSION=26.01
 
 verifast -skip_specless_fns -ignore_unwind_paths -allow_assume verified/lib.rs
 refinement-checker with-directives/lib.rs verified/lib.rs > /dev/null
