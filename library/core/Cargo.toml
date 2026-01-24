@@ -42,7 +42,8 @@ check-cfg = [
     'cfg(target_has_reliable_f128)',
     'cfg(target_has_reliable_f128_math)',
     'cfg(kani)',
-    'cfg(flux)'
+    'cfg(flux)',
+    'cfg(rapx)'
 ]
 
 [package.metadata.flux]

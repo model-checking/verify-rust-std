@@ -231,6 +231,11 @@ pub mod vec;
 #[cfg(all(not(no_rc), not(no_sync), not(no_global_oom_handling)))]
 pub mod wtf8;
 
+#[cfg(rapx)]
+mod rapx_macro {
+    pub use safety_macro::safety;
+}
+
 #[doc(hidden)]
 #[unstable(feature = "liballoc_internals", issue = "none", reason = "implementation detail")]
 pub mod __export {

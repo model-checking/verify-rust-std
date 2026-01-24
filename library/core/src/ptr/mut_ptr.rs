@@ -7,6 +7,8 @@ use crate::intrinsics::const_eval_select;
 use crate::kani;
 use crate::marker::PointeeSized;
 use crate::mem::{self, SizedTypeProperties};
+#[cfg(rapx)]
+use crate::rapx_macro::safety;
 use crate::slice::{self, SliceIndex};
 
 impl<T: PointeeSized> *mut T {
@@ -994,6 +996,8 @@ impl<T: PointeeSized> *mut T {
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
     #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
+    #[cfg_attr(rapx, safety {InBound(self, T, count)})]
+    #[cfg_attr(rapx, safety {ValidNum(count * size_of(T) <= isize::MAX)})]
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
