@@ -49,7 +49,9 @@ pub struct OnceState {
     pub(crate) inner: sys::OnceState,
 }
 
-pub(crate) enum ExclusiveState {
+/// Used for the internal implementation of `sys::sync::once` on different platforms and the
+/// [`LazyLock`](crate::sync::LazyLock) implementation.
+pub(crate) enum OnceExclusiveState {
     Incomplete,
     Poisoned,
     Complete,
@@ -143,6 +145,7 @@ impl Once {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[track_caller]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn call_once<F>(&self, f: F)
     where
         F: FnOnce(),
@@ -202,6 +205,7 @@ impl Once {
     /// ```
     #[inline]
     #[stable(feature = "once_poison", since = "1.51.0")]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn call_once_force<F>(&self, f: F)
     where
         F: FnOnce(&OnceState),
@@ -286,6 +290,7 @@ impl Once {
     /// panicked, this method will also panic. Use [`wait_force`](Self::wait_force)
     /// if this behavior is not desired.
     #[stable(feature = "once_wait", since = "1.86.0")]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn wait(&self) {
         if !self.inner.is_completed() {
             self.inner.wait(false);
@@ -298,6 +303,7 @@ impl Once {
     /// If this [`Once`] has been poisoned, this function blocks until it
     /// becomes completed, unlike [`Once::wait()`], which panics in this case.
     #[stable(feature = "once_wait", since = "1.86.0")]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn wait_force(&self) {
         if !self.inner.is_completed() {
             self.inner.wait(true);
@@ -310,7 +316,7 @@ impl Once {
     /// be running, so the state must be either "incomplete", "poisoned" or
     /// "complete".
     #[inline]
-    pub(crate) fn state(&mut self) -> ExclusiveState {
+    pub(crate) fn state(&mut self) -> OnceExclusiveState {
         self.inner.state()
     }
 
@@ -320,7 +326,7 @@ impl Once {
     /// be running, so the state must be either "incomplete", "poisoned" or
     /// "complete".
     #[inline]
-    pub(crate) fn set_state(&mut self, new_state: ExclusiveState) {
+    pub(crate) fn set_state(&mut self, new_state: OnceExclusiveState) {
         self.inner.set_state(new_state);
     }
 }

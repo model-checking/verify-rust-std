@@ -1651,6 +1651,17 @@ fn extract_if_unconsumed() {
 }
 
 #[test]
+fn extract_if_debug() {
+    let mut vec = vec![1, 2];
+    let mut drain = vec.extract_if(.., |&mut x| x % 2 != 0);
+    assert!(format!("{drain:?}").contains("Some(1)"));
+    drain.next();
+    assert!(format!("{drain:?}").contains("Some(2)"));
+    drain.next();
+    assert!(format!("{drain:?}").contains("None"));
+}
+
+#[test]
 fn test_reserve_exact() {
     // This is all the same as test_reserve
 
@@ -2297,20 +2308,6 @@ fn test_vec_swap() {
     swap(&mut n, &mut a[0]);
     assert_eq!(a[0], 42);
     assert_eq!(n, 0);
-}
-
-#[test]
-fn test_extend_from_within_spec() {
-    #[derive(Copy)]
-    struct CopyOnly;
-
-    impl Clone for CopyOnly {
-        fn clone(&self) -> Self {
-            panic!("extend_from_within must use specialization on copy");
-        }
-    }
-
-    vec![CopyOnly, CopyOnly].extend_from_within(..);
 }
 
 #[test]

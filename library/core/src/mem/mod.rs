@@ -6,9 +6,10 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 use crate::alloc::Layout;
+use crate::clone::TrivialClone;
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::DiscriminantKind;
+use crate::marker::{Destruct, DiscriminantKind};
 use crate::panic::const_assert;
 use crate::{clone, cmp, fmt, hash, intrinsics, ptr};
 
@@ -335,7 +336,7 @@ pub fn forget_unsized<T: ?Sized>(t: T) {
 #[rustc_const_stable(feature = "const_mem_size_of", since = "1.24.0")]
 #[rustc_diagnostic_item = "mem_size_of"]
 pub const fn size_of<T>() -> usize {
-    intrinsics::size_of::<T>()
+    <T as SizedTypeProperties>::SIZE
 }
 
 /// Returns the size of the pointed-to value in bytes.
@@ -443,7 +444,7 @@ pub const unsafe fn size_of_val_raw<T: ?Sized>(val: *const T) -> usize {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[deprecated(note = "use `align_of` instead", since = "1.2.0", suggestion = "align_of")]
 pub fn min_align_of<T>() -> usize {
-    intrinsics::align_of::<T>()
+    <T as SizedTypeProperties>::ALIGN
 }
 
 /// Returns the [ABI]-required minimum alignment of the type of the value that `val` points to in
@@ -490,7 +491,7 @@ pub fn min_align_of_val<T: ?Sized>(val: &T) -> usize {
 #[rustc_const_stable(feature = "const_align_of", since = "1.24.0")]
 #[rustc_diagnostic_item = "mem_align_of"]
 pub const fn align_of<T>() -> usize {
-    intrinsics::align_of::<T>()
+    <T as SizedTypeProperties>::ALIGN
 }
 
 /// Returns the [ABI]-required minimum alignment of the type of the value that `val` points to in
@@ -811,7 +812,8 @@ pub const fn swap<T>(x: &mut T, y: &mut T) {
 /// ```
 #[inline]
 #[stable(feature = "mem_take", since = "1.40.0")]
-pub fn take<T: Default>(dest: &mut T) -> T {
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
+pub const fn take<T: [const] Default>(dest: &mut T) -> T {
     replace(dest, T::default())
 }
 
@@ -962,8 +964,13 @@ pub const fn replace<T>(dest: &mut T, src: T) -> T {
 /// [`RefCell`]: crate::cell::RefCell
 #[inline]
 #[stable(feature = "rust1", since = "1.0.0")]
+#[rustc_const_unstable(feature = "const_destruct", issue = "133214")]
 #[rustc_diagnostic_item = "mem_drop"]
-pub fn drop<T>(_x: T) {}
+pub const fn drop<T>(_x: T)
+where
+    T: [const] Destruct,
+{
+}
 
 /// Bitwise-copies a value.
 ///
@@ -1068,6 +1075,10 @@ impl<T> clone::Clone for Discriminant<T> {
         *self
     }
 }
+
+#[doc(hidden)]
+#[unstable(feature = "trivial_clone", issue = "none")]
+unsafe impl<T> TrivialClone for Discriminant<T> {}
 
 #[stable(feature = "discriminant_value", since = "1.21.0")]
 impl<T> cmp::PartialEq for Discriminant<T> {
@@ -1235,6 +1246,16 @@ pub const fn variant_count<T>() -> usize {
 #[doc(hidden)]
 #[unstable(feature = "sized_type_properties", issue = "none")]
 pub trait SizedTypeProperties: Sized {
+    #[doc(hidden)]
+    #[unstable(feature = "sized_type_properties", issue = "none")]
+    #[lang = "mem_size_const"]
+    const SIZE: usize = intrinsics::size_of::<Self>();
+
+    #[doc(hidden)]
+    #[unstable(feature = "sized_type_properties", issue = "none")]
+    #[lang = "mem_align_const"]
+    const ALIGN: usize = intrinsics::align_of::<Self>();
+
     /// `true` if this type requires no storage.
     /// `false` if its [size](size_of) is greater than zero.
     ///
@@ -1262,11 +1283,16 @@ pub trait SizedTypeProperties: Sized {
     /// ```
     #[doc(hidden)]
     #[unstable(feature = "sized_type_properties", issue = "none")]
-    const IS_ZST: bool = size_of::<Self>() == 0;
+    const IS_ZST: bool = Self::SIZE == 0;
 
     #[doc(hidden)]
     #[unstable(feature = "sized_type_properties", issue = "none")]
-    const LAYOUT: Layout = Layout::new::<Self>();
+    const LAYOUT: Layout = {
+        // SAFETY: if the type is instantiated, rustc already ensures that its
+        // layout is valid. Use the unchecked constructor to avoid inserting a
+        // panicking codepath that needs to be optimized out.
+        unsafe { Layout::from_size_align_unchecked(Self::SIZE, Self::ALIGN) }
+    };
 
     /// The largest safe length for a `[Self]`.
     ///
@@ -1274,7 +1300,7 @@ pub trait SizedTypeProperties: Sized {
     /// which is never allowed for a single object.
     #[doc(hidden)]
     #[unstable(feature = "sized_type_properties", issue = "none")]
-    const MAX_SLICE_LEN: usize = match size_of::<Self>() {
+    const MAX_SLICE_LEN: usize = match Self::SIZE {
         0 => usize::MAX,
         n => (isize::MAX as usize) / n,
     };
@@ -1407,10 +1433,10 @@ impl<T> SizedTypeProperties for T {}
 /// [`offset_of_enum`]: https://doc.rust-lang.org/nightly/unstable-book/language-features/offset-of-enum.html
 /// [`offset_of_slice`]: https://doc.rust-lang.org/nightly/unstable-book/language-features/offset-of-slice.html
 #[stable(feature = "offset_of", since = "1.77.0")]
-#[allow_internal_unstable(builtin_syntax)]
+#[allow_internal_unstable(builtin_syntax, core_intrinsics)]
 pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
     // The `{}` is for better error messages
-    {builtin # offset_of($Container, $($fields)+)}
+    const {builtin # offset_of($Container, $($fields)+)}
 }
 
 /// Create a fresh instance of the inhabited ZST type `T`.
