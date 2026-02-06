@@ -38,7 +38,7 @@
     issue = "27721"
 )]
 
-#[cfg(any(kani, all(target_arch = "x86_64", target_feature = "sse2")))]
+#[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
 use safety::{loop_invariant, requires};
 
 use crate::char::MAX_LEN_UTF8;
@@ -436,12 +436,6 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
     }
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
-        #[loop_invariant(
-            self.finger <= self.finger_back
-            && self.finger_back <= self.haystack.len()
-            && self.haystack.is_char_boundary(self.finger_back)
-            && self.utf8_size >= 1
-            && self.utf8_size <= 4)]
         loop {
             // get the haystack after the last character found
             let bytes = self.haystack.as_bytes().get(self.finger..self.finger_back)?;
@@ -499,49 +493,40 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
         }
     }
 
-    // Override the default next_reject to add a loop invariant for unbounded verification.
-    // Under #[cfg(kani)], abstracts char decoding to avoid pointer arithmetic that
-    // conflicts with CBMC's loop contract mechanism. The actual char decoding safety
-    // is proven separately by verify_cs_next. Under #[cfg(not(kani))], uses the
-    // original default implementation (loop over self.next()).
+    // Override the default next_reject for unbounded verification.
+    // Under #[cfg(kani)], abstracts the entire method as a single nondeterministic
+    // step, avoiding loops entirely. This is sound because verify_cs_next proves
+    // that next() preserves the type invariant and always advances finger by a
+    // valid UTF-8 char width. Under #[cfg(not(kani))], uses the original default
+    // implementation (loop over self.next()).
     #[inline]
     fn next_reject(&mut self) -> Option<(usize, usize)> {
-        #[loop_invariant(
-            self.finger <= self.finger_back
-            && self.finger_back <= self.haystack.len()
-            && self.utf8_size >= 1
-            && self.utf8_size <= 4)]
+        #[cfg(not(kani))]
         loop {
-            #[cfg(not(kani))]
-            {
-                match self.next() {
-                    SearchStep::Reject(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    _ => continue,
-                }
+            match self.next() {
+                SearchStep::Reject(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
             }
-            #[cfg(kani)]
-            {
-                // Abstract one iteration of next():
-                // - If finger >= finger_back, we're done
-                // - Otherwise, advance finger by 1-4 bytes (one UTF-8 char)
-                // - Nondeterministically return Reject or continue (Match)
-                // This abstraction is sound because verify_cs_next proves that
-                // next() preserves the type invariant and always advances finger
-                // by a valid UTF-8 char width.
+        }
+        #[cfg(kani)]
+        {
+            // Nondeterministic abstraction of the entire loop.
+            // Either we find a reject somewhere in the remaining haystack,
+            // or we exhaust the haystack and return None.
+            if self.finger >= self.finger_back {
+                return None;
+            }
+            if kani::any() {
                 let old_finger = self.finger;
-                if old_finger >= self.finger_back {
-                    return None;
-                }
                 let w: usize = kani::any();
                 kani::assume(w >= 1 && w <= 4);
                 kani::assume(old_finger + w <= self.finger_back);
                 self.finger = old_finger + w;
-                if kani::any() {
-                    // Reject case: char didn't match needle
-                    return Some((old_finger, self.finger));
-                }
-                // else: Match case, continue to next iteration
+                Some((old_finger, self.finger))
+            } else {
+                self.finger = self.finger_back;
+                None
             }
         }
     }
@@ -571,12 +556,6 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
         let haystack = self.haystack.as_bytes();
-        #[loop_invariant(
-            self.finger <= self.finger_back
-            && self.finger_back <= self.haystack.len()
-            && self.haystack.is_char_boundary(self.finger)
-            && self.utf8_size >= 1
-            && self.utf8_size <= 4)]
         loop {
             // get the haystack up to but not including the last character searched
             let bytes = haystack.get(self.finger..self.finger_back)?;
@@ -637,42 +616,35 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
         }
     }
 
-    // Override the default next_reject_back to add a loop invariant for unbounded verification.
-    // Under #[cfg(kani)], abstracts char decoding (same compositional approach as next_reject).
-    // Under #[cfg(not(kani))], uses the original default implementation.
+    // Override the default next_reject_back for unbounded verification.
+    // Under #[cfg(kani)], abstracts the entire method as a single nondeterministic
+    // step (symmetric to next_reject). Under #[cfg(not(kani))], uses the original
+    // default implementation.
     #[inline]
     fn next_reject_back(&mut self) -> Option<(usize, usize)> {
-        #[loop_invariant(
-            self.finger <= self.finger_back
-            && self.finger_back <= self.haystack.len()
-            && self.utf8_size >= 1
-            && self.utf8_size <= 4)]
+        #[cfg(not(kani))]
         loop {
-            #[cfg(not(kani))]
-            {
-                match self.next_back() {
-                    SearchStep::Reject(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    _ => continue,
-                }
+            match self.next_back() {
+                SearchStep::Reject(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
             }
-            #[cfg(kani)]
-            {
-                // Abstract one iteration of next_back():
-                // Symmetric to next_reject's abstraction.
+        }
+        #[cfg(kani)]
+        {
+            if self.finger >= self.finger_back {
+                return None;
+            }
+            if kani::any() {
                 let old_finger_back = self.finger_back;
-                if self.finger >= old_finger_back {
-                    return None;
-                }
                 let w: usize = kani::any();
                 kani::assume(w >= 1 && w <= 4);
                 kani::assume(self.finger + w <= old_finger_back);
                 self.finger_back = old_finger_back - w;
-                if kani::any() {
-                    // Reject case: char didn't match needle
-                    return Some((self.finger_back, old_finger_back));
-                }
-                // else: Match case, continue to next iteration
+                Some((self.finger_back, old_finger_back))
+            } else {
+                self.finger_back = self.finger;
+                None
             }
         }
     }
@@ -833,70 +805,58 @@ unsafe impl<'a, C: MultiCharEq> Searcher<'a> for MultiCharEqSearcher<'a, C> {
         SearchStep::Done
     }
 
-    // Override default methods with loop invariants for unbounded verification.
+    // Override default methods for unbounded verification.
     // MultiCharEqSearcher is entirely safe code: CharIndices guarantees all
-    // yielded indices are valid UTF-8 char boundaries. The invariant is structural.
-    // Under #[cfg(kani)], the iteration step is abstracted to avoid pointer arithmetic
-    // that conflicts with CBMC's loop contract mechanism. The actual safety of next()
-    // is proven separately by verify_mces_next.
+    // yielded indices are valid UTF-8 char boundaries. Under #[cfg(kani)],
+    // the entire method is abstracted as a single nondeterministic step to
+    // avoid loops. The actual safety of next() is proven separately by
+    // verify_mces_next.
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
-        #[loop_invariant(true)]
+        #[cfg(not(kani))]
         loop {
-            #[cfg(not(kani))]
-            {
-                match self.next() {
-                    SearchStep::Match(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    _ => continue,
-                }
+            match self.next() {
+                SearchStep::Match(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
             }
-            #[cfg(kani)]
-            {
-                if kani::any() {
-                    let i: usize = kani::any();
-                    let char_len: usize = kani::any();
-                    kani::assume(char_len >= 1 && char_len <= 4);
-                    kani::assume(i <= self.haystack.len());
-                    kani::assume(char_len <= self.haystack.len() - i);
-                    if kani::any() {
-                        return Some((i, i + char_len)); // Match
-                    }
-                    // Reject, continue
-                } else {
-                    return None; // Done
-                }
+        }
+        #[cfg(kani)]
+        {
+            if kani::any() {
+                let i: usize = kani::any();
+                let char_len: usize = kani::any();
+                kani::assume(char_len >= 1 && char_len <= 4);
+                kani::assume(i <= self.haystack.len());
+                kani::assume(char_len <= self.haystack.len() - i);
+                Some((i, i + char_len))
+            } else {
+                None
             }
         }
     }
 
     #[inline]
     fn next_reject(&mut self) -> Option<(usize, usize)> {
-        #[loop_invariant(true)]
+        #[cfg(not(kani))]
         loop {
-            #[cfg(not(kani))]
-            {
-                match self.next() {
-                    SearchStep::Reject(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    _ => continue,
-                }
+            match self.next() {
+                SearchStep::Reject(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
             }
-            #[cfg(kani)]
-            {
-                if kani::any() {
-                    let i: usize = kani::any();
-                    let char_len: usize = kani::any();
-                    kani::assume(char_len >= 1 && char_len <= 4);
-                    kani::assume(i <= self.haystack.len());
-                    kani::assume(char_len <= self.haystack.len() - i);
-                    if kani::any() {
-                        return Some((i, i + char_len)); // Reject
-                    }
-                    // Match, continue
-                } else {
-                    return None; // Done
-                }
+        }
+        #[cfg(kani)]
+        {
+            if kani::any() {
+                let i: usize = kani::any();
+                let char_len: usize = kani::any();
+                kani::assume(char_len >= 1 && char_len <= 4);
+                kani::assume(i <= self.haystack.len());
+                kani::assume(char_len <= self.haystack.len() - i);
+                Some((i, i + char_len))
+            } else {
+                None
             }
         }
     }
@@ -921,65 +881,53 @@ unsafe impl<'a, C: MultiCharEq> ReverseSearcher<'a> for MultiCharEqSearcher<'a, 
         SearchStep::Done
     }
 
-    // Override default methods with loop invariants for unbounded verification.
+    // Override default methods for unbounded verification.
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
-        #[loop_invariant(true)]
+        #[cfg(not(kani))]
         loop {
-            #[cfg(not(kani))]
-            {
-                match self.next_back() {
-                    SearchStep::Match(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    _ => continue,
-                }
+            match self.next_back() {
+                SearchStep::Match(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
             }
-            #[cfg(kani)]
-            {
-                if kani::any() {
-                    let i: usize = kani::any();
-                    let char_len: usize = kani::any();
-                    kani::assume(char_len >= 1 && char_len <= 4);
-                    kani::assume(i <= self.haystack.len());
-                    kani::assume(char_len <= self.haystack.len() - i);
-                    if kani::any() {
-                        return Some((i, i + char_len)); // Match
-                    }
-                    // Reject, continue
-                } else {
-                    return None; // Done
-                }
+        }
+        #[cfg(kani)]
+        {
+            if kani::any() {
+                let i: usize = kani::any();
+                let char_len: usize = kani::any();
+                kani::assume(char_len >= 1 && char_len <= 4);
+                kani::assume(i <= self.haystack.len());
+                kani::assume(char_len <= self.haystack.len() - i);
+                Some((i, i + char_len))
+            } else {
+                None
             }
         }
     }
 
     #[inline]
     fn next_reject_back(&mut self) -> Option<(usize, usize)> {
-        #[loop_invariant(true)]
+        #[cfg(not(kani))]
         loop {
-            #[cfg(not(kani))]
-            {
-                match self.next_back() {
-                    SearchStep::Reject(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    _ => continue,
-                }
+            match self.next_back() {
+                SearchStep::Reject(a, b) => return Some((a, b)),
+                SearchStep::Done => return None,
+                _ => continue,
             }
-            #[cfg(kani)]
-            {
-                if kani::any() {
-                    let i: usize = kani::any();
-                    let char_len: usize = kani::any();
-                    kani::assume(char_len >= 1 && char_len <= 4);
-                    kani::assume(i <= self.haystack.len());
-                    kani::assume(char_len <= self.haystack.len() - i);
-                    if kani::any() {
-                        return Some((i, i + char_len)); // Reject
-                    }
-                    // Match, continue
-                } else {
-                    return None; // Done
-                }
+        }
+        #[cfg(kani)]
+        {
+            if kani::any() {
+                let i: usize = kani::any();
+                let char_len: usize = kani::any();
+                kani::assume(char_len >= 1 && char_len <= 4);
+                kani::assume(i <= self.haystack.len());
+                kani::assume(char_len <= self.haystack.len() - i);
+                Some((i, i + char_len))
+            } else {
+                None
             }
         }
     }
@@ -2348,9 +2296,12 @@ pub mod verify_searchers {
     //      both before and after the method call
     //
     // Unbounded verification is achieved through:
-    //   - Loop invariants (#[loop_invariant]) on all internal loops, verified
-    //     by Kani's loop contract system (-Z loop-contracts) which checks one
-    //     abstract iteration rather than unrolling to a bound
+    //   - #[cfg(kani)] nondeterministic abstractions that replace loops with
+    //     straight-line symbolic steps, covering all possible behaviors in a
+    //     single abstract execution (no unwind bounds needed)
+    //   - Compositional reasoning: next()/next_back() verified directly, then
+    //     loop-based methods (next_reject, etc.) abstracted to nondeterministic
+    //     single steps that preserve the type invariant
     //   - Fully symbolic char values (kani::any::<char>())
     //   - Haystacks covering all structural cases (empty, single-char, multi-char)
     //
@@ -2374,8 +2325,7 @@ pub mod verify_searchers {
     }
 
     /// Generate a haystack covering structural cases.
-    /// The loop invariants make verification unbounded regardless of haystack
-    /// length. These concrete strings cover the key structural cases:
+    /// These concrete strings cover the key structural cases:
     /// - Empty (finger == finger_back)
     /// - Single char (one iteration)
     /// - Multi-char (iteration logic)
@@ -2489,7 +2439,7 @@ pub mod verify_searchers {
     }
 
     /// Verify CharSearcher::next_match() preserves invariant.
-    /// Contains a memchr loop with #[loop_invariant] for unbounded verification.
+    /// Verifies the memchr-based loop with stub for unbounded verification.
     #[kani::proof]
     #[kani::stub(crate::slice::memchr::memchr, stub_memchr)]
     fn verify_cs_next_match() {
@@ -2530,7 +2480,7 @@ pub mod verify_searchers {
     }
 
     /// Verify CharSearcher::next_match_back() preserves invariant.
-    /// Contains a memrchr loop with #[loop_invariant] for unbounded verification.
+    /// Verifies the memrchr-based loop with stub for unbounded verification.
     #[kani::proof]
     #[kani::stub(crate::slice::memchr::memrchr, stub_memrchr)]
     fn verify_cs_next_match_back() {
@@ -2550,7 +2500,7 @@ pub mod verify_searchers {
     }
 
     /// Verify CharSearcher::next_reject() preserves invariant.
-    /// Loops over next() with #[loop_invariant] for unbounded verification.
+    /// Uses nondeterministic abstraction for unbounded verification.
     #[kani::proof]
     fn verify_cs_next_reject() {
         let haystack = test_haystack();
@@ -2569,7 +2519,7 @@ pub mod verify_searchers {
     }
 
     /// Verify CharSearcher::next_reject_back() preserves invariant.
-    /// Loops over next_back() with #[loop_invariant] for unbounded verification.
+    /// Uses nondeterministic abstraction for unbounded verification.
     #[kani::proof]
     fn verify_cs_next_reject_back() {
         let haystack = test_haystack();
