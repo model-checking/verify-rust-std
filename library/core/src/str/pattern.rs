@@ -2175,7 +2175,7 @@ impl TwoWaySearcher {
         let mut left = 0; // Corresponds to i in the paper
         let mut right = 1; // Corresponds to j in the paper
         let mut offset = 0; // Corresponds to k in the paper, but starting at 0
-                            // to match 0-based indexing.
+        // to match 0-based indexing.
         let mut period = 1; // Corresponds to p in the paper
 
         while let Some(&a) = arr.get(right + offset) {
@@ -2221,7 +2221,7 @@ impl TwoWaySearcher {
         let mut left = 0; // Corresponds to i in the paper
         let mut right = 1; // Corresponds to j in the paper
         let mut offset = 0; // Corresponds to k in the paper, but starting at 0
-                            // to match 0-based indexing.
+        // to match 0-based indexing.
         let mut period = 1; // Corresponds to p in the paper
         let n = arr.len();
 
