@@ -438,7 +438,10 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
     fn next_match(&mut self) -> Option<(usize, usize)> {
         loop {
             // get the haystack after the last character found
-            let bytes = self.haystack.as_bytes().get(self.finger..self.finger_back)?;
+            let bytes = self
+                .haystack
+                .as_bytes()
+                .get(self.finger..self.finger_back)?;
             // the last byte of the utf8 encoded needle
             // SAFETY: we have an invariant that `utf8_size < 5`
             let last_byte = unsafe { *self.utf8_encoded.get_unchecked(self.utf8_size() - 1) };
@@ -777,7 +780,11 @@ impl<C: MultiCharEq> Pattern for MultiCharEqPattern<C> {
 
     #[inline]
     fn into_searcher(self, haystack: &str) -> MultiCharEqSearcher<'_, C> {
-        MultiCharEqSearcher { haystack, char_eq: self.0, char_indices: haystack.char_indices() }
+        MultiCharEqSearcher {
+            haystack,
+            char_eq: self.0,
+            char_indices: haystack.char_indices(),
+        }
     }
 }
 
@@ -1341,33 +1348,33 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
                 // because the haystack is valid UTF-8.
                 #[cfg(not(kani))]
                 {
-                match self.haystack[pos..].chars().next() {
-                    _ if is_match => SearchStep::Match(pos, pos),
-                    None => {
-                        searcher.is_finished = true;
-                        SearchStep::Done
+                    match self.haystack[pos..].chars().next() {
+                        _ if is_match => SearchStep::Match(pos, pos),
+                        None => {
+                            searcher.is_finished = true;
+                            SearchStep::Done
+                        }
+                        Some(ch) => {
+                            searcher.position += ch.len_utf8();
+                            SearchStep::Reject(pos, searcher.position)
+                        }
                     }
-                    Some(ch) => {
-                        searcher.position += ch.len_utf8();
-                        SearchStep::Reject(pos, searcher.position)
-                    }
-                }
                 }
                 #[cfg(kani)]
                 {
-                if is_match {
-                    SearchStep::Match(pos, pos)
-                } else if pos >= self.haystack.len() {
-                    searcher.is_finished = true;
-                    SearchStep::Done
-                } else {
-                    let w: usize = kani::any();
-                    kani::assume(w >= 1 && w <= 4);
-                    kani::assume(pos + w <= self.haystack.len());
-                    kani::assume(self.haystack.is_char_boundary(pos + w));
-                    searcher.position = pos + w;
-                    SearchStep::Reject(pos, searcher.position)
-                }
+                    if is_match {
+                        SearchStep::Match(pos, pos)
+                    } else if pos >= self.haystack.len() {
+                        searcher.is_finished = true;
+                        SearchStep::Done
+                    } else {
+                        let w: usize = kani::any();
+                        kani::assume(w >= 1 && w <= 4);
+                        kani::assume(pos + w <= self.haystack.len());
+                        kani::assume(self.haystack.is_char_boundary(pos + w));
+                        searcher.position = pos + w;
+                        SearchStep::Reject(pos, searcher.position)
+                    }
                 }
             }
             StrSearcherImpl::TwoWay(ref mut searcher) => {
@@ -1394,17 +1401,17 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
                         // correctness is assumed per challenge rules.
                         #[cfg(not(kani))]
                         {
-                        while !self.haystack.is_char_boundary(b) {
-                            b += 1;
-                        }
+                            while !self.haystack.is_char_boundary(b) {
+                                b += 1;
+                            }
                         }
                         #[cfg(kani)]
                         {
-                        let skip: usize = kani::any();
-                        kani::assume(skip <= 3);
-                        kani::assume(b + skip <= self.haystack.len());
-                        b = b + skip;
-                        kani::assume(self.haystack.is_char_boundary(b));
+                            let skip: usize = kani::any();
+                            kani::assume(skip <= 3);
+                            kani::assume(b + skip <= self.haystack.len());
+                            b = b + skip;
+                            kani::assume(self.haystack.is_char_boundary(b));
                         }
                         searcher.position = cmp::max(b, searcher.position);
                         SearchStep::Reject(a, b)
@@ -1487,9 +1494,7 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
                 StrSearcherImpl::Empty(ref en) => {
                     en.is_finished || en.position >= self.haystack.len()
                 }
-                StrSearcherImpl::TwoWay(ref tw) => {
-                    tw.position >= self.haystack.len()
-                }
+                StrSearcherImpl::TwoWay(ref tw) => tw.position >= self.haystack.len(),
             };
             if is_done {
                 return None;
@@ -1541,33 +1546,33 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
                 // iterator raw pointer internals that cause CBMC model blowup.
                 #[cfg(not(kani))]
                 {
-                match self.haystack[..end].chars().next_back() {
-                    _ if is_match => SearchStep::Match(end, end),
-                    None => {
-                        searcher.is_finished = true;
-                        SearchStep::Done
+                    match self.haystack[..end].chars().next_back() {
+                        _ if is_match => SearchStep::Match(end, end),
+                        None => {
+                            searcher.is_finished = true;
+                            SearchStep::Done
+                        }
+                        Some(ch) => {
+                            searcher.end -= ch.len_utf8();
+                            SearchStep::Reject(searcher.end, end)
+                        }
                     }
-                    Some(ch) => {
-                        searcher.end -= ch.len_utf8();
-                        SearchStep::Reject(searcher.end, end)
-                    }
-                }
                 }
                 #[cfg(kani)]
                 {
-                if is_match {
-                    SearchStep::Match(end, end)
-                } else if end == 0 {
-                    searcher.is_finished = true;
-                    SearchStep::Done
-                } else {
-                    let w: usize = kani::any();
-                    kani::assume(w >= 1 && w <= 4);
-                    kani::assume(w <= end);
-                    kani::assume(self.haystack.is_char_boundary(end - w));
-                    searcher.end = end - w;
-                    SearchStep::Reject(searcher.end, end)
-                }
+                    if is_match {
+                        SearchStep::Match(end, end)
+                    } else if end == 0 {
+                        searcher.is_finished = true;
+                        SearchStep::Done
+                    } else {
+                        let w: usize = kani::any();
+                        kani::assume(w >= 1 && w <= 4);
+                        kani::assume(w <= end);
+                        kani::assume(self.haystack.is_char_boundary(end - w));
+                        searcher.end = end - w;
+                        SearchStep::Reject(searcher.end, end)
+                    }
                 }
             }
             StrSearcherImpl::TwoWay(ref mut searcher) => {
@@ -1585,17 +1590,17 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
                         // Under Kani, abstract this loop (same as forward case).
                         #[cfg(not(kani))]
                         {
-                        while !self.haystack.is_char_boundary(a) {
-                            a -= 1;
-                        }
+                            while !self.haystack.is_char_boundary(a) {
+                                a -= 1;
+                            }
                         }
                         #[cfg(kani)]
                         {
-                        let skip: usize = kani::any();
-                        kani::assume(skip <= 3);
-                        kani::assume(skip <= a);
-                        a = a - skip;
-                        kani::assume(self.haystack.is_char_boundary(a));
+                            let skip: usize = kani::any();
+                            kani::assume(skip <= 3);
+                            kani::assume(skip <= a);
+                            a = a - skip;
+                            kani::assume(self.haystack.is_char_boundary(a));
                         }
                         searcher.end = cmp::min(a, searcher.end);
                         SearchStep::Reject(a, b)
@@ -1672,12 +1677,8 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
         #[cfg(kani)]
         {
             let is_done = match self.searcher {
-                StrSearcherImpl::Empty(ref en) => {
-                    en.is_finished || en.end == 0
-                }
-                StrSearcherImpl::TwoWay(ref tw) => {
-                    tw.end == 0
-                }
+                StrSearcherImpl::Empty(ref en) => en.is_finished || en.end == 0,
+                StrSearcherImpl::TwoWay(ref tw) => tw.end == 0,
             };
             if is_done {
                 return None;
@@ -1842,71 +1843,71 @@ impl TwoWaySearcher {
         }
         #[cfg(not(kani))]
         {
-        let (crit_pos_false, period_false) = TwoWaySearcher::maximal_suffix(needle, false);
-        let (crit_pos_true, period_true) = TwoWaySearcher::maximal_suffix(needle, true);
+            let (crit_pos_false, period_false) = TwoWaySearcher::maximal_suffix(needle, false);
+            let (crit_pos_true, period_true) = TwoWaySearcher::maximal_suffix(needle, true);
 
-        let (crit_pos, period) = if crit_pos_false > crit_pos_true {
-            (crit_pos_false, period_false)
-        } else {
-            (crit_pos_true, period_true)
-        };
+            let (crit_pos, period) = if crit_pos_false > crit_pos_true {
+                (crit_pos_false, period_false)
+            } else {
+                (crit_pos_true, period_true)
+            };
 
-        // A particularly readable explanation of what's going on here can be found
-        // in Crochemore and Rytter's book "Text Algorithms", ch 13. Specifically
-        // see the code for "Algorithm CP" on p. 323.
-        //
-        // What's going on is we have some critical factorization (u, v) of the
-        // needle, and we want to determine whether u is a suffix of
-        // &v[..period]. If it is, we use "Algorithm CP1". Otherwise we use
-        // "Algorithm CP2", which is optimized for when the period of the needle
-        // is large.
-        if needle[..crit_pos] == needle[period..period + crit_pos] {
-            // short period case -- the period is exact
-            // compute a separate critical factorization for the reversed needle
-            // x = u' v' where |v'| < period(x).
+            // A particularly readable explanation of what's going on here can be found
+            // in Crochemore and Rytter's book "Text Algorithms", ch 13. Specifically
+            // see the code for "Algorithm CP" on p. 323.
             //
-            // This is sped up by the period being known already.
-            // Note that a case like x = "acba" may be factored exactly forwards
-            // (crit_pos = 1, period = 3) while being factored with approximate
-            // period in reverse (crit_pos = 2, period = 2). We use the given
-            // reverse factorization but keep the exact period.
-            let crit_pos_back = needle.len()
-                - cmp::max(
-                    TwoWaySearcher::reverse_maximal_suffix(needle, period, false),
-                    TwoWaySearcher::reverse_maximal_suffix(needle, period, true),
-                );
+            // What's going on is we have some critical factorization (u, v) of the
+            // needle, and we want to determine whether u is a suffix of
+            // &v[..period]. If it is, we use "Algorithm CP1". Otherwise we use
+            // "Algorithm CP2", which is optimized for when the period of the needle
+            // is large.
+            if needle[..crit_pos] == needle[period..period + crit_pos] {
+                // short period case -- the period is exact
+                // compute a separate critical factorization for the reversed needle
+                // x = u' v' where |v'| < period(x).
+                //
+                // This is sped up by the period being known already.
+                // Note that a case like x = "acba" may be factored exactly forwards
+                // (crit_pos = 1, period = 3) while being factored with approximate
+                // period in reverse (crit_pos = 2, period = 2). We use the given
+                // reverse factorization but keep the exact period.
+                let crit_pos_back = needle.len()
+                    - cmp::max(
+                        TwoWaySearcher::reverse_maximal_suffix(needle, period, false),
+                        TwoWaySearcher::reverse_maximal_suffix(needle, period, true),
+                    );
 
-            TwoWaySearcher {
-                crit_pos,
-                crit_pos_back,
-                period,
-                byteset: Self::byteset_create(&needle[..period]),
+                TwoWaySearcher {
+                    crit_pos,
+                    crit_pos_back,
+                    period,
+                    byteset: Self::byteset_create(&needle[..period]),
 
-                position: 0,
-                end,
-                memory: 0,
-                memory_back: needle.len(),
+                    position: 0,
+                    end,
+                    memory: 0,
+                    memory_back: needle.len(),
+                }
+            } else {
+                // long period case -- we have an approximation to the actual period,
+                // and don't use memorization.
+                //
+                // Approximate the period by lower bound max(|u|, |v|) + 1.
+                // The critical factorization is efficient to use for both forward and
+                // reverse search.
+
+                TwoWaySearcher {
+                    crit_pos,
+                    crit_pos_back: crit_pos,
+                    period: cmp::max(crit_pos, needle.len() - crit_pos) + 1,
+                    byteset: Self::byteset_create(needle),
+
+                    position: 0,
+                    end,
+                    memory: usize::MAX, // Dummy value to signify that the period is long
+                    memory_back: usize::MAX,
+                }
             }
-        } else {
-            // long period case -- we have an approximation to the actual period,
-            // and don't use memorization.
-            //
-            // Approximate the period by lower bound max(|u|, |v|) + 1.
-            // The critical factorization is efficient to use for both forward and
-            // reverse search.
-
-            TwoWaySearcher {
-                crit_pos,
-                crit_pos_back: crit_pos,
-                period: cmp::max(crit_pos, needle.len() - crit_pos) + 1,
-                byteset: Self::byteset_create(needle),
-
-                position: 0,
-                end,
-                memory: usize::MAX, // Dummy value to signify that the period is long
-                memory_back: usize::MAX,
-            }
-        }
         }
     }
 
@@ -1966,70 +1967,73 @@ impl TwoWaySearcher {
         }
         #[cfg(not(kani))]
         {
-        // `next()` uses `self.position` as its cursor
-        let old_pos = self.position;
-        let needle_last = needle.len() - 1;
-        'search: loop {
-            // Check that we have room to search in
-            // position + needle_last can not overflow if we assume slices
-            // are bounded by isize's range.
-            let tail_byte = match haystack.get(self.position + needle_last) {
-                Some(&b) => b,
-                None => {
-                    self.position = haystack.len();
+            // `next()` uses `self.position` as its cursor
+            let old_pos = self.position;
+            let needle_last = needle.len() - 1;
+            'search: loop {
+                // Check that we have room to search in
+                // position + needle_last can not overflow if we assume slices
+                // are bounded by isize's range.
+                let tail_byte = match haystack.get(self.position + needle_last) {
+                    Some(&b) => b,
+                    None => {
+                        self.position = haystack.len();
+                        return S::rejecting(old_pos, self.position);
+                    }
+                };
+
+                if S::use_early_reject() && old_pos != self.position {
                     return S::rejecting(old_pos, self.position);
                 }
-            };
 
-            if S::use_early_reject() && old_pos != self.position {
-                return S::rejecting(old_pos, self.position);
-            }
-
-            // Quickly skip by large portions unrelated to our substring
-            if !self.byteset_contains(tail_byte) {
-                self.position += needle.len();
-                if !long_period {
-                    self.memory = 0;
-                }
-                continue 'search;
-            }
-
-            // See if the right part of the needle matches
-            let start =
-                if long_period { self.crit_pos } else { cmp::max(self.crit_pos, self.memory) };
-            for i in start..needle.len() {
-                if needle[i] != haystack[self.position + i] {
-                    self.position += i - self.crit_pos + 1;
+                // Quickly skip by large portions unrelated to our substring
+                if !self.byteset_contains(tail_byte) {
+                    self.position += needle.len();
                     if !long_period {
                         self.memory = 0;
                     }
                     continue 'search;
                 }
-            }
 
-            // See if the left part of the needle matches
-            let start = if long_period { 0 } else { self.memory };
-            for i in (start..self.crit_pos).rev() {
-                if needle[i] != haystack[self.position + i] {
-                    self.position += self.period;
-                    if !long_period {
-                        self.memory = needle.len() - self.period;
+                // See if the right part of the needle matches
+                let start = if long_period {
+                    self.crit_pos
+                } else {
+                    cmp::max(self.crit_pos, self.memory)
+                };
+                for i in start..needle.len() {
+                    if needle[i] != haystack[self.position + i] {
+                        self.position += i - self.crit_pos + 1;
+                        if !long_period {
+                            self.memory = 0;
+                        }
+                        continue 'search;
                     }
-                    continue 'search;
                 }
+
+                // See if the left part of the needle matches
+                let start = if long_period { 0 } else { self.memory };
+                for i in (start..self.crit_pos).rev() {
+                    if needle[i] != haystack[self.position + i] {
+                        self.position += self.period;
+                        if !long_period {
+                            self.memory = needle.len() - self.period;
+                        }
+                        continue 'search;
+                    }
+                }
+
+                // We have found a match!
+                let match_pos = self.position;
+
+                // Note: add self.period instead of needle.len() to have overlapping matches
+                self.position += needle.len();
+                if !long_period {
+                    self.memory = 0; // set to needle.len() - self.period for overlapping matches
+                }
+
+                return S::matching(match_pos, match_pos + needle.len());
             }
-
-            // We have found a match!
-            let match_pos = self.position;
-
-            // Note: add self.period instead of needle.len() to have overlapping matches
-            self.position += needle.len();
-            if !long_period {
-                self.memory = 0; // set to needle.len() - self.period for overlapping matches
-            }
-
-            return S::matching(match_pos, match_pos + needle.len());
-        }
         }
     }
 
@@ -2080,73 +2084,77 @@ impl TwoWaySearcher {
         }
         #[cfg(not(kani))]
         {
-        // `next_back()` uses `self.end` as its cursor -- so that `next()` and `next_back()`
-        // are independent.
-        let old_end = self.end;
-        'search: loop {
-            // Check that we have room to search in
-            // end - needle.len() will wrap around when there is no more room,
-            // but due to slice length limits it can never wrap all the way back
-            // into the length of haystack.
-            let front_byte = match haystack.get(self.end.wrapping_sub(needle.len())) {
-                Some(&b) => b,
-                None => {
-                    self.end = 0;
-                    return S::rejecting(0, old_end);
+            // `next_back()` uses `self.end` as its cursor -- so that `next()` and `next_back()`
+            // are independent.
+            let old_end = self.end;
+            'search: loop {
+                // Check that we have room to search in
+                // end - needle.len() will wrap around when there is no more room,
+                // but due to slice length limits it can never wrap all the way back
+                // into the length of haystack.
+                let front_byte = match haystack.get(self.end.wrapping_sub(needle.len())) {
+                    Some(&b) => b,
+                    None => {
+                        self.end = 0;
+                        return S::rejecting(0, old_end);
+                    }
+                };
+
+                if S::use_early_reject() && old_end != self.end {
+                    return S::rejecting(self.end, old_end);
                 }
-            };
 
-            if S::use_early_reject() && old_end != self.end {
-                return S::rejecting(self.end, old_end);
-            }
-
-            // Quickly skip by large portions unrelated to our substring
-            if !self.byteset_contains(front_byte) {
-                self.end -= needle.len();
-                if !long_period {
-                    self.memory_back = needle.len();
-                }
-                continue 'search;
-            }
-
-            // See if the left part of the needle matches
-            let crit = if long_period {
-                self.crit_pos_back
-            } else {
-                cmp::min(self.crit_pos_back, self.memory_back)
-            };
-            for i in (0..crit).rev() {
-                if needle[i] != haystack[self.end - needle.len() + i] {
-                    self.end -= self.crit_pos_back - i;
+                // Quickly skip by large portions unrelated to our substring
+                if !self.byteset_contains(front_byte) {
+                    self.end -= needle.len();
                     if !long_period {
                         self.memory_back = needle.len();
                     }
                     continue 'search;
                 }
-            }
 
-            // See if the right part of the needle matches
-            let needle_end = if long_period { needle.len() } else { self.memory_back };
-            for i in self.crit_pos_back..needle_end {
-                if needle[i] != haystack[self.end - needle.len() + i] {
-                    self.end -= self.period;
-                    if !long_period {
-                        self.memory_back = self.period;
+                // See if the left part of the needle matches
+                let crit = if long_period {
+                    self.crit_pos_back
+                } else {
+                    cmp::min(self.crit_pos_back, self.memory_back)
+                };
+                for i in (0..crit).rev() {
+                    if needle[i] != haystack[self.end - needle.len() + i] {
+                        self.end -= self.crit_pos_back - i;
+                        if !long_period {
+                            self.memory_back = needle.len();
+                        }
+                        continue 'search;
                     }
-                    continue 'search;
                 }
-            }
 
-            // We have found a match!
-            let match_pos = self.end - needle.len();
-            // Note: sub self.period instead of needle.len() to have overlapping matches
-            self.end -= needle.len();
-            if !long_period {
-                self.memory_back = needle.len();
-            }
+                // See if the right part of the needle matches
+                let needle_end = if long_period {
+                    needle.len()
+                } else {
+                    self.memory_back
+                };
+                for i in self.crit_pos_back..needle_end {
+                    if needle[i] != haystack[self.end - needle.len() + i] {
+                        self.end -= self.period;
+                        if !long_period {
+                            self.memory_back = self.period;
+                        }
+                        continue 'search;
+                    }
+                }
 
-            return S::matching(match_pos, match_pos + needle.len());
-        }
+                // We have found a match!
+                let match_pos = self.end - needle.len();
+                // Note: sub self.period instead of needle.len() to have overlapping matches
+                self.end -= needle.len();
+                if !long_period {
+                    self.memory_back = needle.len();
+                }
+
+                return S::matching(match_pos, match_pos + needle.len());
+            }
         }
     }
 
@@ -2167,7 +2175,7 @@ impl TwoWaySearcher {
         let mut left = 0; // Corresponds to i in the paper
         let mut right = 1; // Corresponds to j in the paper
         let mut offset = 0; // Corresponds to k in the paper, but starting at 0
-        // to match 0-based indexing.
+                            // to match 0-based indexing.
         let mut period = 1; // Corresponds to p in the paper
 
         while let Some(&a) = arr.get(right + offset) {
@@ -2213,7 +2221,7 @@ impl TwoWaySearcher {
         let mut left = 0; // Corresponds to i in the paper
         let mut right = 1; // Corresponds to j in the paper
         let mut offset = 0; // Corresponds to k in the paper, but starting at 0
-        // to match 0-based indexing.
+                            // to match 0-based indexing.
         let mut period = 1; // Corresponds to p in the paper
         let n = arr.len();
 
@@ -2379,7 +2387,9 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
             // SAFETY: mask is between 0 and 15 trailing zeroes, we skip one additional byte that was already compared
             // and then take trimmed_needle.len() bytes. This is within the bounds defined by the outer loop
             unsafe {
-                let sub = haystack.get_unchecked(offset..).get_unchecked(..trimmed_needle.len());
+                let sub = haystack
+                    .get_unchecked(offset..)
+                    .get_unchecked(..trimmed_needle.len());
                 if small_slice_eq(sub, trimmed_needle) {
                     return true;
                 }
@@ -2395,7 +2405,12 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
         let a: Block = unsafe { haystack.as_ptr().add(idx).cast::<Block>().read_unaligned() };
         // SAFETY: this requires LANES + block_offset bytes being readable at idx
         let b: Block = unsafe {
-            haystack.as_ptr().add(idx).add(second_probe_offset).cast::<Block>().read_unaligned()
+            haystack
+                .as_ptr()
+                .add(idx)
+                .add(second_probe_offset)
+                .cast::<Block>()
+                .read_unaligned()
         };
         let eq_first: Mask = a.simd_eq(first_probe);
         let eq_last: Mask = b.simd_eq(second_probe);
@@ -3182,8 +3197,7 @@ pub mod verify_str_searcher {
 
     /// Type invariant for TwoWaySearcher variant
     fn type_invariant_two_way(tw: &TwoWaySearcher, haystack_len: usize) -> bool {
-        tw.position <= haystack_len
-            && tw.end <= haystack_len
+        tw.position <= haystack_len && tw.end <= haystack_len
     }
 
     /// Composite type invariant for StrSearcher
@@ -3191,8 +3205,7 @@ pub mod verify_str_searcher {
         match s.searcher {
             StrSearcherImpl::Empty(ref en) => type_invariant_empty_needle(en, s.haystack),
             StrSearcherImpl::TwoWay(ref tw) => {
-                s.needle.len() >= 1
-                    && type_invariant_two_way(tw, s.haystack.len())
+                s.needle.len() >= 1 && type_invariant_two_way(tw, s.haystack.len())
             }
         }
     }
