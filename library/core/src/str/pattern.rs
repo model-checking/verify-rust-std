@@ -438,10 +438,7 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
     fn next_match(&mut self) -> Option<(usize, usize)> {
         loop {
             // get the haystack after the last character found
-            let bytes = self
-                .haystack
-                .as_bytes()
-                .get(self.finger..self.finger_back)?;
+            let bytes = self.haystack.as_bytes().get(self.finger..self.finger_back)?;
             // the last byte of the utf8 encoded needle
             // SAFETY: we have an invariant that `utf8_size < 5`
             let last_byte = unsafe { *self.utf8_encoded.get_unchecked(self.utf8_size() - 1) };
@@ -780,11 +777,7 @@ impl<C: MultiCharEq> Pattern for MultiCharEqPattern<C> {
 
     #[inline]
     fn into_searcher(self, haystack: &str) -> MultiCharEqSearcher<'_, C> {
-        MultiCharEqSearcher {
-            haystack,
-            char_eq: self.0,
-            char_indices: haystack.char_indices(),
-        }
+        MultiCharEqSearcher { haystack, char_eq: self.0, char_indices: haystack.char_indices() }
     }
 }
 
@@ -1996,11 +1989,8 @@ impl TwoWaySearcher {
                 }
 
                 // See if the right part of the needle matches
-                let start = if long_period {
-                    self.crit_pos
-                } else {
-                    cmp::max(self.crit_pos, self.memory)
-                };
+                let start =
+                    if long_period { self.crit_pos } else { cmp::max(self.crit_pos, self.memory) };
                 for i in start..needle.len() {
                     if needle[i] != haystack[self.position + i] {
                         self.position += i - self.crit_pos + 1;
@@ -2130,11 +2120,7 @@ impl TwoWaySearcher {
                 }
 
                 // See if the right part of the needle matches
-                let needle_end = if long_period {
-                    needle.len()
-                } else {
-                    self.memory_back
-                };
+                let needle_end = if long_period { needle.len() } else { self.memory_back };
                 for i in self.crit_pos_back..needle_end {
                     if needle[i] != haystack[self.end - needle.len() + i] {
                         self.end -= self.period;
@@ -2387,9 +2373,7 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
             // SAFETY: mask is between 0 and 15 trailing zeroes, we skip one additional byte that was already compared
             // and then take trimmed_needle.len() bytes. This is within the bounds defined by the outer loop
             unsafe {
-                let sub = haystack
-                    .get_unchecked(offset..)
-                    .get_unchecked(..trimmed_needle.len());
+                let sub = haystack.get_unchecked(offset..).get_unchecked(..trimmed_needle.len());
                 if small_slice_eq(sub, trimmed_needle) {
                     return true;
                 }
@@ -2405,12 +2389,7 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
         let a: Block = unsafe { haystack.as_ptr().add(idx).cast::<Block>().read_unaligned() };
         // SAFETY: this requires LANES + block_offset bytes being readable at idx
         let b: Block = unsafe {
-            haystack
-                .as_ptr()
-                .add(idx)
-                .add(second_probe_offset)
-                .cast::<Block>()
-                .read_unaligned()
+            haystack.as_ptr().add(idx).add(second_probe_offset).cast::<Block>().read_unaligned()
         };
         let eq_first: Mask = a.simd_eq(first_probe);
         let eq_last: Mask = b.simd_eq(second_probe);
