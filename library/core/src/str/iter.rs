@@ -1058,7 +1058,9 @@ where
     P: Pattern<Searcher<'a>: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("MatchIndicesInternal").field(&self.0).finish()
+        f.debug_tuple("MatchIndicesInternal")
+            .field(&self.0)
+            .finish()
     }
 }
 
@@ -1435,7 +1437,9 @@ impl<'a, P: Pattern> Iterator for SplitInclusive<'a, P> {
 #[stable(feature = "split_inclusive", since = "1.51.0")]
 impl<'a, P: Pattern<Searcher<'a>: fmt::Debug>> fmt::Debug for SplitInclusive<'a, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SplitInclusive").field("0", &self.0).finish()
+        f.debug_struct("SplitInclusive")
+            .field("0", &self.0)
+            .finish()
     }
 }
 
@@ -1613,3 +1617,261 @@ macro_rules! escape_types_impls {
 }
 
 escape_types_impls!(EscapeDebug, EscapeDefault, EscapeUnicode);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+
+    // ========== Chars ==========
+
+    /// Verify safety of Chars::next.
+    /// Unsafe ops: next_code_point + char::from_u32_unchecked.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_chars_next() {
+        let c: char = kani::any();
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        let mut chars = s.chars();
+        let result = chars.next();
+        assert_eq!(result, Some(c));
+        assert!(chars.next().is_none());
+    }
+
+    /// Verify safety of Chars::next_back.
+    /// Unsafe ops: next_code_point_reverse + char::from_u32_unchecked.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_chars_next_back() {
+        let c: char = kani::any();
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        let mut chars = s.chars();
+        let result = chars.next_back();
+        assert_eq!(result, Some(c));
+        assert!(chars.next_back().is_none());
+    }
+
+    /// Verify safety of Chars::advance_by (small input, final loop path).
+    /// Unsafe ops: self.iter.advance_by(slurp).unwrap_unchecked().
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_chars_advance_by() {
+        let c: char = kani::any();
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        let mut chars = s.chars();
+        let n: usize = kani::any();
+        kani::assume(n <= 4);
+        let _ = chars.advance_by(n);
+    }
+
+    /// Verify safety of Chars::advance_by (large input, CHUNK_SIZE=32 branch).
+    /// Unsafe ops: self.iter.advance_by(bytes_skipped).unwrap_unchecked(),
+    ///             self.iter.advance_by(1).unwrap_unchecked().
+    #[kani::proof]
+    #[kani::unwind(34)]
+    fn check_chars_advance_by_large() {
+        // 33 ASCII bytes exercises the CHUNK_SIZE=32 branch
+        let s = "abcdefghijklmnopqrstuvwxyz0123456";
+        let mut chars = s.chars();
+        let _ = chars.advance_by(33);
+    }
+
+    /// Verify safety of Chars::as_str.
+    /// Unsafe ops: from_utf8_unchecked(self.iter.as_slice()).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_chars_as_str() {
+        let c: char = kani::any();
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        let len = s.len();
+        let mut chars = s.chars();
+        let s1 = chars.as_str();
+        assert_eq!(s1.len(), len);
+        let _ = chars.next();
+        let s2 = chars.as_str();
+        assert_eq!(s2.len(), 0);
+    }
+
+    // ========== SplitInternal ==========
+
+    /// Verify safety of SplitInternal::get_end.
+    /// Unsafe ops: get_unchecked(self.start..self.end).
+    /// Exercised when pattern has no matches in the haystack.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_split_internal_get_end() {
+        let mut split = "ab".split('x');
+        let result = split.next(); // no match -> calls get_end
+        assert!(result.is_some());
+        assert!(split.next().is_none());
+    }
+
+    /// Verify safety of SplitInternal::next.
+    /// Unsafe ops: get_unchecked(self.start..a) and get_end fallback.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_split_internal_next() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut split = "ab".split(c);
+        let _ = split.next();
+        let _ = split.next();
+        let _ = split.next();
+    }
+
+    /// Verify safety of SplitInternal::next_inclusive.
+    /// Unsafe ops: get_unchecked(self.start..b) and get_end fallback.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_split_internal_next_inclusive() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut split = "ab".split_inclusive(c);
+        let _ = split.next();
+        let _ = split.next();
+        let _ = split.next();
+    }
+
+    /// Verify safety of SplitInternal::next_back.
+    /// Unsafe ops: get_unchecked(b..self.end) and get_unchecked(self.start..self.end).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_split_internal_next_back() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut split = "ab".split(c);
+        let _ = split.next_back();
+        let _ = split.next_back();
+        let _ = split.next_back();
+    }
+
+    /// Verify safety of SplitInternal::next_back (allow_trailing_empty=false path).
+    /// Exercises the recursive next_back call via split_terminator.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_split_internal_next_back_terminator() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut split = "ab".split_terminator(c);
+        let _ = split.next_back();
+        let _ = split.next_back();
+        let _ = split.next_back();
+    }
+
+    /// Verify safety of SplitInternal::next_back_inclusive.
+    /// Unsafe ops: get_unchecked(b..self.end) and get_unchecked(self.start..self.end).
+    /// split_inclusive sets allow_trailing_empty=false, exercising the recursive path.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_split_internal_next_back_inclusive() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut split = "ab".split_inclusive(c);
+        let _ = split.next_back();
+        let _ = split.next_back();
+        let _ = split.next_back();
+    }
+
+    /// Verify safety of SplitInternal::remainder.
+    /// Unsafe ops: get_unchecked(self.start..self.end).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_split_internal_remainder() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut split = "ab".split(c);
+        let _ = split.remainder();
+        let _ = split.next();
+        let _ = split.remainder();
+    }
+
+    // ========== MatchIndicesInternal ==========
+
+    /// Verify safety of MatchIndicesInternal::next.
+    /// Unsafe ops: get_unchecked(start..end).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_match_indices_internal_next() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut mi = "ab".match_indices(c);
+        let _ = mi.next();
+        let _ = mi.next();
+        let _ = mi.next();
+    }
+
+    /// Verify safety of MatchIndicesInternal::next_back.
+    /// Unsafe ops: get_unchecked(start..end).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_match_indices_internal_next_back() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut mi = "ab".match_indices(c);
+        let _ = mi.next_back();
+        let _ = mi.next_back();
+        let _ = mi.next_back();
+    }
+
+    // ========== MatchesInternal ==========
+
+    /// Verify safety of MatchesInternal::next.
+    /// Unsafe ops: get_unchecked(a..b).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_matches_internal_next() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut m = "ab".matches(c);
+        let _ = m.next();
+        let _ = m.next();
+        let _ = m.next();
+    }
+
+    /// Verify safety of MatchesInternal::next_back.
+    /// Unsafe ops: get_unchecked(a..b).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_matches_internal_next_back() {
+        let c: char = kani::any();
+        kani::assume(c.is_ascii());
+        let mut m = "ab".matches(c);
+        let _ = m.next_back();
+        let _ = m.next_back();
+        let _ = m.next_back();
+    }
+
+    // ========== SplitAsciiWhitespace ==========
+
+    /// Verify safety of SplitAsciiWhitespace::remainder.
+    /// Unsafe ops: from_utf8_unchecked(&self.inner.iter.iter.v).
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_split_ascii_whitespace_remainder() {
+        let mut split = "a b".split_ascii_whitespace();
+        let _ = split.remainder();
+        let _ = split.next();
+        let _ = split.remainder();
+        let _ = split.next();
+        let _ = split.remainder();
+    }
+
+    // ========== Bytes ==========
+
+    /// Verify safety contract of Bytes::__iterator_get_unchecked.
+    /// Contract: #[requires(idx < self.0.len())].
+    #[kani::proof]
+    fn check_bytes_iterator_get_unchecked() {
+        let s = "abcd";
+        let mut bytes = s.bytes();
+        let idx: usize = kani::any();
+        kani::assume(idx < bytes.len());
+        unsafe {
+            let _ = bytes.__iterator_get_unchecked(idx);
+        }
+    }
+}
