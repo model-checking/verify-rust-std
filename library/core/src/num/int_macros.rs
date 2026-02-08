@@ -1736,7 +1736,6 @@ macro_rules! int_impl {
             let mut base = self;
             let mut acc: Self = 1;
 
-            #[safety::loop_invariant(true)]
             loop {
                 if (exp & 1) == 1 {
                     acc = try_opt!(acc.checked_mul(base));
