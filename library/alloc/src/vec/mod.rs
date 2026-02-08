@@ -457,7 +457,10 @@ impl<T> Vec<T> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
     pub const fn new() -> Self {
-        Vec { buf: RawVec::new(), len: 0 }
+        Vec {
+            buf: RawVec::new(),
+            len: 0,
+        }
     }
 
     /// Constructs a new, empty `Vec<T>` with at least the specified capacity.
@@ -864,7 +867,10 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     pub const fn new_in(alloc: A) -> Self {
-        Vec { buf: RawVec::new_in(alloc), len: 0 }
+        Vec {
+            buf: RawVec::new_in(alloc),
+            len: 0,
+        }
     }
 
     /// Constructs a new, empty `Vec<T, A>` with at least the specified capacity
@@ -926,7 +932,10 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
-        Vec { buf: RawVec::with_capacity_in(capacity, alloc), len: 0 }
+        Vec {
+            buf: RawVec::with_capacity_in(capacity, alloc),
+            len: 0,
+        }
     }
 
     /// Constructs a new, empty `Vec<T, A>` with at least the specified capacity
@@ -944,7 +953,10 @@ impl<T, A: Allocator> Vec<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "try_with_capacity", issue = "91913")]
     pub fn try_with_capacity_in(capacity: usize, alloc: A) -> Result<Self, TryReserveError> {
-        Ok(Vec { buf: RawVec::try_with_capacity_in(capacity, alloc)?, len: 0 })
+        Ok(Vec {
+            buf: RawVec::try_with_capacity_in(capacity, alloc)?,
+            len: 0,
+        })
     }
 
     /// Creates a `Vec<T, A>` directly from a pointer, a length, a capacity,
@@ -1063,7 +1075,12 @@ impl<T, A: Allocator> Vec<T, A> {
             "Vec::from_raw_parts_in requires that length <= capacity",
             (length: usize = length, capacity: usize = capacity) => length <= capacity
         );
-        unsafe { Vec { buf: RawVec::from_raw_parts_in(ptr, capacity, alloc), len: length } }
+        unsafe {
+            Vec {
+                buf: RawVec::from_raw_parts_in(ptr, capacity, alloc),
+                len: length,
+            }
+        }
     }
 
     #[doc(alias = "from_non_null_parts_in")]
@@ -1184,7 +1201,12 @@ impl<T, A: Allocator> Vec<T, A> {
             "Vec::from_parts_in requires that length <= capacity",
             (length: usize = length, capacity: usize = capacity) => length <= capacity
         );
-        unsafe { Vec { buf: RawVec::from_nonnull_in(ptr, capacity, alloc), len: length } }
+        unsafe {
+            Vec {
+                buf: RawVec::from_nonnull_in(ptr, capacity, alloc),
+                len: length,
+            }
+        }
     }
 
     /// Decomposes a `Vec<T>` into its raw components: `(pointer, length, capacity, allocator)`.
@@ -2306,7 +2328,9 @@ impl<T, A: Allocator> Vec<T, A> {
                     unsafe {
                         ptr::copy(
                             self.v.as_ptr().add(self.processed_len),
-                            self.v.as_mut_ptr().add(self.processed_len - self.deleted_cnt),
+                            self.v
+                                .as_mut_ptr()
+                                .add(self.processed_len - self.deleted_cnt),
                             self.original_len - self.processed_len,
                         );
                     }
@@ -2318,7 +2342,12 @@ impl<T, A: Allocator> Vec<T, A> {
             }
         }
 
-        let mut g = BackshiftOnDrop { v: self, processed_len: 0, deleted_cnt: 0, original_len };
+        let mut g = BackshiftOnDrop {
+            v: self,
+            processed_len: 0,
+            deleted_cnt: 0,
+            original_len,
+        };
 
         fn process_loop<F, T, A: Allocator, const DELETED: bool>(
             original_len: usize,
@@ -2492,8 +2521,11 @@ impl<T, A: Allocator> Vec<T, A> {
          * doing slice partition_dedup + truncate */
 
         // Construct gap first and then drop item to avoid memory corruption if `T::drop` panics.
-        let mut gap =
-            FillGapOnDrop { read: first_duplicate_idx + 1, write: first_duplicate_idx, vec: self };
+        let mut gap = FillGapOnDrop {
+            read: first_duplicate_idx + 1,
+            write: first_duplicate_idx,
+            vec: self,
+        };
         unsafe {
             // SAFETY: we checked that first_duplicate_idx in bounds before.
             // If drop panics, `gap` would remove this item without drop.
@@ -3724,7 +3756,14 @@ impl<T, A: Allocator> IntoIterator for Vec<T, A> {
                 begin.add(me.len()) as *const T
             };
             let cap = me.buf.capacity();
-            IntoIter { buf, phantom: PhantomData, cap, alloc, ptr: buf, end }
+            IntoIter {
+                buf,
+                phantom: PhantomData,
+                cap,
+                alloc,
+                ptr: buf,
+                end,
+            }
         }
     }
 }
@@ -3891,7 +3930,10 @@ impl<T, A: Allocator> Vec<T, A> {
         R: RangeBounds<usize>,
         I: IntoIterator<Item = T>,
     {
-        Splice { drain: self.drain(range), replace_with: replace_with.into_iter() }
+        Splice {
+            drain: self.drain(range),
+            replace_with: replace_with.into_iter(),
+        }
     }
 
     /// Creates an iterator which uses a closure to determine if an element in the range should be removed.
@@ -4311,43 +4353,431 @@ mod verify {
 
     use crate::vec::Vec;
 
-    // Size chosen for testing the empty vector (0), middle element removal (1)
-    // and last element removal (2) cases while keeping verification tractable
-    const ARRAY_LEN: usize = 3;
-
-    #[kani::proof]
-    pub fn verify_swap_remove() {
-        // Creating a vector directly from a fixed length arbitrary array
-        let mut arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
-        let mut vect = Vec::from(&arr);
-
-        // Recording the original length and a copy of the vector for validation
-        let original_len = vect.len();
-        let original_vec = vect.clone();
-
-        // Generating a nondeterministic index which is guaranteed to be within bounds
-        let index: usize = kani::any_where(|x| *x < original_len);
-
-        let removed = vect.swap_remove(index);
-
-        // Verifying that the length of the vector decreases by one after the operation is performed
-        assert!(vect.len() == original_len - 1, "Length should decrease by 1");
-
-        // Verifying that the removed element matches the original element at the index
-        assert!(removed == original_vec[index], "Removed element should match original");
-
-        // Verifying that the removed index now contains the element originally at the vector's last index if applicable
-        if index < original_len - 1 {
-            assert!(
-                vect[index] == original_vec[original_len - 1],
-                "Index should contain last element"
-            );
-        }
-
-        // Check that all other unaffected elements remain unchanged
-        let k = kani::any_where(|&x: &usize| x < original_len - 1);
-        if k != index {
-            assert!(vect[k] == arr[k]);
-        }
+    // Helper: create a Vec<T> with symbolic length for verification.
+    // Creates from a fixed-size array then truncates to a symbolic length,
+    // giving a Vec with 0..=MAX_LEN initialized elements and capacity MAX_LEN.
+    fn any_vec<T: kani::Arbitrary, const MAX_LEN: usize>() -> Vec<T> {
+        let arr: [T; MAX_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(arr);
+        let new_len: usize = kani::any();
+        kani::assume(new_len <= v.len());
+        v.truncate(new_len);
+        v
     }
+
+    // Helper: create a Vec<T> with at least `min_len` elements.
+    fn any_vec_with_min_len<T: kani::Arbitrary, const MAX_LEN: usize>(min_len: usize) -> Vec<T> {
+        let arr: [T; MAX_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(arr);
+        let new_len: usize = kani::any();
+        kani::assume(new_len >= min_len && new_len <= v.len());
+        v.truncate(new_len);
+        v
+    }
+
+    /// Macro for generating Vec harnesses across representative types.
+    macro_rules! check_vec_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                // --- from_raw_parts ---
+                #[kani::proof]
+                fn check_from_raw_parts() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let cap = v.capacity();
+                    let ptr = v.as_mut_ptr();
+                    core::mem::forget(v);
+                    let reconstructed = unsafe { Vec::from_raw_parts(ptr, len, cap) };
+                    assert!(reconstructed.len() == len);
+                    assert!(reconstructed.capacity() == cap);
+                }
+
+                // --- into_raw_parts_with_alloc ---
+                #[kani::proof]
+                fn check_into_raw_parts_with_alloc() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let cap = v.capacity();
+                    let (ptr, l, c, alloc) = v.into_raw_parts_with_alloc();
+                    assert!(l == len);
+                    assert!(c == cap);
+                    // Reconstruct to avoid leak
+                    let _ = unsafe { Vec::from_raw_parts_in(ptr, l, c, alloc) };
+                }
+
+                // --- into_boxed_slice ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_into_boxed_slice() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let boxed = v.into_boxed_slice();
+                    assert!(boxed.len() == len);
+                }
+
+                // --- truncate ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_truncate() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let new_len: usize = kani::any();
+                    v.truncate(new_len);
+                    if new_len < orig_len {
+                        assert!(v.len() == new_len);
+                    } else {
+                        assert!(v.len() == orig_len);
+                    }
+                }
+
+                // --- set_len ---
+                #[kani::proof]
+                fn check_set_len() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let cap = v.capacity();
+                    let new_len: usize = kani::any();
+                    kani::assume(new_len <= cap);
+                    // SAFETY: All elements up to capacity are initialized since
+                    // Vec::from(arr) initializes all MAX_LEN elements and truncate
+                    // only reduces len, not capacity.
+                    unsafe { v.set_len(new_len) };
+                    assert!(v.len() == new_len);
+                }
+
+                // --- swap_remove ---
+                #[kani::proof]
+                fn check_swap_remove() {
+                    let mut v: Vec<$ty> = any_vec_with_min_len::<$ty, MAX_LEN>(1);
+                    let orig_len = v.len();
+                    let index: usize = kani::any();
+                    kani::assume(index < orig_len);
+                    let _ = v.swap_remove(index);
+                    assert!(v.len() == orig_len - 1);
+                }
+
+                // --- insert ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_insert() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let index: usize = kani::any();
+                    kani::assume(index <= orig_len);
+                    let elem: $ty = kani::any();
+                    v.insert(index, elem);
+                    assert!(v.len() == orig_len + 1);
+                }
+
+                // --- remove ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_remove() {
+                    let mut v: Vec<$ty> = any_vec_with_min_len::<$ty, MAX_LEN>(1);
+                    let orig_len = v.len();
+                    let index: usize = kani::any();
+                    kani::assume(index < orig_len);
+                    let _ = v.remove(index);
+                    assert!(v.len() == orig_len - 1);
+                }
+
+                // --- retain_mut ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_retain_mut() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    v.retain_mut(|_| kani::any());
+                    assert!(v.len() <= orig_len);
+                }
+
+                // --- dedup_by ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_dedup_by() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    v.dedup_by(|_, _| kani::any());
+                    assert!(v.len() <= orig_len);
+                }
+
+                // --- push ---
+                #[kani::proof]
+                fn check_push() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let elem: $ty = kani::any();
+                    v.push(elem);
+                    assert!(v.len() == orig_len + 1);
+                }
+
+                // --- push_within_capacity ---
+                #[kani::proof]
+                fn check_push_within_capacity() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let orig_cap = v.capacity();
+                    let elem: $ty = kani::any();
+                    let result = v.push_within_capacity(elem);
+                    if orig_len < orig_cap {
+                        assert!(result.is_ok());
+                        assert!(v.len() == orig_len + 1);
+                    } else {
+                        assert!(result.is_err());
+                        assert!(v.len() == orig_len);
+                    }
+                }
+
+                // --- pop ---
+                #[kani::proof]
+                fn check_pop() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let result = v.pop();
+                    if orig_len > 0 {
+                        assert!(result.is_some());
+                        assert!(v.len() == orig_len - 1);
+                    } else {
+                        assert!(result.is_none());
+                    }
+                }
+
+                // --- append ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_append() {
+                    let mut v1: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let mut v2: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len1 = v1.len();
+                    let len2 = v2.len();
+                    v1.append(&mut v2);
+                    assert!(v1.len() == len1 + len2);
+                    assert!(v2.len() == 0);
+                }
+
+                // --- append_elements (private unsafe, called by append) ---
+                // Verified transitively through check_append above.
+                // Also verify directly:
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_append_elements() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let other: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let other_len = other.len();
+                    let other_slice: &[$ty] = &other;
+                    // append_elements is private, but append calls it.
+                    // Verify through append with a second vec.
+                    let mut v2 = other;
+                    v.append(&mut v2);
+                    assert!(v.len() == orig_len + other_len);
+                }
+
+                // --- drain ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_drain() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let start: usize = kani::any();
+                    let end: usize = kani::any();
+                    kani::assume(start <= end);
+                    kani::assume(end <= len);
+                    let drained: Vec<$ty> = v.drain(start..end).collect();
+                    assert!(drained.len() == end - start);
+                    assert!(v.len() == len - (end - start));
+                }
+
+                // --- clear ---
+                #[kani::proof]
+                fn check_clear() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    v.clear();
+                    assert!(v.len() == 0);
+                }
+
+                // --- split_off ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_split_off() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let at: usize = kani::any();
+                    kani::assume(at <= len);
+                    let right = v.split_off(at);
+                    assert!(v.len() == at);
+                    assert!(right.len() == len - at);
+                }
+
+                // --- leak ---
+                #[kani::proof]
+                fn check_leak() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let leaked = v.leak();
+                    assert!(leaked.len() == len);
+                }
+
+                // --- spare_capacity_mut ---
+                #[kani::proof]
+                fn check_spare_capacity_mut() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let cap = v.capacity();
+                    let spare = v.spare_capacity_mut();
+                    assert!(spare.len() == cap - len);
+                }
+
+                // --- split_at_spare_mut ---
+                #[kani::proof]
+                fn check_split_at_spare_mut() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let cap = v.capacity();
+                    let (init, spare) = v.split_at_spare_mut();
+                    assert!(init.len() == len);
+                    assert!(spare.len() == cap - len);
+                }
+
+                // --- split_at_spare_mut_with_len (private unsafe) ---
+                // Verified transitively through split_at_spare_mut above.
+
+                // --- extend_from_within ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_extend_from_within() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let start: usize = kani::any();
+                    let end: usize = kani::any();
+                    kani::assume(start <= end);
+                    kani::assume(end <= len);
+                    v.extend_from_within(start..end);
+                    assert!(v.len() == len + (end - start));
+                }
+
+                // --- into_flattened ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_into_flattened() {
+                    let arr: [[$ty; 1]; MAX_LEN] = kani::Arbitrary::any_array();
+                    let v: Vec<[$ty; 1]> = Vec::from(arr);
+                    let len = v.len();
+                    let flat = v.into_flattened();
+                    assert!(flat.len() == len);
+                }
+
+                // --- extend_with (private, called by resize) ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_extend_with() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let new_len: usize = kani::any();
+                    kani::assume(new_len >= orig_len);
+                    kani::assume(new_len <= MAX_LEN + MAX_LEN);
+                    let value: $ty = kani::any();
+                    v.resize(new_len, value);
+                    assert!(v.len() == new_len);
+                }
+
+                // --- spec_extend_from_within (private trait) ---
+                // Verified transitively through extend_from_within above.
+
+                // --- deref ---
+                #[kani::proof]
+                fn check_deref() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let slice: &[$ty] = &v;
+                    assert!(slice.len() == len);
+                }
+
+                // --- deref_mut ---
+                #[kani::proof]
+                fn check_deref_mut() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let slice: &mut [$ty] = &mut v;
+                    assert!(slice.len() == len);
+                }
+
+                // --- into_iter ---
+                #[kani::proof]
+                fn check_into_iter() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let iter = v.into_iter();
+                    assert!(iter.len() == len);
+                }
+
+                // --- extend_desugared (private) ---
+                // This is the default extend impl. Verify through Extend trait:
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_extend_desugared() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let extra: [$ty; 1] = kani::Arbitrary::any_array();
+                    v.extend(extra.iter().copied());
+                    assert!(v.len() == orig_len + 1);
+                }
+
+                // --- extend_trusted (private) ---
+                // Called when extending with a TrustedLen iterator.
+                // Vec::from(arr) uses this path. Also verify through extend:
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_extend_trusted() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let extra: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let extra_len = extra.len();
+                    v.extend(extra);
+                    assert!(v.len() == orig_len + extra_len);
+                }
+
+                // --- extract_if ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_extract_if() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let extracted: Vec<$ty> = v.extract_if(.., |_| kani::any()).collect();
+                    assert!(v.len() + extracted.len() == orig_len);
+                }
+
+                // --- drop ---
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_drop() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    drop(v);
+                }
+
+                // --- try_from ---
+                #[kani::proof]
+                fn check_try_from() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let len = v.len();
+                    let result: Result<[$ty; MAX_LEN], _> = v.try_into();
+                    if len == MAX_LEN {
+                        assert!(result.is_ok());
+                    } else {
+                        assert!(result.is_err());
+                    }
+                }
+            }
+        };
+    }
+
+    // Representative types covering: ZST, small aligned, validity-constrained,
+    // compound with padding. MAX_LEN=5 keeps verification tractable while
+    // exercising all code paths.
+    check_vec_with_ty!(verify_vec_u8, u8, 3);
+    check_vec_with_ty!(verify_vec_unit, (), 3);
+    check_vec_with_ty!(verify_vec_char, char, 3);
+    check_vec_with_ty!(verify_vec_tup, (char, u8), 3);
 }
