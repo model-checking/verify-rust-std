@@ -103,10 +103,17 @@ impl<'a, T> Iter<'a, T> {
         let ptr: NonNull<T> = NonNull::from_ref(slice).cast();
         // SAFETY: Similar to `IterMut::new`.
         unsafe {
-            let end_or_len =
-                if T::IS_ZST { without_provenance(len) } else { ptr.as_ptr().add(len) };
+            let end_or_len = if T::IS_ZST {
+                without_provenance(len)
+            } else {
+                ptr.as_ptr().add(len)
+            };
 
-            Self { ptr, end_or_len, _marker: PhantomData }
+            Self {
+                ptr,
+                end_or_len,
+                _marker: PhantomData,
+            }
         }
     }
 
@@ -158,7 +165,11 @@ iterator! {struct Iter -> *const T, &'a T, const, {/* no mut */}, as_ref, {
 impl<T> Clone for Iter<'_, T> {
     #[inline]
     fn clone(&self) -> Self {
-        Iter { ptr: self.ptr, end_or_len: self.end_or_len, _marker: self._marker }
+        Iter {
+            ptr: self.ptr,
+            end_or_len: self.end_or_len,
+            _marker: self._marker,
+        }
     }
 }
 
@@ -292,10 +303,17 @@ impl<'a, T> IterMut<'a, T> {
         // See the `next_unchecked!` and `is_empty!` macros as well as the
         // `post_inc_start` method for more information.
         unsafe {
-            let end_or_len =
-                if T::IS_ZST { without_provenance_mut(len) } else { ptr.as_ptr().add(len) };
+            let end_or_len = if T::IS_ZST {
+                without_provenance_mut(len)
+            } else {
+                ptr.as_ptr().add(len)
+            };
 
-            Self { ptr, end_or_len, _marker: PhantomData }
+            Self {
+                ptr,
+                end_or_len,
+                _marker: PhantomData,
+            }
         }
     }
 
@@ -466,7 +484,11 @@ where
 impl<'a, T: 'a, P: FnMut(&T) -> bool> Split<'a, T, P> {
     #[inline]
     pub(super) fn new(slice: &'a [T], pred: P) -> Self {
-        Self { v: slice, pred, finished: false }
+        Self {
+            v: slice,
+            pred,
+            finished: false,
+        }
     }
     /// Returns a slice which contains items not yet handled by split.
     /// # Example
@@ -490,7 +512,10 @@ where
     P: FnMut(&T) -> bool,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Split").field("v", &self.v).field("finished", &self.finished).finish()
+        f.debug_struct("Split")
+            .field("v", &self.v)
+            .field("finished", &self.finished)
+            .finish()
     }
 }
 
@@ -501,7 +526,11 @@ where
     P: Clone + FnMut(&T) -> bool,
 {
     fn clone(&self) -> Self {
-        Split { v: self.v, pred: self.pred.clone(), finished: self.finished }
+        Split {
+            v: self.v,
+            pred: self.pred.clone(),
+            finished: self.finished,
+        }
     }
 }
 
@@ -621,7 +650,11 @@ impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitInclusive<'a, T, P> {
     #[inline]
     pub(super) fn new(slice: &'a [T], pred: P) -> Self {
         let finished = slice.is_empty();
-        Self { v: slice, pred, finished }
+        Self {
+            v: slice,
+            pred,
+            finished,
+        }
     }
 }
 
@@ -645,7 +678,11 @@ where
     P: Clone + FnMut(&T) -> bool,
 {
     fn clone(&self) -> Self {
-        SplitInclusive { v: self.v, pred: self.pred.clone(), finished: self.finished }
+        SplitInclusive {
+            v: self.v,
+            pred: self.pred.clone(),
+            finished: self.finished,
+        }
     }
 }
 
@@ -662,8 +699,12 @@ where
             return None;
         }
 
-        let idx =
-            self.v.iter().position(|x| (self.pred)(x)).map(|idx| idx + 1).unwrap_or(self.v.len());
+        let idx = self
+            .v
+            .iter()
+            .position(|x| (self.pred)(x))
+            .map(|idx| idx + 1)
+            .unwrap_or(self.v.len());
         if idx == self.v.len() {
             self.finished = true;
         }
@@ -699,8 +740,16 @@ where
         // The last index of self.v is already checked and found to match
         // by the last iteration, so we start searching a new match
         // one index to the left.
-        let remainder = if self.v.is_empty() { &[] } else { &self.v[..(self.v.len() - 1)] };
-        let idx = remainder.iter().rposition(|x| (self.pred)(x)).map(|idx| idx + 1).unwrap_or(0);
+        let remainder = if self.v.is_empty() {
+            &[]
+        } else {
+            &self.v[..(self.v.len() - 1)]
+        };
+        let idx = remainder
+            .iter()
+            .rposition(|x| (self.pred)(x))
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
         if idx == 0 {
             self.finished = true;
         }
@@ -741,7 +790,11 @@ where
 impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitMut<'a, T, P> {
     #[inline]
     pub(super) fn new(slice: &'a mut [T], pred: P) -> Self {
-        Self { v: slice, pred, finished: false }
+        Self {
+            v: slice,
+            pred,
+            finished: false,
+        }
     }
 }
 
@@ -751,7 +804,10 @@ where
     P: FnMut(&T) -> bool,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SplitMut").field("v", &self.v).field("finished", &self.finished).finish()
+        f.debug_struct("SplitMut")
+            .field("v", &self.v)
+            .field("finished", &self.finished)
+            .finish()
     }
 }
 
@@ -871,7 +927,11 @@ impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitInclusiveMut<'a, T, P> {
     #[inline]
     pub(super) fn new(slice: &'a mut [T], pred: P) -> Self {
         let finished = slice.is_empty();
-        Self { v: slice, pred, finished }
+        Self {
+            v: slice,
+            pred,
+            finished,
+        }
     }
 }
 
@@ -995,7 +1055,9 @@ where
 impl<'a, T: 'a, P: FnMut(&T) -> bool> RSplit<'a, T, P> {
     #[inline]
     pub(super) fn new(slice: &'a [T], pred: P) -> Self {
-        Self { inner: Split::new(slice, pred) }
+        Self {
+            inner: Split::new(slice, pred),
+        }
     }
 }
 
@@ -1019,7 +1081,9 @@ where
     P: Clone + FnMut(&T) -> bool,
 {
     fn clone(&self) -> Self {
-        RSplit { inner: self.inner.clone() }
+        RSplit {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -1092,7 +1156,9 @@ where
 impl<'a, T: 'a, P: FnMut(&T) -> bool> RSplitMut<'a, T, P> {
     #[inline]
     pub(super) fn new(slice: &'a mut [T], pred: P) -> Self {
-        Self { inner: SplitMut::new(slice, pred) }
+        Self {
+            inner: SplitMut::new(slice, pred),
+        }
     }
 }
 
@@ -1218,7 +1284,9 @@ where
 impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitN<'a, T, P> {
     #[inline]
     pub(super) fn new(s: Split<'a, T, P>, n: usize) -> Self {
-        Self { inner: GenericSplitN { iter: s, count: n } }
+        Self {
+            inner: GenericSplitN { iter: s, count: n },
+        }
     }
 }
 
@@ -1228,7 +1296,9 @@ where
     P: FnMut(&T) -> bool,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SplitN").field("inner", &self.inner).finish()
+        f.debug_struct("SplitN")
+            .field("inner", &self.inner)
+            .finish()
     }
 }
 
@@ -1262,7 +1332,9 @@ where
 impl<'a, T: 'a, P: FnMut(&T) -> bool> RSplitN<'a, T, P> {
     #[inline]
     pub(super) fn new(s: RSplit<'a, T, P>, n: usize) -> Self {
-        Self { inner: GenericSplitN { iter: s, count: n } }
+        Self {
+            inner: GenericSplitN { iter: s, count: n },
+        }
     }
 }
 
@@ -1272,7 +1344,9 @@ where
     P: FnMut(&T) -> bool,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RSplitN").field("inner", &self.inner).finish()
+        f.debug_struct("RSplitN")
+            .field("inner", &self.inner)
+            .finish()
     }
 }
 
@@ -1302,7 +1376,9 @@ where
 impl<'a, T: 'a, P: FnMut(&T) -> bool> SplitNMut<'a, T, P> {
     #[inline]
     pub(super) fn new(s: SplitMut<'a, T, P>, n: usize) -> Self {
-        Self { inner: GenericSplitN { iter: s, count: n } }
+        Self {
+            inner: GenericSplitN { iter: s, count: n },
+        }
     }
 }
 
@@ -1312,7 +1388,9 @@ where
     P: FnMut(&T) -> bool,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SplitNMut").field("inner", &self.inner).finish()
+        f.debug_struct("SplitNMut")
+            .field("inner", &self.inner)
+            .finish()
     }
 }
 
@@ -1343,7 +1421,9 @@ where
 impl<'a, T: 'a, P: FnMut(&T) -> bool> RSplitNMut<'a, T, P> {
     #[inline]
     pub(super) fn new(s: RSplitMut<'a, T, P>, n: usize) -> Self {
-        Self { inner: GenericSplitN { iter: s, count: n } }
+        Self {
+            inner: GenericSplitN { iter: s, count: n },
+        }
     }
 }
 
@@ -1353,7 +1433,9 @@ where
     P: FnMut(&T) -> bool,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RSplitNMut").field("inner", &self.inner).finish()
+        f.debug_struct("RSplitNMut")
+            .field("inner", &self.inner)
+            .finish()
     }
 }
 
@@ -1398,7 +1480,10 @@ impl<'a, T: 'a> Windows<'a, T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Clone for Windows<'_, T> {
     fn clone(&self) -> Self {
-        Windows { v: self.v, size: self.size }
+        Windows {
+            v: self.v,
+            size: self.size,
+        }
     }
 }
 
@@ -1545,7 +1630,10 @@ pub struct Chunks<'a, T: 'a> {
 impl<'a, T: 'a> Chunks<'a, T> {
     #[inline]
     pub(super) const fn new(slice: &'a [T], size: usize) -> Self {
-        Self { v: slice, chunk_size: size }
+        Self {
+            v: slice,
+            chunk_size: size,
+        }
     }
 }
 
@@ -1553,7 +1641,10 @@ impl<'a, T: 'a> Chunks<'a, T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Clone for Chunks<'_, T> {
     fn clone(&self) -> Self {
-        Chunks { v: self.v, chunk_size: self.chunk_size }
+        Chunks {
+            v: self.v,
+            chunk_size: self.chunk_size,
+        }
     }
 }
 
@@ -1640,7 +1731,11 @@ impl<'a, T> DoubleEndedIterator for Chunks<'a, T> {
             None
         } else {
             let remainder = self.v.len() % self.chunk_size;
-            let chunksz = if remainder != 0 { remainder } else { self.chunk_size };
+            let chunksz = if remainder != 0 {
+                remainder
+            } else {
+                self.chunk_size
+            };
             // SAFETY: split_at_unchecked requires the argument be less than or
             // equal to the length. This is guaranteed, but subtle: `chunksz`
             // will always either be `self.v.len() % self.chunk_size`, which
@@ -1734,7 +1829,11 @@ pub struct ChunksMut<'a, T: 'a> {
 impl<'a, T: 'a> ChunksMut<'a, T> {
     #[inline]
     pub(super) const fn new(slice: &'a mut [T], size: usize) -> Self {
-        Self { v: slice, chunk_size: size, _marker: PhantomData }
+        Self {
+            v: slice,
+            chunk_size: size,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -1829,7 +1928,11 @@ impl<'a, T> DoubleEndedIterator for ChunksMut<'a, T> {
             None
         } else {
             let remainder = self.v.len() % self.chunk_size;
-            let sz = if remainder != 0 { remainder } else { self.chunk_size };
+            let sz = if remainder != 0 {
+                remainder
+            } else {
+                self.chunk_size
+            };
             let len = self.v.len();
             // SAFETY: Similar to `Chunks::next_back`
             let (head, tail) = unsafe { self.v.split_at_mut_unchecked(len - sz) };
@@ -1925,7 +2028,11 @@ impl<'a, T> ChunksExact<'a, T> {
         let fst_len = slice.len() - rem;
         // SAFETY: 0 <= fst_len <= slice.len() by construction above
         let (fst, snd) = unsafe { slice.split_at_unchecked(fst_len) };
-        Self { v: fst, rem: snd, chunk_size }
+        Self {
+            v: fst,
+            rem: snd,
+            chunk_size,
+        }
     }
 
     /// Returns the remainder of the original slice that is not going to be
@@ -1956,7 +2063,11 @@ impl<'a, T> ChunksExact<'a, T> {
 #[stable(feature = "chunks_exact", since = "1.31.0")]
 impl<T> Clone for ChunksExact<'_, T> {
     fn clone(&self) -> Self {
-        ChunksExact { v: self.v, rem: self.rem, chunk_size: self.chunk_size }
+        ChunksExact {
+            v: self.v,
+            rem: self.rem,
+            chunk_size: self.chunk_size,
+        }
     }
 }
 
@@ -2106,7 +2217,12 @@ impl<'a, T> ChunksExactMut<'a, T> {
         let fst_len = slice.len() - rem;
         // SAFETY: 0 <= fst_len <= slice.len() by construction above
         let (fst, snd) = unsafe { slice.split_at_mut_unchecked(fst_len) };
-        Self { v: fst, rem: snd, chunk_size, _marker: PhantomData }
+        Self {
+            v: fst,
+            rem: snd,
+            chunk_size,
+            _marker: PhantomData,
+        }
     }
 
     /// Returns the remainder of the original slice that is not going to be
@@ -2367,7 +2483,10 @@ pub struct RChunks<'a, T: 'a> {
 impl<'a, T: 'a> RChunks<'a, T> {
     #[inline]
     pub(super) const fn new(slice: &'a [T], size: usize) -> Self {
-        Self { v: slice, chunk_size: size }
+        Self {
+            v: slice,
+            chunk_size: size,
+        }
     }
 }
 
@@ -2375,7 +2494,10 @@ impl<'a, T: 'a> RChunks<'a, T> {
 #[stable(feature = "rchunks", since = "1.31.0")]
 impl<T> Clone for RChunks<'_, T> {
     fn clone(&self) -> Self {
-        RChunks { v: self.v, chunk_size: self.chunk_size }
+        RChunks {
+            v: self.v,
+            chunk_size: self.chunk_size,
+        }
     }
 }
 
@@ -2468,7 +2590,11 @@ impl<'a, T> DoubleEndedIterator for RChunks<'a, T> {
             None
         } else {
             let remainder = self.v.len() % self.chunk_size;
-            let chunksz = if remainder != 0 { remainder } else { self.chunk_size };
+            let chunksz = if remainder != 0 {
+                remainder
+            } else {
+                self.chunk_size
+            };
             // SAFETY: similar to Chunks::next_back
             let (fst, snd) = unsafe { self.v.split_at_unchecked(chunksz) };
             self.v = snd;
@@ -2548,7 +2674,11 @@ pub struct RChunksMut<'a, T: 'a> {
 impl<'a, T: 'a> RChunksMut<'a, T> {
     #[inline]
     pub(super) const fn new(slice: &'a mut [T], size: usize) -> Self {
-        Self { v: slice, chunk_size: size, _marker: PhantomData }
+        Self {
+            v: slice,
+            chunk_size: size,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -2650,7 +2780,11 @@ impl<'a, T> DoubleEndedIterator for RChunksMut<'a, T> {
             None
         } else {
             let remainder = self.v.len() % self.chunk_size;
-            let sz = if remainder != 0 { remainder } else { self.chunk_size };
+            let sz = if remainder != 0 {
+                remainder
+            } else {
+                self.chunk_size
+            };
             // SAFETY: Similar to `Chunks::next_back`
             let (head, tail) = unsafe { self.v.split_at_mut_unchecked(sz) };
             self.v = tail;
@@ -2743,7 +2877,11 @@ impl<'a, T> RChunksExact<'a, T> {
         let rem = slice.len() % chunk_size;
         // SAFETY: 0 <= rem <= slice.len() by construction above
         let (fst, snd) = unsafe { slice.split_at_unchecked(rem) };
-        Self { v: snd, rem: fst, chunk_size }
+        Self {
+            v: snd,
+            rem: fst,
+            chunk_size,
+        }
     }
 
     /// Returns the remainder of the original slice that is not going to be
@@ -2775,7 +2913,11 @@ impl<'a, T> RChunksExact<'a, T> {
 #[stable(feature = "rchunks", since = "1.31.0")]
 impl<'a, T> Clone for RChunksExact<'a, T> {
     fn clone(&self) -> RChunksExact<'a, T> {
-        RChunksExact { v: self.v, rem: self.rem, chunk_size: self.chunk_size }
+        RChunksExact {
+            v: self.v,
+            rem: self.rem,
+            chunk_size: self.chunk_size,
+        }
     }
 }
 
@@ -2927,7 +3069,11 @@ impl<'a, T> RChunksExactMut<'a, T> {
         let rem = slice.len() % chunk_size;
         // SAFETY: 0 <= rem <= slice.len() by construction above
         let (fst, snd) = unsafe { slice.split_at_mut_unchecked(rem) };
-        Self { v: snd, rem: fst, chunk_size }
+        Self {
+            v: snd,
+            rem: fst,
+            chunk_size,
+        }
     }
 
     /// Returns the remainder of the original slice that is not going to be
@@ -3121,7 +3267,11 @@ where
             let mut len = 1;
             let mut iter = self.slice.windows(2);
             while let Some([l, r]) = iter.next() {
-                if (self.predicate)(l, r) { len += 1 } else { break }
+                if (self.predicate)(l, r) {
+                    len += 1
+                } else {
+                    break;
+                }
             }
             let (head, tail) = self.slice.split_at(len);
             self.slice = tail;
@@ -3131,7 +3281,11 @@ where
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.slice.is_empty() { (0, Some(0)) } else { (1, Some(self.slice.len())) }
+        if self.slice.is_empty() {
+            (0, Some(0))
+        } else {
+            (1, Some(self.slice.len()))
+        }
     }
 
     #[inline]
@@ -3153,7 +3307,11 @@ where
             let mut len = 1;
             let mut iter = self.slice.windows(2);
             while let Some([l, r]) = iter.next_back() {
-                if (self.predicate)(l, r) { len += 1 } else { break }
+                if (self.predicate)(l, r) {
+                    len += 1
+                } else {
+                    break;
+                }
             }
             let (head, tail) = self.slice.split_at(self.slice.len() - len);
             self.slice = head;
@@ -3168,14 +3326,19 @@ impl<'a, T: 'a, P> FusedIterator for ChunkBy<'a, T, P> where P: FnMut(&T, &T) ->
 #[stable(feature = "slice_group_by_clone", since = "1.89.0")]
 impl<'a, T: 'a, P: Clone> Clone for ChunkBy<'a, T, P> {
     fn clone(&self) -> Self {
-        Self { slice: self.slice, predicate: self.predicate.clone() }
+        Self {
+            slice: self.slice,
+            predicate: self.predicate.clone(),
+        }
     }
 }
 
 #[stable(feature = "slice_group_by", since = "1.77.0")]
 impl<'a, T: 'a + fmt::Debug, P> fmt::Debug for ChunkBy<'a, T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ChunkBy").field("slice", &self.slice).finish()
+        f.debug_struct("ChunkBy")
+            .field("slice", &self.slice)
+            .finish()
     }
 }
 
@@ -3215,7 +3378,11 @@ where
             let mut len = 1;
             let mut iter = self.slice.windows(2);
             while let Some([l, r]) = iter.next() {
-                if (self.predicate)(l, r) { len += 1 } else { break }
+                if (self.predicate)(l, r) {
+                    len += 1
+                } else {
+                    break;
+                }
             }
             let slice = mem::take(&mut self.slice);
             let (head, tail) = slice.split_at_mut(len);
@@ -3226,7 +3393,11 @@ where
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.slice.is_empty() { (0, Some(0)) } else { (1, Some(self.slice.len())) }
+        if self.slice.is_empty() {
+            (0, Some(0))
+        } else {
+            (1, Some(self.slice.len()))
+        }
     }
 
     #[inline]
@@ -3248,7 +3419,11 @@ where
             let mut len = 1;
             let mut iter = self.slice.windows(2);
             while let Some([l, r]) = iter.next_back() {
-                if (self.predicate)(l, r) { len += 1 } else { break }
+                if (self.predicate)(l, r) {
+                    len += 1
+                } else {
+                    break;
+                }
             }
             let slice = mem::take(&mut self.slice);
             let (head, tail) = slice.split_at_mut(slice.len() - len);
@@ -3264,7 +3439,9 @@ impl<'a, T: 'a, P> FusedIterator for ChunkByMut<'a, T, P> where P: FnMut(&T, &T)
 #[stable(feature = "slice_group_by", since = "1.77.0")]
 impl<'a, T: 'a + fmt::Debug, P> fmt::Debug for ChunkByMut<'a, T, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ChunkByMut").field("slice", &self.slice).finish()
+        f.debug_struct("ChunkByMut")
+            .field("slice", &self.slice)
+            .finish()
     }
 }
 
@@ -3399,6 +3576,42 @@ mod verify {
                 check_safe_abstraction!(check_clone, $ty, |iter: &mut Iter<'_, $ty>| {
                     kani::assert(iter.clone().is_safe(), "Clone is safe");
                 });
+
+                // Part 1 macro functions: last, fold, for_each, position, rposition
+                #[kani::proof]
+                fn check_last() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    let _ = iter.last();
+                }
+
+                #[kani::proof]
+                fn check_fold() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    let _ = iter.fold(0usize, |acc, _| acc.wrapping_add(1));
+                }
+
+                #[kani::proof]
+                fn check_for_each() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    iter.for_each(|_| {});
+                }
+
+                #[kani::proof]
+                fn check_position() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter::<$ty>(&array);
+                    let _ = iter.position(|_| kani::any());
+                }
+
+                #[kani::proof]
+                fn check_rposition() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter::<$ty>(&array);
+                    let _ = iter.rposition(|_| kani::any());
+                }
             }
         };
     }
@@ -3408,4 +3621,631 @@ mod verify {
     check_iter_with_ty!(verify_u8, u8, u32::MAX as usize);
     check_iter_with_ty!(verify_char, char, 50);
     check_iter_with_ty!(verify_tup, (char, u8), 50);
+
+    // --- IterMut harnesses ---
+
+    fn any_mut_slice<T>(orig_slice: &mut [T]) -> &mut [T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &mut orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *mut T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts_mut(ptr, 0) }
+        }
+    }
+
+    fn any_iter_mut<'a, T>(orig_slice: &'a mut [T]) -> IterMut<'a, T> {
+        let slice = any_mut_slice(orig_slice);
+        IterMut::new(slice)
+    }
+
+    macro_rules! check_iter_mut_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                fn check_new_iter_mut() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_mut_slice::<$ty>(&mut array);
+                    let iter = IterMut::new(slice);
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                #[kani::proof]
+                fn check_into_slice() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.into_slice();
+                }
+
+                #[kani::proof]
+                fn check_as_mut_slice() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.as_mut_slice();
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                #[kani::proof]
+                fn check_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.next();
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.next_back();
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                #[kani::proof]
+                fn check_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.nth(kani::any());
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                #[kani::proof]
+                fn check_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.nth_back(kani::any());
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                #[kani::proof]
+                fn check_advance_by() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.advance_by(kani::any());
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                #[kani::proof]
+                fn check_advance_back_by() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.advance_back_by(kani::any());
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                #[kani::proof]
+                fn check_len() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.len();
+                }
+
+                #[kani::proof]
+                fn check_is_empty() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.is_empty();
+                }
+
+                #[kani::proof]
+                fn check_size_hint() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.size_hint();
+                }
+
+                #[kani::proof]
+                fn check_count() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    iter.count();
+                }
+
+                #[kani::proof]
+                fn check_last() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.last();
+                }
+
+                #[kani::proof]
+                fn check_fold() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.fold(0usize, |acc, _| acc.wrapping_add(1));
+                }
+
+                #[kani::proof]
+                fn check_for_each() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    iter.for_each(|_| {});
+                }
+
+                #[kani::proof]
+                fn check_position() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.position(|_| kani::any());
+                }
+
+                #[kani::proof]
+                fn check_rposition() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.rposition(|_| kani::any());
+                }
+            }
+        };
+    }
+
+    check_iter_mut_with_ty!(verify_iter_mut_unit, (), isize::MAX as usize);
+    check_iter_mut_with_ty!(verify_iter_mut_u8, u8, u32::MAX as usize);
+    check_iter_mut_with_ty!(verify_iter_mut_char, char, 50);
+    check_iter_mut_with_ty!(verify_iter_mut_tup, (char, u8), 50);
+
+    // --- Part 2: Chunk/Window iterator harnesses ---
+
+    /// Helper to create an arbitrary slice for chunk-type iterators.
+    fn any_chunk_slice<T>(orig_slice: &[T]) -> &[T] {
+        any_slice(orig_slice)
+    }
+
+    fn any_chunk_mut_slice<T>(orig_slice: &mut [T]) -> &mut [T] {
+        any_mut_slice(orig_slice)
+    }
+
+    macro_rules! check_chunks_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                // --- Windows ---
+
+                #[kani::proof]
+                fn check_windows_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.windows(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_windows_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.windows(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_windows_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.windows(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- Chunks ---
+
+                #[kani::proof]
+                fn check_chunks_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_chunks_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- ChunksMut ---
+
+                #[kani::proof]
+                fn check_chunks_mut_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_chunks_mut_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let _ = iter.nth(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_chunks_mut_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_chunks_mut_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let _ = iter.nth_back(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_chunks_mut_get_unchecked() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- ChunksExact ---
+
+                #[kani::proof]
+                fn check_chunks_exact_new() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let _ = slice.chunks_exact(size);
+                }
+
+                #[kani::proof]
+                fn check_chunks_exact_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_exact(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- ChunksExactMut ---
+
+                #[kani::proof]
+                fn check_chunks_exact_mut_new() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let _ = slice.chunks_exact_mut(size);
+                }
+
+                #[kani::proof]
+                fn check_chunks_exact_mut_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_chunks_exact_mut_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let _ = iter.nth(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_chunks_exact_mut_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_chunks_exact_mut_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let _ = iter.nth_back(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_chunks_exact_mut_get_unchecked() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- RChunks ---
+
+                #[kani::proof]
+                fn check_rchunks_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_rchunks_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_rchunks_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- RChunksMut ---
+
+                #[kani::proof]
+                fn check_rchunks_mut_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_rchunks_mut_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let _ = iter.nth(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_rchunks_mut_last() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let _ = iter.last();
+                }
+
+                #[kani::proof]
+                fn check_rchunks_mut_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_rchunks_mut_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let _ = iter.nth_back(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_rchunks_mut_get_unchecked() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- RChunksExact ---
+
+                #[kani::proof]
+                fn check_rchunks_exact_new() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let _ = slice.rchunks_exact(size);
+                }
+
+                #[kani::proof]
+                fn check_rchunks_exact_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_exact(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- RChunksExactMut ---
+
+                #[kani::proof]
+                fn check_rchunks_exact_mut_new() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let _ = slice.rchunks_exact_mut(size);
+                }
+
+                #[kani::proof]
+                fn check_rchunks_exact_mut_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_rchunks_exact_mut_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let _ = iter.nth(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_rchunks_exact_mut_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_rchunks_exact_mut_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let _ = iter.nth_back(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_rchunks_exact_mut_get_unchecked() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_mut_slice::<$ty>(&mut array);
+                    let size: usize = kani::any();
+                    kani::assume(size > 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let idx: usize = kani::any();
+                    kani::assume(idx < iter.len());
+                    let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+                }
+
+                // --- Split ---
+
+                #[kani::proof]
+                fn check_split_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let mut iter = slice.split(|_| kani::any());
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_split_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let mut iter = slice.split(|_| kani::any());
+                    let _ = iter.next_back();
+                }
+
+                // --- ArrayWindows ---
+
+                #[kani::proof]
+                fn check_array_windows_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    // ArrayWindows requires const generic N, use a small fixed size.
+                    let mut iter = slice.array_windows::<1>();
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_array_windows_nth() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let mut iter = slice.array_windows::<1>();
+                    let _ = iter.nth(kani::any());
+                }
+
+                #[kani::proof]
+                fn check_array_windows_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let mut iter = slice.array_windows::<1>();
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_array_windows_nth_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_chunk_slice::<$ty>(&array);
+                    let mut iter = slice.array_windows::<1>();
+                    let _ = iter.nth_back(kani::any());
+                }
+            }
+        };
+    }
+
+    check_chunks_with_ty!(verify_chunks_u8, u8, u32::MAX as usize);
+    check_chunks_with_ty!(verify_chunks_unit, (), isize::MAX as usize);
+    check_chunks_with_ty!(verify_chunks_char, char, 50);
+    check_chunks_with_ty!(verify_chunks_tup, (char, u8), 50);
 }
