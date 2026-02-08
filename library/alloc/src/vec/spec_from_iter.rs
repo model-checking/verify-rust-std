@@ -62,3 +62,63 @@ impl<T> SpecFromIter<T, IntoIter<T>> for Vec<T> {
         vec
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use super::*;
+
+    const MAX_LEN: usize = 3;
+
+    fn any_vec<T: kani::Arbitrary, const N: usize>() -> Vec<T> {
+        let arr: [T; N] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(arr);
+        let new_len: usize = kani::any();
+        kani::assume(new_len <= v.len());
+        v.truncate(new_len);
+        v
+    }
+
+    macro_rules! check_spec_from_iter_with_ty {
+        ($mod_name:ident, $ty:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                // Tests SpecFromIter for IntoIter (the specialized path)
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_from_iter_into_iter() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let iter = v.into_iter();
+                    let result: Vec<$ty> =
+                        <Vec<$ty> as SpecFromIter<$ty, IntoIter<$ty>>>::from_iter(iter);
+                    assert!(result.len() == orig_len);
+                }
+
+                // Tests SpecFromIter for IntoIter after advancing
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_from_iter_into_iter_advanced() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut iter = v.into_iter();
+                    let skip: usize = kani::any();
+                    kani::assume(skip <= orig_len);
+                    let _ = iter.advance_by(skip);
+                    let remaining = orig_len - skip;
+                    let result: Vec<$ty> =
+                        <Vec<$ty> as SpecFromIter<$ty, IntoIter<$ty>>>::from_iter(iter);
+                    assert!(result.len() == remaining);
+                }
+            }
+        };
+    }
+
+    check_spec_from_iter_with_ty!(verify_spec_from_iter_u8, u8);
+    check_spec_from_iter_with_ty!(verify_spec_from_iter_unit, ());
+    check_spec_from_iter_with_ty!(verify_spec_from_iter_char, char);
+    check_spec_from_iter_with_ty!(verify_spec_from_iter_tup, (char, u8));
+}

@@ -21,7 +21,10 @@ impl<T: Clone + IsZero> SpecFromElem for T {
     #[inline]
     default fn from_elem<A: Allocator>(elem: T, n: usize, alloc: A) -> Vec<T, A> {
         if elem.is_zero() {
-            return Vec { buf: RawVec::with_capacity_zeroed_in(n, alloc), len: n };
+            return Vec {
+                buf: RawVec::with_capacity_zeroed_in(n, alloc),
+                len: n,
+            };
         }
         let mut v = Vec::with_capacity_in(n, alloc);
         v.extend_with(n, elem);
@@ -33,7 +36,10 @@ impl SpecFromElem for i8 {
     #[inline]
     fn from_elem<A: Allocator>(elem: i8, n: usize, alloc: A) -> Vec<i8, A> {
         if elem == 0 {
-            return Vec { buf: RawVec::with_capacity_zeroed_in(n, alloc), len: n };
+            return Vec {
+                buf: RawVec::with_capacity_zeroed_in(n, alloc),
+                len: n,
+            };
         }
         let mut v = Vec::with_capacity_in(n, alloc);
         unsafe {
@@ -48,7 +54,10 @@ impl SpecFromElem for u8 {
     #[inline]
     fn from_elem<A: Allocator>(elem: u8, n: usize, alloc: A) -> Vec<u8, A> {
         if elem == 0 {
-            return Vec { buf: RawVec::with_capacity_zeroed_in(n, alloc), len: n };
+            return Vec {
+                buf: RawVec::with_capacity_zeroed_in(n, alloc),
+                len: n,
+            };
         }
         let mut v = Vec::with_capacity_in(n, alloc);
         unsafe {
@@ -71,5 +80,45 @@ impl SpecFromElem for () {
             v.set_len(n);
         }
         v
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use super::*;
+
+    #[kani::proof]
+    fn check_from_elem_i8() {
+        let elem: i8 = kani::any();
+        let n: usize = kani::any();
+        kani::assume(n <= 3);
+        let v = <i8 as SpecFromElem>::from_elem(elem, n, crate::alloc::Global);
+        assert!(v.len() == n);
+        let k: usize = kani::any();
+        kani::assume(k < n);
+        assert!(v[k] == elem);
+    }
+
+    #[kani::proof]
+    fn check_from_elem_u8() {
+        let elem: u8 = kani::any();
+        let n: usize = kani::any();
+        kani::assume(n <= 3);
+        let v = <u8 as SpecFromElem>::from_elem(elem, n, crate::alloc::Global);
+        assert!(v.len() == n);
+        let k: usize = kani::any();
+        kani::assume(k < n);
+        assert!(v[k] == elem);
+    }
+
+    #[kani::proof]
+    fn check_from_elem_unit() {
+        let n: usize = kani::any();
+        kani::assume(n <= 3);
+        let v = <() as SpecFromElem>::from_elem((), n, crate::alloc::Global);
+        assert!(v.len() == n);
     }
 }

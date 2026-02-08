@@ -61,3 +61,51 @@ where
         vector
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use super::*;
+
+    const MAX_LEN: usize = 3;
+
+    fn any_vec<T: kani::Arbitrary, const N: usize>() -> Vec<T> {
+        let arr: [T; N] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(arr);
+        let new_len: usize = kani::any();
+        kani::assume(new_len <= v.len());
+        v.truncate(new_len);
+        v
+    }
+
+    macro_rules! check_spec_from_iter_nested_with_ty {
+        ($mod_name:ident, $ty:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                // The default SpecFromIterNested::from_iter delegates to
+                // extend_desugared via SpecExtend. We test it by passing
+                // a regular iterator (vec's IntoIter is NOT TrustedLen for
+                // this path, so we use a .map() to strip TrustedLen).
+                #[kani::proof]
+                #[kani::unwind(8)]
+                fn check_from_iter_nested_default() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    // .map(|x| x) strips TrustedLen, forcing the default impl
+                    let iter = v.into_iter().map(|x| x);
+                    let result: Vec<$ty> =
+                        <Vec<$ty> as SpecFromIterNested<$ty, _>>::from_iter(iter);
+                    assert!(result.len() == orig_len);
+                }
+            }
+        };
+    }
+
+    check_spec_from_iter_nested_with_ty!(verify_from_iter_nested_u8, u8);
+    check_spec_from_iter_nested_with_ty!(verify_from_iter_nested_unit, ());
+    check_spec_from_iter_nested_with_ty!(verify_from_iter_nested_char, char);
+    check_spec_from_iter_nested_with_ty!(verify_from_iter_nested_tup, (char, u8));
+}
