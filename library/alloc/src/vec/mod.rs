@@ -457,10 +457,7 @@ impl<T> Vec<T> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
     pub const fn new() -> Self {
-        Vec {
-            buf: RawVec::new(),
-            len: 0,
-        }
+        Vec { buf: RawVec::new(), len: 0 }
     }
 
     /// Constructs a new, empty `Vec<T>` with at least the specified capacity.
@@ -867,10 +864,7 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     pub const fn new_in(alloc: A) -> Self {
-        Vec {
-            buf: RawVec::new_in(alloc),
-            len: 0,
-        }
+        Vec { buf: RawVec::new_in(alloc), len: 0 }
     }
 
     /// Constructs a new, empty `Vec<T, A>` with at least the specified capacity
@@ -932,10 +926,7 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
-        Vec {
-            buf: RawVec::with_capacity_in(capacity, alloc),
-            len: 0,
-        }
+        Vec { buf: RawVec::with_capacity_in(capacity, alloc), len: 0 }
     }
 
     /// Constructs a new, empty `Vec<T, A>` with at least the specified capacity
@@ -953,10 +944,7 @@ impl<T, A: Allocator> Vec<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "try_with_capacity", issue = "91913")]
     pub fn try_with_capacity_in(capacity: usize, alloc: A) -> Result<Self, TryReserveError> {
-        Ok(Vec {
-            buf: RawVec::try_with_capacity_in(capacity, alloc)?,
-            len: 0,
-        })
+        Ok(Vec { buf: RawVec::try_with_capacity_in(capacity, alloc)?, len: 0 })
     }
 
     /// Creates a `Vec<T, A>` directly from a pointer, a length, a capacity,
@@ -1075,12 +1063,7 @@ impl<T, A: Allocator> Vec<T, A> {
             "Vec::from_raw_parts_in requires that length <= capacity",
             (length: usize = length, capacity: usize = capacity) => length <= capacity
         );
-        unsafe {
-            Vec {
-                buf: RawVec::from_raw_parts_in(ptr, capacity, alloc),
-                len: length,
-            }
-        }
+        unsafe { Vec { buf: RawVec::from_raw_parts_in(ptr, capacity, alloc), len: length } }
     }
 
     #[doc(alias = "from_non_null_parts_in")]
@@ -1201,12 +1184,7 @@ impl<T, A: Allocator> Vec<T, A> {
             "Vec::from_parts_in requires that length <= capacity",
             (length: usize = length, capacity: usize = capacity) => length <= capacity
         );
-        unsafe {
-            Vec {
-                buf: RawVec::from_nonnull_in(ptr, capacity, alloc),
-                len: length,
-            }
-        }
+        unsafe { Vec { buf: RawVec::from_nonnull_in(ptr, capacity, alloc), len: length } }
     }
 
     /// Decomposes a `Vec<T>` into its raw components: `(pointer, length, capacity, allocator)`.
@@ -2328,9 +2306,7 @@ impl<T, A: Allocator> Vec<T, A> {
                     unsafe {
                         ptr::copy(
                             self.v.as_ptr().add(self.processed_len),
-                            self.v
-                                .as_mut_ptr()
-                                .add(self.processed_len - self.deleted_cnt),
+                            self.v.as_mut_ptr().add(self.processed_len - self.deleted_cnt),
                             self.original_len - self.processed_len,
                         );
                     }
@@ -2342,12 +2318,7 @@ impl<T, A: Allocator> Vec<T, A> {
             }
         }
 
-        let mut g = BackshiftOnDrop {
-            v: self,
-            processed_len: 0,
-            deleted_cnt: 0,
-            original_len,
-        };
+        let mut g = BackshiftOnDrop { v: self, processed_len: 0, deleted_cnt: 0, original_len };
 
         fn process_loop<F, T, A: Allocator, const DELETED: bool>(
             original_len: usize,
@@ -2521,11 +2492,8 @@ impl<T, A: Allocator> Vec<T, A> {
          * doing slice partition_dedup + truncate */
 
         // Construct gap first and then drop item to avoid memory corruption if `T::drop` panics.
-        let mut gap = FillGapOnDrop {
-            read: first_duplicate_idx + 1,
-            write: first_duplicate_idx,
-            vec: self,
-        };
+        let mut gap =
+            FillGapOnDrop { read: first_duplicate_idx + 1, write: first_duplicate_idx, vec: self };
         unsafe {
             // SAFETY: we checked that first_duplicate_idx in bounds before.
             // If drop panics, `gap` would remove this item without drop.
@@ -3756,14 +3724,7 @@ impl<T, A: Allocator> IntoIterator for Vec<T, A> {
                 begin.add(me.len()) as *const T
             };
             let cap = me.buf.capacity();
-            IntoIter {
-                buf,
-                phantom: PhantomData,
-                cap,
-                alloc,
-                ptr: buf,
-                end,
-            }
+            IntoIter { buf, phantom: PhantomData, cap, alloc, ptr: buf, end }
         }
     }
 }
@@ -3930,10 +3891,7 @@ impl<T, A: Allocator> Vec<T, A> {
         R: RangeBounds<usize>,
         I: IntoIterator<Item = T>,
     {
-        Splice {
-            drain: self.drain(range),
-            replace_with: replace_with.into_iter(),
-        }
+        Splice { drain: self.drain(range), replace_with: replace_with.into_iter() }
     }
 
     /// Creates an iterator which uses a closure to determine if an element in the range should be removed.
