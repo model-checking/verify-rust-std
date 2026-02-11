@@ -485,9 +485,7 @@ impl String {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
     pub fn with_capacity(capacity: usize) -> String {
-        String {
-            vec: Vec::with_capacity(capacity),
-        }
+        String { vec: Vec::with_capacity(capacity) }
     }
 
     /// Creates a new empty `String` with at least the specified capacity.
@@ -500,9 +498,7 @@ impl String {
     #[inline]
     #[unstable(feature = "try_with_capacity", issue = "91913")]
     pub fn try_with_capacity(capacity: usize) -> Result<String, TryReserveError> {
-        Ok(String {
-            vec: Vec::try_with_capacity(capacity)?,
-        })
+        Ok(String { vec: Vec::try_with_capacity(capacity)? })
     }
 
     /// Converts a vector of bytes to a `String`.
@@ -567,10 +563,7 @@ impl String {
     pub fn from_utf8(vec: Vec<u8>) -> Result<String, FromUtf8Error> {
         match str::from_utf8(&vec) {
             Ok(..) => Ok(String { vec }),
-            Err(e) => Err(FromUtf8Error {
-                bytes: vec,
-                error: e,
-            }),
+            Err(e) => Err(FromUtf8Error { bytes: vec, error: e }),
         }
     }
 
@@ -797,9 +790,7 @@ impl String {
         let (chunks, []) = v.as_chunks::<2>() else {
             return Err(FromUtf16Error(()));
         };
-        match (cfg!(target_endian = "little"), unsafe {
-            v.align_to::<u16>()
-        }) {
+        match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
             (true, ([], v, [])) => Self::from_utf16(v),
             _ => char::decode_utf16(chunks.iter().copied().map(u16::from_le_bytes))
                 .collect::<Result<_, _>>()
@@ -835,9 +826,7 @@ impl String {
     #[cfg(not(no_global_oom_handling))]
     #[unstable(feature = "str_from_utf16_endian", issue = "116258")]
     pub fn from_utf16le_lossy(v: &[u8]) -> String {
-        match (cfg!(target_endian = "little"), unsafe {
-            v.align_to::<u16>()
-        }) {
+        match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
             (true, ([], v, [])) => Self::from_utf16_lossy(v),
             (true, ([], v, [_remainder])) => Self::from_utf16_lossy(v) + "\u{FFFD}",
             _ => {
@@ -845,11 +834,7 @@ impl String {
                 let string = char::decode_utf16(chunks.iter().copied().map(u16::from_le_bytes))
                     .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
                     .collect();
-                if remainder.is_empty() {
-                    string
-                } else {
-                    string + "\u{FFFD}"
-                }
+                if remainder.is_empty() { string } else { string + "\u{FFFD}" }
             }
         }
     }
@@ -924,11 +909,7 @@ impl String {
                 let string = char::decode_utf16(chunks.iter().copied().map(u16::from_be_bytes))
                     .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
                     .collect();
-                if remainder.is_empty() {
-                    string
-                } else {
-                    string + "\u{FFFD}"
-                }
+                if remainder.is_empty() { string } else { string + "\u{FFFD}" }
             }
         }
     }
@@ -1011,11 +992,7 @@ impl String {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub unsafe fn from_raw_parts(buf: *mut u8, length: usize, capacity: usize) -> String {
-        unsafe {
-            String {
-                vec: Vec::from_raw_parts(buf, length, capacity),
-            }
-        }
+        unsafe { String { vec: Vec::from_raw_parts(buf, length, capacity) } }
     }
 
     /// Converts a vector of bytes to a `String` without checking that the
@@ -1547,11 +1524,7 @@ impl String {
         let next = idx + ch.len_utf8();
         let len = self.len();
         unsafe {
-            ptr::copy(
-                self.vec.as_ptr().add(next),
-                self.vec.as_mut_ptr().add(idx),
-                len - next,
-            );
+            ptr::copy(self.vec.as_ptr().add(next), self.vec.as_mut_ptr().add(idx), len - next);
             self.vec.set_len(len - (next - idx));
         }
         ch
@@ -1601,9 +1574,7 @@ impl String {
                 Some((prev_front, start))
             })
             .collect();
-            rejections
-                .into_iter()
-                .chain(core::iter::once((front, self.len())))
+            rejections.into_iter().chain(core::iter::once((front, self.len())))
         };
 
         let mut len = 0;
@@ -1677,11 +1648,7 @@ impl String {
         }
 
         let len = self.len();
-        let mut guard = SetLenOnDrop {
-            s: self,
-            idx: 0,
-            del_bytes: 0,
-        };
+        let mut guard = SetLenOnDrop { s: self, idx: 0, del_bytes: 0 };
 
         while guard.idx < len {
             let ch =
@@ -1812,11 +1779,7 @@ impl String {
         // ahead. This is safe because sufficient capacity was just reserved, and `idx`
         // is a char boundary.
         unsafe {
-            ptr::copy(
-                self.vec.as_ptr().add(idx),
-                self.vec.as_mut_ptr().add(idx + amt),
-                len - idx,
-            );
+            ptr::copy(self.vec.as_ptr().add(idx), self.vec.as_mut_ptr().add(idx + amt), len - idx);
         }
 
         // SAFETY: Copy the new string slice into the vacated region if `idx != len`,
@@ -2017,12 +1980,7 @@ impl String {
         // SAFETY: `slice::range` and `is_char_boundary` do the appropriate bounds checks.
         let chars_iter = unsafe { self.get_unchecked(start..end) }.chars();
 
-        Drain {
-            start,
-            end,
-            iter: chars_iter,
-            string: self_ptr,
-        }
+        Drain { start, end, iter: chars_iter, string: self_ptr }
     }
 
     /// Converts a `String` into an iterator over the [`char`]s of the string.
@@ -2077,9 +2035,7 @@ impl String {
     #[must_use = "`self` will be dropped if the result is not used"]
     #[unstable(feature = "string_into_chars", issue = "133125")]
     pub fn into_chars(self) -> IntoChars {
-        IntoChars {
-            bytes: self.into_bytes().into_iter(),
-        }
+        IntoChars { bytes: self.into_bytes().into_iter() }
     }
 
     /// Removes the specified range in the string,
@@ -2331,9 +2287,7 @@ impl Error for FromUtf16Error {}
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Clone for String {
     fn clone(&self) -> Self {
-        String {
-            vec: self.vec.clone(),
-        }
+        String { vec: self.vec.clone() }
     }
 
     /// Clones the contents of `source` into `self`.
@@ -3538,8 +3492,9 @@ impl From<char> for String {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use super::*;
     use core::kani;
+
+    use super::*;
 
     /// Helper: create a symbolic ASCII string of arbitrary length up to N bytes.
     /// All bytes are constrained to be valid ASCII (0..=127), ensuring valid UTF-8.
