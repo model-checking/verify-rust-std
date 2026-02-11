@@ -3444,19 +3444,13 @@ mod verify {
     nonzero_check_saturating_mul!(core::num::NonZeroI32, nonzero_check_saturating_mul_i32);
     nonzero_check_saturating_mul!(core::num::NonZeroI64, nonzero_check_saturating_mul_i64);
     nonzero_check_saturating_mul!(core::num::NonZeroI128, nonzero_check_saturating_mul_i128);
-    nonzero_check_saturating_mul!(
-        core::num::NonZeroIsize,
-        nonzero_check_saturating_mul_isize
-    );
+    nonzero_check_saturating_mul!(core::num::NonZeroIsize, nonzero_check_saturating_mul_isize);
     nonzero_check_saturating_mul!(core::num::NonZeroU8, nonzero_check_saturating_mul_u8);
     nonzero_check_saturating_mul!(core::num::NonZeroU16, nonzero_check_saturating_mul_u16);
     nonzero_check_saturating_mul!(core::num::NonZeroU32, nonzero_check_saturating_mul_u32);
     nonzero_check_saturating_mul!(core::num::NonZeroU64, nonzero_check_saturating_mul_u64);
     nonzero_check_saturating_mul!(core::num::NonZeroU128, nonzero_check_saturating_mul_u128);
-    nonzero_check_saturating_mul!(
-        core::num::NonZeroUsize,
-        nonzero_check_saturating_mul_usize
-    );
+    nonzero_check_saturating_mul!(core::num::NonZeroUsize, nonzero_check_saturating_mul_usize);
 
     macro_rules! nonzero_check_checked_add {
         ($t:ty, $nonzero_type:ty, $harness:ident) => {
@@ -3476,11 +3470,7 @@ mod verify {
     nonzero_check_checked_add!(u32, core::num::NonZeroU32, nonzero_check_checked_add_u32);
     nonzero_check_checked_add!(u64, core::num::NonZeroU64, nonzero_check_checked_add_u64);
     nonzero_check_checked_add!(u128, core::num::NonZeroU128, nonzero_check_checked_add_u128);
-    nonzero_check_checked_add!(
-        usize,
-        core::num::NonZeroUsize,
-        nonzero_check_checked_add_usize
-    );
+    nonzero_check_checked_add!(usize, core::num::NonZeroUsize, nonzero_check_checked_add_usize);
 
     macro_rules! nonzero_check_saturating_add {
         ($t:ty, $nonzero_type:ty, $harness:ident) => {
@@ -3495,26 +3485,10 @@ mod verify {
     }
 
     nonzero_check_saturating_add!(u8, core::num::NonZeroU8, nonzero_check_saturating_add_u8);
-    nonzero_check_saturating_add!(
-        u16,
-        core::num::NonZeroU16,
-        nonzero_check_saturating_add_u16
-    );
-    nonzero_check_saturating_add!(
-        u32,
-        core::num::NonZeroU32,
-        nonzero_check_saturating_add_u32
-    );
-    nonzero_check_saturating_add!(
-        u64,
-        core::num::NonZeroU64,
-        nonzero_check_saturating_add_u64
-    );
-    nonzero_check_saturating_add!(
-        u128,
-        core::num::NonZeroU128,
-        nonzero_check_saturating_add_u128
-    );
+    nonzero_check_saturating_add!(u16, core::num::NonZeroU16, nonzero_check_saturating_add_u16);
+    nonzero_check_saturating_add!(u32, core::num::NonZeroU32, nonzero_check_saturating_add_u32);
+    nonzero_check_saturating_add!(u64, core::num::NonZeroU64, nonzero_check_saturating_add_u64);
+    nonzero_check_saturating_add!(u128, core::num::NonZeroU128, nonzero_check_saturating_add_u128);
     nonzero_check_saturating_add!(
         usize,
         core::num::NonZeroUsize,
@@ -3737,10 +3711,7 @@ mod verify {
     nonzero_check_overflowing_abs!(core::num::NonZeroI32, nonzero_check_overflowing_abs_i32);
     nonzero_check_overflowing_abs!(core::num::NonZeroI64, nonzero_check_overflowing_abs_i64);
     nonzero_check_overflowing_abs!(core::num::NonZeroI128, nonzero_check_overflowing_abs_i128);
-    nonzero_check_overflowing_abs!(
-        core::num::NonZeroIsize,
-        nonzero_check_overflowing_abs_isize
-    );
+    nonzero_check_overflowing_abs!(core::num::NonZeroIsize, nonzero_check_overflowing_abs_isize);
 
     macro_rules! nonzero_check_saturating_abs {
         ($nonzero_type:ty, $harness:ident) => {
@@ -3759,10 +3730,7 @@ mod verify {
     nonzero_check_saturating_abs!(core::num::NonZeroI32, nonzero_check_saturating_abs_i32);
     nonzero_check_saturating_abs!(core::num::NonZeroI64, nonzero_check_saturating_abs_i64);
     nonzero_check_saturating_abs!(core::num::NonZeroI128, nonzero_check_saturating_abs_i128);
-    nonzero_check_saturating_abs!(
-        core::num::NonZeroIsize,
-        nonzero_check_saturating_abs_isize
-    );
+    nonzero_check_saturating_abs!(core::num::NonZeroIsize, nonzero_check_saturating_abs_isize);
 
     macro_rules! nonzero_check_wrapping_abs {
         ($nonzero_type:ty, $harness:ident) => {
@@ -3860,10 +3828,7 @@ mod verify {
     nonzero_check_overflowing_neg!(core::num::NonZeroI32, nonzero_check_overflowing_neg_i32);
     nonzero_check_overflowing_neg!(core::num::NonZeroI64, nonzero_check_overflowing_neg_i64);
     nonzero_check_overflowing_neg!(core::num::NonZeroI128, nonzero_check_overflowing_neg_i128);
-    nonzero_check_overflowing_neg!(
-        core::num::NonZeroIsize,
-        nonzero_check_overflowing_neg_isize
-    );
+    nonzero_check_overflowing_neg!(core::num::NonZeroIsize, nonzero_check_overflowing_neg_isize);
 
     macro_rules! nonzero_check_wrapping_neg {
         ($nonzero_type:ty, $harness:ident) => {
