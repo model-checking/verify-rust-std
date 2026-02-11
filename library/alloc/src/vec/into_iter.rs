@@ -484,9 +484,7 @@ where
 #[stable(feature = "vec_into_iter_clone", since = "1.8.0")]
 impl<T: Clone, A: Allocator + Clone> Clone for IntoIter<T, A> {
     fn clone(&self) -> Self {
-        self.as_slice()
-            .to_vec_in(self.alloc.deref().clone())
-            .into_iter()
+        self.as_slice().to_vec_in(self.alloc.deref().clone()).into_iter()
     }
 }
 

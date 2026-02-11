@@ -45,14 +45,7 @@ impl<'a, T, F, A: Allocator> ExtractIf<'a, T, F, A> {
         unsafe {
             vec.set_len(0);
         }
-        ExtractIf {
-            vec,
-            idx: start,
-            del: 0,
-            end,
-            old_len,
-            pred,
-        }
+        ExtractIf { vec, idx: start, del: 0, end, old_len, pred }
     }
 
     /// Returns a reference to the underlying allocator.
@@ -136,14 +129,8 @@ where
     A: Allocator,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let peek = if self.idx < self.end {
-            self.vec.get(self.idx)
-        } else {
-            None
-        };
-        f.debug_struct("ExtractIf")
-            .field("peek", &peek)
-            .finish_non_exhaustive()
+        let peek = if self.idx < self.end { self.vec.get(self.idx) } else { None };
+        f.debug_struct("ExtractIf").field("peek", &peek).finish_non_exhaustive()
     }
 }
 
