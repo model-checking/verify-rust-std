@@ -36,10 +36,11 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use crate::marker::{Destruct, PointeeSized};
+use safety::requires;
+
 #[cfg(kani)]
 use crate::kani;
-use safety::requires;
+use crate::marker::{Destruct, PointeeSized};
 
 mod uninit;
 
