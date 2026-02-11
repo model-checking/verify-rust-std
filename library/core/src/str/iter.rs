@@ -1058,9 +1058,7 @@ where
     P: Pattern<Searcher<'a>: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("MatchIndicesInternal")
-            .field(&self.0)
-            .finish()
+        f.debug_tuple("MatchIndicesInternal").field(&self.0).finish()
     }
 }
 
@@ -1437,9 +1435,7 @@ impl<'a, P: Pattern> Iterator for SplitInclusive<'a, P> {
 #[stable(feature = "split_inclusive", since = "1.51.0")]
 impl<'a, P: Pattern<Searcher<'a>: fmt::Debug>> fmt::Debug for SplitInclusive<'a, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SplitInclusive")
-            .field("0", &self.0)
-            .finish()
+        f.debug_struct("SplitInclusive").field("0", &self.0).finish()
     }
 }
 
