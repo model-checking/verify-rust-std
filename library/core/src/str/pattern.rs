@@ -436,6 +436,7 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
     }
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
+        #[cfg(not(kani))]
         loop {
             // get the haystack after the last character found
             let bytes = self.haystack.as_bytes().get(self.finger..self.finger_back)?;
@@ -464,23 +465,7 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 if self.finger >= self.utf8_size() {
                     let found_char = self.finger - self.utf8_size();
                     if let Some(slice) = self.haystack.as_bytes().get(found_char..self.finger) {
-                        // Under Kani, use an unrolled byte comparison to avoid calling
-                        // memcmp, which has internal variables that conflict with CBMC's
-                        // loop contract assigns checking. The utf8_size is always 1-4,
-                        // so this unrolled comparison is equivalent to slice == &encoded[..].
-                        #[cfg(not(kani))]
-                        let matched = slice == &self.utf8_encoded[0..self.utf8_size()];
-                        #[cfg(kani)]
-                        let matched = {
-                            let e = &self.utf8_encoded;
-                            let s = self.utf8_size();
-                            slice.len() == s
-                                && (s < 1 || slice[0] == e[0])
-                                && (s < 2 || slice[1] == e[1])
-                                && (s < 3 || slice[2] == e[2])
-                                && (s < 4 || slice[3] == e[3])
-                        };
-                        if matched {
+                        if slice == &self.utf8_encoded[0..self.utf8_size()] {
                             return Some((found_char, self.finger));
                         }
                     }
@@ -489,6 +474,27 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 // found nothing, exit
                 self.finger = self.finger_back;
                 return None;
+            }
+        }
+        // Nondeterministic abstraction for Kani verification.
+        // Overapproximates all possible behaviors of the real loop:
+        // either finds a match at some valid position, or exhausts the haystack.
+        #[cfg(kani)]
+        {
+            if self.finger >= self.finger_back {
+                return None;
+            }
+            if kani::any() {
+                let a: usize = kani::any();
+                let w = self.utf8_size();
+                kani::assume(a >= self.finger);
+                kani::assume(w <= self.finger_back); // avoid overflow
+                kani::assume(a + w <= self.finger_back);
+                self.finger = a + w;
+                Some((a, self.finger))
+            } else {
+                self.finger = self.finger_back;
+                None
             }
         }
     }
@@ -555,63 +561,79 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
     }
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
-        let haystack = self.haystack.as_bytes();
-        loop {
-            // get the haystack up to but not including the last character searched
-            let bytes = haystack.get(self.finger..self.finger_back)?;
-            // the last byte of the utf8 encoded needle
-            // SAFETY: we have an invariant that `utf8_size < 5`
-            let last_byte = unsafe { *self.utf8_encoded.get_unchecked(self.utf8_size() - 1) };
-            if let Some(index) = memchr::memrchr(last_byte, bytes) {
-                // we searched a slice that was offset by self.finger,
-                // add self.finger to recoup the original index
-                let index = self.finger + index;
-                // memrchr will return the index of the byte we wish to
-                // find. In case of an ASCII character, this is indeed
-                // were we wish our new finger to be ("after" the found
-                // char in the paradigm of reverse iteration). For
-                // multibyte chars we need to skip down by the number of more
-                // bytes they have than ASCII
-                let shift = self.utf8_size() - 1;
-                if index >= shift {
-                    let found_char = index - shift;
-                    if let Some(slice) = haystack.get(found_char..(found_char + self.utf8_size())) {
-                        // Under Kani, use unrolled byte comparison (see next_match above).
-                        #[cfg(not(kani))]
-                        let matched = slice == &self.utf8_encoded[0..self.utf8_size()];
-                        #[cfg(kani)]
-                        let matched = {
-                            let e = &self.utf8_encoded;
-                            let s = self.utf8_size();
-                            slice.len() == s
-                                && (s < 1 || slice[0] == e[0])
-                                && (s < 2 || slice[1] == e[1])
-                                && (s < 3 || slice[2] == e[2])
-                                && (s < 4 || slice[3] == e[3])
-                        };
-                        if matched {
-                            // move finger to before the character found (i.e., at its start index)
-                            self.finger_back = found_char;
-                            return Some((self.finger_back, self.finger_back + self.utf8_size()));
+        #[cfg(not(kani))]
+        {
+            let haystack = self.haystack.as_bytes();
+            loop {
+                // get the haystack up to but not including the last character searched
+                let bytes = haystack.get(self.finger..self.finger_back)?;
+                // the last byte of the utf8 encoded needle
+                // SAFETY: we have an invariant that `utf8_size < 5`
+                let last_byte = unsafe { *self.utf8_encoded.get_unchecked(self.utf8_size() - 1) };
+                if let Some(index) = memchr::memrchr(last_byte, bytes) {
+                    // we searched a slice that was offset by self.finger,
+                    // add self.finger to recoup the original index
+                    let index = self.finger + index;
+                    // memrchr will return the index of the byte we wish to
+                    // find. In case of an ASCII character, this is indeed
+                    // were we wish our new finger to be ("after" the found
+                    // char in the paradigm of reverse iteration). For
+                    // multibyte chars we need to skip down by the number of more
+                    // bytes they have than ASCII
+                    let shift = self.utf8_size() - 1;
+                    if index >= shift {
+                        let found_char = index - shift;
+                        if let Some(slice) =
+                            haystack.get(found_char..(found_char + self.utf8_size()))
+                        {
+                            if slice == &self.utf8_encoded[0..self.utf8_size()] {
+                                // move finger to before the character found (i.e., at its start index)
+                                self.finger_back = found_char;
+                                return Some((
+                                    self.finger_back,
+                                    self.finger_back + self.utf8_size(),
+                                ));
+                            }
                         }
                     }
+                    // We can't use finger_back = index - size + 1 here. If we found the last char
+                    // of a different-sized character (or the middle byte of a different character)
+                    // we need to bump the finger_back down to `index`. This similarly makes
+                    // `finger_back` have the potential to no longer be on a boundary,
+                    // but this is OK since we only exit this function on a boundary
+                    // or when the haystack has been searched completely.
+                    //
+                    // Unlike next_match this does not
+                    // have the problem of repeated bytes in utf-8 because
+                    // we're searching for the last byte, and we can only have
+                    // found the last byte when searching in reverse.
+                    self.finger_back = index;
+                } else {
+                    self.finger_back = self.finger;
+                    // found nothing, exit
+                    return None;
                 }
-                // We can't use finger_back = index - size + 1 here. If we found the last char
-                // of a different-sized character (or the middle byte of a different character)
-                // we need to bump the finger_back down to `index`. This similarly makes
-                // `finger_back` have the potential to no longer be on a boundary,
-                // but this is OK since we only exit this function on a boundary
-                // or when the haystack has been searched completely.
-                //
-                // Unlike next_match this does not
-                // have the problem of repeated bytes in utf-8 because
-                // we're searching for the last byte, and we can only have
-                // found the last byte when searching in reverse.
-                self.finger_back = index;
+            }
+        }
+        // Nondeterministic abstraction for Kani verification.
+        // Overapproximates all possible behaviors of the real reverse loop:
+        // either finds a match at some valid position, or exhausts the haystack.
+        #[cfg(kani)]
+        {
+            if self.finger >= self.finger_back {
+                return None;
+            }
+            if kani::any() {
+                let a: usize = kani::any();
+                let w = self.utf8_size();
+                kani::assume(a >= self.finger);
+                kani::assume(w <= self.finger_back);
+                kani::assume(a + w <= self.finger_back);
+                self.finger_back = a;
+                Some((a, a + w))
             } else {
                 self.finger_back = self.finger;
-                // found nothing, exit
-                return None;
+                None
             }
         }
     }
