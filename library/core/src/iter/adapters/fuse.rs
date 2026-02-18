@@ -478,3 +478,57 @@ fn and_then_or_clear<T, U>(opt: &mut Option<T>, f: impl FnOnce(&mut T) -> Option
     }
     x
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_fuse_get_unchecked_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Fuse::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_fuse_get_unchecked_unit() {
+        const MAX_LEN: usize = 8;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Fuse::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_fuse_get_unchecked_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Fuse::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_fuse_get_unchecked_tup() {
+        const MAX_LEN: usize = 8;
+        let array: [(char, u8); MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Fuse::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+}

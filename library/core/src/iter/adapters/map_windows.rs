@@ -1,4 +1,6 @@
 use crate::iter::FusedIterator;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::ub_checks::Invariant;
 use crate::{fmt, ptr};
@@ -295,5 +297,81 @@ where
 impl<T, const N: usize> Invariant for Buffer<T, N> {
     fn is_safe(&self) -> bool {
         self.start + N <= 2 * N
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    fn map_sum_u8(w: &[u8; 2]) -> u8 {
+        w[0].wrapping_add(w[1])
+    }
+
+    fn map_sum3_u8(w: &[u8; 3]) -> u8 {
+        w[0].wrapping_add(w[1]).wrapping_add(w[2])
+    }
+
+    // Exercises as_array_ref (via next_window), push (via repeated next),
+    // and drop (via Drop for Buffer when MapWindows is dropped).
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_map_windows_n2_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut mw = MapWindows::new(slice.iter().copied(), map_sum_u8 as fn(&[u8; 2]) -> u8);
+        while let Some(_) = mw.next() {}
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_map_windows_n3_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut mw = MapWindows::new(slice.iter().copied(), map_sum3_u8 as fn(&[u8; 3]) -> u8);
+        while let Some(_) = mw.next() {}
+    }
+
+    // Exercises as_uninit_array_mut (via Buffer::clone when MapWindows is cloned).
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_map_windows_clone_n2_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        kani::assume(slice.len() >= 2);
+        let mut mw = MapWindows::new(slice.iter().copied(), map_sum_u8 as fn(&[u8; 2]) -> u8);
+        let _ = mw.next(); // Initialize buffer
+        let _mw_clone = mw.clone(); // Exercises as_uninit_array_mut via Buffer::clone
+    }
+
+    // Exercises clone when buffer is None (before first next() call).
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_map_windows_clone_before_next_n2_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mw = MapWindows::new(slice.iter().copied(), map_sum_u8 as fn(&[u8; 2]) -> u8);
+        let mut mw_clone = mw.clone(); // Clone before buffer is initialized
+        while let Some(_) = mw_clone.next() {}
+    }
+
+    fn map_first_char(w: &[char; 2]) -> char {
+        w[0]
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_map_windows_n2_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut mw =
+            MapWindows::new(slice.iter().copied(), map_first_char as fn(&[char; 2]) -> char);
+        while let Some(_) = mw.next() {}
     }
 }

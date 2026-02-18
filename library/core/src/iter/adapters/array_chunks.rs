@@ -3,6 +3,8 @@ use crate::iter::adapters::SourceIter;
 use crate::iter::{
     ByRefSized, FusedIterator, InPlaceIterable, TrustedFused, TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, NeverShortCircuit, Try};
 
@@ -273,4 +275,78 @@ unsafe impl<I: InPlaceIterable + Iterator, const N: usize> InPlaceIterable for A
             _ => None,
         }
     };
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // next_back_remainder (uses unwrap_err_unchecked internally)
+    // Uses Range<u8> instead of slice::Iter to avoid pointer-heavy symbolic
+    // state that causes CBMC to exhaust resources. Range<u8> satisfies
+    // DoubleEndedIterator + ExactSizeIterator and exercises the same
+    // unwrap_err_unchecked path.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_array_chunks_next_back_remainder_n2() {
+        let len: u8 = kani::any();
+        kani::assume(len <= 4);
+        let mut chunks = ArrayChunks::<_, 2>::new(0..len);
+        let _ = chunks.next_back();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_array_chunks_next_back_remainder_n3() {
+        let len: u8 = kani::any();
+        kani::assume(len <= 4);
+        let mut chunks = ArrayChunks::<_, 3>::new(0..len);
+        let _ = chunks.next_back();
+    }
+
+    // fold (TRANC specialized — uses __iterator_get_unchecked in a loop)
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_array_chunks_fold_n2_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let chunks = ArrayChunks::<_, 2>::new(slice.iter());
+        let count = Iterator::fold(chunks, 0usize, |acc, _| acc + 1);
+        assert_eq!(count, slice.len() / 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_array_chunks_fold_n2_unit() {
+        const MAX_LEN: usize = 8;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let chunks = ArrayChunks::<_, 2>::new(slice.iter());
+        let count = Iterator::fold(chunks, 0usize, |acc, _| acc + 1);
+        assert_eq!(count, slice.len() / 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_array_chunks_fold_n3_u8() {
+        const MAX_LEN: usize = 6;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let chunks = ArrayChunks::<_, 3>::new(slice.iter());
+        let count = Iterator::fold(chunks, 0usize, |acc, _| acc + 1);
+        assert_eq!(count, slice.len() / 3);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_array_chunks_fold_n2_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let chunks = ArrayChunks::<_, 2>::new(slice.iter());
+        let count = Iterator::fold(chunks, 0usize, |acc, _| acc + 1);
+        assert_eq!(count, slice.len() / 2);
+    }
 }
