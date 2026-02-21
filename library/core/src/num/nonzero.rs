@@ -3515,14 +3515,32 @@ mod verify {
     nonzero_check_checked_pow!(core::num::NonZeroI16, nonzero_check_checked_pow_i16);
     nonzero_check_checked_pow!(core::num::NonZeroI32, nonzero_check_checked_pow_i32);
     nonzero_check_checked_pow!(core::num::NonZeroI64, nonzero_check_checked_pow_i64);
-    nonzero_check_checked_pow!(core::num::NonZeroI128, nonzero_check_checked_pow_i128);
     nonzero_check_checked_pow!(core::num::NonZeroIsize, nonzero_check_checked_pow_isize);
     nonzero_check_checked_pow!(core::num::NonZeroU8, nonzero_check_checked_pow_u8);
     nonzero_check_checked_pow!(core::num::NonZeroU16, nonzero_check_checked_pow_u16);
     nonzero_check_checked_pow!(core::num::NonZeroU32, nonzero_check_checked_pow_u32);
     nonzero_check_checked_pow!(core::num::NonZeroU64, nonzero_check_checked_pow_u64);
-    nonzero_check_checked_pow!(core::num::NonZeroU128, nonzero_check_checked_pow_u128);
     nonzero_check_checked_pow!(core::num::NonZeroUsize, nonzero_check_checked_pow_usize);
+
+    // 128-bit types use a bounded exponent to avoid CBMC timeout (same reason
+    // as nonzero_check_saturating_pow_128): checked_pow uses binary exponentiation
+    // with expensive 128-bit multiplications in CBMC's bitvector encoding.
+    macro_rules! nonzero_check_checked_pow_128 {
+        ($nonzero_type:ty, $harness:ident) => {
+            #[kani::proof]
+            #[kani::unwind(5)]
+            pub fn $harness() {
+                let x: $nonzero_type = kani::any();
+                let exp: u32 = kani::any_where(|&e| e <= 10);
+                if let Some(result) = x.checked_pow(exp) {
+                    assert!(result.get() != 0);
+                }
+            }
+        };
+    }
+
+    nonzero_check_checked_pow_128!(core::num::NonZeroI128, nonzero_check_checked_pow_i128);
+    nonzero_check_checked_pow_128!(core::num::NonZeroU128, nonzero_check_checked_pow_u128);
 
     macro_rules! nonzero_check_saturating_pow {
         ($nonzero_type:ty, $harness:ident) => {
