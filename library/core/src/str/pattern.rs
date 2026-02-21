@@ -488,8 +488,8 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 let a: usize = kani::any();
                 let w = self.utf8_size();
                 kani::assume(a >= self.finger);
-                kani::assume(w <= self.finger_back); // avoid overflow
-                kani::assume(a + w <= self.finger_back);
+                kani::assume(a <= self.finger_back); // avoid overflow in a + w
+                kani::assume(w <= self.finger_back - a);
                 self.finger = a + w;
                 Some((a, self.finger))
             } else {
@@ -627,8 +627,8 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
                 let a: usize = kani::any();
                 let w = self.utf8_size();
                 kani::assume(a >= self.finger);
-                kani::assume(w <= self.finger_back);
-                kani::assume(a + w <= self.finger_back);
+                kani::assume(a <= self.finger_back); // avoid overflow in a + w
+                kani::assume(w <= self.finger_back - a);
                 self.finger_back = a;
                 Some((a, a + w))
             } else {
