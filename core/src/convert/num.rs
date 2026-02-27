@@ -198,11 +198,11 @@ macro_rules! impl_float_from_bool {
             /// # Examples
             /// ```
             $($(#[doc = $doctest_prefix])*)?
-            #[doc = concat!("let x: ", stringify!($float)," = false.into();")]
+            #[doc = concat!("let x = ", stringify!($float), "::from(false);")]
             /// assert_eq!(x, 0.0);
             /// assert!(x.is_sign_positive());
             ///
-            #[doc = concat!("let y: ", stringify!($float)," = true.into();")]
+            #[doc = concat!("let y = ", stringify!($float), "::from(true);")]
             /// assert_eq!(y, 1.0);
             $($(#[doc = $doctest_suffix])*)?
             /// ```
