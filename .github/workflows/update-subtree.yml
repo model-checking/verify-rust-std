@@ -11,6 +11,9 @@ defaults:
 
 jobs:
   update-subtree-library:
+    permissions:
+      contents: write
+      pull-requests: write
     if: github.repository == 'model-checking/verify-rust-std'
     # Changing the host platform may alter the libgit2 version as used by
     # splitsh-lite, which will require changing the version of git2go.
