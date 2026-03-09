@@ -1,6 +1,6 @@
 set -e -x
 
-export VFVERSION=25.11
+export VFVERSION=26.01
 
 verifast -rustc_args "--edition 2021 --cfg test" -skip_specless_fns -ignore_unwind_paths -allow_assume verified/lib.rs
 refinement-checker --rustc-args "--edition 2021 --cfg test" original/lib.rs verified/lib.rs > /dev/null

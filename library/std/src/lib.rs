@@ -63,10 +63,10 @@
 //!    type, but not the all-important methods.
 //!
 //! So for example there is a [page for the primitive type
-//! `i32`](primitive::i32) that lists all the methods that can be called on
-//! 32-bit integers (very useful), and there is a [page for the module
-//! `std::i32`] that documents the constant values [`MIN`] and [`MAX`] (rarely
-//! useful).
+//! `char`](primitive::char) that lists all the methods that can be called on
+//! characters (very useful), and there is a [page for the module
+//! `std::char`](crate::char) that documents iterator and error types created by these methods
+//! (rarely useful).
 //!
 //! Note the documentation for the primitives [`str`] and [`[T]`][prim@slice] (also
 //! called 'slice'). Many method calls on [`String`] and [`Vec<T>`] are actually
@@ -180,9 +180,6 @@
 //!
 //!
 //! [I/O]: io
-//! [`MIN`]: i32::MIN
-//! [`MAX`]: i32::MAX
-//! [page for the module `std::i32`]: crate::i32
 //! [TCP]: net::TcpStream
 //! [The Rust Prelude]: prelude
 //! [UDP]: net::UdpSocket
@@ -280,7 +277,6 @@
 #![feature(cfg_sanitizer_cfi)]
 #![feature(cfg_target_thread_local)]
 #![feature(cfi_encoding)]
-#![feature(char_max_len)]
 #![feature(const_trait_impl)]
 #![feature(core_float_math)]
 #![feature(decl_macro)]
@@ -294,8 +290,6 @@
 #![feature(ffi_const)]
 #![feature(formatting_options)]
 #![feature(funnel_shifts)]
-#![feature(hash_map_internals)]
-#![feature(hash_map_macro)]
 #![feature(if_let_guard)]
 #![feature(intra_doc_pointers)]
 #![feature(iter_advance_by)]
@@ -354,6 +348,7 @@
 #![feature(int_from_ascii)]
 #![feature(ip)]
 #![feature(lazy_get)]
+#![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_write_slice)]
 #![feature(panic_can_unwind)]
@@ -387,7 +382,6 @@
 #![feature(try_reserve_kind)]
 #![feature(try_with_capacity)]
 #![feature(unique_rc_arc)]
-#![feature(vec_into_raw_parts)]
 #![feature(wtf8_internals)]
 // tidy-alphabetical-end
 //
@@ -678,7 +672,7 @@ pub mod arch {
     pub use std_detect::is_loongarch_feature_detected;
     #[unstable(feature = "is_riscv_feature_detected", issue = "111192")]
     pub use std_detect::is_riscv_feature_detected;
-    #[unstable(feature = "stdarch_s390x_feature_detection", issue = "135413")]
+    #[stable(feature = "stdarch_s390x_feature_detection", since = "CURRENT_RUSTC_VERSION")]
     pub use std_detect::is_s390x_feature_detected;
     #[stable(feature = "simd_x86", since = "1.27.0")]
     pub use std_detect::is_x86_feature_detected;
