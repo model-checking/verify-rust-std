@@ -266,7 +266,7 @@ nonpoison_and_poison_unwrap_test!(
     }
 );
 
-#[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
+#[cfg(panic = "unwind")] // Requires unwinding support.
 nonpoison_and_poison_unwrap_test!(
     name: test_panics,
     test_body: {
@@ -297,7 +297,7 @@ nonpoison_and_poison_unwrap_test!(
     }
 );
 
-#[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
+#[cfg(panic = "unwind")] // Requires unwinding support.
 nonpoison_and_poison_unwrap_test!(
     name: test_mutex_arc_access_in_unwind,
     test_body: {
@@ -548,4 +548,18 @@ fn panic_while_mapping_unlocked_poison() {
     }
 
     drop(lock);
+}
+
+#[test]
+fn test_mutex_with_mut() {
+    let mutex = std::sync::nonpoison::Mutex::new(2);
+
+    let result = mutex.with_mut(|value| {
+        *value += 3;
+
+        *value + 5
+    });
+
+    assert_eq!(*mutex.lock(), 5);
+    assert_eq!(result, 10);
 }
