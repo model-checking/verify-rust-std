@@ -11,6 +11,9 @@ defaults:
 
 jobs:
   update-subtree-library:
+    permissions:
+      contents: write
+      pull-requests: write
     if: github.repository == 'model-checking/verify-rust-std'
     # Changing the host platform may alter the libgit2 version as used by
     # splitsh-lite, which will require changing the version of git2go.
@@ -214,16 +217,12 @@ jobs:
 
         # Try to automatically patch the VeriFast proofs
         pushd verifast-proofs
-        if bash ./patch-verifast-proofs.sh; then
-          if ! git diff --quiet; then
-            git -c user.name=gitbot -c user.email=git@bot \
-              commit . -m "Update VeriFast proofs"
-          else
-            # The original files have not changed; no updates to the VeriFast proofs are necessary.
-            true
-          fi
+        ./patch-verifast-proofs.sh
+        if ! git diff --quiet; then
+          git -c user.name=gitbot -c user.email=git@bot \
+            commit . -m "Update VeriFast proofs"
         else
-          # Patching the VeriFast proofs failed; requires manual intervention.
+          # The original files have not changed; no updates to the VeriFast proofs are necessary.
           true
         fi
         popd
