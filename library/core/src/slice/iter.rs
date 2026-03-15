@@ -3455,11 +3455,15 @@ mod verify {
         };
     }
 
-    // FIXME: Add harnesses for ZST with alignment > 1.
+    // Representative types cover: ZST (size 0), small (size 1, align 1),
+    // validity-constrained (size 4, align 4), compound with padding.
+    // The unsafe pointer arithmetic depends only on size_of::<T>() and
+    // align_of::<T>(), so these cover all relevant layout categories.
+    // Loop abstractions in macros.rs make verification length-independent.
     check_iter_with_ty!(verify_unit, (), isize::MAX as usize);
     check_iter_with_ty!(verify_u8, u8, u32::MAX as usize);
-    check_iter_with_ty!(verify_char, char, 50);
-    check_iter_with_ty!(verify_tup, (char, u8), 50);
+    check_iter_with_ty!(verify_char, char, u32::MAX as usize);
+    check_iter_with_ty!(verify_tup, (char, u8), u32::MAX as usize);
 
     // --- IterMut harnesses ---
 
@@ -3625,8 +3629,8 @@ mod verify {
 
     check_iter_mut_with_ty!(verify_iter_mut_unit, (), isize::MAX as usize);
     check_iter_mut_with_ty!(verify_iter_mut_u8, u8, u32::MAX as usize);
-    check_iter_mut_with_ty!(verify_iter_mut_char, char, 50);
-    check_iter_mut_with_ty!(verify_iter_mut_tup, (char, u8), 50);
+    check_iter_mut_with_ty!(verify_iter_mut_char, char, u32::MAX as usize);
+    check_iter_mut_with_ty!(verify_iter_mut_tup, (char, u8), u32::MAX as usize);
 
     // --- Part 2: Chunk/Window iterator harnesses ---
 
@@ -4083,8 +4087,8 @@ mod verify {
         };
     }
 
-    check_chunks_with_ty!(verify_chunks_u8, u8, 128);
-    check_chunks_with_ty!(verify_chunks_unit, (), 128);
-    check_chunks_with_ty!(verify_chunks_char, char, 50);
-    check_chunks_with_ty!(verify_chunks_tup, (char, u8), 50);
+    check_chunks_with_ty!(verify_chunks_u8, u8, u32::MAX as usize);
+    check_chunks_with_ty!(verify_chunks_unit, (), u32::MAX as usize);
+    check_chunks_with_ty!(verify_chunks_char, char, u32::MAX as usize);
+    check_chunks_with_ty!(verify_chunks_tup, (char, u8), u32::MAX as usize);
 }
