@@ -1001,25 +1001,27 @@ mod verify {
 
     // pub const fn count_bytes(&self) -> usize
     #[kani::proof]
-    #[kani::unwind(32)]
+    #[kani::unwind(33)]
     fn check_count_bytes() {
         const MAX_SIZE: usize = 32;
-        let mut bytes: [u8; MAX_SIZE] = kani::any();
+        let bytes: [u8; MAX_SIZE] = kani::any();
 
-        // Non-deterministically generate a length within the valid range [0, MAX_SIZE]
-        let mut len: usize = kani::any_where(|&x| x < MAX_SIZE);
+        // Non-deterministically choose the position of the null terminator.
+        let len: usize = kani::any_where(|&x: &usize| x < MAX_SIZE);
 
-        // If a null byte exists before the generated length
-        // adjust len to its position
-        if let Some(pos) = bytes[..len].iter().position(|&x| x == 0) {
-            len = pos;
-        } else {
-            // If no null byte, insert one at the chosen length
-            bytes[len] = 0;
+        // Constrain bytes to form a valid C string of length `len`:
+        // bytes[0..len] must be non-null, bytes[len] must be 0.
+        // Using assume on the immutable array avoids the CBMC array-store
+        // issue that arises when mutating a symbolic array at a symbolic index.
+        kani::assume(bytes[len] == 0);
+        for i in 0..MAX_SIZE {
+            if i < len {
+                kani::assume(bytes[i] != 0);
+            }
         }
 
         let c_str = CStr::from_bytes_until_nul(&bytes).unwrap();
-        // Verify that count_bytes matches the adjusted length
+        // Verify that count_bytes matches the chosen null position
         assert_eq!(c_str.count_bytes(), len);
         assert!(c_str.is_safe());
     }
