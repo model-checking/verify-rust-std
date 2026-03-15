@@ -293,3 +293,65 @@ where
 // I: TrustedLen would not.
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<I> TrustedLen for Skip<I> where I: Iterator + TrustedRandomAccess {}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_skip_get_unchecked_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= slice.len());
+        let mut iter = Skip::new(slice.iter(), n);
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_skip_get_unchecked_unit() {
+        const MAX_LEN: usize = 8;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= slice.len());
+        let mut iter = Skip::new(slice.iter(), n);
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_skip_get_unchecked_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= slice.len());
+        let mut iter = Skip::new(slice.iter(), n);
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_skip_get_unchecked_tup() {
+        const MAX_LEN: usize = 8;
+        let array: [(char, u8); MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= slice.len());
+        let mut iter = Skip::new(slice.iter(), n);
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+}

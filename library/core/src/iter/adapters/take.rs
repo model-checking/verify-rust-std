@@ -1,6 +1,8 @@
 use crate::cmp;
 use crate::iter::adapters::SourceIter;
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, TrustedRandomAccess};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, Try};
 
@@ -372,5 +374,93 @@ impl<T: Clone> ExactSizeIterator for Take<crate::iter::Repeat<T>> {
 impl<F: FnMut() -> A, A> ExactSizeIterator for Take<crate::iter::RepeatWith<F>> {
     fn len(&self) -> usize {
         self.n
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // spec_fold (TRA specialized — uses __iterator_get_unchecked in a loop)
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_take_spec_fold_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= MAX_LEN);
+        let take = Take::new(slice.iter(), n);
+        let count = take.fold(0usize, |acc, _| acc + 1);
+        assert_eq!(count, n.min(slice.len()));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_take_spec_fold_unit() {
+        const MAX_LEN: usize = 8;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= MAX_LEN);
+        let take = Take::new(slice.iter(), n);
+        let count = take.fold(0usize, |acc, _| acc + 1);
+        assert_eq!(count, n.min(slice.len()));
+    }
+
+    // spec_for_each (TRA specialized — uses __iterator_get_unchecked in a loop)
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_take_spec_for_each_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= MAX_LEN);
+        let take = Take::new(slice.iter(), n);
+        let mut count = 0usize;
+        take.for_each(|_| count += 1);
+        assert_eq!(count, n.min(slice.len()));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_take_spec_fold_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= MAX_LEN);
+        let take = Take::new(slice.iter(), n);
+        let count = take.fold(0usize, |acc, _| acc + 1);
+        assert_eq!(count, n.min(slice.len()));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_take_spec_fold_tup() {
+        const MAX_LEN: usize = 8;
+        let array: [(char, u8); MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= MAX_LEN);
+        let take = Take::new(slice.iter(), n);
+        let count = take.fold(0usize, |acc, _| acc + 1);
+        assert_eq!(count, n.min(slice.len()));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_take_spec_for_each_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        kani::assume(n <= MAX_LEN);
+        let take = Take::new(slice.iter(), n);
+        let mut count = 0usize;
+        take.for_each(|_| count += 1);
+        assert_eq!(count, n.min(slice.len()));
     }
 }

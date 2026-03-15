@@ -589,3 +589,63 @@ spec_int_ranges_r!(u8 u16 u32 usize);
 spec_int_ranges!(u8 u16 usize);
 #[cfg(target_pointer_width = "16")]
 spec_int_ranges_r!(u8 u16 usize);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // original_step (uses NonZero::new_unchecked + unchecked_add)
+    // Exercised through size_hint → spec_size_hint → original_step,
+    // forward iteration via next, and backward iteration via
+    // next_back → next_back_index → original_step.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_step_by_original_step_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let step: usize = kani::any();
+        kani::assume(step >= 1 && step <= MAX_LEN);
+        let sb = StepBy::new(slice.iter(), step);
+        // size_hint calls original_step internally
+        let _ = sb.size_hint();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_step_by_iterate_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let step: usize = kani::any();
+        kani::assume(step >= 1 && step <= MAX_LEN);
+        let mut sb = StepBy::new(slice.iter(), step);
+        while let Some(_) = sb.next() {}
+    }
+
+    // next_back exercises next_back_index → original_step
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_step_by_next_back_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let step: usize = kani::any();
+        kani::assume(step >= 1 && step <= MAX_LEN);
+        let mut sb = StepBy::new(slice.iter(), step);
+        while let Some(_) = sb.next_back() {}
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_step_by_original_step_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let step: usize = kani::any();
+        kani::assume(step >= 1 && step <= MAX_LEN);
+        let sb = StepBy::new(slice.iter(), step);
+        let _ = sb.size_hint();
+    }
+}

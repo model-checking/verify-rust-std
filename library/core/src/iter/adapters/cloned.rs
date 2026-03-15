@@ -152,6 +152,7 @@ where
     I: UncheckedIterator<Item = &'a T>,
     T: Clone,
 {
+    #[requires(self.it.size_hint().0 > 0)]
     unsafe fn next_unchecked(&mut self) -> T {
         // SAFETY: `Cloned` is 1:1 with the inner iterator, so if the caller promised
         // that there's an element left, the inner iterator has one too.
@@ -192,4 +193,103 @@ where
 unsafe impl<I: InPlaceIterable> InPlaceIterable for Cloned<I> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_cloned_get_unchecked_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Cloned::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let result = unsafe { iter.__iterator_get_unchecked(idx) };
+        assert_eq!(result, slice[idx]);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_cloned_get_unchecked_unit() {
+        const MAX_LEN: usize = 8;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Cloned::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_cloned_next_unchecked_u8() {
+        const MAX_LEN: usize = 8;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Cloned::new(slice.iter());
+        kani::assume(iter.size_hint().0 > 0);
+        let _ = unsafe { iter.next_unchecked() };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_cloned_next_unchecked_unit() {
+        const MAX_LEN: usize = 8;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Cloned::new(slice.iter());
+        kani::assume(iter.size_hint().0 > 0);
+        let _ = unsafe { iter.next_unchecked() };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_cloned_get_unchecked_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Cloned::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_cloned_get_unchecked_tup() {
+        const MAX_LEN: usize = 8;
+        let array: [(char, u8); MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Cloned::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_cloned_next_unchecked_char() {
+        const MAX_LEN: usize = 8;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Cloned::new(slice.iter());
+        kani::assume(iter.size_hint().0 > 0);
+        let _ = unsafe { iter.next_unchecked() };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_cloned_next_unchecked_tup() {
+        const MAX_LEN: usize = 8;
+        let array: [(char, u8); MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Cloned::new(slice.iter());
+        kani::assume(iter.size_hint().0 > 0);
+        let _ = unsafe { iter.next_unchecked() };
+    }
 }

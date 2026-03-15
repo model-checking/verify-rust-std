@@ -270,6 +270,7 @@ where
     }
 
     #[inline]
+    #[requires(self.index + idx < self.a.size() && self.index + idx < self.b.size())]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item {
         let idx = self.index + idx;
@@ -690,5 +691,180 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
             }
         }
         accum
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::iter;
+
+    // --- Unsafe functions ---
+
+    // __iterator_get_unchecked (delegates to ZipImpl::get_unchecked)
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_iterator_get_unchecked_u8() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [u8; MAX_LEN] = kani::any();
+        let arr_b: [u8; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < Iterator::size_hint(&zip).0);
+        let _ = unsafe { zip.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_iterator_get_unchecked_unit() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [(); MAX_LEN] = [(); MAX_LEN];
+        let arr_b: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < Iterator::size_hint(&zip).0);
+        let _ = unsafe { zip.__iterator_get_unchecked(idx) };
+    }
+
+    // --- Safe abstractions ---
+
+    // next (TRA specialized — uses __iterator_get_unchecked internally)
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_next_u8() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [u8; MAX_LEN] = kani::any();
+        let arr_b: [u8; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let expected = cmp::min(slice_a.len(), slice_b.len());
+        let mut count = 0usize;
+        while let Some(_) = Iterator::next(&mut zip) {
+            count += 1;
+        }
+        assert_eq!(count, expected);
+    }
+
+    // nth (TRA specialized — uses __iterator_get_unchecked for side effects)
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_nth_u8() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [u8; MAX_LEN] = kani::any();
+        let arr_b: [u8; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let n: usize = kani::any();
+        kani::assume(n <= MAX_LEN);
+        let _ = Iterator::nth(&mut zip, n);
+    }
+
+    // next_back (TRA specialized — uses __iterator_get_unchecked internally)
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_next_back_u8() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [u8; MAX_LEN] = kani::any();
+        let arr_b: [u8; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        while let Some(_) = DoubleEndedIterator::next_back(&mut zip) {}
+    }
+
+    // fold (TRANC specialized — uses get_unchecked in a loop)
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_fold_u8() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [u8; MAX_LEN] = kani::any();
+        let arr_b: [u8; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let expected = cmp::min(slice_a.len(), slice_b.len());
+        let count = Iterator::fold(zip, 0usize, |acc, _| acc + 1);
+        assert_eq!(count, expected);
+    }
+
+    // spec_fold (TrustedLen specialized — uses unwrap_unchecked)
+    // RepeatN implements TrustedLen but NOT TrustedRandomAccessNoCoerce,
+    // so Zip::fold delegates to SpecFold::spec_fold (the TrustedLen path).
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_spec_fold() {
+        let len_a: usize = kani::any();
+        let len_b: usize = kani::any();
+        kani::assume(len_a <= 8);
+        kani::assume(len_b <= 8);
+        let zip = Zip::new(iter::repeat_n(1u8, len_a), iter::repeat_n(2u8, len_b));
+        let count = Iterator::fold(zip, 0usize, |acc, _| acc + 1);
+        assert_eq!(count, cmp::min(len_a, len_b));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_iterator_get_unchecked_char() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [char; MAX_LEN] = kani::any();
+        let arr_b: [char; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < Iterator::size_hint(&zip).0);
+        let _ = unsafe { zip.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_iterator_get_unchecked_tup() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [(char, u8); MAX_LEN] = kani::any();
+        let arr_b: [(char, u8); MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < Iterator::size_hint(&zip).0);
+        let _ = unsafe { zip.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_next_char() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [char; MAX_LEN] = kani::any();
+        let arr_b: [char; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let expected = cmp::min(slice_a.len(), slice_b.len());
+        let mut count = 0usize;
+        while let Some(_) = Iterator::next(&mut zip) {
+            count += 1;
+        }
+        assert_eq!(count, expected);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_zip_fold_char() {
+        const MAX_LEN: usize = 8;
+        let arr_a: [char; MAX_LEN] = kani::any();
+        let arr_b: [char; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let expected = cmp::min(slice_a.len(), slice_b.len());
+        let count = Iterator::fold(zip, 0usize, |acc, _| acc + 1);
+        assert_eq!(count, expected);
     }
 }
