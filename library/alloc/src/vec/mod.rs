@@ -4368,7 +4368,7 @@ mod verify {
 
                 // --- into_boxed_slice ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_into_boxed_slice() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let len = v.len();
@@ -4378,7 +4378,7 @@ mod verify {
 
                 // --- truncate ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_truncate() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -4418,7 +4418,7 @@ mod verify {
 
                 // --- insert ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_insert() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -4431,7 +4431,7 @@ mod verify {
 
                 // --- remove ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_remove() {
                     let mut v: Vec<$ty> = any_vec_with_min_len::<$ty, MAX_LEN>(1);
                     let orig_len = v.len();
@@ -4443,7 +4443,7 @@ mod verify {
 
                 // --- retain_mut ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_retain_mut() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -4453,7 +4453,7 @@ mod verify {
 
                 // --- dedup_by ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_dedup_by() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -4504,7 +4504,7 @@ mod verify {
 
                 // --- append ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_append() {
                     let mut v1: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let mut v2: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
@@ -4519,7 +4519,7 @@ mod verify {
                 // Verified transitively through check_append above.
                 // Also verify directly:
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_append_elements() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let other: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
@@ -4535,7 +4535,7 @@ mod verify {
 
                 // --- drain ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_drain() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let len = v.len();
@@ -4558,7 +4558,7 @@ mod verify {
 
                 // --- split_off ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_split_off() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let len = v.len();
@@ -4604,7 +4604,7 @@ mod verify {
 
                 // --- extend_from_within ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_extend_from_within() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let len = v.len();
@@ -4618,7 +4618,7 @@ mod verify {
 
                 // --- into_flattened ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_into_flattened() {
                     let arr: [[$ty; 1]; MAX_LEN] = kani::Arbitrary::any_array();
                     let v: Vec<[$ty; 1]> = Vec::from(arr);
@@ -4629,7 +4629,7 @@ mod verify {
 
                 // --- extend_with (private, called by resize) ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_extend_with() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -4674,7 +4674,7 @@ mod verify {
                 // --- extend_desugared (private) ---
                 // This is the default extend impl. Verify through Extend trait:
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_extend_desugared() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -4687,7 +4687,7 @@ mod verify {
                 // Called when extending with a TrustedLen iterator.
                 // Vec::from(arr) uses this path. Also verify through extend:
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_extend_trusted() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -4699,7 +4699,7 @@ mod verify {
 
                 // --- extract_if ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_extract_if() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -4709,7 +4709,7 @@ mod verify {
 
                 // --- drop ---
                 #[kani::proof]
-                #[kani::unwind(8)]
+
                 fn check_drop() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     drop(v);
@@ -4731,9 +4731,12 @@ mod verify {
         };
     }
 
-    // Representative types covering: ZST, small aligned, validity-constrained,
-    // compound with padding. MAX_LEN=5 keeps verification tractable while
-    // exercising all code paths.
+    // Representative types covering: ZST (size 0), small aligned (size 1),
+    // validity-constrained (size 4), compound with padding (size 5+).
+    // The unsafe pointer operations depend only on size_of::<T>() and
+    // align_of::<T>(), so these cover all relevant layout categories.
+    // MAX_LEN=3 allows CBMC to fully unwind all loops without explicit
+    // unwind bounds, while covering empty/single/multiple element cases.
     check_vec_with_ty!(verify_vec_u8, u8, 3);
     check_vec_with_ty!(verify_vec_unit, (), 3);
     check_vec_with_ty!(verify_vec_char, char, 3);
