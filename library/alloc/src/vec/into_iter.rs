@@ -541,3 +541,189 @@ unsafe impl<T> AsVecIntoIter for IntoIter<T> {
         self
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use crate::vec::Vec;
+
+    const MAX_LEN: usize = 3;
+
+    fn any_vec<T: kani::Arbitrary, const N: usize>() -> Vec<T> {
+        let arr: [T; N] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(arr);
+        let new_len: usize = kani::any();
+        kani::assume(new_len <= v.len());
+        v.truncate(new_len);
+        v
+    }
+
+    macro_rules! check_into_iter_with_ty {
+        ($mod_name:ident, $ty:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                #[kani::proof]
+                fn check_as_slice() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let iter = v.into_iter();
+                    let s = iter.as_slice();
+                    assert!(s.len() == orig_len);
+                }
+
+                #[kani::proof]
+                fn check_as_mut_slice() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut iter = v.into_iter();
+                    let s = iter.as_mut_slice();
+                    assert!(s.len() == orig_len);
+                }
+
+                #[kani::proof]
+                fn check_next() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut iter = v.into_iter();
+                    if orig_len > 0 {
+                        assert!(iter.next().is_some());
+                        assert!(iter.len() == orig_len - 1);
+                    } else {
+                        assert!(iter.next().is_none());
+                    }
+                }
+
+                #[kani::proof]
+                fn check_size_hint() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let iter = v.into_iter();
+                    let (lo, hi) = iter.size_hint();
+                    assert!(lo == orig_len);
+                    assert!(hi == Some(orig_len));
+                }
+
+                #[kani::proof]
+                fn check_advance_by() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut iter = v.into_iter();
+                    let n: usize = kani::any();
+                    kani::assume(n <= MAX_LEN + 1);
+                    let result = iter.advance_by(n);
+                    if n <= orig_len {
+                        assert!(result.is_ok());
+                        assert!(iter.len() == orig_len - n);
+                    } else {
+                        assert!(result.is_err());
+                    }
+                }
+
+                #[kani::proof]
+                fn check_next_chunk() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut iter = v.into_iter();
+                    let result = iter.next_chunk::<2>();
+                    if orig_len >= 2 {
+                        assert!(result.is_ok());
+                        assert!(iter.len() == orig_len - 2);
+                    } else {
+                        assert!(result.is_err());
+                    }
+                }
+
+                #[kani::proof]
+                fn check_fold() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let iter = v.into_iter();
+                    let count = iter.fold(0usize, |acc, _| acc + 1);
+                    assert!(count == orig_len);
+                }
+
+                #[kani::proof]
+                fn check_try_fold() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut iter = v.into_iter();
+                    let result: Result<usize, ()> = iter.try_fold(0usize, |acc, _| Ok(acc + 1));
+                    assert!(result == Ok(orig_len));
+                }
+
+                #[kani::proof]
+                fn check_get_unchecked() {
+                    let v: Vec<u8> = any_vec::<u8, MAX_LEN>();
+                    let orig_len = v.len();
+                    kani::assume(orig_len > 0);
+                    let mut iter = v.into_iter();
+                    let i: usize = kani::any();
+                    kani::assume(i < orig_len);
+                    // SAFETY: i < len, and u8: Copy satisfies NonDrop
+                    let _val: u8 = unsafe { iter.__iterator_get_unchecked(i) };
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut iter = v.into_iter();
+                    if orig_len > 0 {
+                        assert!(iter.next_back().is_some());
+                        assert!(iter.len() == orig_len - 1);
+                    } else {
+                        assert!(iter.next_back().is_none());
+                    }
+                }
+
+                #[kani::proof]
+                fn check_advance_back_by() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut iter = v.into_iter();
+                    let n: usize = kani::any();
+                    kani::assume(n <= MAX_LEN + 1);
+                    let result = iter.advance_back_by(n);
+                    if n <= orig_len {
+                        assert!(result.is_ok());
+                        assert!(iter.len() == orig_len - n);
+                    } else {
+                        assert!(result.is_err());
+                    }
+                }
+
+                #[kani::proof]
+                fn check_drop() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let iter = v.into_iter();
+                    drop(iter);
+                }
+
+                #[kani::proof]
+                fn check_forget_allocation_drop_remaining() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let mut iter = v.into_iter();
+                    iter.forget_allocation_drop_remaining();
+                    assert!(iter.len() == 0);
+                }
+
+                #[kani::proof]
+                fn check_into_vecdeque() {
+                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let iter = v.into_iter();
+                    let vd = iter.into_vecdeque();
+                    assert!(vd.len() == orig_len);
+                }
+            }
+        };
+    }
+
+    check_into_iter_with_ty!(verify_into_iter_u8, u8);
+    check_into_iter_with_ty!(verify_into_iter_unit, ());
+    check_into_iter_with_ty!(verify_into_iter_char, char);
+    check_into_iter_with_ty!(verify_into_iter_tup, (char, u8));
+}

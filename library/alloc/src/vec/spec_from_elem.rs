@@ -73,3 +73,43 @@ impl SpecFromElem for () {
         v
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use super::*;
+
+    #[kani::proof]
+    fn check_from_elem_i8() {
+        let elem: i8 = kani::any();
+        let n: usize = kani::any();
+        kani::assume(n <= 3);
+        let v = <i8 as SpecFromElem>::from_elem(elem, n, crate::alloc::Global);
+        assert!(v.len() == n);
+        let k: usize = kani::any();
+        kani::assume(k < n);
+        assert!(v[k] == elem);
+    }
+
+    #[kani::proof]
+    fn check_from_elem_u8() {
+        let elem: u8 = kani::any();
+        let n: usize = kani::any();
+        kani::assume(n <= 3);
+        let v = <u8 as SpecFromElem>::from_elem(elem, n, crate::alloc::Global);
+        assert!(v.len() == n);
+        let k: usize = kani::any();
+        kani::assume(k < n);
+        assert!(v[k] == elem);
+    }
+
+    #[kani::proof]
+    fn check_from_elem_unit() {
+        let n: usize = kani::any();
+        kani::assume(n <= 3);
+        let v = <() as SpecFromElem>::from_elem((), n, crate::alloc::Global);
+        assert!(v.len() == n);
+    }
+}

@@ -133,3 +133,52 @@ where
         f.debug_struct("ExtractIf").field("peek", &peek).finish_non_exhaustive()
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use crate::vec::Vec;
+
+    const MAX_LEN: usize = 3;
+
+    fn any_vec<T: kani::Arbitrary, const N: usize>() -> Vec<T> {
+        let arr: [T; N] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(arr);
+        let new_len: usize = kani::any();
+        kani::assume(new_len <= v.len());
+        v.truncate(new_len);
+        v
+    }
+
+    macro_rules! check_extract_if_with_ty {
+        ($mod_name:ident, $ty:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                #[kani::proof]
+                fn check_extract_if_next() {
+                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
+                    let orig_len = v.len();
+                    let mut extracted = 0usize;
+                    {
+                        let mut iter = v.extract_if(.., |_| {
+                            let keep: bool = kani::any();
+                            keep
+                        });
+                        while let Some(_) = iter.next() {
+                            extracted += 1;
+                        }
+                    }
+                    assert!(v.len() + extracted == orig_len);
+                }
+            }
+        };
+    }
+
+    check_extract_if_with_ty!(verify_extract_if_u8, u8);
+    check_extract_if_with_ty!(verify_extract_if_unit, ());
+    check_extract_if_with_ty!(verify_extract_if_char, char);
+    check_extract_if_with_ty!(verify_extract_if_tup, (char, u8));
+}
