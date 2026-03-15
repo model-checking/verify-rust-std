@@ -796,12 +796,12 @@ impl String {
         // Under Kani, skip the collect/from_utf16 loops and return nondeterministically.
         #[cfg(not(kani))]
         {
-        match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
-            (true, ([], v, [])) => Self::from_utf16(v),
-            _ => char::decode_utf16(chunks.iter().copied().map(u16::from_le_bytes))
-                .collect::<Result<_, _>>()
-                .map_err(|_| FromUtf16Error(())),
-        }
+            match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
+                (true, ([], v, [])) => Self::from_utf16(v),
+                _ => char::decode_utf16(chunks.iter().copied().map(u16::from_le_bytes))
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| FromUtf16Error(())),
+            }
         }
         #[cfg(kani)]
         {
@@ -840,17 +840,18 @@ impl String {
     pub fn from_utf16le_lossy(v: &[u8]) -> String {
         #[cfg(not(kani))]
         {
-        match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
-            (true, ([], v, [])) => Self::from_utf16_lossy(v),
-            (true, ([], v, [_remainder])) => Self::from_utf16_lossy(v) + "\u{FFFD}",
-            _ => {
-                let (chunks, remainder) = v.as_chunks::<2>();
-                let string = char::decode_utf16(chunks.iter().copied().map(u16::from_le_bytes))
-                    .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
-                    .collect();
-                if remainder.is_empty() { string } else { string + "\u{FFFD}" }
+            match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
+                (true, ([], v, [])) => Self::from_utf16_lossy(v),
+                (true, ([], v, [_remainder])) => Self::from_utf16_lossy(v) + "\u{FFFD}",
+                _ => {
+                    let (chunks, remainder) = v.as_chunks::<2>();
+                    let string =
+                        char::decode_utf16(chunks.iter().copied().map(u16::from_le_bytes))
+                            .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
+                            .collect();
+                    if remainder.is_empty() { string } else { string + "\u{FFFD}" }
+                }
             }
-        }
         }
         #[cfg(kani)]
         {
@@ -887,12 +888,12 @@ impl String {
         };
         #[cfg(not(kani))]
         {
-        match (cfg!(target_endian = "big"), unsafe { v.align_to::<u16>() }) {
-            (true, ([], v, [])) => Self::from_utf16(v),
-            _ => char::decode_utf16(chunks.iter().copied().map(u16::from_be_bytes))
-                .collect::<Result<_, _>>()
-                .map_err(|_| FromUtf16Error(())),
-        }
+            match (cfg!(target_endian = "big"), unsafe { v.align_to::<u16>() }) {
+                (true, ([], v, [])) => Self::from_utf16(v),
+                _ => char::decode_utf16(chunks.iter().copied().map(u16::from_be_bytes))
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| FromUtf16Error(())),
+            }
         }
         #[cfg(kani)]
         {
@@ -931,17 +932,18 @@ impl String {
     pub fn from_utf16be_lossy(v: &[u8]) -> String {
         #[cfg(not(kani))]
         {
-        match (cfg!(target_endian = "big"), unsafe { v.align_to::<u16>() }) {
-            (true, ([], v, [])) => Self::from_utf16_lossy(v),
-            (true, ([], v, [_remainder])) => Self::from_utf16_lossy(v) + "\u{FFFD}",
-            _ => {
-                let (chunks, remainder) = v.as_chunks::<2>();
-                let string = char::decode_utf16(chunks.iter().copied().map(u16::from_be_bytes))
-                    .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
-                    .collect();
-                if remainder.is_empty() { string } else { string + "\u{FFFD}" }
+            match (cfg!(target_endian = "big"), unsafe { v.align_to::<u16>() }) {
+                (true, ([], v, [])) => Self::from_utf16_lossy(v),
+                (true, ([], v, [_remainder])) => Self::from_utf16_lossy(v) + "\u{FFFD}",
+                _ => {
+                    let (chunks, remainder) = v.as_chunks::<2>();
+                    let string =
+                        char::decode_utf16(chunks.iter().copied().map(u16::from_be_bytes))
+                            .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
+                            .collect();
+                    if remainder.is_empty() { string } else { string + "\u{FFFD}" }
+                }
             }
-        }
         }
         #[cfg(kani)]
         {
