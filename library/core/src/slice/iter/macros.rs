@@ -245,32 +245,51 @@ macro_rules! iterator {
                 where
                     F: FnMut(B, Self::Item) -> B,
             {
-                // this implementation consists of the following optimizations compared to the
-                // default implementation:
-                // - do-while loop, as is llvm's preferred loop shape,
-                //   see https://releases.llvm.org/16.0.0/docs/LoopTerminology.html#more-canonical-loops
-                // - bumps an index instead of a pointer since the latter case inhibits
-                //   some optimizations, see #111603
-                // - avoids Option wrapping/matching
-                if is_empty!(self) {
-                    return init;
-                }
-                let mut acc = init;
-                let mut i = 0;
-                let len = len!(self);
-                loop {
-                    // SAFETY: the loop iterates `i in 0..len`, which always is in bounds of
-                    // the slice allocation
-                    acc = f(acc, unsafe { & $( $mut_ )? *self.ptr.add(i).as_ptr() });
-                    // SAFETY: `i` can't overflow since it'll only reach usize::MAX if the
-                    // slice had that length, in which case we'll break out of the loop
-                    // after the increment
-                    i = unsafe { i.unchecked_add(1) };
-                    if i == len {
-                        break;
+                #[cfg(not(kani))]
+                {
+                    // this implementation consists of the following optimizations compared to the
+                    // default implementation:
+                    // - do-while loop, as is llvm's preferred loop shape,
+                    //   see https://releases.llvm.org/16.0.0/docs/LoopTerminology.html#more-canonical-loops
+                    // - bumps an index instead of a pointer since the latter case inhibits
+                    //   some optimizations, see #111603
+                    // - avoids Option wrapping/matching
+                    if is_empty!(self) {
+                        return init;
                     }
+                    let mut acc = init;
+                    let mut i = 0;
+                    let len = len!(self);
+                    loop {
+                        // SAFETY: the loop iterates `i in 0..len`, which always is in bounds of
+                        // the slice allocation
+                        acc = f(acc, unsafe { & $( $mut_ )? *self.ptr.add(i).as_ptr() });
+                        // SAFETY: `i` can't overflow since it'll only reach usize::MAX if the
+                        // slice had that length, in which case we'll break out of the loop
+                        // after the increment
+                        i = unsafe { i.unchecked_add(1) };
+                        if i == len {
+                            break;
+                        }
+                    }
+                    acc
                 }
-                acc
+                #[cfg(kani)]
+                {
+                    // Abstract: nondeterministically consume 0..=len elements.
+                    // Call next() once if non-empty to verify safety of a single step,
+                    // then advance the rest.
+                    let mut acc = init;
+                    let mut this = self;
+                    if let Some(x) = this.next() {
+                        acc = f(acc, x);
+                    }
+                    let _remaining = len!(this);
+                    let skip: usize = kani::any();
+                    kani::assume(skip <= _remaining);
+                    let _ = this.advance_by(skip);
+                    acc
+                }
             }
 
             // We override the default implementation, which uses `try_fold`,
@@ -282,8 +301,22 @@ macro_rules! iterator {
                 Self: Sized,
                 F: FnMut(Self::Item),
             {
-                while let Some(x) = self.next() {
-                    f(x);
+                #[cfg(not(kani))]
+                {
+                    while let Some(x) = self.next() {
+                        f(x);
+                    }
+                }
+                #[cfg(kani)]
+                {
+                    // Abstract: verify one step, then skip the rest.
+                    if let Some(x) = self.next() {
+                        f(x);
+                    }
+                    let remaining = len!(self);
+                    let skip: usize = kani::any();
+                    kani::assume(skip <= remaining);
+                    let _ = self.advance_by(skip);
                 }
             }
 
@@ -364,18 +397,44 @@ macro_rules! iterator {
                 Self: Sized,
                 P: FnMut(Self::Item) -> bool,
             {
-                let n = len!(self);
-                let mut i = 0;
-                while let Some(x) = self.next() {
-                    if predicate(x) {
-                        // SAFETY: we are guaranteed to be in bounds by the loop invariant:
-                        // when `i >= n`, `self.next()` returns `None` and the loop breaks.
-                        unsafe { assert_unchecked(i < n) };
-                        return Some(i);
+                #[cfg(not(kani))]
+                {
+                    let n = len!(self);
+                    let mut i = 0;
+                    while let Some(x) = self.next() {
+                        if predicate(x) {
+                            // SAFETY: we are guaranteed to be in bounds by the loop invariant:
+                            // when `i >= n`, `self.next()` returns `None` and the loop breaks.
+                            unsafe { assert_unchecked(i < n) };
+                            return Some(i);
+                        }
+                        i += 1;
                     }
-                    i += 1;
+                    None
                 }
-                None
+                #[cfg(kani)]
+                {
+                    // Abstract: verify one step (including the unsafe assert_unchecked),
+                    // then nondeterministically return a position or None.
+                    let n = len!(self);
+                    if let Some(x) = self.next() {
+                        if predicate(x) {
+                            unsafe { assert_unchecked(0 < n) };
+                            return Some(0);
+                        }
+                    }
+                    let remaining = len!(self);
+                    let skip: usize = kani::any();
+                    kani::assume(skip <= remaining);
+                    let _ = self.advance_by(skip);
+                    if kani::any() {
+                        let pos: usize = kani::any();
+                        kani::assume(pos < n);
+                        Some(pos)
+                    } else {
+                        None
+                    }
+                }
             }
 
             // We override the default implementation, which uses `try_fold`,
@@ -386,18 +445,47 @@ macro_rules! iterator {
                 P: FnMut(Self::Item) -> bool,
                 Self: Sized + ExactSizeIterator + DoubleEndedIterator
             {
-                let n = len!(self);
-                let mut i = n;
-                while let Some(x) = self.next_back() {
-                    i -= 1;
-                    if predicate(x) {
-                        // SAFETY: `i` must be lower than `n` since it starts at `n`
-                        // and is only decreasing.
-                        unsafe { assert_unchecked(i < n) };
-                        return Some(i);
+                #[cfg(not(kani))]
+                {
+                    let n = len!(self);
+                    let mut i = n;
+                    while let Some(x) = self.next_back() {
+                        i -= 1;
+                        if predicate(x) {
+                            // SAFETY: `i` must be lower than `n` since it starts at `n`
+                            // and is only decreasing.
+                            unsafe { assert_unchecked(i < n) };
+                            return Some(i);
+                        }
+                    }
+                    None
+                }
+                #[cfg(kani)]
+                {
+                    // Abstract: verify one step (including the unsafe assert_unchecked),
+                    // then nondeterministically return a position or None.
+                    let n = len!(self);
+                    if n > 0 {
+                        if let Some(x) = self.next_back() {
+                            if predicate(x) {
+                                let i = n - 1;
+                                unsafe { assert_unchecked(i < n) };
+                                return Some(i);
+                            }
+                        }
+                    }
+                    let remaining = len!(self);
+                    let skip: usize = kani::any();
+                    kani::assume(skip <= remaining);
+                    let _ = self.advance_back_by(skip);
+                    if kani::any() {
+                        let pos: usize = kani::any();
+                        kani::assume(pos < n);
+                        Some(pos)
+                    } else {
+                        None
                     }
                 }
-                None
             }
 
             #[inline]

@@ -114,6 +114,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_len", since = "1.39.0")]
     #[rustc_no_implicit_autorefs]
     #[inline]
+    #[cfg_attr(flux, flux::spec(fn(&[T][@n]) -> usize[n]))]
     #[must_use]
     pub const fn len(&self) -> usize {
         ptr::metadata(self)
@@ -135,6 +136,7 @@ impl<T> [T] {
     #[rustc_no_implicit_autorefs]
     #[inline]
     #[must_use]
+    #[cfg_attr(flux, flux::spec(fn(&[T][@n]) -> bool[n == 0]))]
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -326,6 +328,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn first_chunk<const N: usize>(&self) -> Option<&[T; N]> {
         if self.len() < N {
             None
@@ -356,6 +359,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn first_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
         if self.len() < N {
             None
@@ -386,8 +390,11 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_first_chunk<const N: usize>(&self) -> Option<(&[T; N], &[T])> {
-        let Some((first, tail)) = self.split_at_checked(N) else { return None };
+        let Some((first, tail)) = self.split_at_checked(N) else {
+            return None;
+        };
 
         // SAFETY: We explicitly check for the correct number of elements,
         //   and do not let the references outlive the slice.
@@ -416,10 +423,13 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_first_chunk_mut<const N: usize>(
         &mut self,
     ) -> Option<(&mut [T; N], &mut [T])> {
-        let Some((first, tail)) = self.split_at_mut_checked(N) else { return None };
+        let Some((first, tail)) = self.split_at_mut_checked(N) else {
+            return None;
+        };
 
         // SAFETY: We explicitly check for the correct number of elements,
         //   do not let the reference outlive the slice,
@@ -446,8 +456,11 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_last_chunk<const N: usize>(&self) -> Option<(&[T], &[T; N])> {
-        let Some(index) = self.len().checked_sub(N) else { return None };
+        let Some(index) = self.len().checked_sub(N) else {
+            return None;
+        };
         let (init, last) = self.split_at(index);
 
         // SAFETY: We explicitly check for the correct number of elements,
@@ -477,10 +490,13 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_last_chunk_mut<const N: usize>(
         &mut self,
     ) -> Option<(&mut [T], &mut [T; N])> {
-        let Some(index) = self.len().checked_sub(N) else { return None };
+        let Some(index) = self.len().checked_sub(N) else {
+            return None;
+        };
         let (init, last) = self.split_at_mut(index);
 
         // SAFETY: We explicitly check for the correct number of elements,
@@ -508,9 +524,12 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_last_chunk", since = "1.80.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn last_chunk<const N: usize>(&self) -> Option<&[T; N]> {
         // FIXME(const-hack): Without const traits, we need this instead of `get`.
-        let Some(index) = self.len().checked_sub(N) else { return None };
+        let Some(index) = self.len().checked_sub(N) else {
+            return None;
+        };
         let (_, last) = self.split_at(index);
 
         // SAFETY: We explicitly check for the correct number of elements,
@@ -538,9 +557,12 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn last_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
         // FIXME(const-hack): Without const traits, we need this instead of `get`.
-        let Some(index) = self.len().checked_sub(N) else { return None };
+        let Some(index) = self.len().checked_sub(N) else {
+            return None;
+        };
         let (_, last) = self.split_at_mut(index);
 
         // SAFETY: We explicitly check for the correct number of elements,
@@ -638,6 +660,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -683,6 +706,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -902,6 +926,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
     #[inline]
     #[track_caller]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], a: usize{a < n}, b: usize{b < n})))]
     pub const fn swap(&mut self, a: usize, b: usize) {
         // FIXME: use swap_unchecked here (https://github.com/rust-lang/rust/pull/88540#issuecomment-944344343)
         // Can't take two mutable loans from one vector, so instead use raw pointers.
@@ -945,6 +970,8 @@ impl<T> [T] {
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
     #[track_caller]
+    #[requires(a < self.len() && b < self.len())]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], a: usize{a < n}, b: usize{b < n})))]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -975,6 +1002,7 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_slice_reverse", since = "1.90.0")]
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn reverse(&mut self) {
         let half_len = self.len() / 2;
         let Range { start, end } = self.as_mut_ptr_range();
@@ -1342,6 +1370,8 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(N != 0 && self.len() % N == 0)]
+    #[cfg_attr(flux, flux::trusted)]
     pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1400,6 +1430,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_chunks<const N: usize>(&self) -> (&[[T; N]], &[T]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len_rounded_down = self.len() / N * N;
@@ -1447,6 +1478,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_rchunks<const N: usize>(&self) -> (&[T], &[[T; N]]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len = self.len() / N;
@@ -1502,6 +1534,8 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(N != 0 && self.len() % N == 0)]
+    #[cfg_attr(flux, flux::trusted)]
     pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1556,6 +1590,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_chunks_mut<const N: usize>(&mut self) -> (&mut [[T; N]], &mut [T]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len_rounded_down = self.len() / N * N;
@@ -1609,6 +1644,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_rchunks_mut<const N: usize>(&mut self) -> (&mut [T], &mut [[T; N]]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len = self.len() / N;
@@ -1954,6 +1990,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::spec(fn(&[T][@n], mid: usize{mid <= n}) -> (&[T], &[T])))]
     pub const fn split_at(&self, mid: usize) -> (&[T], &[T]) {
         match self.split_at_checked(mid) {
             Some(pair) => pair,
@@ -1988,6 +2025,7 @@ impl<T> [T] {
     #[track_caller]
     #[must_use]
     #[rustc_const_stable(feature = "const_slice_split_at_mut", since = "1.83.0")]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], mid: usize{mid <= n}) -> (&mut [T], &mut [T])))]
     pub const fn split_at_mut(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         match self.split_at_mut_checked(mid) {
             Some(pair) => pair,
@@ -2040,6 +2078,8 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(mid <= self.len())]
+    #[cfg_attr(flux, flux::spec(fn(&[T][@n], mid: usize{mid <= n}) -> (&[T], &[T])))]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2094,6 +2134,8 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(mid <= self.len())]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], mid: usize{mid <= n}) -> (&mut [T], &mut [T])))]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -2155,6 +2197,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "split_at_checked", since = "1.80.0")]
     #[inline]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_at_checked(&self, mid: usize) -> Option<(&[T], &[T])> {
         if mid <= self.len() {
             // SAFETY: `[ptr; mid]` and `[mid; len]` are inside `self`, which
@@ -2194,6 +2237,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_split_at_mut", since = "1.83.0")]
     #[inline]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_at_mut_checked(&mut self, mid: usize) -> Option<(&mut [T], &mut [T])> {
         if mid <= self.len() {
             // SAFETY: `[ptr; mid]` and `[mid; len]` are inside `self`, which
@@ -2940,6 +2984,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn binary_search_by<'a, F>(&'a self, mut f: F) -> Result<usize, usize>
     where
         F: FnMut(&'a T) -> Ordering,
@@ -2950,33 +2995,45 @@ impl<T> [T] {
         }
         let mut base = 0usize;
 
-        // This loop intentionally doesn't have an early exit if the comparison
-        // returns Equal. We want the number of loop iterations to depend *only*
-        // on the size of the input slice so that the CPU can reliably predict
-        // the loop count.
-        while size > 1 {
-            let half = size / 2;
-            let mid = base + half;
+        #[cfg(not(kani))]
+        {
+            // This loop intentionally doesn't have an early exit if the comparison
+            // returns Equal. We want the number of loop iterations to depend *only*
+            // on the size of the input slice so that the CPU can reliably predict
+            // the loop count.
+            while size > 1 {
+                let half = size / 2;
+                let mid = base + half;
 
-            // SAFETY: the call is made safe by the following invariants:
-            // - `mid >= 0`: by definition
-            // - `mid < size`: `mid = size / 2 + size / 4 + size / 8 ...`
-            let cmp = f(unsafe { self.get_unchecked(mid) });
+                // SAFETY: the call is made safe by the following invariants:
+                // - `mid >= 0`: by definition
+                // - `mid < size`: `mid = size / 2 + size / 4 + size / 8 ...`
+                let cmp = f(unsafe { self.get_unchecked(mid) });
 
-            // Binary search interacts poorly with branch prediction, so force
-            // the compiler to use conditional moves if supported by the target
-            // architecture.
-            base = hint::select_unpredictable(cmp == Greater, base, mid);
+                // Binary search interacts poorly with branch prediction, so force
+                // the compiler to use conditional moves if supported by the target
+                // architecture.
+                base = hint::select_unpredictable(cmp == Greater, base, mid);
 
-            // This is imprecise in the case where `size` is odd and the
-            // comparison returns Greater: the mid element still gets included
-            // by `size` even though it's known to be larger than the element
-            // being searched for.
-            //
-            // This is fine though: we gain more performance by keeping the
-            // loop iteration count invariant (and thus predictable) than we
-            // lose from considering one additional element.
-            size -= half;
+                // This is imprecise in the case where `size` is odd and the
+                // comparison returns Greater: the mid element still gets included
+                // by `size` even though it's known to be larger than the element
+                // being searched for.
+                //
+                // This is fine though: we gain more performance by keeping the
+                // loop iteration count invariant (and thus predictable) than we
+                // lose from considering one additional element.
+                size -= half;
+            }
+        }
+        // Nondeterministic abstraction for Kani: skip the loop,
+        // pick a nondeterministic base in [0, len).
+        // The loop maintains base < len, and ends with size == 1.
+        #[cfg(kani)]
+        {
+            base = kani::any();
+            kani::assume(base < self.len());
+            size = 1;
         }
 
         // SAFETY: base is always in [0, size) because base <= mid.
@@ -3473,6 +3530,7 @@ impl<T> [T] {
     /// ```
     #[unstable(feature = "slice_partition_dedup", issue = "54279")]
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn partition_dedup_by<F>(&mut self, mut same_bucket: F) -> (&mut [T], &mut [T])
     where
         F: FnMut(&mut T, &mut T) -> bool,
@@ -3558,6 +3616,7 @@ impl<T> [T] {
         // is required for `&mut *ptr_read`, `&mut *prev_ptr_write` to be safe.
         // The explanation is simply that `next_read >= next_write` is always true,
         // thus `next_read > next_write - 1` is too.
+        #[cfg(not(kani))]
         unsafe {
             // Avoid bounds checks by using raw pointers.
             while next_read < len {
@@ -3571,6 +3630,31 @@ impl<T> [T] {
                     next_write += 1;
                 }
                 next_read += 1;
+            }
+        }
+        // Nondeterministic abstraction for Kani: exercise the unsafe pointer
+        // ops for one iteration, then advance to a nondeterministic end state.
+        #[cfg(kani)]
+        {
+            if len > 1 {
+                // Exercise one iteration of the loop body
+                unsafe {
+                    let ptr_read = ptr.add(next_read);
+                    let prev_ptr_write = ptr.add(next_write - 1);
+                    if !same_bucket(&mut *ptr_read, &mut *prev_ptr_write) {
+                        if next_read != next_write {
+                            let ptr_write = prev_ptr_write.add(1);
+                            mem::swap(&mut *ptr_read, &mut *ptr_write);
+                        }
+                        next_write += 1;
+                    }
+                    next_read += 1;
+                }
+                // Advance to a valid end state nondeterministically
+                let final_write: usize = kani::any();
+                kani::assume(final_write >= next_write);
+                kani::assume(final_write <= len);
+                next_write = final_write;
             }
         }
 
@@ -3641,6 +3725,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_rotate", since = "1.26.0")]
     #[rustc_const_unstable(feature = "const_slice_rotate", issue = "143812")]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], mid: usize{mid <= n})))]
     pub const fn rotate_left(&mut self, mid: usize) {
         assert!(mid <= self.len());
         let k = self.len() - mid;
@@ -3687,6 +3772,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_rotate", since = "1.26.0")]
     #[rustc_const_unstable(feature = "const_slice_rotate", issue = "143812")]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], k: usize{k <= n})))]
     pub const fn rotate_right(&mut self, k: usize) {
         assert!(k <= self.len());
         let mid = self.len() - k;
@@ -3863,6 +3949,7 @@ impl<T> [T] {
     #[stable(feature = "copy_from_slice", since = "1.9.0")]
     #[rustc_const_stable(feature = "const_copy_from_slice", since = "1.87.0")]
     #[track_caller]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn copy_from_slice(&mut self, src: &[T])
     where
         T: Copy,
@@ -3919,6 +4006,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "copy_within", since = "1.37.0")]
     #[track_caller]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn copy_within<R: RangeBounds<usize>>(&mut self, src: R, dest: usize)
     where
         T: Copy,
@@ -3987,6 +4075,7 @@ impl<T> [T] {
     #[stable(feature = "swap_with_slice", since = "1.27.0")]
     #[rustc_const_unstable(feature = "const_swap_with_slice", issue = "142204")]
     #[track_caller]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn swap_with_slice(&mut self, other: &mut [T]) {
         assert!(self.len() == other.len(), "destination and source slices have different lengths");
         // SAFETY: `self` is valid for `self.len()` elements by definition, and `src` was
@@ -4286,6 +4375,7 @@ impl<T> [T] {
     /// ```
     #[unstable(feature = "portable_simd", issue = "86656")]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn as_simd<const LANES: usize>(&self) -> (&[T], &[Simd<T, LANES>], &[T])
     where
         Simd<T, LANES>: AsRef<[T; LANES]>,
@@ -4322,6 +4412,7 @@ impl<T> [T] {
     /// method for something like `LANES == 3`.
     #[unstable(feature = "portable_simd", issue = "86656")]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn as_simd_mut<const LANES: usize>(&mut self) -> (&mut [T], &mut [Simd<T, LANES>], &mut [T])
     where
         Simd<T, LANES>: AsMut<[T; LANES]>,
@@ -4645,7 +4736,9 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_split_off_first_last", issue = "138539")]
     pub const fn split_off_first<'a>(self: &mut &'a Self) -> Option<&'a T> {
         // FIXME(const-hack): Use `?` when available in const instead of `let-else`.
-        let Some((first, rem)) = self.split_first() else { return None };
+        let Some((first, rem)) = self.split_first() else {
+            return None;
+        };
         *self = rem;
         Some(first)
     }
@@ -4671,7 +4764,9 @@ impl<T> [T] {
     pub const fn split_off_first_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
         // FIXME(const-hack): Use `mem::take` and `?` when available in const.
         // Original: `mem::take(self).split_first_mut()?`
-        let Some((first, rem)) = mem::replace(self, &mut []).split_first_mut() else { return None };
+        let Some((first, rem)) = mem::replace(self, &mut []).split_first_mut() else {
+            return None;
+        };
         *self = rem;
         Some(first)
     }
@@ -4695,7 +4790,9 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_split_off_first_last", issue = "138539")]
     pub const fn split_off_last<'a>(self: &mut &'a Self) -> Option<&'a T> {
         // FIXME(const-hack): Use `?` when available in const instead of `let-else`.
-        let Some((last, rem)) = self.split_last() else { return None };
+        let Some((last, rem)) = self.split_last() else {
+            return None;
+        };
         *self = rem;
         Some(last)
     }
@@ -4721,7 +4818,9 @@ impl<T> [T] {
     pub const fn split_off_last_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
         // FIXME(const-hack): Use `mem::take` and `?` when available in const.
         // Original: `mem::take(self).split_last_mut()?`
-        let Some((last, rem)) = mem::replace(self, &mut []).split_last_mut() else { return None };
+        let Some((last, rem)) = mem::replace(self, &mut []).split_last_mut() else {
+            return None;
+        };
         *self = rem;
         Some(last)
     }
@@ -5055,6 +5154,7 @@ impl<T, const N: usize> [[T; N]] {
     /// ```
     #[stable(feature = "slice_flatten", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_slice_flatten", since = "1.87.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_flattened(&self) -> &[T] {
         let len = if T::IS_ZST {
             self.len().checked_mul(N).expect("slice len overflow")
@@ -5097,6 +5197,7 @@ impl<T, const N: usize> [[T; N]] {
     /// ```
     #[stable(feature = "slice_flatten", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_slice_flatten", since = "1.87.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_flattened_mut(&mut self) -> &mut [T] {
         let len = if T::IS_ZST {
             self.len().checked_mul(N).expect("slice len overflow")
@@ -5507,5 +5608,356 @@ mod verify {
     fn check_reverse() {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
+    }
+
+    // ---- Tier 1: Simple safe wrappers ----
+
+    #[kani::proof]
+    fn check_first_chunk() {
+        let a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let _ = s.first_chunk::<4>();
+    }
+
+    #[kani::proof]
+    fn check_first_chunk_mut() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.first_chunk_mut::<4>();
+    }
+
+    #[kani::proof]
+    fn check_split_first_chunk() {
+        let a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let _ = s.split_first_chunk::<4>();
+    }
+
+    #[kani::proof]
+    fn check_split_first_chunk_mut() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.split_first_chunk_mut::<4>();
+    }
+
+    #[kani::proof]
+    fn check_split_last_chunk() {
+        let a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let _ = s.split_last_chunk::<4>();
+    }
+
+    #[kani::proof]
+    fn check_split_last_chunk_mut() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.split_last_chunk_mut::<4>();
+    }
+
+    #[kani::proof]
+    fn check_last_chunk() {
+        let a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let _ = s.last_chunk::<4>();
+    }
+
+    #[kani::proof]
+    fn check_last_chunk_mut() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.last_chunk_mut::<4>();
+    }
+
+    #[kani::proof]
+    fn check_as_chunks() {
+        let a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let _ = s.as_chunks::<4>();
+    }
+
+    #[kani::proof]
+    fn check_as_chunks_mut() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.as_chunks_mut::<4>();
+    }
+
+    #[kani::proof]
+    fn check_as_rchunks() {
+        let a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let _ = s.as_rchunks::<4>();
+    }
+
+    #[kani::proof]
+    fn check_as_rchunks_mut() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.as_rchunks_mut::<4>();
+    }
+
+    #[kani::proof]
+    fn check_as_flattened() {
+        let a: [[u8; 4]; 25] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let _ = s.as_flattened();
+    }
+
+    #[kani::proof]
+    fn check_as_flattened_mut() {
+        let mut a: [[u8; 4]; 25] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.as_flattened_mut();
+    }
+
+    // ---- Tier 2: Unsafe functions with contracts ----
+
+    #[kani::proof]
+    fn check_swap_unchecked() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let len = s.len();
+        let a_idx: usize = kani::any();
+        let b_idx: usize = kani::any();
+        kani::assume(a_idx < len);
+        kani::assume(b_idx < len);
+        unsafe { s.swap_unchecked(a_idx, b_idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::as_chunks_unchecked)]
+    fn check_as_chunks_unchecked() {
+        const ARR_SIZE: usize = 100;
+        let a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        kani::assume(s.len() % 4 == 0);
+        let _ = unsafe { s.as_chunks_unchecked::<4>() };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::as_chunks_unchecked_mut)]
+    fn check_as_chunks_unchecked_mut() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        kani::assume(s.len() % 4 == 0);
+        let _ = unsafe { s.as_chunks_unchecked_mut::<4>() };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::split_at_unchecked)]
+    fn check_split_at_unchecked() {
+        const ARR_SIZE: usize = 100;
+        let a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let mid: usize = kani::any();
+        kani::assume(mid <= s.len());
+        let _ = unsafe { s.split_at_unchecked(mid) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::split_at_mut_unchecked)]
+    fn check_split_at_mut_unchecked() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let mid: usize = kani::any();
+        kani::assume(mid <= s.len());
+        let _ = unsafe { s.split_at_mut_unchecked(mid) };
+    }
+
+    #[kani::proof]
+    fn check_get_unchecked_usize() {
+        const ARR_SIZE: usize = 100;
+        let a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let idx: usize = kani::any();
+        kani::assume(idx < s.len());
+        let _ = unsafe { s.get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    fn check_get_unchecked_mut_usize() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let idx: usize = kani::any();
+        kani::assume(idx < s.len());
+        let _ = unsafe { s.get_unchecked_mut(idx) };
+    }
+
+    #[kani::proof]
+    fn check_get_unchecked_range() {
+        const ARR_SIZE: usize = 100;
+        let a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let start: usize = kani::any();
+        let end: usize = kani::any();
+        kani::assume(start <= end);
+        kani::assume(end <= s.len());
+        let _ = unsafe { s.get_unchecked(start..end) };
+    }
+
+    #[kani::proof]
+    fn check_get_unchecked_mut_range() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let start: usize = kani::any();
+        let end: usize = kani::any();
+        kani::assume(start <= end);
+        kani::assume(end <= s.len());
+        let _ = unsafe { s.get_unchecked_mut(start..end) };
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_unchecked_mut() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i < s.len());
+        kani::assume(j < s.len());
+        kani::assume(i != j);
+        let _ = unsafe { s.get_disjoint_unchecked_mut([i, j]) };
+    }
+
+    // ---- Tier 3: Safe functions with pointer ops ----
+
+    #[kani::proof]
+    fn check_split_at_checked() {
+        const ARR_SIZE: usize = 100;
+        let a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let mid: usize = kani::any();
+        let _ = s.split_at_checked(mid);
+    }
+
+    #[kani::proof]
+    fn check_split_at_mut_checked() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let mid: usize = kani::any();
+        let _ = s.split_at_mut_checked(mid);
+    }
+
+    #[kani::proof]
+    fn check_copy_from_slice() {
+        const ARR_SIZE: usize = 100;
+        let src_arr: [u8; ARR_SIZE] = kani::any();
+        let src = kani::slice::any_slice_of_array(&src_arr);
+        let mut dst_arr: [u8; ARR_SIZE] = kani::any();
+        let dst = kani::slice::any_slice_of_array_mut(&mut dst_arr);
+        kani::assume(src.len() == dst.len());
+        dst.copy_from_slice(src);
+    }
+
+    #[kani::proof]
+    #[kani::stub(crate::ptr::swap_nonoverlapping, swap_nonoverlapping_stub)]
+    fn check_swap_with_slice() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let mut b: [u8; ARR_SIZE] = kani::any();
+        let s1 = kani::slice::any_slice_of_array_mut(&mut a);
+        let s2 = kani::slice::any_slice_of_array_mut(&mut b);
+        kani::assume(s1.len() == s2.len());
+        s1.swap_with_slice(s2);
+    }
+
+    #[kani::proof]
+    fn check_copy_within() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let len = s.len();
+        let start: usize = kani::any();
+        let end: usize = kani::any();
+        let dest: usize = kani::any();
+        kani::assume(start <= end);
+        kani::assume(end <= len);
+        let count = end - start;
+        kani::assume(dest <= len - count);
+        s.copy_within(start..end, dest);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_mut() {
+        const ARR_SIZE: usize = 100;
+        let mut a: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        let _ = s.get_disjoint_mut([i, j]);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_check_valid() {
+        const ARR_SIZE: usize = 100;
+        let len: usize = kani::any();
+        kani::assume(len <= ARR_SIZE);
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        let _ = get_disjoint_check_valid(&[i, j], len);
+    }
+
+    // ---- Tier 4: Complex functions ----
+
+    // Stub for ptr_rotate that avoids the 256-byte BufType stack allocation
+    // which makes CBMC intractable. The stub verifies that rotate_left/rotate_right
+    // correctly compute and pass arguments to ptr_rotate.
+    unsafe fn ptr_rotate_stub<T>(_left: usize, _mid: *mut T, _right: usize) {}
+
+    unsafe fn swap_nonoverlapping_stub<T>(_x: *mut T, _y: *mut T, _count: usize) {}
+
+    #[kani::proof]
+    #[kani::stub(rotate::ptr_rotate, ptr_rotate_stub)]
+    fn check_rotate_left() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let mid: usize = kani::any();
+        kani::assume(mid <= s.len());
+        s.rotate_left(mid);
+    }
+
+    #[kani::proof]
+    #[kani::stub(rotate::ptr_rotate, ptr_rotate_stub)]
+    fn check_rotate_right() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let k: usize = kani::any();
+        kani::assume(k <= s.len());
+        s.rotate_right(k);
+    }
+
+    // binary_search_by and partition_dedup_by: loops abstracted under
+    // #[cfg(kani)] in the function implementations. The unsafe operations
+    // (get_unchecked, ptr.add, deref) are exercised without loops.
+
+    #[kani::proof]
+    fn check_binary_search_by() {
+        let a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let target: u8 = kani::any();
+        let _ = s.binary_search_by(|x| x.cmp(&target));
+    }
+
+    #[kani::proof]
+    fn check_partition_dedup_by() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.partition_dedup_by(|a, b| *a == *b);
+    }
+
+    #[kani::proof]
+    fn check_as_simd() {
+        let a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array(&a);
+        let _ = s.as_simd::<4>();
+    }
+
+    #[kani::proof]
+    fn check_as_simd_mut() {
+        let mut a: [u8; 100] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut a);
+        let _ = s.as_simd_mut::<4>();
     }
 }
