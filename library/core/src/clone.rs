@@ -36,6 +36,10 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::{Destruct, PointeeSized};
 
 mod uninit;
@@ -544,6 +548,7 @@ unsafe impl CloneToUninit for str {
 #[unstable(feature = "clone_to_uninit", issue = "126799")]
 unsafe impl CloneToUninit for crate::ffi::CStr {
     #[cfg_attr(debug_assertions, track_caller)]
+    #[requires(!dest.is_null())]
     unsafe fn clone_to_uninit(&self, dest: *mut u8) {
         // SAFETY: For now, CStr is just a #[repr(trasnsparent)] [c_char] with some invariants.
         // And we can cast [c_char] to [u8] on all supported platforms (see: to_bytes_with_nul).

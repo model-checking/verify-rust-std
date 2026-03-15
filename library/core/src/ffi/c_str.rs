@@ -875,6 +875,7 @@ impl FusedIterator for Bytes<'_> {}
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
+    use crate::clone::CloneToUninit;
 
     // Helper function
     fn arbitrary_cstr(slice: &[u8]) -> &CStr {
@@ -1095,5 +1096,54 @@ mod verify {
         let expected_is_empty = bytes.len() == 0;
         assert_eq!(expected_is_empty, c_str.is_empty());
         assert!(c_str.is_safe());
+    }
+
+    // ops::Index<ops::RangeFrom<usize>> for CStr
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_index_from() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let bytes_with_nul = c_str.to_bytes_with_nul();
+        let idx: usize = kani::any();
+        kani::assume(idx < bytes_with_nul.len());
+
+        let indexed = &c_str[idx..];
+        assert!(indexed.is_safe());
+        // The indexed result should correspond to the tail of the original bytes
+        assert_eq!(indexed.to_bytes_with_nul(), &bytes_with_nul[idx..]);
+    }
+
+    // CloneToUninit for CStr
+    // MAX_SIZE is kept small to avoid CBMC timeout: the symbolic pointer
+    // arithmetic in clone_to_uninit is expensive; 8 bytes is sufficient to
+    // cover empty, single-char, and multi-char C strings.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_clone_to_uninit() {
+        const MAX_SIZE: usize = 8;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let len = c_str.to_bytes_with_nul().len();
+
+        // Allocate destination buffer (len <= MAX_SIZE since slice.len() <= MAX_SIZE)
+        let mut buf = [core::mem::MaybeUninit::<u8>::uninit(); MAX_SIZE];
+        let dest = buf.as_mut_ptr() as *mut u8;
+
+        // Safety: dest is non-null (stack allocation), valid for len writes
+        unsafe {
+            c_str.clone_to_uninit(dest);
+        }
+
+        // Verify the cloned bytes form a valid CStr
+        let cloned_slice = unsafe { core::slice::from_raw_parts(dest, len) };
+        let cloned_cstr = CStr::from_bytes_with_nul(cloned_slice);
+        assert!(cloned_cstr.is_ok());
+        assert!(cloned_cstr.unwrap().is_safe());
     }
 }
