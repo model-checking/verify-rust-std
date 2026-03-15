@@ -114,6 +114,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_len", since = "1.39.0")]
     #[rustc_no_implicit_autorefs]
     #[inline]
+    #[cfg_attr(flux, flux::spec(fn(&[T][@n]) -> usize[n]))]
     #[must_use]
     pub const fn len(&self) -> usize {
         ptr::metadata(self)
@@ -135,6 +136,7 @@ impl<T> [T] {
     #[rustc_no_implicit_autorefs]
     #[inline]
     #[must_use]
+    #[cfg_attr(flux, flux::spec(fn(&[T][@n]) -> bool[n == 0]))]
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -326,6 +328,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn first_chunk<const N: usize>(&self) -> Option<&[T; N]> {
         if self.len() < N {
             None
@@ -356,6 +359,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn first_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
         if self.len() < N {
             None
@@ -386,6 +390,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_first_chunk<const N: usize>(&self) -> Option<(&[T; N], &[T])> {
         let Some((first, tail)) = self.split_at_checked(N) else {
             return None;
@@ -418,6 +423,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_first_chunk_mut<const N: usize>(
         &mut self,
     ) -> Option<(&mut [T; N], &mut [T])> {
@@ -450,6 +456,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_last_chunk<const N: usize>(&self) -> Option<(&[T], &[T; N])> {
         let Some(index) = self.len().checked_sub(N) else {
             return None;
@@ -483,6 +490,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_last_chunk_mut<const N: usize>(
         &mut self,
     ) -> Option<(&mut [T], &mut [T; N])> {
@@ -516,6 +524,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_last_chunk", since = "1.80.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn last_chunk<const N: usize>(&self) -> Option<&[T; N]> {
         // FIXME(const-hack): Without const traits, we need this instead of `get`.
         let Some(index) = self.len().checked_sub(N) else {
@@ -548,6 +557,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn last_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
         // FIXME(const-hack): Without const traits, we need this instead of `get`.
         let Some(index) = self.len().checked_sub(N) else {
@@ -650,6 +660,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -695,6 +706,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -914,6 +926,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
     #[inline]
     #[track_caller]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], a: usize{a < n}, b: usize{b < n})))]
     pub const fn swap(&mut self, a: usize, b: usize) {
         // FIXME: use swap_unchecked here (https://github.com/rust-lang/rust/pull/88540#issuecomment-944344343)
         // Can't take two mutable loans from one vector, so instead use raw pointers.
@@ -958,6 +971,7 @@ impl<T> [T] {
     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
     #[track_caller]
     #[requires(a < self.len() && b < self.len())]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], a: usize{a < n}, b: usize{b < n})))]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -988,6 +1002,7 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_slice_reverse", since = "1.90.0")]
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn reverse(&mut self) {
         let half_len = self.len() / 2;
         let Range { start, end } = self.as_mut_ptr_range();
@@ -1356,6 +1371,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[requires(N != 0 && self.len() % N == 0)]
+    #[cfg_attr(flux, flux::trusted)]
     pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1414,6 +1430,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_chunks<const N: usize>(&self) -> (&[[T; N]], &[T]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len_rounded_down = self.len() / N * N;
@@ -1461,6 +1478,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_rchunks<const N: usize>(&self) -> (&[T], &[[T; N]]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len = self.len() / N;
@@ -1517,6 +1535,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[requires(N != 0 && self.len() % N == 0)]
+    #[cfg_attr(flux, flux::trusted)]
     pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1571,6 +1590,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_chunks_mut<const N: usize>(&mut self) -> (&mut [[T; N]], &mut [T]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len_rounded_down = self.len() / N * N;
@@ -1624,6 +1644,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_rchunks_mut<const N: usize>(&mut self) -> (&mut [T], &mut [[T; N]]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len = self.len() / N;
@@ -1969,6 +1990,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(flux, flux::spec(fn(&[T][@n], mid: usize{mid <= n}) -> (&[T], &[T])))]
     pub const fn split_at(&self, mid: usize) -> (&[T], &[T]) {
         match self.split_at_checked(mid) {
             Some(pair) => pair,
@@ -2003,6 +2025,7 @@ impl<T> [T] {
     #[track_caller]
     #[must_use]
     #[rustc_const_stable(feature = "const_slice_split_at_mut", since = "1.83.0")]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], mid: usize{mid <= n}) -> (&mut [T], &mut [T])))]
     pub const fn split_at_mut(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         match self.split_at_mut_checked(mid) {
             Some(pair) => pair,
@@ -2056,6 +2079,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[requires(mid <= self.len())]
+    #[cfg_attr(flux, flux::spec(fn(&[T][@n], mid: usize{mid <= n}) -> (&[T], &[T])))]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2111,6 +2135,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[requires(mid <= self.len())]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], mid: usize{mid <= n}) -> (&mut [T], &mut [T])))]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -2172,6 +2197,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "split_at_checked", since = "1.80.0")]
     #[inline]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_at_checked(&self, mid: usize) -> Option<(&[T], &[T])> {
         if mid <= self.len() {
             // SAFETY: `[ptr; mid]` and `[mid; len]` are inside `self`, which
@@ -2211,6 +2237,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_split_at_mut", since = "1.83.0")]
     #[inline]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn split_at_mut_checked(&mut self, mid: usize) -> Option<(&mut [T], &mut [T])> {
         if mid <= self.len() {
             // SAFETY: `[ptr; mid]` and `[mid; len]` are inside `self`, which
@@ -2957,6 +2984,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn binary_search_by<'a, F>(&'a self, mut f: F) -> Result<usize, usize>
     where
         F: FnMut(&'a T) -> Ordering,
@@ -3502,6 +3530,7 @@ impl<T> [T] {
     /// ```
     #[unstable(feature = "slice_partition_dedup", issue = "54279")]
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn partition_dedup_by<F>(&mut self, mut same_bucket: F) -> (&mut [T], &mut [T])
     where
         F: FnMut(&mut T, &mut T) -> bool,
@@ -3696,6 +3725,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_rotate", since = "1.26.0")]
     #[rustc_const_unstable(feature = "const_slice_rotate", issue = "143812")]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], mid: usize{mid <= n})))]
     pub const fn rotate_left(&mut self, mid: usize) {
         assert!(mid <= self.len());
         let k = self.len() - mid;
@@ -3742,6 +3772,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_rotate", since = "1.26.0")]
     #[rustc_const_unstable(feature = "const_slice_rotate", issue = "143812")]
+    #[cfg_attr(flux, flux::spec(fn(self: &mut [T][@n], k: usize{k <= n})))]
     pub const fn rotate_right(&mut self, k: usize) {
         assert!(k <= self.len());
         let mid = self.len() - k;
@@ -3918,6 +3949,7 @@ impl<T> [T] {
     #[stable(feature = "copy_from_slice", since = "1.9.0")]
     #[rustc_const_stable(feature = "const_copy_from_slice", since = "1.87.0")]
     #[track_caller]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn copy_from_slice(&mut self, src: &[T])
     where
         T: Copy,
@@ -3974,6 +4006,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "copy_within", since = "1.37.0")]
     #[track_caller]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn copy_within<R: RangeBounds<usize>>(&mut self, src: R, dest: usize)
     where
         T: Copy,
@@ -4042,6 +4075,7 @@ impl<T> [T] {
     #[stable(feature = "swap_with_slice", since = "1.27.0")]
     #[rustc_const_unstable(feature = "const_swap_with_slice", issue = "142204")]
     #[track_caller]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn swap_with_slice(&mut self, other: &mut [T]) {
         assert!(self.len() == other.len(), "destination and source slices have different lengths");
         // SAFETY: `self` is valid for `self.len()` elements by definition, and `src` was
@@ -4341,6 +4375,7 @@ impl<T> [T] {
     /// ```
     #[unstable(feature = "portable_simd", issue = "86656")]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn as_simd<const LANES: usize>(&self) -> (&[T], &[Simd<T, LANES>], &[T])
     where
         Simd<T, LANES>: AsRef<[T; LANES]>,
@@ -4377,6 +4412,7 @@ impl<T> [T] {
     /// method for something like `LANES == 3`.
     #[unstable(feature = "portable_simd", issue = "86656")]
     #[must_use]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn as_simd_mut<const LANES: usize>(&mut self) -> (&mut [T], &mut [Simd<T, LANES>], &mut [T])
     where
         Simd<T, LANES>: AsMut<[T; LANES]>,
@@ -5118,6 +5154,7 @@ impl<T, const N: usize> [[T; N]] {
     /// ```
     #[stable(feature = "slice_flatten", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_slice_flatten", since = "1.87.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_flattened(&self) -> &[T] {
         let len = if T::IS_ZST {
             self.len().checked_mul(N).expect("slice len overflow")
@@ -5160,6 +5197,7 @@ impl<T, const N: usize> [[T; N]] {
     /// ```
     #[stable(feature = "slice_flatten", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_slice_flatten", since = "1.87.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub const fn as_flattened_mut(&mut self) -> &mut [T] {
         let len = if T::IS_ZST {
             self.len().checked_mul(N).expect("slice len overflow")

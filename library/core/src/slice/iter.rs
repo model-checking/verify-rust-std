@@ -98,6 +98,7 @@ unsafe impl<T: Sync> Send for Iter<'_, T> {}
 
 impl<'a, T> Iter<'a, T> {
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub(super) const fn new(slice: &'a [T]) -> Self {
         let len = slice.len();
         let ptr: NonNull<T> = NonNull::from_ref(slice).cast();
@@ -139,6 +140,7 @@ impl<'a, T> Iter<'a, T> {
     #[must_use]
     #[stable(feature = "iter_to_slice", since = "1.4.0")]
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn as_slice(&self) -> &'a [T] {
         self.make_slice()
     }
@@ -272,6 +274,7 @@ unsafe impl<T: Send> Send for IterMut<'_, T> {}
 
 impl<'a, T> IterMut<'a, T> {
     #[inline]
+    #[cfg_attr(flux, flux::trusted)]
     pub(super) const fn new(slice: &'a mut [T]) -> Self {
         let len = slice.len();
         let ptr: NonNull<T> = NonNull::from_mut(slice).cast();
@@ -327,6 +330,7 @@ impl<'a, T> IterMut<'a, T> {
     /// ```
     #[must_use = "`self` will be dropped if the result is not used"]
     #[stable(feature = "iter_to_slice", since = "1.4.0")]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn into_slice(self) -> &'a mut [T] {
         // SAFETY: the iterator was created from a mutable slice with pointer
         // `self.ptr` and length `len!(self)`. This guarantees that all the prerequisites
@@ -399,6 +403,7 @@ impl<'a, T> IterMut<'a, T> {
     #[must_use]
     // FIXME: Uncomment the `AsMut<[T]>` impl when this gets stabilized.
     #[unstable(feature = "slice_iter_mut_as_mut_slice", issue = "93079")]
+    #[cfg_attr(flux, flux::trusted)]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         // SAFETY: the iterator was created from a mutable slice with pointer
         // `self.ptr` and length `len!(self)`. This guarantees that all the prerequisites
