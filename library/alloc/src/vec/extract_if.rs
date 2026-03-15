@@ -158,7 +158,6 @@ mod verify {
                 use super::*;
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_extract_if_next() {
                     let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();

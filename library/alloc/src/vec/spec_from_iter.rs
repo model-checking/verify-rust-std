@@ -88,7 +88,6 @@ mod verify {
 
                 // Tests SpecFromIter for IntoIter (the specialized path)
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_from_iter_into_iter() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -100,7 +99,6 @@ mod verify {
 
                 // Tests SpecFromIter for IntoIter after advancing
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_from_iter_into_iter_advanced() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();

@@ -566,7 +566,6 @@ mod verify {
                 use super::*;
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_as_slice() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -576,7 +575,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_as_mut_slice() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -586,7 +584,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_next() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -600,7 +597,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_size_hint() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -611,7 +607,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_advance_by() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -628,7 +623,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_next_chunk() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -643,7 +637,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_fold() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -653,7 +646,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_try_fold() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -663,7 +655,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_get_unchecked() {
                     let v: Vec<u8> = any_vec::<u8, MAX_LEN>();
                     let orig_len = v.len();
@@ -676,7 +667,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_next_back() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -690,7 +680,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_advance_back_by() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
@@ -707,7 +696,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_drop() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let iter = v.into_iter();
@@ -715,7 +703,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_forget_allocation_drop_remaining() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let mut iter = v.into_iter();
@@ -724,7 +711,6 @@ mod verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_into_vecdeque() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();

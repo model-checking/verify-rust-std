@@ -80,7 +80,6 @@ mod verify {
                 use super::*;
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_spec_extend_into_iter() {
                     let mut dest: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let src: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
@@ -101,7 +100,6 @@ mod verify {
                 use super::*;
 
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_spec_extend_slice_iter() {
                     let mut dest: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let src: Vec<$ty> = any_vec::<$ty, MAX_LEN>();

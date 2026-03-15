@@ -90,7 +90,6 @@ mod verify {
                 // a regular iterator (vec's IntoIter is NOT TrustedLen for
                 // this path, so we use a .map() to strip TrustedLen).
                 #[kani::proof]
-                #[kani::unwind(8)]
                 fn check_from_iter_nested_default() {
                     let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
                     let orig_len = v.len();
