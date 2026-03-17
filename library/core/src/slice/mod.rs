@@ -5543,8 +5543,9 @@ mod verify {
                 const ARR_SIZE: usize = 64;
                 let mut arr: [u8; ARR_SIZE] = kani::any();
                 let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = slice.len();
                 let result = slice.first_chunk_mut::<$N>();
-                if slice.len() >= $N {
+                if len >= $N {
                     assert!(result.is_some());
                 } else {
                     assert!(result.is_none());
@@ -5769,8 +5770,9 @@ mod verify {
                 const ARR_SIZE: usize = 16;
                 let mut arr: [[u8; $N]; ARR_SIZE] = kani::any();
                 let slice: &mut [[u8; $N]] = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = slice.len();
                 let flat = slice.as_flattened_mut();
-                assert!(flat.len() == slice.len() * $N);
+                assert!(flat.len() == len * $N);
             }
         };
     }
