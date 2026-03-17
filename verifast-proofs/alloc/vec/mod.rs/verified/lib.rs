@@ -119,3 +119,34 @@ pub(crate) mod raw_vec;
 
 #[path = "mod.rs"]
 pub mod vec;
+
+/*@
+
+// IntoIter predicates and lemmas (must be in lib.rs because VeriFast
+// only reads ghost annotations from root file and #[path] includes,
+// not from `mod submodule;` declarations)
+
+pred<T, A> <vec::into_iter::IntoIter<T, A>>.own(t, v) = true;
+
+lem vec::into_iter::IntoIter_drop<T, A>()
+    req vec::into_iter::IntoIter_own::<T, A>(?t, ?v);
+    ens <A>.own(t, v.alloc);
+{
+    assume(false);
+}
+
+lem vec::into_iter::IntoIter_own_mono<T0, T1, A0, A1>()
+    req type_interp::<T0>() &*& type_interp::<T1>() &*& type_interp::<A0>() &*& type_interp::<A1>() &*& vec::into_iter::IntoIter_own::<T0, A0>(?t, ?v) &*& is_subtype_of::<T0, T1>() == true &*& is_subtype_of::<A0, A1>() == true;
+    ens type_interp::<T0>() &*& type_interp::<T1>() &*& type_interp::<A0>() &*& type_interp::<A1>() &*& vec::into_iter::IntoIter_own::<T1, A1>(t, vec::into_iter::IntoIter::<T1, A1> { buf: upcast(v.buf), cap: upcast(v.cap), alloc: upcast(v.alloc), ptr: upcast(v.ptr), end: v.end as *T1 });
+{
+    assume(false);
+}
+
+lem vec::into_iter::IntoIter_send<T, A>(t1: thread_id_t)
+    req type_interp::<T>() &*& type_interp::<A>() &*& is_Send(typeid(vec::into_iter::IntoIter<T, A>)) == true &*& vec::into_iter::IntoIter_own::<T, A>(?t0, ?v);
+    ens type_interp::<T>() &*& type_interp::<A>() &*& vec::into_iter::IntoIter_own::<T, A>(t1, v);
+{
+    assume(false);
+}
+
+@*/

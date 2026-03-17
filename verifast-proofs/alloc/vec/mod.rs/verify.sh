@@ -1,6 +1,6 @@
 set -e -x
 
-export VFVERSION=25.11-slice-support
+export VFVERSION=25.11-slice-support-v2
 
 # Step 1: VeriFast verification
 verifast -rustc_args "--edition 2024 --cfg no_global_oom_handling" -skip_specless_fns -ignore_unwind_paths -allow_assume -allow_dead_code verified/lib.rs

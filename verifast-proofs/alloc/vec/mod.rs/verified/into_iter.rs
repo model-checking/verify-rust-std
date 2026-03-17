@@ -85,7 +85,12 @@ impl<T, A: Allocator> IntoIter<T, A> {
     /// assert_eq!(into_iter.as_slice(), &['b', 'c']);
     /// ```
     #[stable(feature = "vec_into_iter_as_slice", since = "1.15.0")]
-    pub fn as_slice(&self) -> &[T] {
+    pub fn as_slice(&self) -> &[T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         unsafe { slice::from_raw_parts(self.ptr.as_ptr(), self.len()) }
     }
 
@@ -103,14 +108,24 @@ impl<T, A: Allocator> IntoIter<T, A> {
     /// assert_eq!(into_iter.next().unwrap(), 'z');
     /// ```
     #[stable(feature = "vec_into_iter_as_slice", since = "1.15.0")]
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
+    pub fn as_mut_slice(&mut self) -> &mut [T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         unsafe { &mut *self.as_raw_mut_slice() }
     }
 
     /// Returns a reference to the underlying allocator.
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
-    pub fn allocator(&self) -> &A {
+    pub fn allocator(&self) -> &A
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         &self.alloc
     }
 
@@ -159,7 +174,12 @@ impl<T, A: Allocator> IntoIter<T, A> {
     }
 
     /// Forgets to Drop the remaining elements while still allowing the backing allocation to be freed.
-    pub(crate) fn forget_remaining_elements(&mut self) {
+    pub(crate) fn forget_remaining_elements(&mut self)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         // For the ZST case, it is crucial that we mutate `end` here, not `ptr`.
         // `ptr` must stay aligned, while `end` may be unaligned.
         self.end = self.ptr.as_ptr();
@@ -195,7 +215,12 @@ impl<T, A: Allocator> IntoIter<T, A> {
 
 #[stable(feature = "vec_intoiter_as_ref", since = "1.46.0")]
 impl<T, A: Allocator> AsRef<[T]> for IntoIter<T, A> {
-    fn as_ref(&self) -> &[T] {
+    fn as_ref(&self) -> &[T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.as_slice()
     }
 }
@@ -210,7 +235,12 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
     type Item = T;
 
     #[inline]
-    fn next(&mut self) -> Option<T> {
+    fn next(&mut self) -> Option<T>
+    //@ req thread_token(?t) &*& *self |-> ?self0 &*& <IntoIter<T, A>>.own(t, self0);
+    //@ ens thread_token(t) &*& *self |-> ?self1 &*& <IntoIter<T, A>>.own(t, self1) &*& <std::option::Option<T>>.own(t, result);
+    //@ on_unwind_ens false;
+    {
+        //@ assume(false);
         let ptr = if T::IS_ZST {
             if self.ptr.as_ptr() == self.end as *mut T {
                 return None;
@@ -231,7 +261,12 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
     }
 
     #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
+    fn size_hint(&self) -> (usize, Option<usize>)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let exact = if T::IS_ZST {
             self.end.addr().wrapping_sub(self.ptr.as_ptr().addr())
         } else {
@@ -241,7 +276,12 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
     }
 
     #[inline]
-    fn advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
+    fn advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let step_size = self.len().min(n);
         let to_drop = ptr::slice_from_raw_parts_mut(self.ptr.as_ptr(), step_size);
         if T::IS_ZST {
@@ -259,12 +299,22 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
     }
 
     #[inline]
-    fn count(self) -> usize {
+    fn count(self) -> usize
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.len()
     }
 
     #[inline]
-    fn last(mut self) -> Option<T> {
+    fn last(mut self) -> Option<T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.next_back()
     }
 
@@ -364,7 +414,10 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
     unsafe fn __iterator_get_unchecked(&mut self, i: usize) -> Self::Item
     where
         Self: TrustedRandomAccessNoCoerce,
+    //@ req true;
+    //@ ens true;
     {
+        //@ assume(false);
         // SAFETY: the caller must guarantee that `i` is in bounds of the
         // `Vec<T>`, so `i` cannot overflow an `isize`, and the `self.ptr.add(i)`
         // is guaranteed to pointer to an element of the `Vec<T>` and
@@ -380,7 +433,12 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> DoubleEndedIterator for IntoIter<T, A> {
     #[inline]
-    fn next_back(&mut self) -> Option<T> {
+    fn next_back(&mut self) -> Option<T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         if T::IS_ZST {
             if self.ptr.as_ptr() == self.end as *mut _ {
                 return None;
@@ -403,7 +461,12 @@ impl<T, A: Allocator> DoubleEndedIterator for IntoIter<T, A> {
     }
 
     #[inline]
-    fn advance_back_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
+    fn advance_back_by(&mut self, n: usize) -> Result<(), NonZero<usize>>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let step_size = self.len().min(n);
         if T::IS_ZST {
             // SAFETY: same as for advance_by()
@@ -423,7 +486,12 @@ impl<T, A: Allocator> DoubleEndedIterator for IntoIter<T, A> {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> ExactSizeIterator for IntoIter<T, A> {
-    fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         if T::IS_ZST {
             self.ptr.as_ptr() == self.end as *mut _
         } else {
@@ -455,7 +523,12 @@ where
     /// assert_eq!(iter.len(), 0);
     /// assert_eq!(iter.as_slice(), &[]);
     /// ```
-    fn default() -> Self {
+    fn default() -> Self
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         super::Vec::new_in(Default::default()).into_iter()
     }
 }
@@ -491,7 +564,14 @@ impl<T: Clone, A: Allocator + Clone> Clone for IntoIter<T, A> {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<#[may_dangle] T, A: Allocator> Drop for IntoIter<T, A> {
-    fn drop(&mut self) {
+    fn drop(&mut self)
+    //@ req thread_token(?t) &*& t == currentThread &*& <IntoIter<T, A>>.full_borrow_content(t, self)();
+    //@ ens thread_token(t) &*& (*self).buf |-> ?buf &*& (std::ptr::NonNull_own::<T>())(t, buf) &*& (*self).cap |-> ?cap &*& (*self).alloc |-> ?alloc &*& <A>.own(t, alloc) &*& (*self).ptr |-> ?ptr &*& (std::ptr::NonNull_own::<T>())(t, ptr) &*& (*self).end |-> ?end &*& struct_IntoIter_padding(self);
+    {
+        //@ open <IntoIter<T, A>>.full_borrow_content(t, self)();
+        //@ open <IntoIter<T, A>>.own(t, *self);
+        //@ open_points_to(self);
+        //@ assume(false);
         struct DropGuard<'a, T, A: Allocator>(&'a mut IntoIter<T, A>);
 
         impl<T, A: Allocator> Drop for DropGuard<'_, T, A> {
@@ -529,7 +609,11 @@ unsafe impl<T, A: Allocator> SourceIter for IntoIter<T, A> {
     type Source = Self;
 
     #[inline]
-    unsafe fn as_inner(&mut self) -> &mut Self::Source {
+    unsafe fn as_inner(&mut self) -> &mut Self::Source
+    //@ req true;
+    //@ ens true;
+    {
+        //@ assume(false);
         self
     }
 }

@@ -962,7 +962,17 @@ impl<T> Vec<T> {
     
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new() -> Self
+    /*@
+    req thread_token(?t) &*& t == currentThread;
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, std::alloc::Global>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Vec { buf: RawVec::new(), len: 0 }
     }
 
@@ -1021,7 +1031,17 @@ impl<T> Vec<T> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
     
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_capacity(capacity: usize) -> Self
+    /*@
+    req thread_token(?t) &*& t == currentThread;
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, std::alloc::Global>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Self::with_capacity_in(capacity, Global)
     }
 
@@ -1037,7 +1057,12 @@ impl<T> Vec<T> {
     /// or if the allocator reports allocation failure.
     #[inline]
     #[unstable(feature = "try_with_capacity", issue = "91913")]
-    pub fn try_with_capacity(capacity: usize) -> Result<Self, TryReserveError> {
+    pub fn try_with_capacity(capacity: usize) -> Result<Self, TryReserveError>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Self::try_with_capacity_in(capacity, Global)
     }
 
@@ -1330,7 +1355,12 @@ impl<T> Vec<T> {
     /// ```
     #[must_use = "losing the pointer will leak memory"]
     #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
-    pub fn into_raw_parts(self) -> (*mut T, usize, usize) {
+    pub fn into_raw_parts(self) -> (*mut T, usize, usize)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let mut me = ManuallyDrop::new(self);
         (me.as_mut_ptr(), me.len(), me.capacity())
     }
@@ -1372,7 +1402,12 @@ impl<T> Vec<T> {
     #[must_use = "losing the pointer will leak memory"]
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     // #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
-    pub fn into_parts(self) -> (NonNull<T>, usize, usize) {
+    pub fn into_parts(self) -> (NonNull<T>, usize, usize)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let (ptr, len, capacity) = self.into_raw_parts();
         // SAFETY: A `Vec` always has a non-null pointer.
         (unsafe { NonNull::new_unchecked(ptr) }, len, capacity)
@@ -1396,7 +1431,18 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    pub const fn new_in(alloc: A) -> Self {
+    pub const fn new_in(alloc: A) -> Self
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        own(t)(alloc);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, A>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Vec { buf: RawVec::new_in(alloc), len: 0 }
     }
 
@@ -1458,7 +1504,18 @@ impl<T, A: Allocator> Vec<T, A> {
     
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> Self
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        own(t)(alloc);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, A>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Vec { buf: RawVec::with_capacity_in(capacity, alloc), len: 0 }
     }
 
@@ -1476,7 +1533,12 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "try_with_capacity", issue = "91913")]
-    pub fn try_with_capacity_in(capacity: usize, alloc: A) -> Result<Self, TryReserveError> {
+    pub fn try_with_capacity_in(capacity: usize, alloc: A) -> Result<Self, TryReserveError>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Ok(Vec { buf: RawVec::try_with_capacity_in(capacity, alloc)?, len: 0 })
     }
 
@@ -1961,7 +2023,12 @@ impl<T, A: Allocator> Vec<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     // #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
-    pub fn into_parts_with_alloc(self) -> (NonNull<T>, usize, usize, A) {
+    pub fn into_parts_with_alloc(self) -> (NonNull<T>, usize, usize, A)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let (ptr, len, capacity, alloc) = self.into_raw_parts_with_alloc();
         // SAFETY: A `Vec` always has a non-null pointer.
         (unsafe { NonNull::new_unchecked(ptr) }, len, capacity, alloc)
@@ -2034,7 +2101,30 @@ impl<T, A: Allocator> Vec<T, A> {
     
     #[stable(feature = "rust1", since = "1.0.0")]
     
-    pub fn reserve(&mut self, additional: usize) {
+    pub fn reserve(&mut self, additional: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        array_at_lft(alloc_id.lft, ptr1, length, vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr1 + length, capacity1 - length, _) &*&
+        (length > capacity || length + additional <= capacity1);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.buf.reserve(self.len, additional);
     }
 
@@ -2064,7 +2154,30 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn reserve_exact(&mut self, additional: usize) {
+    pub fn reserve_exact(&mut self, additional: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        array_at_lft(alloc_id.lft, ptr1, length, vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr1 + length, capacity1 - length, _) &*&
+        (length > capacity || length + additional <= capacity1);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.buf.reserve_exact(self.len, additional);
     }
 
@@ -2101,7 +2214,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// # process_data(&[1, 2, 3]).expect("why is the test harness OOMing on 12 bytes?");
     /// ```
     #[stable(feature = "try_reserve", since = "1.57.0")]
-    pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.buf.try_reserve(self.len, additional)
     }
 
@@ -2144,7 +2262,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// # process_data(&[1, 2, 3]).expect("why is the test harness OOMing on 12 bytes?");
     /// ```
     #[stable(feature = "try_reserve", since = "1.57.0")]
-    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
+    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.buf.try_reserve_exact(self.len, additional)
     }
 
@@ -2258,7 +2381,29 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     
     #[stable(feature = "shrink_to", since = "1.56.0")]
-    pub fn shrink_to(&mut self, min_capacity: usize) {
+    pub fn shrink_to(&mut self, min_capacity: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        array_at_lft(alloc_id.lft, ptr1, length, vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr1 + length, capacity1 - length, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         if self.capacity() > min_capacity {
             self.buf.shrink_to_fit(cmp::max(self.len, min_capacity));
         }
@@ -3175,7 +3320,15 @@ impl<T, A: Allocator> Vec<T, A> {
         };
     @*/
     //@ ens true;
-    /*@ safety_proof { assume(false); } @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<T>(_t)(element);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
     {
         //@ assume(false);
         let _ = self.insert_mut(index, element);
@@ -3209,7 +3362,12 @@ impl<T, A: Allocator> Vec<T, A> {
     #[unstable(feature = "push_mut", issue = "135974")]
     #[track_caller]
     #[must_use = "if you don't need a reference to the value, use `Vec::insert` instead"]
-    pub fn insert_mut(&mut self, index: usize, element: T) -> &mut T {
+    pub fn insert_mut(&mut self, index: usize, element: T) -> &mut T
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         #[cold]
         #[cfg_attr(not(panic = "immediate-abort"), inline(never))]
         #[track_caller]
@@ -3286,13 +3444,17 @@ impl<T, A: Allocator> Vec<T, A> {
                 *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, length - 1) &*&
                 array_at_lft(alloc_id.lft, ptr, length - 1, ?vs1) &*& foreach(vs1, own(t)) &*&
                 array_at_lft_(alloc_id.lft, ptr + length - 1, capacity - (length - 1), _) &*&
-                result == nth(index, vs)
+                result == nth(index, vs) &*& own(t)(result)
         };
     @*/
     //@ ens true;
     /*@
     safety_proof {
-        assume(false);
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        open own::<T>(_t)(result);
+        close <Vec<T, A>>.own(_t, self1);
     }
     @*/
     {
@@ -3332,7 +3494,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[unstable(feature = "vec_try_remove", issue = "146954")]
     #[rustc_confusables("delete", "take", "remove")]
-    pub fn try_remove(&mut self, index: usize) -> Option<T> {
+    pub fn try_remove(&mut self, index: usize) -> Option<T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let len = self.len();
         if index >= len {
             return None;
@@ -3383,7 +3550,11 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&T) -> bool,
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
     {
+        //@ assume(false);
         self.retain_mut(|elem| f(elem));
     }
 
@@ -3409,7 +3580,31 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn retain_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut T) -> bool,
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(f);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, ?new_length) &*&
+        new_length <= length &*&
+        array_at_lft(alloc_id.lft, ptr, new_length, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + new_length, capacity - new_length, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<F>(_t)(f);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
     {
+        //@ assume(false);
         let original_len = self.len();
 
         if original_len == 0 {
@@ -3555,7 +3750,8 @@ impl<T, A: Allocator> Vec<T, A> {
     req thread_token(?t) &*& t == currentThread &*&
         *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
         array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
-        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(same_bucket);
     @*/
     /*@
     ens thread_token(t) &*&
@@ -3566,7 +3762,11 @@ impl<T, A: Allocator> Vec<T, A> {
     @*/
     /*@
     safety_proof {
-        assume(false); // TODO: needs closure/FnMut support in VeriFast
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<F>(_t)(same_bucket);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
     }
     @*/
     {
@@ -3734,7 +3934,11 @@ impl<T, A: Allocator> Vec<T, A> {
     @*/
     /*@
     safety_proof {
-        assume(false); // TODO: needs push_mut spec + grow_one spec chain
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<T>(_t)(value);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
     }
     @*/
     {
@@ -3779,7 +3983,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Takes *O*(1) time.
     #[inline]
     #[unstable(feature = "vec_push_within_capacity", issue = "100486")]
-    pub fn push_within_capacity(&mut self, value: T) -> Result<(), T> {
+    pub fn push_within_capacity(&mut self, value: T) -> Result<(), T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.push_mut_within_capacity(value).map(|_| ())
     }
 
@@ -3815,7 +4024,12 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "push_mut", issue = "135974")]
     #[must_use = "if you don't need a reference to the value, use `Vec::push` instead"]
-    pub fn push_mut(&mut self, value: T) -> &mut T {
+    pub fn push_mut(&mut self, value: T) -> &mut T
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         // Inform codegen that the length does not change across grow_one().
         let len = self.len;
         // This will panic or abort if we would allocate > isize::MAX bytes
@@ -3849,7 +4063,12 @@ impl<T, A: Allocator> Vec<T, A> {
     // #[unstable(feature = "vec_push_within_capacity", issue = "100486")]
     #[inline]
     #[must_use = "if you don't need a reference to the value, use `Vec::push_within_capacity` instead"]
-    pub fn push_mut_within_capacity(&mut self, value: T) -> Result<&mut T, T> {
+    pub fn push_mut_within_capacity(&mut self, value: T) -> Result<&mut T, T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         if self.len == self.buf.capacity() {
             return Err(value);
         }
@@ -3885,9 +4104,46 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     
     pub fn pop(&mut self) -> Option<T>
-    //@ req true;
+    /*@
+    req *self |-> ?self0 &*& Vec(?t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*& t == currentThread &*&
+        if length == 0 {
+            ens *self |-> self0 &*& Vec(t, self0, alloc_id, ptr, capacity, 0) &*&
+                result == std::option::Option::None
+        } else {
+            points_to_at_lft(alloc_id.lft, ptr + length - 1, ?v) &*&
+            ens *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, length - 1) &*&
+                points_to_at_lft(alloc_id.lft, ptr + length - 1, v) &*&
+                result == std::option::Option::Some(v)
+        };
+    @*/
     //@ ens true;
-    /*@ safety_proof { assume(false); } @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        assert Vec(_t, self0, ?alloc_id, ?ptr, ?capacity, ?length);
+        assert array_at_lft(_, ptr, length, ?vs);
+        if length > 0 {
+            // Split the array to expose the last element (mirrors swap_remove index==length-1)
+            array_at_lft_split(ptr, length - 1);
+            foreach_split(vs, own(_t), length - 1);
+            open array_at_lft(_, ptr + length - 1, _, _);
+            open foreach(drop(length - 1, vs), own(_t));
+            points_to_at_lft_inv(ptr + length - 1);
+            // Open the empty tail
+            open array_at_lft(_, ptr + length, _, _);
+            open foreach(tail(drop(length - 1, vs)), own(_t));
+        }
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        if length > 0 {
+            open own::<T>(_t)(head(drop(length - 1, vs)));
+            close <std::option::Option<T>>.own(_t, result);
+        } else {
+            close <std::option::Option<T>>.own(_t, result);
+        }
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
     {
         //@ assume(false);
         if self.len == 0 {
@@ -3944,7 +4200,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "vec_peek_mut", issue = "122742")]
-    pub fn peek_mut(&mut self) -> Option<PeekMut<'_, T, A>> {
+    pub fn peek_mut(&mut self) -> Option<PeekMut<'_, T, A>>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         PeekMut::new(self)
     }
 
@@ -3983,7 +4244,20 @@ impl<T, A: Allocator> Vec<T, A> {
         *other |-> ?other1 &*& Vec(t, other1, alloc_id2, ptr2, capacity2, 0) &*&
         array_at_lft_(alloc_id2.lft, ptr2, capacity2, _);
     @*/
-    /*@ safety_proof { assume(false); } @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0_);
+        open <Vec<T, A>>.own(_t, ?other0_);
+        let result = call();
+        // Close other's .own (now empty)
+        close foreach::<T>(nil, own(_t));
+        assert Vec(_, ?other1_, _, _, _, 0);
+        close <Vec<T, A>>.own(_t, other1_);
+        // Close self's .own (now has all elements)
+        assert Vec(_, ?self1_, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1_);
+    }
+    @*/
     {
         //@ assume(false);
         unsafe {
@@ -3995,7 +4269,10 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Appends elements to `self` from other buffer.
     #[inline]
     unsafe fn append_elements(&mut self, other: *const [T])
+    //@ req true;
+    //@ ens true;
     {
+        //@ assume(false);
         let count = other.len();
         self.reserve(count);
         let len = self.len();
@@ -4096,7 +4373,11 @@ impl<T, A: Allocator> Vec<T, A> {
     @*/
     /*@
     safety_proof {
-        assume(false); // TODO: needs as_mut_slice + drop_in_place specs
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, ?alloc_id, ?ptr, ?capacity, _);
+        close foreach::<T>(nil, own(_t));
+        close <Vec<T, A>>.own(_t, self1);
     }
     @*/
     {
@@ -4222,7 +4503,14 @@ impl<T, A: Allocator> Vec<T, A> {
         };
     @*/
     //@ ens true;
-    /*@ safety_proof { assume(false); } @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0_);
+        let result = call();
+        assert Vec(_, ?self1_, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1_);
+    }
+    @*/
     {
         //@ assume(false);
         #[cold]
@@ -4327,7 +4615,11 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn leak<'a>(self) -> &'a mut [T]
     where
         A: 'a,
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
     {
+        //@ assume(false);
         let mut me = ManuallyDrop::new(self);
         unsafe { slice::from_raw_parts_mut(me.as_mut_ptr(), me.len) }
     }
@@ -4362,7 +4654,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[stable(feature = "vec_spare_capacity", since = "1.60.0")]
     #[inline]
-    pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
+    pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         // Note:
         // This method is not implemented in terms of `split_at_spare_mut`,
         // to prevent invalidation of pointers to the buffer.
@@ -4546,7 +4843,31 @@ impl<T: Clone, A: Allocator> Vec<T, A> {
     /// ```
     
     #[stable(feature = "vec_resize", since = "1.5.0")]
-    pub fn resize(&mut self, new_len: usize, value: T) {
+    pub fn resize(&mut self, new_len: usize, value: T)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(value);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, new_len) &*&
+        array_at_lft(alloc_id1.lft, ptr1, new_len, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id1.lft, ptr1 + new_len, capacity1 - new_len, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<T>(_t)(value);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         let len = self.len();
 
         if new_len > len {
@@ -4717,7 +5038,30 @@ impl<T: PartialEq, A: Allocator> Vec<T, A> {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn dedup(&mut self) {
+    pub fn dedup(&mut self)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, ?new_length) &*&
+        new_length <= length &*&
+        array_at_lft(alloc_id.lft, ptr, new_length, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + new_length, capacity - new_length, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.dedup_by(|a, b| a == b)
     }
 }
@@ -4808,7 +5152,12 @@ impl<T, A: Allocator> ops::Deref for Vec<T, A> {
     type Target = [T];
 
     #[inline]
-    fn deref(&self) -> &[T] {
+    fn deref(&self) -> &[T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.as_slice()
     }
 }
@@ -4816,7 +5165,12 @@ impl<T, A: Allocator> ops::Deref for Vec<T, A> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> ops::DerefMut for Vec<T, A> {
     #[inline]
-    fn deref_mut(&mut self) -> &mut [T] {
+    fn deref_mut(&mut self) -> &mut [T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.as_mut_slice()
     }
 }
@@ -4827,9 +5181,13 @@ unsafe impl<T, A: Allocator> ops::DerefPure for Vec<T, A> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
-    fn clone(&self) -> Self {
-        let alloc = self.allocator().clone();
+    fn clone(&self) -> Self
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
         //@ assume(false);
+        let alloc = self.allocator().clone();
         let v = <[T]>::to_vec_in(&**self, alloc);
         unsafe { core::ptr::read(&v as *const std::vec::Vec<T, A> as *const Self) }
     }
@@ -4876,7 +5234,12 @@ impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Hash, A: Allocator> Hash for Vec<T, A> {
     #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, state: &mut H)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Hash::hash(&**self, state)
     }
 }
@@ -5020,12 +5383,59 @@ impl<T, A: Allocator> Extend<T> for Vec<T, A> {
     }
 
     #[inline]
-    fn extend_one(&mut self, item: T) {
+    fn extend_one(&mut self, item: T)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(item);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, length + 1) &*&
+        array_at_lft(alloc_id1.lft, ptr1, length + 1, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id1.lft, ptr1 + length + 1, capacity1 - (length + 1), _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<T>(_t)(item);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.push(item);
     }
 
     #[inline]
-    fn extend_reserve(&mut self, additional: usize) {
+    fn extend_reserve(&mut self, additional: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        array_at_lft(alloc_id.lft, ptr1, length, vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr1 + length, capacity1 - length, _) &*&
+        (length > capacity || length + additional <= capacity1);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.reserve(additional);
     }
 
@@ -5290,7 +5700,12 @@ where
     A2: Allocator,
 {
     #[inline]
-    fn partial_cmp(&self, other: &Vec<T, A2>) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Vec<T, A2>) -> Option<Ordering>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
@@ -5302,7 +5717,12 @@ impl<T: Eq, A: Allocator> Eq for Vec<T, A> {}
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Ord, A: Allocator> Ord for Vec<T, A> {
     #[inline]
-    fn cmp(&self, other: &Self) -> Ordering {
+    fn cmp(&self, other: &Self) -> Ordering
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Ord::cmp(&**self, &**other)
     }
 }
@@ -5310,22 +5730,13 @@ impl<T: Ord, A: Allocator> Ord for Vec<T, A> {
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<#[may_dangle] T, A: Allocator> Drop for Vec<T, A> {
     fn drop(&mut self)
-    /*@
-    req thread_token(?t) &*& t == currentThread &*&
-        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
-        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
-        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
-    @*/
-    /*@
-    ens thread_token(t) &*&
-        *self |-> ?self1;
-    @*/
-    /*@
-    safety_proof {
-        assume(false); // TODO: needs drop_in_place + RawVec dealloc
-    }
-    @*/
+    //@ req thread_token(?t) &*& t == currentThread &*& <Vec<T, A>>.full_borrow_content(t, self)();
+    //@ ens thread_token(t) &*& (*self).buf |-> ?buf &*& <RawVec<T, A>>.own(t, buf) &*& (*self).len |-> ?len &*& struct_Vec_padding(self);
     {
+        //@ open <Vec<T, A>>.full_borrow_content(t, self)();
+        //@ open <Vec<T, A>>.own(t, *self);
+        //@ open Vec(t, *self, ?alloc_id, ?ptr, ?capacity, ?length);
+        //@ open_points_to(self);
         //@ assume(false);
         unsafe {
             // use drop for [T]
@@ -5343,7 +5754,17 @@ impl<T> const Default for Vec<T> {
     /// Creates an empty `Vec<T>`.
     ///
     /// The vector will not allocate until elements are pushed onto it.
-    fn default() -> Vec<T> {
+    fn default() -> Vec<T>
+    /*@
+    req thread_token(?t) &*& t == currentThread;
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, std::alloc::Global>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Vec::new()
     }
 }
@@ -5357,28 +5778,48 @@ impl<T: fmt::Debug, A: Allocator> fmt::Debug for Vec<T, A> {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> AsRef<Vec<T, A>> for Vec<T, A> {
-    fn as_ref(&self) -> &Vec<T, A> {
+    fn as_ref(&self) -> &Vec<T, A>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self
     }
 }
 
 #[stable(feature = "vec_as_mut", since = "1.5.0")]
 impl<T, A: Allocator> AsMut<Vec<T, A>> for Vec<T, A> {
-    fn as_mut(&mut self) -> &mut Vec<T, A> {
+    fn as_mut(&mut self) -> &mut Vec<T, A>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> AsRef<[T]> for Vec<T, A> {
-    fn as_ref(&self) -> &[T] {
+    fn as_ref(&self) -> &[T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self
     }
 }
 
 #[stable(feature = "vec_as_mut", since = "1.5.0")]
 impl<T, A: Allocator> AsMut<[T]> for Vec<T, A> {
-    fn as_mut(&mut self) -> &mut [T] {
+    fn as_mut(&mut self) -> &mut [T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self
     }
 }
@@ -5393,7 +5834,12 @@ impl<T: Clone> From<&[T]> for Vec<T> {
     /// ```
     /// assert_eq!(Vec::from(&[1, 2, 3][..]), vec![1, 2, 3]);
     /// ```
-    fn from(s: &[T]) -> Vec<T> {
+    fn from(s: &[T]) -> Vec<T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let v = s.to_vec();
         unsafe { core::ptr::read(&v as *const std::vec::Vec<T> as *const Vec<T>) }
     }
@@ -5409,7 +5855,12 @@ impl<T: Clone> From<&mut [T]> for Vec<T> {
     /// ```
     /// assert_eq!(Vec::from(&mut [1, 2, 3][..]), vec![1, 2, 3]);
     /// ```
-    fn from(s: &mut [T]) -> Vec<T> {
+    fn from(s: &mut [T]) -> Vec<T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         unsafe { core::mem::transmute_copy::<<[T] as crate::borrow::ToOwned>::Owned, Vec<T>>(&s.to_vec()) }
     }
 }
@@ -5497,7 +5948,12 @@ impl<T, A: Allocator> From<Box<[T], A>> for Vec<T, A> {
     /// let b: Box<[i32]> = vec![1, 2, 3].into_boxed_slice();
     /// assert_eq!(Vec::from(b), vec![1, 2, 3]);
     /// ```
-    fn from(s: Box<[T], A>) -> Self {
+    fn from(s: Box<[T], A>) -> Self
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let v = s.into_vec();
         unsafe { core::mem::transmute_copy::<std::vec::Vec<T, A>, Self>(&core::mem::ManuallyDrop::new(v)) }
     }
@@ -5544,7 +6000,12 @@ impl From<&str> for Vec<u8> {
     /// ```
     /// assert_eq!(Vec::from("123"), vec![b'1', b'2', b'3']);
     /// ```
-    fn from(s: &str) -> Vec<u8> {
+    fn from(s: &str) -> Vec<u8>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         From::from(s.as_bytes())
     }
 }
