@@ -3408,4 +3408,433 @@ mod verify {
     check_iter_with_ty!(verify_u8, u8, u32::MAX as usize);
     check_iter_with_ty!(verify_char, char, 50);
     check_iter_with_ty!(verify_tup, (char, u8), 50);
+
+    // =========================================================================
+    // Challenge 18: Additional iterator harnesses
+    // =========================================================================
+
+    // --- IterMut ---
+    fn any_slice_mut<T>(orig_slice: &mut [T]) -> &mut [T] {
+        let len = orig_slice.len();
+        if len == 0 { return orig_slice; }
+        let last = kani::any_where(|idx: &usize| *idx <= len);
+        let first = kani::any_where(|idx: &usize| *idx <= last);
+        &mut orig_slice[first..last]
+    }
+
+    mod verify_iter_mut {
+        use super::*;
+
+        #[kani::proof]
+        fn check_iter_mut_new() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let _iter = IterMut::new(slice);
+        }
+
+        #[kani::proof]
+        fn check_iter_mut_into_slice() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let iter = IterMut::new(slice);
+            let _result = iter.into_slice();
+        }
+
+        #[kani::proof]
+        fn check_iter_mut_as_mut_slice() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let mut iter = IterMut::new(slice);
+            let _result = iter.as_mut_slice();
+        }
+
+        #[kani::proof]
+        fn check_iter_mut_next() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let mut iter = IterMut::new(slice);
+            let _ = iter.next();
+        }
+
+        #[kani::proof]
+        fn check_iter_mut_next_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let mut iter = IterMut::new(slice);
+            let _ = iter.next_back();
+        }
+    }
+
+    // --- Split ---
+    mod verify_split {
+        use super::*;
+
+        #[kani::proof]
+        fn check_split_next() {
+            let array: [u8; 16] = kani::any();
+            let slice = any_slice(&array);
+            let target: u8 = kani::any();
+            let mut split = slice.split(|x| *x == target);
+            let _ = split.next();
+        }
+
+        #[kani::proof]
+        fn check_split_next_back() {
+            let array: [u8; 16] = kani::any();
+            let slice = any_slice(&array);
+            let target: u8 = kani::any();
+            let mut split = slice.split(|x| *x == target);
+            let _ = split.next_back();
+        }
+    }
+
+    // --- Chunks ---
+    mod verify_chunks {
+        use super::*;
+
+        #[kani::proof]
+        fn check_chunks_next() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let mut chunks = slice.chunks(chunk_size);
+            let _ = chunks.next();
+        }
+
+        #[kani::proof]
+        fn check_chunks_next_back() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let mut chunks = slice.chunks(chunk_size);
+            let _ = chunks.next_back();
+        }
+
+        #[kani::proof]
+        fn check_chunks_get_unchecked() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let chunks = slice.chunks(chunk_size);
+            if chunks.len() > 0 {
+                let idx: usize = kani::any_where(|i: &usize| *i < chunks.len());
+                let _ = unsafe { chunks.__iterator_get_unchecked(idx) };
+            }
+        }
+    }
+
+    // --- ChunksMut ---
+    mod verify_chunks_mut {
+        use super::*;
+
+        #[kani::proof]
+        fn check_chunks_mut_next() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut chunks = slice.chunks_mut(chunk_size);
+                let _ = chunks.next();
+            }
+        }
+
+        #[kani::proof]
+        fn check_chunks_mut_nth() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut chunks = slice.chunks_mut(chunk_size);
+                let _ = chunks.nth(kani::any());
+            }
+        }
+
+        #[kani::proof]
+        fn check_chunks_mut_next_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut chunks = slice.chunks_mut(chunk_size);
+                let _ = chunks.next_back();
+            }
+        }
+
+        #[kani::proof]
+        fn check_chunks_mut_nth_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut chunks = slice.chunks_mut(chunk_size);
+                let _ = chunks.nth_back(kani::any());
+            }
+        }
+    }
+
+    // --- ChunksExact / ChunksExactMut ---
+    mod verify_chunks_exact {
+        use super::*;
+
+        #[kani::proof]
+        fn check_chunks_exact_new() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let _chunks = slice.chunks_exact(chunk_size);
+        }
+
+        #[kani::proof]
+        fn check_chunks_exact_mut_next() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut chunks = slice.chunks_exact_mut(chunk_size);
+                let _ = chunks.next();
+            }
+        }
+
+        #[kani::proof]
+        fn check_chunks_exact_mut_nth() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut chunks = slice.chunks_exact_mut(chunk_size);
+                let _ = chunks.nth(kani::any());
+            }
+        }
+
+        #[kani::proof]
+        fn check_chunks_exact_mut_next_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut chunks = slice.chunks_exact_mut(chunk_size);
+                let _ = chunks.next_back();
+            }
+        }
+
+        #[kani::proof]
+        fn check_chunks_exact_mut_nth_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut chunks = slice.chunks_exact_mut(chunk_size);
+                let _ = chunks.nth_back(kani::any());
+            }
+        }
+    }
+
+    // --- RChunks / RChunksMut ---
+    mod verify_rchunks {
+        use super::*;
+
+        #[kani::proof]
+        fn check_rchunks_next() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let mut rchunks = slice.rchunks(chunk_size);
+            let _ = rchunks.next();
+        }
+
+        #[kani::proof]
+        fn check_rchunks_next_back() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let mut rchunks = slice.rchunks(chunk_size);
+            let _ = rchunks.next_back();
+        }
+
+        #[kani::proof]
+        fn check_rchunks_mut_next() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_mut(chunk_size);
+                let _ = rchunks.next();
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_mut_nth() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_mut(chunk_size);
+                let _ = rchunks.nth(kani::any());
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_mut_last() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_mut(chunk_size);
+                let _ = rchunks.last();
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_mut_next_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_mut(chunk_size);
+                let _ = rchunks.next_back();
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_mut_nth_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_mut(chunk_size);
+                let _ = rchunks.nth_back(kani::any());
+            }
+        }
+    }
+
+    // --- RChunksExact / RChunksExactMut ---
+    mod verify_rchunks_exact {
+        use super::*;
+
+        #[kani::proof]
+        fn check_rchunks_exact_new() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let _rchunks = slice.rchunks_exact(chunk_size);
+        }
+
+        #[kani::proof]
+        fn check_rchunks_exact_mut_next() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_exact_mut(chunk_size);
+                let _ = rchunks.next();
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_exact_mut_nth() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_exact_mut(chunk_size);
+                let _ = rchunks.nth(kani::any());
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_exact_mut_next_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_exact_mut(chunk_size);
+                let _ = rchunks.next_back();
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_exact_mut_nth_back() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let mut rchunks = slice.rchunks_exact_mut(chunk_size);
+                let _ = rchunks.nth_back(kani::any());
+            }
+        }
+    }
+
+    // --- ArrayWindows (const generic) ---
+    mod verify_array_windows {
+        use super::*;
+
+        macro_rules! check_array_windows {
+            ($name:ident, $N:expr) => {
+                #[kani::proof]
+                fn $name() {
+                    let array: [u8; 64] = kani::any();
+                    let slice = any_slice(&array);
+                    if slice.len() >= $N {
+                        let mut windows = slice.array_windows::<$N>();
+                        let _ = windows.next();
+                        let _ = windows.next_back();
+                    }
+                }
+            };
+        }
+        check_array_windows!(check_array_windows_1, 1);
+        check_array_windows!(check_array_windows_2, 2);
+        check_array_windows!(check_array_windows_4, 4);
+
+        macro_rules! check_array_windows_nth {
+            ($name:ident, $N:expr) => {
+                #[kani::proof]
+                fn $name() {
+                    let array: [u8; 64] = kani::any();
+                    let slice = any_slice(&array);
+                    if slice.len() >= $N {
+                        let mut windows = slice.array_windows::<$N>();
+                        let _ = windows.nth(kani::any());
+                        let _ = windows.nth_back(kani::any());
+                    }
+                }
+            };
+        }
+        check_array_windows_nth!(check_array_windows_nth_2, 2);
+        check_array_windows_nth!(check_array_windows_nth_4, 4);
+    }
+
+    // --- Windows ---
+    mod verify_windows {
+        use super::*;
+
+        #[kani::proof]
+        fn check_windows_get_unchecked() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let windows = slice.windows(size);
+            if windows.len() > 0 {
+                let idx: usize = kani::any_where(|i: &usize| *i < windows.len());
+                let _ = unsafe { windows.__iterator_get_unchecked(idx) };
+            }
+        }
+    }
 }
