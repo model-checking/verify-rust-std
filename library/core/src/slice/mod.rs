@@ -5508,4 +5508,329 @@ mod verify {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
     }
+
+    // =========================================================================
+    // Challenge 17: Const generic function harnesses
+    // =========================================================================
+
+    // --- first_chunk / first_chunk_mut ---
+    macro_rules! check_first_chunk {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let result = slice.first_chunk::<$N>();
+                if slice.len() >= $N {
+                    assert!(result.is_some());
+                } else {
+                    assert!(result.is_none());
+                }
+            }
+        };
+    }
+    check_first_chunk!(check_first_chunk_0, 0);
+    check_first_chunk!(check_first_chunk_1, 1);
+    check_first_chunk!(check_first_chunk_2, 2);
+    check_first_chunk!(check_first_chunk_4, 4);
+    check_first_chunk!(check_first_chunk_8, 8);
+
+    macro_rules! check_first_chunk_mut {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let result = slice.first_chunk_mut::<$N>();
+                if slice.len() >= $N {
+                    assert!(result.is_some());
+                } else {
+                    assert!(result.is_none());
+                }
+            }
+        };
+    }
+    check_first_chunk_mut!(check_first_chunk_mut_0, 0);
+    check_first_chunk_mut!(check_first_chunk_mut_1, 1);
+    check_first_chunk_mut!(check_first_chunk_mut_4, 4);
+
+    // --- split_first_chunk / split_first_chunk_mut ---
+    macro_rules! check_split_first_chunk {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let result = slice.split_first_chunk::<$N>();
+                if slice.len() >= $N {
+                    let (first, rest) = result.unwrap();
+                    assert!(first.len() == $N);
+                    assert!(rest.len() == slice.len() - $N);
+                } else {
+                    assert!(result.is_none());
+                }
+            }
+        };
+    }
+    check_split_first_chunk!(check_split_first_chunk_0, 0);
+    check_split_first_chunk!(check_split_first_chunk_1, 1);
+    check_split_first_chunk!(check_split_first_chunk_4, 4);
+
+    macro_rules! check_split_first_chunk_mut {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = slice.len();
+                let result = slice.split_first_chunk_mut::<$N>();
+                if len >= $N {
+                    let (first, rest) = result.unwrap();
+                    assert!(first.len() == $N);
+                    assert!(rest.len() == len - $N);
+                } else {
+                    assert!(result.is_none());
+                }
+            }
+        };
+    }
+    check_split_first_chunk_mut!(check_split_first_chunk_mut_0, 0);
+    check_split_first_chunk_mut!(check_split_first_chunk_mut_1, 1);
+    check_split_first_chunk_mut!(check_split_first_chunk_mut_4, 4);
+
+    // --- split_last_chunk / split_last_chunk_mut ---
+    macro_rules! check_split_last_chunk {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let result = slice.split_last_chunk::<$N>();
+                if slice.len() >= $N {
+                    let (rest, last) = result.unwrap();
+                    assert!(last.len() == $N);
+                    assert!(rest.len() == slice.len() - $N);
+                } else {
+                    assert!(result.is_none());
+                }
+            }
+        };
+    }
+    check_split_last_chunk!(check_split_last_chunk_0, 0);
+    check_split_last_chunk!(check_split_last_chunk_1, 1);
+    check_split_last_chunk!(check_split_last_chunk_4, 4);
+
+    macro_rules! check_split_last_chunk_mut {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = slice.len();
+                let result = slice.split_last_chunk_mut::<$N>();
+                if len >= $N {
+                    let (rest, last) = result.unwrap();
+                    assert!(last.len() == $N);
+                    assert!(rest.len() == len - $N);
+                } else {
+                    assert!(result.is_none());
+                }
+            }
+        };
+    }
+    check_split_last_chunk_mut!(check_split_last_chunk_mut_0, 0);
+    check_split_last_chunk_mut!(check_split_last_chunk_mut_1, 1);
+    check_split_last_chunk_mut!(check_split_last_chunk_mut_4, 4);
+
+    // --- last_chunk / last_chunk_mut ---
+    macro_rules! check_last_chunk {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let result = slice.last_chunk::<$N>();
+                if slice.len() >= $N {
+                    assert!(result.is_some());
+                } else {
+                    assert!(result.is_none());
+                }
+            }
+        };
+    }
+    check_last_chunk!(check_last_chunk_0, 0);
+    check_last_chunk!(check_last_chunk_1, 1);
+    check_last_chunk!(check_last_chunk_4, 4);
+
+    macro_rules! check_last_chunk_mut {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = slice.len();
+                let result = slice.last_chunk_mut::<$N>();
+                if len >= $N {
+                    assert!(result.is_some());
+                } else {
+                    assert!(result.is_none());
+                }
+            }
+        };
+    }
+    check_last_chunk_mut!(check_last_chunk_mut_0, 0);
+    check_last_chunk_mut!(check_last_chunk_mut_1, 1);
+    check_last_chunk_mut!(check_last_chunk_mut_4, 4);
+
+    // --- as_chunks_unchecked / as_chunks / as_rchunks ---
+    macro_rules! check_as_chunks {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let (chunks, remainder) = slice.as_chunks::<$N>();
+                assert!(chunks.len() * $N + remainder.len() == slice.len());
+                assert!(remainder.len() < $N);
+            }
+        };
+    }
+    check_as_chunks!(check_as_chunks_1, 1);
+    check_as_chunks!(check_as_chunks_2, 2);
+    check_as_chunks!(check_as_chunks_4, 4);
+    check_as_chunks!(check_as_chunks_8, 8);
+
+    macro_rules! check_as_rchunks {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let (remainder, chunks) = slice.as_rchunks::<$N>();
+                assert!(chunks.len() * $N + remainder.len() == slice.len());
+                assert!(remainder.len() < $N);
+            }
+        };
+    }
+    check_as_rchunks!(check_as_rchunks_1, 1);
+    check_as_rchunks!(check_as_rchunks_2, 2);
+    check_as_rchunks!(check_as_rchunks_4, 4);
+
+    // --- as_chunks_mut / as_chunks_unchecked_mut ---
+    macro_rules! check_as_chunks_mut {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = slice.len();
+                let (chunks, remainder) = slice.as_chunks_mut::<$N>();
+                assert!(chunks.len() * $N + remainder.len() == len);
+                assert!(remainder.len() < $N);
+            }
+        };
+    }
+    check_as_chunks_mut!(check_as_chunks_mut_1, 1);
+    check_as_chunks_mut!(check_as_chunks_mut_2, 2);
+    check_as_chunks_mut!(check_as_chunks_mut_4, 4);
+
+    // --- as_flattened / as_flattened_mut ---
+    macro_rules! check_as_flattened {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 16;
+                let arr: [[u8; $N]; ARR_SIZE] = kani::any();
+                let slice: &[[u8; $N]] = kani::slice::any_slice_of_array(&arr);
+                let flat = slice.as_flattened();
+                assert!(flat.len() == slice.len() * $N);
+            }
+        };
+    }
+    check_as_flattened!(check_as_flattened_1, 1);
+    check_as_flattened!(check_as_flattened_2, 2);
+    check_as_flattened!(check_as_flattened_4, 4);
+
+    macro_rules! check_as_flattened_mut {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 16;
+                let mut arr: [[u8; $N]; ARR_SIZE] = kani::any();
+                let slice: &mut [[u8; $N]] = kani::slice::any_slice_of_array_mut(&mut arr);
+                let flat = slice.as_flattened_mut();
+                assert!(flat.len() == slice.len() * $N);
+            }
+        };
+    }
+    check_as_flattened_mut!(check_as_flattened_mut_1, 1);
+    check_as_flattened_mut!(check_as_flattened_mut_2, 2);
+    check_as_flattened_mut!(check_as_flattened_mut_4, 4);
+
+    // --- get_unchecked / get_unchecked_mut ---
+    #[kani::proof]
+    fn check_get_unchecked() {
+        const ARR_SIZE: usize = 64;
+        let arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&arr);
+        if !slice.is_empty() {
+            let idx: usize = kani::any();
+            kani::assume(idx < slice.len());
+            let val = unsafe { slice.get_unchecked(idx) };
+            assert!(*val == slice[idx]);
+        }
+    }
+
+    #[kani::proof]
+    fn check_get_unchecked_mut() {
+        const ARR_SIZE: usize = 64;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        if !slice.is_empty() {
+            let idx: usize = kani::any();
+            kani::assume(idx < slice.len());
+            let val = unsafe { slice.get_unchecked_mut(idx) };
+            *val = 42;
+        }
+    }
+
+    // --- binary_search_by ---
+    #[kani::proof]
+    fn check_binary_search_by() {
+        let arr: [u8; 16] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&arr);
+        let target: u8 = kani::any();
+        // binary_search_by on unsorted slice should not panic or UB
+        let _ = slice.binary_search_by(|x| x.cmp(&target));
+    }
+
+    // --- copy_within ---
+    #[kani::proof]
+    fn check_copy_within() {
+        const ARR_SIZE: usize = 16;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = slice.len();
+        if len > 0 {
+            let src_start: usize = kani::any();
+            let src_end: usize = kani::any();
+            let dest: usize = kani::any();
+            kani::assume(src_start <= src_end);
+            kani::assume(src_end <= len);
+            let count = src_end - src_start;
+            kani::assume(dest <= len - count);
+            slice.copy_within(src_start..src_end, dest);
+        }
+    }
 }
