@@ -5833,4 +5833,93 @@ mod verify {
             slice.copy_within(src_start..src_end, dest);
         }
     }
+
+    // --- as_chunks_unchecked / as_chunks_unchecked_mut ---
+    macro_rules! check_as_chunks_unchecked {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                // Only call when len is a multiple of N
+                if slice.len() > 0 && slice.len() % $N == 0 {
+                    let chunks = unsafe { slice.as_chunks_unchecked::<$N>() };
+                    assert!(chunks.len() == slice.len() / $N);
+                }
+            }
+        };
+    }
+    check_as_chunks_unchecked!(check_as_chunks_unchecked_1, 1);
+    check_as_chunks_unchecked!(check_as_chunks_unchecked_2, 2);
+    check_as_chunks_unchecked!(check_as_chunks_unchecked_4, 4);
+
+    macro_rules! check_as_chunks_unchecked_mut {
+        ($name:ident, $N:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [u8; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = slice.len();
+                if len > 0 && len % $N == 0 {
+                    let chunks = unsafe { slice.as_chunks_unchecked_mut::<$N>() };
+                    assert!(chunks.len() == len / $N);
+                }
+            }
+        };
+    }
+    check_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_1, 1);
+    check_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_2, 2);
+    check_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_4, 4);
+
+    // --- get_disjoint_mut / get_disjoint_unchecked_mut ---
+    #[kani::proof]
+    fn check_get_disjoint_mut_2() {
+        let mut arr: [u8; 16] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = slice.len();
+        if len >= 2 {
+            let i: usize = kani::any();
+            let j: usize = kani::any();
+            kani::assume(i < len);
+            kani::assume(j < len);
+            kani::assume(i != j);
+            let result = slice.get_disjoint_mut([i, j]);
+            assert!(result.is_ok());
+        }
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_unchecked_mut_2() {
+        let mut arr: [u8; 16] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = slice.len();
+        if len >= 2 {
+            let i: usize = kani::any();
+            let j: usize = kani::any();
+            kani::assume(i < len);
+            kani::assume(j < len);
+            kani::assume(i != j);
+            let [a, b] = unsafe { slice.get_disjoint_unchecked_mut([i, j]) };
+            *a = 42;
+            *b = 99;
+        }
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_mut_3() {
+        let mut arr: [u8; 16] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = slice.len();
+        if len >= 3 {
+            let i: usize = kani::any();
+            let j: usize = kani::any();
+            let k: usize = kani::any();
+            kani::assume(i < len && j < len && k < len);
+            kani::assume(i != j && i != k && j != k);
+            let result = slice.get_disjoint_mut([i, j, k]);
+            assert!(result.is_ok());
+        }
+    }
 }

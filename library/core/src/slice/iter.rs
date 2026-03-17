@@ -3837,4 +3837,153 @@ mod verify {
             }
         }
     }
+
+    // --- __iterator_get_unchecked for remaining iterator types ---
+    mod verify_get_unchecked {
+        use super::*;
+
+        #[kani::proof]
+        fn check_chunks_mut_get_unchecked() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let chunks = slice.chunks_mut(chunk_size);
+                if chunks.len() > 0 {
+                    let idx: usize = kani::any_where(|i: &usize| *i < chunks.len());
+                    let _ = unsafe { chunks.__iterator_get_unchecked(idx) };
+                }
+            }
+        }
+
+        #[kani::proof]
+        fn check_chunks_exact_get_unchecked() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let chunks = slice.chunks_exact(chunk_size);
+            if chunks.len() > 0 {
+                let idx: usize = kani::any_where(|i: &usize| *i < chunks.len());
+                let _ = unsafe { chunks.__iterator_get_unchecked(idx) };
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_get_unchecked() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let rchunks = slice.rchunks(chunk_size);
+            if rchunks.len() > 0 {
+                let idx: usize = kani::any_where(|i: &usize| *i < rchunks.len());
+                let _ = unsafe { rchunks.__iterator_get_unchecked(idx) };
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_mut_get_unchecked() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let rchunks = slice.rchunks_mut(chunk_size);
+                if rchunks.len() > 0 {
+                    let idx: usize = kani::any_where(|i: &usize| *i < rchunks.len());
+                    let _ = unsafe { rchunks.__iterator_get_unchecked(idx) };
+                }
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_exact_get_unchecked() {
+            let array: [u8; 64] = kani::any();
+            let slice = any_slice(&array);
+            let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+            let rchunks = slice.rchunks_exact(chunk_size);
+            if rchunks.len() > 0 {
+                let idx: usize = kani::any_where(|i: &usize| *i < rchunks.len());
+                let _ = unsafe { rchunks.__iterator_get_unchecked(idx) };
+            }
+        }
+
+        #[kani::proof]
+        fn check_rchunks_exact_mut_get_unchecked() {
+            let mut array: [u8; 64] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let len = slice.len();
+            if len > 0 {
+                let chunk_size: usize = kani::any_where(|s: &usize| *s > 0 && *s <= 64);
+                let rchunks = slice.rchunks_exact_mut(chunk_size);
+                if rchunks.len() > 0 {
+                    let idx: usize = kani::any_where(|i: &usize| *i < rchunks.len());
+                    let _ = unsafe { rchunks.__iterator_get_unchecked(idx) };
+                }
+            }
+        }
+    }
+
+    // --- Macro-generated functions: fold, for_each, position, rposition ---
+    mod verify_macro_fns {
+        use super::*;
+
+        #[kani::proof]
+        fn check_iter_fold() {
+            let array: [u8; 16] = kani::any();
+            let iter = any_iter(&array);
+            let sum = iter.fold(0u32, |acc, &x| acc.wrapping_add(x as u32));
+            let _ = sum;
+        }
+
+        #[kani::proof]
+        fn check_iter_for_each() {
+            let array: [u8; 16] = kani::any();
+            let iter = any_iter(&array);
+            let mut count = 0usize;
+            iter.for_each(|_| count += 1);
+        }
+
+        #[kani::proof]
+        fn check_iter_position() {
+            let array: [u8; 16] = kani::any();
+            let iter = any_iter(&array);
+            let target: u8 = kani::any();
+            let _ = iter.position(|x| *x == target);
+        }
+
+        #[kani::proof]
+        fn check_iter_rposition() {
+            let array: [u8; 16] = kani::any();
+            let iter = any_iter(&array);
+            let target: u8 = kani::any();
+            let _ = iter.rposition(|x| *x == target);
+        }
+
+        // IterMut variants
+        #[kani::proof]
+        fn check_iter_mut_fold() {
+            let mut array: [u8; 16] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let iter = slice.iter_mut();
+            let sum = iter.fold(0u32, |acc, x| acc.wrapping_add(*x as u32));
+            let _ = sum;
+        }
+
+        #[kani::proof]
+        fn check_iter_mut_for_each() {
+            let mut array: [u8; 16] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let mut iter = slice.iter_mut();
+            iter.for_each(|x| *x = 0);
+        }
+
+        #[kani::proof]
+        fn check_iter_mut_position() {
+            let mut array: [u8; 16] = kani::any();
+            let slice = any_slice_mut(&mut array);
+            let target: u8 = kani::any();
+            let _ = slice.iter_mut().position(|x| *x == target);
+        }
+    }
 }
