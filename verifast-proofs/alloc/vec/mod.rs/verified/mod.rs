@@ -3159,7 +3159,21 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[track_caller]
     pub fn insert(&mut self, index: usize, element: T)
-    //@ req true;
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(element) &*&
+        if index > length {
+            ens false
+        } else {
+            ens thread_token(t) &*&
+                *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, length + 1) &*&
+                array_at_lft(alloc_id1.lft, ptr1, length + 1, ?vs1) &*& foreach(vs1, own(t)) &*&
+                array_at_lft_(alloc_id1.lft, ptr1 + length + 1, capacity1 - (length + 1), _)
+        };
+    @*/
     //@ ens true;
     /*@ safety_proof { assume(false); } @*/
     {
@@ -3260,7 +3274,21 @@ impl<T, A: Allocator> Vec<T, A> {
     #[track_caller]
     #[rustc_confusables("delete", "take")]
     pub fn remove(&mut self, index: usize) -> T
-    //@ req true;
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        if index >= length {
+            ens false
+        } else {
+            ens thread_token(t) &*&
+                *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, length - 1) &*&
+                array_at_lft(alloc_id.lft, ptr, length - 1, ?vs1) &*& foreach(vs1, own(t)) &*&
+                array_at_lft_(alloc_id.lft, ptr + length - 1, capacity - (length - 1), _) &*&
+                result == nth(index, vs)
+        };
+    @*/
     //@ ens true;
     /*@
     safety_proof {
@@ -3523,11 +3551,22 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn dedup_by<F>(&mut self, mut same_bucket: F)
     where
         F: FnMut(&mut T, &mut T) -> bool,
-    //@ req true;
-    //@ ens true;
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, ?new_length) &*&
+        new_length <= length &*&
+        array_at_lft(alloc_id.lft, ptr, new_length, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + new_length, capacity - new_length, _);
+    @*/
     /*@
     safety_proof {
-        assume(false);
+        assume(false); // TODO: needs closure/FnMut support in VeriFast
     }
     @*/
     {
@@ -3680,9 +3719,24 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_confusables("push_back", "put", "append")]
     pub fn push(&mut self, value: T)
-    //@ req true;
-    //@ ens true;
-    /*@ safety_proof { assume(false); } @*/
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(value);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, length + 1) &*&
+        array_at_lft(alloc_id1.lft, ptr1, length + 1, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id1.lft, ptr1 + length + 1, capacity1 - (length + 1), _);
+    @*/
+    /*@
+    safety_proof {
+        assume(false); // TODO: needs push_mut spec + grow_one spec chain
+    }
+    @*/
     {
         //@ assume(false);
         let _ = self.push_mut(value);
@@ -3831,11 +3885,29 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     
     pub fn pop(&mut self) -> Option<T>
-    //@ req true;
-    //@ ens true;
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        if length == 0 {
+            *self |-> self0 &*& Vec(t, self0, alloc_id, ptr, capacity, 0) &*&
+            array_at_lft(alloc_id.lft, ptr, 0, nil) &*& foreach(nil, own(t)) &*&
+            array_at_lft_(alloc_id.lft, ptr, capacity, _) &*&
+            result == std::option::Option::None
+        } else {
+            *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, length - 1) &*&
+            array_at_lft(alloc_id.lft, ptr, length - 1, take(length - 1, vs)) &*& foreach(take(length - 1, vs), own(t)) &*&
+            array_at_lft_(alloc_id.lft, ptr + length - 1, capacity - (length - 1), _) &*&
+            result == std::option::Option::Some(nth(length - 1, vs))
+        };
+    @*/
     /*@
     safety_proof {
-        assume(false);
+        assume(false); // TODO: shared ref management for as_ptr() + len()
     }
     @*/
     {
@@ -3916,8 +3988,23 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[stable(feature = "append", since = "1.4.0")]
     pub fn append(&mut self, other: &mut Self)
-    //@ req true;
-    //@ ens true;
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        *other |-> ?other0 &*& Vec(t, other0, ?alloc_id2, ?ptr2, ?capacity2, ?length2) &*&
+        array_at_lft(alloc_id2.lft, ptr2, length2, ?vs2) &*& foreach(vs2, own(t)) &*&
+        array_at_lft_(alloc_id2.lft, ptr2 + length2, capacity2 - length2, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, length + length2) &*&
+        array_at_lft(alloc_id1.lft, ptr1, length + length2, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id1.lft, ptr1 + length + length2, capacity1 - (length + length2), _) &*&
+        *other |-> ?other1 &*& Vec(t, other1, alloc_id2, ptr2, capacity2, 0) &*&
+        array_at_lft_(alloc_id2.lft, ptr2, capacity2, _);
+    @*/
     /*@ safety_proof { assume(false); } @*/
     {
         //@ assume(false);
@@ -3930,10 +4017,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Appends elements to `self` from other buffer.
     #[inline]
     unsafe fn append_elements(&mut self, other: *const [T])
-    //@ req true;
-    //@ ens true;
     {
-        //@ assume(false);
         let count = other.len();
         self.reserve(count);
         let len = self.len();
@@ -4021,11 +4105,20 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn clear(&mut self)
-    //@ req true;
-    //@ ens true;
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, 0) &*&
+        array_at_lft_(alloc_id.lft, ptr, capacity, _);
+    @*/
     /*@
     safety_proof {
-        assume(false);
+        assume(false); // TODO: needs as_mut_slice + drop_in_place specs
     }
     @*/
     {
@@ -4135,7 +4228,21 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn split_off(&mut self, at: usize) -> Self
     where
         A: Clone,
-    //@ req true;
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        if at > length {
+            ens false
+        } else {
+            ens thread_token(t) &*&
+                *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, at) &*&
+                array_at_lft(alloc_id.lft, ptr, at, take(at, vs)) &*& foreach(take(at, vs), own(t)) &*&
+                array_at_lft_(alloc_id.lft, ptr + at, capacity - at, _) &*&
+                <Vec<T, A>>.own(t, result)
+        };
+    @*/
     //@ ens true;
     /*@ safety_proof { assume(false); } @*/
     {
@@ -5225,11 +5332,19 @@ impl<T: Ord, A: Allocator> Ord for Vec<T, A> {
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<#[may_dangle] T, A: Allocator> Drop for Vec<T, A> {
     fn drop(&mut self)
-    //@ req true;
-    //@ ens true;
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1;
+    @*/
     /*@
     safety_proof {
-        assume(false);
+        assume(false); // TODO: needs drop_in_place + RawVec dealloc
     }
     @*/
     {
