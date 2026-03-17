@@ -3907,7 +3907,7 @@ impl<T, A: Allocator> Vec<T, A> {
     @*/
     /*@
     safety_proof {
-        assume(false); // TODO: shared ref management for as_ptr() + len()
+        assume(false); // TODO: complete proof
     }
     @*/
     {
