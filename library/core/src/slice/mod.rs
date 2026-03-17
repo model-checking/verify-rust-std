@@ -5907,6 +5907,53 @@ mod verify {
         }
     }
 
+    // --- as_simd / as_simd_mut ---
+    macro_rules! check_as_simd {
+        ($name:ident, $T:ty, $LANES:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$T; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let (prefix, middle, suffix) = slice.as_simd::<$LANES>();
+                assert!(prefix.len() + middle.len() * $LANES + suffix.len() == slice.len());
+            }
+        };
+    }
+    check_as_simd!(check_as_simd_u8_2, u8, 2);
+    check_as_simd!(check_as_simd_u8_4, u8, 4);
+    check_as_simd!(check_as_simd_u32_2, u32, 2);
+    check_as_simd!(check_as_simd_u32_4, u32, 4);
+
+    macro_rules! check_as_simd_mut {
+        ($name:ident, $T:ty, $LANES:expr) => {
+            #[kani::proof]
+            fn $name() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [$T; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let len = slice.len();
+                let (prefix, middle, suffix) = slice.as_simd_mut::<$LANES>();
+                assert!(prefix.len() + middle.len() * $LANES + suffix.len() == len);
+            }
+        };
+    }
+    check_as_simd_mut!(check_as_simd_mut_u8_2, u8, 2);
+    check_as_simd_mut!(check_as_simd_mut_u8_4, u8, 4);
+    check_as_simd_mut!(check_as_simd_mut_u32_2, u32, 2);
+    check_as_simd_mut!(check_as_simd_mut_u32_4, u32, 4);
+
+    // --- get_disjoint_check_valid (free function) ---
+    #[kani::proof]
+    fn check_get_disjoint_check_valid_2() {
+        let len: usize = kani::any_where(|l: &usize| *l <= 64);
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        let indices = [i, j];
+        // Just verify it doesn't panic/UB — Result is expected
+        let _ = super::get_disjoint_check_valid(&indices, len);
+    }
+
     #[kani::proof]
     fn check_get_disjoint_mut_3() {
         let mut arr: [u8; 16] = kani::any();
