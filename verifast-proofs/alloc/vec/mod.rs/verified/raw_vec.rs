@@ -1532,7 +1532,21 @@ impl<T, A: Allocator> RawVec<T, A> {
     /// Aborts on OOM.
     
     #[inline]
-    pub(crate) fn reserve(&mut self, len: usize, additional: usize) {
+    pub(crate) fn reserve(&mut self, len: usize, additional: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*&
+        RawVec(t, self0, ?alloc_id, ?ptr0, ?capacity0) &*& array_at_lft_(alloc_id.lft, ptr0, capacity0, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*&
+        RawVec(t, self1, alloc_id, ?ptr1, ?capacity1) &*& array_at_lft_(alloc_id.lft, ptr1, capacity1, _) &*&
+        len > capacity0 || len + additional <= capacity1;
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         // SAFETY: All calls on self.inner pass T::LAYOUT as the elem_layout
         unsafe { self.inner.reserve(len, additional, T::LAYOUT) }
     }
@@ -1541,7 +1555,21 @@ impl<T, A: Allocator> RawVec<T, A> {
     /// caller to ensure `len == self.capacity()`.
     
     #[inline(never)]
-    pub(crate) fn grow_one(&mut self) {
+    pub(crate) fn grow_one(&mut self)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*&
+        RawVec(t, self0, ?alloc_id, ?ptr0, ?capacity0) &*& array_at_lft_(alloc_id.lft, ptr0, capacity0, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*&
+        RawVec(t, self1, alloc_id, ?ptr1, ?capacity1) &*& array_at_lft_(alloc_id.lft, ptr1, capacity1, _) &*&
+        capacity0 + 1 <= capacity1;
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         // SAFETY: All calls on self.inner pass T::LAYOUT as the elem_layout
         unsafe { self.inner.grow_one(T::LAYOUT) }
     }
@@ -2369,7 +2397,23 @@ impl<A: Allocator> RawVecInner<A> {
     /// - `elem_layout`'s size must be a multiple of its alignment
     
     #[inline]
-    unsafe fn grow_one(&mut self, elem_layout: Layout) {
+    unsafe fn grow_one(&mut self, elem_layout: Layout)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        elem_layout.size() % elem_layout.align() == 0 &*&
+        *self |-> ?self0 &*&
+        RawVecInner(t, self0, elem_layout, ?alloc_id, ?ptr0, ?capacity0) &*&
+        array_at_lft_(alloc_id.lft, ptr0, capacity0 * elem_layout.size(), _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*&
+        RawVecInner(t, self1, elem_layout, alloc_id, ?ptr1, ?capacity1) &*&
+        array_at_lft_(alloc_id.lft, ptr1, capacity1 * elem_layout.size(), _) &*&
+        capacity0 + 1 <= capacity1;
+    @*/
+    {
+        //@ assume(false);
         // SAFETY: Precondition passed to caller
         if let Err(err) = unsafe { self.grow_amortized(self.cap.as_inner(), 1, elem_layout) } {
             handle_error(err);
