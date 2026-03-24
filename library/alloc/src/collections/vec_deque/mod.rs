@@ -19,6 +19,8 @@ use core::mem::{ManuallyDrop, SizedTypeProperties};
 use core::ops::{Index, IndexMut, Range, RangeBounds};
 use core::{fmt, ptr, slice};
 
+use safety::{ensures, requires};
+
 use crate::alloc::{Allocator, Global};
 use crate::collections::{TryReserveError, TryReserveErrorKind};
 use crate::raw_vec::RawVec;
@@ -169,6 +171,8 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// May only be called if `deque.len() < deque.capacity()`
     #[inline]
+    #[requires(self.len < self.capacity())]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn push_unchecked(&mut self, element: T) {
         // SAFETY: Because of the precondition, it's guaranteed that there is space
         // in the logical array after the last element.
@@ -178,16 +182,25 @@ impl<T, A: Allocator> VecDeque<T, A> {
     }
 
     /// Moves an element out of the buffer
+    ///
+    /// # Safety
+    ///
+    /// May only be called if `off < self.capacity()`.
     #[inline]
+    #[requires(off < self.capacity())]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn buffer_read(&mut self, off: usize) -> T {
         unsafe { ptr::read(self.ptr().add(off)) }
     }
 
     /// Writes an element into the buffer, moving it and returning a pointer to it.
+    ///
     /// # Safety
     ///
     /// May only be called if `off < self.capacity()`.
     #[inline]
+    #[requires(off < self.capacity())]
+    #[cfg_attr(kani, kani::modifies(self.ptr().add(off)))]
     unsafe fn buffer_write(&mut self, off: usize, value: T) -> &mut T {
         unsafe {
             let ptr = self.ptr().add(off);
@@ -197,8 +210,12 @@ impl<T, A: Allocator> VecDeque<T, A> {
     }
 
     /// Returns a slice pointer into the buffer.
+    ///
+    /// # Safety
+    ///
     /// `range` must lie inside `0..self.capacity()`.
     #[inline]
+    #[requires(range.start <= range.end && range.end <= self.capacity())]
     unsafe fn buffer_range(&self, range: Range<usize>) -> *mut [T] {
         unsafe {
             ptr::slice_from_raw_parts_mut(self.ptr().add(range.start), range.end - range.start)
@@ -231,7 +248,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
     }
 
     /// Copies a contiguous block of memory len long from src to dst
+    ///
+    /// # Safety
+    ///
+    /// `src + len` and `dst + len` must not exceed `self.capacity()`.
     #[inline]
+    #[requires(len <= self.capacity() && src <= self.capacity() - len && dst <= self.capacity() - len)]
+    #[cfg_attr(kani, kani::modifies(
+        core::ptr::slice_from_raw_parts_mut(self.ptr().add(dst), len)
+    ))]
     unsafe fn copy(&mut self, src: usize, dst: usize, len: usize) {
         debug_assert!(
             dst + len <= self.capacity(),
@@ -255,7 +280,17 @@ impl<T, A: Allocator> VecDeque<T, A> {
     }
 
     /// Copies a contiguous block of memory len long from src to dst
+    ///
+    /// # Safety
+    ///
+    /// `src + len` and `dst + len` must not exceed `self.capacity()`.
+    /// The ranges `src..src+len` and `dst..dst+len` must not overlap.
     #[inline]
+    #[requires(len <= self.capacity() && src <= self.capacity() - len && dst <= self.capacity() - len)]
+    #[requires(src >= dst.saturating_add(len) || dst >= src.saturating_add(len))]
+    #[cfg_attr(kani, kani::modifies(
+        core::ptr::slice_from_raw_parts_mut(self.ptr().add(dst), len)
+    ))]
     unsafe fn copy_nonoverlapping(&mut self, src: usize, dst: usize, len: usize) {
         debug_assert!(
             dst + len <= self.capacity(),
@@ -281,6 +316,25 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Copies a potentially wrapping block of memory len long from src to dest.
     /// (abs(dst - src) + len) must be no larger than capacity() (There must be at
     /// most one continuous overlapping region between src and dest).
+    ///
+    /// # Safety
+    ///
+    /// `cmp::min(src.abs_diff(dst), capacity - src.abs_diff(dst)) + len` must not
+    /// exceed `capacity`.
+    #[requires(
+        self.capacity() > 0
+        && src < self.capacity()
+        && dst < self.capacity()
+        && len <= self.capacity()
+        && {
+            let diff = src.abs_diff(dst);
+            let wrap_diff = self.capacity() - diff;
+            cmp::min(diff, wrap_diff) + len <= self.capacity()
+        }
+    )]
+    #[cfg_attr(kani, kani::modifies(
+        core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+    ))]
     unsafe fn wrap_copy(&mut self, src: usize, dst: usize, len: usize) {
         debug_assert!(
             cmp::min(src.abs_diff(dst), self.capacity() - src.abs_diff(dst)) + len
@@ -413,8 +467,16 @@ impl<T, A: Allocator> VecDeque<T, A> {
     }
 
     /// Copies all values from `src` to `dst`, wrapping around if needed.
-    /// Assumes capacity is sufficient.
+    ///
+    /// # Safety
+    ///
+    /// `src.len()` must not exceed `self.capacity()`.
+    /// `dst` must be less than `self.capacity()`.
     #[inline]
+    #[requires(src.len() <= self.capacity() && dst < self.capacity())]
+    #[cfg_attr(kani, kani::modifies(
+        core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+    ))]
     unsafe fn copy_slice(&mut self, dst: usize, src: &[T]) {
         debug_assert!(src.len() <= self.capacity());
         let head_room = self.capacity() - dst;
@@ -436,8 +498,13 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// # Safety
     ///
     /// Assumes no wrapping around happens.
-    /// Assumes capacity is sufficient.
+    /// Assumes capacity is sufficient: `dst + iter.len() <= capacity`.
     #[inline]
+    #[requires(dst < self.capacity())]
+    #[cfg_attr(kani, kani::modifies(
+        core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity()),
+        written
+    ))]
     unsafe fn write_iter(
         &mut self,
         dst: usize,
@@ -458,6 +525,11 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// Assumes that `iter` yields at most `len` items.
     /// Assumes capacity is sufficient.
+    #[requires(dst < self.capacity() && len <= self.capacity())]
+    #[cfg_attr(kani, kani::modifies(
+        self,
+        core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+    ))]
     unsafe fn write_iter_wrapping(
         &mut self,
         dst: usize,
@@ -497,7 +569,14 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
     /// Frobs the head and tail sections around to handle the fact that we
     /// just reallocated. Unsafe because it trusts old_capacity.
+    ///
+    /// # Safety
+    ///
+    /// `old_capacity` must be the capacity before reallocation.
+    /// New capacity must be >= old capacity.
     #[inline]
+    #[requires(old_capacity <= self.capacity() && self.len <= old_capacity)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn handle_capacity_increase(&mut self, old_capacity: usize) {
         let new_capacity = self.capacity();
         debug_assert!(new_capacity >= old_capacity);
@@ -650,6 +729,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// `initialized.start` ≤ `initialized.end` ≤ `capacity`.
     #[inline]
     #[cfg(not(test))]
+    #[requires(initialized.start <= initialized.end && initialized.end <= capacity)]
     pub(crate) unsafe fn from_contiguous_raw_parts_in(
         ptr: *mut T,
         initialized: Range<usize>,
@@ -1091,6 +1171,12 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// `old_head` refers to the head index before `shrink_to` was called. `target_cap`
     /// is the capacity that it was trying to shrink to.
+    #[requires(
+        target_cap <= self.capacity()
+        && self.len <= target_cap
+        && old_head < self.capacity()
+    )]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn abort_shrink(&mut self, old_head: usize, target_cap: usize) {
         // Moral equivalent of self.head + self.len <= target_cap. Won't overflow
         // because `self.len <= target_cap`.
@@ -2706,6 +2792,8 @@ impl<T, A: Allocator> VecDeque<T, A> {
     // so it's sound to call here because we're calling with something
     // less than half the length, which is never above half the capacity.
 
+    #[requires(mid <= self.len() / 2)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn rotate_left_inner(&mut self, mid: usize) {
         debug_assert!(mid * 2 <= self.len());
         unsafe {
@@ -2714,6 +2802,8 @@ impl<T, A: Allocator> VecDeque<T, A> {
         self.head = self.to_physical_idx(mid);
     }
 
+    #[requires(k <= self.len() / 2)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn rotate_right_inner(&mut self, k: usize) {
         debug_assert!(k * 2 <= self.len());
         self.head = self.wrap_sub(self.head, k);
@@ -3308,5 +3398,542 @@ mod verify {
         if k != i && k != j {
             assert!(deque[k] == arr[k]);
         }
+    }
+
+    #[kani::proof_for_contract(VecDeque::buffer_read)]
+    fn check_buffer_read() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let off: usize = kani::any_where(|&x: &usize| x < ARRAY_LEN);
+        unsafe {
+            let _ = deque.buffer_read(off);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::buffer_write)]
+    fn check_buffer_write() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let off: usize = kani::any_where(|&x: &usize| x < deque.capacity());
+        let value: u32 = kani::any();
+        unsafe {
+            let _ = deque.buffer_write(off, value);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::buffer_range)]
+    fn check_buffer_range() {
+        let deque: VecDeque<u32> = VecDeque::with_capacity(4);
+        let cap = deque.capacity();
+        let start: usize = kani::any_where(|&x: &usize| x <= cap);
+        let end: usize = kani::any_where(|&x: &usize| x >= start && x <= cap);
+        unsafe {
+            let _ = deque.buffer_range(start..end);
+        }
+        core::mem::forget(deque);
+    }
+
+    #[kani::proof_for_contract(VecDeque::push_unchecked)]
+    fn check_push_unchecked() {
+        const ARRAY_LEN: usize = 3;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        kani::assume(deque.len() < deque.capacity());
+        let element: u32 = kani::any();
+        unsafe {
+            deque.push_unchecked(element);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::copy)]
+    fn check_copy() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let cap = deque.capacity();
+        let len: usize = kani::any_where(|&x: &usize| x <= cap);
+        let src: usize = kani::any_where(|&x: &usize| x <= cap - len);
+        let dst: usize = kani::any_where(|&x: &usize| x <= cap - len);
+        unsafe {
+            deque.copy(src, dst, len);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::copy_nonoverlapping)]
+    fn check_copy_nonoverlapping() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let cap = deque.capacity();
+        let len: usize = kani::any_where(|&x: &usize| x <= cap);
+        let src: usize = kani::any_where(|&x: &usize| x <= cap - len);
+        let dst: usize = kani::any_where(|&x: &usize| x <= cap - len);
+        kani::assume(src >= dst.saturating_add(len) || dst >= src.saturating_add(len));
+        unsafe {
+            deque.copy_nonoverlapping(src, dst, len);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::copy_slice)]
+    fn check_copy_slice() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let cap = deque.capacity();
+        let src_arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let src_len: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN && x <= cap);
+        let dst: usize = kani::any_where(|&x: &usize| x < cap);
+        unsafe {
+            deque.copy_slice(dst, &src_arr[..src_len]);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::wrap_copy)]
+    fn check_wrap_copy() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let cap = deque.capacity();
+        kani::assume(cap > 0);
+        let src: usize = kani::any_where(|&x: &usize| x < cap);
+        let dst: usize = kani::any_where(|&x: &usize| x < cap);
+        let len: usize = kani::any_where(|&x: &usize| x <= cap);
+        let diff = src.abs_diff(dst);
+        let wrap_diff = cap - diff;
+        kani::assume(core::cmp::min(diff, wrap_diff).saturating_add(len) <= cap);
+        unsafe {
+            deque.wrap_copy(src, dst, len);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::handle_capacity_increase)]
+    fn check_handle_capacity_increase() {
+        const ARRAY_LEN: usize = 3;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let old_cap = deque.capacity();
+        // Grow the buffer directly without calling handle_capacity_increase
+        // (reserve() would call it internally, causing a duplicate call)
+        deque.buf.reserve(deque.len, ARRAY_LEN + 1);
+        kani::assume(deque.capacity() >= old_cap);
+        unsafe {
+            deque.handle_capacity_increase(old_cap);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::write_iter)]
+    fn check_write_iter() {
+        let mut deque: VecDeque<u32> = VecDeque::with_capacity(4);
+        let cap = deque.capacity();
+        let dst: usize = kani::any_where(|&x: &usize| x < cap);
+        let value: u32 = kani::any();
+        let mut written: usize = 0;
+        unsafe {
+            deque.write_iter(dst, core::iter::once(value), &mut written);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::write_iter_wrapping)]
+    fn check_write_iter_wrapping() {
+        let mut deque: VecDeque<u32> = VecDeque::with_capacity(4);
+        let cap = deque.capacity();
+        let dst: usize = kani::any_where(|&x: &usize| x < cap);
+        let value: u32 = kani::any();
+        unsafe {
+            let _ = deque.write_iter_wrapping(dst, core::iter::once(value), 1);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::from_contiguous_raw_parts_in)]
+    fn check_from_contiguous_raw_parts_in() {
+        use crate::alloc::Global;
+        const CAP: usize = 4;
+        let arr: [u32; CAP] = kani::Arbitrary::any_array();
+        let mut v = crate::vec::Vec::from(arr);
+        let ptr = v.as_mut_ptr();
+        let cap = v.capacity();
+        core::mem::forget(v);
+        let start: usize = kani::any_where(|&x: &usize| x <= CAP);
+        let end: usize = kani::any_where(|&x: &usize| x >= start && x <= cap);
+        unsafe {
+            let deque: VecDeque<u32> =
+                VecDeque::from_contiguous_raw_parts_in(ptr, start..end, cap, Global);
+            core::mem::forget(deque);
+        }
+    }
+
+    #[kani::proof_for_contract(VecDeque::abort_shrink)]
+    fn check_abort_shrink() {
+        const ARRAY_LEN: usize = 3;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let cap = deque.capacity();
+        let old_head: usize = kani::any_where(|&x: &usize| x < cap);
+        let target_cap: usize = kani::any_where(|&x: &usize| x <= cap && x >= deque.len());
+        unsafe {
+            deque.abort_shrink(old_head, target_cap);
+        }
+    }
+
+    // ===== Part B Group 1: Access & Queue Operations =====
+
+    #[kani::proof]
+    fn check_get() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let deque: VecDeque<u32> = VecDeque::from(arr);
+        let index: usize = kani::any();
+        let result = deque.get(index);
+        if index < ARRAY_LEN {
+            assert!(result.is_some());
+        } else {
+            assert!(result.is_none());
+        }
+    }
+
+    #[kani::proof]
+    fn check_get_mut() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let index: usize = kani::any();
+        let result = deque.get_mut(index);
+        if index < ARRAY_LEN {
+            assert!(result.is_some());
+        } else {
+            assert!(result.is_none());
+        }
+    }
+
+    #[kani::proof]
+    fn check_swap() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let i: usize = kani::any_where(|&x: &usize| x < ARRAY_LEN);
+        let j: usize = kani::any_where(|&x: &usize| x < ARRAY_LEN);
+        deque.swap(i, j);
+    }
+
+    #[kani::proof]
+    fn check_pop_front() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let result = deque.pop_front();
+        assert!(result.is_some());
+        assert_eq!(deque.len(), ARRAY_LEN - 1);
+    }
+
+    #[kani::proof]
+    fn check_pop_back() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let result = deque.pop_back();
+        assert!(result.is_some());
+        assert_eq!(deque.len(), ARRAY_LEN - 1);
+    }
+
+    #[kani::proof]
+    fn check_push_front() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let value: u32 = kani::any();
+        deque.push_front(value);
+        assert_eq!(deque.len(), ARRAY_LEN + 1);
+    }
+
+    #[kani::proof]
+    fn check_push_back() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let value: u32 = kani::any();
+        deque.push_back(value);
+        assert_eq!(deque.len(), ARRAY_LEN + 1);
+    }
+
+    // ===== Part B Group 2: Capacity Management =====
+
+    #[kani::proof]
+    fn check_reserve_exact() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let additional: usize = kani::any_where(|&x: &usize| x <= 8);
+        deque.reserve_exact(additional);
+        assert!(deque.capacity() >= ARRAY_LEN + additional);
+    }
+
+    #[kani::proof]
+    fn check_reserve() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let additional: usize = kani::any_where(|&x: &usize| x <= 8);
+        deque.reserve(additional);
+        assert!(deque.capacity() >= ARRAY_LEN + additional);
+    }
+
+    #[kani::proof]
+    fn check_try_reserve_exact() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let additional: usize = kani::any_where(|&x: &usize| x <= 8);
+        let _ = deque.try_reserve_exact(additional);
+    }
+
+    #[kani::proof]
+    fn check_try_reserve() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let additional: usize = kani::any_where(|&x: &usize| x <= 8);
+        let _ = deque.try_reserve(additional);
+    }
+
+    #[kani::proof]
+    fn check_shrink_to() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        deque.reserve(8);
+        let min_cap: usize = kani::any_where(|&x: &usize| x <= deque.capacity());
+        deque.shrink_to(min_cap);
+        assert!(deque.capacity() >= deque.len());
+    }
+
+    // ===== Part B Group 3: Structural Modifications =====
+
+    #[kani::proof]
+    fn check_insert() {
+        const ARRAY_LEN: usize = 3;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let index: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        let value: u32 = kani::any();
+        deque.insert(index, value);
+        assert_eq!(deque.len(), ARRAY_LEN + 1);
+    }
+
+    #[kani::proof]
+    fn check_remove() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let index: usize = kani::any_where(|&x: &usize| x < ARRAY_LEN);
+        let result = deque.remove(index);
+        assert!(result.is_some());
+        assert_eq!(deque.len(), ARRAY_LEN - 1);
+    }
+
+    #[kani::proof]
+    fn check_split_off() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let at: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        let other = deque.split_off(at);
+        assert_eq!(deque.len() + other.len(), ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    fn check_append() {
+        const LEN1: usize = 3;
+        const LEN2: usize = 3;
+        let arr1: [u32; LEN1] = kani::Arbitrary::any_array();
+        let arr2: [u32; LEN2] = kani::Arbitrary::any_array();
+        let mut deque1: VecDeque<u32> = VecDeque::from(arr1);
+        let mut deque2: VecDeque<u32> = VecDeque::from(arr2);
+        deque1.append(&mut deque2);
+        assert_eq!(deque1.len(), LEN1 + LEN2);
+        assert_eq!(deque2.len(), 0);
+    }
+
+    #[kani::proof]
+    fn check_truncate() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let new_len: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        deque.truncate(new_len);
+        assert!(deque.len() <= ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn check_retain_mut() {
+        const ARRAY_LEN: usize = 2;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let threshold: u32 = kani::any();
+        deque.retain_mut(|x| *x <= threshold);
+        assert!(deque.len() <= ARRAY_LEN);
+    }
+
+    // ===== Part B Group 4: Slice/View Operations =====
+
+    #[kani::proof]
+    fn check_as_slices() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let deque: VecDeque<u32> = VecDeque::from(arr);
+        let (front, back) = deque.as_slices();
+        assert_eq!(front.len() + back.len(), ARRAY_LEN);
+        // Access the slices to exercise the pointer dereferences
+        if !front.is_empty() {
+            let _ = front[0];
+        }
+        if !back.is_empty() {
+            let _ = back[0];
+        }
+    }
+
+    #[kani::proof]
+    fn check_as_mut_slices() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let (front, back) = deque.as_mut_slices();
+        assert_eq!(front.len() + back.len(), ARRAY_LEN);
+        // Write to the slices to exercise mutable pointer dereferences
+        if !front.is_empty() {
+            front[0] = 0;
+        }
+        if !back.is_empty() {
+            back[0] = 0;
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn check_range() {
+        const ARRAY_LEN: usize = 2;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let deque: VecDeque<u32> = VecDeque::from(arr);
+        let start: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        let end: usize = kani::any_where(|&x: &usize| x >= start && x <= ARRAY_LEN);
+        let mut count: usize = 0;
+        for _ in deque.range(start..end) {
+            count += 1;
+        }
+        assert_eq!(count, end - start);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn check_range_mut() {
+        const ARRAY_LEN: usize = 2;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let start: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        let end: usize = kani::any_where(|&x: &usize| x >= start && x <= ARRAY_LEN);
+        for elem in deque.range_mut(start..end) {
+            *elem = 0;
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn check_drain() {
+        const ARRAY_LEN: usize = 2;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let start: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        let end: usize = kani::any_where(|&x: &usize| x >= start && x <= ARRAY_LEN);
+        let drain_len = end - start;
+        // Consume the Drain iterator — exercises element removal path
+        let collected: crate::vec::Vec<u32> = deque.drain(start..end).collect();
+        assert_eq!(collected.len(), drain_len);
+        assert_eq!(deque.len(), ARRAY_LEN - drain_len);
+    }
+
+    // ===== Part B Group 5: Rotation & Layout =====
+
+    #[kani::proof]
+    fn check_rotate_left() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let n: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        deque.rotate_left(n);
+        assert_eq!(deque.len(), ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    fn check_rotate_right() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let n: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        deque.rotate_right(n);
+        assert_eq!(deque.len(), ARRAY_LEN);
+    }
+
+    #[kani::proof_for_contract(VecDeque::rotate_left_inner)]
+    fn check_rotate_left_inner() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let mid: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN / 2);
+        unsafe {
+            deque.rotate_left_inner(mid);
+        }
+        core::mem::forget(deque);
+    }
+
+    #[kani::proof_for_contract(VecDeque::rotate_right_inner)]
+    fn check_rotate_right_inner() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let k: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN / 2);
+        unsafe {
+            deque.rotate_right_inner(k);
+        }
+        core::mem::forget(deque);
+    }
+
+    #[kani::proof]
+    fn check_make_contiguous() {
+        const ARRAY_LEN: usize = 3;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        // Create a non-contiguous state by pushing front
+        deque.push_front(kani::any());
+        let slice = deque.make_contiguous();
+        assert_eq!(slice.len(), ARRAY_LEN + 1);
+        // Access the returned slice to exercise the pointer dereference
+        let _ = slice[0];
+    }
+
+    #[kani::proof]
+    fn check_grow() {
+        const ARRAY_LEN: usize = 4;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        // Fill to capacity so grow() precondition (is_full) is met
+        while !deque.is_full() {
+            deque.push_back(kani::any());
+        }
+        let old_cap = deque.capacity();
+        deque.grow();
+        assert!(deque.capacity() > old_cap);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn check_resize_with() {
+        const ARRAY_LEN: usize = 2;
+        let arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut deque: VecDeque<u32> = VecDeque::from(arr);
+        let new_len: usize = kani::any_where(|&x: &usize| x <= 3);
+        deque.resize_with(new_len, || 0u32);
+        assert_eq!(deque.len(), new_len);
     }
 }

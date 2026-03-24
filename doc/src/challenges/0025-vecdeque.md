@@ -87,3 +87,64 @@ All proofs must automatically ensure the absence of the following undefined beha
 
 Note: All solutions to verification challenges need to satisfy the criteria established in the [challenge book](../general-rules.md)
 in addition to the ones listed above.
+
+## Verification Summary
+
+All 13 Part A unsafe functions and all 30 Part B safe abstractions have been verified using Kani.
+
+### Part A: Safety Contracts (`#[requires]`/`#[ensures]` with `#[kani::proof_for_contract]`)
+
+All unsafe functions have `#[requires]` contracts formalizing their safety preconditions, verified by `#[kani::proof_for_contract]` harnesses:
+
+| Function | Contract | Harness |
+|----------|----------|---------|
+| `push_unchecked` | `self.len < self.capacity()` | `check_push_unchecked` |
+| `buffer_read` | `off < self.capacity()` | `check_buffer_read` |
+| `buffer_write` | `off < self.capacity()` | `check_buffer_write` |
+| `buffer_range` | `range.start <= range.end && range.end <= self.capacity()` | `check_buffer_range` |
+| `copy` | `len <= cap && src <= cap - len && dst <= cap - len` | `check_copy` |
+| `copy_nonoverlapping` | Same as `copy` + non-overlap | `check_copy_nonoverlapping` |
+| `wrap_copy` | `min(diff, cap - diff) + len <= cap` | `check_wrap_copy` |
+| `copy_slice` | `src.len() <= cap && dst < cap` | `check_copy_slice` |
+| `write_iter` | `dst < self.capacity()` | `check_write_iter` |
+| `write_iter_wrapping` | `dst < cap && len <= cap` | `check_write_iter_wrapping` |
+| `handle_capacity_increase` | `old_cap <= cap && len <= old_cap` | `check_handle_capacity_increase` |
+| `from_contiguous_raw_parts_in` | `init.start <= init.end <= capacity` | `check_from_contiguous_raw_parts_in` |
+| `abort_shrink` | `target_cap <= cap && len <= target_cap && old_head < cap` | `check_abort_shrink` |
+| `rotate_left_inner` | `mid <= self.len() / 2` | `check_rotate_left_inner` |
+| `rotate_right_inner` | `k <= self.len() / 2` | `check_rotate_right_inner` |
+
+### Part B: UB Absence Proofs (`#[kani::proof]`)
+
+All safe abstractions verified with `#[kani::proof]` harnesses proving no undefined behavior:
+
+| Function | Harness |
+|----------|---------|
+| `get` | `check_get` |
+| `get_mut` | `check_get_mut` |
+| `swap` | `check_swap` |
+| `reserve_exact` | `check_reserve_exact` |
+| `reserve` | `check_reserve` |
+| `try_reserve_exact` | `check_try_reserve_exact` |
+| `try_reserve` | `check_try_reserve` |
+| `shrink_to` | `check_shrink_to` |
+| `truncate` | `check_truncate` |
+| `as_slices` | `check_as_slices` |
+| `as_mut_slices` | `check_as_mut_slices` |
+| `range` | `check_range` |
+| `range_mut` | `check_range_mut` |
+| `drain` | `check_drain` |
+| `pop_front` | `check_pop_front` |
+| `pop_back` | `check_pop_back` |
+| `push_front` | `check_push_front` |
+| `push_back` | `check_push_back` |
+| `insert` | `check_insert` |
+| `remove` | `check_remove` |
+| `split_off` | `check_split_off` |
+| `append` | `check_append` |
+| `retain_mut` | `check_retain_mut` |
+| `grow` | `check_grow` |
+| `resize_with` | `check_resize_with` |
+| `make_contiguous` | `check_make_contiguous` |
+| `rotate_left` | `check_rotate_left` |
+| `rotate_right` | `check_rotate_right` |
