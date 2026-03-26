@@ -1613,3 +1613,168 @@ macro_rules! escape_types_impls {
 }
 
 escape_types_impls!(EscapeDebug, EscapeDefault, EscapeUnicode);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // --- Chars ---
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chars_next() {
+        let s = "hello";
+        let mut chars = s.chars();
+        let c = chars.next();
+        assert!(c == Some('h'));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chars_advance_by() {
+        let s = "hello";
+        let mut chars = s.chars();
+        let r = chars.advance_by(2);
+        assert!(r.is_ok());
+        assert!(chars.next() == Some('l'));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chars_next_back() {
+        let s = "hello";
+        let mut chars = s.chars();
+        let c = chars.next_back();
+        assert!(c == Some('o'));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chars_as_str() {
+        let s = "hello";
+        let mut chars = s.chars();
+        chars.next();
+        let rest = chars.as_str();
+        assert!(rest.len() == 4);
+    }
+
+    // --- SplitInternal (tested via str::split) ---
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_internal_get_end() {
+        let s = "a,b";
+        let mut split = s.split(',');
+        let _ = split.next();
+        let _ = split.next();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_internal_next() {
+        let s = "a,b,c";
+        let mut split = s.split(',');
+        let first = split.next();
+        assert!(first == Some("a"));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_internal_next_inclusive() {
+        let s = "a,b,c";
+        let mut split = s.split_inclusive(',');
+        let first = split.next();
+        assert!(first == Some("a,"));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_internal_next_match_back() {
+        let s = "a,b,c";
+        let mut rsplit = s.rsplit(',');
+        let last = rsplit.next();
+        assert!(last == Some("c"));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_internal_next_back_inclusive() {
+        let s = "a,b,c";
+        let mut split = s.split_inclusive(',');
+        let last = split.next_back();
+        assert!(last == Some("c"));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_internal_remainder() {
+        let s = "a,b,c";
+        let mut split = s.split(',');
+        split.next();
+        let rest = split.remainder();
+        assert!(rest == Some("b,c"));
+    }
+
+    // --- MatchIndicesInternal ---
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_match_indices_next() {
+        let s = "abab";
+        let mut mi = s.match_indices('a');
+        let first = mi.next();
+        assert!(first == Some((0, "a")));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_match_indices_next_back() {
+        let s = "abab";
+        let mut mi = s.match_indices('a');
+        let last = mi.next_back();
+        assert!(last == Some((2, "a")));
+    }
+
+    // --- MatchesInternal ---
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_matches_next() {
+        let s = "abab";
+        let mut m = s.matches('a');
+        let first = m.next();
+        assert!(first == Some("a"));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_matches_next_back() {
+        let s = "abab";
+        let mut m = s.matches('a');
+        let last = m.next_back();
+        assert!(last == Some("a"));
+    }
+
+    // --- SplitAsciiWhitespace ---
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_ascii_whitespace_remainder() {
+        let s = "a b c";
+        let mut split = s.split_ascii_whitespace();
+        split.next();
+        let rest = split.remainder();
+        assert!(rest == Some("b c"));
+    }
+
+    // --- __iterator_get_unchecked (Bytes) ---
+
+    #[kani::proof]
+    fn verify_iterator_get_unchecked() {
+        let s = "hello";
+        let mut bytes = s.bytes();
+        let val = unsafe { bytes.__iterator_get_unchecked(0) };
+        assert!(val == b'h');
+    }
+}
