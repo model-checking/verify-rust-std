@@ -3488,3 +3488,128 @@ impl From<char> for String {
         c.to_string()
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+    use crate::string::String;
+
+    #[kani::proof]
+    fn verify_pop() {
+        let mut s = String::from("hello");
+        let c = s.pop();
+        assert!(c == Some('o'));
+        assert!(s.len() == 4);
+    }
+
+    #[kani::proof]
+    fn verify_remove() {
+        let mut s = String::from("hello");
+        let c = s.remove(0);
+        assert!(c == 'h');
+        assert!(s.len() == 4);
+    }
+
+    #[kani::proof]
+    fn verify_insert() {
+        let mut s = String::from("ello");
+        s.insert(0, 'h');
+        assert!(s.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_insert_str() {
+        let mut s = String::from("world");
+        s.insert_str(0, "hello ");
+        assert!(s.len() == 11);
+    }
+
+    #[kani::proof]
+    fn verify_split_off() {
+        let mut s = String::from("hello");
+        let s2 = s.split_off(2);
+        assert!(s.len() == 2);
+        assert!(s2.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_drain() {
+        let mut s = String::from("hello");
+        let d: String = s.drain(1..3).collect();
+        assert!(d.len() == 2);
+        assert!(s.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_replace_range() {
+        let mut s = String::from("hello");
+        s.replace_range(1..3, "a");
+        assert!(s.len() == 4);
+    }
+
+    #[kani::proof]
+    fn verify_into_boxed_str() {
+        let s = String::from("hello");
+        let b: crate::boxed::Box<str> = s.into_boxed_str();
+        assert!(b.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_leak() {
+        let s = String::from("hello");
+        let leaked: &'static mut str = s.leak();
+        assert!(leaked.len() == 5);
+        unsafe {
+            drop(crate::boxed::Box::from_raw(leaked as *mut str));
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn verify_from_utf16le() {
+        let bytes: [u8; 4] = [0x68, 0x00, 0x69, 0x00];
+        let result = String::from_utf16le(&bytes);
+        assert!(result.is_ok());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn verify_from_utf16le_lossy() {
+        let bytes: [u8; 4] = [0x68, 0x00, 0x69, 0x00];
+        let s = String::from_utf16le_lossy(&bytes);
+        assert!(s.len() >= 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn verify_from_utf16be() {
+        let bytes: [u8; 4] = [0x00, 0x68, 0x00, 0x69];
+        let result = String::from_utf16be(&bytes);
+        assert!(result.is_ok());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn verify_from_utf16be_lossy() {
+        let bytes: [u8; 4] = [0x00, 0x68, 0x00, 0x69];
+        let s = String::from_utf16be_lossy(&bytes);
+        assert!(s.len() >= 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn verify_retain() {
+        let mut s = String::from("hello");
+        s.retain(|c| c != 'l');
+        assert!(s.len() == 3);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn verify_remove_matches() {
+        let mut s = String::from("abcabc");
+        s.remove_matches('a');
+        assert!(s.len() == 4);
+    }
+}
