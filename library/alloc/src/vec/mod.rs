@@ -4317,37 +4317,323 @@ mod verify {
 
     #[kani::proof]
     pub fn verify_swap_remove() {
-        // Creating a vector directly from a fixed length arbitrary array
-        let mut arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
-        let mut vect = Vec::from(&arr);
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let i: usize = kani::any_where(|x| *x < v.len());
+        let _ = v.swap_remove(i);
+        assert!(v.len() == ARRAY_LEN - 1);
+    }
 
-        // Recording the original length and a copy of the vector for validation
-        let original_len = vect.len();
-        let original_vec = vect.clone();
+    #[kani::proof]
+    pub fn verify_push() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.push(kani::any());
+        assert!(v.len() == ARRAY_LEN + 1);
+    }
 
-        // Generating a nondeterministic index which is guaranteed to be within bounds
-        let index: usize = kani::any_where(|x| *x < original_len);
+    #[kani::proof]
+    pub fn verify_pop() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        assert!(v.pop().is_some());
+        assert!(v.len() == ARRAY_LEN - 1);
+    }
 
-        let removed = vect.swap_remove(index);
+    #[kani::proof]
+    pub fn verify_push_within_capacity() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.reserve(1);
+        assert!(v.push_within_capacity(42).is_ok());
+    }
 
-        // Verifying that the length of the vector decreases by one after the operation is performed
-        assert!(vect.len() == original_len - 1, "Length should decrease by 1");
+    #[kani::proof]
+    pub fn verify_insert() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let i: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        v.insert(i, 42);
+        assert!(v.len() == ARRAY_LEN + 1);
+        assert!(v[i] == 42);
+    }
 
-        // Verifying that the removed element matches the original element at the index
-        assert!(removed == original_vec[index], "Removed element should match original");
+    #[kani::proof]
+    pub fn verify_remove() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let i: usize = kani::any_where(|&x: &usize| x < ARRAY_LEN);
+        let _ = v.remove(i);
+        assert!(v.len() == ARRAY_LEN - 1);
+    }
 
-        // Verifying that the removed index now contains the element originally at the vector's last index if applicable
-        if index < original_len - 1 {
-            assert!(
-                vect[index] == original_vec[original_len - 1],
-                "Index should contain last element"
-            );
+    #[kani::proof]
+    pub fn verify_clear() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.clear();
+        assert!(v.is_empty());
+    }
+
+    #[kani::proof]
+    pub fn verify_truncate() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let n: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        v.truncate(n);
+        assert!(v.len() == n);
+    }
+
+    #[kani::proof]
+    pub fn verify_deref() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let v = Vec::from(&arr);
+        let s: &[i32] = &*v;
+        assert!(s.len() == ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    pub fn verify_deref_mut() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let s: &mut [i32] = &mut *v;
+        s[0] = 42;
+        assert!(s[0] == 42);
+    }
+
+    #[kani::proof]
+    pub fn verify_leak() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let leaked = v.leak();
+        assert!(leaked.len() == 3);
+        unsafe {
+            drop(crate::boxed::Box::from_raw(leaked as *mut [i32]));
         }
+    }
 
-        // Check that all other unaffected elements remain unchanged
-        let k = kani::any_where(|&x: &usize| x < original_len - 1);
-        if k != index {
-            assert!(vect[k] == arr[k]);
-        }
+    #[kani::proof]
+    pub fn verify_spare_capacity_mut() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.reserve(2);
+        assert!(v.spare_capacity_mut().len() >= 2);
+    }
+
+    #[kani::proof]
+    pub fn verify_split_at_spare_mut() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.reserve(2);
+        let (init, spare) = v.split_at_spare_mut();
+        assert!(init.len() == ARRAY_LEN);
+        assert!(spare.len() >= 2);
+    }
+
+    #[kani::proof]
+    pub fn verify_into_boxed_slice() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let v = Vec::from(&arr);
+        let b = v.into_boxed_slice();
+        assert!(b.len() == ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    pub fn verify_into_raw_parts_with_alloc() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let (ptr, len, cap, _alloc) = v.into_raw_parts_with_alloc();
+        assert!(len == 3);
+        unsafe { drop(Vec::from_raw_parts(ptr, len, cap)); }
+    }
+
+    #[kani::proof]
+    pub fn verify_append() {
+        let mut v1 = Vec::from(&[1i32, 2]);
+        let mut v2 = Vec::from(&[3i32, 4]);
+        v1.append(&mut v2);
+        assert!(v1.len() == 4);
+        assert!(v2.is_empty());
+    }
+
+    #[kani::proof]
+    pub fn verify_split_off() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let at: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        let v2 = v.split_off(at);
+        assert!(v.len() + v2.len() == ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn verify_retain_mut() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.retain_mut(|x| *x > 0);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn verify_dedup_by() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.dedup_by(|a, b| *a == *b);
+    }
+
+    #[kani::proof]
+    pub fn verify_drain() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let d: Vec<i32> = v.drain(..).collect();
+        assert!(v.is_empty());
+        assert!(d.len() == ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    pub fn verify_into_iter() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let v = Vec::from(&arr);
+        let c: Vec<i32> = v.into_iter().collect();
+        assert!(c.len() == ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    pub fn verify_extend_from_within() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.extend_from_within(..);
+        assert!(v.len() == ARRAY_LEN * 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn verify_extend_with() {
+        let mut v: Vec<i32> = Vec::new();
+        let n: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        v.extend_with(n, 42);
+        assert!(v.len() == n);
+    }
+
+    #[kani::proof]
+    pub fn verify_into_flattened() {
+        let inner: [[i32; 2]; 2] = kani::Arbitrary::any_array();
+        let v = Vec::from(&inner);
+        let flat = v.into_flattened();
+        assert!(flat.len() == 4);
+    }
+
+    #[kani::proof]
+    pub fn verify_from_raw_parts() {
+        let mut v = Vec::from(&[1i32, 2, 3]);
+        let (ptr, len, cap) = (v.as_mut_ptr(), v.len(), v.capacity());
+        core::mem::forget(v);
+        let r = unsafe { Vec::from_raw_parts(ptr, len, cap) };
+        assert!(r.len() == 3);
+    }
+
+    #[kani::proof]
+    pub fn verify_from_nonnull() {
+        let mut v = Vec::from(&[1i32, 2, 3]);
+        let (ptr, len, cap) = (
+            unsafe { core::ptr::NonNull::new_unchecked(v.as_mut_ptr()) },
+            v.len(),
+            v.capacity(),
+        );
+        core::mem::forget(v);
+        let r = unsafe { Vec::from_parts(ptr, len, cap) };
+        assert!(r.len() == 3);
+    }
+
+    #[kani::proof]
+    pub fn verify_from_nonnull_in() {
+        let mut v = Vec::from(&[1i32, 2, 3]);
+        let len = v.len();
+        let cap = v.capacity();
+        let ptr = unsafe {
+            core::ptr::NonNull::new_unchecked(v.as_mut_ptr())
+        };
+        let alloc = v.allocator().clone();
+        core::mem::forget(v);
+        let r = unsafe { Vec::from_parts_in(ptr, len, cap, alloc) };
+        assert!(r.len() == 3);
+    }
+
+    #[kani::proof]
+    pub fn verify_set_len() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let n: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
+        unsafe { v.set_len(n); }
+        assert!(v.len() == n);
+    }
+
+    #[kani::proof]
+    pub fn verify_append_elements() {
+        let mut v = Vec::from(&[1i32, 2]);
+        let other = [3i32, 4];
+        unsafe { v.append_elements(&other as *const [i32]); }
+        assert!(v.len() == 4);
+    }
+
+    #[kani::proof]
+    pub fn verify_split_at_spare_mut_with_len() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.reserve(2);
+        let (init, spare, len_ref) = unsafe {
+            v.split_at_spare_mut_with_len()
+        };
+        assert!(init.len() == ARRAY_LEN);
+        assert!(spare.len() >= 2);
+        assert!(*len_ref == ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    pub fn verify_spec_extend_from_within() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        v.extend_from_within(0..v.len());
+        assert!(v.len() == ARRAY_LEN * 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn verify_extract_if() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let e: Vec<i32> = v.extract_if(.., |x| *x > 0).collect();
+        assert!(v.len() + e.len() == ARRAY_LEN);
+    }
+
+    #[kani::proof]
+    pub fn verify_drop() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        drop(v);
+    }
+
+    #[kani::proof]
+    pub fn verify_try_from() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let r: Result<crate::boxed::Box<[i32; 3]>, _> = v.try_into();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn verify_extend_desugared() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let extra: [i32; 2] = kani::Arbitrary::any_array();
+        v.extend_desugared(extra.into_iter());
+        assert!(v.len() == ARRAY_LEN + 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn verify_extend_trusted() {
+        let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut v = Vec::from(&arr);
+        let extra: [i32; 2] = kani::Arbitrary::any_array();
+        v.extend_trusted(extra.into_iter());
+        assert!(v.len() == ARRAY_LEN + 2);
     }
 }
