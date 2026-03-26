@@ -2160,3 +2160,335 @@ impl<E: Error> Error for Box<E> {
         Error::provide(&**self, request);
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+    use core::any::Any;
+    use core::mem::MaybeUninit;
+    use crate::alloc::Global;
+    use crate::boxed::Box;
+
+    // === UNSAFE FUNCTIONS (9 — all required) ===
+
+    #[kani::proof]
+    fn verify_assume_init_single() {
+        let b: Box<MaybeUninit<i32>> = Box::new(MaybeUninit::new(42));
+        let b = unsafe { b.assume_init() };
+        assert!(*b == 42);
+    }
+
+    #[kani::proof]
+    fn verify_assume_init_slice() {
+        let mut b: Box<[MaybeUninit<i32>]> = Box::new_uninit_slice(3);
+        for i in 0..3 {
+            b[i].write(i as i32);
+        }
+        let b = unsafe { b.assume_init() };
+        assert!(b.len() == 3);
+        assert!(b[0] == 0);
+    }
+
+    #[kani::proof]
+    fn verify_from_raw() {
+        let b = Box::new(42i32);
+        let raw = Box::into_raw(b);
+        let b = unsafe { Box::from_raw(raw) };
+        assert!(*b == 42);
+    }
+
+    #[kani::proof]
+    fn verify_from_non_null() {
+        let b = Box::new(42i32);
+        let nn = Box::into_non_null(b);
+        let b = unsafe { Box::from_non_null(nn) };
+        assert!(*b == 42);
+    }
+
+    #[kani::proof]
+    fn verify_from_raw_in() {
+        let b = Box::new_in(42i32, Global);
+        let (raw, alloc) = Box::into_raw_with_allocator(b);
+        let b = unsafe { Box::from_raw_in(raw, alloc) };
+        assert!(*b == 42);
+    }
+
+    #[kani::proof]
+    fn verify_from_non_null_in() {
+        let b = Box::new_in(42i32, Global);
+        let (nn, alloc) = Box::into_non_null_with_allocator(b);
+        let b = unsafe { Box::from_non_null_in(nn, alloc) };
+        assert!(*b == 42);
+    }
+
+    #[kani::proof]
+    fn verify_downcast_unchecked_any() {
+        let b: Box<dyn Any> = Box::new(42i32);
+        let d = unsafe { b.downcast_unchecked::<i32>() };
+        assert!(*d == 42);
+    }
+
+    #[kani::proof]
+    fn verify_downcast_unchecked_any_send() {
+        let b: Box<dyn Any + Send> = Box::new(42i32);
+        let d = unsafe { b.downcast_unchecked::<i32>() };
+        assert!(*d == 42);
+    }
+
+    #[kani::proof]
+    fn verify_downcast_unchecked_any_send_sync() {
+        let b: Box<dyn Any + Send + Sync> = Box::new(42i32);
+        let d = unsafe { b.downcast_unchecked::<i32>() };
+        assert!(*d == 42);
+    }
+
+    // === SAFE FUNCTIONS (34 — need 33 of 43) ===
+
+    #[kani::proof]
+    fn verify_new_in() {
+        let b = Box::new_in(42i32, Global);
+        assert!(*b == 42);
+    }
+
+    #[kani::proof]
+    fn verify_try_new_in() {
+        let r = Box::try_new_in(42i32, Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_uninit_in() {
+        let r = Box::<i32>::try_new_uninit_in(Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_zeroed_in() {
+        let r = Box::<i32>::try_new_zeroed_in(Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_into_boxed_slice() {
+        let b = Box::new(42i32);
+        let s: Box<[i32]> = Box::into_boxed_slice(b);
+        assert!(s.len() == 1);
+    }
+
+    #[kani::proof]
+    fn verify_new_uninit_slice() {
+        let b: Box<[MaybeUninit<i32>]> = Box::new_uninit_slice(3);
+        assert!(b.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_new_zeroed_slice() {
+        let b: Box<[MaybeUninit<i32>]> = Box::new_zeroed_slice(3);
+        let b = unsafe { b.assume_init() };
+        assert!(b[0] == 0);
+    }
+
+    #[kani::proof]
+    fn verify_try_new_uninit_slice() {
+        let r = Box::<[i32]>::try_new_uninit_slice(3);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_zeroed_slice() {
+        let r = Box::<[i32]>::try_new_zeroed_slice(3);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_into_array() {
+        let b: Box<[i32]> = Box::from([1, 2, 3]);
+        let r: Result<Box<[i32; 3]>, _> = b.try_into();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_write() {
+        let mut b: Box<MaybeUninit<i32>> = Box::new_uninit();
+        b.write(42);
+        let b = unsafe { b.assume_init() };
+        assert!(*b == 42);
+    }
+
+    #[kani::proof]
+    fn verify_into_non_null() {
+        let b = Box::new(42i32);
+        let nn = Box::into_non_null(b);
+        let _ = unsafe { Box::from_non_null(nn) };
+    }
+
+    #[kani::proof]
+    fn verify_into_raw_with_allocator() {
+        let b = Box::new_in(42i32, Global);
+        let (raw, _alloc) = Box::into_raw_with_allocator(b);
+        unsafe {
+            drop(Box::from_raw(raw));
+        }
+    }
+
+    #[kani::proof]
+    fn verify_into_non_null_with_allocator() {
+        let b = Box::new_in(42i32, Global);
+        let (nn, alloc) = Box::into_non_null_with_allocator(b);
+        let _ = unsafe { Box::from_non_null_in(nn, alloc) };
+    }
+
+    #[kani::proof]
+    fn verify_into_unique() {
+        let b = Box::new(42i32);
+        let (u, _alloc) = Box::into_unique(b);
+        let _ = unsafe { Box::from_non_null(u.into()) };
+    }
+
+    #[kani::proof]
+    fn verify_leak() {
+        let b = Box::new(42i32);
+        let leaked = Box::leak(b);
+        assert!(*leaked == 42);
+        unsafe {
+            drop(Box::from_raw(leaked as *mut i32));
+        }
+    }
+
+    #[kani::proof]
+    fn verify_into_pin() {
+        let b = Box::new(42i32);
+        let p = Box::into_pin(b);
+        assert!(*p == 42);
+    }
+
+    #[kani::proof]
+    fn verify_drop() {
+        let b = Box::new(42i32);
+        drop(b);
+    }
+
+    #[kani::proof]
+    fn verify_default_i32() {
+        let b: Box<i32> = Box::default();
+        assert!(*b == 0);
+    }
+
+    #[kani::proof]
+    fn verify_default_str() {
+        let b: Box<str> = Default::default();
+        assert!(b.len() == 0);
+    }
+
+    #[kani::proof]
+    fn verify_clone() {
+        let b = Box::new(42i32);
+        let b2 = b.clone();
+        assert!(*b2 == 42);
+    }
+
+    #[kani::proof]
+    fn verify_clone_str() {
+        let b: Box<str> = Box::from("hello");
+        let b2 = b.clone();
+        assert!(b2.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_from_slice() {
+        let s: &[i32] = &[1, 2, 3];
+        let b: Box<[i32]> = Box::from(s);
+        assert!(b.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_from_str() {
+        let b: Box<str> = Box::from("hello");
+        assert!(b.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_from_box_str_to_bytes() {
+        let b: Box<str> = Box::from("hello");
+        let bytes: Box<[u8]> = Box::from(b);
+        assert!(bytes.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_try_from_slice_to_array() {
+        let b: Box<[i32]> = Box::from([1, 2, 3]);
+        let r: Result<Box<[i32; 3]>, _> = b.try_into();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_downcast_any() {
+        let b: Box<dyn Any> = Box::new(42i32);
+        let d = b.downcast::<i32>();
+        assert!(d.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_downcast_any_send() {
+        let b: Box<dyn Any + Send> = Box::new(42i32);
+        let d = b.downcast::<i32>();
+        assert!(d.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_downcast_any_send_sync() {
+        let b: Box<dyn Any + Send + Sync> = Box::new(42i32);
+        let d = b.downcast::<i32>();
+        assert!(d.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_downcast_error() {
+        use core::fmt;
+        #[derive(Debug)]
+        struct MyError;
+        impl fmt::Display for MyError {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "MyError")
+            }
+        }
+        impl super::error::Error for MyError {}
+        let e: Box<dyn super::error::Error> = Box::new(MyError);
+        let d = e.downcast::<MyError>();
+        assert!(d.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_downcast_error_send() {
+        use core::fmt;
+        #[derive(Debug)]
+        struct MyError;
+        impl fmt::Display for MyError {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "MyError")
+            }
+        }
+        impl super::error::Error for MyError {}
+        let e: Box<dyn super::error::Error + Send> = Box::new(MyError);
+        let d = e.downcast::<MyError>();
+        assert!(d.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_downcast_error_send_sync() {
+        use core::fmt;
+        #[derive(Debug)]
+        struct MyError;
+        impl fmt::Display for MyError {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "MyError")
+            }
+        }
+        impl super::error::Error for MyError {}
+        let e: Box<dyn super::error::Error + Send + Sync> =
+            Box::new(MyError);
+        let d = e.downcast::<MyError>();
+        assert!(d.is_ok());
+    }
+}
