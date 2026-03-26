@@ -3493,6 +3493,7 @@ impl From<char> for String {
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use core::kani;
+
     use crate::string::String;
 
     #[kani::proof]
