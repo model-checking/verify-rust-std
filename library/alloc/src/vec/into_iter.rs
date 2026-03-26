@@ -606,8 +606,7 @@ mod verify {
     #[kani::unwind(4)]
     fn verify_try_fold() {
         let v = Vec::from(&[1i32, 2, 3]);
-        let r: Result<i32, ()> =
-            v.into_iter().try_fold(0, |a, x| Ok(a + x));
+        let r: Result<i32, ()> = v.into_iter().try_fold(0, |a, x| Ok(a + x));
         assert!(r == Ok(6));
     }
 
