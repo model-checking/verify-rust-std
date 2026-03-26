@@ -4442,7 +4442,9 @@ mod verify {
         let v = Vec::from(&[1i32, 2, 3]);
         let (ptr, len, cap, _alloc) = v.into_raw_parts_with_alloc();
         assert!(len == 3);
-        unsafe { drop(Vec::from_raw_parts(ptr, len, cap)); }
+        unsafe {
+            drop(Vec::from_raw_parts(ptr, len, cap));
+        }
     }
 
     #[kani::proof]
@@ -4533,11 +4535,8 @@ mod verify {
     #[kani::proof]
     pub fn verify_from_nonnull() {
         let mut v = Vec::from(&[1i32, 2, 3]);
-        let (ptr, len, cap) = (
-            unsafe { core::ptr::NonNull::new_unchecked(v.as_mut_ptr()) },
-            v.len(),
-            v.capacity(),
-        );
+        let (ptr, len, cap) =
+            (unsafe { core::ptr::NonNull::new_unchecked(v.as_mut_ptr()) }, v.len(), v.capacity());
         core::mem::forget(v);
         let r = unsafe { Vec::from_parts(ptr, len, cap) };
         assert!(r.len() == 3);
@@ -4548,9 +4547,7 @@ mod verify {
         let mut v = Vec::from(&[1i32, 2, 3]);
         let len = v.len();
         let cap = v.capacity();
-        let ptr = unsafe {
-            core::ptr::NonNull::new_unchecked(v.as_mut_ptr())
-        };
+        let ptr = unsafe { core::ptr::NonNull::new_unchecked(v.as_mut_ptr()) };
         let alloc = v.allocator().clone();
         core::mem::forget(v);
         let r = unsafe { Vec::from_parts_in(ptr, len, cap, alloc) };
