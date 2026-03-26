@@ -4562,7 +4562,9 @@ mod verify {
         let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
         let mut v = Vec::from(&arr);
         let n: usize = kani::any_where(|&x: &usize| x <= ARRAY_LEN);
-        unsafe { v.set_len(n); }
+        unsafe {
+            v.set_len(n);
+        }
         assert!(v.len() == n);
     }
 
@@ -4570,7 +4572,9 @@ mod verify {
     pub fn verify_append_elements() {
         let mut v = Vec::from(&[1i32, 2]);
         let other = [3i32, 4];
-        unsafe { v.append_elements(&other as *const [i32]); }
+        unsafe {
+            v.append_elements(&other as *const [i32]);
+        }
         assert!(v.len() == 4);
     }
 
@@ -4579,9 +4583,7 @@ mod verify {
         let arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
         let mut v = Vec::from(&arr);
         v.reserve(2);
-        let (init, spare, len_ref) = unsafe {
-            v.split_at_spare_mut_with_len()
-        };
+        let (init, spare, len_ref) = unsafe { v.split_at_spare_mut_with_len() };
         assert!(init.len() == ARRAY_LEN);
         assert!(spare.len() >= 2);
         assert!(*len_ref == ARRAY_LEN);
