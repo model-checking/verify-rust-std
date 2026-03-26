@@ -5508,4 +5508,376 @@ mod verify {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
     }
+
+    // --- Challenge #17: Slice harnesses ---
+    const SLICE_LEN: usize = 5;
+
+    #[kani::proof]
+    fn check_get_unchecked() {
+        let arr: [i32; SLICE_LEN] = kani::any();
+        let s: &[i32] = &arr;
+        let idx: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        let val = unsafe { s.get_unchecked(idx) };
+        assert_eq!(*val, arr[idx]);
+    }
+
+    #[kani::proof]
+    fn check_get_unchecked_mut() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let idx: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        let s: &mut [i32] = &mut arr;
+        let val = unsafe { s.get_unchecked_mut(idx) };
+        *val = 42;
+        assert_eq!(arr[idx], 42);
+    }
+
+    #[kani::proof]
+    fn check_swap_unchecked() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let a: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        let b: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        let orig_a = arr[a];
+        let orig_b = arr[b];
+        unsafe { arr.swap_unchecked(a, b) };
+        assert_eq!(arr[a], orig_b);
+        assert_eq!(arr[b], orig_a);
+    }
+
+    #[kani::proof]
+    fn check_as_chunks_unchecked() {
+        let arr: [i32; 4] = kani::any();
+        let s: &[i32] = &arr;
+        let chunks: &[[i32; 2]] = unsafe { s.as_chunks_unchecked::<2>() };
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0][0], arr[0]);
+        assert_eq!(chunks[1][1], arr[3]);
+    }
+
+    #[kani::proof]
+    fn check_as_chunks_unchecked_mut() {
+        let mut arr: [i32; 4] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let chunks: &mut [[i32; 2]] = unsafe { s.as_chunks_unchecked_mut::<2>() };
+        assert_eq!(chunks.len(), 2);
+        chunks[0][0] = 99;
+        assert_eq!(arr[0], 99);
+    }
+
+    #[kani::proof]
+    fn check_split_at_unchecked() {
+        let arr: [i32; SLICE_LEN] = kani::any();
+        let s: &[i32] = &arr;
+        let mid: usize = kani::any_where(|&m: &usize| m <= SLICE_LEN);
+        let (left, right) = unsafe { s.split_at_unchecked(mid) };
+        assert_eq!(left.len(), mid);
+        assert_eq!(right.len(), SLICE_LEN - mid);
+    }
+
+    #[kani::proof]
+    fn check_split_at_mut_unchecked() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let mid: usize = kani::any_where(|&m: &usize| m <= SLICE_LEN);
+        let s: &mut [i32] = &mut arr;
+        let (left, right) = unsafe { s.split_at_mut_unchecked(mid) };
+        assert_eq!(left.len(), mid);
+        assert_eq!(right.len(), SLICE_LEN - mid);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_unchecked_mut() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let a: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        let b: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        kani::assume(a != b);
+        let s: &mut [i32] = &mut arr;
+        let [ra, rb] = unsafe { s.get_disjoint_unchecked_mut([a, b]) };
+        *ra = 10;
+        *rb = 20;
+        assert_eq!(arr[a], 10);
+        assert_eq!(arr[b], 20);
+    }
+
+    #[kani::proof]
+    fn check_first_chunk() {
+        let arr: [i32; SLICE_LEN] = kani::any();
+        let s: &[i32] = &arr;
+        let chunk: Option<&[i32; 3]> = s.first_chunk::<3>();
+        assert!(chunk.is_some());
+        assert_eq!(chunk.unwrap()[0], arr[0]);
+        assert_eq!(chunk.unwrap()[2], arr[2]);
+    }
+
+    #[kani::proof]
+    fn check_first_chunk_mut() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let chunk: Option<&mut [i32; 3]> = s.first_chunk_mut::<3>();
+        assert!(chunk.is_some());
+        chunk.unwrap()[0] = 77;
+        assert_eq!(arr[0], 77);
+    }
+
+    #[kani::proof]
+    fn check_split_first_chunk() {
+        let arr: [i32; SLICE_LEN] = kani::any();
+        let s: &[i32] = &arr;
+        let result: Option<(&[i32; 2], &[i32])> = s.split_first_chunk::<2>();
+        assert!(result.is_some());
+        let (head, tail) = result.unwrap();
+        assert_eq!(head[0], arr[0]);
+        assert_eq!(tail.len(), 3);
+    }
+
+    #[kani::proof]
+    fn check_split_first_chunk_mut() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let result: Option<(&mut [i32; 2], &mut [i32])> = s.split_first_chunk_mut::<2>();
+        assert!(result.is_some());
+        let (head, tail) = result.unwrap();
+        head[0] = 55;
+        assert_eq!(tail.len(), 3);
+    }
+
+    #[kani::proof]
+    fn check_split_last_chunk() {
+        let arr: [i32; SLICE_LEN] = kani::any();
+        let s: &[i32] = &arr;
+        let result: Option<(&[i32], &[i32; 2])> = s.split_last_chunk::<2>();
+        assert!(result.is_some());
+        let (init, last) = result.unwrap();
+        assert_eq!(init.len(), 3);
+        assert_eq!(last[1], arr[4]);
+    }
+
+    #[kani::proof]
+    fn check_split_last_chunk_mut() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let result: Option<(&mut [i32], &mut [i32; 2])> = s.split_last_chunk_mut::<2>();
+        assert!(result.is_some());
+        let (_init, last) = result.unwrap();
+        last[0] = 88;
+        assert_eq!(arr[3], 88);
+    }
+
+    #[kani::proof]
+    fn check_last_chunk() {
+        let arr: [i32; SLICE_LEN] = kani::any();
+        let s: &[i32] = &arr;
+        let chunk: Option<&[i32; 3]> = s.last_chunk::<3>();
+        assert!(chunk.is_some());
+        assert_eq!(chunk.unwrap()[2], arr[4]);
+    }
+
+    #[kani::proof]
+    fn check_last_chunk_mut() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let chunk: Option<&mut [i32; 3]> = s.last_chunk_mut::<3>();
+        assert!(chunk.is_some());
+        chunk.unwrap()[0] = 66;
+        assert_eq!(arr[2], 66);
+    }
+
+    #[kani::proof]
+    fn check_as_chunks() {
+        let arr: [i32; 4] = kani::any();
+        let s: &[i32] = &arr;
+        let (chunks, remainder) = s.as_chunks::<2>();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(remainder.len(), 0);
+        assert_eq!(chunks[0][0], arr[0]);
+    }
+
+    #[kani::proof]
+    fn check_as_chunks_mut() {
+        let mut arr: [i32; 4] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let (chunks, remainder) = s.as_chunks_mut::<2>();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(remainder.len(), 0);
+        chunks[1][1] = 33;
+        assert_eq!(arr[3], 33);
+    }
+
+    #[kani::proof]
+    fn check_as_rchunks() {
+        let arr: [i32; SLICE_LEN] = kani::any();
+        let s: &[i32] = &arr;
+        let (remainder, chunks) = s.as_rchunks::<2>();
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(remainder.len(), 1);
+        assert_eq!(remainder[0], arr[0]);
+    }
+
+    #[kani::proof]
+    fn check_split_at_checked() {
+        let arr: [i32; SLICE_LEN] = kani::any();
+        let s: &[i32] = &arr;
+        let mid: usize = kani::any();
+        if mid <= SLICE_LEN {
+            let result = s.split_at_checked(mid);
+            assert!(result.is_some());
+            let (l, r) = result.unwrap();
+            assert_eq!(l.len(), mid);
+            assert_eq!(r.len(), SLICE_LEN - mid);
+        } else {
+            assert!(s.split_at_checked(mid).is_none());
+        }
+    }
+
+    #[kani::proof]
+    fn check_split_at_mut_checked() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let mid: usize = kani::any();
+        let s: &mut [i32] = &mut arr;
+        if mid <= SLICE_LEN {
+            let result = s.split_at_mut_checked(mid);
+            assert!(result.is_some());
+            let (l, r) = result.unwrap();
+            assert_eq!(l.len(), mid);
+            assert_eq!(r.len(), SLICE_LEN - mid);
+        } else {
+            let s2: &mut [i32] = &mut arr;
+            assert!(s2.split_at_mut_checked(mid).is_none());
+        }
+    }
+
+    #[kani::proof]
+    fn check_copy_from_slice() {
+        let src: [i32; SLICE_LEN] = kani::any();
+        let mut dst: [i32; SLICE_LEN] = kani::any();
+        dst.copy_from_slice(&src);
+        assert_eq!(dst, src);
+    }
+
+    #[kani::proof]
+    fn check_copy_within() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let src_start: usize = kani::any();
+        let src_end: usize = kani::any();
+        let dest: usize = kani::any();
+        kani::assume(src_start <= src_end);
+        kani::assume(src_end <= SLICE_LEN);
+        kani::assume(dest <= SLICE_LEN - (src_end - src_start));
+        arr.copy_within(src_start..src_end, dest);
+    }
+
+    #[kani::proof]
+    fn check_swap_with_slice() {
+        let mut a: [i32; SLICE_LEN] = kani::any();
+        let mut b: [i32; SLICE_LEN] = kani::any();
+        let orig_a = a;
+        let orig_b = b;
+        a.swap_with_slice(&mut b);
+        assert_eq!(a, orig_b);
+        assert_eq!(b, orig_a);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn check_binary_search_by() {
+        let a: i32 = kani::any();
+        let b: i32 = kani::any();
+        let c: i32 = kani::any();
+        kani::assume(a <= b && b <= c);
+        let arr = [a, b, c];
+        let target: i32 = kani::any();
+        let result = arr.binary_search_by(|probe| probe.cmp(&target));
+        match result {
+            Ok(idx) => assert!(idx < 3 && arr[idx] == target),
+            Err(idx) => assert!(idx <= 3),
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn check_partition_dedup_by() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let (dedup, dups) = arr.partition_dedup_by(|a, b| *a == *b);
+        assert_eq!(dedup.len() + dups.len(), SLICE_LEN);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_rotate_left() {
+        let mut arr: [i32; 2] = kani::any();
+        let k: usize = kani::any();
+        kani::assume(k <= 2);
+        arr.rotate_left(k);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_rotate_right() {
+        let mut arr: [i32; 2] = kani::any();
+        let k: usize = kani::any();
+        kani::assume(k <= 2);
+        arr.rotate_right(k);
+    }
+
+    #[kani::proof]
+    fn check_as_flattened() {
+        let arr: [[i32; 2]; 3] = kani::any();
+        let s: &[[i32; 2]] = &arr;
+        let flat: &[i32] = s.as_flattened();
+        assert_eq!(flat.len(), 6);
+        assert_eq!(flat[0], arr[0][0]);
+        assert_eq!(flat[5], arr[2][1]);
+    }
+
+    #[kani::proof]
+    fn check_as_flattened_mut() {
+        let mut arr: [[i32; 2]; 3] = kani::any();
+        let s: &mut [[i32; 2]] = &mut arr;
+        let flat: &mut [i32] = s.as_flattened_mut();
+        assert_eq!(flat.len(), 6);
+        flat[0] = 42;
+        assert_eq!(arr[0][0], 42);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_mut() {
+        let mut arr: [i32; SLICE_LEN] = kani::any();
+        let a: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        let b: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        kani::assume(a != b);
+        let result = arr.get_disjoint_mut([a, b]);
+        assert!(result.is_ok());
+        let [ra, rb] = result.unwrap();
+        *ra = 1;
+        *rb = 2;
+        assert_eq!(arr[a], 1);
+        assert_eq!(arr[b], 2);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_check_valid() {
+        let a: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        let b: usize = kani::any_where(|&i: &usize| i < SLICE_LEN);
+        let indices = [a, b];
+        let result = get_disjoint_check_valid(&indices, SLICE_LEN);
+        if a == b {
+            assert!(result.is_err());
+        } else {
+            assert!(result.is_ok());
+        }
+    }
+
+    #[kani::proof]
+    fn check_as_simd() {
+        let arr: [f32; 4] = kani::any();
+        let s: &[f32] = &arr;
+        let (prefix, middle, suffix) = s.as_simd::<4>();
+        assert_eq!(prefix.len() + middle.len() * 4 + suffix.len(), 4);
+    }
+
+    #[kani::proof]
+    fn check_as_simd_mut() {
+        let mut arr: [f32; 4] = kani::any();
+        let s: &mut [f32] = &mut arr;
+        let (prefix, middle, suffix) = s.as_simd_mut::<4>();
+        assert_eq!(prefix.len() + middle.len() * 4 + suffix.len(), 4);
+    }
 }
