@@ -2164,9 +2164,10 @@ impl<E: Error> Error for Box<E> {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use core::kani;
     use core::any::Any;
+    use core::kani;
     use core::mem::MaybeUninit;
+
     use crate::alloc::Global;
     use crate::boxed::Box;
 
@@ -2486,8 +2487,7 @@ mod verify {
             }
         }
         impl super::error::Error for MyError {}
-        let e: Box<dyn super::error::Error + Send + Sync> =
-            Box::new(MyError);
+        let e: Box<dyn super::error::Error + Send + Sync> = Box::new(MyError);
         let d = e.downcast::<MyError>();
         assert!(d.is_ok());
     }
