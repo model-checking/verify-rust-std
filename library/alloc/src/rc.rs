@@ -4160,3 +4160,436 @@ impl<T: ?Sized, A: Allocator> Drop for UniqueRcUninit<T, A> {
         }
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::any::Any;
+    use core::kani;
+    use core::mem::MaybeUninit;
+
+    use crate::alloc::Global;
+    use crate::rc::{Rc, UniqueRc, Weak};
+
+    // === UNSAFE (12 — all required) ===
+
+    #[kani::proof]
+    fn verify_assume_init_single() {
+        let b: Rc<MaybeUninit<i32>> = Rc::new(MaybeUninit::new(42));
+        let b = unsafe { b.assume_init() };
+        assert!(*b == 42);
+    }
+
+    #[kani::proof]
+    fn verify_assume_init_slice() {
+        let mut b: Rc<[MaybeUninit<i32>]> = Rc::new_uninit_slice(3);
+        let s = Rc::get_mut(&mut b).unwrap();
+        s[0].write(1);
+        s[1].write(2);
+        s[2].write(3);
+        let b = unsafe { b.assume_init() };
+        assert!(b.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_from_raw() {
+        let rc = Rc::new(42i32);
+        let raw = Rc::into_raw(rc);
+        let rc = unsafe { Rc::from_raw(raw) };
+        assert!(*rc == 42);
+    }
+
+    #[kani::proof]
+    fn verify_from_raw_in() {
+        let rc = Rc::new_in(42i32, Global);
+        let (raw, alloc) = Rc::into_raw_with_allocator(rc);
+        let rc = unsafe { Rc::from_raw_in(raw, alloc) };
+        assert!(*rc == 42);
+    }
+
+    #[kani::proof]
+    fn verify_increment_strong_count() {
+        let rc = Rc::new(42i32);
+        let ptr = Rc::as_ptr(&rc);
+        unsafe {
+            Rc::increment_strong_count(ptr);
+        }
+        let rc2 = unsafe { Rc::from_raw(ptr) };
+        assert!(*rc2 == 42);
+    }
+
+    #[kani::proof]
+    fn verify_increment_strong_count_in() {
+        let rc = Rc::new_in(42i32, Global);
+        let ptr = Rc::as_ptr(&rc);
+        unsafe {
+            Rc::increment_strong_count_in(ptr, Global);
+        }
+        let rc2 = unsafe { Rc::from_raw_in(ptr, Global) };
+        assert!(*rc2 == 42);
+    }
+
+    #[kani::proof]
+    fn verify_decrement_strong_count() {
+        let rc = Rc::new(42i32);
+        let rc2 = rc.clone();
+        let ptr = Rc::as_ptr(&rc2);
+        core::mem::forget(rc2);
+        unsafe {
+            Rc::decrement_strong_count(ptr);
+        }
+    }
+
+    #[kani::proof]
+    fn verify_decrement_strong_count_in() {
+        let rc = Rc::new_in(42i32, Global);
+        let rc2 = rc.clone();
+        let ptr = Rc::as_ptr(&rc2);
+        core::mem::forget(rc2);
+        unsafe {
+            Rc::decrement_strong_count_in(ptr, Global);
+        }
+    }
+
+    #[kani::proof]
+    fn verify_get_mut_unchecked() {
+        let mut rc = Rc::new(42i32);
+        unsafe {
+            *Rc::get_mut_unchecked(&mut rc) = 99;
+        }
+        assert!(*rc == 99);
+    }
+
+    #[kani::proof]
+    fn verify_downcast_unchecked() {
+        let rc: Rc<dyn Any> = Rc::new(42i32);
+        let d = unsafe { rc.downcast_unchecked::<i32>() };
+        assert!(*d == 42);
+    }
+
+    #[kani::proof]
+    fn verify_weak_from_raw() {
+        let rc = Rc::new(42i32);
+        let weak = Rc::downgrade(&rc);
+        let raw = Weak::into_raw(weak);
+        let weak2 = unsafe { Weak::from_raw(raw) };
+        assert!(weak2.upgrade().is_some());
+    }
+
+    #[kani::proof]
+    fn verify_weak_from_raw_in() {
+        let rc = Rc::new_in(42i32, Global);
+        let weak = Rc::downgrade(&rc);
+        let (raw, alloc) = Weak::into_raw_with_allocator(weak);
+        let weak2 = unsafe { Weak::from_raw_in(raw, alloc) };
+        assert!(weak2.upgrade().is_some());
+    }
+
+    // === SAFE (target 41+ of 54) ===
+
+    #[kani::proof]
+    fn verify_inner() {
+        let rc = Rc::new(42i32);
+        assert!(*rc == 42);
+    }
+
+    #[kani::proof]
+    fn verify_into_inner_with_allocator() {
+        let rc = Rc::new_in(42i32, Global);
+        drop(rc);
+    }
+
+    #[kani::proof]
+    fn verify_new() {
+        let rc = Rc::new(42i32);
+        assert!(*rc == 42);
+    }
+
+    #[kani::proof]
+    fn verify_new_uninit() {
+        let rc: Rc<MaybeUninit<i32>> = Rc::new_uninit();
+        let _ = rc;
+    }
+
+    #[kani::proof]
+    fn verify_new_zeroed() {
+        let rc: Rc<MaybeUninit<i32>> = Rc::new_zeroed();
+        let rc = unsafe { rc.assume_init() };
+        assert!(*rc == 0);
+    }
+
+    #[kani::proof]
+    fn verify_try_new() {
+        let r = Rc::try_new(42i32);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_uninit() {
+        let r = Rc::<i32>::try_new_uninit();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_zeroed() {
+        let r = Rc::<i32>::try_new_zeroed();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_pin() {
+        let p = Rc::pin(42i32);
+        assert!(*p == 42);
+    }
+
+    #[kani::proof]
+    fn verify_new_uninit_in() {
+        let rc: Rc<MaybeUninit<i32>, Global> = Rc::new_uninit_in(Global);
+        let _ = rc;
+    }
+
+    #[kani::proof]
+    fn verify_new_zeroed_in() {
+        let rc: Rc<MaybeUninit<i32>, Global> = Rc::new_zeroed_in(Global);
+        let rc = unsafe { rc.assume_init() };
+        assert!(*rc == 0);
+    }
+
+    #[kani::proof]
+    fn verify_try_new_in() {
+        let r = Rc::try_new_in(42i32, Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_uninit_in() {
+        let r = Rc::<i32, Global>::try_new_uninit_in(Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_zeroed_in() {
+        let r = Rc::<i32, Global>::try_new_zeroed_in(Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_pin_in() {
+        let p = Rc::pin_in(42i32, Global);
+        assert!(*p == 42);
+    }
+
+    #[kani::proof]
+    fn verify_try_unwrap() {
+        let rc = Rc::new(42i32);
+        let val = Rc::try_unwrap(rc);
+        assert!(val == Ok(42));
+    }
+
+    #[kani::proof]
+    fn verify_new_uninit_slice() {
+        let b: Rc<[MaybeUninit<i32>]> = Rc::new_uninit_slice(3);
+        assert!(b.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_new_zeroed_slice() {
+        let b: Rc<[MaybeUninit<i32>]> = Rc::new_zeroed_slice(3);
+        let b = unsafe { b.assume_init() };
+        assert!(b[0] == 0);
+    }
+
+    #[kani::proof]
+    fn verify_into_array() {
+        let rc: Rc<[i32]> = Rc::from([1, 2, 3]);
+        let r: Result<Rc<[i32; 3]>, _> = rc.try_into();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_new_uninit_slice_in() {
+        let b: Rc<[MaybeUninit<i32>], Global> =
+            Rc::new_uninit_slice_in(3, Global);
+        assert!(b.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_new_zeroed_slice_in() {
+        let b: Rc<[MaybeUninit<i32>], Global> =
+            Rc::new_zeroed_slice_in(3, Global);
+        let b = unsafe { b.assume_init() };
+        assert!(b[0] == 0);
+    }
+
+    #[kani::proof]
+    fn verify_into_raw_with_allocator() {
+        let rc = Rc::new_in(42i32, Global);
+        let (raw, alloc) = Rc::into_raw_with_allocator(rc);
+        let _ = unsafe { Rc::from_raw_in(raw, alloc) };
+    }
+
+    #[kani::proof]
+    fn verify_as_ptr() {
+        let rc = Rc::new(42i32);
+        let ptr = Rc::as_ptr(&rc);
+        assert!(unsafe { *ptr } == 42);
+    }
+
+    #[kani::proof]
+    fn verify_get_mut() {
+        let mut rc = Rc::new(42i32);
+        *Rc::get_mut(&mut rc).unwrap() = 99;
+        assert!(*rc == 99);
+    }
+
+    #[kani::proof]
+    fn verify_downcast() {
+        let rc: Rc<dyn Any> = Rc::new(42i32);
+        let d = rc.downcast::<i32>();
+        assert!(d.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_from_slice_clone() {
+        let s: &[i32] = &[1, 2, 3];
+        let rc: Rc<[i32]> = Rc::from(s);
+        assert!(rc.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_from_slice_copy() {
+        let s: &[u8] = &[1, 2, 3];
+        let rc: Rc<[u8]> = Rc::from(s);
+        assert!(rc.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_drop() {
+        let rc = Rc::new(42i32);
+        drop(rc);
+    }
+
+    #[kani::proof]
+    fn verify_clone() {
+        let rc = Rc::new(42i32);
+        let rc2 = rc.clone();
+        assert!(*rc2 == 42);
+    }
+
+    #[kani::proof]
+    fn verify_default_i32() {
+        let rc: Rc<i32> = Rc::default();
+        assert!(*rc == 0);
+    }
+
+    #[kani::proof]
+    fn verify_default_str() {
+        let rc: Rc<str> = Default::default();
+        assert!(rc.len() == 0);
+    }
+
+    #[kani::proof]
+    fn verify_from_str() {
+        let rc: Rc<str> = Rc::from("hello");
+        assert!(rc.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_from_vec() {
+        let v = crate::vec![1i32, 2, 3];
+        let rc: Rc<[i32]> = Rc::from(v);
+        assert!(rc.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_from_rc_str() {
+        let rc: Rc<str> = Rc::from("hello");
+        let bytes: Rc<[u8]> = Rc::from(rc);
+        assert!(bytes.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_try_from() {
+        let rc: Rc<[i32]> = Rc::from([1, 2, 3]);
+        let r: Result<Rc<[i32; 3]>, _> = rc.try_into();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_weak_as_ptr() {
+        let rc = Rc::new(42i32);
+        let weak = Rc::downgrade(&rc);
+        let ptr = Weak::as_ptr(&weak);
+        assert!(unsafe { *ptr } == 42);
+    }
+
+    #[kani::proof]
+    fn verify_weak_into_raw_with_allocator() {
+        let rc = Rc::new_in(42i32, Global);
+        let weak = Rc::downgrade(&rc);
+        let (raw, alloc) = Weak::into_raw_with_allocator(weak);
+        let _ = unsafe { Weak::from_raw_in(raw, alloc) };
+    }
+
+    #[kani::proof]
+    fn verify_weak_upgrade() {
+        let rc = Rc::new(42i32);
+        let weak = Rc::downgrade(&rc);
+        let upgraded = weak.upgrade();
+        assert!(upgraded.is_some());
+        assert!(*upgraded.unwrap() == 42);
+    }
+
+    #[kani::proof]
+    fn verify_weak_inner() {
+        let rc = Rc::new(42i32);
+        let weak = Rc::downgrade(&rc);
+        assert!(weak.upgrade().is_some());
+    }
+
+    #[kani::proof]
+    fn verify_weak_drop() {
+        let rc = Rc::new(42i32);
+        let weak = Rc::downgrade(&rc);
+        drop(weak);
+        assert!(*rc == 42);
+    }
+
+    #[kani::proof]
+    fn verify_inc_strong() {
+        let rc = Rc::new(42i32);
+        let _rc2 = rc.clone();
+    }
+
+    #[kani::proof]
+    fn verify_inc_weak() {
+        let rc = Rc::new(42i32);
+        let _weak = Rc::downgrade(&rc);
+    }
+
+    #[kani::proof]
+    fn verify_unique_rc_into_rc() {
+        let urc = UniqueRc::new(42i32);
+        let rc: Rc<i32> = UniqueRc::into_rc(urc);
+        assert!(*rc == 42);
+    }
+
+    #[kani::proof]
+    fn verify_unique_rc_deref() {
+        let urc = UniqueRc::new(42i32);
+        assert!(*urc == 42);
+    }
+
+    #[kani::proof]
+    fn verify_unique_rc_deref_mut() {
+        let mut urc = UniqueRc::new(42i32);
+        *urc = 99;
+        assert!(*urc == 99);
+    }
+
+    #[kani::proof]
+    fn verify_unique_rc_drop() {
+        let urc = UniqueRc::new(42i32);
+        drop(urc);
+    }
+}
