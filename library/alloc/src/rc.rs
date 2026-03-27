@@ -4408,15 +4408,13 @@ mod verify {
 
     #[kani::proof]
     fn verify_new_uninit_slice_in() {
-        let b: Rc<[MaybeUninit<i32>], Global> =
-            Rc::new_uninit_slice_in(3, Global);
+        let b: Rc<[MaybeUninit<i32>], Global> = Rc::new_uninit_slice_in(3, Global);
         assert!(b.len() == 3);
     }
 
     #[kani::proof]
     fn verify_new_zeroed_slice_in() {
-        let b: Rc<[MaybeUninit<i32>], Global> =
-            Rc::new_zeroed_slice_in(3, Global);
+        let b: Rc<[MaybeUninit<i32>], Global> = Rc::new_zeroed_slice_in(3, Global);
         let b = unsafe { b.assume_init() };
         assert!(b[0] == 0);
     }
