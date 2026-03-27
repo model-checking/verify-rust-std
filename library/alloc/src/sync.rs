@@ -4705,14 +4705,12 @@ mod verify {
 
     #[kani::proof]
     fn verify_new_uninit_in() {
-        let _a: Arc<MaybeUninit<i32>, Global> =
-            Arc::new_uninit_in(Global);
+        let _a: Arc<MaybeUninit<i32>, Global> = Arc::new_uninit_in(Global);
     }
 
     #[kani::proof]
     fn verify_new_zeroed_in() {
-        let a: Arc<MaybeUninit<i32>, Global> =
-            Arc::new_zeroed_in(Global);
+        let a: Arc<MaybeUninit<i32>, Global> = Arc::new_zeroed_in(Global);
         let a = unsafe { a.assume_init() };
         assert!(*a == 0);
     }
@@ -4860,7 +4858,6 @@ mod verify {
         let a: Arc<i32> = Arc::default();
         assert!(*a == 0);
     }
-
 
     #[kani::proof]
     fn verify_from_str() {
