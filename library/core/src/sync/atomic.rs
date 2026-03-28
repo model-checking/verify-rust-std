@@ -4559,7 +4559,6 @@ mod verify {
         let _ = atomic.load(Ordering::Relaxed);
     }
 
-
     #[kani::proof]
     fn verify_atomic_ptr_from_ptr() {
         let mut val: *mut u8 = core::ptr::null_mut();
