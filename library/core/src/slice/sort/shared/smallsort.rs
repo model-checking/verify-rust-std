@@ -962,9 +962,7 @@ mod verify {
     #[kani::unwind(6)]
     fn verify_unstable_small_sort() {
         let mut arr: [i32; 4] = kani::any();
-        <i32 as UnstableSmallSortTypeImpl>::small_sort(
-            &mut arr, &mut |a, b| *a < *b,
-        );
+        <i32 as UnstableSmallSortTypeImpl>::small_sort(&mut arr, &mut |a, b| *a < *b);
         assert!(is_sorted(&arr));
     }
 
@@ -972,9 +970,7 @@ mod verify {
     #[kani::unwind(6)]
     fn verify_unstable_freeze_small_sort() {
         let mut arr: [i32; 4] = kani::any();
-        <i32 as UnstableSmallSortFreezeTypeImpl>::small_sort(
-            &mut arr, &mut |a, b| *a < *b,
-        );
+        <i32 as UnstableSmallSortFreezeTypeImpl>::small_sort(&mut arr, &mut |a, b| *a < *b);
         assert!(is_sorted(&arr));
     }
 }
