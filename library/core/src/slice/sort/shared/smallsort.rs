@@ -1,10 +1,10 @@
 //! This module contains a variety of sort implementations that are optimized for small lengths.
 
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::slice::sort::shared::FreezeMarker;
 use crate::{hint, intrinsics, ptr, slice};
-#[cfg(kani)]
-use crate::kani;
 
 // It's important to differentiate between SMALL_SORT_THRESHOLD performance for
 // small slices and small-sort performance sorting small sub-slices as part of
@@ -954,9 +954,7 @@ mod verify {
     fn verify_stable_small_sort() {
         let mut arr: [i32; 4] = kani::any();
         let mut scratch = [MaybeUninit::<i32>::uninit(); 20];
-        <i32 as StableSmallSortTypeImpl>::small_sort(
-            &mut arr, &mut scratch, &mut |a, b| *a < *b,
-        );
+        <i32 as StableSmallSortTypeImpl>::small_sort(&mut arr, &mut scratch, &mut |a, b| *a < *b);
         assert!(is_sorted(&arr));
     }
 
