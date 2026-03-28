@@ -900,12 +900,7 @@ mod verify {
         let orig_a = arr[a];
         let orig_b = arr[b];
         unsafe {
-            swap_if_less(
-                arr.as_mut_ptr(),
-                a,
-                b,
-                &mut |x, y| *x < *y,
-            );
+            swap_if_less(arr.as_mut_ptr(), a, b, &mut |x, y| *x < *y);
         }
         // After swap_if_less, arr[a] <= arr[b]
         assert!(arr[a] <= arr[b]);
@@ -923,11 +918,7 @@ mod verify {
             MaybeUninit::uninit(),
         ];
         unsafe {
-            sort4_stable(
-                src.as_ptr(),
-                dst.as_mut_ptr() as *mut i32,
-                &mut |x, y| *x < *y,
-            );
+            sort4_stable(src.as_ptr(), dst.as_mut_ptr() as *mut i32, &mut |x, y| *x < *y);
         }
         let d0 = unsafe { dst[0].assume_init() };
         let d1 = unsafe { dst[1].assume_init() };
@@ -942,11 +933,7 @@ mod verify {
     #[kani::unwind(6)]
     fn verify_insertion_sort_shift_left() {
         let mut arr: [i32; 4] = kani::any();
-        insertion_sort_shift_left(
-            &mut arr,
-            1,
-            &mut |a, b| *a < *b,
-        );
+        insertion_sort_shift_left(&mut arr, 1, &mut |a, b| *a < *b);
         assert!(arr[0] <= arr[1]);
         assert!(arr[1] <= arr[2]);
         assert!(arr[2] <= arr[3]);
@@ -959,11 +946,7 @@ mod verify {
     fn verify_stable_small_sort() {
         let mut arr: [i32; 4] = kani::any();
         let mut scratch = [MaybeUninit::<i32>::uninit(); 20];
-        <i32 as StableSmallSortTypeImpl>::small_sort(
-            &mut arr,
-            &mut scratch,
-            &mut |a, b| *a < *b,
-        );
+        <i32 as StableSmallSortTypeImpl>::small_sort(&mut arr, &mut scratch, &mut |a, b| *a < *b);
         assert!(arr[0] <= arr[1]);
         assert!(arr[1] <= arr[2]);
         assert!(arr[2] <= arr[3]);
@@ -975,10 +958,7 @@ mod verify {
     #[kani::unwind(6)]
     fn verify_unstable_small_sort() {
         let mut arr: [i32; 4] = kani::any();
-        <i32 as UnstableSmallSortTypeImpl>::small_sort(
-            &mut arr,
-            &mut |a, b| *a < *b,
-        );
+        <i32 as UnstableSmallSortTypeImpl>::small_sort(&mut arr, &mut |a, b| *a < *b);
         assert!(arr[0] <= arr[1]);
         assert!(arr[1] <= arr[2]);
         assert!(arr[2] <= arr[3]);
@@ -990,10 +970,7 @@ mod verify {
     #[kani::unwind(6)]
     fn verify_unstable_freeze_small_sort() {
         let mut arr: [i32; 4] = kani::any();
-        <i32 as UnstableSmallSortFreezeTypeImpl>::small_sort(
-            &mut arr,
-            &mut |a, b| *a < *b,
-        );
+        <i32 as UnstableSmallSortFreezeTypeImpl>::small_sort(&mut arr, &mut |a, b| *a < *b);
         assert!(arr[0] <= arr[1]);
         assert!(arr[1] <= arr[2]);
         assert!(arr[2] <= arr[3]);
