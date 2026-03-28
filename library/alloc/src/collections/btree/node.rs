@@ -1890,9 +1890,9 @@ mod tests;
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use super::*;
     use core::kani;
 
+    use super::*;
     use crate::alloc::Global;
 
     /// Create a leaf node with n key-value pairs (keys 0..n, vals 10..10+n*10)
@@ -2067,7 +2067,9 @@ mod verify {
         let mut node = make_leaf(3);
         let kv = node.borrow_mut().first_kv();
         let val = kv.into_val_mut();
-        unsafe { *val = 99; }
+        unsafe {
+            *val = 99;
+        }
     }
 
     // --- Handle::into_kv_mut ---
