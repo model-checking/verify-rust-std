@@ -4480,3 +4480,91 @@ impl<T> fmt::Pointer for AtomicPtr<T> {
 pub fn spin_loop_hint() {
     spin_loop()
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    #[kani::proof]
+    fn verify_atomic_bool_from_ptr() {
+        let mut val: bool = kani::any();
+        let ptr = &mut val as *mut bool;
+        let atomic = unsafe { AtomicBool::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_i8_from_ptr() {
+        let mut val: i8 = kani::any();
+        let ptr = &mut val as *mut i8;
+        let atomic = unsafe { AtomicI8::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_u8_from_ptr() {
+        let mut val: u8 = kani::any();
+        let ptr = &mut val as *mut u8;
+        let atomic = unsafe { AtomicU8::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_i16_from_ptr() {
+        let mut val: i16 = kani::any();
+        let ptr = &mut val as *mut i16;
+        let atomic = unsafe { AtomicI16::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_u16_from_ptr() {
+        let mut val: u16 = kani::any();
+        let ptr = &mut val as *mut u16;
+        let atomic = unsafe { AtomicU16::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_i32_from_ptr() {
+        let mut val: i32 = kani::any();
+        let ptr = &mut val as *mut i32;
+        let atomic = unsafe { AtomicI32::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_u32_from_ptr() {
+        let mut val: u32 = kani::any();
+        let ptr = &mut val as *mut u32;
+        let atomic = unsafe { AtomicU32::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_i64_from_ptr() {
+        let mut val: i64 = kani::any();
+        let ptr = &mut val as *mut i64;
+        let atomic = unsafe { AtomicI64::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_u64_from_ptr() {
+        let mut val: u64 = kani::any();
+        let ptr = &mut val as *mut u64;
+        let atomic = unsafe { AtomicU64::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+
+    #[kani::proof]
+    fn verify_atomic_ptr_from_ptr() {
+        let mut val: *mut u8 = core::ptr::null_mut();
+        let ptr = &mut val as *mut *mut u8;
+        let atomic = unsafe { AtomicPtr::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+}
