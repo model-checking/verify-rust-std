@@ -246,9 +246,9 @@ use self::Ordering::*;
 use crate::cell::UnsafeCell;
 use crate::hint::spin_loop;
 use crate::intrinsics::AtomicOrdering as AO;
-use crate::{fmt, intrinsics, ub_checks};
 #[cfg(kani)]
 use crate::kani;
+use crate::{fmt, intrinsics, ub_checks};
 
 trait Sealed {}
 
@@ -4664,7 +4664,13 @@ mod verify {
     fn verify_atomic_compare_exchange() {
         let mut val: i32 = 10;
         let result = unsafe {
-            atomic_compare_exchange(&mut val as *mut i32, 10, 20, Ordering::SeqCst, Ordering::SeqCst)
+            atomic_compare_exchange(
+                &mut val as *mut i32,
+                10,
+                20,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
         };
         assert!(result == Ok(10));
     }
@@ -4673,7 +4679,13 @@ mod verify {
     fn verify_atomic_compare_exchange_weak() {
         let mut val: i32 = 10;
         let _ = unsafe {
-            atomic_compare_exchange_weak(&mut val as *mut i32, 10, 20, Ordering::SeqCst, Ordering::SeqCst)
+            atomic_compare_exchange_weak(
+                &mut val as *mut i32,
+                10,
+                20,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
         };
     }
 
