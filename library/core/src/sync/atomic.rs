@@ -246,7 +246,9 @@ use self::Ordering::*;
 use crate::cell::UnsafeCell;
 use crate::hint::spin_loop;
 use crate::intrinsics::AtomicOrdering as AO;
-use crate::{fmt, intrinsics};
+use crate::{fmt, intrinsics, ub_checks};
+#[cfg(kani)]
+use crate::kani;
 
 trait Sealed {}
 
@@ -571,6 +573,7 @@ impl AtomicBool {
     #[inline]
     #[stable(feature = "atomic_from_ptr", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_atomic_from_ptr", since = "1.84.0")]
+    #[safety::requires(ub_checks::can_dereference(ptr as *const AtomicBool))]
     pub const unsafe fn from_ptr<'a>(ptr: *mut bool) -> &'a AtomicBool {
         // SAFETY: guaranteed by the caller
         unsafe { &*ptr.cast() }
@@ -1529,6 +1532,7 @@ impl<T> AtomicPtr<T> {
     #[inline]
     #[stable(feature = "atomic_from_ptr", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_atomic_from_ptr", since = "1.84.0")]
+    #[safety::requires(ub_checks::can_dereference(ptr as *const AtomicPtr<T>))]
     pub const unsafe fn from_ptr<'a>(ptr: *mut *mut T) -> &'a AtomicPtr<T> {
         // SAFETY: guaranteed by the caller
         unsafe { &*ptr.cast() }
@@ -2705,6 +2709,7 @@ macro_rules! atomic_int {
             #[inline]
             #[stable(feature = "atomic_from_ptr", since = "1.75.0")]
             #[rustc_const_stable(feature = "const_atomic_from_ptr", since = "1.84.0")]
+            #[safety::requires(ub_checks::can_dereference(ptr as *const $atomic_type))]
             pub const unsafe fn from_ptr<'a>(ptr: *mut $int_type) -> &'a $atomic_type {
                 // SAFETY: guaranteed by the caller
                 unsafe { &*ptr.cast() }
@@ -3928,6 +3933,7 @@ fn strongest_failure_ordering(order: Ordering) -> Ordering {
 
 #[inline]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst))]
 unsafe fn atomic_store<T: Copy>(dst: *mut T, val: T, order: Ordering) {
     // SAFETY: the caller must uphold the safety contract for `atomic_store`.
     unsafe {
@@ -3943,6 +3949,7 @@ unsafe fn atomic_store<T: Copy>(dst: *mut T, val: T, order: Ordering) {
 
 #[inline]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_dereference(dst))]
 unsafe fn atomic_load<T: Copy>(dst: *const T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_load`.
     unsafe {
@@ -3959,6 +3966,7 @@ unsafe fn atomic_load<T: Copy>(dst: *const T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_swap<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_swap`.
     unsafe {
@@ -3976,6 +3984,7 @@ unsafe fn atomic_swap<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_add<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_add`.
     unsafe {
@@ -3993,6 +4002,7 @@ unsafe fn atomic_add<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> 
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_sub<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_sub`.
     unsafe {
@@ -4012,6 +4022,7 @@ unsafe fn atomic_sub<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> 
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[doc(hidden)]
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 pub unsafe fn atomic_compare_exchange<T: Copy>(
     dst: *mut T,
     old: T,
@@ -4077,6 +4088,7 @@ pub unsafe fn atomic_compare_exchange<T: Copy>(
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_compare_exchange_weak<T: Copy>(
     dst: *mut T,
     old: T,
@@ -4142,6 +4154,7 @@ unsafe fn atomic_compare_exchange_weak<T: Copy>(
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_and<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_and`
     unsafe {
@@ -4158,6 +4171,7 @@ unsafe fn atomic_and<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> 
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_nand<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_nand`
     unsafe {
@@ -4174,6 +4188,7 @@ unsafe fn atomic_nand<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) ->
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_or<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_or`
     unsafe {
@@ -4190,6 +4205,7 @@ unsafe fn atomic_or<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_xor<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_xor`
     unsafe {
@@ -4207,6 +4223,7 @@ unsafe fn atomic_xor<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> 
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_max<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_max`
     unsafe {
@@ -4224,6 +4241,7 @@ unsafe fn atomic_max<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_min<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_min`
     unsafe {
@@ -4241,6 +4259,7 @@ unsafe fn atomic_min<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_umax<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_umax`
     unsafe {
@@ -4258,6 +4277,7 @@ unsafe fn atomic_umax<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[safety::requires(ub_checks::can_write(dst) && ub_checks::can_dereference(dst as *const T))]
 unsafe fn atomic_umin<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_umin`
     unsafe {
@@ -4559,11 +4579,150 @@ mod verify {
         let _ = atomic.load(Ordering::Relaxed);
     }
 
+    // --- AtomicPtr: multiple T sizes per spec ---
+
     #[kani::proof]
-    fn verify_atomic_ptr_from_ptr() {
+    fn verify_atomic_ptr_from_ptr_size0() {
+        let mut val: *mut () = core::ptr::null_mut();
+        let ptr = &mut val as *mut *mut ();
+        let atomic = unsafe { AtomicPtr::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_ptr_from_ptr_size1() {
         let mut val: *mut u8 = core::ptr::null_mut();
         let ptr = &mut val as *mut *mut u8;
         let atomic = unsafe { AtomicPtr::from_ptr(ptr) };
         let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_ptr_from_ptr_size2() {
+        let mut val: *mut u16 = core::ptr::null_mut();
+        let ptr = &mut val as *mut *mut u16;
+        let atomic = unsafe { AtomicPtr::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_ptr_from_ptr_size4() {
+        let mut val: *mut u32 = core::ptr::null_mut();
+        let ptr = &mut val as *mut *mut u32;
+        let atomic = unsafe { AtomicPtr::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_ptr_from_ptr_size3() {
+        let mut val: *mut [u8; 3] = core::ptr::null_mut();
+        let ptr = &mut val as *mut *mut [u8; 3];
+        let atomic = unsafe { AtomicPtr::from_ptr(ptr) };
+        let _ = atomic.load(Ordering::Relaxed);
+    }
+
+    // --- Part 2: Verify atomic helper functions ---
+
+    #[kani::proof]
+    fn verify_atomic_store() {
+        let mut val: i32 = kani::any();
+        let new_val: i32 = kani::any();
+        unsafe { atomic_store(&mut val as *mut i32, new_val, Ordering::SeqCst) };
+        assert!(val == new_val);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_load() {
+        let val: i32 = kani::any();
+        let loaded = unsafe { atomic_load(&val as *const i32, Ordering::SeqCst) };
+        assert!(loaded == val);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_swap() {
+        let mut val: i32 = kani::any();
+        let new_val: i32 = kani::any();
+        let old = unsafe { atomic_swap(&mut val as *mut i32, new_val, Ordering::SeqCst) };
+        let _ = old;
+    }
+
+    #[kani::proof]
+    fn verify_atomic_add() {
+        let mut val: i32 = 10;
+        let old = unsafe { atomic_add(&mut val as *mut i32, 5i32, Ordering::SeqCst) };
+        assert!(old == 10);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_sub() {
+        let mut val: i32 = 10;
+        let old = unsafe { atomic_sub(&mut val as *mut i32, 3i32, Ordering::SeqCst) };
+        assert!(old == 10);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_compare_exchange() {
+        let mut val: i32 = 10;
+        let result = unsafe {
+            atomic_compare_exchange(&mut val as *mut i32, 10, 20, Ordering::SeqCst, Ordering::SeqCst)
+        };
+        assert!(result == Ok(10));
+    }
+
+    #[kani::proof]
+    fn verify_atomic_compare_exchange_weak() {
+        let mut val: i32 = 10;
+        let _ = unsafe {
+            atomic_compare_exchange_weak(&mut val as *mut i32, 10, 20, Ordering::SeqCst, Ordering::SeqCst)
+        };
+    }
+
+    #[kani::proof]
+    fn verify_atomic_and() {
+        let mut val: i32 = 0b1111;
+        let old = unsafe { atomic_and(&mut val as *mut i32, 0b1010i32, Ordering::SeqCst) };
+        assert!(old == 0b1111);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_nand() {
+        let mut val: i32 = 0b1111;
+        let old = unsafe { atomic_nand(&mut val as *mut i32, 0b1010i32, Ordering::SeqCst) };
+        assert!(old == 0b1111);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_or() {
+        let mut val: i32 = 0b1010;
+        let old = unsafe { atomic_or(&mut val as *mut i32, 0b0101i32, Ordering::SeqCst) };
+        assert!(old == 0b1010);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_xor() {
+        let mut val: i32 = 0b1111;
+        let old = unsafe { atomic_xor(&mut val as *mut i32, 0b1010i32, Ordering::SeqCst) };
+        assert!(old == 0b1111);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_max() {
+        let mut val: i32 = 10;
+        let old = unsafe { atomic_max(&mut val as *mut i32, 20, Ordering::SeqCst) };
+        assert!(old == 10);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_umax() {
+        let mut val: u32 = 10;
+        let old = unsafe { atomic_umax(&mut val as *mut u32, 20, Ordering::SeqCst) };
+        assert!(old == 10);
+    }
+
+    #[kani::proof]
+    fn verify_atomic_umin() {
+        let mut val: u32 = 20;
+        let old = unsafe { atomic_umin(&mut val as *mut u32, 10, Ordering::SeqCst) };
+        assert!(old == 20);
     }
 }
