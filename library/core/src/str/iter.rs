@@ -1619,162 +1619,184 @@ escape_types_impls!(EscapeDebug, EscapeDefault, EscapeUnicode);
 mod verify {
     use super::*;
 
-    // --- Chars ---
+    const MAX_LEN: usize = 4;
+
+    /// Create a symbolic valid UTF-8 string of symbolic length.
+    /// Kani explores ALL valid UTF-8 byte patterns exhaustively.
+    fn any_str(bytes: &[u8; MAX_LEN]) -> &str {
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_LEN);
+        kani::assume(crate::str::from_utf8(&bytes[..len]).is_ok());
+        unsafe { crate::str::from_utf8_unchecked(&bytes[..len]) }
+    }
+
+    // --- Chars (loop-free: next, next_back, as_str are wrappers) ---
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_chars_next() {
-        let s = "hello";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut chars = s.chars();
-        let c = chars.next();
-        assert!(c == Some('h'));
+        let _ = chars.next();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
-    fn verify_chars_advance_by() {
-        let s = "hello";
-        let mut chars = s.chars();
-        let r = chars.advance_by(2);
-        assert!(r.is_ok());
-        assert!(chars.next() == Some('l'));
-    }
-
-    #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_chars_next_back() {
-        let s = "hello";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut chars = s.chars();
-        let c = chars.next_back();
-        assert!(c == Some('o'));
+        let _ = chars.next_back();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_chars_as_str() {
-        let s = "hello";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut chars = s.chars();
-        chars.next();
-        let rest = chars.as_str();
-        assert!(rest.len() == 4);
+        let _ = chars.next();
+        let _ = chars.as_str();
     }
 
-    // --- SplitInternal (tested via str::split) ---
+    #[kani::proof]
+    #[kani::unwind(20)]
+    fn verify_chars_advance_by() {
+        let bytes: [u8; 4] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 4);
+        kani::assume(crate::str::from_utf8(&bytes[..len]).is_ok());
+        let s = unsafe { crate::str::from_utf8_unchecked(&bytes[..len]) };
+        let n: usize = kani::any();
+        kani::assume(n <= 4);
+        let mut chars = s.chars();
+        let _ = chars.advance_by(n);
+    }
+
+    // --- SplitInternal: symbolic string, concrete pattern ---
+    // Pattern correctness assumed per spec assumption #2
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_split_internal_get_end() {
-        let s = "a,b";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut split = s.split(',');
         let _ = split.next();
         let _ = split.next();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_split_internal_next() {
-        let s = "a,b,c";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut split = s.split(',');
-        let first = split.next();
-        assert!(first == Some("a"));
+        let _ = split.next();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_split_internal_next_inclusive() {
-        let s = "a,b,c";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut split = s.split_inclusive(',');
-        let first = split.next();
-        assert!(first == Some("a,"));
+        let _ = split.next();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_split_internal_next_match_back() {
-        let s = "a,b,c";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut rsplit = s.rsplit(',');
-        let last = rsplit.next();
-        assert!(last == Some("c"));
+        let _ = rsplit.next();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_split_internal_next_back_inclusive() {
-        let s = "a,b,c";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut split = s.split_inclusive(',');
-        let last = split.next_back();
-        assert!(last == Some("c"));
+        let _ = split.next_back();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_split_internal_remainder() {
-        let s = "a,b,c";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut split = s.split(',');
-        split.next();
-        let rest = split.remainder();
-        assert!(rest == Some("b,c"));
+        let _ = split.next();
+        let _ = split.remainder();
     }
 
-    // --- MatchIndicesInternal ---
+    // --- MatchIndicesInternal: symbolic string ---
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_match_indices_next() {
-        let s = "abab";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut mi = s.match_indices('a');
-        let first = mi.next();
-        assert!(first == Some((0, "a")));
+        let _ = mi.next();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_match_indices_next_back() {
-        let s = "abab";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut mi = s.match_indices('a');
-        let last = mi.next_back();
-        assert!(last == Some((2, "a")));
+        let _ = mi.next_back();
     }
 
-    // --- MatchesInternal ---
+    // --- MatchesInternal: symbolic string ---
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_matches_next() {
-        let s = "abab";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut m = s.matches('a');
-        let first = m.next();
-        assert!(first == Some("a"));
+        let _ = m.next();
     }
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_matches_next_back() {
-        let s = "abab";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut m = s.matches('a');
-        let last = m.next_back();
-        assert!(last == Some("a"));
+        let _ = m.next_back();
     }
 
-    // --- SplitAsciiWhitespace ---
+    // --- SplitAsciiWhitespace: symbolic string ---
 
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(10)]
     fn verify_split_ascii_whitespace_remainder() {
-        let s = "a b c";
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
         let mut split = s.split_ascii_whitespace();
-        split.next();
-        let rest = split.remainder();
-        assert!(rest == Some("b c"));
+        let _ = split.next();
+        let _ = split.remainder();
     }
 
-    // --- __iterator_get_unchecked (Bytes) ---
+    // --- __iterator_get_unchecked: symbolic ---
 
     #[kani::proof]
+    #[kani::unwind(10)]
     fn verify_iterator_get_unchecked() {
-        let s = "hello";
-        let mut bytes = s.bytes();
-        let val = unsafe { bytes.__iterator_get_unchecked(0) };
-        assert!(val == b'h');
+        let bytes: [u8; MAX_LEN] = kani::any();
+        let s = any_str(&bytes);
+        kani::assume(s.len() > 0);
+        let idx: usize = kani::any();
+        kani::assume(idx < s.len());
+        let mut b = s.bytes();
+        let val = unsafe { b.__iterator_get_unchecked(idx) };
+        let _ = val;
     }
 }
