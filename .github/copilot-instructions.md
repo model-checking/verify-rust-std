@@ -12,7 +12,7 @@ Only these tools are accepted: **Kani**, **VeriFast**, **Flux**, and **ESBMC (GO
 
 ## General Rules (All PRs)
 
-- The contribution must be automated and pass as part of PR CI checks.
+- The contribution must be automated and pass as part of PR CI checks. Contributors should maintain the proofs and provide support thoughtout the lifetime of the contest (i.e. keeping it up-to-date with infrastructure changes in the contest).
 - Changes must not alter the runtime logic of the standard library unless the change is proposed and incorporated upstream into the official Rust standard library.
 - All contributors must be properly credited. By submitting, contributors confirm they can use, modify, copy, and redistribute their contribution.
 - PRs should reference the relevant tracking issue (e.g., `Resolves #ISSUE-NUMBER`).
