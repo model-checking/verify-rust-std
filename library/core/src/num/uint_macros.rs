@@ -2078,6 +2078,7 @@ macro_rules! uint_impl {
             let mut base = self;
             let mut acc: Self = 1;
 
+            // Note: self == 0 branch is unreachable when called from NonZero context
             #[safety::loop_invariant(self == 0 || (acc > 0 && base > 0))]
             loop {
                 if (exp & 1) == 1 {

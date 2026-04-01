@@ -3038,7 +3038,7 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 let y: $nonzero_type = kani::any();
                 let result = x | y;
-                let _ = result.get();
+                assert!(result.get() == (x.get() | y.get()));
             }
         };
     }
@@ -3064,7 +3064,7 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 let y: $t = kani::any();
                 let result = x | y;
-                let _ = result.get();
+                assert!(result.get() == (x.get() | y));
             }
         };
     }
@@ -3090,7 +3090,7 @@ mod verify {
                 let x: $t = kani::any();
                 let y: $nonzero_type = kani::any();
                 let result = x | y;
-                let _ = result.get();
+                assert!(result.get() == (x | y.get()));
             }
         };
     }
@@ -3192,7 +3192,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.swap_bytes();
-                let _ = result.get();
+                assert!(result.swap_bytes() == x);
             }
         };
     }
@@ -3217,7 +3217,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.reverse_bits();
-                let _ = result.get();
+                assert!(result.reverse_bits() == x);
             }
         };
     }
@@ -3241,8 +3241,7 @@ mod verify {
             #[kani::proof]
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
-                let result = <$nonzero_type>::from_be(x);
-                let _ = result.get();
+                assert!(<$nonzero_type>::from_be(x.to_be()) == x);
             }
         };
     }
@@ -3266,8 +3265,7 @@ mod verify {
             #[kani::proof]
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
-                let result = <$nonzero_type>::from_le(x);
-                let _ = result.get();
+                assert!(<$nonzero_type>::from_le(x.to_le()) == x);
             }
         };
     }
@@ -3292,7 +3290,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.to_be();
-                let _ = result.get();
+                assert!(<$nonzero_type>::from_be(result) == x);
             }
         };
     }
@@ -3317,7 +3315,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.to_le();
-                let _ = result.get();
+                assert!(<$nonzero_type>::from_le(result) == x);
             }
         };
     }
@@ -3347,9 +3345,7 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 let y: $nonzero_type = kani::any();
                 let result = x.checked_mul(y);
-                if let Some(nz) = result {
-                    let _ = nz.get();
-                }
+                assert!(result.map(|r| r.get()) == x.get().checked_mul(y.get()));
             }
         };
     }
@@ -3375,7 +3371,7 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 let y: $nonzero_type = kani::any();
                 let result = x.saturating_mul(y);
-                let _ = result.get();
+                assert!(result.get() == x.get().saturating_mul(y.get()));
             }
         };
     }
@@ -3397,13 +3393,13 @@ mod verify {
     macro_rules! nonzero_check_checked_pow {
         ($nonzero_type:ty, $harness_name:ident) => {
             #[kani::proof]
+            // Max 128 iterations for u128 exponentiation loop + 1
+            #[kani::unwind(129)]
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let exp: u32 = kani::any();
                 let result = x.checked_pow(exp);
-                if let Some(nz) = result {
-                    let _ = nz.get();
-                }
+                assert!(result.map(|r| r.get()) == x.get().checked_pow(exp));
             }
         };
     }
@@ -3425,11 +3421,12 @@ mod verify {
     macro_rules! nonzero_check_saturating_pow {
         ($nonzero_type:ty, $harness_name:ident) => {
             #[kani::proof]
+            #[kani::unwind(129)]
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let exp: u32 = kani::any();
                 let result = x.saturating_pow(exp);
-                let _ = result.get();
+                assert!(result.get() == x.get().saturating_pow(exp));
             }
         };
     }
@@ -3455,9 +3452,7 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 let y: $t = kani::any();
                 let result = x.checked_add(y);
-                if let Some(nz) = result {
-                    let _ = nz.get();
-                }
+                assert!(result.map(|r| r.get()) == x.get().checked_add(y));
             }
         };
     }
@@ -3477,7 +3472,7 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 let y: $t = kani::any();
                 let result = x.saturating_add(y);
-                let _ = result.get();
+                assert!(result.get() == x.get().saturating_add(y));
             }
         };
     }
@@ -3504,9 +3499,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.checked_next_power_of_two();
-                if let Some(nz) = result {
-                    let _ = nz.get();
-                }
+                assert!(result.map(|r| r.get()) == x.get().checked_next_power_of_two());
             }
         };
     }
@@ -3544,7 +3537,11 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 let y: $nonzero_type = kani::any();
                 let result = x.midpoint(y);
-                let _ = result.get();
+                let r = result.get();
+                let xv = x.get();
+                let yv = y.get();
+                let (lo, hi) = if xv <= yv { (xv, yv) } else { (yv, xv) };
+                assert!(r >= lo && r <= hi);
             }
         };
     }
@@ -3560,11 +3557,14 @@ mod verify {
     macro_rules! nonzero_check_isqrt {
         ($nonzero_type:ty, $harness_name:ident) => {
             #[kani::proof]
+            // 64 iterations max for u128 isqrt loop + 1 for exit check
             #[kani::unwind(65)]
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.isqrt();
-                let _ = result.get();
+                let r = result.get();
+                let xv = x.get();
+                assert!(r.checked_mul(r).map_or(true, |sq| sq <= xv));
             }
         };
     }
@@ -3647,7 +3647,7 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 kani::assume(x.get() != <$t>::MIN);
                 let result = x.abs();
-                let _ = result.get();
+                assert!(result.get() == x.get().abs());
             }
         };
     }
@@ -3666,9 +3666,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.checked_abs();
-                if let Some(nz) = result {
-                    let _ = nz.get();
-                }
+                assert!(result.map(|r| r.get()) == x.get().checked_abs());
             }
         };
     }
@@ -3687,8 +3685,8 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let (result, overflowed) = x.overflowing_abs();
-                let _ = result.get();
-                let _ = overflowed;
+                assert!(result.get() == x.get().wrapping_abs());
+                assert!(overflowed == (x.get() == x.get().wrapping_neg() && x.get() < 0));
             }
         };
     }
@@ -3710,7 +3708,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.saturating_abs();
-                let _ = result.get();
+                assert!(result.get() == x.get().saturating_abs());
             }
         };
     }
@@ -3729,7 +3727,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.wrapping_abs();
-                let _ = result.get();
+                assert!(result.get() == x.get().wrapping_abs());
             }
         };
     }
@@ -3748,7 +3746,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result: $unsigned_nonzero_type = x.unsigned_abs();
-                let _ = result.get();
+                assert!(result.get() == x.get().unsigned_abs());
             }
         };
     }
@@ -3794,7 +3792,7 @@ mod verify {
                 let x: $nonzero_type = kani::any();
                 kani::assume(x.get() != <$t>::MIN);
                 let result = -x;
-                let _ = result.get();
+                assert!(result.get() == -x.get());
             }
         };
     }
@@ -3813,9 +3811,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.checked_neg();
-                if let Some(nz) = result {
-                    let _ = nz.get();
-                }
+                assert!(result.map(|r| r.get()) == x.get().checked_neg());
             }
         };
     }
@@ -3834,8 +3830,9 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let (result, overflowed) = x.overflowing_neg();
-                let _ = result.get();
-                let _ = overflowed;
+                assert!(result.get() == x.get().wrapping_neg());
+                let (_, expected_overflow) = x.get().overflowing_neg();
+                assert!(overflowed == expected_overflow);
             }
         };
     }
@@ -3857,7 +3854,7 @@ mod verify {
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let result = x.wrapping_neg();
-                let _ = result.get();
+                assert!(result.get() == x.get().wrapping_neg());
             }
         };
     }
