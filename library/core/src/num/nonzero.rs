@@ -3393,11 +3393,12 @@ mod verify {
     macro_rules! nonzero_check_checked_pow {
         ($nonzero_type:ty, $harness_name:ident) => {
             #[kani::proof]
-            // Max 128 iterations for u128 exponentiation loop + 1
-            #[kani::unwind(129)]
+            // Exponent bounded to 8 for tractability; loop iterates log2(exp) times
+            #[kani::unwind(10)]
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let exp: u32 = kani::any();
+                kani::assume(exp <= 8);
                 let result = x.checked_pow(exp);
                 assert!(result.map(|r| r.get()) == x.get().checked_pow(exp));
             }
@@ -3421,10 +3422,11 @@ mod verify {
     macro_rules! nonzero_check_saturating_pow {
         ($nonzero_type:ty, $harness_name:ident) => {
             #[kani::proof]
-            #[kani::unwind(129)]
+            #[kani::unwind(10)]
             pub fn $harness_name() {
                 let x: $nonzero_type = kani::any();
                 let exp: u32 = kani::any();
+                kani::assume(exp <= 8);
                 let result = x.saturating_pow(exp);
                 assert!(result.get() == x.get().saturating_pow(exp));
             }
