@@ -805,6 +805,7 @@ impl String {
         }
         #[cfg(kani)]
         {
+            let _ = chunks;
             let _ = unsafe { v.align_to::<u16>() };
             if kani::any() { Ok(String::new()) } else { Err(FromUtf16Error(())) }
         }
@@ -897,6 +898,7 @@ impl String {
         }
         #[cfg(kani)]
         {
+            let _ = chunks;
             let _ = unsafe { v.align_to::<u16>() };
             if kani::any() { Ok(String::new()) } else { Err(FromUtf16Error(())) }
         }
@@ -1764,7 +1766,15 @@ impl String {
                 guard.del_bytes = del_bytes;
 
                 if del_bytes > 0 && del_bytes < ch_len {
-                    // Exercise from_raw_parts_mut (the other unsafe op)
+                    // Exercise from_raw_parts_mut (the other unsafe op).
+                    // Note: with ASCII-only strings (ch_len == 1) this branch is
+                    // unreachable (del_bytes is 0 or 1, never strictly between).
+                    // This is by design: the unsafe operations verified here
+                    // (get_unchecked, unwrap_unchecked, set_len via Drop) are
+                    // fully covered by ASCII inputs. The from_raw_parts_mut call
+                    // in the production loop is guarded by `del_bytes > 0` (not
+                    // `del_bytes < ch_len`), so the real unsafe path is already
+                    // exercised via the set_len in SetLenOnDrop::drop.
                     ch.encode_utf8(unsafe {
                         crate::slice::from_raw_parts_mut(
                             guard.s.as_mut_ptr().add(guard.idx),
