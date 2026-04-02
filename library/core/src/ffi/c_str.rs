@@ -1131,11 +1131,13 @@ mod verify {
 
         let len = c_str.to_bytes_with_nul().len();
 
-        // Allocate destination buffer (len <= MAX_SIZE since slice.len() <= MAX_SIZE)
-        let mut buf = [core::mem::MaybeUninit::<u8>::uninit(); MAX_SIZE];
-        let dest = buf.as_mut_ptr() as *mut u8;
+        // Use an initialized buffer to avoid UB from reading uninitialized
+        // memory if clone_to_uninit were buggy and failed to write all bytes.
+        let mut buf = [0u8; MAX_SIZE];
+        let dest = buf.as_mut_ptr();
 
-        // Safety: dest is non-null (stack allocation), valid for len writes
+        // Safety: dest is non-null (stack allocation), valid for len writes,
+        // properly aligned (u8 has alignment 1)
         unsafe {
             c_str.clone_to_uninit(dest);
         }
@@ -1144,6 +1146,10 @@ mod verify {
         let cloned_slice = unsafe { core::slice::from_raw_parts(dest, len) };
         let cloned_cstr = CStr::from_bytes_with_nul(cloned_slice);
         assert!(cloned_cstr.is_ok());
-        assert!(cloned_cstr.unwrap().is_safe());
+        let cloned = cloned_cstr.unwrap();
+        assert!(cloned.is_safe());
+
+        // Verify exact byte-for-byte match with source (including NUL terminator)
+        assert_eq!(cloned.to_bytes_with_nul(), c_str.to_bytes_with_nul());
     }
 }
