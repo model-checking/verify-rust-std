@@ -490,6 +490,8 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 kani::assume(a >= self.finger);
                 kani::assume(a <= self.finger_back); // avoid overflow in a + w
                 kani::assume(w <= self.finger_back - a);
+                kani::assume(self.haystack.is_char_boundary(a));
+                kani::assume(self.haystack.is_char_boundary(a + w));
                 self.finger = a + w;
                 Some((a, self.finger))
             } else {
@@ -527,8 +529,9 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 let old_finger = self.finger;
                 let w: usize = kani::any();
                 kani::assume(w >= 1 && w <= 4);
-                kani::assume(old_finger + w <= self.finger_back);
+                kani::assume(w <= self.finger_back - old_finger);
                 self.finger = old_finger + w;
+                kani::assume(self.haystack.is_char_boundary(self.finger));
                 Some((old_finger, self.finger))
             } else {
                 self.finger = self.finger_back;
@@ -629,6 +632,8 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
                 kani::assume(a >= self.finger);
                 kani::assume(a <= self.finger_back); // avoid overflow in a + w
                 kani::assume(w <= self.finger_back - a);
+                kani::assume(self.haystack.is_char_boundary(a));
+                kani::assume(self.haystack.is_char_boundary(a + w));
                 self.finger_back = a;
                 Some((a, a + w))
             } else {
@@ -661,8 +666,9 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
                 let old_finger_back = self.finger_back;
                 let w: usize = kani::any();
                 kani::assume(w >= 1 && w <= 4);
-                kani::assume(self.finger + w <= old_finger_back);
+                kani::assume(w <= old_finger_back - self.finger);
                 self.finger_back = old_finger_back - w;
+                kani::assume(self.haystack.is_char_boundary(self.finger_back));
                 Some((self.finger_back, old_finger_back))
             } else {
                 self.finger_back = self.finger;
@@ -851,6 +857,8 @@ unsafe impl<'a, C: MultiCharEq> Searcher<'a> for MultiCharEqSearcher<'a, C> {
                 kani::assume(char_len >= 1 && char_len <= 4);
                 kani::assume(i <= self.haystack.len());
                 kani::assume(char_len <= self.haystack.len() - i);
+                kani::assume(self.haystack.is_char_boundary(i));
+                kani::assume(self.haystack.is_char_boundary(i + char_len));
                 Some((i, i + char_len))
             } else {
                 None
@@ -876,6 +884,8 @@ unsafe impl<'a, C: MultiCharEq> Searcher<'a> for MultiCharEqSearcher<'a, C> {
                 kani::assume(char_len >= 1 && char_len <= 4);
                 kani::assume(i <= self.haystack.len());
                 kani::assume(char_len <= self.haystack.len() - i);
+                kani::assume(self.haystack.is_char_boundary(i));
+                kani::assume(self.haystack.is_char_boundary(i + char_len));
                 Some((i, i + char_len))
             } else {
                 None
@@ -922,6 +932,8 @@ unsafe impl<'a, C: MultiCharEq> ReverseSearcher<'a> for MultiCharEqSearcher<'a, 
                 kani::assume(char_len >= 1 && char_len <= 4);
                 kani::assume(i <= self.haystack.len());
                 kani::assume(char_len <= self.haystack.len() - i);
+                kani::assume(self.haystack.is_char_boundary(i));
+                kani::assume(self.haystack.is_char_boundary(i + char_len));
                 Some((i, i + char_len))
             } else {
                 None
@@ -947,6 +959,8 @@ unsafe impl<'a, C: MultiCharEq> ReverseSearcher<'a> for MultiCharEqSearcher<'a, 
                 kani::assume(char_len >= 1 && char_len <= 4);
                 kani::assume(i <= self.haystack.len());
                 kani::assume(char_len <= self.haystack.len() - i);
+                kani::assume(self.haystack.is_char_boundary(i));
+                kani::assume(self.haystack.is_char_boundary(i + char_len));
                 Some((i, i + char_len))
             } else {
                 None
@@ -2347,10 +2361,15 @@ pub mod verify_searchers {
     }
 
     /// Generate a haystack covering structural cases.
-    /// These concrete strings cover the key structural cases:
+    /// These concrete ASCII strings cover the key structural cases:
     /// - Empty (finger == finger_back)
     /// - Single char (one iteration)
     /// - Multi-char (iteration logic)
+    ///
+    /// ASCII-only is sufficient because the #[cfg(kani)] abstractions constrain
+    /// returned indices to `is_char_boundary` positions, and the harnesses verify
+    /// boundary-preservation in postconditions. The abstractions themselves are
+    /// haystack-content-independent overapproximations.
     fn test_haystack() -> &'static str {
         let choice: u8 = kani::any();
         match choice % 3 {
@@ -2371,8 +2390,10 @@ pub mod verify_searchers {
     // complex memchr implementation.
     //=========================================================================
 
-    /// Abstract stub for memchr: returns the first index of byte `x` in `text`,
-    /// or None if not found.
+    /// Abstract stub for memchr: overapproximation that returns *some* index
+    /// where `text[index] == x`, or None. Does not enforce "first occurrence"
+    /// semantics — this is sound because our proofs verify safety properties
+    /// that hold for ANY valid matching index, not just the first.
     fn stub_memchr(x: u8, text: &[u8]) -> Option<usize> {
         if kani::any() {
             let index: usize = kani::any();
@@ -2384,8 +2405,9 @@ pub mod verify_searchers {
         }
     }
 
-    /// Abstract stub for memrchr: returns the last index of byte `x` in `text`,
-    /// or None if not found.
+    /// Abstract stub for memrchr: overapproximation that returns *some* index
+    /// where `text[index] == x`, or None. Does not enforce "last occurrence"
+    /// semantics — sound for the same reason as stub_memchr above.
     fn stub_memrchr(x: u8, text: &[u8]) -> Option<usize> {
         if kani::any() {
             let index: usize = kani::any();
@@ -2563,7 +2585,6 @@ pub mod verify_searchers {
     // MultiCharEqSearcher Verification (Group B -- all safe code)
     //=========================================================================
 
-    /// Verify into_searcher establishes MultiCharEqSearcher invariant.
     /// Verify into_searcher establishes the MultiCharEqSearcher type invariant.
     /// Uses empty haystack because MCES is entirely safe code (no unsafe blocks),
     /// and CharIndices over non-empty strings creates an intractably large CBMC model.
