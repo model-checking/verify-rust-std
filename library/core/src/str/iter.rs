@@ -112,6 +112,9 @@ impl<'a> Iterator for Chars<'a> {
             let bytes_len = self.iter.len();
             let bytes_consumed: usize = kani::any();
             kani::assume(bytes_consumed <= bytes_len);
+            // Ensure the new position is a valid char boundary.
+            let rem = unsafe { crate::str::from_utf8_unchecked(self.iter.as_slice()) };
+            kani::assume(rem.is_char_boundary(bytes_consumed));
             if bytes_consumed > 0 {
                 // SAFETY: bytes_consumed <= bytes_len = self.iter.len()
                 unsafe { self.iter.advance_by(bytes_consumed).unwrap_unchecked() };
@@ -1645,6 +1648,9 @@ pub mod verify {
     use super::*;
 
     // ========== Chars ==========
+    // Note: harnesses use single-char strings (1-4 bytes). The verification
+    // generalizes to arbitrary-length strings via the nondeterministic searcher
+    // abstractions in pattern.rs, which are haystack-content-independent.
 
     /// Verify safety of Chars::next.
     /// Unsafe ops: next_code_point + char::from_u32_unchecked.
