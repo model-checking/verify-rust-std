@@ -490,6 +490,8 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 kani::assume(a >= self.finger);
                 kani::assume(a <= self.finger_back); // avoid overflow in a + w
                 kani::assume(w <= self.finger_back - a);
+                kani::assume(self.haystack.is_char_boundary(a));
+                kani::assume(self.haystack.is_char_boundary(a + w));
                 self.finger = a + w;
                 Some((a, self.finger))
             } else {
@@ -527,8 +529,9 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 let old_finger = self.finger;
                 let w: usize = kani::any();
                 kani::assume(w >= 1 && w <= 4);
-                kani::assume(old_finger + w <= self.finger_back);
+                kani::assume(w <= self.finger_back - old_finger);
                 self.finger = old_finger + w;
+                kani::assume(self.haystack.is_char_boundary(self.finger));
                 Some((old_finger, self.finger))
             } else {
                 self.finger = self.finger_back;
@@ -629,6 +632,8 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
                 kani::assume(a >= self.finger);
                 kani::assume(a <= self.finger_back); // avoid overflow in a + w
                 kani::assume(w <= self.finger_back - a);
+                kani::assume(self.haystack.is_char_boundary(a));
+                kani::assume(self.haystack.is_char_boundary(a + w));
                 self.finger_back = a;
                 Some((a, a + w))
             } else {
@@ -661,8 +666,9 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
                 let old_finger_back = self.finger_back;
                 let w: usize = kani::any();
                 kani::assume(w >= 1 && w <= 4);
-                kani::assume(self.finger + w <= old_finger_back);
+                kani::assume(w <= old_finger_back - self.finger);
                 self.finger_back = old_finger_back - w;
+                kani::assume(self.haystack.is_char_boundary(self.finger_back));
                 Some((self.finger_back, old_finger_back))
             } else {
                 self.finger_back = self.finger;
@@ -851,6 +857,8 @@ unsafe impl<'a, C: MultiCharEq> Searcher<'a> for MultiCharEqSearcher<'a, C> {
                 kani::assume(char_len >= 1 && char_len <= 4);
                 kani::assume(i <= self.haystack.len());
                 kani::assume(char_len <= self.haystack.len() - i);
+                kani::assume(self.haystack.is_char_boundary(i));
+                kani::assume(self.haystack.is_char_boundary(i + char_len));
                 Some((i, i + char_len))
             } else {
                 None
@@ -876,6 +884,8 @@ unsafe impl<'a, C: MultiCharEq> Searcher<'a> for MultiCharEqSearcher<'a, C> {
                 kani::assume(char_len >= 1 && char_len <= 4);
                 kani::assume(i <= self.haystack.len());
                 kani::assume(char_len <= self.haystack.len() - i);
+                kani::assume(self.haystack.is_char_boundary(i));
+                kani::assume(self.haystack.is_char_boundary(i + char_len));
                 Some((i, i + char_len))
             } else {
                 None
@@ -922,6 +932,8 @@ unsafe impl<'a, C: MultiCharEq> ReverseSearcher<'a> for MultiCharEqSearcher<'a, 
                 kani::assume(char_len >= 1 && char_len <= 4);
                 kani::assume(i <= self.haystack.len());
                 kani::assume(char_len <= self.haystack.len() - i);
+                kani::assume(self.haystack.is_char_boundary(i));
+                kani::assume(self.haystack.is_char_boundary(i + char_len));
                 Some((i, i + char_len))
             } else {
                 None
@@ -947,6 +959,8 @@ unsafe impl<'a, C: MultiCharEq> ReverseSearcher<'a> for MultiCharEqSearcher<'a, 
                 kani::assume(char_len >= 1 && char_len <= 4);
                 kani::assume(i <= self.haystack.len());
                 kani::assume(char_len <= self.haystack.len() - i);
+                kani::assume(self.haystack.is_char_boundary(i));
+                kani::assume(self.haystack.is_char_boundary(i + char_len));
                 Some((i, i + char_len))
             } else {
                 None
@@ -3191,7 +3205,7 @@ pub mod verify_str_searcher {
     fn type_invariant_empty_needle(en: &EmptyNeedle, haystack: &str) -> bool {
         en.position <= haystack.len()
             && en.end <= haystack.len()
-            && en.position <= en.end + if en.is_finished { 0 } else { 0 }
+            && en.position <= en.end
             && haystack.is_char_boundary(en.position)
             && haystack.is_char_boundary(en.end)
     }
