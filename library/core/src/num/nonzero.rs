@@ -3667,6 +3667,24 @@ mod verify {
     nonzero_check_isqrt!(core::num::NonZeroU8, nonzero_check_isqrt_u8);
     nonzero_check_isqrt!(core::num::NonZeroU16, nonzero_check_isqrt_u16);
     nonzero_check_isqrt!(core::num::NonZeroU32, nonzero_check_isqrt_u32);
+    nonzero_check_isqrt!(core::num::NonZeroU64, nonzero_check_isqrt_u64);
+    nonzero_check_isqrt!(core::num::NonZeroUsize, nonzero_check_isqrt_usize);
+
+    // 128-bit isqrt uses checked_mul to avoid potential CBMC overflow
+    // concerns: while isqrt(u128::MAX)^2 fits in u128 mathematically,
+    // CBMC's bitvector encoding may not prove this without help.
+    #[kani::proof]
+    pub fn nonzero_check_isqrt_u128() {
+        let x: core::num::NonZeroU128 = kani::any();
+        let result = x.isqrt();
+        assert!(result.get() != 0);
+        let r = result.get();
+        let v = x.get();
+        match r.checked_mul(r) {
+            Some(r_sq) => assert!(r_sq <= v),
+            None => panic!("isqrt result squared overflowed u128"),
+        }
+    }
 
     // --- Signed-only operations: neg, abs family, checked_neg family ---
 
