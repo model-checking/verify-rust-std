@@ -9436,6 +9436,7 @@ mod verify_1065 {
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_u64, u64);
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_u128, u128);
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_unit, ());
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_bool, bool);
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_string, String);
     gen_new_uninit_slice_harness!(harness_new_uninit_slice_array_u8_arr, [u8; 4]);
 }
@@ -9466,6 +9467,7 @@ mod verify_1090 {
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u64, u64);
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u128, u128);
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_unit, ());
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_bool, bool);
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_string, String);
     gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_array_u8_4, [u8; 4]);
 }
@@ -9475,498 +9477,183 @@ mod verify_1111 {
     use super::*;
     use crate::rc::kani_rc_harness_helpers::*;
 
-    struct DropSentinel(u8);
-
-    impl Drop for DropSentinel {
-        fn drop(&mut self) {}
-    }
-
     fn exercise_into_array<const N: usize, T>(rc: Rc<[T]>) {
         let _: Option<Rc<[T; N]>> = rc.into_array::<N>();
     }
 
-    #[kani::proof]
-    pub fn harness_into_array_i32_n0_some_len_eq_n() {
-        // let rc: Rc<[i32]> = Rc::from([]);
-        // exercise_into_array::<0, i32>(rc);
-        type T = u8;
-        let vec = verifier_nondet_vec_rc::<T>();
-        let slice = Rc::from(vec);
+    macro_rules! gen_into_array_nondet_vec_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                type T = $ty;
+                let vec = verifier_nondet_vec_rc::<T>();
+                let slice = Rc::from(vec);
 
-        const N: usize = 100;
-        exercise_into_array::<N, T>(slice);
+                const N: usize = 100;
+                exercise_into_array::<N, T>(slice);
+            }
+        };
     }
 
-    #[kani::proof]
-    pub fn harness_into_array_i32_n0_none_len_ne_n() {
-        let rc: Rc<[i32]> = Rc::from([kani::any::<i32>()]);
-        exercise_into_array::<0, i32>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_i32_n1_some_len_eq_n() {
-        let rc: Rc<[i32]> = Rc::from([kani::any::<i32>()]);
-        exercise_into_array::<1, i32>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_i32_n1_none_len_ne_n() {
-        let rc: Rc<[i32]> = Rc::from([]);
-        exercise_into_array::<1, i32>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_i32_n3_some_len_eq_n() {
-        let rc: Rc<[i32]> = Rc::from([kani::any::<i32>(), kani::any::<i32>(), kani::any::<i32>()]);
-        exercise_into_array::<3, i32>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_i32_n3_none_len_ne_n() {
-        let rc: Rc<[i32]> = Rc::from([kani::any::<i32>()]);
-        exercise_into_array::<3, i32>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_unit_n0_some_len_eq_n() {
-        let rc: Rc<[()]> = Rc::from([]);
-        exercise_into_array::<0, ()>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_unit_n0_none_len_ne_n() {
-        let rc: Rc<[()]> = Rc::from([()]);
-        exercise_into_array::<0, ()>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_unit_n1_some_len_eq_n() {
-        let rc: Rc<[()]> = Rc::from([()]);
-        exercise_into_array::<1, ()>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_unit_n1_none_len_ne_n() {
-        let rc: Rc<[()]> = Rc::from([]);
-        exercise_into_array::<1, ()>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_unit_n3_some_len_eq_n() {
-        let rc: Rc<[()]> = Rc::from([(), (), ()]);
-        exercise_into_array::<3, ()>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_unit_n3_none_len_ne_n() {
-        let rc: Rc<[()]> = Rc::from([()]);
-        exercise_into_array::<3, ()>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_string_n0_some_len_eq_n() {
-        let rc: Rc<[String]> = Rc::from([]);
-        exercise_into_array::<0, String>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_string_n0_none_len_ne_n() {
-        let rc: Rc<[String]> = Rc::from([String::new()]);
-        exercise_into_array::<0, String>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_string_n1_some_len_eq_n() {
-        let rc: Rc<[String]> = Rc::from([String::new()]);
-        exercise_into_array::<1, String>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_string_n1_none_len_ne_n() {
-        let rc: Rc<[String]> = Rc::from([]);
-        exercise_into_array::<1, String>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_string_n3_some_len_eq_n() {
-        let rc: Rc<[String]> = Rc::from([String::new(), String::new(), String::new()]);
-        exercise_into_array::<3, String>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_string_n3_none_len_ne_n() {
-        let rc: Rc<[String]> = Rc::from([String::new()]);
-        exercise_into_array::<3, String>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_array_u8_3_n0_some_len_eq_n() {
-        let rc: Rc<[[u8; 3]]> = Rc::from([]);
-        exercise_into_array::<0, [u8; 3]>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_array_u8_3_n0_none_len_ne_n() {
-        let rc: Rc<[[u8; 3]]> = Rc::from([kani::any::<[u8; 3]>()]);
-        exercise_into_array::<0, [u8; 3]>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_array_u8_3_n1_some_len_eq_n() {
-        let rc: Rc<[[u8; 3]]> = Rc::from([kani::any::<[u8; 3]>()]);
-        exercise_into_array::<1, [u8; 3]>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_array_u8_3_n1_none_len_ne_n() {
-        let rc: Rc<[[u8; 3]]> = Rc::from([]);
-        exercise_into_array::<1, [u8; 3]>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_array_u8_3_n3_some_len_eq_n() {
-        let rc: Rc<[[u8; 3]]> = Rc::from([
-            kani::any::<[u8; 3]>(),
-            kani::any::<[u8; 3]>(),
-            kani::any::<[u8; 3]>(),
-        ]);
-        exercise_into_array::<3, [u8; 3]>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_array_u8_3_n3_none_len_ne_n() {
-        let rc: Rc<[[u8; 3]]> = Rc::from([kani::any::<[u8; 3]>()]);
-        exercise_into_array::<3, [u8; 3]>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_u8_n0_some_len_eq_n() {
-        let rc: Rc<[u8]> = Rc::from([]);
-        exercise_into_array::<0, u8>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_u8_n0_none_len_ne_n() {
-        let rc: Rc<[u8]> = Rc::from([kani::any::<u8>()]);
-        exercise_into_array::<0, u8>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_u8_n1_some_len_eq_n() {
-        let rc: Rc<[u8]> = Rc::from([kani::any::<u8>()]);
-        exercise_into_array::<1, u8>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_u8_n1_none_len_ne_n() {
-        let rc: Rc<[u8]> = Rc::from([]);
-        exercise_into_array::<1, u8>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_u8_n3_some_len_eq_n() {
-        let rc: Rc<[u8]> = Rc::from([kani::any::<u8>(), kani::any::<u8>(), kani::any::<u8>()]);
-        exercise_into_array::<3, u8>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_u8_n3_none_len_ne_n() {
-        let rc: Rc<[u8]> = Rc::from([kani::any::<u8>()]);
-        exercise_into_array::<3, u8>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_drop_sentinel_n0_some_len_eq_n() {
-        let rc: Rc<[DropSentinel]> = Rc::from([]);
-        exercise_into_array::<0, DropSentinel>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_drop_sentinel_n0_none_len_ne_n() {
-        let rc: Rc<[DropSentinel]> = Rc::from([DropSentinel(kani::any::<u8>())]);
-        exercise_into_array::<0, DropSentinel>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_drop_sentinel_n1_some_len_eq_n() {
-        let rc: Rc<[DropSentinel]> = Rc::from([DropSentinel(kani::any::<u8>())]);
-        exercise_into_array::<1, DropSentinel>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_drop_sentinel_n1_none_len_ne_n() {
-        let rc: Rc<[DropSentinel]> = Rc::from([]);
-        exercise_into_array::<1, DropSentinel>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_drop_sentinel_n3_some_len_eq_n() {
-        let rc: Rc<[DropSentinel]> = Rc::from([
-            DropSentinel(kani::any::<u8>()),
-            DropSentinel(kani::any::<u8>()),
-            DropSentinel(kani::any::<u8>()),
-        ]);
-        exercise_into_array::<3, DropSentinel>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_drop_sentinel_n3_none_len_ne_n() {
-        let rc: Rc<[DropSentinel]> = Rc::from([DropSentinel(kani::any::<u8>())]);
-        exercise_into_array::<3, DropSentinel>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_nested_rc_i32_n0_some_len_eq_n() {
-        let rc: Rc<[Rc<i32>]> = Rc::from([]);
-        exercise_into_array::<0, Rc<i32>>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_nested_rc_i32_n0_none_len_ne_n() {
-        let rc: Rc<[Rc<i32>]> = Rc::from([Rc::new(kani::any::<i32>())]);
-        exercise_into_array::<0, Rc<i32>>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_nested_rc_i32_n1_some_len_eq_n() {
-        let rc: Rc<[Rc<i32>]> = Rc::from([Rc::new(kani::any::<i32>())]);
-        exercise_into_array::<1, Rc<i32>>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_nested_rc_i32_n1_none_len_ne_n() {
-        let rc: Rc<[Rc<i32>]> = Rc::from([]);
-        exercise_into_array::<1, Rc<i32>>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_nested_rc_i32_n3_some_len_eq_n() {
-        let rc: Rc<[Rc<i32>]> = Rc::from([
-            Rc::new(kani::any::<i32>()),
-            Rc::new(kani::any::<i32>()),
-            Rc::new(kani::any::<i32>()),
-        ]);
-        exercise_into_array::<3, Rc<i32>>(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_into_array_nested_rc_i32_n3_none_len_ne_n() {
-        let rc: Rc<[Rc<i32>]> = Rc::from([Rc::new(kani::any::<i32>())]);
-        exercise_into_array::<3, Rc<i32>>(rc);
-    }
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_i8, i8);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_i16, i16);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_i32, i32);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_i64, i64);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_i128, i128);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_u8, u8);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_u16, u16);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_u32, u32);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_u64, u64);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_u128, u128);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_unit, ());
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_bool, bool);
+    gen_into_array_nondet_vec_harness!(harness_into_array_nondet_array_u8_4, [u8; 4]);
 }
 
 #[cfg(kani)]
 mod verify_657 {
     use super::*;
+    use crate::rc::kani_rc_harness_helpers::*;
 
-    struct DropSentinel(u8);
-
-    impl Drop for DropSentinel {
-        fn drop(&mut self) {}
+    macro_rules! gen_pin_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let _pinned = Rc::pin_in(value, Global);
+            }
+        };
     }
 
-    #[kani::proof]
-    pub fn harness_pin_u8() {
-        let value: u8 = kani::any();
-        let pinned = Rc::pin(value);
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_i32() {
-        let value: i32 = kani::any();
-        let pinned = Rc::pin(value);
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_u64() {
-        let value: u64 = kani::any();
-        let pinned = Rc::pin(value);
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_unit() {
-        let pinned = Rc::pin(());
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_string() {
-        let pinned = Rc::pin(String::from("test"));
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_drop_sentinel() {
-        let value = DropSentinel(kani::any());
-        let pinned = Rc::pin(value);
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_array_u8_3() {
-        let value: [u8; 3] = kani::any();
-        let pinned = Rc::pin(value);
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_bool() {
-        let value: bool = kani::any();
-        let pinned = Rc::pin(value);
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_tuple_i32_string() {
-        let value = (kani::any::<i32>(), String::from("test"));
-        let pinned = Rc::pin(value);
-        drop(pinned);
-    }
-
-    #[kani::proof]
-    pub fn harness_pin_option_i32() {
-        let value: Option<i32> = kani::any();
-        let pinned = Rc::pin(value);
-        drop(pinned);
-    }
+    gen_pin_in_harness!(harness_pin_in_i8, i8);
+    gen_pin_in_harness!(harness_pin_in_i16, i16);
+    gen_pin_in_harness!(harness_pin_in_i32, i32);
+    gen_pin_in_harness!(harness_pin_in_i64, i64);
+    gen_pin_in_harness!(harness_pin_in_i128, i128);
+    gen_pin_in_harness!(harness_pin_in_u8, u8);
+    gen_pin_in_harness!(harness_pin_in_u16, u16);
+    gen_pin_in_harness!(harness_pin_in_u32, u32);
+    gen_pin_in_harness!(harness_pin_in_u64, u64);
+    gen_pin_in_harness!(harness_pin_in_u128, u128);
+    gen_pin_in_harness!(harness_pin_in_unit, ());
+    gen_pin_in_harness!(harness_pin_in_bool, bool);
+    gen_pin_in_harness!(harness_pin_in_array_u8_4, [u8; 4]);
 }
 
 #[cfg(kani)]
 mod verify_1152 {
     use super::*;
+    use crate::rc::kani_rc_harness_helpers::*;
 
-    struct DropSentinel(u8);
-
-    impl Drop for DropSentinel {
-        fn drop(&mut self) {}
+    macro_rules! gen_new_uninit_slice_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                type T = $ty;
+                let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<T>(*l));
+                let _rc: Rc<[mem::MaybeUninit<T>]> = Rc::<[T]>::new_uninit_slice_in(len, Global);
+            }
+        };
     }
 
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_in_i32_single_path_global() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc = Rc::<[i32], Global>::new_uninit_slice_in(len, Global);
-        drop(rc);
-    }
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_i8, i8);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_i16, i16);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_i32, i32);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_i64, i64);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_i128, i128);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u8, u8);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u16, u16);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u32, u32);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u64, u64);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_u128, u128);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_unit, ());
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_bool, bool);
+    gen_new_uninit_slice_in_harness!(harness_new_uninit_slice_in_array_u8_4, [u8; 4]);
 
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_in_unit_single_path_global() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc = Rc::<[()], Global>::new_uninit_slice_in(len, Global);
-        drop(rc);
-    }
+    // #[kani::proof]
+    // pub fn harness_new_uninit_slice_in_i32_single_path_global() {
+    //     let len: usize = kani::any::<u8>() as usize;
+    //     let rc = Rc::<[i32], Global>::new_uninit_slice_in(len, Global);
+    //     drop(rc);
+    // }
 
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_in_string_single_path_global() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc = Rc::<[String], Global>::new_uninit_slice_in(len, Global);
-        drop(rc);
-    }
+    // #[kani::proof]
+    // pub fn harness_new_uninit_slice_in_unit_single_path_global() {
+    //     let len: usize = kani::any::<u8>() as usize;
+    //     let rc = Rc::<[()], Global>::new_uninit_slice_in(len, Global);
+    //     drop(rc);
+    // }
 
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_in_array_u8_3_single_path_global() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc = Rc::<[[u8; 3]], Global>::new_uninit_slice_in(len, Global);
-        drop(rc);
-    }
+    // #[kani::proof]
+    // pub fn harness_new_uninit_slice_in_string_single_path_global() {
+    //     let len: usize = kani::any::<u8>() as usize;
+    //     let rc = Rc::<[String], Global>::new_uninit_slice_in(len, Global);
+    //     drop(rc);
+    // }
 
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_in_u8_single_path_global() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc = Rc::<[u8], Global>::new_uninit_slice_in(len, Global);
-        drop(rc);
-    }
+    // #[kani::proof]
+    // pub fn harness_new_uninit_slice_in_array_u8_3_single_path_global() {
+    //     let len: usize = kani::any::<u8>() as usize;
+    //     let rc = Rc::<[[u8; 3]], Global>::new_uninit_slice_in(len, Global);
+    //     drop(rc);
+    // }
 
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_in_drop_sentinel_single_path_global() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc = Rc::<[DropSentinel], Global>::new_uninit_slice_in(len, Global);
-        drop(rc);
-    }
+    // #[kani::proof]
+    // pub fn harness_new_uninit_slice_in_u8_single_path_global() {
+    //     let len: usize = kani::any::<u8>() as usize;
+    //     let rc = Rc::<[u8], Global>::new_uninit_slice_in(len, Global);
+    //     drop(rc);
+    // }
 
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_in_nested_rc_i32_single_path_global() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc = Rc::<[Rc<i32>], Global>::new_uninit_slice_in(len, Global);
-        drop(rc);
-    }
+    // #[kani::proof]
+    // pub fn harness_new_uninit_slice_in_drop_sentinel_single_path_global() {
+    //     let len: usize = kani::any::<u8>() as usize;
+    //     let rc = Rc::<[DropSentinel], Global>::new_uninit_slice_in(len, Global);
+    //     drop(rc);
+    // }
+
+    // #[kani::proof]
+    // pub fn harness_new_uninit_slice_in_nested_rc_i32_single_path_global() {
+    //     let len: usize = kani::any::<u8>() as usize;
+    //     let rc = Rc::<[Rc<i32>], Global>::new_uninit_slice_in(len, Global);
+    //     drop(rc);
+    // }
 }
 
 #[cfg(kani)]
 mod verify_574 {
     use super::*;
+    use crate::rc::kani_rc_harness_helpers::*;
 
-    struct DropSentinel(u8);
-
-    impl Drop for DropSentinel {
-        fn drop(&mut self) {}
+    macro_rules! gen_try_new_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _result = Rc::<$ty>::try_new(kani::any::<$ty>());
+            }
+        };
     }
 
-    #[kani::proof]
-    pub fn harness_try_new_u8_single_path_global() {
-        let result = Rc::<u8>::try_new(kani::any::<u8>());
-        drop(result);
-    }
+    gen_try_new_harness!(harness_try_new_i8, i8);
+    gen_try_new_harness!(harness_try_new_i16, i16);
+    gen_try_new_harness!(harness_try_new_i32, i32);
+    gen_try_new_harness!(harness_try_new_i64, i64);
+    gen_try_new_harness!(harness_try_new_i128, i128);
+    gen_try_new_harness!(harness_try_new_u8, u8);
+    gen_try_new_harness!(harness_try_new_u16, u16);
+    gen_try_new_harness!(harness_try_new_u32, u32);
+    gen_try_new_harness!(harness_try_new_u64, u64);
+    gen_try_new_harness!(harness_try_new_u128, u128);
+    gen_try_new_harness!(harness_try_new_unit, ());
+    gen_try_new_harness!(harness_try_new_bool, bool);
+    gen_try_new_harness!(harness_try_new_tuple, (u8, i32));
+    gen_try_new_harness!(harness_try_new_array_u8, [u8; 4]);
 
     #[kani::proof]
-    pub fn harness_try_new_i32_single_path_global() {
-        let result = Rc::<i32>::try_new(kani::any::<i32>());
-        drop(result);
-    }
-
-    #[kani::proof]
-    pub fn harness_try_new_u64_single_path_global() {
-        let result = Rc::<u64>::try_new(kani::any::<u64>());
-        drop(result);
-    }
-
-    #[kani::proof]
-    pub fn harness_try_new_unit_single_path_global() {
-        let result = Rc::<()>::try_new(());
-        drop(result);
-    }
-
-    #[kani::proof]
-    // pub fn harness_try_new_string_single_path_global() {
     pub fn harness_try_new_vec_u8() {
-        use crate::rc::kani_rc_harness_helpers::*;
-        let vec = verifier_nondet_vec::<u8>();
-        let _ = Rc::try_new(vec);
-        // let result = Rc::<String>::try_new(String::from("test"));
-        // drop(result);
-    }
-
-    #[kani::proof]
-    pub fn harness_try_new_drop_sentinel_single_path_global() {
-        let result = Rc::<DropSentinel>::try_new(DropSentinel(kani::any::<u8>()));
-        drop(result);
-    }
-
-    #[kani::proof]
-    pub fn harness_try_new_array_u8_3_single_path_global() {
-        let result = Rc::<[u8; 3]>::try_new(kani::any::<[u8; 3]>());
-        drop(result);
-    }
-
-    #[kani::proof]
-    pub fn harness_try_new_bool_single_path_global() {
-        let result = Rc::<bool>::try_new(kani::any::<bool>());
-        drop(result);
-    }
-
-    #[kani::proof]
-    pub fn harness_try_new_tuple_i32_string_single_path_global() {
-        let result = Rc::<(i32, String)>::try_new((kani::any::<i32>(), String::from("test")));
-        drop(result);
-    }
-
-    #[kani::proof]
-    pub fn harness_try_new_option_i32_single_path_global() {
-        let result = Rc::<Option<i32>>::try_new(kani::any::<Option<i32>>());
-        drop(result);
+        type T = u8;
+        let vec = verifier_nondet_vec::<T>();
+        let _ = Rc::<Vec<T>>::try_new(vec);
     }
 }
 
