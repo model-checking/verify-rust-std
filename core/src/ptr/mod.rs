@@ -821,7 +821,7 @@ where
 }
 
 /// Helper function for `drop_in_place`. The compiler replaces this by the actual drop glue.
-#[lang = "drop_in_place"]
+#[lang = "drop_glue"]
 const unsafe fn drop_glue<T: PointeeSized>(_: &mut T)
 where
     T: [const] Destruct,
