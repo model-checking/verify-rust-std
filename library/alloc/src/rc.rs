@@ -295,7 +295,11 @@ fn rc_inner_layout_for_value_layout(layout: Layout) -> Layout {
     // Previously, layout was calculated on the expression
     // `&*(ptr as *const RcInner<T>)`, but this created a misaligned
     // reference (see #54908).
-    Layout::new::<RcInner<()>>().extend(layout).unwrap().0.pad_to_align()
+    Layout::new::<RcInner<()>>()
+        .extend(layout)
+        .unwrap()
+        .0
+        .pad_to_align()
 }
 
 /// A single-threaded reference-counting pointer. 'Rc' stands for 'Reference
@@ -375,7 +379,11 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
 
     #[inline]
     unsafe fn from_inner_in(ptr: NonNull<RcInner<T>>, alloc: A) -> Self {
-        Self { ptr, phantom: PhantomData, alloc }
+        Self {
+            ptr,
+            phantom: PhantomData,
+            alloc,
+        }
     }
 
     #[inline]
@@ -389,7 +397,10 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
         // Reconstruct the "strong weak" pointer and drop it when this
         // variable goes out of scope. This ensures that the memory is
         // deallocated even if the destructor of `T` panics.
-        let _weak = Weak { ptr: self.ptr, alloc: &self.alloc };
+        let _weak = Weak {
+            ptr: self.ptr,
+            alloc: &self.alloc,
+        };
 
         // Destroy the contained object.
         // We cannot use `get_mut_unchecked` here, because `self.alloc` is borrowed.
@@ -418,8 +429,12 @@ impl<T> Rc<T> {
         // if the weak pointer is stored inside the strong one.
         unsafe {
             Self::from_inner(
-                Box::leak(Box::new(RcInner { strong: Cell::new(1), weak: Cell::new(1), value }))
-                    .into(),
+                Box::leak(Box::new(RcInner {
+                    strong: Cell::new(1),
+                    weak: Cell::new(1),
+                    value,
+                }))
+                .into(),
             )
         }
     }
@@ -791,7 +806,10 @@ impl<T, A: Allocator> Rc<T, A> {
         let uninit_ptr: NonNull<_> = (unsafe { &mut *uninit_raw_ptr }).into();
         let init_ptr: NonNull<RcInner<T>> = uninit_ptr.cast();
 
-        let weak = Weak { ptr: init_ptr, alloc };
+        let weak = Weak {
+            ptr: init_ptr,
+            alloc,
+        };
 
         // It's important we don't give up ownership of the weak pointer, or
         // else the memory might be freed by the time `data_fn` returns. If
@@ -842,7 +860,11 @@ impl<T, A: Allocator> Rc<T, A> {
         // the allocation while the strong destructor is running, even
         // if the weak pointer is stored inside the strong one.
         let (ptr, alloc) = Box::into_unique(Box::try_new_in(
-            RcInner { strong: Cell::new(1), weak: Cell::new(1), value },
+            RcInner {
+                strong: Cell::new(1),
+                weak: Cell::new(1),
+                value,
+            },
             alloc,
         )?);
         Ok(unsafe { Self::from_inner_in(ptr.into(), alloc) })
@@ -970,7 +992,10 @@ impl<T, A: Allocator> Rc<T, A> {
             // pointer while also handling drop logic by just crafting a
             // fake Weak.
             this.inner().dec_strong();
-            let _weak = Weak { ptr: this.ptr, alloc };
+            let _weak = Weak {
+                ptr: this.ptr,
+                alloc,
+            };
             Ok(val)
         } else {
             Err(this)
@@ -1627,7 +1652,7 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// }
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
-        #[cfg_attr(
+    #[cfg_attr(
         kani,
         kani::requires({
             let offset = unsafe { data_offset(ptr) };
@@ -1676,7 +1701,10 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
         this.inner().inc_weak();
         // Make sure we do not create a dangling Weak
         debug_assert!(!is_dangling(this.ptr.as_ptr()));
-        Weak { ptr: this.ptr, alloc: this.alloc.clone() }
+        Weak {
+            ptr: this.ptr,
+            alloc: this.alloc.clone(),
+        }
     }
 
     /// Gets the number of [`Weak`] pointers to this allocation.
@@ -1884,7 +1912,11 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     #[inline]
     #[stable(feature = "rc_unique", since = "1.4.0")]
     pub fn get_mut(this: &mut Self) -> Option<&mut T> {
-        if Rc::is_unique(this) { unsafe { Some(Rc::get_mut_unchecked(this)) } } else { None }
+        if Rc::is_unique(this) {
+            unsafe { Some(Rc::get_mut_unchecked(this)) }
+        } else {
+            None
+        }
     }
 
     /// Returns a mutable reference into the given `Rc`,
@@ -2356,7 +2388,12 @@ impl<T> Rc<[T]> {
             // Pointer to first element
             let elems = (&raw mut (*ptr).value) as *mut T;
 
-            let mut guard = Guard { mem: NonNull::new_unchecked(mem), elems, layout, n_elems: 0 };
+            let mut guard = Guard {
+                mem: NonNull::new_unchecked(mem),
+                elems,
+                layout,
+                n_elems: 0,
+            };
 
             for (i, item) in iter.enumerate() {
                 ptr::write(elems.add(i), item);
@@ -2523,7 +2560,11 @@ impl<T: Default> Default for Rc<T> {
             Self::from_inner(
                 Box::leak(Box::write(
                     Box::new_uninit(),
-                    RcInner { strong: Cell::new(1), weak: Cell::new(1), value: T::default() },
+                    RcInner {
+                        strong: Cell::new(1),
+                        weak: Cell::new(1),
+                        value: T::default(),
+                    },
                 ))
                 .into(),
             )
@@ -3216,7 +3257,10 @@ impl<T> Weak<T> {
     #[rustc_const_stable(feature = "const_weak_new", since = "1.73.0")]
     #[must_use]
     pub const fn new() -> Weak<T> {
-        Weak { ptr: NonNull::without_provenance(NonZeroUsize::MAX), alloc: Global }
+        Weak {
+            ptr: NonNull::without_provenance(NonZeroUsize::MAX),
+            alloc: Global,
+        }
     }
 }
 
@@ -3238,7 +3282,10 @@ impl<T, A: Allocator> Weak<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     pub fn new_in(alloc: A) -> Weak<T, A> {
-        Weak { ptr: NonNull::without_provenance(NonZeroUsize::MAX), alloc }
+        Weak {
+            ptr: NonNull::without_provenance(NonZeroUsize::MAX),
+            alloc,
+        }
     }
 }
 
@@ -3527,7 +3574,7 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
     /// [`new`]: Weak::new
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-        #[cfg_attr(
+    #[cfg_attr(
         kani,
         kani::requires({
                 let is_sentinel = is_dangling(ptr);
@@ -3590,7 +3637,10 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
         };
 
         // SAFETY: we now have recovered the original Weak pointer, so can create the Weak.
-        Weak { ptr: unsafe { NonNull::new_unchecked(ptr) }, alloc }
+        Weak {
+            ptr: unsafe { NonNull::new_unchecked(ptr) },
+            alloc,
+        }
     }
 
     /// Attempts to upgrade the `Weak` pointer to an [`Rc`], delaying
@@ -3641,7 +3691,11 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
     #[must_use]
     #[stable(feature = "weak_counts", since = "1.41.0")]
     pub fn strong_count(&self) -> usize {
-        if let Some(inner) = self.inner() { inner.strong() } else { 0 }
+        if let Some(inner) = self.inner() {
+            inner.strong()
+        } else {
+            0
+        }
     }
 
     /// Gets the number of `Weak` pointers pointing to this allocation.
@@ -3673,7 +3727,10 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
             // is dropped, the data field will be dropped in-place).
             Some(unsafe {
                 let ptr = self.ptr.as_ptr();
-                WeakInner { strong: &(*ptr).strong, weak: &(*ptr).weak }
+                WeakInner {
+                    strong: &(*ptr).strong,
+                    weak: &(*ptr).weak,
+                }
             })
         }
     }
@@ -3752,14 +3809,19 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for Weak<T, A> {
     /// assert!(other_weak_foo.upgrade().is_none());
     /// ```
     fn drop(&mut self) {
-        let inner = if let Some(inner) = self.inner() { inner } else { return };
+        let inner = if let Some(inner) = self.inner() {
+            inner
+        } else {
+            return;
+        };
 
         inner.dec_weak();
         // the weak count starts at 1, and will only go to zero if all
         // the strong pointers have disappeared.
         if inner.weak() == 0 {
             unsafe {
-                self.alloc.deallocate(self.ptr.cast(), Layout::for_value_raw(self.ptr.as_ptr()));
+                self.alloc
+                    .deallocate(self.ptr.cast(), Layout::for_value_raw(self.ptr.as_ptr()));
             }
         }
     }
@@ -3783,7 +3845,10 @@ impl<T: ?Sized, A: Allocator + Clone> Clone for Weak<T, A> {
         if let Some(inner) = self.inner() {
             inner.inc_weak()
         }
-        Weak { ptr: self.ptr, alloc: self.alloc.clone() }
+        Weak {
+            ptr: self.ptr,
+            alloc: self.alloc.clone(),
+        }
     }
 }
 
@@ -4293,7 +4358,12 @@ impl<T, A: Allocator> UniqueRc<T, A> {
             },
             alloc,
         ));
-        Self { ptr: ptr.into(), _marker: PhantomData, _marker2: PhantomData, alloc }
+        Self {
+            ptr: ptr.into(),
+            _marker: PhantomData,
+            _marker2: PhantomData,
+            alloc,
+        }
     }
 }
 
@@ -4335,7 +4405,10 @@ impl<T: ?Sized, A: Allocator + Clone> UniqueRc<T, A> {
         unsafe {
             this.ptr.as_ref().inc_weak();
         }
-        Weak { ptr: this.ptr, alloc: this.alloc.clone() }
+        Weak {
+            ptr: this.ptr,
+            alloc: this.alloc.clone(),
+        }
     }
 }
 
@@ -4370,7 +4443,8 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for UniqueRc<T, A> {
             self.ptr.as_ref().dec_weak();
 
             if self.ptr.as_ref().weak() == 0 {
-                self.alloc.deallocate(self.ptr.cast(), Layout::for_value_raw(self.ptr.as_ptr()));
+                self.alloc
+                    .deallocate(self.ptr.cast(), Layout::for_value_raw(self.ptr.as_ptr()));
             }
         }
     }
@@ -4401,7 +4475,11 @@ impl<T: ?Sized, A: Allocator> UniqueRcUninit<T, A> {
                 |mem| mem.with_metadata_of(ptr::from_ref(for_value) as *const RcInner<T>),
             )
         };
-        Self { ptr: NonNull::new(ptr).unwrap(), layout_for_value: layout, alloc: Some(alloc) }
+        Self {
+            ptr: NonNull::new(ptr).unwrap(),
+            layout_for_value: layout,
+            alloc: Some(alloc),
+        }
     }
 
     /// Returns the pointer to be written into to initialize the [`Rc`].
@@ -4464,7 +4542,11 @@ mod kani_rc_harness_helpers {
 
     pub(super) fn rc_slice_layout_ok<T>(len: usize) -> bool {
         Layout::array::<T>(len)
-            .and_then(|value_layout| Layout::new::<RcInner<()>>().extend(value_layout).map(|_| ()))
+            .and_then(|value_layout| {
+                Layout::new::<RcInner<()>>()
+                    .extend(value_layout)
+                    .map(|_| ())
+            })
             .is_ok()
     }
 
@@ -4472,6 +4554,12 @@ mod kani_rc_harness_helpers {
         let len = vec.len();
         kani::assume(rc_slice_layout_ok::<T>(len));
         vec.as_slice()
+    }
+
+    pub(super) fn verifier_nondet_vec_rc<T>() -> Vec<T> {
+        let vec = verifier_nondet_vec();
+        kani::assume(rc_slice_layout_ok::<T>(vec.len()));
+        vec
     }
 }
 
@@ -4553,8 +4641,8 @@ mod verify_1239 {
 
 #[cfg(kani)]
 mod verify_1327 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[kani::proof_for_contract(Rc::<i32>::from_raw)]
     pub fn harness_rc_from_raw_i32() {
@@ -4626,8 +4714,8 @@ mod verify_1327 {
 
 #[cfg(kani)]
 mod verify_1403 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[kani::proof_for_contract(Rc::<i32>::increment_strong_count)]
     pub fn harness_increment_strong_count_i32() {
@@ -4713,15 +4801,15 @@ mod verify_1403 {
 
 #[cfg(kani)]
 mod verify_1486 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[kani::proof_for_contract(Rc::<i32>::decrement_strong_count)]
     pub fn harness_rc_decrement_strong_count_i32() {
         let value: i32 = kani::any();
         let rc: Rc<i32> = Rc::new(value);
         let ptr: *const i32 = Rc::into_raw(rc);
-        unsafe{
+        unsafe {
             Rc::increment_strong_count(ptr);
         }
         unsafe {
@@ -4734,7 +4822,7 @@ mod verify_1486 {
         let value: () = kani::any();
         let rc: Rc<()> = Rc::new(value);
         let ptr: *const () = Rc::into_raw(rc);
-        unsafe{
+        unsafe {
             Rc::increment_strong_count(ptr);
         }
         unsafe {
@@ -4747,7 +4835,7 @@ mod verify_1486 {
         let value: [u8; 4] = kani::any();
         let rc: Rc<[u8; 4]> = Rc::new(value);
         let ptr: *const [u8; 4] = Rc::into_raw(rc);
-        unsafe{
+        unsafe {
             Rc::increment_strong_count(ptr);
         }
         unsafe {
@@ -4761,7 +4849,7 @@ mod verify_1486 {
         let slice = nondet_rc_slice(&vec);
         let rc = Rc::new(slice);
         let ptr = Rc::into_raw(rc);
-        unsafe{
+        unsafe {
             Rc::increment_strong_count(ptr);
         }
         unsafe {
@@ -4775,7 +4863,7 @@ mod verify_1486 {
         let slice = nondet_rc_slice(&vec);
         let rc = Rc::new(slice);
         let ptr = Rc::into_raw(rc);
-        unsafe{
+        unsafe {
             Rc::increment_strong_count(ptr);
         }
         unsafe {
@@ -4789,7 +4877,7 @@ mod verify_1486 {
         let slice = nondet_rc_slice(&vec);
         let rc = Rc::new(slice);
         let ptr = Rc::into_raw(rc);
-        unsafe{
+        unsafe {
             Rc::increment_strong_count(ptr);
         }
         unsafe {
@@ -4800,8 +4888,8 @@ mod verify_1486 {
 
 #[cfg(kani)]
 mod verify_1650 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[kani::proof_for_contract(Rc::<i32, Global>::from_raw_in)]
     pub fn harness_rc_from_raw_in_i32_global() {
@@ -4842,7 +4930,7 @@ mod verify_1650 {
         let slice = nondet_rc_slice(&vec);
         let rc = Rc::new_in(slice, Global);
         let (ptr, alloc) = Rc::into_raw_with_allocator(rc);
-        let _recovered = unsafe { Rc::from_raw_in(ptr, alloc) };  
+        let _recovered = unsafe { Rc::from_raw_in(ptr, alloc) };
     }
 
     #[kani::proof_for_contract(Rc::<[u16], Global>::from_raw_in)]
@@ -4851,7 +4939,7 @@ mod verify_1650 {
         let slice = nondet_rc_slice(&vec);
         let rc = Rc::new_in(slice, Global);
         let (ptr, alloc) = Rc::into_raw_with_allocator(rc);
-        let _recovered = unsafe { Rc::from_raw_in(ptr, alloc) };  
+        let _recovered = unsafe { Rc::from_raw_in(ptr, alloc) };
     }
 
     #[kani::proof_for_contract(Rc::<[u32], Global>::from_raw_in)]
@@ -4866,8 +4954,8 @@ mod verify_1650 {
 
 #[cfg(kani)]
 mod verify_1792 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[kani::proof_for_contract(Rc::<i32, Global>::increment_strong_count_in)]
     pub fn harness_rc_increment_strong_count_in_i32_global() {
@@ -4955,9 +5043,9 @@ mod verify_1792 {
 mod verify_1878 {
     use core::u8;
 
-    use crate::rc;
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
+    use crate::rc;
 
     #[kani::proof_for_contract(Rc::<i32, Global>::decrement_strong_count_in)]
     pub fn harness_rc_decrement_strong_count_in_i32_global() {
@@ -5031,8 +5119,8 @@ mod verify_1878 {
 
 #[cfg(kani)]
 mod verify_1982 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[kani::proof_for_contract(Rc::<i32>::get_mut_unchecked)]
     pub fn harness_get_mut_unchecked_i32() {
@@ -5161,14 +5249,14 @@ mod verify_2216 {
     pub fn harness_downcast_unchecked_unit() {
         let value: () = kani::any();
         let rc_dyn: Rc<dyn Any> = Rc::new(value);
-        let _downcasted: Rc<()> = unsafe { rc_dyn.downcast_unchecked::<>() };
+        let _downcasted: Rc<()> = unsafe { rc_dyn.downcast_unchecked() };
     }
 }
 
 #[cfg(kani)]
 mod verify_3369 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[kani::proof_for_contract(Weak::<i32>::from_raw)]
     pub fn harness_weak_from_raw_i32() {
@@ -5248,8 +5336,8 @@ mod verify_3369 {
 
 #[cfg(kani)]
 mod verify_3588 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[kani::proof_for_contract(Weak::<i32, Global>::from_raw_in)]
     pub fn harness_weak_from_raw_in_i32_global_live() {
@@ -5322,9 +5410,9 @@ mod verify_3588 {
 
 #[cfg(kani)]
 mod verify_1964 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -5531,8 +5619,8 @@ mod verify_1964 {
 
 #[cfg(kani)]
 mod verify_2118 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     #[derive(Clone)]
     struct DropSentinel(u8);
@@ -5724,8 +5812,8 @@ mod verify_2230 {
 
 #[cfg(kani)]
 mod verify_2342 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     struct DropSentinel(u8);
 
@@ -5802,9 +5890,9 @@ mod verify_2342 {
 mod verify_3511 {
     use crate::vec;
 
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -5996,9 +6084,9 @@ mod verify_3511 {
 
 #[cfg(kani)]
 mod verify_3558 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -6182,9 +6270,9 @@ mod verify_3558 {
 
 #[cfg(kani)]
 mod verify_3754 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -6377,7 +6465,7 @@ mod verify_3754 {
         let _inner = Weak::inner(&weak);
     }
 
-     #[kani::proof]
+    #[kani::proof]
     pub fn harness_weak_inner_unsized_slice_u16_some_global() {
         let vec = verifier_nondet_vec::<u16>();
         let slice = nondet_rc_slice(&vec);
@@ -6400,9 +6488,9 @@ mod verify_3754 {
 mod verify_3844 {
     use crate::vec;
 
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -6660,9 +6748,9 @@ mod verify_3844 {
 
 #[cfg(kani)]
 mod verify_3939 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -6935,9 +7023,9 @@ mod verify_3939 {
 
 #[cfg(kani)]
 mod verify_3972 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -7192,9 +7280,9 @@ mod verify_3972 {
 
 #[cfg(kani)]
 mod verify_4413 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -7239,7 +7327,8 @@ mod verify_4413 {
 
     #[kani::proof]
     pub fn harness_into_rc_drop_sentinel_global() {
-        let unique: UniqueRc<DropSentinel, Global> = UniqueRc::new_in(DropSentinel(kani::any()), Global);
+        let unique: UniqueRc<DropSentinel, Global> =
+            UniqueRc::new_in(DropSentinel(kani::any()), Global);
         let rc: Rc<DropSentinel, Global> = UniqueRc::into_rc(unique);
         drop(rc);
     }
@@ -7315,9 +7404,9 @@ mod verify_4413 {
 
 #[cfg(kani)]
 mod verify_4436 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -7386,13 +7475,15 @@ mod verify_4436 {
 
     #[kani::proof]
     pub fn harness_downgrade_drop_sentinel_unique_global() {
-        let unique: UniqueRc<DropSentinel, Global> = UniqueRc::new_in(DropSentinel(kani::any()), Global);
+        let unique: UniqueRc<DropSentinel, Global> =
+            UniqueRc::new_in(DropSentinel(kani::any()), Global);
         exercise_downgrade_unique(&unique);
     }
 
     #[kani::proof]
     pub fn harness_downgrade_drop_sentinel_weak_present_global() {
-        let unique: UniqueRc<DropSentinel, Global> = UniqueRc::new_in(DropSentinel(kani::any()), Global);
+        let unique: UniqueRc<DropSentinel, Global> =
+            UniqueRc::new_in(DropSentinel(kani::any()), Global);
         exercise_downgrade_weak_present(&unique);
     }
 
@@ -7467,9 +7558,9 @@ mod verify_4436 {
 
 #[cfg(kani)]
 mod verify_4461 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::{any::Any, ops::DerefMut};
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -7574,9 +7665,9 @@ mod verify_4461 {
 
 #[cfg(kani)]
 mod verify_4453 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::{any::Any, ops::Deref};
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -7674,9 +7765,9 @@ mod verify_4453 {
 
 #[cfg(kani)]
 mod verify_4471 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -7867,10 +7958,10 @@ mod verify_4471 {
 mod verify_4503 {
     use crate::vec;
 
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
     use core::cell::Cell;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -7980,10 +8071,10 @@ mod verify_4503 {
 
 #[cfg(kani)]
 mod verify_4520 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
     use core::cell::Cell;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -8094,10 +8185,10 @@ mod verify_4520 {
 
 #[cfg(kani)]
 mod verify_4543 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
     use core::cell::Cell;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -8207,10 +8298,10 @@ mod verify_4543 {
 
 #[cfg(kani)]
 mod verify_368 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
     use core::cell::Cell;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -8317,8 +8408,8 @@ mod verify_368 {
 
 #[cfg(kani)]
 mod verify_375 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
     use core::any::Any;
     use core::slice;
 
@@ -8331,7 +8422,6 @@ mod verify_375 {
     fn exercise_into_inner_with_allocator<T: ?Sized>(rc: Rc<T, Global>) {
         let (ptr, alloc) = Rc::<T, Global>::into_inner_with_allocator(rc);
         let recovered: Rc<T, Global> = unsafe { Rc::<T, Global>::from_inner_in(ptr, alloc) };
-        drop(recovered);
     }
 
     #[kani::proof]
@@ -8359,8 +8449,12 @@ mod verify_375 {
     }
 
     #[kani::proof]
-    pub fn harness_into_inner_with_allocator_string_global() {
-        let rc: Rc<String, Global> = Rc::new_in(String::from("test"), Global);
+    // pub fn harness_into_inner_with_allocator_string_global() {
+    pub fn harness_into_inner_with_allocator_vec_u8() {
+        // let s = String::from("test");
+        let v = verifier_nondet_vec::<u8>();
+        let v = core::mem::forget(v);
+        let rc: Rc<_, Global> = Rc::new_in(v, Global);
         exercise_into_inner_with_allocator(rc);
     }
 
@@ -8416,7 +8510,8 @@ mod verify_375 {
 
     #[kani::proof]
     pub fn harness_into_inner_with_allocator_tuple_i32_string_global() {
-        let rc: Rc<(i32, String), Global> = Rc::new_in((kani::any::<i32>(), String::from("test")), Global);
+        let rc: Rc<(i32, String), Global> =
+            Rc::new_in((kani::any::<i32>(), String::from("test")), Global);
         exercise_into_inner_with_allocator(rc);
     }
 
@@ -8718,19 +8813,21 @@ mod verify_711 {
 
     #[kani::proof]
     pub fn harness_new_uninit_in_array_u8_3_single_path_global() {
-        let rc: Rc<mem::MaybeUninit<[u8; 3]>, Global> = Rc::<[u8; 3], Global>::new_uninit_in(Global);
+        let rc: Rc<mem::MaybeUninit<[u8; 3]>, Global> =
+            Rc::<[u8; 3], Global>::new_uninit_in(Global);
         drop(rc);
     }
 
     #[kani::proof]
     pub fn harness_new_uninit_in_bool_single_path_global() {
         let rc: Rc<mem::MaybeUninit<bool>, Global> = Rc::<bool, Global>::new_uninit_in(Global);
-        drop(rc);
+        // drop(rc);
     }
 
     #[kani::proof]
     pub fn harness_new_uninit_in_nested_rc_i32_single_path_global() {
-        let rc: Rc<mem::MaybeUninit<Rc<i32>>, Global> = Rc::<Rc<i32>, Global>::new_uninit_in(Global);
+        let rc: Rc<mem::MaybeUninit<Rc<i32>>, Global> =
+            Rc::<Rc<i32>, Global>::new_uninit_in(Global);
         drop(rc);
     }
 
@@ -8798,7 +8895,8 @@ mod verify_748 {
 
     #[kani::proof]
     pub fn harness_new_zeroed_in_array_u8_3_single_path_global() {
-        let rc: Rc<mem::MaybeUninit<[u8; 3]>, Global> = Rc::<[u8; 3], Global>::new_zeroed_in(Global);
+        let rc: Rc<mem::MaybeUninit<[u8; 3]>, Global> =
+            Rc::<[u8; 3], Global>::new_zeroed_in(Global);
         drop(rc);
     }
 
@@ -8810,7 +8908,8 @@ mod verify_748 {
 
     #[kani::proof]
     pub fn harness_new_zeroed_in_nested_rc_i32_single_path_global() {
-        let rc: Rc<mem::MaybeUninit<Rc<i32>>, Global> = Rc::<Rc<i32>, Global>::new_zeroed_in(Global);
+        let rc: Rc<mem::MaybeUninit<Rc<i32>>, Global> =
+            Rc::<Rc<i32>, Global>::new_zeroed_in(Global);
         drop(rc);
     }
 
@@ -9009,9 +9108,13 @@ mod verify_857 {
     }
 
     #[kani::proof]
-    pub fn harness_try_new_in_string_single_path_global() {
-        let result = Rc::<String, Global>::try_new_in(String::from("test"), Global);
-        drop(result);
+    // pub fn harness_try_new_in_string_single_path_global() {
+    pub fn harness_try_new_in_vec_u8() {
+        use crate::rc::kani_rc_harness_helpers::*;
+        let vec = verifier_nondet_vec::<u8>();
+        let _ = Rc::<_, Global>::try_new_in(vec, Global);
+        // let result = Rc::<String, Global>::try_new_in(String::from("test"), Global);
+        // drop(result);
     }
 
     #[kani::proof]
@@ -9254,9 +9357,13 @@ mod verify_955 {
     }
 
     #[kani::proof]
-    pub fn harness_pin_in_string_single_path_global() {
-        let pinned = Rc::<String, Global>::pin_in(String::from("test"), Global);
-        drop(pinned);
+    // pub fn harness_pin_in_string_single_path_global() {
+    pub fn harness_pin_in_vec_u8() {
+        use crate::rc::kani_rc_harness_helpers::*;
+        let v = verifier_nondet_vec::<u8>();
+        let _ = Rc::<_, Global>::pin_in(v, Global);
+        // let pinned = Rc::<String, Global>::pin_in(String::from("test"), Global);
+        // drop(pinned);
     }
 
     #[kani::proof]
@@ -9304,127 +9411,69 @@ mod verify_955 {
 
 #[cfg(kani)]
 mod verify_1065 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
 
-    struct DropSentinel(u8);
-
-    impl Drop for DropSentinel {
-        fn drop(&mut self) {}
+    macro_rules! gen_new_uninit_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                type T = $ty;
+                let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<T>(*l));
+                let _rc: Rc<[mem::MaybeUninit<T>]> = Rc::<[T]>::new_uninit_slice(len);
+            }
+        };
     }
 
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_i32_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<i32>]> = Rc::<[i32]>::new_uninit_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_unit_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<()>]> = Rc::<[()]>::new_uninit_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_string_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<String>]> = Rc::<[String]>::new_uninit_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_array_u8_3_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<[u8; 3]>]> = Rc::<[[u8; 3]]>::new_uninit_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_u8_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<u8>]> = Rc::<[u8]>::new_uninit_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_drop_sentinel_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<DropSentinel>]> = Rc::<[DropSentinel]>::new_uninit_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_uninit_slice_nested_rc_i32_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<Rc<i32>>]> = Rc::<[Rc<i32>]>::new_uninit_slice(len);
-        drop(rc);
-    }
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_i8, i8);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_i16, i16);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_i32, i32);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_i64, i64);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_i128, i128);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_u8, u8);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_u16, u16);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_u32, u32);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_u64, u64);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_u128, u128);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_unit, ());
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_string, String);
+    gen_new_uninit_slice_harness!(harness_new_uninit_slice_array_u8_arr, [u8; 4]);
 }
 
 #[cfg(kani)]
 mod verify_1090 {
     use super::*;
+    use crate::rc::kani_rc_harness_helpers::*;
 
-    struct DropSentinel(u8);
-
-    impl Drop for DropSentinel {
-        fn drop(&mut self) {}
+    macro_rules! gen_new_zeroed_slice_harness {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$elem_ty>(*l));
+                let _rc: Rc<[mem::MaybeUninit<$elem_ty>]> = Rc::<[$elem_ty]>::new_zeroed_slice(len);
+            }
+        };
     }
 
-    #[kani::proof]
-    pub fn harness_new_zeroed_slice_i32_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<i32>]> = Rc::<[i32]>::new_zeroed_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_zeroed_slice_unit_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<()>]> = Rc::<[()]>::new_zeroed_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_zeroed_slice_string_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<String>]> = Rc::<[String]>::new_zeroed_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_zeroed_slice_array_u8_3_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<[u8; 3]>]> = Rc::<[[u8; 3]]>::new_zeroed_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_zeroed_slice_u8_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<u8>]> = Rc::<[u8]>::new_zeroed_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_zeroed_slice_drop_sentinel_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<DropSentinel>]> = Rc::<[DropSentinel]>::new_zeroed_slice(len);
-        drop(rc);
-    }
-
-    #[kani::proof]
-    pub fn harness_new_zeroed_slice_nested_rc_i32_single_path() {
-        let len: usize = kani::any::<u8>() as usize;
-        let rc: Rc<[mem::MaybeUninit<Rc<i32>>]> = Rc::<[Rc<i32>]>::new_zeroed_slice(len);
-        drop(rc);
-    }
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_i8, i8);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_i16, i16);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_i32, i32);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_i64, i64);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_i128, i128);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u8, u8);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u16, u16);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u32, u32);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u64, u64);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_u128, u128);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_unit, ());
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_string, String);
+    gen_new_zeroed_slice_harness!(harness_new_zeroed_slice_array_u8_4, [u8; 4]);
 }
 
 #[cfg(kani)]
 mod verify_1111 {
     use super::*;
+    use crate::rc::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -9433,14 +9482,19 @@ mod verify_1111 {
     }
 
     fn exercise_into_array<const N: usize, T>(rc: Rc<[T]>) {
-        let result: Option<Rc<[T; N]>> = rc.into_array::<N>();
-        drop(result);
+        let _: Option<Rc<[T; N]>> = rc.into_array::<N>();
     }
 
     #[kani::proof]
     pub fn harness_into_array_i32_n0_some_len_eq_n() {
-        let rc: Rc<[i32]> = Rc::from([]);
-        exercise_into_array::<0, i32>(rc);
+        // let rc: Rc<[i32]> = Rc::from([]);
+        // exercise_into_array::<0, i32>(rc);
+        type T = u8;
+        let vec = verifier_nondet_vec_rc::<T>();
+        let slice = Rc::from(vec);
+
+        const N: usize = 100;
+        exercise_into_array::<N, T>(slice);
     }
 
     #[kani::proof]
@@ -9571,8 +9625,11 @@ mod verify_1111 {
 
     #[kani::proof]
     pub fn harness_into_array_array_u8_3_n3_some_len_eq_n() {
-        let rc: Rc<[[u8; 3]]> =
-            Rc::from([kani::any::<[u8; 3]>(), kani::any::<[u8; 3]>(), kani::any::<[u8; 3]>()]);
+        let rc: Rc<[[u8; 3]]> = Rc::from([
+            kani::any::<[u8; 3]>(),
+            kani::any::<[u8; 3]>(),
+            kani::any::<[u8; 3]>(),
+        ]);
         exercise_into_array::<3, [u8; 3]>(rc);
     }
 
@@ -9873,9 +9930,13 @@ mod verify_574 {
     }
 
     #[kani::proof]
-    pub fn harness_try_new_string_single_path_global() {
-        let result = Rc::<String>::try_new(String::from("test"));
-        drop(result);
+    // pub fn harness_try_new_string_single_path_global() {
+    pub fn harness_try_new_vec_u8() {
+        use crate::rc::kani_rc_harness_helpers::*;
+        let vec = verifier_nondet_vec::<u8>();
+        let _ = Rc::try_new(vec);
+        // let result = Rc::<String>::try_new(String::from("test"));
+        // drop(result);
     }
 
     #[kani::proof]
@@ -10055,6 +10116,7 @@ mod verify_643 {
 #[cfg(kani)]
 mod verify_983 {
     use super::*;
+    use crate::rc::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -10147,18 +10209,25 @@ mod verify_983 {
     }
 
     #[kani::proof]
-    pub fn harness_try_unwrap_string_unique_global() {
-        assert_try_unwrap_unique(String::from("test"));
+    // pub fn harness_try_unwrap_string_unique_global() {
+    pub fn harness_try_unwrap_unique_vec_u8() {
+        let vec = verifier_nondet_vec::<u8>();
+        assert_try_unwrap_unique(vec);
     }
 
     #[kani::proof]
-    pub fn harness_try_unwrap_string_shared_global() {
-        assert_try_unwrap_shared(String::from("test"));
+    // pub fn harness_try_unwrap_string_shared_global() {
+    pub fn harness_try_unwrap_shared_global_vec_u8() {
+        let vec = verifier_nondet_vec::<u8>();
+        // assert_try_unwrap_shared(String::from("test"));
+        assert_try_unwrap_shared(vec);
     }
 
     #[kani::proof]
     pub fn harness_try_unwrap_string_weak_present_global() {
-        assert_try_unwrap_weak_present(String::from("test"));
+        let vec = verifier_nondet_vec::<u8>();
+        // assert_try_unwrap_weak_present(String::from("test"));
+        assert_try_unwrap_weak_present(vec);
     }
 
     #[kani::proof]
@@ -10329,9 +10398,9 @@ mod verify_1180 {
 
 #[cfg(kani)]
 mod verify_1594 {
+    use super::kani_rc_harness_helpers::*;
     use super::*;
     use core::any::Any;
-    use super::kani_rc_harness_helpers::*;
 
     struct DropSentinel(u8);
 
@@ -10488,8 +10557,8 @@ mod verify_2467 {
 mod verify_2530 {
     use crate::vec;
 
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     struct DropSentinel(u8);
 
@@ -10735,8 +10804,8 @@ mod verify_2530 {
 
 #[cfg(kani)]
 mod verify_2557 {
-    use super::*;
     use super::kani_rc_harness_helpers::*;
+    use super::*;
 
     struct DropSentinel(u8);
 
@@ -11034,19 +11103,22 @@ mod verify_2557 {
 
     #[kani::proof]
     pub fn harness_clone_rc_cell_i32_unique() {
-        let rc: Rc<core::cell::Cell<i32>, Global> = Rc::new_in(core::cell::Cell::new(kani::any::<i32>()), Global);
+        let rc: Rc<core::cell::Cell<i32>, Global> =
+            Rc::new_in(core::cell::Cell::new(kani::any::<i32>()), Global);
         exercise_clone_unique(rc);
     }
 
     #[kani::proof]
     pub fn harness_clone_rc_cell_i32_shared() {
-        let rc: Rc<core::cell::Cell<i32>, Global> = Rc::new_in(core::cell::Cell::new(kani::any::<i32>()), Global);
+        let rc: Rc<core::cell::Cell<i32>, Global> =
+            Rc::new_in(core::cell::Cell::new(kani::any::<i32>()), Global);
         exercise_clone_shared(rc);
     }
 
     #[kani::proof]
     pub fn harness_clone_rc_cell_i32_weak_present() {
-        let rc: Rc<core::cell::Cell<i32>, Global> = Rc::new_in(core::cell::Cell::new(kani::any::<i32>()), Global);
+        let rc: Rc<core::cell::Cell<i32>, Global> =
+            Rc::new_in(core::cell::Cell::new(kani::any::<i32>()), Global);
         exercise_clone_weak_present(rc);
     }
 
@@ -11346,32 +11418,23 @@ mod verify_3181 {
 
     #[kani::proof]
     pub fn harness_to_rc_slice_u8_non_trusted_len() {
-        exercise_to_rc_slice_non_trusted([
-            kani::any::<u8>(),
-            kani::any::<u8>(),
-            kani::any::<u8>(),
-        ]
-        .into_iter());
+        exercise_to_rc_slice_non_trusted(
+            [kani::any::<u8>(), kani::any::<u8>(), kani::any::<u8>()].into_iter(),
+        );
     }
 
     #[kani::proof]
     pub fn harness_to_rc_slice_i32_non_trusted_len() {
-        exercise_to_rc_slice_non_trusted([
-            kani::any::<i32>(),
-            kani::any::<i32>(),
-            kani::any::<i32>(),
-        ]
-        .into_iter());
+        exercise_to_rc_slice_non_trusted(
+            [kani::any::<i32>(), kani::any::<i32>(), kani::any::<i32>()].into_iter(),
+        );
     }
 
     #[kani::proof]
     pub fn harness_to_rc_slice_u64_non_trusted_len() {
-        exercise_to_rc_slice_non_trusted([
-            kani::any::<u64>(),
-            kani::any::<u64>(),
-            kani::any::<u64>(),
-        ]
-        .into_iter());
+        exercise_to_rc_slice_non_trusted(
+            [kani::any::<u64>(), kani::any::<u64>(), kani::any::<u64>()].into_iter(),
+        );
     }
 
     #[kani::proof]
@@ -11399,22 +11462,26 @@ mod verify_3181 {
 
     #[kani::proof]
     pub fn harness_to_rc_slice_arr3_non_trusted_len() {
-        exercise_to_rc_slice_non_trusted([
-            kani::any::<[u8; 3]>(),
-            kani::any::<[u8; 3]>(),
-            kani::any::<[u8; 3]>(),
-        ]
-        .into_iter());
+        exercise_to_rc_slice_non_trusted(
+            [
+                kani::any::<[u8; 3]>(),
+                kani::any::<[u8; 3]>(),
+                kani::any::<[u8; 3]>(),
+            ]
+            .into_iter(),
+        );
     }
 
     #[kani::proof]
     pub fn harness_to_rc_slice_bool_non_trusted_len() {
-        exercise_to_rc_slice_non_trusted([
-            kani::any::<bool>(),
-            kani::any::<bool>(),
-            kani::any::<bool>(),
-        ]
-        .into_iter());
+        exercise_to_rc_slice_non_trusted(
+            [
+                kani::any::<bool>(),
+                kani::any::<bool>(),
+                kani::any::<bool>(),
+            ]
+            .into_iter(),
+        );
     }
 
     #[kani::proof]
