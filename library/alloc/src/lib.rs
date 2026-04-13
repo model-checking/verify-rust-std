@@ -210,6 +210,7 @@
 #![feature(min_specialization)]
 #![feature(multiple_supertrait_upcastable)]
 #![feature(negative_impls)]
+#![feature(proc_macro_hygiene)]
 #![feature(rustc_attrs)]
 #![feature(slice_internals)]
 #![feature(staged_api)]
