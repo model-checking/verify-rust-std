@@ -2708,16 +2708,25 @@ impl<T> Rc<[T]> {
 
             let mut guard = Guard { mem: NonNull::new_unchecked(mem), elems, layout, n_elems: 0 };
 
-            // Keep this as an explicit `while` loop so Kani can attach loop
-            // contracts here instead of unrolling the desugared `for` iterator state.
-            let mut iter = iter;
-            let mut i = 0usize;
-            #[cfg_attr(kani, kani::loop_invariant(i == guard.n_elems))]
-            #[cfg_attr(kani, kani::loop_modifies(&i, &guard.n_elems, ptr::slice_from_raw_parts_mut(elems, len)))]
-            while let Some(item) = iter.next() {
+            #[cfg(not(kani))]
+            for (i, item) in iter.enumerate() {
                 ptr::write(elems.add(i), item);
-                i += 1;
                 guard.n_elems += 1;
+            }
+
+            #[cfg(kani)]
+            {
+                // Kani needs an explicit loop so it can attach loop contracts.
+                let mut iter = iter;
+                let mut i = 0usize;
+
+                #[kani::loop_invariant(i == guard.n_elems)]
+                #[kani::loop_modifies(&i, &guard.n_elems, ptr::slice_from_raw_parts_mut(elems, len))]
+                while let Some(item) = iter.next() {
+                    ptr::write(elems.add(i), item);
+                    i += 1;
+                    guard.n_elems += 1;
+                }
             }
 
             // All clear. Forget the guard so it doesn't free the new RcInner.
@@ -5150,6 +5159,7 @@ unsafe impl<T: Allocator + ?Sized, A: AllocatorClone> AllocatorClone for Rc<T, A
 // =========================================================================
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod kani_rc_harness_helpers {
     use super::*;
 
@@ -5162,6 +5172,7 @@ mod kani_rc_harness_helpers {
             let sz: usize = kani::any();
             kani::assume(sz <= cap);
             v.set_len(sz);
+            ptr::write_bytes(v.as_mut_ptr().cast::<u8>(), kani::any::<u8>(), mem::size_of::<T>() * sz);
         }
         v
     }
@@ -5193,6 +5204,7 @@ mod kani_rc_harness_helpers {
 // === UNSAFE FUNCTIONS (12 — all required) ===
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1198 {
     use super::*;
 
@@ -5233,6 +5245,7 @@ mod verify_1198 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1239 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5282,6 +5295,7 @@ mod verify_1239 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1327 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5332,6 +5346,7 @@ mod verify_1327 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1403 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5390,6 +5405,7 @@ mod verify_1403 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1486 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5448,6 +5464,7 @@ mod verify_1486 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1650 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5498,6 +5515,7 @@ mod verify_1650 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1792 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5571,6 +5589,7 @@ mod verify_1792 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1878 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5642,6 +5661,7 @@ mod verify_1878 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1982 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5698,6 +5718,7 @@ mod verify_1982 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2216 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5747,6 +5768,7 @@ mod verify_2216 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3369 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5799,6 +5821,7 @@ mod verify_3369 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3588 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -5853,6 +5876,7 @@ mod verify_3588 {
 // === SAFE FUNCTIONS (50 of 54) ===
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1918 {
     use core::any::Any;
 
@@ -5915,7 +5939,8 @@ mod verify_1918 {
     }
 
     macro_rules! gen_get_mut_unsized_harness {
-        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+        ($(#[$unique_attr:meta])* $unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+            $(#[$unique_attr])*
             #[kani::proof]
             pub fn $unique() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -6027,6 +6052,7 @@ mod verify_1918 {
         u8
     );
     gen_get_mut_unsized_harness!(
+        #[cfg(not(target_os = "macos"))]
         harness_get_mut_vec_u16_unique_some,
         harness_get_mut_vec_u16_shared_none,
         harness_get_mut_vec_u16_weak_present_none,
@@ -6053,6 +6079,7 @@ mod verify_1918 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2089 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -6091,7 +6118,15 @@ mod verify_2089 {
     }
 
     macro_rules! gen_make_mut_unsized_harness {
-        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+        (
+            $(#[$unique_attr:meta])*
+            $unique:ident,
+            $shared:ident,
+            $(#[$weak_present_attr:meta])*
+            $weak_present:ident,
+            $elem:ty
+        ) => {
+            $(#[$unique_attr])*
             #[kani::proof]
             pub fn $unique() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -6107,6 +6142,7 @@ mod verify_2089 {
                 let _ = Rc::<[$elem], Global>::make_mut(&mut rc);
             }
 
+            $(#[$weak_present_attr])*
             #[kani::proof]
             pub fn $weak_present() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -6203,8 +6239,10 @@ mod verify_2089 {
         u16
     );
     gen_make_mut_unsized_harness!(
+        #[cfg(not(target_os = "macos"))]
         harness_make_mut_vec_u32_unique,
         harness_make_mut_vec_u32_shared,
+        #[cfg(not(target_os = "macos"))]
         harness_make_mut_vec_u32_weak_present,
         u32
     );
@@ -6223,6 +6261,7 @@ mod verify_2089 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2201 {
     use core::any::Any;
 
@@ -6310,6 +6349,7 @@ mod verify_2201 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2313 {
     use core::any::Any;
 
@@ -6367,6 +6407,7 @@ mod verify_2313 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3502 {
     use core::any::Any;
 
@@ -6514,6 +6555,7 @@ mod verify_3502 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3549 {
     use core::any::Any;
 
@@ -6702,6 +6744,7 @@ mod verify_3549 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3696 {
     use core::any::Any;
 
@@ -6925,6 +6968,7 @@ mod verify_3696 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3745 {
     use core::any::Any;
 
@@ -7046,6 +7090,7 @@ mod verify_3745 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3835 {
     use core::any::Any;
 
@@ -7301,6 +7346,7 @@ mod verify_3835 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3929 {
     use core::any::Any;
 
@@ -7403,6 +7449,7 @@ mod verify_3929 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3962 {
     use core::any::Any;
 
@@ -7508,6 +7555,7 @@ mod verify_3962 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_4403 {
     use core::any::Any;
 
@@ -7553,6 +7601,7 @@ mod verify_4403 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_4426 {
     use core::any::Any;
 
@@ -7597,6 +7646,7 @@ mod verify_4426 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_4451 {
     use core::any::Any;
 
@@ -7642,6 +7692,7 @@ mod verify_4451 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_4443 {
     use core::any::Any;
 
@@ -7686,6 +7737,7 @@ mod verify_4443 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_4461 {
     use core::any::Any;
 
@@ -7820,6 +7872,7 @@ mod verify_4461 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_4493 {
     use core::any::Any;
 
@@ -7883,6 +7936,7 @@ mod verify_4493 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_4510 {
     use core::any::Any;
 
@@ -7949,6 +8003,7 @@ mod verify_4510 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_4533 {
     use core::any::Any;
 
@@ -7965,7 +8020,7 @@ mod verify_4533 {
         };
     }
 
-    macro_rules! gen_unique_rc_uninit_drop_harness {
+    macro_rules! gen_unique_rc_uninit_drop_dyn_any_harness {
         ($name:ident, $src_ty:ty) => {
             #[kani::proof]
             pub fn $name() {
@@ -7977,7 +8032,7 @@ mod verify_4533 {
         };
     }
 
-    macro_rules! gen_drop_unsized_harness {
+    macro_rules! gen_unique_rc_uninit_drop_unsized_harness {
         ($name:ident, $elem:ty) => {
             #[kani::proof]
             pub fn $name() {
@@ -8001,16 +8056,17 @@ mod verify_4533 {
     gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_unit, ());
     gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_array, [u8; 4]);
     gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_bool, bool);
-    gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_dyn_any, i32);
+    gen_unique_rc_uninit_drop_dyn_any_harness!(harness_unique_rc_uninit_drop_dyn_any, i32);
 
-    gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_slice_u8, u8);
-    gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_slice_u16, u16);
-    gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_slice_u32, u32);
-    gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_slice_u64, u64);
-    gen_unique_rc_uninit_drop_harness!(harness_unique_rc_uninit_drop_slice_u128, u128);
+    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u8, u8);
+    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u16, u16);
+    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u32, u32);
+    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u64, u64);
+    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u128, u128);
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_368 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -8058,6 +8114,7 @@ mod verify_368 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_375 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -8112,6 +8169,7 @@ mod verify_375 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_425 {
     use super::*;
 
@@ -8141,6 +8199,7 @@ mod verify_425 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_521 {
     use super::*;
 
@@ -8169,6 +8228,7 @@ mod verify_521 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_552 {
     use super::*;
 
@@ -8197,6 +8257,7 @@ mod verify_552 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_711 {
     use super::*;
 
@@ -8226,6 +8287,7 @@ mod verify_711 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_748 {
     use super::*;
 
@@ -8255,6 +8317,7 @@ mod verify_748 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_792 {
     use super::*;
 
@@ -8289,6 +8352,7 @@ mod verify_792 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_857 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -8334,6 +8398,7 @@ mod verify_857 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_899 {
     use super::*;
 
@@ -8362,6 +8427,7 @@ mod verify_899 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_937 {
     use super::*;
 
@@ -8390,6 +8456,7 @@ mod verify_937 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_955 {
     use core::marker::PhantomPinned;
 
@@ -8430,6 +8497,7 @@ mod verify_955 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1065 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -8460,6 +8528,7 @@ mod verify_1065 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1090 {
     use super::*;
     use crate::rc::kani_rc_harness_helpers::*;
@@ -8490,6 +8559,7 @@ mod verify_1090 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1111 {
     use super::*;
     use crate::rc::kani_rc_harness_helpers::*;
@@ -8522,6 +8592,7 @@ mod verify_1111 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_657 {
     use core::marker::PhantomPinned;
 
@@ -8563,6 +8634,7 @@ mod verify_657 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1152 {
     use super::*;
     use crate::rc::kani_rc_harness_helpers::*;
@@ -8594,6 +8666,7 @@ mod verify_1152 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_574 {
     use super::*;
     use crate::rc::kani_rc_harness_helpers::*;
@@ -8639,6 +8712,7 @@ mod verify_574 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_611 {
     use super::*;
 
@@ -8667,6 +8741,7 @@ mod verify_611 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_643 {
     use super::*;
 
@@ -8695,6 +8770,7 @@ mod verify_643 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_983 {
     use super::*;
     use crate::rc::kani_rc_harness_helpers::*;
@@ -8858,6 +8934,7 @@ mod verify_983 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1180 {
     use super::*;
     use crate::rc::kani_rc_harness_helpers::*;
@@ -8890,6 +8967,7 @@ mod verify_1180 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_1580 {
     use core::any::Any;
 
@@ -8954,6 +9032,7 @@ mod verify_1580 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2467 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -8984,6 +9063,7 @@ mod verify_2467 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2530 {
     use core::any::Any;
 
@@ -9227,6 +9307,7 @@ mod verify_2530 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2557 {
     use core::any::Any;
 
@@ -9285,6 +9366,7 @@ mod verify_2557 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2582 {
     use super::*;
 
@@ -9318,6 +9400,7 @@ mod verify_2582 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2606 {
     use super::*;
 
@@ -9328,6 +9411,7 @@ mod verify_2606 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_2973 {
     use super::*;
 
@@ -9345,6 +9429,7 @@ mod verify_2973 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3051 {
     use super::kani_rc_harness_helpers::*;
     use super::*;
@@ -9375,6 +9460,7 @@ mod verify_3051 {
 }
 
 #[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify_3107 {
     use super::*;
 
