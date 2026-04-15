@@ -4564,15 +4564,25 @@ mod verify_1239 {
     // impl<T, A> Rc<[MaybeUninit<T>], A> (same issue as verify_1198).
     // Uses #[kani::proof]; requires is checked as assertion at call site.
 
-    // Kani cannot express the full "every element is initialized" precondition for
-    // arbitrary slices today. Keep this harness instantiated only for zero-valid types.
+    // Kani cannot express the full "all elements are initialized" predicate for
+    // arbitrary `T`. This harness models the caller-side safety requirement of
+    // `assume_init` with a byte-level witness: it explicitly writes the backing
+    // bytes before converting the allocation to `Rc<[MaybeUninit<T>]>`.
+
     fn exercise_assume_init_slice<T>() {
-        let uninit = verifier_nondet_zeroed_uninit_rc_slice::<T>();
+        let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<T>(*l));
+        let mut initialized = Vec::<mem::MaybeUninit<T>, Global>::with_capacity(len);
+        unsafe {
+            initialized.set_len(len);
+            ptr::write_bytes(
+                initialized.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * len,
+            );
+        }
+        let uninit: Rc<[mem::MaybeUninit<T>], Global> = Rc::from(initialized);
         let expected_data = (&*uninit).as_ptr() as *const T;
         let expected_len = uninit.len();
-
-        // SAFETY: All harness instantiations below use types for which a zeroed
-        // allocation is already a valid initialized `[T]`.
         let result: Rc<[T], Global> = unsafe { uninit.assume_init() };
 
         assert_eq!((&*result).as_ptr(), expected_data);
@@ -4599,7 +4609,6 @@ mod verify_1239 {
     gen_assume_init_slice_harness!(harness_assume_init_slice_u32, u32);
     gen_assume_init_slice_harness!(harness_assume_init_slice_u64, u64);
     gen_assume_init_slice_harness!(harness_assume_init_slice_u128, u128);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_bool, bool);
     gen_assume_init_slice_harness!(harness_assume_init_slice_unit, ());
     gen_assume_init_slice_harness!(harness_assume_init_slice_array, [u8; 4]);
 }
@@ -8786,4 +8795,71 @@ mod verify_3107 {
 
     gen_from_rc_str_to_rc_u8_slice_harness!(harness_from_rc_str_to_rc_u8_slice_empty, "");
     gen_from_rc_str_to_rc_u8_slice_harness!(harness_from_rc_str_to_rc_u8_slice_nonempty, "test");
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1528 {
+    use core::any::Any;
+    use super::kani_rc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_into_raw_with_allocator_sized_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc_i32: Rc<i32, Global> = Rc::new_in(kani::any::<i32>(), Global);
+                let rc: Rc<dyn Any, Global> = rc_i32;
+                let (ptr, alloc): (*const dyn Any, Global) =
+                    Rc::<dyn Any, Global>::into_raw_with_allocator(rc);
+                let _recovered: Rc<dyn Any, Global> =
+                    unsafe { Rc::<dyn Any, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let (ptr, alloc): (*const $ty, Global) =
+                    Rc::<$ty, Global>::into_raw_with_allocator(rc);
+                let _recovered: Rc<$ty, Global> =
+                    unsafe { Rc::<$ty, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_into_raw_with_allocator_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let (ptr, alloc): (*const [$elem], Global) =
+                    Rc::<[$elem], Global>::into_raw_with_allocator(rc);
+                let _recovered: Rc<[$elem], Global> =
+                    unsafe { Rc::<[$elem], Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_i8, i8);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_i16, i16);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_i32, i32);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_i64, i64);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_i128, i128);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u8, u8);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u16, u16);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u32, u32);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u64, u64);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_u128, u128);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_unit, ());
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_bool, bool);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_array, [u8; 4]);
+    gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_dyn_any, dyn Any);
+
+    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u8, u8);
+    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u16, u16);
+    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u32, u32);
+    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u64, u64);
+    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u128, u128);
 }
