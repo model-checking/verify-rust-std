@@ -5,7 +5,7 @@
 
 [KMIR](https://github.com/runtimeverification/mir-semantics) is a formal
 verification tool for Rust that defines the operational semantics of Rust’s
-Middle Intermediate Representation (MIR) in K (through Stable MIR). By
+Middle Intermediate Representation (MIR) in K (through Public / Stable MIR). By
 leveraging the [K framework](https://kframework.org/), KMIR provides a parser,
 interpreter, and symbolic execution engine for MIR programs. This tool enables
 direct execution of concrete and symbolic input, with step-by-step inspection of
@@ -64,7 +64,7 @@ on abstract input which is not fully specified but characterized by _path condit
 
 K (and thus KMIR) verifies program correctness by performing an
 _all-path-reachability proof_ using the symbolic execution engine and verifier
-derived from the K encoding of the Stable MIR operational semantics.
+derived from the K encoding of the Public MIR operational semantics.
 The K semantics framework is based on reachability logic, which is a theory
 describing transition systems in [matching logic](http://www.matching-logic.org/).
 An all-path-reachability proof in this system verifies that a particular
@@ -159,7 +159,7 @@ The [KMIR docker
 image](https://github.com/runtimeverification/mir-semantics/blob/c221c81d73a56c48692a087a2ced29917de99246/Dockerfile.kmir)
 is currently the best option for casual users of KMIR. It contains an
 installation of K Framework, the tool `kmir`, and the `stable-mir-json`
-extraction tool, which is a custom version of `rustc` which extracts Stable MIR
+extraction tool, which is a custom version of `rustc` which extracts Public MIR
 as JSON or as graphviz' *.dot when compiling a crate.
 The image is [available on Docker Hub](https://hub.docker.com/r/runtimeverificationinc/kmir/tags).
 
