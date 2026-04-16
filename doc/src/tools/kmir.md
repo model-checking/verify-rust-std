@@ -273,6 +273,41 @@ kmir show <FILE>.<SYMBOL> --proof-dir <DIR> --leaves --statistics
 kmir view <FILE>.<SYMBOL> --proof-dir <DIR>
 ```
 
+#### Useful Prove Flags
+
+Proof state is automatically written to disk at every branch point and leaf
+node. Additional state can be emitted with flags to `kmir prove`.
+
+It is recommended to use `--terminate-on-thunk`, which stops the proof when
+an unevaluated symbolic value (thunk) is encountered. This does not affect
+soundness, but gives feedback of the proof failure from the earliest point
+a K rule could not apply.
+
+If a `--proof-dir <DIR>` is supplied, proof progress is written to disk.
+If a proof is cancelled before completion, calling the same command with
+the same `--proof-dir <DIR>` will read the state from disk and continue
+the proof from there. Otherwise the `--reload` flag will start the proof
+overwriting the previous entry.
+
+Furthermore, performance for a proof can be increased with parallelism.
+We recommend `--max-workers 4` which empirical evidence suggests is an
+optimal number of workers for a proof.
+
+| Flag                         | Effect                                                                      |
+| ---                          | ---                                                                         |
+| `--reload`                   | Discard existing proof progress and restart from scratch                    |
+| `--terminate-on-thunk`       | Stop proof at unevaluated thunks (recommended)                              |
+| `--break-on-thunk`           | Emit state at thunk evaluation                                              |
+| `--break-on-calls`           | Emit state at all function and intrinsic calls                              |
+| `--break-on-function-calls`  | Emit state at function calls only                                           |
+| `--break-on-intrinsic-calls` | Emit state at intrinsic calls only                                          |
+| `--break-on-function <STR>`  | Emit state when calling a function whose name contains `<STR>` (repeatable) |
+| `--max-depth <N>`            | Emit state every <N> steps                                                  |
+| `--max-iterations <N>`       | Stop proof after <N> iterations (states are emitted)                        |
+| `--fail-fast`                | Stop proof at the earliest failure (leaves other branches pending)          |
+| `--max-workers <N>` (best 4) | Max workers for parallel execution                                          |
+
+
 ## Background Reading
 
 - **[Matching Logic](http://www.matching-logic.org/)**
