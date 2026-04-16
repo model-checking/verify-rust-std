@@ -155,54 +155,123 @@ Goto-transcoder (ESBMC).
 
 ## Steps to Use the Tool
 
-The [KMIR docker
-image](https://github.com/runtimeverification/mir-semantics/blob/c221c81d73a56c48692a087a2ced29917de99246/Dockerfile.kmir)
-is currently the best option for casual users of KMIR. It contains an
-installation of K Framework, the tool `kmir`, and the `stable-mir-json`
-extraction tool, which is a custom version of `rustc` which extracts Public MIR
-as JSON or as graphviz' *.dot when compiling a crate.
-The image is [available on Docker Hub](https://hub.docker.com/r/runtimeverificationinc/kmir/tags).
+### Installation
 
-Alternatively, the tools for `kmir` can be built from source as [described in
-the `mir-semantics` repository's
-`README.md`](https://github.com/runtimeverification/mir-semantics). This
-requires an installation of `K Framework`, best done [using the `kup`
-tool](https://github.com/runtimeverification/kup/README.md), and includes a
-git submodule dependency on `stable-mir-json`.
+3 methods to install KMIR are listed. Recommended is the Nix installation via kup.
 
-The `stable-mir-json` tool is a custom driver for `rustc` which, while compiling
-Rust code, writes the code's Stable MIR, represented in a JSON format, to a
-file.  Just like `rustc` itself, `stable-mir-json` extracts MIR of a single
-crate and must be invoked via `cargo` for multi-crate programs. Besides the JSON
-extraction, `stable-mir-json` can also write a graphviz `dot` file representing
-the Stable MIR structure of all functions and their call graph within the crate.
+#### Nix (via kup)
 
-The `kmir` tool provides commands to work with the Stable MIR representation of
-Rust programs that `stable-mir-json` extracts.
+The recommended installation method uses
+[`kup`](https://github.com/runtimeverification/kup), the K Framework package
+manager. This installs K Framework, `kmir`, and `stable-mir-json` on your
+system via [Nix](https://nixos.org/).
 
-* Run Stable MIR code extracted from Rust programs (`kmir run my-program.smir.json`);
-* Prove that a given Rust program or function will terminate without panics or
-  undefined behaviour (`kmir prove-rs my-program.rs [--start-symbol my_function]`).
-  This command invokes `stable-mir-json` internally, and then performs an all-path
-  reachability proof that the program reaches normal termination  under all possible inputs.
-  Any statements that would panic or cause undefined behaviour will terminate execution
-  so this proves the successful execution. Pre-and post-conditions can be modelled
-  using assertions and conditional execution.
-* (Advanced use for K experts:) Prove a property about a Rust program, which is given
-  as a K "claim" and proven using an all-path reachability proof in K
-  (`kmir prove my-program-spec.k`);
-* Print or inspect the control flow graph of a program's proof constructed by the
-  `kmir prove` or `kmir prove-rs` commands (`kmir show module.proof_identifier`
-  and `kmir view module.proof_identifier`);
+The following script installs Nix (if not already present) and `kup`:
 
-An example of proofs using KMIR, and how to construct them in Rust code,
-are [provided in the `kmir-proofs`
-directory](https://github.com/model-checking/verify-rust-std/tree/main/kmir-proofs).
+```bash
+bash <(curl https://kframework.org/install)
+```
 
-The `kmir` tool is under active development at the time of writing.
-Future development will include using source code annotations instead of explicit
-test functions to better integrate with Rust code bases, using a suitable annotation
-language to express pre- and post-conditions.
+Then install `kmir`:
+
+```bash
+kup install kmir
+```
+
+`kmir` is now installed on the path:
+```bash
+kmir --help
+```
+
+#### Docker
+
+KMIR is available as a Docker image on
+[Docker Hub](https://hub.docker.com/r/runtimeverificationinc/kmir/tags).
+The image contains K Framework, the `kmir` tool, and `stable-mir-json`.
+
+The following commands may require `sudo` permissions.
+
+```bash
+docker run --rm \
+  runtimeverificationinc/kmir:ubuntu-jammy-0.4.206 \
+  kmir --help
+```
+
+To run a proof using Docker, mount your working directory into the container:
+
+```bash
+docker run --rm \
+  -u $(id -u):$(id -g) \
+  -v /path/to/your/files:/workspace \
+  runtimeverificationinc/kmir:<LATEST-VERSION-FROM-DOCKERHUB> \
+  kmir prove /workspace/program.rs --proof-dir /workspace/proofs --verbose
+```
+
+The `-u` flag ensures files created inside the container have the correct
+ownership on the host. The `-v` flag mounts a host directory so that input
+files are accessible and proof output persists after the container exits.
+
+#### From source
+
+The tools can be built from source as described in the
+[`mir-semantics` repository](https://github.com/runtimeverification/mir-semantics).
+This requires [Python](https://www.python.org/) >= 3.10,
+[`uv`](https://docs.astral.sh/uv/),
+[K Framework](https://github.com/runtimeverification/k), and Rust via
+[`rustup`](https://rustup.rs/).
+
+```bash
+git clone --recurse-submodules https://github.com/runtimeverification/mir-semantics.git
+cd mir-semantics
+make build
+make stable-mir-json
+```
+
+`kmir` can be invoked via `uv` (from repo root):
+
+```bash
+uv --project kmir/ -- kmir --help
+```
+
+### Usage (Verification)
+
+The `kmir` tool works with Stable MIR extracted from Rust programs via
+[`stable-mir-json`](https://github.com/runtimeverification/stable-mir-json),
+a custom driver for `rustc` that serializes a crate's Stable MIR to JSON.
+
+| Command             | Purpose                                                                      |
+| ---                 | ---                                                                          |
+| `kmir prove`        | Prove a Rust program (*.rs) terminates without panics or undefined behaviour |
+| `kmir show`         | Inspect a static proof graph (nodes, statistics, rule applications)          |
+| `kmir view`         | Interactive proof viewer                                                     |
+| `kmir prune`        | Remove a node and its subtree from a proof                                   |
+| `kmir section-edge` | Split a proof edge into finer sections                                       |
+| `kmir link`         | Link multiple SMIR JSON files into one (for multi-crate projects)            |
+
+To prove a program:
+
+```bash
+kmir prove <FILE>.rs --proof-dir <DIR> [--start-symbol <SYMBOL>] --verbose
+```
+
+Where `<FILE>` is the Rust source file to verify, `<DIR>` is the directory
+where proof artifacts are stored, and `<SYMBOL>` is the entry function to
+verify (defaults to `main` if omitted).
+
+This invokes `stable-mir-json` internally, then performs an all-path
+reachability proof that the program reaches normal termination under all
+possible inputs. Any statements that would panic or cause undefined behaviour
+terminate execution, so successful completion proves their absence.
+Pre-conditions and post-conditions can be modelled using conditional execution
+and assertions.
+
+To inspect proof results, the proof ID is `<FILE>.<SYMBOL>`, e.g., proving
+`program.rs` produces proof ID `program.main`:
+
+```bash
+kmir show <FILE>.<SYMBOL> --proof-dir <DIR> --leaves --statistics
+kmir view <FILE>.<SYMBOL> --proof-dir <DIR>
+```
 
 ## Background Reading
 
