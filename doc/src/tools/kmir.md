@@ -83,7 +83,7 @@ one of several possible techniques can be used:
    need to be written in K's native language.
 2) As potential future work, it would be possible to implement an annotation
    language to provide the required context for loop invariant directly in
-   source code (as done in the past using natspec for Solitidy code).
+   source code (as done in the past using natspec for Solidity code).
 3) In general, K also supports bounded loop unrolling, by way of identifying
    loop heads and counting how many times the same loop head has been observed.
    This technique is managed by the all-path reachability prover library for
@@ -141,7 +141,7 @@ Goto-transcoder (ESBMC).
   Goto-transcoder (ESBMC) encode the verification problem into an SAT / SMT
   verification condition to be discharged by the appropriate solver. Kani
   recently added a Lean backend through Aeneas, however Lean does not support
-  matching or reachability logic currently. Verifast performs symbollic
+  matching or reachability logic currently. Verifast performs symbolic
   execution of the verification target like KMIR, however reasoning is performed
   by annotating functions with design-by-contract components in separation
   logic.
