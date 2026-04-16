@@ -159,6 +159,11 @@ Goto-transcoder (ESBMC).
 
 3 methods to install KMIR are listed. Recommended is the Nix installation via kup.
 
+<figure>
+<img width="931" height="627" alt="Demo installing KMIR via kup" src="https://github.com/user-attachments/assets/e31c16ad-7d78-4b62-93a6-8c7e61948d50" />
+<figcaption>Installing KMIR via kup (cached install shown; first install takes longer)</figcaption>
+</figure>
+
 #### Nix (via kup)
 
 The recommended installation method uses
