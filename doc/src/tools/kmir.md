@@ -90,10 +90,12 @@ one of several possible techniques can be used:
    K and works out of the box with suitable arguments, without requiring any
    special support from the back-end.
 
-Our front-end, at the time of writing, does not have either of these
-options turned on. As soon as larger programs will require it, we will decide
-whether the preference is to implement support for user-supplied K-level
-loop invariants, or bounded loop unrolling support, or (probably) offer both.
+By default, KMIR will attempt to exhaustively unroll a loop. Loop invariants
+have been applied to the verification of the Solana P-Token / SPL-Token
+Equivalence (see Case Study 2.) to summarise the behaviour of iterator [
+[P-Token Loop](https://github.com/runtimeverification/solana-token/blob/proofs/specs/shared/inner_test_validate_owner.rs),
+[P-Token Lemma](https://github.com/runtimeverification/mir-semantics/blob/mk/lemmas-inner_test_validate_owner/kmir/src/kmir/kdist/mir-semantics/symbolic/inner_test_validate_owner.md)
+].
 
 KMIR also prioritizes UI with interactive proof exploration available
 out-of-the-box through the terminal KCFG (K Control Flow Graph) viewer, allowing
