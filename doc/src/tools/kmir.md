@@ -278,6 +278,11 @@ kmir show <FILE>.<SYMBOL> --proof-dir <DIR> --leaves --statistics
 kmir view <FILE>.<SYMBOL> --proof-dir <DIR>
 ```
 
+<figure>
+<img width="1276" height="560" alt="Passing KMIR proof with show" src="https://github.com/user-attachments/assets/936b42fe-9bdc-480d-962f-390576193634" />
+<figcaption><code>kmir prove</code> on passing proof with <code>kmir show</code> (time is shortened, real time is in output)</figcaption>
+</figure>
+
 #### Useful Prove Flags
 
 Proof state is automatically written to disk at every branch point and leaf
