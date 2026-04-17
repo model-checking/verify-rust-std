@@ -178,6 +178,25 @@ Goto-transcoder (ESBMC).
   means that performance and user experience are projected to improve due to the
   continued development of other semantics.
 
+## Known Limitations
+
+KMIR is under active development. The following summarises notable limitations
+at the time of writing:
+
+**Language features not yet supported:**
+- Floating point types (`f16`, `f32`, `f64`, `f128`)
+- Heap allocating types: `String`s and `Vec`
+- Smart pointers (`Box`, `Rc`, `Arc`)
+- Async/await
+- Multi-threading and atomics
+- Dynamic trait objects `dyn T`
+
+**Language feature partially supported:**
+- Iterators
+- Casts
+- `unsafe` code (`Unions`, raw pointers, etc.)
+- `usize`/`isize` are modelled as fixed-width, not architecture-dependent
+
 ## Steps to Use the Tool
 
 ### Installation
