@@ -406,6 +406,39 @@ The full set of verified methods covers all integer types (i8-i128, u8-u128):
 | `carrying_mul`     | u8, u16, u32, u64   | verified                |
 | `to_int_unchecked` | f16, f32, f64, f128 | pending (float support) |
 
+### Case Study 2: Solana P-Token / SPL-Token Equivalence Proofs
+
+KMIR has been used to formally verify the equivalence of the
+[Solana P-Token](https://github.com/runtimeverification/solana-token/tree/proofs/p-token)
+(a compute-optimized rewrite using
+[Pinocchio](https://github.com/anza-xyz/pinocchio)) against the original
+[Solana SPL-Token](https://github.com/runtimeverification/solana-token/tree/proofs/program)
+program.
+
+The verification proves that the P-Token program simulates the SPL-Token
+program: for each SPL-Token state and instruction (a request to perform an
+operation such as Transfer or Burn), there is an equivalent P-Token state
+and instruction that produces the same result. Both programs must agree on
+state transitions and error behaviour.
+
+Each instruction is verified twice (once for each implementation) against a
+shared specification harness that captures the initial account state, invokes
+the instruction processor with symbolic input, and verifies the same
+postcondition holds after execution. 41 proofs are required to demonstrate
+equivalence.
+
+For more details, please see:
+- [Proof Status](https://github.com/runtimeverification/solana-token/issues/24)
+- [Multisig Proof Status](https://github.com/runtimeverification/solana-token/issues/97)
+- [Shared Specifications](https://github.com/runtimeverification/solana-token/tree/proofs/specs)
+- [SPL-Token Implementation](https://github.com/runtimeverification/solana-token/blob/proofs/program/src/processor.rs)
+- [P-Token Implementation](https://github.com/runtimeverification/solana-token/tree/proofs/p-token/src/processor)
+
+A detailed report covering the Solana programming model, the formal
+equivalence methodology, and per-instruction verification conditions is
+available in the
+[equivalence proofs report](https://github.com/runtimeverification/solana-token/blob/proofs/RV_EQUIVALENCE_PROOFS_REPORT.md).
+
 ## Background Reading
 
 - **[Matching Logic](http://www.matching-logic.org/)**
