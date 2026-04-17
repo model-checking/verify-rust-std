@@ -62,6 +62,29 @@ Programs modelled in K Framework can be executed _symbolically_, i.e., operating
 on abstract input which is not fully specified but characterized by _path conditions_ 
 (e.g., that an integer variable holds an unknown but non-negative value).
 
+In practice, KMIR proof harnesses work similarly to property tests. Arguments
+to the entry function are automatically instantiated as fully symbolic values,
+so the proof covers all possible inputs. Post-conditions are expressed using
+`assert!` statements. Pre-conditions can be added using `std::intrinsics::assume`,
+which constrains the symbolic path condition to restrict the inputs under
+consideration. This design allows users to write verification harnesses in
+plain Rust without needing to learn write K (excepting advanced features).
+
+```rust
+#![feature(core_intrinsics)]
+use std::intrinsics::assume;
+
+fn abs_safe(x: i32) {
+    unsafe { assume(x != i32::MIN); }
+    let result = x.abs();
+    assert!(result >= 0);
+}
+```
+
+When KMIR is directed to prove `abs_safe`, `x` is instantiated symbolically.
+The `assume` adds `x != i32::MIN` as a path constraint, and KMIR proves the
+assertion holds for all values satisfying that constraint.
+
 K (and thus KMIR) verifies program correctness by performing an
 _all-path-reachability proof_ using the symbolic execution engine and verifier
 derived from the K encoding of the Public MIR operational semantics.
