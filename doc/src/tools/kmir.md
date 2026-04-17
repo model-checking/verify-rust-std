@@ -348,6 +348,64 @@ optimal number of workers for a proof.
 | `--max-workers <N>` (best 4) | Max workers for parallel execution                                          |
 
 
+## KMIR Case Studies
+
+### Case Study 1: Verify Std Rust Challenge 11
+
+[Challenge 11](https://model-checking.github.io/verify-rust-std/challenges/0011-floats-ints.html)
+requires verifying the safety of public unsafe methods for numeric primitives
+in `core::num`. KMIR successfully verified the correctness of all scoped integer
+operations. Float operations remain future work. For details, please visit the
+[proof suite](https://github.com/runtimeverification/mir-semantics/tree/master/kmir/src/tests/integration/data/verify-rust-std/0011-floats-ints).
+
+For each unsafe method, two harness files are written:
+
+**PASSING** (
+[unchecked_add.rs](https://github.com/runtimeverification/mir-semantics/blob/master/kmir/src/tests/integration/data/verify-rust-std/0011-floats-ints/unchecked_add.rs)
+): calls the unsafe method only when its safety precondition holds. KMIR proves
+all paths terminate without UB:
+
+```rust
+fn unchecked_add_u128(a: u128, b: u128) {
+    if let Some(expected) = a.checked_add(b) {
+        let result = unsafe { a.unchecked_add(b) };
+        assert!(result == expected);
+    }
+}
+```
+
+**FAILING** (
+[unchecked_add-fail.rs](https://github.com/runtimeverification/mir-semantics/blob/master/kmir/src/tests/integration/data/verify-rust-std/0011-floats-ints/unchecked_add-fail.rs)
+): calls the unsafe method on arbitrary symbolic inputs without a precondition.
+KMIR detects UB on overflow paths and the proof fails:
+
+```rust
+fn unchecked_add_u128(a: u128, b: u128) {
+    let result = unsafe { a.unchecked_add(b) };
+    assert!(result == a.wrapping_add(b)); // UB
+}
+```
+
+Each failing test has an expected failure state recorded in the
+[show](https://github.com/runtimeverification/mir-semantics/tree/master/kmir/src/tests/integration/data/verify-rust-std/0011-floats-ints/show)
+directory.
+
+The full set of verified methods covers all integer types (i8-i128, u8-u128):
+
+| Method             | Types               | Status                  |
+| ---                | ---                 | ---                     |
+| `unchecked_add`    | all integer types   | verified                |
+| `unchecked_sub`    | all integer types   | verified                |
+| `unchecked_mul`    | all integer types   | verified                |
+| `unchecked_shl`    | all integer types   | verified                |
+| `unchecked_shr`    | all integer types   | verified                |
+| `unchecked_neg`    | signed types only   | verified                |
+| `wrapping_shl`     | all integer types   | verified                |
+| `wrapping_shr`     | all integer types   | verified                |
+| `widening_mul`     | u8, u16, u32, u64   | verified                |
+| `carrying_mul`     | u8, u16, u32, u64   | verified                |
+| `to_int_unchecked` | f16, f32, f64, f128 | pending (float support) |
+
 ## Background Reading
 
 - **[Matching Logic](http://www.matching-logic.org/)**
