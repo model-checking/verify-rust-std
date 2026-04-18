@@ -22,7 +22,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Run Proofs in Tool Container
+      - name: Run Challenge 11 Proofs
         run: |
           docker run --rm -t \
             --name ${{ env.container_name }} \
@@ -30,4 +30,4 @@ jobs:
             -u $(id -u):$(id -g) \
             -v $PWD:/home/kmir/workspace \
             runtimeverificationinc/kmir:ubuntu-jammy-latest \
-            kmir-proofs/unchecked_arithmetic/run-proofs.sh
+            kmir-proofs/0011-floats-ints/run-proofs.sh
