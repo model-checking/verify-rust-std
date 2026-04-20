@@ -339,7 +339,7 @@ fn get_path_from_fd(fd: c_int) -> Option<PathBuf> {
         // alternatives. If a better method is invented, it should be used
         // instead.
         let mut buf = vec![0; libc::PATH_MAX as usize];
-        let n = unsafe { libc::fcntl(fd, libc::F_GETPATH, buf.as_ptr()) };
+        let n = unsafe { libc::fcntl(fd, libc::F_GETPATH, buf.as_mut_ptr()) };
         if n == -1 {
             cfg_select! {
                 target_os = "netbsd" => {
@@ -375,7 +375,7 @@ fn get_path_from_fd(fd: c_int) -> Option<PathBuf> {
     #[cfg(target_os = "vxworks")]
     fn get_path(fd: c_int) -> Option<PathBuf> {
         let mut buf = vec![0; libc::PATH_MAX as usize];
-        let n = unsafe { libc::ioctl(fd, libc::FIOGETNAME, buf.as_ptr()) };
+        let n = unsafe { libc::ioctl(fd, libc::FIOGETNAME, buf.as_mut_ptr()) };
         if n == -1 {
             return None;
         }
@@ -1872,7 +1872,12 @@ fn file_time_to_timespec(time: Option<SystemTime>) -> io::Result<libc::timespec>
             io::ErrorKind::InvalidInput,
             "timestamp is too small to set as a file time",
         )),
-        None => Ok(libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT as _ }),
+        None => Ok({
+            let mut ts = libc::timespec::default();
+            ts.tv_sec = 0;
+            ts.tv_nsec = libc::UTIME_OMIT as _;
+            ts
+        }),
     }
 }
 

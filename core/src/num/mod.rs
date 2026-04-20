@@ -46,6 +46,7 @@ mod error;
 mod float_parse;
 mod nonzero;
 mod saturating;
+mod traits;
 mod wrapping;
 
 /// 100% perma-unstable
@@ -1064,6 +1065,9 @@ impl u8 {
     /// U+0020 SPACE, U+0009 HORIZONTAL TAB, U+000A LINE FEED,
     /// U+000C FORM FEED, or U+000D CARRIAGE RETURN.
     ///
+    /// **Warning:** Because the list above excludes U+000B VERTICAL TAB,
+    /// `b.is_ascii_whitespace()` is **not** equivalent to `char::from(b).is_whitespace()`.
+    ///
     /// Rust uses the WhatWG Infra Standard's [definition of ASCII
     /// whitespace][infra-aw]. There are several other definitions in
     /// wide use. For instance, [the POSIX locale][pct] includes
@@ -1795,3 +1799,12 @@ macro_rules! from_str_int_impl {
 
 from_str_int_impl! { signed isize i8 i16 i32 i64 i128 }
 from_str_int_impl! { unsigned usize u8 u16 u32 u64 u128 }
+
+macro_rules! impl_sealed {
+    ($($t:ty)*) => {$(
+        /// Allows extension traits within `core`.
+        #[unstable(feature = "sealed", issue = "none")]
+        impl crate::sealed::Sealed for $t {}
+    )*}
+}
+impl_sealed! { isize i8 i16 i32 i64 i128 usize u8 u16 u32 u64 u128 }

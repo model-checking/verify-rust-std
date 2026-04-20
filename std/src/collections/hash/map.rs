@@ -20,7 +20,7 @@ use crate::ops::Index;
 /// reasonable best-effort is made to generate this seed from a high quality,
 /// secure source of randomness provided by the host without blocking the
 /// program. Because of this, the randomness of the seed depends on the output
-/// quality of the system's random number coroutine when the seed is created.
+/// quality of the system's random number generator when the seed is created.
 /// In particular, seeds generated when the system's entropy pool is abnormally
 /// low such as during system boot may be of a lower quality.
 ///
@@ -301,8 +301,11 @@ impl<K, V, A: Allocator> HashMap<K, V, RandomState, A> {
     /// # Examples
     ///
     /// ```
+    /// # #![feature(allocator_api)]
     /// use std::collections::HashMap;
-    /// let mut map: HashMap<&str, i32> = HashMap::new();
+    /// use std::alloc::Global;
+    ///
+    /// let map: HashMap<i32, i32> = HashMap::new_in(Global);
     /// ```
     #[inline]
     #[must_use]
@@ -321,8 +324,11 @@ impl<K, V, A: Allocator> HashMap<K, V, RandomState, A> {
     /// # Examples
     ///
     /// ```
+    /// # #![feature(allocator_api)]
     /// use std::collections::HashMap;
-    /// let mut map: HashMap<&str, i32> = HashMap::with_capacity(10);
+    /// use std::alloc::Global;
+    ///
+    /// let map: HashMap<i32, i32> = HashMap::with_capacity_in(10, Global);
     /// ```
     #[inline]
     #[must_use]
@@ -410,6 +416,18 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     ///
     /// The `hash_builder` passed should implement the [`BuildHasher`] trait for
     /// the `HashMap` to be useful, see its documentation for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    /// use std::alloc::Global;
+    /// use std::collections::HashMap;
+    /// use std::hash::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let map: HashMap<i32, i32> = HashMap::with_hasher_in(s, Global);
+    /// ```
     #[inline]
     #[must_use]
     #[unstable(feature = "allocator_api", issue = "32838")]
@@ -432,6 +450,17 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// The `hasher` passed should implement the [`BuildHasher`] trait for
     /// the `HashMap` to be useful, see its documentation for details.
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    /// use std::alloc::Global;
+    /// use std::collections::HashMap;
+    /// use std::hash::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let map: HashMap<i32, i32> = HashMap::with_capacity_and_hasher_in(10, s, Global);
+    /// ```
     #[inline]
     #[must_use]
     #[unstable(feature = "allocator_api", issue = "32838")]

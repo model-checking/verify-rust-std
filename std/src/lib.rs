@@ -311,6 +311,7 @@
 //
 // Library features (core):
 // tidy-alphabetical-start
+#![feature(borrowed_buf_init)]
 #![feature(bstr)]
 #![feature(bstr_internals)]
 #![feature(cast_maybe_uninit)]
@@ -346,6 +347,7 @@
 #![feature(ip)]
 #![feature(iter_advance_by)]
 #![feature(iter_next_chunk)]
+#![feature(maybe_dangling)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_fill)]
 #![feature(panic_can_unwind)]
@@ -417,6 +419,13 @@
 // tidy-alphabetical-end
 //
 #![default_lib_allocator]
+// Removed features
+#![unstable_removed(
+    feature = "concat_idents",
+    reason = "Replaced by the macro_metavar_expr_concat feature",
+    link = "https://github.com/rust-lang/rust/issues/29599#issuecomment-2986866250",
+    since = "1.90.0"
+)]
 
 // The Rust prelude
 // The compiler expects the prelude definition to be defined before its use statement.
@@ -537,7 +546,7 @@ pub use core::option;
 pub use core::pin;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::ptr;
-#[unstable(feature = "new_range_api", issue = "125687")]
+#[stable(feature = "new_range_api", since = "1.96.0")]
 pub use core::range;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::result;
@@ -636,7 +645,7 @@ pub mod simd {
 }
 
 #[unstable(feature = "autodiff", issue = "124509")]
-/// This module provides support for automatic differentiation.
+#[doc = include_str!("../../core/src/autodiff.md")]
 pub mod autodiff {
     /// This macro handles automatic differentiation.
     pub use core::autodiff::{autodiff_forward, autodiff_reverse};
@@ -706,6 +715,8 @@ pub use core::cfg_select;
     reason = "`concat_bytes` is not stable enough for use and is subject to change"
 )]
 pub use core::concat_bytes;
+#[unstable(feature = "derive_macro_global_path", issue = "154645")]
+pub use core::derive;
 #[stable(feature = "matches_macro", since = "1.42.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::matches;

@@ -15,7 +15,7 @@ mod validations;
 
 use self::pattern::{DoubleEndedSearcher, Pattern, ReverseSearcher, Searcher};
 use crate::char::{self, EscapeDebugExtArgs};
-use crate::ops::Range;
+use crate::range::Range;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{ascii, mem};
@@ -589,6 +589,7 @@ impl str {
     #[rustc_as_ptr]
     #[must_use]
     #[inline(always)]
+    #[rustc_no_writable]
     pub const fn as_mut_ptr(&mut self) -> *mut u8 {
         self as *mut str as *mut u8
     }
@@ -1202,6 +1203,9 @@ impl str {
     ///
     /// This uses the same definition as [`char::is_ascii_whitespace`].
     /// To split by Unicode `Whitespace` instead, use [`split_whitespace`].
+    /// Note that because of this difference in definition, even if `s.is_ascii()`
+    /// is `true`, `s.split_ascii_whitespace()` behavior will differ from `s.split_whitespace()`
+    /// if `s` contains U+000B VERTICAL TAB.
     ///
     /// [`split_whitespace`]: str::split_whitespace
     ///
@@ -2896,9 +2900,12 @@ impl str {
     /// Returns a string slice with leading ASCII whitespace removed.
     ///
     /// 'Whitespace' refers to the definition used by
-    /// [`u8::is_ascii_whitespace`].
+    /// [`u8::is_ascii_whitespace`]. Importantly, this definition excludes
+    /// the U+000B code point even though it has the Unicode [`White_Space`] property
+    /// and is removed by [`str::trim_start`].
     ///
     /// [`u8::is_ascii_whitespace`]: u8::is_ascii_whitespace
+    /// [`White_Space`]: https://www.unicode.org/reports/tr44/#White_Space
     ///
     /// # Examples
     ///
@@ -2921,9 +2928,12 @@ impl str {
     /// Returns a string slice with trailing ASCII whitespace removed.
     ///
     /// 'Whitespace' refers to the definition used by
-    /// [`u8::is_ascii_whitespace`].
+    /// [`u8::is_ascii_whitespace`]. Importantly, this definition excludes
+    /// the U+000B code point even though it has the Unicode [`White_Space`] property
+    /// and is removed by [`str::trim_end`].
     ///
     /// [`u8::is_ascii_whitespace`]: u8::is_ascii_whitespace
+    /// [`White_Space`]: https://www.unicode.org/reports/tr44/#White_Space
     ///
     /// # Examples
     ///
@@ -2947,9 +2957,12 @@ impl str {
     /// removed.
     ///
     /// 'Whitespace' refers to the definition used by
-    /// [`u8::is_ascii_whitespace`].
+    /// [`u8::is_ascii_whitespace`]. Importantly, this definition excludes
+    /// the U+000B code point even though it has the Unicode [`White_Space`] property
+    /// and is removed by [`str::trim`].
     ///
     /// [`u8::is_ascii_whitespace`]: u8::is_ascii_whitespace
+    /// [`White_Space`]: https://www.unicode.org/reports/tr44/#White_Space
     ///
     /// # Examples
     ///
@@ -3112,14 +3125,15 @@ impl str {
     /// # Examples
     /// ```
     /// #![feature(substr_range)]
+    /// use core::range::Range;
     ///
     /// let data = "a, b, b, a";
     /// let mut iter = data.split(", ").map(|s| data.substr_range(s).unwrap());
     ///
-    /// assert_eq!(iter.next(), Some(0..1));
-    /// assert_eq!(iter.next(), Some(3..4));
-    /// assert_eq!(iter.next(), Some(6..7));
-    /// assert_eq!(iter.next(), Some(9..10));
+    /// assert_eq!(iter.next(), Some(Range { start: 0, end: 1 }));
+    /// assert_eq!(iter.next(), Some(Range { start: 3, end: 4 }));
+    /// assert_eq!(iter.next(), Some(Range { start: 6, end: 7 }));
+    /// assert_eq!(iter.next(), Some(Range { start: 9, end: 10 }));
     /// ```
     #[must_use]
     #[unstable(feature = "substr_range", issue = "126769")]
