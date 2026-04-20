@@ -5192,7 +5192,7 @@ mod verify_3588 {
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u128, u128);
 }
 
-// === SAFE FUNCTIONS (50 of 54) ===
+// === SAFE FUNCTIONS (51 of 54) ===
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -7481,10 +7481,7 @@ mod verify_375 {
     gen_into_inner_with_allocator_unsized_harness!(harness_into_inner_with_allocator_vec_u16, u16);
     gen_into_inner_with_allocator_unsized_harness!(harness_into_inner_with_allocator_vec_u32, u32);
     gen_into_inner_with_allocator_unsized_harness!(harness_into_inner_with_allocator_vec_u64, u64);
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_vec_u128,
-        u128
-    );
+    gen_into_inner_with_allocator_unsized_harness!(harness_into_inner_with_allocator_vec_u128, u128);
 }
 
 #[cfg(kani)]
@@ -7493,28 +7490,28 @@ mod verify_425 {
     use super::*;
 
     macro_rules! gen_rc_new_harness {
-        ($name:ident, $ty:ty, $value:expr) => {
+        ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let value: $ty = $value;
+                let value: $ty = kani::any::<$ty>();
                 let _rc: Rc<$ty> = Rc::new(value);
             }
         };
     }
 
-    gen_rc_new_harness!(harness_rc_new_i8, i8, kani::any::<i8>());
-    gen_rc_new_harness!(harness_rc_new_i16, i16, kani::any::<i16>());
-    gen_rc_new_harness!(harness_rc_new_i32, i32, kani::any::<i32>());
-    gen_rc_new_harness!(harness_rc_new_i64, i64, kani::any::<i64>());
-    gen_rc_new_harness!(harness_rc_new_i128, i128, kani::any::<i128>());
-    gen_rc_new_harness!(harness_rc_new_u8, u8, kani::any::<u8>());
-    gen_rc_new_harness!(harness_rc_new_u16, u16, kani::any::<u16>());
-    gen_rc_new_harness!(harness_rc_new_u32, u32, kani::any::<u32>());
-    gen_rc_new_harness!(harness_rc_new_u64, u64, kani::any::<u64>());
-    gen_rc_new_harness!(harness_rc_new_u128, u128, kani::any::<u128>());
-    gen_rc_new_harness!(harness_rc_new_unit, (), ());
-    gen_rc_new_harness!(harness_rc_new_array_u8_4, [u8; 4], kani::any::<[u8; 4]>());
-    gen_rc_new_harness!(harness_rc_new_bool, bool, kani::any::<bool>());
+    gen_rc_new_harness!(harness_rc_new_i8, i8);
+    gen_rc_new_harness!(harness_rc_new_i16, i16);
+    gen_rc_new_harness!(harness_rc_new_i32, i32);
+    gen_rc_new_harness!(harness_rc_new_i64, i64);
+    gen_rc_new_harness!(harness_rc_new_i128, i128);
+    gen_rc_new_harness!(harness_rc_new_u8, u8);
+    gen_rc_new_harness!(harness_rc_new_u16, u16);
+    gen_rc_new_harness!(harness_rc_new_u32, u32);
+    gen_rc_new_harness!(harness_rc_new_u64, u64);
+    gen_rc_new_harness!(harness_rc_new_u128, u128);
+    gen_rc_new_harness!(harness_rc_new_unit, ());
+    gen_rc_new_harness!(harness_rc_new_array_u8_4, [u8; 4]);
+    gen_rc_new_harness!(harness_rc_new_bool, bool);
 }
 
 #[cfg(kani)]
