@@ -1886,3 +1886,248 @@ fn move_to_slice<T>(src: &mut [MaybeUninit<T>], dst: &mut [MaybeUninit<T>]) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use super::*;
+    use crate::alloc::Global;
+
+    /// Create a leaf node with n key-value pairs (keys 0..n, vals 10..10+n*10)
+    fn make_leaf(n: usize) -> NodeRef<marker::Owned, u32, u32, marker::Leaf> {
+        let mut node = NodeRef::new_leaf(Global);
+        for i in 0..n {
+            node.borrow_mut().push(i as u32, (i as u32 + 1) * 10);
+        }
+        node
+    }
+
+    // === GROUP 1: BOUNDED FUNCTIONS ===
+
+    // --- LeafNode::new ---
+    #[kani::proof]
+    fn verify_leaf_node_new() {
+        let node = NodeRef::<marker::Owned, u32, u32, marker::Leaf>::new_leaf(Global);
+        assert!(node.len() == 0);
+    }
+
+    // --- NodeRef::len ---
+    #[kani::proof]
+    fn verify_len() {
+        let node = make_leaf(3);
+        assert!(node.len() == 3);
+    }
+
+    // --- NodeRef::first_edge ---
+    #[kani::proof]
+    fn verify_first_edge() {
+        let node = make_leaf(3);
+        let edge = node.reborrow().first_edge();
+        let _ = edge;
+    }
+
+    // --- NodeRef::last_edge ---
+    #[kani::proof]
+    fn verify_last_edge() {
+        let node = make_leaf(3);
+        let edge = node.reborrow().last_edge();
+        let _ = edge;
+    }
+
+    // --- NodeRef::first_kv ---
+    #[kani::proof]
+    fn verify_first_kv() {
+        let node = make_leaf(3);
+        let kv = node.reborrow().first_kv();
+        let _ = kv;
+    }
+
+    // --- NodeRef::last_kv ---
+    #[kani::proof]
+    fn verify_last_kv() {
+        let node = make_leaf(3);
+        let kv = node.reborrow().last_kv();
+        let _ = kv;
+    }
+
+    // --- NodeRef::keys ---
+    #[kani::proof]
+    fn verify_keys() {
+        let node = make_leaf(3);
+        let borrow = node.reborrow();
+        let keys = borrow.keys();
+        assert!(keys.len() == 3);
+        assert!(keys[0] == 0);
+    }
+
+    // --- NodeRef::into_leaf ---
+    #[kani::proof]
+    fn verify_into_leaf() {
+        let node = make_leaf(2);
+        let leaf = node.reborrow().into_leaf();
+        let _ = leaf;
+    }
+
+    // --- NodeRef::as_leaf_mut ---
+    #[kani::proof]
+    fn verify_as_leaf_mut() {
+        let mut node = make_leaf(2);
+        let mut borrow = node.borrow_mut();
+        let leaf = borrow.as_leaf_mut();
+        let _ = leaf;
+    }
+
+    // --- NodeRef::into_leaf_mut ---
+    #[kani::proof]
+    fn verify_into_leaf_mut() {
+        let mut node = make_leaf(2);
+        let borrow = node.borrow_mut();
+        let leaf = borrow.into_leaf_mut();
+        let _ = leaf;
+    }
+
+    // --- NodeRef::ascend ---
+    #[kani::proof]
+    fn verify_ascend_leaf() {
+        let node = make_leaf(2);
+        let result = node.reborrow().ascend();
+        assert!(result.is_err());
+    }
+
+    // --- NodeRef::push ---
+    #[kani::proof]
+    fn verify_push() {
+        let mut node = make_leaf(0);
+        node.borrow_mut().push(1, 10);
+        assert!(node.len() == 1);
+        node.borrow_mut().push(2, 20);
+        assert!(node.len() == 2);
+    }
+
+    // --- Handle::left_edge ---
+    #[kani::proof]
+    fn verify_left_edge() {
+        let node = make_leaf(3);
+        let kv = node.reborrow().first_kv();
+        let edge = kv.left_edge();
+        let _ = edge;
+    }
+
+    // --- Handle::right_edge ---
+    #[kani::proof]
+    fn verify_right_edge() {
+        let node = make_leaf(3);
+        let kv = node.reborrow().first_kv();
+        let edge = kv.right_edge();
+        let _ = edge;
+    }
+
+    // --- Handle::left_kv ---
+    #[kani::proof]
+    fn verify_left_kv() {
+        let node = make_leaf(3);
+        let edge = node.reborrow().last_edge();
+        let result = edge.left_kv();
+        assert!(result.is_ok());
+    }
+
+    // --- Handle::right_kv ---
+    #[kani::proof]
+    fn verify_right_kv() {
+        let node = make_leaf(3);
+        let edge = node.reborrow().first_edge();
+        let result = edge.right_kv();
+        assert!(result.is_ok());
+    }
+
+    // --- Handle::into_kv ---
+    #[kani::proof]
+    fn verify_into_kv() {
+        let node = make_leaf(3);
+        let kv = node.reborrow().first_kv();
+        let (k, v) = kv.into_kv();
+        assert!(*k == 0);
+        assert!(*v == 10);
+    }
+
+    // --- Handle::key_mut ---
+    #[kani::proof]
+    fn verify_key_mut() {
+        let mut node = make_leaf(3);
+        let mut kv = node.borrow_mut().first_kv();
+        let key = kv.key_mut();
+        *key = 99;
+    }
+
+    // --- Handle::into_val_mut ---
+    #[kani::proof]
+    fn verify_into_val_mut() {
+        let mut node = make_leaf(3);
+        let kv = node.borrow_mut().first_kv();
+        let val = kv.into_val_mut();
+        unsafe {
+            *val = 99;
+        }
+    }
+
+    // --- Handle::into_kv_mut ---
+    #[kani::proof]
+    fn verify_into_kv_mut() {
+        let mut node = make_leaf(3);
+        let kv = node.borrow_mut().first_kv();
+        let (k, v) = kv.into_kv_mut();
+        *k = 99;
+        *v = 999;
+    }
+
+    // --- Handle::into_kv_valmut ---
+    #[kani::proof]
+    fn verify_into_kv_valmut() {
+        let mut node = make_leaf(3);
+        let kv = node.borrow_valmut().first_kv();
+        let (k, v) = kv.into_kv_valmut();
+        assert!(*k == 0);
+        *v = 99;
+    }
+
+    // --- Handle::kv_mut ---
+    #[kani::proof]
+    fn verify_kv_mut() {
+        let mut node = make_leaf(3);
+        let mut kv = node.borrow_mut().first_kv();
+        let (k, v) = kv.kv_mut();
+        *k = 99;
+        *v = 999;
+    }
+
+    // --- NodeRef::as_leaf_dying ---
+    #[kani::proof]
+    fn verify_as_leaf_dying() {
+        let node = make_leaf(2);
+        let mut dying = node.into_dying();
+        let leaf = dying.as_leaf_dying();
+        let _ = leaf;
+    }
+
+    // --- NodeRef::as_internal_mut (needs internal node) ---
+    #[kani::proof]
+    fn verify_new_internal_and_as_internal_mut() {
+        let child = make_leaf(2).forget_type();
+        let mut internal = NodeRef::new_internal(child, Global);
+        let mut borrow = internal.borrow_mut();
+        let int_ref = borrow.as_internal_mut();
+        let _ = int_ref;
+    }
+
+    // --- Handle::descend (needs internal node) ---
+    #[kani::proof]
+    fn verify_descend() {
+        let child = make_leaf(2).forget_type();
+        let internal = NodeRef::new_internal(child, Global);
+        let edge = internal.reborrow().first_edge();
+        let descended = edge.descend();
+        assert!(descended.len() == 2);
+    }
+}
