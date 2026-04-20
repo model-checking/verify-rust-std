@@ -92,6 +92,8 @@ use crate::alloc::{Allocator, Global};
 use crate::borrow::{Cow, ToOwned};
 use crate::boxed::Box;
 use crate::collections::TryReserveError;
+#[cfg(rapx)]
+use crate::rapx_macro::safety;
 use crate::raw_vec::RawVec;
 
 mod extract_if;
@@ -1227,6 +1229,7 @@ impl<T, A: Allocator> Vec<T, A> {
     #[must_use = "losing the pointer will leak memory"]
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
+    #[cfg_attr(rapx, safety {proof})]
     pub fn into_raw_parts_with_alloc(self) -> (*mut T, usize, usize, A) {
         let mut me = ManuallyDrop::new(self);
         let len = me.len();
