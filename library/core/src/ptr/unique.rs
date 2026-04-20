@@ -1,5 +1,6 @@
 use safety::{ensures, requires};
 
+use crate::clone::TrivialClone;
 use crate::fmt;
 #[cfg(kani)]
 use crate::kani;
@@ -174,6 +175,10 @@ impl<T: PointeeSized> Clone for Unique<T> {
 
 #[unstable(feature = "ptr_internals", issue = "none")]
 impl<T: PointeeSized> Copy for Unique<T> {}
+
+#[doc(hidden)]
+#[unstable(feature = "trivial_clone", issue = "none")]
+unsafe impl<T: ?Sized> TrivialClone for Unique<T> {}
 
 #[unstable(feature = "ptr_internals", issue = "none")]
 impl<T: PointeeSized, U: PointeeSized> CoerceUnsized<Unique<U>> for Unique<T> where T: Unsize<U> {}

@@ -106,6 +106,7 @@
 #![feature(const_cmp)]
 #![feature(const_destruct)]
 #![feature(const_eval_select)]
+#![feature(const_select_unpredictable)]
 #![feature(core_intrinsics)]
 #![feature(coverage_attribute)]
 #![feature(disjoint_bitor)]
@@ -116,10 +117,10 @@
 #![feature(link_cfg)]
 #![feature(offset_of_enum)]
 #![feature(panic_internals)]
+#![feature(pattern_type_macro)]
 #![feature(ptr_alignment_type)]
 #![feature(ptr_metadata)]
 #![feature(set_ptr_value)]
-#![feature(slice_as_array)]
 #![feature(slice_ptr_get)]
 #![feature(str_internals)]
 #![feature(str_split_inclusive_remainder)]
@@ -171,6 +172,7 @@
 #![feature(never_type)]
 #![feature(no_core)]
 #![feature(optimize_attribute)]
+#![feature(pattern_types)]
 #![feature(prelude_import)]
 #![feature(reborrow)]
 #![feature(repr_simd)]
@@ -195,6 +197,7 @@
 // tidy-alphabetical-start
 #![feature(aarch64_unstable_target_feature)]
 #![feature(arm_target_feature)]
+#![feature(avx10_target_feature)]
 #![feature(hexagon_target_feature)]
 #![feature(loongarch_target_feature)]
 #![feature(mips_target_feature)]
@@ -281,6 +284,8 @@ pub mod num;
 pub mod hint;
 pub mod intrinsics;
 pub mod mem;
+#[unstable(feature = "profiling_marker_api", issue = "148197")]
+pub mod profiling;
 pub mod ptr;
 #[unstable(feature = "ub_checks", issue = "none")]
 pub mod ub_checks;
@@ -293,6 +298,7 @@ pub mod cmp;
 pub mod convert;
 pub mod default;
 pub mod error;
+pub mod index;
 pub mod marker;
 pub mod ops;
 
