@@ -18,6 +18,8 @@ use core::hash::{Hash, Hasher};
 use core::intrinsics::abort;
 #[cfg(not(no_global_oom_handling))]
 use core::iter;
+#[cfg(kani)]
+use core::kani;
 use core::marker::{PhantomData, Unsize};
 use core::mem::{self, ManuallyDrop, align_of_val_raw};
 use core::num::NonZeroUsize;
@@ -1346,6 +1348,20 @@ impl<T, A: Allocator> Arc<mem::MaybeUninit<T>, A> {
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[must_use = "`self` will be dropped if the result is not used"]
     #[inline]
+    #[cfg_attr(
+        // Kani 0.65 limitation: proof_for_contract cannot target this
+        // MaybeUninit-based generic impl reliably. Verified via kani::proof
+        // harnesses with explicit postcondition checks.
+        kani,
+        kani::requires({
+            let p = Arc::<mem::MaybeUninit<T>, A>::as_ptr(&self);
+            kani::mem::can_dereference(p)
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &Arc<T, A>| Arc::<T, A>::strong_count(result) >= 1)
+    )]
     pub unsafe fn assume_init(self) -> Arc<T, A> {
         let (ptr, alloc) = Arc::into_inner_with_allocator(self);
         unsafe { Arc::from_inner_in(ptr.cast(), alloc) }
@@ -1385,6 +1401,20 @@ impl<T, A: Allocator> Arc<[mem::MaybeUninit<T>], A> {
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[must_use = "`self` will be dropped if the result is not used"]
     #[inline]
+    #[cfg_attr(
+        // Kani 0.65 limitation: proof_for_contract cannot target this
+        // MaybeUninit-based generic impl reliably. Verified via kani::proof
+        // harnesses with explicit postcondition checks.
+        kani,
+        kani::requires({
+            let p = Arc::<[mem::MaybeUninit<T>], A>::as_ptr(&self);
+            kani::mem::can_dereference(p)
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &Arc<[T], A>| Arc::<[T], A>::strong_count(result) >= 1)
+    )]
     pub unsafe fn assume_init(self) -> Arc<[T], A> {
         let (ptr, alloc) = Arc::into_inner_with_allocator(self);
         unsafe { Arc::from_ptr_in(ptr.as_ptr() as _, alloc) }
@@ -1455,6 +1485,19 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_raw", since = "1.17.0")]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+
+            kani::mem::checked_align_of_raw(ptr).is_some()
+                && kani::mem::checked_size_of_raw(ptr).is_some()
+                && ptr == rebuilt_ptr
+                && unsafe { (*inner).strong.load(Relaxed) >= 1 }
+        })
+    )]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Arc::from_raw_in(ptr, Global) }
     }
@@ -1517,6 +1560,23 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "arc_mutate_strong_count", since = "1.51.0")]
+    #[cfg_attr(kani, kani::requires(!ptr.is_null()))]
+    #[cfg_attr(kani, kani::requires(kani::mem::can_dereference(ptr)))]
+    #[cfg_attr(kani, kani::requires({
+        let offset = unsafe { data_offset(ptr) };
+        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
+        kani::mem::can_dereference(arc_ptr)
+    }))]
+    #[cfg_attr(kani, kani::requires({
+        let offset = unsafe { data_offset(ptr) };
+        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
+        kani::mem::can_dereference(arc_ptr) && unsafe { (*arc_ptr).strong.load(Relaxed) >= 1 }
+    }))]
+    #[cfg_attr(kani, kani::modifies({
+        let offset = unsafe { data_offset(ptr) };
+        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
+        unsafe { &raw const (*arc_ptr).strong }
+    }))]
     pub unsafe fn increment_strong_count(ptr: *const T) {
         unsafe { Arc::increment_strong_count_in(ptr, Global) }
     }
@@ -1557,6 +1617,32 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "arc_mutate_strong_count", since = "1.51.0")]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
+            let inner = inner_mut as *const ArcInner<T>;
+            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+            let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
+            let into_raw_roundtrip_ptr = {
+                let arc = unsafe { Arc::<T>::from_raw(ptr) };
+                Arc::<T>::into_raw(arc)
+            };
+            ptr == rebuilt_ptr
+                && ptr == into_raw_roundtrip_ptr
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+        })
+    )]
+    #[cfg_attr(kani, kani::modifies({
+        let offset = unsafe { data_offset(ptr) };
+        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
+        unsafe { &raw const (*arc_ptr).strong }
+    }))]
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         unsafe { Arc::decrement_strong_count_in(ptr, Global) }
     }
@@ -1699,6 +1785,24 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+            ptr == rebuilt_ptr
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*inner).strong.load(Relaxed) >= 1 }
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &Self| Arc::<T, A>::as_ptr(result) == ptr)
+    )]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         unsafe {
             let offset = data_offset(ptr);
@@ -1855,6 +1959,35 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
+            let inner = inner_mut as *const ArcInner<T>;
+            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+            let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
+
+            let into_raw_roundtrip_ptr = {
+                let arc = unsafe { Arc::<T, A>::from_raw_in(ptr, alloc.clone()) };
+                let (raw_ptr, _raw_alloc) = Arc::<T, A>::into_raw_with_allocator(arc);
+                raw_ptr
+            };
+
+            ptr == rebuilt_ptr
+                && ptr == into_raw_roundtrip_ptr
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+        })
+    )]
+    #[cfg_attr(kani, kani::modifies({
+        let offset = unsafe { data_offset(ptr) };
+        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
+        unsafe { &raw const (*arc_ptr).strong }
+    }))]
     pub unsafe fn increment_strong_count_in(ptr: *const T, alloc: A)
     where
         A: Clone,
@@ -1904,6 +2037,29 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
+            let inner = inner_mut as *const ArcInner<T>;
+            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+
+            let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
+
+            ptr == rebuilt_ptr
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+        })
+    )]
+    #[cfg_attr(kani, kani::modifies({
+        let offset = unsafe { data_offset(ptr) };
+        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
+        unsafe { &raw const (*arc_ptr).strong }
+    }))]
     pub unsafe fn decrement_strong_count_in(ptr: *const T, alloc: A) {
         unsafe { drop(Arc::from_raw_in(ptr, alloc)) };
     }
@@ -2511,6 +2667,24 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "get_mut_unchecked", issue = "63292")]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let inner = this.ptr.as_ptr();
+            let data = unsafe { &raw mut (*inner).data };
+            kani::mem::can_dereference(inner)
+                && kani::mem::can_dereference(data)
+                && kani::mem::can_write(data)
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &&mut T| {
+            let inner = old(this.ptr.as_ptr());
+            let data = unsafe { &raw const (*inner).data };
+            core::ptr::addr_eq((*result) as *const T, data)
+        })
+    )]
     pub unsafe fn get_mut_unchecked(this: &mut Self) -> &mut T {
         // We are careful to *not* create a reference covering the "count" fields, as
         // this would alias with concurrent access to the reference counts (e.g. by `Weak`).
@@ -2742,6 +2916,7 @@ impl<A: Allocator> Arc<dyn Any + Send + Sync, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[cfg_attr(kani, kani::requires((*self).is::<T>()))]
     pub unsafe fn downcast_unchecked<T>(self) -> Arc<T, A>
     where
         T: Any + Send + Sync,
@@ -2852,6 +3027,52 @@ impl<T: ?Sized> Weak<T> {
     /// [`upgrade`]: Weak::upgrade
     #[inline]
     #[stable(feature = "weak_into_raw", since = "1.45.0")]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let is_sentinel = is_dangling(ptr);
+            if is_sentinel {
+                true
+            } else {
+                let offset = unsafe { data_offset(ptr) };
+                let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+                let rebuilt_ptr = unsafe { &raw const (*inner).data };
+                let weak = unsafe { &raw const (*inner).weak };
+
+                ptr == rebuilt_ptr
+                    && kani::mem::can_dereference(weak)
+                    && unsafe { (*inner).weak.load(Relaxed) > 0 }
+            }
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &Self| {
+            if old(is_dangling(ptr)) {
+                (result.ptr.as_ptr().cast::<()>()).addr() == usize::MAX
+                    && (result.as_ptr().cast::<()>()).addr() == usize::MAX
+            } else {
+                result.as_ptr() == ptr
+                    && result.ptr.as_ptr()
+                        == old({
+                            let offset = unsafe { data_offset(ptr) };
+                            unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> }
+                        })
+            }
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &Self| {
+            old(is_dangling(ptr))
+                || unsafe { (*result.ptr.as_ptr()).weak.load(Relaxed) }
+                    == old({
+                        let offset = unsafe { data_offset(ptr) };
+                        let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+                        unsafe { (*inner).weak.load(Relaxed) }
+                    })
+        })
+    )]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Weak::from_raw_in(ptr, Global) }
     }
@@ -3023,6 +3244,50 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
     /// [`upgrade`]: Weak::upgrade
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let is_sentinel = is_dangling(ptr);
+            is_sentinel || {
+                let offset = unsafe { data_offset(ptr) };
+                let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+                let rebuilt_ptr = unsafe { &raw const (*inner).data };
+                let weak = unsafe { &raw const (*inner).weak };
+
+                ptr == rebuilt_ptr
+                    && kani::mem::can_dereference(weak)
+                    && unsafe { (*inner).weak.load(Relaxed) > 0 }
+            }
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &Self| {
+            if old(is_dangling(ptr)) {
+                (result.ptr.as_ptr().cast::<()>()).addr() == usize::MAX
+                    && (result.as_ptr().cast::<()>()).addr() == usize::MAX
+            } else {
+                result.as_ptr() == ptr
+                    && result.ptr.as_ptr()
+                        == old({
+                            let offset = unsafe { data_offset(ptr) };
+                            unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> }
+                        })
+            }
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &Self| {
+            old(is_dangling(ptr))
+                || unsafe { (*result.ptr.as_ptr()).weak.load(Relaxed) }
+                    == old({
+                        let offset = unsafe { data_offset(ptr) };
+                        let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+                        unsafe { (*inner).weak.load(Relaxed) }
+                    })
+        })
+    )]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         // See Weak::as_ptr for context on how the input pointer is derived.
 
@@ -4527,4 +4792,4870 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for UniqueArc<T, A> {
 
         unsafe { ptr::drop_in_place(&mut (*self.ptr.as_ptr()).data) };
     }
+}
+
+// ===================================================================================
+// Challenge 27: Verify atomically reference-counted implementation harnesses
+// ===================================================================================
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod kani_arc_harness_helpers {
+    use super::*;
+
+    pub(super) fn verifier_nondet_vec<T>() -> Vec<T> {
+        let cap: usize = kani::any();
+        let elem_layout = Layout::new::<T>();
+        kani::assume(elem_layout.repeat(cap).is_ok());
+        let mut v = Vec::<T>::with_capacity(cap);
+        unsafe {
+            let sz: usize = kani::any();
+            kani::assume(sz <= cap);
+            v.set_len(sz);
+            ptr::write_bytes(
+                v.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * sz,
+            );
+        }
+        v
+    }
+
+    pub(super) fn arc_slice_layout_ok<T>(len: usize) -> bool {
+        Layout::array::<T>(len)
+            .and_then(|value_layout| Layout::new::<ArcInner<()>>().extend(value_layout).map(|_| ()))
+            .is_ok()
+    }
+
+    pub(super) fn nondet_arc_slice<T>(vec: &Vec<T>) -> &[T] {
+        let len = vec.len();
+        kani::assume(arc_slice_layout_ok::<T>(len));
+        vec.as_slice()
+    }
+
+    pub(super) fn verifier_nondet_vec_arc<T>() -> Vec<T> {
+        let vec = verifier_nondet_vec();
+        kani::assume(arc_slice_layout_ok::<T>(vec.len()));
+        vec
+    }
+}
+
+// === UNSAFE FUNCTIONS ===
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1349 {
+    use super::*;
+
+    // Kani 0.65 limitation: proof_for_contract cannot resolve paths for
+    // impl<T, A> Arc<MaybeUninit<T>, A>. These harnesses use #[kani::proof]
+    // instead; the requires clause is still checked at the call site, and the
+    // initialized value is checked explicitly below.
+    //
+    // Kani cannot express the full "value is initialized" predicate for
+    // arbitrary `T`. This harness models the caller-side safety requirement of
+    // `assume_init` by explicitly initializing the payload with
+    // `MaybeUninit::write` before converting to `Arc<T>`.
+    macro_rules! gen_assume_init_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let expected = value.clone();
+                let mut uninit: Arc<mem::MaybeUninit<$ty>, Global> = Arc::new_uninit_in(Global);
+                Arc::get_mut(&mut uninit).unwrap().write(value);
+                let init: Arc<$ty, Global> = unsafe { uninit.assume_init() };
+                assert_eq!(&*init, &expected);
+            }
+        };
+    }
+
+    gen_assume_init_harness!(harness_arc_assume_init_i8, i8);
+    gen_assume_init_harness!(harness_arc_assume_init_i16, i16);
+    gen_assume_init_harness!(harness_arc_assume_init_i32, i32);
+    gen_assume_init_harness!(harness_arc_assume_init_i64, i64);
+    gen_assume_init_harness!(harness_arc_assume_init_i128, i128);
+    gen_assume_init_harness!(harness_arc_assume_init_u8, u8);
+    gen_assume_init_harness!(harness_arc_assume_init_u16, u16);
+    gen_assume_init_harness!(harness_arc_assume_init_u32, u32);
+    gen_assume_init_harness!(harness_arc_assume_init_u64, u64);
+    gen_assume_init_harness!(harness_arc_assume_init_u128, u128);
+    gen_assume_init_harness!(harness_arc_assume_init_unit, ());
+    gen_assume_init_harness!(harness_arc_assume_init_array, [u8; 4]);
+    gen_assume_init_harness!(harness_arc_assume_init_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1388 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // Kani 0.65 limitation: proof_for_contract cannot resolve paths for
+    // impl<T, A> Arc<[MaybeUninit<T>], A> (same issue as verify_1349).
+    // Uses #[kani::proof]; requires is checked as assertion at call site.
+    //
+    // Kani cannot express the full "all elements are initialized" predicate for
+    // arbitrary `T`. This harness models the caller-side safety requirement of
+    // `assume_init` with a byte-level witness: it explicitly writes the backing
+    // bytes before converting the allocation to `Arc<[MaybeUninit<T>]>`.
+    fn exercise_assume_init_slice<T>() {
+        let len = kani::any_where(|l: &usize| arc_slice_layout_ok::<T>(*l));
+        let mut initialized = Vec::<mem::MaybeUninit<T>, Global>::with_capacity(len);
+        unsafe {
+            initialized.set_len(len);
+            ptr::write_bytes(
+                initialized.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * len,
+            );
+        }
+        let uninit: Arc<[mem::MaybeUninit<T>], Global> = Arc::from(initialized);
+        let expected_data = (&*uninit).as_ptr() as *const T;
+        let expected_len = uninit.len();
+        let result: Arc<[T], Global> = unsafe { uninit.assume_init() };
+
+        assert_eq!((&*result).as_ptr(), expected_data);
+        assert_eq!(result.len(), expected_len);
+        assert_eq!(Arc::strong_count(&result), 1);
+    }
+
+    macro_rules! gen_assume_init_slice_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                exercise_assume_init_slice::<$elem>();
+            }
+        };
+    }
+
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_i8, i8);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_i16, i16);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_i32, i32);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_i64, i64);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_i128, i128);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_u8, u8);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_u16, u16);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_u32, u32);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_u64, u64);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_u128, u128);
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_unit, ());
+    gen_assume_init_slice_harness!(harness_arc_assume_init_slice_array, [u8; 4]);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1458 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_from_raw_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Arc::<$ty>::from_raw)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let arc: Arc<$ty> = Arc::new(value);
+                let ptr: *const $ty = Arc::into_raw(arc);
+                let _: Arc<$ty> = unsafe { Arc::from_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_from_raw_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Arc::<[$elem]>::from_raw)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem]> = Arc::from(vec);
+                let ptr: *const [$elem] = Arc::into_raw(arc);
+                let _: Arc<[$elem]> = unsafe { Arc::from_raw(ptr) };
+            }
+        };
+    }
+
+    gen_from_raw_sized_harness!(harness_arc_from_raw_i8, i8);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_i16, i16);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_i32, i32);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_i64, i64);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_i128, i128);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_u8, u8);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_u16, u16);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_u32, u32);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_u64, u64);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_u128, u128);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_bool, bool);
+    gen_from_raw_sized_harness!(harness_arc_from_raw_unit, ());
+    gen_from_raw_sized_harness!(harness_arc_from_raw_array, [u8; 4]);
+
+    gen_from_raw_unsized_harness!(harness_arc_from_raw_vec_u8, u8);
+    gen_from_raw_unsized_harness!(harness_arc_from_raw_vec_u16, u16);
+    gen_from_raw_unsized_harness!(harness_arc_from_raw_vec_u32, u32);
+    gen_from_raw_unsized_harness!(harness_arc_from_raw_vec_u64, u64);
+    gen_from_raw_unsized_harness!(harness_arc_from_raw_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1520 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_increment_strong_count_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Arc::<$ty>::increment_strong_count)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let arc: Arc<$ty> = Arc::new(value);
+                let ptr: *const $ty = Arc::into_raw(arc);
+                unsafe {
+                    Arc::<$ty>::increment_strong_count(ptr);
+                    let _recovered: Arc<$ty> = Arc::from_raw(ptr);
+                    Arc::<$ty>::decrement_strong_count(ptr);
+                }
+            }
+        };
+    }
+
+    macro_rules! gen_increment_strong_count_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Arc::<[$elem]>::increment_strong_count)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem]> = Arc::from(vec);
+                let ptr: *const [$elem] = Arc::into_raw(arc);
+                unsafe {
+                    Arc::<[$elem]>::increment_strong_count(ptr);
+                    let _recovered: Arc<[$elem]> = Arc::from_raw(ptr);
+                    Arc::<[$elem]>::decrement_strong_count(ptr);
+                }
+            }
+        };
+    }
+
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_i8, i8);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_i16, i16);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_i32, i32);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_i64, i64);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_i128, i128);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_u8, u8);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_u16, u16);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_u32, u32);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_u64, u64);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_u128, u128);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_bool, bool);
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_unit, ());
+    gen_increment_strong_count_sized_harness!(harness_arc_increment_strong_count_array, [u8; 4]);
+
+    gen_increment_strong_count_unsized_harness!(harness_arc_increment_strong_count_vec_u8, u8);
+    gen_increment_strong_count_unsized_harness!(harness_arc_increment_strong_count_vec_u16, u16);
+    gen_increment_strong_count_unsized_harness!(harness_arc_increment_strong_count_vec_u32, u32);
+    gen_increment_strong_count_unsized_harness!(harness_arc_increment_strong_count_vec_u64, u64);
+    gen_increment_strong_count_unsized_harness!(harness_arc_increment_strong_count_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1560 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_decrement_strong_count_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Arc::<$ty>::decrement_strong_count)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let arc: Arc<$ty> = Arc::new(value);
+                let ptr: *const $ty = Arc::into_raw(arc);
+                unsafe {
+                    Arc::<$ty>::increment_strong_count(ptr);
+                    Arc::<$ty>::decrement_strong_count(ptr);
+                    let _: Arc<$ty> = Arc::from_raw(ptr);
+                }
+            }
+        };
+    }
+
+    macro_rules! gen_decrement_strong_count_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Arc::<[$elem]>::decrement_strong_count)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem]> = Arc::from(vec);
+                let ptr: *const [$elem] = Arc::into_raw(arc);
+                unsafe {
+                    Arc::<[$elem]>::increment_strong_count(ptr);
+                    Arc::<[$elem]>::decrement_strong_count(ptr);
+                    let _: Arc<[$elem]> = Arc::from_raw(ptr);
+                }
+            }
+        };
+    }
+
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_i8, i8);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_i16, i16);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_i32, i32);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_i64, i64);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_i128, i128);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_u8, u8);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_u16, u16);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_u32, u32);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_u64, u64);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_u128, u128);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_bool, bool);
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_unit, ());
+    gen_decrement_strong_count_sized_harness!(harness_arc_decrement_strong_count_array, [u8; 4]);
+
+    gen_decrement_strong_count_unsized_harness!(harness_arc_decrement_strong_count_vec_u8, u8);
+    gen_decrement_strong_count_unsized_harness!(harness_arc_decrement_strong_count_vec_u16, u16);
+    gen_decrement_strong_count_unsized_harness!(harness_arc_decrement_strong_count_vec_u32, u32);
+    gen_decrement_strong_count_unsized_harness!(harness_arc_decrement_strong_count_vec_u64, u64);
+    gen_decrement_strong_count_unsized_harness!(harness_arc_decrement_strong_count_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1702 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_from_raw_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Arc::<$ty, Global>::from_raw_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let arc: Arc<$ty, Global> = Arc::new_in(value, Global);
+                let (ptr, alloc): (*const $ty, Global) = Arc::into_raw_with_allocator(arc);
+                let _: Arc<$ty, Global> = unsafe { Arc::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_from_raw_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Arc::<[$elem], Global>::from_raw_in)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let (ptr, alloc): (*const [$elem], Global) = Arc::into_raw_with_allocator(arc);
+                let _: Arc<[$elem], Global> = unsafe { Arc::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_i8, i8);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_i16, i16);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_i32, i32);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_i64, i64);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_i128, i128);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_u8, u8);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_u16, u16);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_u32, u32);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_u64, u64);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_u128, u128);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_unit, ());
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_bool, bool);
+    gen_from_raw_in_sized_harness!(harness_arc_from_raw_in_array, [u8; 4]);
+
+    gen_from_raw_in_unsized_harness!(harness_arc_from_raw_in_vec_u8, u8);
+    gen_from_raw_in_unsized_harness!(harness_arc_from_raw_in_vec_u16, u16);
+    gen_from_raw_in_unsized_harness!(harness_arc_from_raw_in_vec_u32, u32);
+    gen_from_raw_in_unsized_harness!(harness_arc_from_raw_in_vec_u64, u64);
+    gen_from_raw_in_unsized_harness!(harness_arc_from_raw_in_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1858 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_increment_strong_count_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Arc::<$ty, Global>::increment_strong_count_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let arc: Arc<$ty, Global> = Arc::new_in(value, Global);
+                let (ptr, _alloc): (*const $ty, Global) = Arc::into_raw_with_allocator(arc);
+                unsafe {
+                    Arc::<$ty, Global>::increment_strong_count_in(ptr, Global);
+                    let _: Arc<$ty, Global> = Arc::<$ty, Global>::from_raw_in(ptr, Global);
+                    Arc::<$ty, Global>::decrement_strong_count_in(ptr, Global);
+                }
+            }
+        };
+    }
+
+    macro_rules! gen_increment_strong_count_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Arc::<[$elem], Global>::increment_strong_count_in)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let (ptr, _alloc): (*const [$elem], Global) = Arc::into_raw_with_allocator(arc);
+                unsafe {
+                    Arc::<[$elem], Global>::increment_strong_count_in(ptr, Global);
+                    let _: Arc<[$elem], Global> = Arc::<[$elem], Global>::from_raw_in(ptr, Global);
+                    Arc::<[$elem], Global>::decrement_strong_count_in(ptr, Global);
+                }
+            }
+        };
+    }
+
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_i8, i8);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_i16, i16);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_i32, i32);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_i64, i64);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_i128, i128);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_u8, u8);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_u16, u16);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_u32, u32);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_u64, u64);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_u128, u128);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_bool, bool);
+    gen_increment_strong_count_in_sized_harness!(harness_arc_increment_strong_count_in_unit, ());
+    gen_increment_strong_count_in_sized_harness!(
+        harness_arc_increment_strong_count_in_array,
+        [u8; 4]
+    );
+
+    gen_increment_strong_count_in_unsized_harness!(
+        harness_arc_increment_strong_count_in_vec_u8,
+        u8
+    );
+    gen_increment_strong_count_in_unsized_harness!(
+        harness_arc_increment_strong_count_in_vec_u16,
+        u16
+    );
+    gen_increment_strong_count_in_unsized_harness!(
+        harness_arc_increment_strong_count_in_vec_u32,
+        u32
+    );
+    gen_increment_strong_count_in_unsized_harness!(
+        harness_arc_increment_strong_count_in_vec_u64,
+        u64
+    );
+    gen_increment_strong_count_in_unsized_harness!(
+        harness_arc_increment_strong_count_in_vec_u128,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1907 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_decrement_strong_count_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Arc::<$ty, Global>::decrement_strong_count_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let arc: Arc<$ty, Global> = Arc::new_in(value, Global);
+                let arc2: Arc<$ty, Global> = arc.clone();
+                let (ptr, alloc): (*const $ty, Global) = Arc::into_raw_with_allocator(arc2);
+                unsafe {
+                    Arc::<$ty, Global>::decrement_strong_count_in(ptr, alloc);
+                }
+            }
+        };
+    }
+
+    macro_rules! gen_decrement_strong_count_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Arc::<[$elem], Global>::decrement_strong_count_in)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let arc2: Arc<[$elem], Global> = arc.clone();
+                let (ptr, alloc): (*const [$elem], Global) = Arc::into_raw_with_allocator(arc2);
+                unsafe {
+                    Arc::<[$elem], Global>::decrement_strong_count_in(ptr, alloc);
+                }
+            }
+        };
+    }
+
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_i8, i8);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_i16, i16);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_i32, i32);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_i64, i64);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_i128, i128);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_u8, u8);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_u16, u16);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_u32, u32);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_u64, u64);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_u128, u128);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_bool, bool);
+    gen_decrement_strong_count_in_sized_harness!(harness_arc_decrement_strong_count_in_unit, ());
+    gen_decrement_strong_count_in_sized_harness!(
+        harness_arc_decrement_strong_count_in_array,
+        [u8; 4]
+    );
+
+    gen_decrement_strong_count_in_unsized_harness!(
+        harness_arc_decrement_strong_count_in_vec_u8,
+        u8
+    );
+    gen_decrement_strong_count_in_unsized_harness!(
+        harness_arc_decrement_strong_count_in_vec_u16,
+        u16
+    );
+    gen_decrement_strong_count_in_unsized_harness!(
+        harness_arc_decrement_strong_count_in_vec_u32,
+        u32
+    );
+    gen_decrement_strong_count_in_unsized_harness!(
+        harness_arc_decrement_strong_count_in_vec_u64,
+        u64
+    );
+    gen_decrement_strong_count_in_unsized_harness!(
+        harness_arc_decrement_strong_count_in_vec_u128,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2514 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_get_mut_unchecked_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Arc::<$ty>::get_mut_unchecked)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let replacement: $ty = kani::any();
+                let mut arc: Arc<$ty> = Arc::new(value);
+                unsafe {
+                    *Arc::get_mut_unchecked(&mut arc) = replacement;
+                }
+            }
+        };
+    }
+
+    macro_rules! gen_get_mut_unchecked_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Arc::<[$elem]>::get_mut_unchecked)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let mut arc: Arc<[$elem]> = Arc::from(vec);
+                unsafe {
+                    let data: &mut [$elem] = Arc::get_mut_unchecked(&mut arc);
+                    if !data.is_empty() {
+                        data[0] = kani::any::<$elem>();
+                    }
+                }
+            }
+        };
+    }
+
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_i8, i8);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_i16, i16);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_i32, i32);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_i64, i64);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_i128, i128);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_u8, u8);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_u16, u16);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_u32, u32);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_u64, u64);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_u128, u128);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_bool, bool);
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_unit, ());
+    gen_get_mut_unchecked_sized_harness!(harness_arc_get_mut_unchecked_array, [u8; 4]);
+
+    gen_get_mut_unchecked_unsized_harness!(harness_arc_get_mut_unchecked_vec_u8, u8);
+    gen_get_mut_unchecked_unsized_harness!(harness_arc_get_mut_unchecked_vec_u16, u16);
+    gen_get_mut_unchecked_unsized_harness!(harness_arc_get_mut_unchecked_vec_u32, u32);
+    gen_get_mut_unchecked_unsized_harness!(harness_arc_get_mut_unchecked_vec_u64, u64);
+    gen_get_mut_unchecked_unsized_harness!(harness_arc_get_mut_unchecked_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2745 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_downcast_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Arc::<dyn Any + Send + Sync, Global>::downcast_unchecked::<$ty>)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let arc_dyn: Arc<dyn Any + Send + Sync, Global> = Arc::new_in(value, Global);
+                let _downcasted: Arc<$ty, Global> = unsafe { arc_dyn.downcast_unchecked::<$ty>() };
+            }
+        };
+    }
+
+    macro_rules! gen_downcast_unchecked_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Arc::<dyn Any + Send + Sync, Global>::downcast_unchecked::<Vec<$elem>>)]
+            pub fn $name() {
+                let v = verifier_nondet_vec::<$elem>();
+                let arc_dyn: Arc<dyn Any + Send + Sync, Global> = Arc::new_in(v, Global);
+                let _downcasted: Arc<Vec<$elem>, Global> =
+                    unsafe { arc_dyn.downcast_unchecked::<Vec<$elem>>() };
+            }
+        };
+    }
+
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_i8, i8);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_i16, i16);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_i32, i32);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_i64, i64);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_i128, i128);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_u8, u8);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_u16, u16);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_u32, u32);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_u64, u64);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_u128, u128);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_bool, bool);
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_unit, ());
+    gen_downcast_unchecked_harness!(harness_arc_downcast_unchecked_array, [u8; 4]);
+
+    gen_downcast_unchecked_unsized_harness!(harness_arc_downcast_unchecked_vec_u8, u8);
+    gen_downcast_unchecked_unsized_harness!(harness_arc_downcast_unchecked_vec_u16, u16);
+    gen_downcast_unchecked_unsized_harness!(harness_arc_downcast_unchecked_vec_u32, u32);
+    gen_downcast_unchecked_unsized_harness!(harness_arc_downcast_unchecked_vec_u64, u64);
+    gen_downcast_unchecked_unsized_harness!(harness_arc_downcast_unchecked_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2855 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_weak_from_raw_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Weak::<$ty>::from_raw)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let strong: Arc<$ty> = Arc::new(value);
+                let weak: Weak<$ty> = Arc::downgrade(&strong);
+                let ptr: *const $ty = weak.into_raw();
+                let _recovered: Weak<$ty> = unsafe { Weak::from_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_weak_from_raw_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Weak::<[$elem]>::from_raw)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem]> = Arc::from(vec);
+                let weak: Weak<[$elem]> = Arc::downgrade(&strong);
+                let ptr: *const [$elem] = weak.into_raw();
+                let _recovered: Weak<[$elem]> = unsafe { Weak::from_raw(ptr) };
+            }
+        };
+    }
+
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_i8, i8);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_i16, i16);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_i32, i32);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_i64, i64);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_i128, i128);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_u8, u8);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_u16, u16);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_u32, u32);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_u64, u64);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_u128, u128);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_bool, bool);
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_unit, ());
+    gen_weak_from_raw_sized_harness!(harness_arc_weak_from_raw_array, [u8; 4]);
+
+    gen_weak_from_raw_unsized_harness!(harness_arc_weak_from_raw_vec_u8, u8);
+    gen_weak_from_raw_unsized_harness!(harness_arc_weak_from_raw_vec_u16, u16);
+    gen_weak_from_raw_unsized_harness!(harness_arc_weak_from_raw_vec_u32, u32);
+    gen_weak_from_raw_unsized_harness!(harness_arc_weak_from_raw_vec_u64, u64);
+    gen_weak_from_raw_unsized_harness!(harness_arc_weak_from_raw_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3026 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_weak_from_raw_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Weak::<$ty, Global>::from_raw_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let strong: Arc<$ty, Global> = Arc::new_in(value, Global);
+                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let (ptr, alloc): (*const $ty, Global) = weak.into_raw_with_allocator();
+                let _recovered: Weak<$ty, Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_weak_from_raw_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Weak::<[$elem], Global>::from_raw_in)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem], Global> = Arc::from(vec);
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let (ptr, alloc): (*const [$elem], Global) = weak.into_raw_with_allocator();
+                let _recovered: Weak<[$elem], Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_i8, i8);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_i16, i16);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_i32, i32);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_i64, i64);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_i128, i128);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_u8, u8);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_u16, u16);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_u32, u32);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_u64, u64);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_u128, u128);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_bool, bool);
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_unit, ());
+    gen_weak_from_raw_in_sized_harness!(harness_arc_weak_from_raw_in_array, [u8; 4]);
+
+    gen_weak_from_raw_in_unsized_harness!(harness_arc_weak_from_raw_in_vec_u8, u8);
+    gen_weak_from_raw_in_unsized_harness!(harness_arc_weak_from_raw_in_vec_u16, u16);
+    gen_weak_from_raw_in_unsized_harness!(harness_arc_weak_from_raw_in_vec_u32, u32);
+    gen_weak_from_raw_in_unsized_harness!(harness_arc_weak_from_raw_in_vec_u64, u64);
+    gen_weak_from_raw_in_unsized_harness!(harness_arc_weak_from_raw_in_vec_u128, u128);
+}
+
+// === SAFE FUNCTIONS ===
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_303 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_into_inner_with_allocator_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let (ptr, alloc) = Arc::<$ty, Global>::into_inner_with_allocator(arc);
+                let _recovered: Arc<$ty, Global> =
+                    unsafe { Arc::<$ty, Global>::from_inner_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_into_inner_with_allocator_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let (ptr, alloc) = Arc::<[$elem], Global>::into_inner_with_allocator(arc);
+                let _recovered: Arc<[$elem], Global> =
+                    unsafe { Arc::<[$elem], Global>::from_inner_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_i8, i8);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_i16, i16);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_i32, i32);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_i64, i64);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_i128, i128);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_u8, u8);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_u16, u16);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_u32, u32);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_u64, u64);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_u128, u128);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_unit, ());
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_array, [u8; 4]);
+    gen_into_inner_with_allocator_harness!(harness_arc_into_inner_with_allocator_bool, bool);
+
+    gen_into_inner_with_allocator_unsized_harness!(
+        harness_arc_into_inner_with_allocator_vec_u8,
+        u8
+    );
+    gen_into_inner_with_allocator_unsized_harness!(
+        harness_arc_into_inner_with_allocator_vec_u16,
+        u16
+    );
+    gen_into_inner_with_allocator_unsized_harness!(
+        harness_arc_into_inner_with_allocator_vec_u32,
+        u32
+    );
+    gen_into_inner_with_allocator_unsized_harness!(
+        harness_arc_into_inner_with_allocator_vec_u64,
+        u64
+    );
+    gen_into_inner_with_allocator_unsized_harness!(
+        harness_arc_into_inner_with_allocator_vec_u128,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_419 {
+    use super::*;
+
+    macro_rules! gen_arc_new_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let _arc: Arc<$ty> = Arc::new(value);
+            }
+        };
+    }
+
+    gen_arc_new_harness!(harness_arc_new_i8, i8);
+    gen_arc_new_harness!(harness_arc_new_i16, i16);
+    gen_arc_new_harness!(harness_arc_new_i32, i32);
+    gen_arc_new_harness!(harness_arc_new_i64, i64);
+    gen_arc_new_harness!(harness_arc_new_i128, i128);
+    gen_arc_new_harness!(harness_arc_new_u8, u8);
+    gen_arc_new_harness!(harness_arc_new_u16, u16);
+    gen_arc_new_harness!(harness_arc_new_u32, u32);
+    gen_arc_new_harness!(harness_arc_new_u64, u64);
+    gen_arc_new_harness!(harness_arc_new_u128, u128);
+    gen_arc_new_harness!(harness_arc_new_unit, ());
+    gen_arc_new_harness!(harness_arc_new_array, [u8; 4]);
+    gen_arc_new_harness!(harness_arc_new_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_511 {
+    use super::*;
+
+    macro_rules! gen_arc_new_uninit_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _arc: Arc<mem::MaybeUninit<$ty>> = Arc::<$ty>::new_uninit();
+            }
+        };
+    }
+
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_i8, i8);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_i16, i16);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_i32, i32);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_i64, i64);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_i128, i128);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_u8, u8);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_u16, u16);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_u32, u32);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_u64, u64);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_u128, u128);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_unit, ());
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_array, [u8; 4]);
+    gen_arc_new_uninit_harness!(harness_arc_new_uninit_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_543 {
+    use super::*;
+
+    macro_rules! gen_arc_new_zeroed_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _arc: Arc<mem::MaybeUninit<$ty>> = Arc::<$ty>::new_zeroed();
+            }
+        };
+    }
+
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_i8, i8);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_i16, i16);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_i32, i32);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_i64, i64);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_i128, i128);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_u8, u8);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_u16, u16);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_u32, u32);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_u64, u64);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_u128, u128);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_unit, ());
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_array, [u8; 4]);
+    gen_arc_new_zeroed_harness!(harness_arc_new_zeroed_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_558 {
+    use core::marker::PhantomPinned;
+
+    use super::*;
+
+    struct NotUnpinSentinel(u8, PhantomPinned);
+
+    macro_rules! gen_arc_pin_harness {
+        ($name:ident, NotUnpinSentinel) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value = NotUnpinSentinel(kani::any(), PhantomPinned);
+                let _pinned = Arc::pin(value);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let _pinned = Arc::pin(value);
+            }
+        };
+    }
+
+    gen_arc_pin_harness!(harness_arc_pin_i8, i8);
+    gen_arc_pin_harness!(harness_arc_pin_i16, i16);
+    gen_arc_pin_harness!(harness_arc_pin_i32, i32);
+    gen_arc_pin_harness!(harness_arc_pin_i64, i64);
+    gen_arc_pin_harness!(harness_arc_pin_i128, i128);
+    gen_arc_pin_harness!(harness_arc_pin_u8, u8);
+    gen_arc_pin_harness!(harness_arc_pin_u16, u16);
+    gen_arc_pin_harness!(harness_arc_pin_u32, u32);
+    gen_arc_pin_harness!(harness_arc_pin_u64, u64);
+    gen_arc_pin_harness!(harness_arc_pin_u128, u128);
+    gen_arc_pin_harness!(harness_arc_pin_unit, ());
+    gen_arc_pin_harness!(harness_arc_pin_bool, bool);
+    gen_arc_pin_harness!(harness_arc_pin_array, [u8; 4]);
+    gen_arc_pin_harness!(harness_arc_pin_not_unpin_sentinel, NotUnpinSentinel);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_565 {
+    use core::marker::PhantomPinned;
+
+    use super::*;
+
+    struct NotUnpinSentinel(u8, PhantomPinned);
+
+    macro_rules! gen_arc_try_pin_harness {
+        ($name:ident, NotUnpinSentinel) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value = NotUnpinSentinel(kani::any(), PhantomPinned);
+                let _result = Arc::try_pin(value);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let _result = Arc::try_pin(value);
+            }
+        };
+    }
+
+    gen_arc_try_pin_harness!(harness_arc_try_pin_i8, i8);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_i16, i16);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_i32, i32);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_i64, i64);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_i128, i128);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_u8, u8);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_u16, u16);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_u32, u32);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_u64, u64);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_u128, u128);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_unit, ());
+    gen_arc_try_pin_harness!(harness_arc_try_pin_bool, bool);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_array, [u8; 4]);
+    gen_arc_try_pin_harness!(harness_arc_try_pin_not_unpin_sentinel, NotUnpinSentinel);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_582 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_try_new_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _result = Arc::<$ty>::try_new(kani::any::<$ty>());
+            }
+        };
+    }
+
+    macro_rules! gen_arc_try_new_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec::<$elem>();
+                let _result = Arc::<Vec<$elem>>::try_new(vec);
+            }
+        };
+    }
+
+    gen_arc_try_new_harness!(harness_arc_try_new_i8, i8);
+    gen_arc_try_new_harness!(harness_arc_try_new_i16, i16);
+    gen_arc_try_new_harness!(harness_arc_try_new_i32, i32);
+    gen_arc_try_new_harness!(harness_arc_try_new_i64, i64);
+    gen_arc_try_new_harness!(harness_arc_try_new_i128, i128);
+    gen_arc_try_new_harness!(harness_arc_try_new_u8, u8);
+    gen_arc_try_new_harness!(harness_arc_try_new_u16, u16);
+    gen_arc_try_new_harness!(harness_arc_try_new_u32, u32);
+    gen_arc_try_new_harness!(harness_arc_try_new_u64, u64);
+    gen_arc_try_new_harness!(harness_arc_try_new_u128, u128);
+    gen_arc_try_new_harness!(harness_arc_try_new_unit, ());
+    gen_arc_try_new_harness!(harness_arc_try_new_bool, bool);
+    gen_arc_try_new_harness!(harness_arc_try_new_array, [u8; 4]);
+
+    gen_arc_try_new_vec_harness!(harness_arc_try_new_vec_u8, u8);
+    gen_arc_try_new_vec_harness!(harness_arc_try_new_vec_u16, u16);
+    gen_arc_try_new_vec_harness!(harness_arc_try_new_vec_u32, u32);
+    gen_arc_try_new_vec_harness!(harness_arc_try_new_vec_u64, u64);
+    gen_arc_try_new_vec_harness!(harness_arc_try_new_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_614 {
+    use super::*;
+
+    macro_rules! gen_arc_try_new_uninit_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _result = Arc::<$ty>::try_new_uninit();
+            }
+        };
+    }
+
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_i8, i8);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_i16, i16);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_i32, i32);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_i64, i64);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_i128, i128);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_u8, u8);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_u16, u16);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_u32, u32);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_u64, u64);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_u128, u128);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_unit, ());
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_array, [u8; 4]);
+    gen_arc_try_new_uninit_harness!(harness_arc_try_new_uninit_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_646 {
+    use super::*;
+
+    macro_rules! gen_arc_try_new_zeroed_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _result = Arc::<$ty>::try_new_zeroed();
+            }
+        };
+    }
+
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_i8, i8);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_i16, i16);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_i32, i32);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_i64, i64);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_i128, i128);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_u8, u8);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_u16, u16);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_u32, u32);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_u64, u64);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_u128, u128);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_unit, ());
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_array, [u8; 4]);
+    gen_arc_try_new_zeroed_harness!(harness_arc_try_new_zeroed_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_673 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_new_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let _result: Arc<$ty, Global> = Arc::<$ty, Global>::new_in(value, Global);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_new_in_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec::<$elem>();
+                let _result: Arc<Vec<$elem>, Global> =
+                    Arc::<Vec<$elem>, Global>::new_in(vec, Global);
+            }
+        };
+    }
+
+    gen_arc_new_in_harness!(harness_arc_new_in_i8, i8);
+    gen_arc_new_in_harness!(harness_arc_new_in_i16, i16);
+    gen_arc_new_in_harness!(harness_arc_new_in_i32, i32);
+    gen_arc_new_in_harness!(harness_arc_new_in_i64, i64);
+    gen_arc_new_in_harness!(harness_arc_new_in_i128, i128);
+    gen_arc_new_in_harness!(harness_arc_new_in_u8, u8);
+    gen_arc_new_in_harness!(harness_arc_new_in_u16, u16);
+    gen_arc_new_in_harness!(harness_arc_new_in_u32, u32);
+    gen_arc_new_in_harness!(harness_arc_new_in_u64, u64);
+    gen_arc_new_in_harness!(harness_arc_new_in_u128, u128);
+    gen_arc_new_in_harness!(harness_arc_new_in_unit, ());
+    gen_arc_new_in_harness!(harness_arc_new_in_array, [u8; 4]);
+    gen_arc_new_in_harness!(harness_arc_new_in_bool, bool);
+
+    gen_arc_new_in_vec_harness!(harness_arc_new_in_vec_u8, u8);
+    gen_arc_new_in_vec_harness!(harness_arc_new_in_vec_u16, u16);
+    gen_arc_new_in_vec_harness!(harness_arc_new_in_vec_u32, u32);
+    gen_arc_new_in_vec_harness!(harness_arc_new_in_vec_u64, u64);
+    gen_arc_new_in_vec_harness!(harness_arc_new_in_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_713 {
+    use super::*;
+
+    macro_rules! gen_arc_new_uninit_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _arc: Arc<mem::MaybeUninit<$ty>, Global> =
+                    Arc::<$ty, Global>::new_uninit_in(Global);
+            }
+        };
+    }
+
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_i8, i8);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_i16, i16);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_i32, i32);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_i64, i64);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_i128, i128);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_u8, u8);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_u16, u16);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_u32, u32);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_u64, u64);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_u128, u128);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_unit, ());
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_array, [u8; 4]);
+    gen_arc_new_uninit_in_harness!(harness_arc_new_uninit_in_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_750 {
+    use super::*;
+
+    macro_rules! gen_arc_new_zeroed_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _arc: Arc<mem::MaybeUninit<$ty>, Global> =
+                    Arc::<$ty, Global>::new_zeroed_in(Global);
+            }
+        };
+    }
+
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_i8, i8);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_i16, i16);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_i32, i32);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_i64, i64);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_i128, i128);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_u8, u8);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_u16, u16);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_u32, u32);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_u64, u64);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_u128, u128);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_unit, ());
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_array, [u8; 4]);
+    gen_arc_new_zeroed_in_harness!(harness_arc_new_zeroed_in_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_795 {
+    use super::*;
+
+    struct HoldsWeak<T> {
+        _weak: Weak<HoldsWeak<T>, Global>,
+        _value: T,
+    }
+
+    macro_rules! gen_arc_new_cyclic_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _arc: Arc<$ty, Global> = Arc::<$ty, Global>::new_cyclic_in(
+                    |weak: &Weak<$ty, Global>| {
+                        let _ = weak.upgrade();
+                        kani::any::<$ty>()
+                    },
+                    Global,
+                );
+            }
+        };
+    }
+
+    // `new_cyclic_in` documents that safe code inside `data_fn` can clone the
+    // non-upgradeable `Weak` and store or drop those clones. This harness covers
+    // the self-referential case where the returned value keeps a cloned `Weak`,
+    // exercising the weak-count path in addition to the plain value path above.
+    macro_rules! gen_arc_new_cyclic_in_holds_weak_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _arc: Arc<HoldsWeak<$ty>, Global> =
+                    Arc::<HoldsWeak<$ty>, Global>::new_cyclic_in(
+                        |weak: &Weak<HoldsWeak<$ty>, Global>| HoldsWeak {
+                            _weak: weak.clone(),
+                            _value: kani::any::<$ty>(),
+                        },
+                        Global,
+                    );
+            }
+        };
+    }
+
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_i8, i8);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_i16, i16);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_i32, i32);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_i64, i64);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_i128, i128);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_u8, u8);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_u16, u16);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_u32, u32);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_u64, u64);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_u128, u128);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_unit, ());
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_array, [u8; 4]);
+    gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_bool, bool);
+
+    gen_arc_new_cyclic_in_holds_weak_harness!(harness_arc_new_cyclic_in_holds_weak_u8, u8);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_860 {
+    use core::marker::PhantomPinned;
+
+    use super::*;
+
+    struct NotUnpinSentinel(u8, PhantomPinned);
+
+    macro_rules! gen_arc_pin_in_harness {
+        ($name:ident, NotUnpinSentinel) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value = NotUnpinSentinel(kani::any(), PhantomPinned);
+                let _pinned = Arc::<NotUnpinSentinel, Global>::pin_in(value, Global);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _pinned = Arc::<$ty, Global>::pin_in(kani::any::<$ty>(), Global);
+            }
+        };
+    }
+
+    gen_arc_pin_in_harness!(harness_arc_pin_in_i8, i8);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_i16, i16);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_i32, i32);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_i64, i64);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_i128, i128);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_u8, u8);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_u16, u16);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_u32, u32);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_u64, u64);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_u128, u128);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_unit, ());
+    gen_arc_pin_in_harness!(harness_arc_pin_in_array, [u8; 4]);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_bool, bool);
+    gen_arc_pin_in_harness!(harness_arc_pin_in_not_unpin_sentinel, NotUnpinSentinel);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_871 {
+    use core::marker::PhantomPinned;
+
+    use super::*;
+
+    struct NotUnpinSentinel(u8, PhantomPinned);
+
+    macro_rules! gen_arc_try_pin_in_harness {
+        ($name:ident, NotUnpinSentinel) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value = NotUnpinSentinel(kani::any(), PhantomPinned);
+                let _result = Arc::<NotUnpinSentinel, Global>::try_pin_in(value, Global);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _result = Arc::<$ty, Global>::try_pin_in(kani::any::<$ty>(), Global);
+            }
+        };
+    }
+
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_i8, i8);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_i16, i16);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_i32, i32);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_i64, i64);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_i128, i128);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_u8, u8);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_u16, u16);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_u32, u32);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_u64, u64);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_u128, u128);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_unit, ());
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_array, [u8; 4]);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_bool, bool);
+    gen_arc_try_pin_in_harness!(harness_arc_try_pin_in_not_unpin_sentinel, NotUnpinSentinel);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_894 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_try_new_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _result = Arc::<$ty, Global>::try_new_in(kani::any::<$ty>(), Global);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_try_new_in_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec::<$elem>();
+                let _result = Arc::<Vec<$elem>, Global>::try_new_in(vec, Global);
+            }
+        };
+    }
+
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_i8, i8);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_i16, i16);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_i32, i32);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_i64, i64);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_i128, i128);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_u8, u8);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_u16, u16);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_u32, u32);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_u64, u64);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_u128, u128);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_unit, ());
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_array, [u8; 4]);
+    gen_arc_try_new_in_harness!(harness_arc_try_new_in_bool, bool);
+
+    gen_arc_try_new_in_vec_harness!(harness_arc_try_new_in_vec_u8, u8);
+    gen_arc_try_new_in_vec_harness!(harness_arc_try_new_in_vec_u16, u16);
+    gen_arc_try_new_in_vec_harness!(harness_arc_try_new_in_vec_u32, u32);
+    gen_arc_try_new_in_vec_harness!(harness_arc_try_new_in_vec_u64, u64);
+    gen_arc_try_new_in_vec_harness!(harness_arc_try_new_in_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_935 {
+    use super::*;
+
+    macro_rules! gen_arc_try_new_uninit_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _result = Arc::<$ty, Global>::try_new_uninit_in(Global);
+            }
+        };
+    }
+
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_i8, i8);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_i16, i16);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_i32, i32);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_i64, i64);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_i128, i128);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_u8, u8);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_u16, u16);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_u32, u32);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_u64, u64);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_u128, u128);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_unit, ());
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_array, [u8; 4]);
+    gen_arc_try_new_uninit_in_harness!(harness_arc_try_new_uninit_in_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_973 {
+    use super::*;
+
+    macro_rules! gen_arc_try_new_zeroed_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _result = Arc::<$ty, Global>::try_new_zeroed_in(Global);
+            }
+        };
+    }
+
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_i8, i8);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_i16, i16);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_i32, i32);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_i64, i64);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_i128, i128);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_u8, u8);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_u16, u16);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_u32, u32);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_u64, u64);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_u128, u128);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_unit, ());
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_array, [u8; 4]);
+    gen_arc_try_new_zeroed_in_harness!(harness_arc_try_new_zeroed_in_bool, bool);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1020 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Arc::try_unwrap` first runs
+    // `this.inner().strong.compare_exchange(1, 0, Relaxed, Relaxed)`.
+    // That atomic operation determines the branch:
+    // - In `$unique`, `Arc::new_in` creates exactly one strong handle. The
+    //   strong count is 1, so the compare-exchange changes it to 0 and the
+    //   function continues to the success path: it performs the acquire fence,
+    //   reads `T` out of `ArcInner::data`, creates a temporary `Weak` to clean
+    //   up the implicit strong-weak reference, and returns `Ok(T)`.
+    // - In `$shared`, `Arc::clone(&arc)` creates a second strong handle before
+    //   `try_unwrap(arc)` is called. The strong count is therefore greater than
+    //   1, so `compare_exchange(1, 0, ...)` fails and the function immediately
+    //   returns `Err(arc)` without reading or moving the stored value.
+    // - In `$weak_present`, `Arc::downgrade(&arc)` increases only the weak
+    //   count. The strong count remains 1, so the compare-exchange still
+    //   succeeds and the function takes the same `Ok(T)` path as `$unique`,
+    //   while also covering the case where the allocation must remain alive for
+    //   an outstanding weak handle after the strong value is unwrapped.
+    macro_rules! gen_arc_try_unwrap_harness {
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            gen_arc_try_unwrap_harness!($unique, $shared, $weak_present, $ty, kani::any::<$ty>());
+        };
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let _result = Arc::<$ty, Global>::try_unwrap(arc);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let shared = Arc::clone(&arc);
+                let _result = Arc::<$ty, Global>::try_unwrap(arc);
+                core::mem::forget(shared);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let _weak = Arc::downgrade(&arc);
+                let _result = Arc::<$ty, Global>::try_unwrap(arc);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_try_unwrap_vec_harness {
+        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+            gen_arc_try_unwrap_harness!(
+                $unique,
+                $shared,
+                $weak_present,
+                Vec<$elem>,
+                verifier_nondet_vec::<$elem>()
+            );
+        };
+    }
+
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_i8_unique,
+        harness_arc_try_unwrap_i8_shared,
+        harness_arc_try_unwrap_i8_weak_present,
+        i8
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_i16_unique,
+        harness_arc_try_unwrap_i16_shared,
+        harness_arc_try_unwrap_i16_weak_present,
+        i16
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_i32_unique,
+        harness_arc_try_unwrap_i32_shared,
+        harness_arc_try_unwrap_i32_weak_present,
+        i32
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_i64_unique,
+        harness_arc_try_unwrap_i64_shared,
+        harness_arc_try_unwrap_i64_weak_present,
+        i64
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_i128_unique,
+        harness_arc_try_unwrap_i128_shared,
+        harness_arc_try_unwrap_i128_weak_present,
+        i128
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_u8_unique,
+        harness_arc_try_unwrap_u8_shared,
+        harness_arc_try_unwrap_u8_weak_present,
+        u8
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_u16_unique,
+        harness_arc_try_unwrap_u16_shared,
+        harness_arc_try_unwrap_u16_weak_present,
+        u16
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_u32_unique,
+        harness_arc_try_unwrap_u32_shared,
+        harness_arc_try_unwrap_u32_weak_present,
+        u32
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_u64_unique,
+        harness_arc_try_unwrap_u64_shared,
+        harness_arc_try_unwrap_u64_weak_present,
+        u64
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_u128_unique,
+        harness_arc_try_unwrap_u128_shared,
+        harness_arc_try_unwrap_u128_weak_present,
+        u128
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_unit_unique,
+        harness_arc_try_unwrap_unit_shared,
+        harness_arc_try_unwrap_unit_weak_present,
+        ()
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_array_unique,
+        harness_arc_try_unwrap_array_shared,
+        harness_arc_try_unwrap_array_weak_present,
+        [u8; 4]
+    );
+    gen_arc_try_unwrap_harness!(
+        harness_arc_try_unwrap_bool_unique,
+        harness_arc_try_unwrap_bool_shared,
+        harness_arc_try_unwrap_bool_weak_present,
+        bool
+    );
+
+    gen_arc_try_unwrap_vec_harness!(
+        harness_arc_try_unwrap_vec_u8_unique,
+        harness_arc_try_unwrap_vec_u8_shared,
+        harness_arc_try_unwrap_vec_u8_weak_present,
+        u8
+    );
+    gen_arc_try_unwrap_vec_harness!(
+        harness_arc_try_unwrap_vec_u16_unique,
+        harness_arc_try_unwrap_vec_u16_shared,
+        harness_arc_try_unwrap_vec_u16_weak_present,
+        u16
+    );
+    gen_arc_try_unwrap_vec_harness!(
+        harness_arc_try_unwrap_vec_u32_unique,
+        harness_arc_try_unwrap_vec_u32_shared,
+        harness_arc_try_unwrap_vec_u32_weak_present,
+        u32
+    );
+    gen_arc_try_unwrap_vec_harness!(
+        harness_arc_try_unwrap_vec_u64_unique,
+        harness_arc_try_unwrap_vec_u64_shared,
+        harness_arc_try_unwrap_vec_u64_weak_present,
+        u64
+    );
+    gen_arc_try_unwrap_vec_harness!(
+        harness_arc_try_unwrap_vec_u128_unique,
+        harness_arc_try_unwrap_vec_u128_shared,
+        harness_arc_try_unwrap_vec_u128_weak_present,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1135 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Arc::into_inner` first wraps `this` in `ManuallyDrop`, then runs
+    // `this.inner().strong.fetch_sub(1, Release)`.
+    //
+    // The returned old strong count determines the branch:
+    // - In the unique harness, `Arc::new_in` creates exactly one strong handle.
+    //   `fetch_sub` therefore returns 1, so the function enters the success
+    //   path: it runs the acquire fence, reads `T` out through
+    //   `get_mut_unchecked`, drops the implicit weak reference with
+    //   `drop(Weak { .. })`, and returns `Some(T)`.
+    // - In the shared harness, `Arc::clone(&arc)` creates a second strong
+    //   handle before `into_inner(arc)`. `fetch_sub` observes a value greater
+    //   than 1, so the function returns `None` immediately without reading or
+    //   moving `T`. The remaining clone is forgotten so this harness stays
+    //   focused on the `into_inner` shared branch instead of also proving the
+    //   final `Arc::drop` destruction path.
+    // - In the weak-present harness, `Arc::downgrade(&arc)` increases only the
+    //   weak count. The strong count remains 1, so `fetch_sub` returns 1 and
+    //   the function still returns `Some(T)` while covering the case where an
+    //   outstanding `Weak` exists during the successful unwrap.
+    macro_rules! gen_arc_into_inner_harness {
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            gen_arc_into_inner_harness!($unique, $shared, $weak_present, $ty, kani::any::<$ty>());
+        };
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let _result = Arc::<$ty, Global>::into_inner(arc);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let shared = Arc::clone(&arc);
+                let _result = Arc::<$ty, Global>::into_inner(arc);
+                core::mem::forget(shared);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let _weak = Arc::downgrade(&arc);
+                let _result = Arc::<$ty, Global>::into_inner(arc);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_into_inner_vec_harness {
+        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+            gen_arc_into_inner_harness!(
+                $unique,
+                $shared,
+                $weak_present,
+                Vec<$elem>,
+                verifier_nondet_vec::<$elem>()
+            );
+        };
+    }
+
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_i8_unique,
+        harness_arc_into_inner_i8_shared,
+        harness_arc_into_inner_i8_weak_present,
+        i8
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_i16_unique,
+        harness_arc_into_inner_i16_shared,
+        harness_arc_into_inner_i16_weak_present,
+        i16
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_i32_unique,
+        harness_arc_into_inner_i32_shared,
+        harness_arc_into_inner_i32_weak_present,
+        i32
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_i64_unique,
+        harness_arc_into_inner_i64_shared,
+        harness_arc_into_inner_i64_weak_present,
+        i64
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_i128_unique,
+        harness_arc_into_inner_i128_shared,
+        harness_arc_into_inner_i128_weak_present,
+        i128
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_u8_unique,
+        harness_arc_into_inner_u8_shared,
+        harness_arc_into_inner_u8_weak_present,
+        u8
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_u16_unique,
+        harness_arc_into_inner_u16_shared,
+        harness_arc_into_inner_u16_weak_present,
+        u16
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_u32_unique,
+        harness_arc_into_inner_u32_shared,
+        harness_arc_into_inner_u32_weak_present,
+        u32
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_u64_unique,
+        harness_arc_into_inner_u64_shared,
+        harness_arc_into_inner_u64_weak_present,
+        u64
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_u128_unique,
+        harness_arc_into_inner_u128_shared,
+        harness_arc_into_inner_u128_weak_present,
+        u128
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_unit_unique,
+        harness_arc_into_inner_unit_shared,
+        harness_arc_into_inner_unit_weak_present,
+        ()
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_array_unique,
+        harness_arc_into_inner_array_shared,
+        harness_arc_into_inner_array_weak_present,
+        [u8; 4]
+    );
+    gen_arc_into_inner_harness!(
+        harness_arc_into_inner_bool_unique,
+        harness_arc_into_inner_bool_shared,
+        harness_arc_into_inner_bool_weak_present,
+        bool
+    );
+
+    gen_arc_into_inner_vec_harness!(
+        harness_arc_into_inner_vec_u8_unique,
+        harness_arc_into_inner_vec_u8_shared,
+        harness_arc_into_inner_vec_u8_weak_present,
+        u8
+    );
+    gen_arc_into_inner_vec_harness!(
+        harness_arc_into_inner_vec_u16_unique,
+        harness_arc_into_inner_vec_u16_shared,
+        harness_arc_into_inner_vec_u16_weak_present,
+        u16
+    );
+    gen_arc_into_inner_vec_harness!(
+        harness_arc_into_inner_vec_u32_unique,
+        harness_arc_into_inner_vec_u32_shared,
+        harness_arc_into_inner_vec_u32_weak_present,
+        u32
+    );
+    gen_arc_into_inner_vec_harness!(
+        harness_arc_into_inner_vec_u64_unique,
+        harness_arc_into_inner_vec_u64_shared,
+        harness_arc_into_inner_vec_u64_weak_present,
+        u64
+    );
+    gen_arc_into_inner_vec_harness!(
+        harness_arc_into_inner_vec_u128_unique,
+        harness_arc_into_inner_vec_u128_shared,
+        harness_arc_into_inner_vec_u128_weak_present,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1187 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_new_uninit_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len = kani::any_where(|l: &usize| arc_slice_layout_ok::<$ty>(*l));
+                let _arc: Arc<[mem::MaybeUninit<$ty>]> = Arc::<[$ty]>::new_uninit_slice(len);
+            }
+        };
+    }
+
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_i8, i8);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_i16, i16);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_i32, i32);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_i64, i64);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_i128, i128);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_u8, u8);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_u16, u16);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_u32, u32);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_u64, u64);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_u128, u128);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_unit, ());
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_bool, bool);
+    gen_arc_new_uninit_slice_harness!(harness_arc_new_uninit_slice_array, [u8; 4]);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1213 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_new_zeroed_slice_harness {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len = kani::any_where(|l: &usize| arc_slice_layout_ok::<$elem_ty>(*l));
+                let _arc: Arc<[mem::MaybeUninit<$elem_ty>]> =
+                    Arc::<[$elem_ty]>::new_zeroed_slice(len);
+            }
+        };
+    }
+
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_i8, i8);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_i16, i16);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_i32, i32);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_i64, i64);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_i128, i128);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_u8, u8);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_u16, u16);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_u32, u32);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_u64, u64);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_u128, u128);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_unit, ());
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_bool, bool);
+    gen_arc_new_zeroed_slice_harness!(harness_arc_new_zeroed_slice_array, [u8; 4]);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1234 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Arc<[T]>::into_array::<N>` branches only on `self.len() == N`.
+    // The harness builds `self` from a nondeterministic `Vec<T>`, so the slice
+    // length is symbolic. With `N` fixed to 100, Kani explores:
+    // - `vec.len() == 100`: `into_array` calls `Arc::into_raw(self)`, casts the
+    //   slice pointer to `*const [T; 100]`, rebuilds it with `Arc::from_raw`,
+    //   and returns `Some(Arc<[T; 100]>)`.
+    // - `vec.len() != 100`: the length check fails, so `into_array` returns
+    //   `None` without reinterpreting the slice pointer as an array.
+    macro_rules! gen_arc_into_array_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$ty>();
+                let arc: Arc<[$ty]> = Arc::from(vec);
+                const N: usize = 100;
+                let _: Option<Arc<[$ty; N]>> = arc.into_array::<N>();
+            }
+        };
+    }
+
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_i8, i8);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_i16, i16);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_i32, i32);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_i64, i64);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_i128, i128);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_u8, u8);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_u16, u16);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_u32, u32);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_u64, u64);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_u128, u128);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_unit, ());
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_bool, bool);
+    gen_arc_into_array_slice_harness!(harness_arc_into_array_slice_array, [u8; 4]);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1276 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_new_uninit_slice_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len = kani::any_where(|l: &usize| arc_slice_layout_ok::<$ty>(*l));
+                let _arc: Arc<[mem::MaybeUninit<$ty>], Global> =
+                    Arc::<[$ty]>::new_uninit_slice_in(len, Global);
+            }
+        };
+    }
+
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_i8, i8);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_i16, i16);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_i32, i32);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_i64, i64);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_i128, i128);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_u8, u8);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_u16, u16);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_u32, u32);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_u64, u64);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_u128, u128);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_unit, ());
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_bool, bool);
+    gen_arc_new_uninit_slice_in_harness!(harness_arc_new_uninit_slice_in_array, [u8; 4]);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1304 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_new_zeroed_slice_in_harness {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                type T = $elem_ty;
+                let len = kani::any_where(|l: &usize| arc_slice_layout_ok::<T>(*l));
+                let _arc: Arc<[mem::MaybeUninit<T>], Global> =
+                    Arc::<[T]>::new_zeroed_slice_in(len, Global);
+            }
+        };
+    }
+
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_i8, i8);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_i16, i16);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_i32, i32);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_i64, i64);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_i128, i128);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_u8, u8);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_u16, u16);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_u32, u32);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_u64, u64);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_u128, u128);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_unit, ());
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_bool, bool);
+    gen_arc_new_zeroed_slice_in_harness!(harness_arc_new_zeroed_slice_in_array, [u8; 4]);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1683 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_into_raw_with_allocator_sized_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let arc: Arc<dyn Any, Global> = arc_i32;
+                let (ptr, alloc): (*const dyn Any, Global) =
+                    Arc::<dyn Any, Global>::into_raw_with_allocator(arc);
+                let _recovered: Arc<dyn Any, Global> =
+                    unsafe { Arc::<dyn Any, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let (ptr, alloc): (*const $ty, Global) =
+                    Arc::<$ty, Global>::into_raw_with_allocator(arc);
+                let _recovered: Arc<$ty, Global> =
+                    unsafe { Arc::<$ty, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_arc_into_raw_with_allocator_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let (ptr, alloc): (*const [$elem], Global) =
+                    Arc::<[$elem], Global>::into_raw_with_allocator(arc);
+                let _recovered: Arc<[$elem], Global> =
+                    unsafe { Arc::<[$elem], Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_i8, i8);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_i16, i16);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_i32, i32);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_i64, i64);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_i128, i128);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_u8, u8);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_u16, u16);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_u32, u32);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_u64, u64);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_u128, u128);
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_unit, ());
+    gen_arc_into_raw_with_allocator_sized_harness!(harness_arc_into_raw_with_allocator_bool, bool);
+    gen_arc_into_raw_with_allocator_sized_harness!(
+        harness_arc_into_raw_with_allocator_array,
+        [u8; 4]
+    );
+    gen_arc_into_raw_with_allocator_sized_harness!(
+        harness_arc_into_raw_with_allocator_dyn_any,
+        dyn Any
+    );
+
+    gen_arc_into_raw_with_allocator_unsized_harness!(
+        harness_arc_into_raw_with_allocator_vec_u8,
+        u8
+    );
+    gen_arc_into_raw_with_allocator_unsized_harness!(
+        harness_arc_into_raw_with_allocator_vec_u16,
+        u16
+    );
+    gen_arc_into_raw_with_allocator_unsized_harness!(
+        harness_arc_into_raw_with_allocator_vec_u32,
+        u32
+    );
+    gen_arc_into_raw_with_allocator_unsized_harness!(
+        harness_arc_into_raw_with_allocator_vec_u64,
+        u64
+    );
+    gen_arc_into_raw_with_allocator_unsized_harness!(
+        harness_arc_into_raw_with_allocator_vec_u128,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_1710 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_as_ptr_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let arc: Arc<dyn Any, Global> = arc_i32;
+                let arc_clone: Arc<dyn Any, Global> = Arc::clone(&arc);
+                let _ptr = Arc::<dyn Any, Global>::as_ptr(&arc);
+                let _clone_ptr = Arc::<dyn Any, Global>::as_ptr(&arc_clone);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let arc_clone: Arc<$ty, Global> = Arc::clone(&arc);
+                let _ptr = Arc::<$ty, Global>::as_ptr(&arc);
+                let _clone_ptr = Arc::<$ty, Global>::as_ptr(&arc_clone);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_as_ptr_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let arc_clone: Arc<[$elem], Global> = Arc::clone(&arc);
+                let _ptr = Arc::<[$elem], Global>::as_ptr(&arc);
+                let _clone_ptr = Arc::<[$elem], Global>::as_ptr(&arc_clone);
+            }
+        };
+    }
+
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_i8, i8);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_i16, i16);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_i32, i32);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_i64, i64);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_i128, i128);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_u8, u8);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_u16, u16);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_u32, u32);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_u64, u64);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_u128, u128);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_unit, ());
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_bool, bool);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_array, [u8; 4]);
+    gen_arc_as_ptr_harness!(harness_arc_as_ptr_dyn_any, dyn Any);
+
+    gen_arc_as_ptr_unsized_harness!(harness_arc_as_ptr_vec_u8, u8);
+    gen_arc_as_ptr_unsized_harness!(harness_arc_as_ptr_vec_u16, u16);
+    gen_arc_as_ptr_unsized_harness!(harness_arc_as_ptr_vec_u32, u32);
+    gen_arc_as_ptr_unsized_harness!(harness_arc_as_ptr_vec_u64, u64);
+    gen_arc_as_ptr_unsized_harness!(harness_arc_as_ptr_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2068 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_inner_sized_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let arc: Arc<dyn Any, Global> = arc_i32;
+                let _ = arc.inner();
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let _ = arc.inner();
+            }
+        };
+    }
+
+    macro_rules! gen_arc_inner_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let _ = arc.inner();
+            }
+        };
+    }
+
+    gen_arc_inner_sized_harness!(harness_arc_inner_i8, i8);
+    gen_arc_inner_sized_harness!(harness_arc_inner_i16, i16);
+    gen_arc_inner_sized_harness!(harness_arc_inner_i32, i32);
+    gen_arc_inner_sized_harness!(harness_arc_inner_i64, i64);
+    gen_arc_inner_sized_harness!(harness_arc_inner_i128, i128);
+    gen_arc_inner_sized_harness!(harness_arc_inner_u8, u8);
+    gen_arc_inner_sized_harness!(harness_arc_inner_u16, u16);
+    gen_arc_inner_sized_harness!(harness_arc_inner_u32, u32);
+    gen_arc_inner_sized_harness!(harness_arc_inner_u64, u64);
+    gen_arc_inner_sized_harness!(harness_arc_inner_u128, u128);
+    gen_arc_inner_sized_harness!(harness_arc_inner_unit, ());
+    gen_arc_inner_sized_harness!(harness_arc_inner_bool, bool);
+    gen_arc_inner_sized_harness!(harness_arc_inner_array, [u8; 4]);
+    gen_arc_inner_sized_harness!(harness_arc_inner_dyn_any, dyn Any);
+
+    gen_arc_inner_unsized_harness!(harness_arc_inner_vec_u8, u8);
+    gen_arc_inner_unsized_harness!(harness_arc_inner_vec_u16, u16);
+    gen_arc_inner_unsized_harness!(harness_arc_inner_vec_u32, u32);
+    gen_arc_inner_unsized_harness!(harness_arc_inner_vec_u64, u64);
+    gen_arc_inner_unsized_harness!(harness_arc_inner_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2190 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_from_box_in_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                let boxed_i32: Box<i32, Global> = Box::new_in(kani::any::<i32>(), Global);
+                let src: Box<dyn Any, Global> = boxed_i32;
+                let _ = Arc::<dyn Any, Global>::from_box_in(src);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let src: Box<$ty, Global> = Box::new_in(kani::any::<$ty>(), Global);
+                let _ = Arc::<$ty, Global>::from_box_in(src);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_from_box_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let src: Box<[$elem], Global> = Box::from(vec);
+                let _ = Arc::<[$elem], Global>::from_box_in(src);
+            }
+        };
+    }
+
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_i8, i8);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_i16, i16);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_i32, i32);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_i64, i64);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_i128, i128);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_u8, u8);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_u16, u16);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_u32, u32);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_u64, u64);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_u128, u128);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_unit, ());
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_bool, bool);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_array, [u8; 4]);
+    gen_arc_from_box_in_harness!(harness_arc_from_box_in_dyn_any, dyn Any);
+
+    gen_arc_from_box_in_unsized_harness!(harness_arc_from_box_in_vec_u8, u8);
+    gen_arc_from_box_in_unsized_harness!(harness_arc_from_box_in_vec_u16, u16);
+    gen_arc_from_box_in_unsized_harness!(harness_arc_from_box_in_vec_u32, u32);
+    gen_arc_from_box_in_unsized_harness!(harness_arc_from_box_in_vec_u64, u64);
+    gen_arc_from_box_in_unsized_harness!(harness_arc_from_box_in_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2321 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_from_slice_copy_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$ty>();
+                let _ = <Arc<[$ty], Global> as ArcFromSlice<$ty>>::from_slice(vec.as_slice());
+            }
+        };
+    }
+
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_i8, i8);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_i16, i16);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_i32, i32);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_i64, i64);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_i128, i128);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_u8, u8);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_u16, u16);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_u32, u32);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_u64, u64);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_u128, u128);
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_unit, ());
+    gen_arc_from_slice_copy_harness!(harness_arc_from_slice_copy_array, [u8; 4]);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2343 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_arc_clone_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let arc: Arc<dyn Any, Global> = arc_i32;
+                let _ = Arc::clone(&arc);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let _ = Arc::clone(&arc);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_clone_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let _ = Arc::clone(&arc);
+            }
+        };
+    }
+
+    gen_arc_clone_harness!(harness_arc_clone_i8, i8);
+    gen_arc_clone_harness!(harness_arc_clone_i16, i16);
+    gen_arc_clone_harness!(harness_arc_clone_i32, i32);
+    gen_arc_clone_harness!(harness_arc_clone_i64, i64);
+    gen_arc_clone_harness!(harness_arc_clone_i128, i128);
+    gen_arc_clone_harness!(harness_arc_clone_u8, u8);
+    gen_arc_clone_harness!(harness_arc_clone_u16, u16);
+    gen_arc_clone_harness!(harness_arc_clone_u32, u32);
+    gen_arc_clone_harness!(harness_arc_clone_u64, u64);
+    gen_arc_clone_harness!(harness_arc_clone_u128, u128);
+    gen_arc_clone_harness!(harness_arc_clone_unit, ());
+    gen_arc_clone_harness!(harness_arc_clone_bool, bool);
+    gen_arc_clone_harness!(harness_arc_clone_array, [u8; 4]);
+    gen_arc_clone_harness!(harness_arc_clone_dyn_any, dyn Any);
+
+    gen_arc_clone_unsized_harness!(harness_arc_clone_vec_u8, u8);
+    gen_arc_clone_unsized_harness!(harness_arc_clone_vec_u16, u16);
+    gen_arc_clone_unsized_harness!(harness_arc_clone_vec_u32, u32);
+    gen_arc_clone_unsized_harness!(harness_arc_clone_vec_u64, u64);
+    gen_arc_clone_unsized_harness!(harness_arc_clone_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2459 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Arc::make_mut` has three behavior-defining states:
+    //
+    // 1) Unique strong and no user `Weak`:
+    //    A fresh `Arc` starts with `strong == 1` and only the implicit weak
+    //    reference, so `strong.compare_exchange(1, 0, Acquire, Relaxed)`
+    //    succeeds and `weak.load(Relaxed) == 1`. `make_mut` restores
+    //    `strong` to 1 and returns mutable access to the same allocation.
+    //
+    // 2) Another strong `Arc` is alive:
+    //    `Arc::clone(&arc)` increments `strong` to 2. The compare-exchange
+    //    from 1 to 0 fails, so `make_mut` allocates `UniqueArcUninit`, clones
+    //    the value with `clone_to_uninit`, converts it into a new `Arc`, and
+    //    replaces `arc` with that new allocation.
+    //
+    // 3) No other strong `Arc`, but a user `Weak` is alive:
+    //    `Arc::downgrade(&arc)` increments the weak count, while `strong`
+    //    remains 1. The compare-exchange succeeds, then `weak.load(Relaxed)`
+    //    observes a value other than 1. `make_mut` byte-copies the value into
+    //    a new allocation and writes the new `Arc` back, leaving the old
+    //    allocation to be cleaned up through the remaining `Weak`.
+    macro_rules! gen_arc_make_mut_harness {
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            gen_arc_make_mut_harness!($unique, $shared, $weak_present, $ty, kani::any::<$ty>());
+        };
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let mut arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let _ = Arc::<$ty, Global>::make_mut(&mut arc);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let mut arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let shared: Arc<$ty, Global> = Arc::clone(&arc);
+                let _ = Arc::<$ty, Global>::make_mut(&mut arc);
+                core::mem::forget(shared);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let mut arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
+                let _weak: Weak<$ty, Global> = Arc::downgrade(&arc);
+                let _ = Arc::<$ty, Global>::make_mut(&mut arc);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_make_mut_unsized_harness {
+        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
+                let _ = Arc::<[$elem], Global>::make_mut(&mut arc);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
+                let shared: Arc<[$elem], Global> = Arc::clone(&arc);
+                let _ = Arc::<[$elem], Global>::make_mut(&mut arc);
+                core::mem::forget(shared);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
+                let _weak: Weak<[$elem], Global> = Arc::downgrade(&arc);
+                let _ = Arc::<[$elem], Global>::make_mut(&mut arc);
+            }
+        };
+    }
+
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_i8_unique,
+        harness_arc_make_mut_i8_shared,
+        harness_arc_make_mut_i8_weak_present,
+        i8
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_i16_unique,
+        harness_arc_make_mut_i16_shared,
+        harness_arc_make_mut_i16_weak_present,
+        i16
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_i32_unique,
+        harness_arc_make_mut_i32_shared,
+        harness_arc_make_mut_i32_weak_present,
+        i32
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_i64_unique,
+        harness_arc_make_mut_i64_shared,
+        harness_arc_make_mut_i64_weak_present,
+        i64
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_i128_unique,
+        harness_arc_make_mut_i128_shared,
+        harness_arc_make_mut_i128_weak_present,
+        i128
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_u8_unique,
+        harness_arc_make_mut_u8_shared,
+        harness_arc_make_mut_u8_weak_present,
+        u8
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_u16_unique,
+        harness_arc_make_mut_u16_shared,
+        harness_arc_make_mut_u16_weak_present,
+        u16
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_u32_unique,
+        harness_arc_make_mut_u32_shared,
+        harness_arc_make_mut_u32_weak_present,
+        u32
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_u64_unique,
+        harness_arc_make_mut_u64_shared,
+        harness_arc_make_mut_u64_weak_present,
+        u64
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_u128_unique,
+        harness_arc_make_mut_u128_shared,
+        harness_arc_make_mut_u128_weak_present,
+        u128
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_unit_unique,
+        harness_arc_make_mut_unit_shared,
+        harness_arc_make_mut_unit_weak_present,
+        ()
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_bool_unique,
+        harness_arc_make_mut_bool_shared,
+        harness_arc_make_mut_bool_weak_present,
+        bool
+    );
+    gen_arc_make_mut_harness!(
+        harness_arc_make_mut_array_unique,
+        harness_arc_make_mut_array_shared,
+        harness_arc_make_mut_array_weak_present,
+        [u8; 4]
+    );
+
+    gen_arc_make_mut_unsized_harness!(
+        harness_arc_make_mut_vec_u8_unique,
+        harness_arc_make_mut_vec_u8_shared,
+        harness_arc_make_mut_vec_u8_weak_present,
+        u8
+    );
+    gen_arc_make_mut_unsized_harness!(
+        harness_arc_make_mut_vec_u16_unique,
+        harness_arc_make_mut_vec_u16_shared,
+        harness_arc_make_mut_vec_u16_weak_present,
+        u16
+    );
+    gen_arc_make_mut_unsized_harness!(
+        harness_arc_make_mut_vec_u32_unique,
+        harness_arc_make_mut_vec_u32_shared,
+        harness_arc_make_mut_vec_u32_weak_present,
+        u32
+    );
+    gen_arc_make_mut_unsized_harness!(
+        harness_arc_make_mut_vec_u64_unique,
+        harness_arc_make_mut_vec_u64_shared,
+        harness_arc_make_mut_vec_u64_weak_present,
+        u64
+    );
+    gen_arc_make_mut_unsized_harness!(
+        harness_arc_make_mut_vec_u128_unique,
+        harness_arc_make_mut_vec_u128_shared,
+        harness_arc_make_mut_vec_u128_weak_present,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2595 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Arc::get_mut` has one explicit `if/else`, but the branch condition is
+    // `Arc::is_unique(this)`, which is determined by two atomic checks:
+    //
+    // 1) `is_unique` first tries `weak.compare_exchange(1, usize::MAX, Acquire, Relaxed)`.
+    //    This succeeds only when there is no user-visible `Weak`, because a
+    //    fresh `Arc` holds only its implicit weak reference.
+    //
+    // 2) If that weak-count lock succeeds, it then checks `strong.load(Acquire) == 1`.
+    //    If there is exactly one strong `Arc`, `get_mut` returns `Some(&mut T)`;
+    //    otherwise it returns `None`.
+    //
+    // The harnesses below realize the three behavior-relevant states explicitly:
+    // - unique: fresh `Arc`, so the weak CAS succeeds and strong is 1 => `Some`;
+    // - shared: keep one extra strong clone alive, so the weak CAS succeeds
+    //   but strong is 2 => `None`;
+    // - weak-present: keep one user `Weak` alive, so weak is greater than 1
+    //   and the CAS fails immediately => `None`.
+    macro_rules! gen_arc_get_mut_harness {
+        ($unique:ident, $shared:ident, $weak_present:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let mut arc: Arc<dyn Any, Global> = arc_i32;
+                let _ = Arc::<dyn Any, Global>::get_mut(&mut arc);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let mut arc: Arc<dyn Any, Global> = arc_i32;
+                let shared: Arc<dyn Any, Global> = Arc::clone(&arc);
+                let _ = Arc::<dyn Any, Global>::get_mut(&mut arc);
+                core::mem::forget(shared);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let mut arc: Arc<dyn Any, Global> = arc_i32;
+                let weak: Weak<dyn Any, Global> = Arc::downgrade(&arc);
+                let _ = Arc::<dyn Any, Global>::get_mut(&mut arc);
+                core::mem::forget(weak);
+            }
+        };
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let mut arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let _ = Arc::<$ty, Global>::get_mut(&mut arc);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let mut arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let shared: Arc<$ty, Global> = Arc::clone(&arc);
+                let _ = Arc::<$ty, Global>::get_mut(&mut arc);
+                core::mem::forget(shared);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let mut arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Arc::downgrade(&arc);
+                let _ = Arc::<$ty, Global>::get_mut(&mut arc);
+                core::mem::forget(weak);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_get_mut_unsized_harness {
+        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
+                let _ = Arc::<[$elem], Global>::get_mut(&mut arc);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
+                let shared: Arc<[$elem], Global> = Arc::clone(&arc);
+                let _ = Arc::<[$elem], Global>::get_mut(&mut arc);
+                core::mem::forget(shared);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&arc);
+                let _ = Arc::<[$elem], Global>::get_mut(&mut arc);
+                core::mem::forget(weak);
+            }
+        };
+    }
+
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_i8_unique_some,
+        harness_arc_get_mut_i8_shared_none,
+        harness_arc_get_mut_i8_weak_present_none,
+        i8
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_i16_unique_some,
+        harness_arc_get_mut_i16_shared_none,
+        harness_arc_get_mut_i16_weak_present_none,
+        i16
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_i32_unique_some,
+        harness_arc_get_mut_i32_shared_none,
+        harness_arc_get_mut_i32_weak_present_none,
+        i32
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_i64_unique_some,
+        harness_arc_get_mut_i64_shared_none,
+        harness_arc_get_mut_i64_weak_present_none,
+        i64
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_i128_unique_some,
+        harness_arc_get_mut_i128_shared_none,
+        harness_arc_get_mut_i128_weak_present_none,
+        i128
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_u8_unique_some,
+        harness_arc_get_mut_u8_shared_none,
+        harness_arc_get_mut_u8_weak_present_none,
+        u8
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_u16_unique_some,
+        harness_arc_get_mut_u16_shared_none,
+        harness_arc_get_mut_u16_weak_present_none,
+        u16
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_u32_unique_some,
+        harness_arc_get_mut_u32_shared_none,
+        harness_arc_get_mut_u32_weak_present_none,
+        u32
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_u64_unique_some,
+        harness_arc_get_mut_u64_shared_none,
+        harness_arc_get_mut_u64_weak_present_none,
+        u64
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_u128_unique_some,
+        harness_arc_get_mut_u128_shared_none,
+        harness_arc_get_mut_u128_weak_present_none,
+        u128
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_unit_unique_some,
+        harness_arc_get_mut_unit_shared_none,
+        harness_arc_get_mut_unit_weak_present_none,
+        ()
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_bool_unique_some,
+        harness_arc_get_mut_bool_shared_none,
+        harness_arc_get_mut_bool_weak_present_none,
+        bool
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_array_unique_some,
+        harness_arc_get_mut_array_shared_none,
+        harness_arc_get_mut_array_weak_present_none,
+        [u8; 4]
+    );
+    gen_arc_get_mut_harness!(
+        harness_arc_get_mut_dyn_any_unique_some,
+        harness_arc_get_mut_dyn_any_shared_none,
+        harness_arc_get_mut_dyn_any_weak_present_none,
+        dyn Any
+    );
+
+    gen_arc_get_mut_unsized_harness!(
+        harness_arc_get_mut_vec_u8_unique_some,
+        harness_arc_get_mut_vec_u8_shared_none,
+        harness_arc_get_mut_vec_u8_weak_present_none,
+        u8
+    );
+    gen_arc_get_mut_unsized_harness!(
+        harness_arc_get_mut_vec_u16_unique_some,
+        harness_arc_get_mut_vec_u16_shared_none,
+        harness_arc_get_mut_vec_u16_weak_present_none,
+        u16
+    );
+    gen_arc_get_mut_unsized_harness!(
+        harness_arc_get_mut_vec_u32_unique_some,
+        harness_arc_get_mut_vec_u32_shared_none,
+        harness_arc_get_mut_vec_u32_weak_present_none,
+        u32
+    );
+    gen_arc_get_mut_unsized_harness!(
+        harness_arc_get_mut_vec_u64_unique_some,
+        harness_arc_get_mut_vec_u64_shared_none,
+        harness_arc_get_mut_vec_u64_weak_present_none,
+        u64
+    );
+    gen_arc_get_mut_unsized_harness!(
+        harness_arc_get_mut_vec_u128_unique_some,
+        harness_arc_get_mut_vec_u128_shared_none,
+        harness_arc_get_mut_vec_u128_weak_present_none,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2804 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Arc::drop` has two direct control-flow branches:
+    //
+    // 1) `strong.fetch_sub(1, Release) != 1`:
+    //    dropping this handle does not remove the last strong owner, so `drop`
+    //    returns immediately without the acquire fence and without `drop_slow`.
+    //
+    // 2) `strong.fetch_sub(1, Release) == 1`:
+    //    this handle was the last strong owner, so `drop` executes the acquire
+    //    fence and then calls `drop_slow`.
+    //
+    // We cover the behavior-relevant ownership states explicitly:
+    // - unique: fresh Arc, so dropping it takes branch (2) with no user Weak;
+    // - shared: keep one extra strong clone alive, so dropping the first Arc
+    //   takes branch (1);
+    // - weak-present: keep one user Weak alive, so dropping the unique strong
+    //   Arc still takes branch (2), but drop_slow runs while the allocation
+    //   must remain alive for the outstanding Weak.
+    macro_rules! gen_drop_arc_sized {
+        ($unique:ident, $shared:ident, $weak_present:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let arc: Arc<dyn Any + Send + Sync, Global> = arc_i32;
+                // Drop the only strong owner at function end.
+                let _ = arc;
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let arc: Arc<dyn Any + Send + Sync, Global> = arc_i32;
+                // Keep a second strong owner alive so the first drop takes the
+                // early-return path (`fetch_sub` returns 2).
+                let arc_clone: Arc<dyn Any + Send + Sync, Global> = Arc::clone(&arc);
+                {
+                    // Drop one strong owner while another is still alive.
+                    let _dropped = arc;
+                }
+                // Keep the remaining strong owner alive past the first drop.
+                let _ = arc_clone;
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let arc_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let arc: Arc<dyn Any + Send + Sync, Global> = arc_i32;
+                // Add a user-visible weak owner without increasing `strong`.
+                let weak: Weak<dyn Any + Send + Sync, Global> = Arc::downgrade(&arc);
+                {
+                    // Drop the last strong owner while the weak handle remains alive.
+                    let _dropped = arc;
+                }
+                // Keep the weak handle alive through that drop point.
+                let _ = weak;
+            }
+        };
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                // Drop the only strong owner at function end.
+                let _ = arc;
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                // Keep a second strong owner alive so the first drop takes the
+                // early-return path (`fetch_sub` returns 2).
+                let arc_clone: Arc<$ty, Global> = Arc::clone(&arc);
+                {
+                    // Drop one strong owner while another is still alive.
+                    let _dropped = arc;
+                }
+                // Keep the remaining strong owner alive past the first drop.
+                let _ = arc_clone;
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                // Add a user-visible weak owner without increasing `strong`.
+                let weak: Weak<$ty, Global> = Arc::downgrade(&arc);
+                {
+                    // Drop the last strong owner while the weak handle remains alive.
+                    let _dropped = arc;
+                }
+                // Keep the weak handle alive through that drop point.
+                let _ = weak;
+            }
+        };
+    }
+
+    macro_rules! gen_drop_arc_unsized {
+        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                // Drop the only strong owner at function end.
+                let _ = arc;
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                // Keep a second strong owner alive so the first drop takes the
+                // early-return path (`fetch_sub` returns 2).
+                let arc_clone: Arc<[$elem], Global> = Arc::clone(&arc);
+                {
+                    // Drop one strong owner while another is still alive.
+                    let _dropped = arc;
+                }
+                // Keep the remaining strong owner alive past the first drop.
+                let _ = arc_clone;
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let arc: Arc<[$elem], Global> = Arc::from(vec);
+                // Add a user-visible weak owner without increasing `strong`.
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&arc);
+                {
+                    // Drop the last strong owner while the weak handle remains alive.
+                    let _dropped = arc;
+                }
+                // Keep the weak handle alive through that drop point.
+                let _ = weak;
+            }
+        };
+    }
+
+    gen_drop_arc_sized!(
+        harness_drop_arc_i8_unique,
+        harness_drop_arc_i8_shared,
+        harness_drop_arc_i8_weak_present,
+        i8
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_i16_unique,
+        harness_drop_arc_i16_shared,
+        harness_drop_arc_i16_weak_present,
+        i16
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_i32_unique,
+        harness_drop_arc_i32_shared,
+        harness_drop_arc_i32_weak_present,
+        i32
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_i64_unique,
+        harness_drop_arc_i64_shared,
+        harness_drop_arc_i64_weak_present,
+        i64
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_i128_unique,
+        harness_drop_arc_i128_shared,
+        harness_drop_arc_i128_weak_present,
+        i128
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_u8_unique,
+        harness_drop_arc_u8_shared,
+        harness_drop_arc_u8_weak_present,
+        u8
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_u16_unique,
+        harness_drop_arc_u16_shared,
+        harness_drop_arc_u16_weak_present,
+        u16
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_u32_unique,
+        harness_drop_arc_u32_shared,
+        harness_drop_arc_u32_weak_present,
+        u32
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_u64_unique,
+        harness_drop_arc_u64_shared,
+        harness_drop_arc_u64_weak_present,
+        u64
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_u128_unique,
+        harness_drop_arc_u128_shared,
+        harness_drop_arc_u128_weak_present,
+        u128
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_unit_unique,
+        harness_drop_arc_unit_shared,
+        harness_drop_arc_unit_weak_present,
+        ()
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_array_unique,
+        harness_drop_arc_array_shared,
+        harness_drop_arc_array_weak_present,
+        [u8; 4]
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_dyn_any_unique,
+        harness_drop_arc_dyn_any_shared,
+        harness_drop_arc_dyn_any_weak_present,
+        dyn Any
+    );
+    gen_drop_arc_sized!(
+        harness_drop_arc_bool_unique,
+        harness_drop_arc_bool_shared,
+        harness_drop_arc_bool_weak_present,
+        bool
+    );
+
+    gen_drop_arc_unsized!(
+        harness_drop_arc_vec_u8_unique,
+        harness_drop_arc_vec_u8_shared,
+        harness_drop_arc_vec_u8_weak_present,
+        u8
+    );
+    gen_drop_arc_unsized!(
+        harness_drop_arc_vec_u16_unique,
+        harness_drop_arc_vec_u16_shared,
+        harness_drop_arc_vec_u16_weak_present,
+        u16
+    );
+    gen_drop_arc_unsized!(
+        harness_drop_arc_vec_u32_unique,
+        harness_drop_arc_vec_u32_shared,
+        harness_drop_arc_vec_u32_weak_present,
+        u32
+    );
+    gen_drop_arc_unsized!(
+        harness_drop_arc_vec_u64_unique,
+        harness_drop_arc_vec_u64_shared,
+        harness_drop_arc_vec_u64_weak_present,
+        u64
+    );
+    gen_drop_arc_unsized!(
+        harness_drop_arc_vec_u128_unique,
+        harness_drop_arc_vec_u128_shared,
+        harness_drop_arc_vec_u128_weak_present,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_2877 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Arc<dyn Any + Send + Sync>::downcast::<T>` branches only on the runtime
+    // type test `(*self).is::<T>()`:
+    //
+    // 1) `is::<T>() == true`: `downcast` consumes the trait-object `Arc`,
+    //    extracts `(ptr, alloc)` with `into_inner_with_allocator`, casts the
+    //    pointer to `ArcInner<T>`, and returns `Ok(Arc<T, A>)`.
+    //
+    // 2) `is::<T>() == false`: `downcast` returns `Err(self)` unchanged.
+    //
+    // Each harness pair below covers both branches by:
+    // - success case: build `Arc<U>` with `U == T`, coerce to
+    //   `Arc<dyn Any + Send + Sync>`, then call `downcast::<T>`;
+    // - failure case: build `Arc<bool>` (or another concrete type different
+    //   from `T`), coerce it to the trait-object form, then call
+    //   `downcast::<T>` and exercise the `Err` path.
+    macro_rules! gen_arc_downcast_harness {
+        ($success:ident, $failure:ident, bool) => {
+            #[kani::proof]
+            pub fn $success() {
+                let value: bool = kani::any::<bool>();
+                let arc_value: Arc<bool, Global> = Arc::new_in(value, Global);
+                let arc_any: Arc<dyn Any + Send + Sync, Global> = arc_value;
+                let _ = Arc::<dyn Any + Send + Sync, Global>::downcast::<bool>(arc_any);
+            }
+
+            #[kani::proof]
+            pub fn $failure() {
+                let arc_value: Arc<i8, Global> = Arc::new_in(kani::any::<i8>(), Global);
+                let arc_any: Arc<dyn Any + Send + Sync, Global> = arc_value;
+                let _ = Arc::<dyn Any + Send + Sync, Global>::downcast::<bool>(arc_any);
+            }
+        };
+        ($success:ident, $failure:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $success() {
+                let value: $ty = kani::any::<$ty>();
+                let arc_value: Arc<$ty, Global> = Arc::new_in(value, Global);
+                let arc_any: Arc<dyn Any + Send + Sync, Global> = arc_value;
+                let _ = Arc::<dyn Any + Send + Sync, Global>::downcast::<$ty>(arc_any);
+            }
+
+            #[kani::proof]
+            pub fn $failure() {
+                let arc_value: Arc<bool, Global> = Arc::new_in(kani::any::<bool>(), Global);
+                let arc_any: Arc<dyn Any + Send + Sync, Global> = arc_value;
+                let _ = Arc::<dyn Any + Send + Sync, Global>::downcast::<$ty>(arc_any);
+            }
+        };
+    }
+
+    macro_rules! gen_arc_downcast_vec_harness {
+        ($success:ident, $failure:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $success() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let arc_value: Arc<Vec<$elem>, Global> = Arc::new_in(value, Global);
+                let arc_any: Arc<dyn Any + Send + Sync, Global> = arc_value;
+                let _ = Arc::<dyn Any + Send + Sync, Global>::downcast::<Vec<$elem>>(arc_any);
+            }
+
+            #[kani::proof]
+            pub fn $failure() {
+                let arc_value: Arc<bool, Global> = Arc::new_in(kani::any::<bool>(), Global);
+                let arc_any: Arc<dyn Any + Send + Sync, Global> = arc_value;
+                let _ = Arc::<dyn Any + Send + Sync, Global>::downcast::<Vec<$elem>>(arc_any);
+            }
+        };
+    }
+
+    gen_arc_downcast_harness!(harness_arc_downcast_i8_success, harness_arc_downcast_i8_failure, i8);
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_i16_success,
+        harness_arc_downcast_i16_failure,
+        i16
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_i32_success,
+        harness_arc_downcast_i32_failure,
+        i32
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_i64_success,
+        harness_arc_downcast_i64_failure,
+        i64
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_i128_success,
+        harness_arc_downcast_i128_failure,
+        i128
+    );
+    gen_arc_downcast_harness!(harness_arc_downcast_u8_success, harness_arc_downcast_u8_failure, u8);
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_u16_success,
+        harness_arc_downcast_u16_failure,
+        u16
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_u32_success,
+        harness_arc_downcast_u32_failure,
+        u32
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_u64_success,
+        harness_arc_downcast_u64_failure,
+        u64
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_u128_success,
+        harness_arc_downcast_u128_failure,
+        u128
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_arr4_success,
+        harness_arc_downcast_arr4_failure,
+        [u8; 4]
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_unit_success,
+        harness_arc_downcast_unit_failure,
+        ()
+    );
+    gen_arc_downcast_harness!(
+        harness_arc_downcast_bool_success,
+        harness_arc_downcast_bool_failure,
+        bool
+    );
+
+    gen_arc_downcast_vec_harness!(
+        harness_arc_downcast_vec_u8_success,
+        harness_arc_downcast_vec_u8_failure,
+        u8
+    );
+    gen_arc_downcast_vec_harness!(
+        harness_arc_downcast_vec_u16_success,
+        harness_arc_downcast_vec_u16_failure,
+        u16
+    );
+    gen_arc_downcast_vec_harness!(
+        harness_arc_downcast_vec_u32_success,
+        harness_arc_downcast_vec_u32_failure,
+        u32
+    );
+    gen_arc_downcast_vec_harness!(
+        harness_arc_downcast_vec_u64_success,
+        harness_arc_downcast_vec_u64_failure,
+        u64
+    );
+    gen_arc_downcast_vec_harness!(
+        harness_arc_downcast_vec_u128_success,
+        harness_arc_downcast_vec_u128_failure,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3149 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Weak::as_ptr` only branches on whether `self.ptr` is the sentinel:
+    //
+    // 1) `is_dangling(ptr) == true`:
+    //    return the sentinel address directly as `*const T`.
+    // 2) `is_dangling(ptr) == false`:
+    //    treat `ptr` as a real `ArcInner<T>` allocation and return a raw
+    //    pointer to its `data` field.
+    //
+    // Each harness pair below covers both branches:
+    // - `live`: build a real strong owner first, then call `Arc::downgrade`.
+    //   The resulting `Weak` points into a live allocation, so `is_dangling`
+    //   is false.
+    // - `dangling`: build `Weak::new_in(Global)`, which stores only the
+    //   sentinel and no backing allocation, so `is_dangling` is true.
+    macro_rules! gen_weak_as_ptr_harness {
+        ($live:ident, $dangling:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let strong: Arc<dyn Any, Global> = strong_i32;
+
+                // `strong` is still alive in this scope, so `downgrade`
+                // produces a non-sentinel weak pointer to the same allocation.
+                let weak: Weak<dyn Any, Global> = Arc::downgrade(&strong);
+                let _ptr: *const dyn Any = Weak::<dyn Any, Global>::as_ptr(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // `Weak::new_in(Global)` constructs the sentinel form directly.
+                // Coercing from `Weak<i32>` to `Weak<dyn Any>` changes only
+                // metadata; the sentinel address stays unchanged.
+                let weak_i32: Weak<i32, Global> = Weak::new_in(Global);
+                let weak: Weak<dyn Any, Global> = weak_i32;
+                let _ptr: *const dyn Any = Weak::<dyn Any, Global>::as_ptr(&weak);
+            }
+        };
+        ($live:ident, $dangling:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+
+                // `downgrade(&strong)` points to the same live allocation, so
+                // `Weak::as_ptr` must take the non-dangling branch.
+                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let _ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // This weak handle contains only the sentinel and no `ArcInner`,
+                // so `Weak::as_ptr` must take the dangling branch.
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                let _ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+            }
+        };
+    }
+
+    macro_rules! gen_weak_as_ptr_unsized_harness {
+        ($live:ident, $dangling:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem], Global> = Arc::from(vec);
+
+                // `Arc::from(vec)` creates a real slice allocation, and the
+                // downgraded weak pointer keeps that allocation identity.
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let _ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // Start from the sentinel `Weak<[E; 1]>` and coerce to
+                // `Weak<[E]>`. This changes only slice metadata, not the
+                // sentinel address, so `is_dangling` stays true.
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                let _ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
+            }
+        };
+    }
+
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_i8_live,
+        harness_arc_weak_as_ptr_i8_dangling,
+        i8
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_i16_live,
+        harness_arc_weak_as_ptr_i16_dangling,
+        i16
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_i32_live,
+        harness_arc_weak_as_ptr_i32_dangling,
+        i32
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_i64_live,
+        harness_arc_weak_as_ptr_i64_dangling,
+        i64
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_i128_live,
+        harness_arc_weak_as_ptr_i128_dangling,
+        i128
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_u8_live,
+        harness_arc_weak_as_ptr_u8_dangling,
+        u8
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_u16_live,
+        harness_arc_weak_as_ptr_u16_dangling,
+        u16
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_u32_live,
+        harness_arc_weak_as_ptr_u32_dangling,
+        u32
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_u64_live,
+        harness_arc_weak_as_ptr_u64_dangling,
+        u64
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_u128_live,
+        harness_arc_weak_as_ptr_u128_dangling,
+        u128
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_unit_live,
+        harness_arc_weak_as_ptr_unit_dangling,
+        ()
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_array_live,
+        harness_arc_weak_as_ptr_array_dangling,
+        [u8; 4]
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_bool_live,
+        harness_arc_weak_as_ptr_bool_dangling,
+        bool
+    );
+    gen_weak_as_ptr_harness!(
+        harness_arc_weak_as_ptr_dyn_any_live,
+        harness_arc_weak_as_ptr_dyn_any_dangling,
+        dyn Any
+    );
+
+    gen_weak_as_ptr_unsized_harness!(
+        harness_arc_weak_as_ptr_vec_u8_live,
+        harness_arc_weak_as_ptr_vec_u8_dangling,
+        u8
+    );
+    gen_weak_as_ptr_unsized_harness!(
+        harness_arc_weak_as_ptr_vec_u16_live,
+        harness_arc_weak_as_ptr_vec_u16_dangling,
+        u16
+    );
+    gen_weak_as_ptr_unsized_harness!(
+        harness_arc_weak_as_ptr_vec_u32_live,
+        harness_arc_weak_as_ptr_vec_u32_dangling,
+        u32
+    );
+    gen_weak_as_ptr_unsized_harness!(
+        harness_arc_weak_as_ptr_vec_u64_live,
+        harness_arc_weak_as_ptr_vec_u64_dangling,
+        u64
+    );
+    gen_weak_as_ptr_unsized_harness!(
+        harness_arc_weak_as_ptr_vec_u128_live,
+        harness_arc_weak_as_ptr_vec_u128_dangling,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3195 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Weak::into_raw_with_allocator` itself has no explicit `if/else`:
+    // it wraps `self` in `ManuallyDrop`, calls `as_ptr()`, then reads out the
+    // allocator. The behavior-relevant split therefore comes from `as_ptr()`:
+    //
+    // 1) live weak (from `Arc::downgrade`) -> `as_ptr()` returns a payload
+    //    pointer into a real `ArcInner<T>` allocation;
+    // 2) dangling weak (from `Weak::new_in`) -> `as_ptr()` returns the
+    //    sentinel pointer.
+    //
+    // Each harness consumes the weak with `into_raw_with_allocator`, then
+    // immediately rebuilds it with `from_raw_in(ptr, alloc)`. That matches the
+    // ownership contract of the API and avoids leaking the weak token.
+    macro_rules! gen_weak_into_raw_with_allocator_harness {
+        ($live:ident, $dangling:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let strong: Arc<dyn Any, Global> = strong_i32;
+
+                // `strong` is live in this scope, so the downgraded weak points
+                // to a real allocation and `as_ptr()` takes the non-dangling path.
+                let weak: Weak<dyn Any, Global> = Arc::downgrade(&strong);
+                let (ptr, alloc): (*const dyn Any, Global) =
+                    Weak::<dyn Any, Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<dyn Any, Global> =
+                    unsafe { Weak::<dyn Any, Global>::from_raw_in(ptr, alloc) };
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // `Weak::new_in(Global)` starts in the sentinel form, so
+                // `as_ptr()` takes the dangling path before returning `(ptr, alloc)`.
+                let weak_i32: Weak<i32, Global> = Weak::new_in(Global);
+                let weak: Weak<dyn Any, Global> = weak_i32;
+                let (ptr, alloc): (*const dyn Any, Global) =
+                    Weak::<dyn Any, Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<dyn Any, Global> =
+                    unsafe { Weak::<dyn Any, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+        ($live:ident, $dangling:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+
+                // Live strong owner -> downgraded weak -> non-dangling `as_ptr()`
+                // when `into_raw_with_allocator` extracts the raw pointer.
+                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let (ptr, alloc): (*const $ty, Global) =
+                    Weak::<$ty, Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<$ty, Global> =
+                    unsafe { Weak::<$ty, Global>::from_raw_in(ptr, alloc) };
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // Sentinel weak from `new_in` -> dangling `as_ptr()` path during
+                // `into_raw_with_allocator`.
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                let (ptr, alloc): (*const $ty, Global) =
+                    Weak::<$ty, Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<$ty, Global> =
+                    unsafe { Weak::<$ty, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_weak_into_raw_with_allocator_unsized_harness {
+        ($live:ident, $dangling:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem], Global> = Arc::from(vec);
+
+                // The downgraded weak preserves the real slice allocation, so
+                // `into_raw_with_allocator` extracts a non-sentinel slice pointer.
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let (ptr, alloc): (*const [$elem], Global) =
+                    Weak::<[$elem], Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<[$elem], Global> =
+                    unsafe { Weak::<[$elem], Global>::from_raw_in(ptr, alloc) };
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // The array-to-slice coercion changes metadata only; the sentinel
+                // address from `Weak::new_in(Global)` is preserved.
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                let (ptr, alloc): (*const [$elem], Global) =
+                    Weak::<[$elem], Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<[$elem], Global> =
+                    unsafe { Weak::<[$elem], Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_i8_live,
+        harness_arc_weak_into_raw_with_allocator_i8_dangling,
+        i8
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_i16_live,
+        harness_arc_weak_into_raw_with_allocator_i16_dangling,
+        i16
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_i32_live,
+        harness_arc_weak_into_raw_with_allocator_i32_dangling,
+        i32
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_i64_live,
+        harness_arc_weak_into_raw_with_allocator_i64_dangling,
+        i64
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_i128_live,
+        harness_arc_weak_into_raw_with_allocator_i128_dangling,
+        i128
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_u8_live,
+        harness_arc_weak_into_raw_with_allocator_u8_dangling,
+        u8
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_u16_live,
+        harness_arc_weak_into_raw_with_allocator_u16_dangling,
+        u16
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_u32_live,
+        harness_arc_weak_into_raw_with_allocator_u32_dangling,
+        u32
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_u64_live,
+        harness_arc_weak_into_raw_with_allocator_u64_dangling,
+        u64
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_u128_live,
+        harness_arc_weak_into_raw_with_allocator_u128_dangling,
+        u128
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_unit_live,
+        harness_arc_weak_into_raw_with_allocator_unit_dangling,
+        ()
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_arr_live,
+        harness_arc_weak_into_raw_with_allocator_arr_dangling,
+        [u8; 4]
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_bool_live,
+        harness_arc_weak_into_raw_with_allocator_bool_dangling,
+        bool
+    );
+    gen_weak_into_raw_with_allocator_harness!(
+        harness_arc_weak_into_raw_with_allocator_dyn_any_live,
+        harness_arc_weak_into_raw_with_allocator_dyn_any_dangling,
+        dyn Any
+    );
+
+    gen_weak_into_raw_with_allocator_unsized_harness!(
+        harness_arc_weak_into_raw_with_allocator_vec_u8_live,
+        harness_arc_weak_into_raw_with_allocator_vec_u8_dangling,
+        u8
+    );
+    gen_weak_into_raw_with_allocator_unsized_harness!(
+        harness_arc_weak_into_raw_with_allocator_vec_u16_live,
+        harness_arc_weak_into_raw_with_allocator_vec_u16_dangling,
+        u16
+    );
+    gen_weak_into_raw_with_allocator_unsized_harness!(
+        harness_arc_weak_into_raw_with_allocator_vec_u32_live,
+        harness_arc_weak_into_raw_with_allocator_vec_u32_dangling,
+        u32
+    );
+    gen_weak_into_raw_with_allocator_unsized_harness!(
+        harness_arc_weak_into_raw_with_allocator_vec_u64_live,
+        harness_arc_weak_into_raw_with_allocator_vec_u64_dangling,
+        u64
+    );
+    gen_weak_into_raw_with_allocator_unsized_harness!(
+        harness_arc_weak_into_raw_with_allocator_vec_u128_live,
+        harness_arc_weak_into_raw_with_allocator_vec_u128_dangling,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3341 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Weak::upgrade` has three behavior-relevant input states.
+    //
+    // 1) dangling sentinel weak:
+    //    `self.inner()` returns `None`, so `upgrade()` returns `None`
+    //    immediately.
+    // 2) non-dangling weak, but strong count is already 0:
+    //    `self.inner()` succeeds, but `strong.fetch_update(..., checked_increment)`
+    //    observes 0 and fails, so `upgrade()` returns `None`.
+    // 3) non-dangling weak, and strong count is > 0:
+    //    `fetch_update` increments the strong count and `upgrade()` returns
+    //    `Some(Arc<T, A>)`.
+    macro_rules! gen_weak_upgrade_harness {
+        ($live:ident, $strong_zero:ident, $dangling:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let strong: Arc<dyn Any, Global> = strong_i32;
+
+                // Live strong owner -> downgraded weak -> `fetch_update` sees a
+                // positive strong count and `upgrade()` can return `Some(...)`.
+                let weak: Weak<dyn Any, Global> = Arc::downgrade(&strong);
+                let _ = Weak::<dyn Any, Global>::upgrade(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $strong_zero() {
+                let strong_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let strong: Arc<dyn Any, Global> = strong_i32;
+                let weak: Weak<dyn Any, Global> = Arc::downgrade(&strong);
+
+                // Dropping the last strong owner takes the allocation to
+                // "weak-only" state. The weak still points to a real allocation,
+                // but its strong count is now 0, so `checked_increment` returns
+                // `None` and `upgrade()` returns `None`.
+                drop(strong);
+                let _ = Weak::<dyn Any, Global>::upgrade(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // Sentinel weak from `new_in`: `inner()` returns `None`, so
+                // `upgrade()` returns `None` without touching any counters.
+                let weak_i32: Weak<i32, Global> = Weak::new_in(Global);
+                let weak: Weak<dyn Any, Global> = weak_i32;
+                let _ = Weak::<dyn Any, Global>::upgrade(&weak);
+            }
+        };
+        ($live:ident, $strong_zero:ident, $dangling:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+
+                // Live strong owner -> downgraded weak -> successful atomic
+                // increment inside `upgrade()`.
+                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let _ = Weak::<$ty, Global>::upgrade(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $strong_zero() {
+                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+
+                // The allocation is still kept alive by the weak pointer, but
+                // dropping `strong` takes the strong count to 0. `upgrade()`
+                // therefore follows the "strong already dead" path.
+                drop(strong);
+                let _ = Weak::<$ty, Global>::upgrade(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // Sentinel weak from `new_in` -> immediate `None`.
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                let _ = Weak::<$ty, Global>::upgrade(&weak);
+            }
+        };
+    }
+
+    macro_rules! gen_weak_upgrade_unsized_harness {
+        ($live:ident, $strong_zero:ident, $dangling:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem], Global> = Arc::from(vec);
+
+                // The weak points to a real slice allocation whose strong count
+                // is still positive, so `upgrade()` can rebuild an `Arc<[E]>`.
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $strong_zero() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem], Global> = Arc::from(vec);
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+
+                // After the last strong owner is dropped, the weak still names
+                // the allocation, but `upgrade()` must observe strong == 0.
+                drop(strong);
+                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                // Array-to-slice coercion preserves the sentinel address, so
+                // this remains the dangling path for `upgrade()`.
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+            }
+        };
+    }
+
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_i8_live,
+        harness_arc_weak_upgrade_i8_strong_zero,
+        harness_arc_weak_upgrade_i8_dangling,
+        i8
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_i16_live,
+        harness_arc_weak_upgrade_i16_strong_zero,
+        harness_arc_weak_upgrade_i16_dangling,
+        i16
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_i32_live,
+        harness_arc_weak_upgrade_i32_strong_zero,
+        harness_arc_weak_upgrade_i32_dangling,
+        i32
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_i64_live,
+        harness_arc_weak_upgrade_i64_strong_zero,
+        harness_arc_weak_upgrade_i64_dangling,
+        i64
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_i128_live,
+        harness_arc_weak_upgrade_i128_strong_zero,
+        harness_arc_weak_upgrade_i128_dangling,
+        i128
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_u8_live,
+        harness_arc_weak_upgrade_u8_strong_zero,
+        harness_arc_weak_upgrade_u8_dangling,
+        u8
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_u16_live,
+        harness_arc_weak_upgrade_u16_strong_zero,
+        harness_arc_weak_upgrade_u16_dangling,
+        u16
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_u32_live,
+        harness_arc_weak_upgrade_u32_strong_zero,
+        harness_arc_weak_upgrade_u32_dangling,
+        u32
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_u64_live,
+        harness_arc_weak_upgrade_u64_strong_zero,
+        harness_arc_weak_upgrade_u64_dangling,
+        u64
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_u128_live,
+        harness_arc_weak_upgrade_u128_strong_zero,
+        harness_arc_weak_upgrade_u128_dangling,
+        u128
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_unit_live,
+        harness_arc_weak_upgrade_unit_strong_zero,
+        harness_arc_weak_upgrade_unit_dangling,
+        ()
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_array_live,
+        harness_arc_weak_upgrade_array_strong_zero,
+        harness_arc_weak_upgrade_array_dangling,
+        [u8; 4]
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_bool_live,
+        harness_arc_weak_upgrade_bool_strong_zero,
+        harness_arc_weak_upgrade_bool_dangling,
+        bool
+    );
+    gen_weak_upgrade_harness!(
+        harness_arc_weak_upgrade_dyn_any_live,
+        harness_arc_weak_upgrade_dyn_any_strong_zero,
+        harness_arc_weak_upgrade_dyn_any_dangling,
+        dyn Any
+    );
+
+    gen_weak_upgrade_unsized_harness!(
+        harness_arc_weak_upgrade_vec_u8_live,
+        harness_arc_weak_upgrade_vec_u8_strong_zero,
+        harness_arc_weak_upgrade_vec_u8_dangling,
+        u8
+    );
+    gen_weak_upgrade_unsized_harness!(
+        harness_arc_weak_upgrade_vec_u16_live,
+        harness_arc_weak_upgrade_vec_u16_strong_zero,
+        harness_arc_weak_upgrade_vec_u16_dangling,
+        u16
+    );
+    gen_weak_upgrade_unsized_harness!(
+        harness_arc_weak_upgrade_vec_u32_live,
+        harness_arc_weak_upgrade_vec_u32_strong_zero,
+        harness_arc_weak_upgrade_vec_u32_dangling,
+        u32
+    );
+    gen_weak_upgrade_unsized_harness!(
+        harness_arc_weak_upgrade_vec_u64_live,
+        harness_arc_weak_upgrade_vec_u64_strong_zero,
+        harness_arc_weak_upgrade_vec_u64_dangling,
+        u64
+    );
+    gen_weak_upgrade_unsized_harness!(
+        harness_arc_weak_upgrade_vec_u128_live,
+        harness_arc_weak_upgrade_vec_u128_strong_zero,
+        harness_arc_weak_upgrade_vec_u128_dangling,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3416 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Weak::inner` has exactly two branches:
+    // 1) `is_dangling(self.ptr.as_ptr()) == true`  -> `None`
+    // 2) `is_dangling(self.ptr.as_ptr()) == false` -> `Some(WeakInner { strong, weak })`
+    //
+    // Coverage strategy:
+    // - `*_some`: create a live weak via `Arc::downgrade(&strong)` so the
+    //   pointer is non-sentinel.
+    // - `*_none`: create a sentinel weak via `Weak::new_in(Global)` so the
+    //   pointer is dangling.
+    //
+    // Compared with Rc, the branch structure is the same. The Arc-specific
+    // difference is that `WeakInner` contains references to atomic `strong` and
+    // `weak` counters, and the implementation carefully avoids creating a
+    // reference that would cover the `data` field because that field may be
+    // dropped concurrently when the last strong owner disappears.
+    macro_rules! gen_weak_inner_harness {
+        ($some:ident, $none:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $some() {
+                // Branch (2): live strong owner keeps the allocation around, so
+                // `downgrade` yields a non-dangling weak and `inner()` returns `Some(...)`.
+                let strong_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let strong: Arc<dyn Any, Global> = strong_i32;
+                let weak: Weak<dyn Any, Global> = Arc::downgrade(&strong);
+                let _inner = Weak::<dyn Any, Global>::inner(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $none() {
+                // Branch (1): `Weak::new_in` encodes the sentinel dangling pointer,
+                // so `is_dangling(...)` is true and `inner()` returns `None`.
+                let weak_i32: Weak<i32, Global> = Weak::new_in(Global);
+                let weak: Weak<dyn Any, Global> = weak_i32;
+                let _inner = Weak::<dyn Any, Global>::inner(&weak);
+            }
+        };
+        ($some:ident, $none:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $some() {
+                // Branch (2): downgrade from a live strong Arc.
+                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let _inner = Weak::<$ty, Global>::inner(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $none() {
+                // Branch (1): sentinel weak created directly.
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                let _inner = Weak::<$ty, Global>::inner(&weak);
+            }
+        };
+    }
+
+    // Unsized (`T = [E]`) follows the same two-branch coverage.
+    macro_rules! gen_weak_inner_unsized_harness {
+        ($some:ident, $none:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $some() {
+                // Branch (2): non-dangling unsized weak from a live `Arc<[E]>`.
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem], Global> = Arc::from(vec);
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let _inner = Weak::<[$elem], Global>::inner(&weak);
+            }
+
+            #[kani::proof]
+            pub fn $none() {
+                // Branch (1): sentinel weak remains dangling after array-to-slice coercion.
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                let _inner = Weak::<[$elem], Global>::inner(&weak);
+            }
+        };
+    }
+
+    gen_weak_inner_harness!(harness_arc_weak_inner_i8_some, harness_arc_weak_inner_i8_none, i8);
+    gen_weak_inner_harness!(harness_arc_weak_inner_i16_some, harness_arc_weak_inner_i16_none, i16);
+    gen_weak_inner_harness!(harness_arc_weak_inner_i32_some, harness_arc_weak_inner_i32_none, i32);
+    gen_weak_inner_harness!(harness_arc_weak_inner_i64_some, harness_arc_weak_inner_i64_none, i64);
+    gen_weak_inner_harness!(
+        harness_arc_weak_inner_i128_some,
+        harness_arc_weak_inner_i128_none,
+        i128
+    );
+    gen_weak_inner_harness!(harness_arc_weak_inner_u8_some, harness_arc_weak_inner_u8_none, u8);
+    gen_weak_inner_harness!(harness_arc_weak_inner_u16_some, harness_arc_weak_inner_u16_none, u16);
+    gen_weak_inner_harness!(harness_arc_weak_inner_u32_some, harness_arc_weak_inner_u32_none, u32);
+    gen_weak_inner_harness!(harness_arc_weak_inner_u64_some, harness_arc_weak_inner_u64_none, u64);
+    gen_weak_inner_harness!(
+        harness_arc_weak_inner_u128_some,
+        harness_arc_weak_inner_u128_none,
+        u128
+    );
+    gen_weak_inner_harness!(harness_arc_weak_inner_unit_some, harness_arc_weak_inner_unit_none, ());
+    gen_weak_inner_harness!(
+        harness_arc_weak_inner_array_some,
+        harness_arc_weak_inner_array_none,
+        [u8; 4]
+    );
+    gen_weak_inner_harness!(
+        harness_arc_weak_inner_bool_some,
+        harness_arc_weak_inner_bool_none,
+        bool
+    );
+    gen_weak_inner_harness!(
+        harness_arc_weak_inner_dyn_any_some,
+        harness_arc_weak_inner_dyn_any_none,
+        dyn Any
+    );
+
+    gen_weak_inner_unsized_harness!(
+        harness_arc_weak_inner_vec_u8_some,
+        harness_arc_weak_inner_vec_u8_none,
+        u8
+    );
+    gen_weak_inner_unsized_harness!(
+        harness_arc_weak_inner_vec_u16_some,
+        harness_arc_weak_inner_vec_u16_none,
+        u16
+    );
+    gen_weak_inner_unsized_harness!(
+        harness_arc_weak_inner_vec_u32_some,
+        harness_arc_weak_inner_vec_u32_none,
+        u32
+    );
+    gen_weak_inner_unsized_harness!(
+        harness_arc_weak_inner_vec_u64_some,
+        harness_arc_weak_inner_vec_u64_none,
+        u64
+    );
+    gen_weak_inner_unsized_harness!(
+        harness_arc_weak_inner_vec_u128_some,
+        harness_arc_weak_inner_vec_u128_none,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3559 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    // `Drop for Weak` executes the following decision chain:
+    // 1) `self.inner()` checks whether `self.ptr` is sentinel-dangling.
+    //    - dangling (`Weak::new_in`) => `None` => return immediately.
+    // 2) if `inner` exists, drop always decrements the weak count with
+    //    `inner.weak.fetch_sub(1, Release)`.
+    // 3) then it checks the pre-decrement value returned by `fetch_sub`:
+    //    - `== 1` => this weak was the last one => acquire fence + deallocate.
+    //    - `!= 1` => some weak still exists => do not deallocate.
+    //
+    // Relative to Rc, the state split is the same, but Arc uses atomic weak
+    // counters and an acquire fence on the last-weak path.
+    //
+    // Harness mapping:
+    // - `*_live`: keep one strong owner alive while dropping one explicit weak
+    //   -> after decrement, the implicit weak owned by strong pointers remains
+    //   -> non-last-weak branch.
+    // - `*_after_strong_drop`: create weak, then drop all strong owners before
+    //   weak drop -> now this explicit weak is the last weak token
+    //   -> last-weak deallocation branch.
+    // - `*_dangling`: construct sentinel weak via `Weak::new_in`
+    //   -> `inner()` is `None` -> early return branch.
+    macro_rules! gen_drop_weak_harness {
+        ($live:ident, $after_drop:ident, $dangling:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let strong: Arc<dyn Any, Global> = strong_i32;
+                {
+                    // Create one explicit weak and let it drop at scope end.
+                    let _weak: Weak<dyn Any, Global> = Arc::downgrade(&strong);
+                }
+                // Dropping `_weak` runs `Drop for Weak`, but `strong` is still
+                // alive here, so the implicit weak remains and this is not the
+                // last-weak path.
+            }
+
+            #[kani::proof]
+            pub fn $after_drop() {
+                let strong_i32: Arc<i32, Global> = Arc::new_in(kani::any::<i32>(), Global);
+                let strong: Arc<dyn Any, Global> = strong_i32;
+                let weak: Weak<dyn Any, Global> = Arc::downgrade(&strong);
+
+                // Dropping all strong owners removes the implicit weak.
+                // The explicit `weak` below is now the last weak token, so its
+                // drop takes the deallocation branch.
+                drop(strong);
+                let _ = weak;
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak_i32: Weak<i32, Global> = Weak::new_in(Global);
+                let weak: Weak<dyn Any, Global> = weak_i32;
+                // Sentinel weak has no `ArcInner`, so drop returns immediately.
+                let _ = weak;
+            }
+        };
+        ($live:ident, $after_drop:ident, $dangling:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                {
+                    // Create an explicit weak and let it drop while one strong
+                    // owner is still alive.
+                    let _weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                }
+                // The implicit weak is still present via `strong`, so this does
+                // not take the last-weak branch.
+            }
+
+            #[kani::proof]
+            pub fn $after_drop() {
+                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                // Remove the implicit weak by dropping the last strong owner first.
+                drop(strong);
+                // This explicit weak is now the last one, so dropping it reaches
+                // the final deallocation path.
+                let _ = weak;
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                // Sentinel weak => `inner() == None` => early return path.
+                let _ = weak;
+            }
+        };
+    }
+
+    // Unsized slice (`T = [E]`) follows the same three-path state machine.
+    // The only difference is construction:
+    // - live / after-strong-drop use `Arc<[E]>` from nondet vec;
+    // - dangling uses sentinel `Weak<[E; 1]>` coerced to `Weak<[E]>`.
+    macro_rules! gen_drop_weak_unsized_harness {
+        ($live:ident, $after_drop:ident, $dangling:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem], Global> = Arc::from(vec);
+                {
+                    // Drop one explicit weak while the strong owner still exists.
+                    let _weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                }
+                // The implicit weak is still present, so this is not the
+                // deallocation branch.
+            }
+
+            #[kani::proof]
+            pub fn $after_drop() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let strong: Arc<[$elem], Global> = Arc::from(vec);
+                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                // Dropping the last strong owner removes the implicit weak.
+                drop(strong);
+                // The explicit weak is now the last weak token.
+                let _ = weak;
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                // Array-to-slice coercion preserves the sentinel address.
+                let _ = weak;
+            }
+        };
+    }
+
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_i8_live,
+        harness_drop_arc_weak_i8_after_strong_drop,
+        harness_drop_arc_weak_i8_dangling,
+        i8
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_i16_live,
+        harness_drop_arc_weak_i16_after_strong_drop,
+        harness_drop_arc_weak_i16_dangling,
+        i16
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_i32_live,
+        harness_drop_arc_weak_i32_after_strong_drop,
+        harness_drop_arc_weak_i32_dangling,
+        i32
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_i64_live,
+        harness_drop_arc_weak_i64_after_strong_drop,
+        harness_drop_arc_weak_i64_dangling,
+        i64
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_i128_live,
+        harness_drop_arc_weak_i128_after_strong_drop,
+        harness_drop_arc_weak_i128_dangling,
+        i128
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_u8_live,
+        harness_drop_arc_weak_u8_after_strong_drop,
+        harness_drop_arc_weak_u8_dangling,
+        u8
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_u16_live,
+        harness_drop_arc_weak_u16_after_strong_drop,
+        harness_drop_arc_weak_u16_dangling,
+        u16
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_u32_live,
+        harness_drop_arc_weak_u32_after_strong_drop,
+        harness_drop_arc_weak_u32_dangling,
+        u32
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_u64_live,
+        harness_drop_arc_weak_u64_after_strong_drop,
+        harness_drop_arc_weak_u64_dangling,
+        u64
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_u128_live,
+        harness_drop_arc_weak_u128_after_strong_drop,
+        harness_drop_arc_weak_u128_dangling,
+        u128
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_unit_live,
+        harness_drop_arc_weak_unit_after_strong_drop,
+        harness_drop_arc_weak_unit_dangling,
+        ()
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_array_live,
+        harness_drop_arc_weak_array_after_strong_drop,
+        harness_drop_arc_weak_array_dangling,
+        [u8; 4]
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_bool_live,
+        harness_drop_arc_weak_bool_after_strong_drop,
+        harness_drop_arc_weak_bool_dangling,
+        bool
+    );
+    gen_drop_weak_harness!(
+        harness_drop_arc_weak_dyn_any_live,
+        harness_drop_arc_weak_dyn_any_after_strong_drop,
+        harness_drop_arc_weak_dyn_any_dangling,
+        dyn Any
+    );
+
+    gen_drop_weak_unsized_harness!(
+        harness_drop_arc_weak_vec_u8_live,
+        harness_drop_arc_weak_vec_u8_after_strong_drop,
+        harness_drop_arc_weak_vec_u8_dangling,
+        u8
+    );
+    gen_drop_weak_unsized_harness!(
+        harness_drop_arc_weak_vec_u16_live,
+        harness_drop_arc_weak_vec_u16_after_strong_drop,
+        harness_drop_arc_weak_vec_u16_dangling,
+        u16
+    );
+    gen_drop_weak_unsized_harness!(
+        harness_drop_arc_weak_vec_u32_live,
+        harness_drop_arc_weak_vec_u32_after_strong_drop,
+        harness_drop_arc_weak_vec_u32_dangling,
+        u32
+    );
+    gen_drop_weak_unsized_harness!(
+        harness_drop_arc_weak_vec_u64_live,
+        harness_drop_arc_weak_vec_u64_after_strong_drop,
+        harness_drop_arc_weak_vec_u64_dangling,
+        u64
+    );
+    gen_drop_weak_unsized_harness!(
+        harness_drop_arc_weak_vec_u128_live,
+        harness_drop_arc_weak_vec_u128_after_strong_drop,
+        harness_drop_arc_weak_vec_u128_dangling,
+        u128
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3817 {
+    use super::*;
+
+    macro_rules! gen_arc_default_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _ = Arc::<$ty>::default();
+            }
+        };
+    }
+
+    gen_arc_default_harness!(harness_arc_default_i8, i8);
+    gen_arc_default_harness!(harness_arc_default_i16, i16);
+    gen_arc_default_harness!(harness_arc_default_i32, i32);
+    gen_arc_default_harness!(harness_arc_default_i64, i64);
+    gen_arc_default_harness!(harness_arc_default_i128, i128);
+    gen_arc_default_harness!(harness_arc_default_u8, u8);
+    gen_arc_default_harness!(harness_arc_default_u16, u16);
+    gen_arc_default_harness!(harness_arc_default_u32, u32);
+    gen_arc_default_harness!(harness_arc_default_u64, u64);
+    gen_arc_default_harness!(harness_arc_default_u128, u128);
+    gen_arc_default_harness!(harness_arc_default_unit, ());
+    gen_arc_default_harness!(harness_arc_default_array, [u8; 4]);
+    gen_arc_default_harness!(harness_arc_default_bool, bool);
+    gen_arc_default_harness!(harness_arc_default_vec_u8, Vec<u8>);
+    gen_arc_default_harness!(harness_arc_default_vec_u16, Vec<u16>);
+    gen_arc_default_harness!(harness_arc_default_vec_u32, Vec<u32>);
+    gen_arc_default_harness!(harness_arc_default_vec_u64, Vec<u64>);
+    gen_arc_default_harness!(harness_arc_default_vec_u128, Vec<u128>);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3878 {
+    use core::ffi::CStr;
+
+    use super::*;
+
+    #[kani::proof]
+    pub fn harness_arc_default_cstr() {
+        let _ = Arc::<CStr>::default();
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_3897 {
+    use super::*;
+
+    macro_rules! define_aligned_type {
+        ($name:ident, $align:literal) => {
+            #[repr(align($align))]
+            struct $name;
+        };
+    }
+
+    define_aligned_type!(Align32, 32);
+    define_aligned_type!(Align64, 64);
+    define_aligned_type!(Align128, 128);
+
+    // `Arc<[T]>::default()` has two implementation paths:
+    // 1) `align_of::<T>() <= 16`:
+    //    reuse the shared static empty-slice backing storage and clone it.
+    // 2) `align_of::<T>() > 16`:
+    //    the static backing storage is not sufficiently aligned, so construct
+    //    a fresh empty array `[]` and convert it with `Arc::from(arr)`.
+    // The harnesses below cover both paths:
+    // - ordinary scalar / bool / array / unit element types cover path (1);
+    // - `Align32` / `Align64` / `Align128` force path (2).
+    macro_rules! gen_arc_default_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let result = Arc::<[$ty]>::default();
+                core::mem::forget(result);
+            }
+        };
+    }
+
+    gen_arc_default_slice_harness!(harness_arc_default_slice_u8, u8);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_u16, u16);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_u32, u32);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_u64, u64);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_u128, u128);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_i8, i8);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_i16, i16);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_i32, i32);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_i64, i64);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_i128, i128);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_unit, ());
+    gen_arc_default_slice_harness!(harness_arc_default_slice_bool, bool);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_array, [u8; 4]);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_align32, Align32);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_align64, Align64);
+    gen_arc_default_slice_harness!(harness_arc_default_slice_align128, Align128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4032 {
+    use super::*;
+
+    macro_rules! gen_from_ref_str_arc_harness {
+        ($name:ident, $value:expr) => {
+            #[kani::proof]
+            pub fn $name() {
+                let _ = Arc::<str>::from($value);
+            }
+        };
+    }
+
+    gen_from_ref_str_arc_harness!(harness_from_ref_str_arc_str_empty, "");
+    gen_from_ref_str_arc_harness!(harness_from_ref_str_arc_str_nonempty, "test");
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4166 {
+    use super::*;
+
+    macro_rules! gen_from_arc_str_to_arc_u8_slice_harness {
+        ($name:ident, $value:expr) => {
+            #[kani::proof]
+            pub fn $name() {
+                let arc: Arc<str> = Arc::from($value);
+                let _ = <Arc<[u8]>>::from(arc);
+            }
+        };
+    }
+
+    gen_from_arc_str_to_arc_u8_slice_harness!(harness_from_arc_str_to_arc_u8_slice_empty, "");
+    gen_from_arc_str_to_arc_u8_slice_harness!(
+        harness_from_arc_str_to_arc_u8_slice_nonempty,
+        "test"
+    );
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4110 {
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_from_vec_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let v: Vec<$ty, Global> = verifier_nondet_vec_arc::<$ty>();
+                let _ = Arc::<[$ty], Global>::from(v);
+            }
+        };
+    }
+
+    gen_from_vec_harness!(harness_from_vec_arc_i8, i8);
+    gen_from_vec_harness!(harness_from_vec_arc_i16, i16);
+    gen_from_vec_harness!(harness_from_vec_arc_i32, i32);
+    gen_from_vec_harness!(harness_from_vec_arc_i64, i64);
+    gen_from_vec_harness!(harness_from_vec_arc_i128, i128);
+    gen_from_vec_harness!(harness_from_vec_arc_u8, u8);
+    gen_from_vec_harness!(harness_from_vec_arc_u16, u16);
+    gen_from_vec_harness!(harness_from_vec_arc_u32, u32);
+    gen_from_vec_harness!(harness_from_vec_arc_u64, u64);
+    gen_from_vec_harness!(harness_from_vec_arc_u128, u128);
+    gen_from_vec_harness!(harness_from_vec_arc_unit, ());
+    gen_from_vec_harness!(harness_from_vec_arc_array, [u8; 4]);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4325 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_unique_arc_uninit_new_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let for_value: &$ty = &value;
+                let _uninit: UniqueArcUninit<$ty, Global> = UniqueArcUninit::new(for_value, Global);
+            }
+        };
+    }
+
+    macro_rules! gen_unique_arc_uninit_new_dyn_any_harness {
+        ($name:ident, $src_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $src_ty = kani::any::<$src_ty>();
+                let trait_obj: &dyn Any = &value;
+                let _uninit: UniqueArcUninit<dyn Any, Global> =
+                    UniqueArcUninit::new(trait_obj, Global);
+            }
+        };
+    }
+
+    macro_rules! gen_unique_arc_uninit_new_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let _uninit: UniqueArcUninit<[$elem], Global> = UniqueArcUninit::new(&vec, Global);
+            }
+        };
+    }
+
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_i8, i8);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_i16, i16);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_i32, i32);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_i64, i64);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_i128, i128);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_u8, u8);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_u16, u16);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_u32, u32);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_u64, u64);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_u128, u128);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_unit, ());
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_array, [u8; 4]);
+    gen_unique_arc_uninit_new_harness!(harness_unique_arc_uninit_new_bool, bool);
+    gen_unique_arc_uninit_new_dyn_any_harness!(harness_unique_arc_uninit_new_dyn_any, i32);
+
+    gen_unique_arc_uninit_new_unsized_harness!(harness_unique_arc_uninit_new_vec_u8, u8);
+    gen_unique_arc_uninit_new_unsized_harness!(harness_unique_arc_uninit_new_vec_u16, u16);
+    gen_unique_arc_uninit_new_unsized_harness!(harness_unique_arc_uninit_new_vec_u32, u32);
+    gen_unique_arc_uninit_new_unsized_harness!(harness_unique_arc_uninit_new_vec_u64, u64);
+    gen_unique_arc_uninit_new_unsized_harness!(harness_unique_arc_uninit_new_vec_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4338 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_data_ptr_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let mut uninit: UniqueArcUninit<$ty, Global> = UniqueArcUninit::new(&value, Global);
+                let _ptr: *mut $ty = uninit.data_ptr();
+            }
+        };
+    }
+
+    macro_rules! gen_data_ptr_dyn_any_harness {
+        ($name:ident, $src_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $src_ty = kani::any::<$src_ty>();
+                let trait_obj: &dyn Any = &value;
+                let mut uninit: UniqueArcUninit<dyn Any, Global> =
+                    UniqueArcUninit::new(trait_obj, Global);
+                let _ptr: *mut dyn Any = uninit.data_ptr();
+            }
+        };
+    }
+
+    macro_rules! gen_data_ptr_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let mut uninit: UniqueArcUninit<[$elem], Global> =
+                    UniqueArcUninit::new(&vec, Global);
+                let _ptr: *mut [$elem] = uninit.data_ptr();
+            }
+        };
+    }
+
+    gen_data_ptr_harness!(harness_data_ptr_arc_i8, i8);
+    gen_data_ptr_harness!(harness_data_ptr_arc_i16, i16);
+    gen_data_ptr_harness!(harness_data_ptr_arc_i32, i32);
+    gen_data_ptr_harness!(harness_data_ptr_arc_i64, i64);
+    gen_data_ptr_harness!(harness_data_ptr_arc_i128, i128);
+    gen_data_ptr_harness!(harness_data_ptr_arc_u8, u8);
+    gen_data_ptr_harness!(harness_data_ptr_arc_u16, u16);
+    gen_data_ptr_harness!(harness_data_ptr_arc_u32, u32);
+    gen_data_ptr_harness!(harness_data_ptr_arc_u64, u64);
+    gen_data_ptr_harness!(harness_data_ptr_arc_u128, u128);
+    gen_data_ptr_harness!(harness_data_ptr_arc_unit, ());
+    gen_data_ptr_harness!(harness_data_ptr_arc_array, [u8; 4]);
+    gen_data_ptr_harness!(harness_data_ptr_arc_bool, bool);
+    gen_data_ptr_dyn_any_harness!(harness_data_ptr_arc_dyn_any, i32);
+
+    gen_data_ptr_unsized_harness!(harness_data_ptr_arc_slice_u8, u8);
+    gen_data_ptr_unsized_harness!(harness_data_ptr_arc_slice_u16, u16);
+    gen_data_ptr_unsized_harness!(harness_data_ptr_arc_slice_u32, u32);
+    gen_data_ptr_unsized_harness!(harness_data_ptr_arc_slice_u64, u64);
+    gen_data_ptr_unsized_harness!(harness_data_ptr_arc_slice_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4361 {
+    use core::any::Any;
+
+    use super::kani_arc_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_unique_arc_uninit_drop_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let _uninit: UniqueArcUninit<$ty, Global> = UniqueArcUninit::new(&value, Global);
+            }
+        };
+    }
+
+    macro_rules! gen_unique_arc_uninit_drop_dyn_any_harness {
+        ($name:ident, $src_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $src_ty = kani::any::<$src_ty>();
+                let trait_obj: &dyn Any = &value;
+                let _uninit: UniqueArcUninit<dyn Any, Global> =
+                    UniqueArcUninit::new(trait_obj, Global);
+            }
+        };
+    }
+
+    macro_rules! gen_unique_arc_uninit_drop_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_arc::<$elem>();
+                let _uninit: UniqueArcUninit<[$elem], Global> = UniqueArcUninit::new(&vec, Global);
+            }
+        };
+    }
+
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_i8, i8);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_i16, i16);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_i32, i32);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_i64, i64);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_i128, i128);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_u8, u8);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_u16, u16);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_u32, u32);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_u64, u64);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_u128, u128);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_unit, ());
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_array, [u8; 4]);
+    gen_unique_arc_uninit_drop_harness!(harness_unique_arc_uninit_drop_bool, bool);
+    gen_unique_arc_uninit_drop_dyn_any_harness!(harness_unique_arc_uninit_drop_dyn_any, i32);
+
+    gen_unique_arc_uninit_drop_unsized_harness!(harness_unique_arc_uninit_drop_slice_u8, u8);
+    gen_unique_arc_uninit_drop_unsized_harness!(harness_unique_arc_uninit_drop_slice_u16, u16);
+    gen_unique_arc_uninit_drop_unsized_harness!(harness_unique_arc_uninit_drop_slice_u32, u32);
+    gen_unique_arc_uninit_drop_unsized_harness!(harness_unique_arc_uninit_drop_slice_u64, u64);
+    gen_unique_arc_uninit_drop_unsized_harness!(harness_unique_arc_uninit_drop_slice_u128, u128);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4713 {
+    use core::any::Any;
+
+    use super::*;
+
+    macro_rules! gen_uniquearc_into_arc_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique: UniqueArc<$ty, Global> = UniqueArc::new_in(kani::any::<$ty>(), Global);
+                let _arc: Arc<$ty, Global> = UniqueArc::into_arc(unique);
+            }
+        };
+    }
+
+    macro_rules! gen_uniquearc_into_arc_dyn_any_harness {
+        ($name:ident, $src_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique_src: UniqueArc<$src_ty, Global> =
+                    UniqueArc::new_in(kani::any::<$src_ty>(), Global);
+                let unique_dyn: UniqueArc<dyn Any, Global> = unique_src;
+                let _arc: Arc<dyn Any, Global> = UniqueArc::into_arc(unique_dyn);
+            }
+        };
+    }
+
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_i8, i8);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_i16, i16);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_i32, i32);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_i64, i64);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_i128, i128);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_u8, u8);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_u16, u16);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_u32, u32);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_u64, u64);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_u128, u128);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_bool, bool);
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_unit, ());
+    gen_uniquearc_into_arc_harness!(harness_uniquearc_into_arc_array, [u8; 4]);
+    gen_uniquearc_into_arc_dyn_any_harness!(harness_uniquearc_into_arc_dyn_any, i32);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4737 {
+    use core::any::Any;
+
+    use super::*;
+
+    macro_rules! gen_downgrade_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique: UniqueArc<$ty, Global> = UniqueArc::new_in(kani::any::<$ty>(), Global);
+                let _weak: Weak<$ty, Global> = UniqueArc::downgrade(&unique);
+            }
+        };
+    }
+
+    macro_rules! gen_downgrade_dyn_any_harness {
+        ($name:ident, $src_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique_src: UniqueArc<$src_ty, Global> =
+                    UniqueArc::new_in(kani::any::<$src_ty>(), Global);
+                let unique_dyn: UniqueArc<dyn Any, Global> = unique_src;
+                let _weak: Weak<dyn Any, Global> = UniqueArc::downgrade(&unique_dyn);
+            }
+        };
+    }
+
+    gen_downgrade_harness!(harness_uniquearc_downgrade_i8, i8);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_i16, i16);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_i32, i32);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_i64, i64);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_i128, i128);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_u8, u8);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_u16, u16);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_u32, u32);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_u64, u64);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_u128, u128);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_unit, ());
+    gen_downgrade_harness!(harness_uniquearc_downgrade_array, [u8; 4]);
+    gen_downgrade_harness!(harness_uniquearc_downgrade_bool, bool);
+    gen_downgrade_dyn_any_harness!(harness_uniquearc_downgrade_dyn_any, i32);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4762 {
+    use core::any::Any;
+
+    use super::*;
+
+    macro_rules! gen_deref_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique: UniqueArc<$ty, Global> = UniqueArc::new_in(kani::any::<$ty>(), Global);
+                let _: &$ty = core::ops::Deref::deref(&unique);
+            }
+        };
+    }
+
+    macro_rules! gen_deref_dyn_any_harness {
+        ($name:ident, $src_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique_src: UniqueArc<$src_ty, Global> =
+                    UniqueArc::new_in(kani::any::<$src_ty>(), Global);
+                let unique_dyn: UniqueArc<dyn Any, Global> = unique_src;
+                let _: &dyn Any = core::ops::Deref::deref(&unique_dyn);
+            }
+        };
+    }
+
+    gen_deref_harness!(harness_uniquearc_deref_i8, i8);
+    gen_deref_harness!(harness_uniquearc_deref_i16, i16);
+    gen_deref_harness!(harness_uniquearc_deref_i32, i32);
+    gen_deref_harness!(harness_uniquearc_deref_i64, i64);
+    gen_deref_harness!(harness_uniquearc_deref_i128, i128);
+    gen_deref_harness!(harness_uniquearc_deref_u8, u8);
+    gen_deref_harness!(harness_uniquearc_deref_u16, u16);
+    gen_deref_harness!(harness_uniquearc_deref_u32, u32);
+    gen_deref_harness!(harness_uniquearc_deref_u64, u64);
+    gen_deref_harness!(harness_uniquearc_deref_u128, u128);
+    gen_deref_harness!(harness_uniquearc_deref_bool, bool);
+    gen_deref_harness!(harness_uniquearc_deref_unit, ());
+    gen_deref_harness!(harness_uniquearc_deref_array, [u8; 4]);
+    gen_deref_dyn_any_harness!(harness_uniquearc_deref_dyn_any, i32);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4774 {
+    use core::any::Any;
+
+    use super::*;
+
+    macro_rules! gen_deref_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut unique: UniqueArc<$ty, Global> =
+                    UniqueArc::new_in(kani::any::<$ty>(), Global);
+                let _: &mut $ty = core::ops::DerefMut::deref_mut(&mut unique);
+            }
+        };
+    }
+
+    macro_rules! gen_deref_mut_dyn_any_harness {
+        ($name:ident, $src_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique_src: UniqueArc<$src_ty, Global> =
+                    UniqueArc::new_in(kani::any::<$src_ty>(), Global);
+                let mut unique_dyn: UniqueArc<dyn Any, Global> = unique_src;
+                let _: &mut dyn Any = core::ops::DerefMut::deref_mut(&mut unique_dyn);
+            }
+        };
+    }
+
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_i8, i8);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_i16, i16);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_i32, i32);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_i64, i64);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_i128, i128);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_u8, u8);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_u16, u16);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_u32, u32);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_u64, u64);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_u128, u128);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_bool, bool);
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_unit, ());
+    gen_deref_mut_harness!(harness_uniquearc_deref_mut_array, [u8; 4]);
+    gen_deref_mut_dyn_any_harness!(harness_uniquearc_deref_mut_dyn_any, i32);
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_4791 {
+    use core::any::Any;
+
+    use super::*;
+
+    // `UniqueArc::drop` itself always performs the same two operations:
+    // 1) build one temporary `Weak` from the stored pointer and allocator reference;
+    // 2) drop the payload `data` in place.
+    //
+    // The behavior-relevant branch happens immediately after that, when the temporary `Weak`
+    // created in `drop` is itself dropped:
+    // - if no user `Weak` exists, that temporary `Weak` is the last weak owner, so its
+    //   `Weak::drop` path deallocates the backing allocation;
+    // - if one user `Weak` is kept alive, the temporary `Weak` is not the last weak owner,
+    //   so allocation cleanup is deferred to the remaining `Weak`.
+    macro_rules! gen_drop_unique_arc_harness {
+        ($unique:ident, $weak_present:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                // No external weak exists, so dropping `unique` lets the temporary `Weak`
+                // created inside `UniqueArc::drop` become the last weak owner.
+                let _unique: UniqueArc<$ty, Global> = UniqueArc::new_in(kani::any::<$ty>(), Global);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                // Create one user-visible weak first, so the temporary `Weak` built by
+                // `UniqueArc::drop` is not the last weak owner.
+                let unique: UniqueArc<$ty, Global> = UniqueArc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = UniqueArc::downgrade(&unique);
+                {
+                    // Drop the strong owner now. The remaining `weak` keeps the allocation alive
+                    // after `UniqueArc::drop` finishes dropping `data`.
+                    let _dropped_strong = unique;
+                }
+                let _ = weak;
+            }
+        };
+    }
+
+    macro_rules! gen_drop_unique_arc_dyn_any_harness {
+        ($unique:ident, $weak_present:ident, $src_ty:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                // Build `UniqueArc<dyn Any>` from a concrete source type and drop it directly.
+                let unique_src: UniqueArc<$src_ty, Global> =
+                    UniqueArc::new_in(kani::any::<$src_ty>(), Global);
+                let _unique_dyn: UniqueArc<dyn Any, Global> = unique_src;
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                // Build the trait object, create one external weak alias, then drop the strong
+                // owner while that weak is still alive.
+                let unique_src: UniqueArc<$src_ty, Global> =
+                    UniqueArc::new_in(kani::any::<$src_ty>(), Global);
+                let unique_dyn: UniqueArc<dyn Any, Global> = unique_src;
+                let weak: Weak<dyn Any, Global> = UniqueArc::downgrade(&unique_dyn);
+                {
+                    let _dropped_strong = unique_dyn;
+                }
+                let _ = weak;
+            }
+        };
+    }
+
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_i8_unique,
+        harness_uniquearc_drop_i8_weak_present,
+        i8
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_i16_unique,
+        harness_uniquearc_drop_i16_weak_present,
+        i16
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_i32_unique,
+        harness_uniquearc_drop_i32_weak_present,
+        i32
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_i64_unique,
+        harness_uniquearc_drop_i64_weak_present,
+        i64
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_i128_unique,
+        harness_uniquearc_drop_i128_weak_present,
+        i128
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_u8_unique,
+        harness_uniquearc_drop_u8_weak_present,
+        u8
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_u16_unique,
+        harness_uniquearc_drop_u16_weak_present,
+        u16
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_u32_unique,
+        harness_uniquearc_drop_u32_weak_present,
+        u32
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_u64_unique,
+        harness_uniquearc_drop_u64_weak_present,
+        u64
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_u128_unique,
+        harness_uniquearc_drop_u128_weak_present,
+        u128
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_bool_unique,
+        harness_uniquearc_drop_bool_weak_present,
+        bool
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_unit_unique,
+        harness_uniquearc_drop_unit_weak_present,
+        ()
+    );
+    gen_drop_unique_arc_harness!(
+        harness_uniquearc_drop_array_unique,
+        harness_uniquearc_drop_array_weak_present,
+        [u8; 4]
+    );
+    gen_drop_unique_arc_dyn_any_harness!(
+        harness_uniquearc_drop_dyn_any_unique,
+        harness_uniquearc_drop_dyn_any_weak_present,
+        i32
+    );
 }
