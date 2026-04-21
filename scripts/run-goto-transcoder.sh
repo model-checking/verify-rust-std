@@ -9,8 +9,8 @@ contract_folder=$1/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps
 supported_regex=$2
 unsupported_regex=neg
 
-goto_transcoder_git=https://github.com/rafaelsamenezes/goto-transcoder
-esbmc_url=https://github.com/esbmc/esbmc/releases/download/nightly-7867f5e5595b9e181cd36eb9155d1905f87ad241/esbmc-linux.zip
+goto_transcoder_git=https://github.com/esbmc/goto-transcoder
+esbmc_url=https://github.com/esbmc/esbmc/releases/download/v7.10/esbmc-linux.zip
 
 ##########
 # SCRIPT #
@@ -24,7 +24,7 @@ if [ ! -d "goto-transcoder" ]; then
     cd goto-transcoder
     wget $esbmc_url
     unzip esbmc-linux.zip
-    chmod +x ./linux-release/bin/esbmc
+    chmod +x ./bin/esbmc
     cd ..
 fi
 
@@ -44,8 +44,8 @@ while IFS= read -r line; do
         continue
     fi
     echo "Running: goto-transcoder $contract $contract_folder/$line $contract.esbmc.goto"
-    cargo run cbmc2esbmc $contract ../$contract_folder/$line $contract.esbmc.goto
-    ./linux-release/bin/esbmc --binary $contract.esbmc.goto
+    cargo run cbmc2esbmc  ../$contract_folder/$line $contract.esbmc.goto
+    ./bin/esbmc --cprover --function $contract --binary resources/library.goto $contract.esbmc.goto
 done < "_contracts.txt"
 
 rm "_contracts.txt"

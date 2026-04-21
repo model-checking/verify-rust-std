@@ -22,6 +22,7 @@ Session.vim
 /kani_build/
 /target
 library/target
+scripts/autoharness_analyzer/target/
 *.rlib
 *.rmeta
 *.mir
@@ -55,3 +56,4 @@ goto-transcoder
 # already existing elements were commented out
 
 #/target
+testable-simd-models/target

@@ -191,7 +191,7 @@ use core::error::{self, Error};
 use core::fmt;
 use core::future::Future;
 use core::hash::{Hash, Hasher};
-use core::marker::{PointerLike, Tuple, Unsize};
+use core::marker::{Tuple, Unsize};
 use core::mem::{self, SizedTypeProperties};
 use core::ops::{
     AsyncFn, AsyncFnMut, AsyncFnOnce, CoerceUnsized, Coroutine, CoroutineState, Deref, DerefMut,
@@ -290,8 +290,6 @@ impl<T> Box<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_zeroed_alloc)]
-    ///
     /// let zero = Box::<u32>::new_zeroed();
     /// let zero = unsafe { zero.assume_init() };
     ///
@@ -301,7 +299,7 @@ impl<T> Box<T> {
     /// [zeroed]: mem::MaybeUninit::zeroed
     #[cfg(not(no_global_oom_handling))]
     #[inline]
-    #[unstable(feature = "new_zeroed_alloc", issue = "129396")]
+    #[stable(feature = "new_zeroed_alloc", since = "CURRENT_RUSTC_VERSION")]
     #[must_use]
     pub fn new_zeroed() -> Box<mem::MaybeUninit<T>> {
         Self::new_zeroed_in(Global)
@@ -358,7 +356,6 @@ impl<T> Box<T> {
     /// # Ok::<(), std::alloc::AllocError>(())
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
-    // #[unstable(feature = "new_uninit", issue = "63291")]
     #[inline]
     pub fn try_new_uninit() -> Result<Box<mem::MaybeUninit<T>>, AllocError> {
         Box::try_new_uninit_in(Global)
@@ -384,7 +381,6 @@ impl<T> Box<T> {
     ///
     /// [zeroed]: mem::MaybeUninit::zeroed
     #[unstable(feature = "allocator_api", issue = "32838")]
-    // #[unstable(feature = "new_uninit", issue = "63291")]
     #[inline]
     pub fn try_new_zeroed() -> Result<Box<mem::MaybeUninit<T>>, AllocError> {
         Box::try_new_zeroed_in(Global)
@@ -463,7 +459,6 @@ impl<T, A: Allocator> Box<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[cfg(not(no_global_oom_handling))]
     #[must_use]
-    // #[unstable(feature = "new_uninit", issue = "63291")]
     pub fn new_uninit_in(alloc: A) -> Box<mem::MaybeUninit<T>, A>
     where
         A: Allocator,
@@ -496,7 +491,6 @@ impl<T, A: Allocator> Box<T, A> {
     /// # Ok::<(), std::alloc::AllocError>(())
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
-    // #[unstable(feature = "new_uninit", issue = "63291")]
     pub fn try_new_uninit_in(alloc: A) -> Result<Box<mem::MaybeUninit<T>, A>, AllocError>
     where
         A: Allocator,
@@ -532,7 +526,6 @@ impl<T, A: Allocator> Box<T, A> {
     /// [zeroed]: mem::MaybeUninit::zeroed
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[cfg(not(no_global_oom_handling))]
-    // #[unstable(feature = "new_uninit", issue = "63291")]
     #[must_use]
     pub fn new_zeroed_in(alloc: A) -> Box<mem::MaybeUninit<T>, A>
     where
@@ -570,7 +563,6 @@ impl<T, A: Allocator> Box<T, A> {
     ///
     /// [zeroed]: mem::MaybeUninit::zeroed
     #[unstable(feature = "allocator_api", issue = "32838")]
-    // #[unstable(feature = "new_uninit", issue = "63291")]
     pub fn try_new_zeroed_in(alloc: A) -> Result<Box<mem::MaybeUninit<T>, A>, AllocError>
     where
         A: Allocator,
@@ -627,6 +619,37 @@ impl<T, A: Allocator> Box<T, A> {
     pub fn into_inner(boxed: Self) -> T {
         *boxed
     }
+
+    /// Consumes the `Box` without consuming its allocation, returning the wrapped value and a `Box`
+    /// to the uninitialized memory where the wrapped value used to live.
+    ///
+    /// This can be used together with [`write`](Box::write) to reuse the allocation for multiple
+    /// boxed values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(box_take)]
+    ///
+    /// let c = Box::new(5);
+    ///
+    /// // take the value out of the box
+    /// let (value, uninit) = Box::take(c);
+    /// assert_eq!(value, 5);
+    ///
+    /// // reuse the box for a second value
+    /// let c = Box::write(uninit, 6);
+    /// assert_eq!(*c, 6);
+    /// ```
+    #[unstable(feature = "box_take", issue = "147212")]
+    pub fn take(boxed: Self) -> (T, Box<mem::MaybeUninit<T>, A>) {
+        unsafe {
+            let (raw, alloc) = Box::into_raw_with_allocator(boxed);
+            let value = raw.read();
+            let uninit = Box::from_raw_in(raw.cast::<mem::MaybeUninit<T>>(), alloc);
+            (value, uninit)
+        }
+    }
 }
 
 impl<T> Box<[T]> {
@@ -640,7 +663,7 @@ impl<T> Box<[T]> {
     /// values[0].write(1);
     /// values[1].write(2);
     /// values[2].write(3);
-    /// let values = unsafe {values.assume_init() };
+    /// let values = unsafe { values.assume_init() };
     ///
     /// assert_eq!(*values, [1, 2, 3])
     /// ```
@@ -660,8 +683,6 @@ impl<T> Box<[T]> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(new_zeroed_alloc)]
-    ///
     /// let values = Box::<[u32]>::new_zeroed_slice(3);
     /// let values = unsafe { values.assume_init() };
     ///
@@ -670,7 +691,7 @@ impl<T> Box<[T]> {
     ///
     /// [zeroed]: mem::MaybeUninit::zeroed
     #[cfg(not(no_global_oom_handling))]
-    #[unstable(feature = "new_zeroed_alloc", issue = "129396")]
+    #[stable(feature = "new_zeroed_alloc", since = "CURRENT_RUSTC_VERSION")]
     #[must_use]
     pub fn new_zeroed_slice(len: usize) -> Box<[mem::MaybeUninit<T>]> {
         unsafe { RawVec::with_capacity_zeroed(len).into_box(len) }
@@ -785,7 +806,6 @@ impl<T, A: Allocator> Box<[T], A> {
     /// ```
     #[cfg(not(no_global_oom_handling))]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    // #[unstable(feature = "new_uninit", issue = "63291")]
     #[must_use]
     pub fn new_uninit_slice_in(len: usize, alloc: A) -> Box<[mem::MaybeUninit<T>], A> {
         unsafe { RawVec::with_capacity_in(len, alloc).into_box(len) }
@@ -813,7 +833,6 @@ impl<T, A: Allocator> Box<[T], A> {
     /// [zeroed]: mem::MaybeUninit::zeroed
     #[cfg(not(no_global_oom_handling))]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    // #[unstable(feature = "new_uninit", issue = "63291")]
     #[must_use]
     pub fn new_zeroed_slice_in(len: usize, alloc: A) -> Box<[mem::MaybeUninit<T>], A> {
         unsafe { RawVec::with_capacity_zeroed_in(len, alloc).into_box(len) }
@@ -1098,6 +1117,124 @@ impl<T: ?Sized> Box<T> {
     pub unsafe fn from_non_null(ptr: NonNull<T>) -> Self {
         unsafe { Self::from_raw(ptr.as_ptr()) }
     }
+
+    /// Consumes the `Box`, returning a wrapped raw pointer.
+    ///
+    /// The pointer will be properly aligned and non-null.
+    ///
+    /// After calling this function, the caller is responsible for the
+    /// memory previously managed by the `Box`. In particular, the
+    /// caller should properly destroy `T` and release the memory, taking
+    /// into account the [memory layout] used by `Box`. The easiest way to
+    /// do this is to convert the raw pointer back into a `Box` with the
+    /// [`Box::from_raw`] function, allowing the `Box` destructor to perform
+    /// the cleanup.
+    ///
+    /// Note: this is an associated function, which means that you have
+    /// to call it as `Box::into_raw(b)` instead of `b.into_raw()`. This
+    /// is so that there is no conflict with a method on the inner type.
+    ///
+    /// # Examples
+    /// Converting the raw pointer back into a `Box` with [`Box::from_raw`]
+    /// for automatic cleanup:
+    /// ```
+    /// let x = Box::new(String::from("Hello"));
+    /// let ptr = Box::into_raw(x);
+    /// let x = unsafe { Box::from_raw(ptr) };
+    /// ```
+    /// Manual cleanup by explicitly running the destructor and deallocating
+    /// the memory:
+    /// ```
+    /// use std::alloc::{dealloc, Layout};
+    /// use std::ptr;
+    ///
+    /// let x = Box::new(String::from("Hello"));
+    /// let ptr = Box::into_raw(x);
+    /// unsafe {
+    ///     ptr::drop_in_place(ptr);
+    ///     dealloc(ptr as *mut u8, Layout::new::<String>());
+    /// }
+    /// ```
+    /// Note: This is equivalent to the following:
+    /// ```
+    /// let x = Box::new(String::from("Hello"));
+    /// let ptr = Box::into_raw(x);
+    /// unsafe {
+    ///     drop(Box::from_raw(ptr));
+    /// }
+    /// ```
+    ///
+    /// [memory layout]: self#memory-layout
+    #[must_use = "losing the pointer will leak memory"]
+    #[stable(feature = "box_raw", since = "1.4.0")]
+    #[inline]
+    pub fn into_raw(b: Self) -> *mut T {
+        // Avoid `into_raw_with_allocator` as that interacts poorly with Miri's Stacked Borrows.
+        let mut b = mem::ManuallyDrop::new(b);
+        // We go through the built-in deref for `Box`, which is crucial for Miri to recognize this
+        // operation for it's alias tracking.
+        &raw mut **b
+    }
+
+    /// Consumes the `Box`, returning a wrapped `NonNull` pointer.
+    ///
+    /// The pointer will be properly aligned.
+    ///
+    /// After calling this function, the caller is responsible for the
+    /// memory previously managed by the `Box`. In particular, the
+    /// caller should properly destroy `T` and release the memory, taking
+    /// into account the [memory layout] used by `Box`. The easiest way to
+    /// do this is to convert the `NonNull` pointer back into a `Box` with the
+    /// [`Box::from_non_null`] function, allowing the `Box` destructor to
+    /// perform the cleanup.
+    ///
+    /// Note: this is an associated function, which means that you have
+    /// to call it as `Box::into_non_null(b)` instead of `b.into_non_null()`.
+    /// This is so that there is no conflict with a method on the inner type.
+    ///
+    /// # Examples
+    /// Converting the `NonNull` pointer back into a `Box` with [`Box::from_non_null`]
+    /// for automatic cleanup:
+    /// ```
+    /// #![feature(box_vec_non_null)]
+    ///
+    /// let x = Box::new(String::from("Hello"));
+    /// let non_null = Box::into_non_null(x);
+    /// let x = unsafe { Box::from_non_null(non_null) };
+    /// ```
+    /// Manual cleanup by explicitly running the destructor and deallocating
+    /// the memory:
+    /// ```
+    /// #![feature(box_vec_non_null)]
+    ///
+    /// use std::alloc::{dealloc, Layout};
+    ///
+    /// let x = Box::new(String::from("Hello"));
+    /// let non_null = Box::into_non_null(x);
+    /// unsafe {
+    ///     non_null.drop_in_place();
+    ///     dealloc(non_null.as_ptr().cast::<u8>(), Layout::new::<String>());
+    /// }
+    /// ```
+    /// Note: This is equivalent to the following:
+    /// ```
+    /// #![feature(box_vec_non_null)]
+    ///
+    /// let x = Box::new(String::from("Hello"));
+    /// let non_null = Box::into_non_null(x);
+    /// unsafe {
+    ///     drop(Box::from_non_null(non_null));
+    /// }
+    /// ```
+    ///
+    /// [memory layout]: self#memory-layout
+    #[must_use = "losing the pointer will leak memory"]
+    #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
+    #[inline]
+    pub fn into_non_null(b: Self) -> NonNull<T> {
+        // SAFETY: `Box` is guaranteed to be non-null.
+        unsafe { NonNull::new_unchecked(Self::into_raw(b)) }
+    }
 }
 
 impl<T: ?Sized, A: Allocator> Box<T, A> {
@@ -1206,121 +1343,6 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     pub unsafe fn from_non_null_in(raw: NonNull<T>, alloc: A) -> Self {
         // SAFETY: guaranteed by the caller.
         unsafe { Box::from_raw_in(raw.as_ptr(), alloc) }
-    }
-
-    /// Consumes the `Box`, returning a wrapped raw pointer.
-    ///
-    /// The pointer will be properly aligned and non-null.
-    ///
-    /// After calling this function, the caller is responsible for the
-    /// memory previously managed by the `Box`. In particular, the
-    /// caller should properly destroy `T` and release the memory, taking
-    /// into account the [memory layout] used by `Box`. The easiest way to
-    /// do this is to convert the raw pointer back into a `Box` with the
-    /// [`Box::from_raw`] function, allowing the `Box` destructor to perform
-    /// the cleanup.
-    ///
-    /// Note: this is an associated function, which means that you have
-    /// to call it as `Box::into_raw(b)` instead of `b.into_raw()`. This
-    /// is so that there is no conflict with a method on the inner type.
-    ///
-    /// # Examples
-    /// Converting the raw pointer back into a `Box` with [`Box::from_raw`]
-    /// for automatic cleanup:
-    /// ```
-    /// let x = Box::new(String::from("Hello"));
-    /// let ptr = Box::into_raw(x);
-    /// let x = unsafe { Box::from_raw(ptr) };
-    /// ```
-    /// Manual cleanup by explicitly running the destructor and deallocating
-    /// the memory:
-    /// ```
-    /// use std::alloc::{dealloc, Layout};
-    /// use std::ptr;
-    ///
-    /// let x = Box::new(String::from("Hello"));
-    /// let ptr = Box::into_raw(x);
-    /// unsafe {
-    ///     ptr::drop_in_place(ptr);
-    ///     dealloc(ptr as *mut u8, Layout::new::<String>());
-    /// }
-    /// ```
-    /// Note: This is equivalent to the following:
-    /// ```
-    /// let x = Box::new(String::from("Hello"));
-    /// let ptr = Box::into_raw(x);
-    /// unsafe {
-    ///     drop(Box::from_raw(ptr));
-    /// }
-    /// ```
-    ///
-    /// [memory layout]: self#memory-layout
-    #[must_use = "losing the pointer will leak memory"]
-    #[stable(feature = "box_raw", since = "1.4.0")]
-    #[inline]
-    pub fn into_raw(b: Self) -> *mut T {
-        // Make sure Miri realizes that we transition from a noalias pointer to a raw pointer here.
-        unsafe { &raw mut *&mut *Self::into_raw_with_allocator(b).0 }
-    }
-
-    /// Consumes the `Box`, returning a wrapped `NonNull` pointer.
-    ///
-    /// The pointer will be properly aligned.
-    ///
-    /// After calling this function, the caller is responsible for the
-    /// memory previously managed by the `Box`. In particular, the
-    /// caller should properly destroy `T` and release the memory, taking
-    /// into account the [memory layout] used by `Box`. The easiest way to
-    /// do this is to convert the `NonNull` pointer back into a `Box` with the
-    /// [`Box::from_non_null`] function, allowing the `Box` destructor to
-    /// perform the cleanup.
-    ///
-    /// Note: this is an associated function, which means that you have
-    /// to call it as `Box::into_non_null(b)` instead of `b.into_non_null()`.
-    /// This is so that there is no conflict with a method on the inner type.
-    ///
-    /// # Examples
-    /// Converting the `NonNull` pointer back into a `Box` with [`Box::from_non_null`]
-    /// for automatic cleanup:
-    /// ```
-    /// #![feature(box_vec_non_null)]
-    ///
-    /// let x = Box::new(String::from("Hello"));
-    /// let non_null = Box::into_non_null(x);
-    /// let x = unsafe { Box::from_non_null(non_null) };
-    /// ```
-    /// Manual cleanup by explicitly running the destructor and deallocating
-    /// the memory:
-    /// ```
-    /// #![feature(box_vec_non_null)]
-    ///
-    /// use std::alloc::{dealloc, Layout};
-    ///
-    /// let x = Box::new(String::from("Hello"));
-    /// let non_null = Box::into_non_null(x);
-    /// unsafe {
-    ///     non_null.drop_in_place();
-    ///     dealloc(non_null.as_ptr().cast::<u8>(), Layout::new::<String>());
-    /// }
-    /// ```
-    /// Note: This is equivalent to the following:
-    /// ```
-    /// #![feature(box_vec_non_null)]
-    ///
-    /// let x = Box::new(String::from("Hello"));
-    /// let non_null = Box::into_non_null(x);
-    /// unsafe {
-    ///     drop(Box::from_non_null(non_null));
-    /// }
-    /// ```
-    ///
-    /// [memory layout]: self#memory-layout
-    #[must_use = "losing the pointer will leak memory"]
-    #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
-    #[inline]
-    pub fn into_non_null(b: Self) -> NonNull<T> {
-        // SAFETY: `Box` is guaranteed to be non-null.
-        unsafe { NonNull::new_unchecked(Self::into_raw(b)) }
     }
 
     /// Consumes the `Box`, returning a wrapped raw pointer and the allocator.
@@ -1602,7 +1624,9 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     where
         A: 'a,
     {
-        unsafe { &mut *Box::into_raw(b) }
+        let (ptr, alloc) = Box::into_raw_with_allocator(b);
+        mem::forget(alloc);
+        unsafe { &mut *ptr }
     }
 
     /// Converts a `Box<T>` into a `Pin<Box<T>>`. If `T` does not implement [`Unpin`], then
@@ -1667,7 +1691,7 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for Box<T, A> {
 #[cfg(not(no_global_oom_handling))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Default> Default for Box<T> {
-    /// Creates a `Box<T>`, with the `Default` value for T.
+    /// Creates a `Box<T>`, with the `Default` value for `T`.
     #[inline]
     fn default() -> Self {
         let mut x: Box<mem::MaybeUninit<T>> = Box::new_uninit();
@@ -1690,6 +1714,7 @@ impl<T: Default> Default for Box<T> {
 #[cfg(not(no_global_oom_handling))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Default for Box<[T]> {
+    /// Creates an empty `[T]` inside a `Box`.
     #[inline]
     fn default() -> Self {
         let ptr: Unique<[T]> = Unique::<[T; 0]>::dangling();
@@ -1708,6 +1733,19 @@ impl Default for Box<str> {
             Unique::new_unchecked(bytes.as_ptr() as *mut str)
         };
         Box(ptr, Global)
+    }
+}
+
+#[cfg(not(no_global_oom_handling))]
+#[stable(feature = "pin_default_impls", since = "1.91.0")]
+impl<T> Default for Pin<Box<T>>
+where
+    T: ?Sized,
+    Box<T>: Default,
+{
+    #[inline]
+    fn default() -> Self {
+        Box::into_pin(Box::<T>::default())
     }
 }
 
@@ -2109,11 +2147,6 @@ impl<F: ?Sized + Future + Unpin, A: Allocator> Future for Box<F, A> {
 
 #[stable(feature = "box_error", since = "1.8.0")]
 impl<E: Error> Error for Box<E> {
-    #[allow(deprecated, deprecated_in_future)]
-    fn description(&self) -> &str {
-        Error::description(&**self)
-    }
-
     #[allow(deprecated)]
     fn cause(&self) -> Option<&dyn Error> {
         Error::cause(&**self)
@@ -2127,6 +2160,3 @@ impl<E: Error> Error for Box<E> {
         Error::provide(&**self, request);
     }
 }
-
-#[unstable(feature = "pointer_like_trait", issue = "none")]
-impl<T> PointerLike for Box<T> {}

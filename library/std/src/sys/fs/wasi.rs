@@ -1,4 +1,5 @@
 use crate::ffi::{CStr, OsStr, OsString};
+use crate::fs::TryLockError;
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut, SeekFrom};
 use crate::mem::{self, ManuallyDrop};
 use crate::os::raw::c_int;
@@ -10,7 +11,7 @@ use crate::sys::common::small_c_string::run_path_with_cstr;
 use crate::sys::fd::WasiFd;
 pub use crate::sys::fs::common::exists;
 use crate::sys::time::SystemTime;
-use crate::sys::unsupported;
+use crate::sys::{unsupported, unsupported_err};
 use crate::sys_common::{AsInner, FromInner, IntoInner, ignore_notfound};
 use crate::{fmt, iter, ptr};
 
@@ -461,12 +462,12 @@ impl File {
         unsupported()
     }
 
-    pub fn try_lock(&self) -> io::Result<bool> {
-        unsupported()
+    pub fn try_lock(&self) -> Result<(), TryLockError> {
+        Err(TryLockError::Error(unsupported_err()))
     }
 
-    pub fn try_lock_shared(&self) -> io::Result<bool> {
-        unsupported()
+    pub fn try_lock_shared(&self) -> Result<(), TryLockError> {
+        Err(TryLockError::Error(unsupported_err()))
     }
 
     pub fn unlock(&self) -> io::Result<()> {
@@ -513,6 +514,10 @@ impl File {
 
     pub fn seek(&self, pos: SeekFrom) -> io::Result<u64> {
         self.fd.seek(pos)
+    }
+
+    pub fn size(&self) -> Option<io::Result<u64>> {
+        None
     }
 
     pub fn tell(&self) -> io::Result<u64> {
@@ -843,7 +848,14 @@ fn remove_dir_all_recursive(parent: &WasiFd, path: &Path) -> io::Result<()> {
 
     // Iterate over all the entries in this directory, and travel recursively if
     // necessary
-    for entry in ReadDir::new(fd, dummy_root) {
+    //
+    // Note that all directory entries for this directory are read first before
+    // any removal is done. This works around the fact that the WASIp1 API for
+    // reading directories is not well-designed for handling mutations between
+    // invocations of reading a directory. By reading all the entries at once
+    // this ensures that, at least without concurrent modifications, it should
+    // be possible to delete everything.
+    for entry in ReadDir::new(fd, dummy_root).collect::<Vec<_>>() {
         let entry = entry?;
         let path = crate::str::from_utf8(&entry.name).map_err(|_| {
             io::const_error!(io::ErrorKind::Uncategorized, "invalid utf-8 file name found")

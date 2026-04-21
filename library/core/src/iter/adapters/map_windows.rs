@@ -1,5 +1,6 @@
 use crate::iter::FusedIterator;
 use crate::mem::MaybeUninit;
+use crate::ub_checks::Invariant;
 use crate::{fmt, ptr};
 
 /// An iterator over the mapped windows of another iterator.
@@ -195,7 +196,7 @@ impl<T, const N: usize> Buffer<T, N> {
 
         // SAFETY: the index is valid and this is element `a` in the
         // diagram above and has not been dropped yet.
-        unsafe { ptr::drop_in_place(to_drop.cast::<T>()) };
+        unsafe { ptr::drop_in_place(to_drop.cast_init()) };
     }
 }
 
@@ -287,5 +288,12 @@ where
 {
     fn clone(&self) -> Self {
         Self { f: self.f.clone(), inner: self.inner.clone() }
+    }
+}
+
+#[unstable(feature = "ub_checks", issue = "none")]
+impl<T, const N: usize> Invariant for Buffer<T, N> {
+    fn is_safe(&self) -> bool {
+        self.start + N <= 2 * N
     }
 }

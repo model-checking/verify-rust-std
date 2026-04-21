@@ -4,6 +4,10 @@
 //!
 //! Hints may be compile time or runtime.
 
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::{intrinsics, ub_checks};
 
@@ -98,7 +102,8 @@ use crate::{intrinsics, ub_checks};
 #[inline]
 #[stable(feature = "unreachable", since = "1.27.0")]
 #[rustc_const_stable(feature = "const_unreachable_unchecked", since = "1.57.0")]
-#[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[track_caller]
+#[requires(false)]
 pub const unsafe fn unreachable_unchecked() -> ! {
     ub_checks::assert_unsafe_precondition!(
         check_language_ub,
@@ -198,6 +203,7 @@ pub const unsafe fn unreachable_unchecked() -> ! {
 #[doc(alias = "assume")]
 #[stable(feature = "hint_assert_unchecked", since = "1.81.0")]
 #[rustc_const_stable(feature = "hint_assert_unchecked", since = "1.81.0")]
+#[requires(cond)]
 pub const unsafe fn assert_unchecked(cond: bool) {
     // SAFETY: The caller promised `cond` is true.
     unsafe {
@@ -231,7 +237,7 @@ pub const unsafe fn assert_unchecked(cond: bool) {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore-wasm
 /// use std::sync::atomic::{AtomicBool, Ordering};
 /// use std::sync::Arc;
 /// use std::{hint, thread};
@@ -267,39 +273,29 @@ pub const unsafe fn assert_unchecked(cond: bool) {
 #[inline(always)]
 #[stable(feature = "renamed_spin_loop", since = "1.49.0")]
 pub fn spin_loop() {
-    #[cfg(target_arch = "x86")]
-    {
-        // SAFETY: the `cfg` attr ensures that we only execute this on x86 targets.
-        unsafe { crate::arch::x86::_mm_pause() };
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    {
-        // SAFETY: the `cfg` attr ensures that we only execute this on x86_64 targets.
-        unsafe { crate::arch::x86_64::_mm_pause() };
-    }
-
-    #[cfg(target_arch = "riscv32")]
-    {
-        crate::arch::riscv32::pause();
-    }
-
-    #[cfg(target_arch = "riscv64")]
-    {
-        crate::arch::riscv64::pause();
-    }
-
-    #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
-    {
-        // SAFETY: the `cfg` attr ensures that we only execute this on aarch64 targets.
-        unsafe { crate::arch::aarch64::__isb(crate::arch::aarch64::SY) };
-    }
-
-    #[cfg(all(target_arch = "arm", target_feature = "v6"))]
-    {
-        // SAFETY: the `cfg` attr ensures that we only execute this on arm targets
-        // with support for the v6 feature.
-        unsafe { crate::arch::arm::__yield() };
+    crate::cfg_select! {
+        target_arch = "x86" => {
+            // SAFETY: the `cfg` attr ensures that we only execute this on x86 targets.
+            unsafe { crate::arch::x86::_mm_pause() }
+        }
+        target_arch = "x86_64" => {
+            // SAFETY: the `cfg` attr ensures that we only execute this on x86_64 targets.
+            unsafe { crate::arch::x86_64::_mm_pause() }
+        }
+        target_arch = "riscv32" => crate::arch::riscv32::pause(),
+        target_arch = "riscv64" => crate::arch::riscv64::pause(),
+        any(target_arch = "aarch64", target_arch = "arm64ec") => {
+            // SAFETY: the `cfg` attr ensures that we only execute this on aarch64 targets.
+            unsafe { crate::arch::aarch64::__isb(crate::arch::aarch64::SY) }
+        }
+        all(target_arch = "arm", target_feature = "v6") => {
+            // SAFETY: the `cfg` attr ensures that we only execute this on arm targets
+            // with support for the v6 feature.
+            unsafe { crate::arch::arm::__yield() }
+        }
+        target_arch = "loongarch32" => crate::arch::loongarch32::ibar::<0>(),
+        target_arch = "loongarch64" => crate::arch::loongarch64::ibar::<0>(),
+        _ => { /* do nothing */ }
     }
 }
 
@@ -319,6 +315,10 @@ pub fn spin_loop() {
 /// identity function. As such, it **must not be relied upon to control critical program behavior.**
 /// This also means that this function does not offer any guarantees for cryptographic or security
 /// purposes.
+///
+/// This limitation is not specific to `black_box`; there is no mechanism in the entire Rust
+/// language that can provide the guarantees required for constant-time cryptography.
+/// (There is also no such mechanism in LLVM, so the same is true for every other LLVM-based compiler.)
 ///
 /// </div>
 ///
@@ -645,8 +645,6 @@ pub const fn must_use<T>(value: T) -> T {
 ///     }
 /// }
 /// ```
-///
-///
 #[unstable(feature = "likely_unlikely", issue = "136873")]
 #[inline(always)]
 pub const fn likely(b: bool) -> bool {
@@ -763,8 +761,6 @@ pub const fn cold_path() {
 ///
 /// Distribute values evenly between two buckets:
 /// ```
-/// #![feature(select_unpredictable)]
-///
 /// use std::hash::BuildHasher;
 /// use std::hint;
 ///
@@ -780,18 +776,51 @@ pub const fn cold_path() {
 /// # assert_eq!(bucket_one.len() + bucket_two.len(), 1);
 /// ```
 #[inline(always)]
-#[unstable(feature = "select_unpredictable", issue = "133962")]
+#[stable(feature = "select_unpredictable", since = "1.88.0")]
 pub fn select_unpredictable<T>(condition: bool, true_val: T, false_val: T) -> T {
     // FIXME(https://github.com/rust-lang/unsafe-code-guidelines/issues/245):
     // Change this to use ManuallyDrop instead.
     let mut true_val = MaybeUninit::new(true_val);
     let mut false_val = MaybeUninit::new(false_val);
+
+    struct DropOnPanic<T> {
+        // Invariant: valid pointer and points to an initialized value that is not further used,
+        // i.e. it can be dropped by this guard.
+        inner: *mut T,
+    }
+
+    impl<T> Drop for DropOnPanic<T> {
+        fn drop(&mut self) {
+            // SAFETY: Must be guaranteed on construction of local type `DropOnPanic`.
+            unsafe { self.inner.drop_in_place() }
+        }
+    }
+
+    let true_ptr = true_val.as_mut_ptr();
+    let false_ptr = false_val.as_mut_ptr();
+
     // SAFETY: The value that is not selected is dropped, and the selected one
     // is returned. This is necessary because the intrinsic doesn't drop the
     // value that is  not selected.
     unsafe {
-        crate::intrinsics::select_unpredictable(!condition, &mut true_val, &mut false_val)
-            .assume_init_drop();
+        // Extract the selected value first, ensure it is dropped as well if dropping the unselected
+        // value panics. We construct a temporary by-pointer guard around the selected value while
+        // dropping the unselected value. Arguments overlap here, so we can not use mutable
+        // reference for these arguments.
+        let guard = crate::intrinsics::select_unpredictable(condition, true_ptr, false_ptr);
+        let drop = crate::intrinsics::select_unpredictable(condition, false_ptr, true_ptr);
+
+        // SAFETY: both pointers are well-aligned and point to initialized values inside a
+        // `MaybeUninit` each. In both possible values for `condition` the pointer `guard` and
+        // `drop` do not alias (even though the two argument pairs we have selected from did alias
+        // each other).
+        let guard = DropOnPanic { inner: guard };
+        drop.drop_in_place();
+        crate::mem::forget(guard);
+
+        // Note that it is important to use the values here. Reading from the pointer we got makes
+        // LLVM forget the !unpredictable annotation sometimes (in tests, integer sized values in
+        // particular seemed to confuse it, also observed in llvm/llvm-project #82340).
         crate::intrinsics::select_unpredictable(condition, true_val, false_val).assume_init()
     }
 }

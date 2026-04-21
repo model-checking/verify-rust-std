@@ -1,0 +1,16 @@
+[package]
+name = "testable-simd-models"
+version = "0.0.2"
+authors = ["Cryspen"]
+license = "Apache-2.0"
+homepage = "https://github.com/cryspen/verify-rust-std/testable-simd-models"
+edition = "2021"
+repository = "https://github.com/cryspen/verify-rust-std/testable-simd-models"
+readme = "README.md"
+
+[dependencies]
+rand = "0.9"
+pastey = "0.1.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn" }

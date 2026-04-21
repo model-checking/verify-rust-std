@@ -2,7 +2,7 @@
 
 // Replaces the #[else] gate with #[cfg(not(any(…)))] of all the other gates.
 // This ensures that they must be mutually exclusive and do not have precedence
-// like cfg_if!.
+// like cfg_select!.
 macro cfg_unordered(
     $(#[cfg($cfg:meta)] $os:item)*
     #[else] $fallback:item
@@ -323,6 +323,17 @@ pub mod os {
     pub const EXE_EXTENSION: &str = "efi";
 }
 
+#[cfg(target_os = "vexos")]
+pub mod os {
+    pub const FAMILY: &str = "";
+    pub const OS: &str = "vexos";
+    pub const DLL_PREFIX: &str = "";
+    pub const DLL_SUFFIX: &str = "";
+    pub const DLL_EXTENSION: &str = "";
+    pub const EXE_SUFFIX: &str = ".bin";
+    pub const EXE_EXTENSION: &str = "bin";
+}
+
 #[cfg(target_os = "visionos")]
 pub mod os {
     pub const FAMILY: &str = "unix";
@@ -387,6 +398,17 @@ pub mod os {
     pub const DLL_EXTENSION: &str = "dll";
     pub const EXE_SUFFIX: &str = ".exe";
     pub const EXE_EXTENSION: &str = "exe";
+}
+
+#[cfg(target_os = "zkvm")]
+pub mod os {
+    pub const FAMILY: &str = "";
+    pub const OS: &str = "";
+    pub const DLL_PREFIX: &str = "";
+    pub const DLL_SUFFIX: &str = ".elf";
+    pub const DLL_EXTENSION: &str = "elf";
+    pub const EXE_SUFFIX: &str = ".elf";
+    pub const EXE_EXTENSION: &str = "elf";
 }
 
 // The fallback when none of the other gates match.

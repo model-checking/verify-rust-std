@@ -134,28 +134,25 @@ impl Timespec {
     }
 
     pub fn sub_timespec(&self, other: &Timespec) -> Result<Duration, Duration> {
+        // When a >= b, the difference fits in u64.
+        fn sub_ge_to_unsigned(a: i64, b: i64) -> u64 {
+            debug_assert!(a >= b);
+            a.wrapping_sub(b).cast_unsigned()
+        }
+
         if self >= other {
-            // NOTE(eddyb) two aspects of this `if`-`else` are required for LLVM
-            // to optimize it into a branchless form (see also #75545):
-            //
-            // 1. `self.tv_sec - other.tv_sec` shows up as a common expression
-            //    in both branches, i.e. the `else` must have its `- 1`
-            //    subtraction after the common one, not interleaved with it
-            //    (it used to be `self.tv_sec - 1 - other.tv_sec`)
-            //
-            // 2. the `Duration::new` call (or any other additional complexity)
-            //    is outside of the `if`-`else`, not duplicated in both branches
-            //
-            // Ideally this code could be rearranged such that it more
-            // directly expresses the lower-cost behavior we want from it.
             let (secs, nsec) = if self.tv_nsec.as_inner() >= other.tv_nsec.as_inner() {
                 (
-                    (self.tv_sec - other.tv_sec) as u64,
+                    sub_ge_to_unsigned(self.tv_sec, other.tv_sec),
                     self.tv_nsec.as_inner() - other.tv_nsec.as_inner(),
                 )
             } else {
+                // Following sequence of assertions explain why `self.tv_sec - 1` does not underflow.
+                debug_assert!(self.tv_nsec < other.tv_nsec);
+                debug_assert!(self.tv_sec > other.tv_sec);
+                debug_assert!(self.tv_sec > i64::MIN);
                 (
-                    (self.tv_sec - other.tv_sec - 1) as u64,
+                    sub_ge_to_unsigned(self.tv_sec - 1, other.tv_sec),
                     self.tv_nsec.as_inner() + (NSEC_PER_SEC as u32) - other.tv_nsec.as_inner(),
                 )
             };
@@ -261,6 +258,10 @@ pub struct Instant {
 }
 
 impl Instant {
+    #[cfg(target_vendor = "apple")]
+    pub(crate) const CLOCK_ID: libc::clockid_t = libc::CLOCK_UPTIME_RAW;
+    #[cfg(not(target_vendor = "apple"))]
+    pub(crate) const CLOCK_ID: libc::clockid_t = libc::CLOCK_MONOTONIC;
     pub fn now() -> Instant {
         // https://www.manpagez.com/man/3/clock_gettime/
         //
@@ -273,11 +274,7 @@ impl Instant {
         //
         // Instant on macos was historically implemented using mach_absolute_time;
         // we preserve this value domain out of an abundance of caution.
-        #[cfg(target_vendor = "apple")]
-        const clock_id: libc::clockid_t = libc::CLOCK_UPTIME_RAW;
-        #[cfg(not(target_vendor = "apple"))]
-        const clock_id: libc::clockid_t = libc::CLOCK_MONOTONIC;
-        Instant { t: Timespec::now(clock_id) }
+        Instant { t: Timespec::now(Self::CLOCK_ID) }
     }
 
     pub fn checked_sub_instant(&self, other: &Instant) -> Option<Duration> {
@@ -290,6 +287,14 @@ impl Instant {
 
     pub fn checked_sub_duration(&self, other: &Duration) -> Option<Instant> {
         Some(Instant { t: self.t.checked_sub_duration(other)? })
+    }
+
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(unused, reason = "needed by the `sleep_until` on some unix platforms")
+    )]
+    pub(crate) fn into_timespec(self) -> Timespec {
+        self.t
     }
 }
 

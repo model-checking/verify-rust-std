@@ -490,6 +490,14 @@ fn is_aligned() {
 }
 
 #[test]
+#[should_panic = "is_aligned_to: align is not a power-of-two"]
+fn invalid_is_aligned() {
+    let data = 42;
+    let ptr: *const i32 = &data;
+    assert!(ptr.is_aligned_to(3));
+}
+
+#[test]
 fn offset_from() {
     let mut a = [0; 5];
     let ptr1: *mut i32 = &mut a[1];
@@ -653,7 +661,6 @@ fn thin_box() {
     //   if `{size,align}_of_for_meta<T: ?Sized>(T::Metadata)` are added.
     // * Constructing a `ThinBox` without consuming and deallocating a `Box`
     //   requires either the unstable `Unsize` marker trait,
-    //   or the unstable `unsized_locals` language feature,
     //   or taking `&dyn T` and restricting to `T: Copy`.
 
     use std::alloc::*;
@@ -938,6 +945,7 @@ fn test_const_swap_ptr() {
         assert!(*s2.0.ptr == 1);
 
         // Swap them back, again as an array.
+        // FIXME(#146291): we should be swapping back at type `u8` but that currently does not work.
         unsafe {
             ptr::swap_nonoverlapping(
                 ptr::from_mut(&mut s1).cast::<T>(),

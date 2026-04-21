@@ -13,17 +13,29 @@ macro_rules! pattern_type {
     };
 }
 
+// The Flux spec for the `trait RangePattern` below uses
+// [associated refinements](https://flux-rs.github.io/flux/tutorial/08-traits.html)
+// The `sub_one` method may only be safe for certain values,
+// e.g. when the value is not the "minimum of the type" as in the
+// case of the `char` implementation below. To specify this precondition generically
+// 1. at the trait level, we introduce the predicate `sub_ok`
+//    which characterizes the "valid" values at which `sub_one`
+//    can be safely called, and by default, specify this predicate
+//    is "true";
+// 2. at the impl level, we can provide a type-specific implementation
+//    of `sub_ok` that permits the verification of the impl for that type.
+
 /// A trait implemented for integer types and `char`.
 /// Useful in the future for generic pattern types, but
 /// used right now to simplify ast lowering of pattern type ranges.
+#[cfg_attr(flux, flux::assoc(fn sub_ok(self: Self) -> bool { true }))]
 #[unstable(feature = "pattern_type_range_trait", issue = "123646")]
 #[rustc_const_unstable(feature = "pattern_type_range_trait", issue = "123646")]
-#[const_trait]
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a valid base type for range patterns",
     label = "only integer types and `char` are supported"
 )]
-pub trait RangePattern {
+pub const trait RangePattern {
     /// Trait version of the inherent `MIN` assoc const.
     #[lang = "RangeMin"]
     const MIN: Self;
@@ -33,6 +45,7 @@ pub trait RangePattern {
     const MAX: Self;
 
     /// A compile-time helper to subtract 1 for exclusive ranges.
+    #[cfg_attr(flux, flux::spec(fn (self: Self{<Self as RangePattern>::sub_ok(self)}) -> Self))]
     #[lang = "RangeSub"]
     #[track_caller]
     fn sub_one(self) -> Self;
@@ -61,12 +74,16 @@ impl_range_pat! {
     u8, u16, u32, u64, u128, usize,
 }
 
+// The "associated refinement" `sub_ok` is defined as `non-zero` for `char`, to let Flux
+// verify that the `self as u32 -1` in the impl does not underflow.
+#[cfg_attr(flux, flux::assoc(fn sub_ok(self: char) -> bool { 0 < char_to_int(self)}))]
 #[rustc_const_unstable(feature = "pattern_type_range_trait", issue = "123646")]
 impl const RangePattern for char {
     const MIN: Self = char::MIN;
 
     const MAX: Self = char::MAX;
 
+    #[cfg_attr(flux, flux::spec(fn (self: char{<char as RangePattern>::sub_ok(self)}) -> char))]
     fn sub_one(self) -> Self {
         match char::from_u32(self as u32 - 1) {
             None => panic!("exclusive range to start of valid chars"),

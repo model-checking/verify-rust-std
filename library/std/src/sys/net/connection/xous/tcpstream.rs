@@ -1,11 +1,14 @@
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{Atomic, AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use super::*;
 use crate::fmt;
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut};
-use crate::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
+use crate::net::{
+    IpAddr, Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs,
+};
 use crate::os::xous::services;
 use crate::sync::Arc;
+use crate::sys::net::connection::each_addr;
 use crate::time::Duration;
 
 macro_rules! unimpl {
@@ -29,11 +32,11 @@ pub struct TcpStream {
     remote_port: u16,
     peer_addr: SocketAddr,
     // milliseconds
-    read_timeout: Arc<AtomicU32>,
+    read_timeout: Arc<Atomic<u32>>,
     // milliseconds
-    write_timeout: Arc<AtomicU32>,
-    handle_count: Arc<AtomicUsize>,
-    nonblocking: Arc<AtomicBool>,
+    write_timeout: Arc<Atomic<u32>>,
+    handle_count: Arc<Atomic<usize>>,
+    nonblocking: Arc<Atomic<bool>>,
 }
 
 fn sockaddr_to_buf(duration: Duration, addr: &SocketAddr, buf: &mut [u8]) {
@@ -79,8 +82,8 @@ impl TcpStream {
         }
     }
 
-    pub fn connect(socketaddr: io::Result<&SocketAddr>) -> io::Result<TcpStream> {
-        Self::connect_timeout(socketaddr?, Duration::ZERO)
+    pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
+        each_addr(addr, |addr| Self::connect_timeout(addr, Duration::ZERO))
     }
 
     pub fn connect_timeout(addr: &SocketAddr, duration: Duration) -> io::Result<TcpStream> {

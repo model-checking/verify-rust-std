@@ -3,6 +3,7 @@ use libc::{c_int, pid_t};
 use super::common::*;
 use crate::io;
 use crate::num::NonZero;
+use crate::process::StdioPipes;
 use crate::sys::pal::unsupported::*;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -18,13 +19,13 @@ impl Command {
         unsupported()
     }
 
-    pub fn output(&mut self) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-        unsupported()
-    }
-
     pub fn exec(&mut self, _default: Stdio) -> io::Error {
         unsupported_err()
     }
+}
+
+pub fn output(_: &mut Command) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
+    unsupported()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -40,7 +41,11 @@ impl Process {
         0
     }
 
-    pub fn kill(&mut self) -> io::Result<()> {
+    pub fn kill(&self) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn send_signal(&self, _signal: i32) -> io::Result<()> {
         unsupported()
     }
 

@@ -1,10 +1,11 @@
 use core::convert::TryInto;
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
+use core::sync::atomic::{Atomic, AtomicBool, AtomicU16, AtomicUsize, Ordering};
 
 use super::*;
-use crate::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use crate::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use crate::os::xous::services;
 use crate::sync::Arc;
+use crate::sys::net::connection::each_addr;
 use crate::{fmt, io};
 
 macro_rules! unimpl {
@@ -18,23 +19,26 @@ macro_rules! unimpl {
 
 #[derive(Clone)]
 pub struct TcpListener {
-    fd: Arc<AtomicU16>,
+    fd: Arc<Atomic<u16>>,
     local: SocketAddr,
-    handle_count: Arc<AtomicUsize>,
-    nonblocking: Arc<AtomicBool>,
+    handle_count: Arc<Atomic<usize>>,
+    nonblocking: Arc<Atomic<bool>>,
 }
 
 impl TcpListener {
-    pub fn bind(socketaddr: io::Result<&SocketAddr>) -> io::Result<TcpListener> {
-        let mut addr = *socketaddr?;
+    pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
+        return each_addr(addr, inner);
 
-        let fd = TcpListener::bind_inner(&mut addr)?;
-        return Ok(TcpListener {
-            fd: Arc::new(AtomicU16::new(fd)),
-            local: addr,
-            handle_count: Arc::new(AtomicUsize::new(1)),
-            nonblocking: Arc::new(AtomicBool::new(false)),
-        });
+        fn inner(addr: &SocketAddr) -> io::Result<TcpListener> {
+            let mut addr = *addr;
+            let fd = TcpListener::bind_inner(&mut addr)?;
+            Ok(TcpListener {
+                fd: Arc::new(AtomicU16::new(fd)),
+                local: addr,
+                handle_count: Arc::new(AtomicUsize::new(1)),
+                nonblocking: Arc::new(AtomicBool::new(false)),
+            })
+        }
     }
 
     /// This returns the raw fd of a Listener, so that it can also be used by the

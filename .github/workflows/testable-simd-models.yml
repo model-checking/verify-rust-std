@@ -1,0 +1,31 @@
+# This workflow runs the tests for testable simd models.
+
+name: Testable simd models
+
+on:
+  workflow_dispatch:
+  merge_group:
+  pull_request:
+    branches: [ main ]
+  push:
+    paths:
+      - '.github/workflows/testable-simd-models.yml'
+      - 'testable-simd-models/**'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  testable-simd-models:
+    name: Test testable simd models
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Run tests
+        working-directory: testable-simd-models
+        run: cargo test -- --test-threads=1 --nocapture
+        

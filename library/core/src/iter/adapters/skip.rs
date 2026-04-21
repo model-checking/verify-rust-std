@@ -1,3 +1,5 @@
+use safety::requires;
+
 use crate::intrinsics::unlikely;
 use crate::iter::adapters::SourceIter;
 use crate::iter::adapters::zip::try_get_unchecked;
@@ -5,6 +7,8 @@ use crate::iter::{
     FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, TrustedRandomAccess,
     TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, Try};
 
@@ -158,6 +162,8 @@ where
     }
 
     #[doc(hidden)]
+    #[requires(idx + self.n < self.iter.size_hint().0)]
+    #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
     where
         Self: TrustedRandomAccessNoCoerce,

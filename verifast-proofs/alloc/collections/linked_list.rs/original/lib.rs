@@ -1,4 +1,4 @@
-// verifast_options{skip_specless_fns}
+// verifast_options{skip_specless_fns ignore_unwind_paths}
 
 #![no_std]
 #![allow(internal_features)]
@@ -12,6 +12,7 @@
 #![feature(exact_size_is_empty)]
 #![feature(hasher_prefixfree_extras)]
 #![feature(box_into_inner)]
+#![feature(try_trait_v2)]
 
 #![stable(feature = "rust1", since = "1.0.0")]
 

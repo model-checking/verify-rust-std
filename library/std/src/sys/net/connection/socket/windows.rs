@@ -8,8 +8,8 @@ use crate::net::{Shutdown, SocketAddr};
 use crate::os::windows::io::{
     AsRawSocket, AsSocket, BorrowedSocket, FromRawSocket, IntoRawSocket, OwnedSocket, RawSocket,
 };
-use crate::sync::OnceLock;
 use crate::sys::c;
+use crate::sys::pal::winsock::last_error;
 use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::time::Duration;
 use crate::{cmp, mem, ptr, sys};
@@ -111,85 +111,13 @@ pub(super) mod netc {
     }
 }
 
+pub use crate::sys::pal::winsock::{cvt, cvt_gai, cvt_r, startup as init};
+
 #[expect(missing_debug_implementations)]
 pub struct Socket(OwnedSocket);
 
-static WSA_CLEANUP: OnceLock<unsafe extern "system" fn() -> i32> = OnceLock::new();
-
-/// Checks whether the Windows socket interface has been started already, and
-/// if not, starts it.
-pub fn init() {
-    let _ = WSA_CLEANUP.get_or_init(|| unsafe {
-        let mut data: c::WSADATA = mem::zeroed();
-        let ret = c::WSAStartup(
-            0x202, // version 2.2
-            &mut data,
-        );
-        assert_eq!(ret, 0);
-
-        // Only register `WSACleanup` if `WSAStartup` is actually ever called.
-        // Workaround to prevent linking to `WS2_32.dll` when no network functionality is used.
-        // See issue #85441.
-        c::WSACleanup
-    });
-}
-
-pub fn cleanup() {
-    // only perform cleanup if network functionality was actually initialized
-    if let Some(cleanup) = WSA_CLEANUP.get() {
-        unsafe {
-            cleanup();
-        }
-    }
-}
-
-/// Returns the last error from the Windows socket interface.
-fn last_error() -> io::Error {
-    io::Error::from_raw_os_error(unsafe { c::WSAGetLastError() })
-}
-
-#[doc(hidden)]
-pub trait IsMinusOne {
-    fn is_minus_one(&self) -> bool;
-}
-
-macro_rules! impl_is_minus_one {
-    ($($t:ident)*) => ($(impl IsMinusOne for $t {
-        fn is_minus_one(&self) -> bool {
-            *self == -1
-        }
-    })*)
-}
-
-impl_is_minus_one! { i8 i16 i32 i64 isize }
-
-/// Checks if the signed integer is the Windows constant `SOCKET_ERROR` (-1)
-/// and if so, returns the last error from the Windows socket interface. This
-/// function must be called before another call to the socket API is made.
-pub fn cvt<T: IsMinusOne>(t: T) -> io::Result<T> {
-    if t.is_minus_one() { Err(last_error()) } else { Ok(t) }
-}
-
-/// A variant of `cvt` for `getaddrinfo` which return 0 for a success.
-pub fn cvt_gai(err: c_int) -> io::Result<()> {
-    if err == 0 { Ok(()) } else { Err(last_error()) }
-}
-
-/// Just to provide the same interface as sys/pal/unix/net.rs
-pub fn cvt_r<T, F>(mut f: F) -> io::Result<T>
-where
-    T: IsMinusOne,
-    F: FnMut() -> T,
-{
-    cvt(f())
-}
-
 impl Socket {
-    pub fn new(addr: &SocketAddr, ty: c_int) -> io::Result<Socket> {
-        let family = match *addr {
-            SocketAddr::V4(..) => netc::AF_INET,
-            SocketAddr::V6(..) => netc::AF_INET6,
-        };
+    pub fn new(family: c_int, ty: c_int) -> io::Result<Socket> {
         let socket = unsafe {
             c::WSASocketW(
                 family,
@@ -452,11 +380,11 @@ impl Socket {
             }
             None => 0,
         };
-        setsockopt(self, c::SOL_SOCKET, kind, timeout)
+        unsafe { setsockopt(self, c::SOL_SOCKET, kind, timeout) }
     }
 
     pub fn timeout(&self, kind: c_int) -> io::Result<Option<Duration>> {
-        let raw: u32 = getsockopt(self, c::SOL_SOCKET, kind)?;
+        let raw: u32 = unsafe { getsockopt(self, c::SOL_SOCKET, kind)? };
         if raw == 0 {
             Ok(None)
         } else {
@@ -489,26 +417,26 @@ impl Socket {
             l_linger: linger.unwrap_or_default().as_secs() as c_ushort,
         };
 
-        setsockopt(self, c::SOL_SOCKET, c::SO_LINGER, linger)
+        unsafe { setsockopt(self, c::SOL_SOCKET, c::SO_LINGER, linger) }
     }
 
     pub fn linger(&self) -> io::Result<Option<Duration>> {
-        let val: c::LINGER = getsockopt(self, c::SOL_SOCKET, c::SO_LINGER)?;
+        let val: c::LINGER = unsafe { getsockopt(self, c::SOL_SOCKET, c::SO_LINGER)? };
 
         Ok((val.l_onoff != 0).then(|| Duration::from_secs(val.l_linger as u64)))
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
-        setsockopt(self, c::IPPROTO_TCP, c::TCP_NODELAY, nodelay as c::BOOL)
+        unsafe { setsockopt(self, c::IPPROTO_TCP, c::TCP_NODELAY, nodelay as c::BOOL) }
     }
 
     pub fn nodelay(&self) -> io::Result<bool> {
-        let raw: c::BOOL = getsockopt(self, c::IPPROTO_TCP, c::TCP_NODELAY)?;
+        let raw: c::BOOL = unsafe { getsockopt(self, c::IPPROTO_TCP, c::TCP_NODELAY)? };
         Ok(raw != 0)
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
-        let raw: c_int = getsockopt(self, c::SOL_SOCKET, c::SO_ERROR)?;
+        let raw: c_int = unsafe { getsockopt(self, c::SOL_SOCKET, c::SO_ERROR)? };
         if raw == 0 { Ok(None) } else { Ok(Some(io::Error::from_raw_os_error(raw as i32))) }
     }
 

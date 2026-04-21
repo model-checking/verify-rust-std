@@ -1,7 +1,8 @@
+#![feature(thread_sleep_until)]
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[test]
 #[cfg_attr(any(target_os = "emscripten", target_os = "wasi"), ignore)] // no threads
@@ -15,6 +16,18 @@ fn sleep_very_long() {
     });
     thread::sleep(Duration::from_millis(100));
     assert_eq!(*finished.lock().unwrap(), false);
+}
+
+#[test]
+#[cfg_attr(target_env = "sgx", ignore = "Time within SGX enclave cannot be trusted")]
+fn sleep_until() {
+    let now = Instant::now();
+    let period = Duration::from_millis(100);
+    let deadline = now + period;
+    thread::sleep_until(deadline);
+
+    let elapsed = now.elapsed();
+    assert!(elapsed >= period);
 }
 
 #[test]
@@ -53,6 +66,8 @@ fn thread_local_hygeiene() {
     type Storage = ();
     type LazyStorage = ();
     type EagerStorage = ();
+    #[allow(non_camel_case_types)]
+    type usize = ();
     thread_local! {
         static A: LocalKey = const { () };
         static B: Storage = const { () };

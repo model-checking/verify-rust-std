@@ -112,12 +112,15 @@ else
     fi
 fi
 
+# TODO: this logic is broken because the stage 0 bootstrap sequence was redesigned, c.f. https://blog.rust-lang.org/inside-rust/2025/05/29/redesigning-the-initial-bootstrap-sequence/
+# However, changing the command to --stage 1 as suggested does not work; the compiler complains that there is an old version of the `safety` crate
+# compiled by the beta compiler. For now, comment it out and see if continued work on this feature (e.g. https://github.com/rust-lang/rust/pull/142002) fixes it.
 # Run tests
-cd "$TMP_RUST_DIR"
-echo "Running tests..."
-./x test --stage 0 library/std
+# cd "$TMP_RUST_DIR"
+# echo "Running tests..."
+# ./x test --stage 0 library/std
 
-echo "Tests completed."
+# echo "Tests completed."
 
 # Clean up the temporary directory
 rm -rf "$TMP_RUST_DIR"

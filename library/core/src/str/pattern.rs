@@ -1001,7 +1001,10 @@ impl<'b> Pattern for &'b str {
                     return haystack.as_bytes().contains(&self.as_bytes()[0]);
                 }
 
-                #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+                #[cfg(any(
+                    all(target_arch = "x86_64", target_feature = "sse2"),
+                    all(target_arch = "loongarch64", target_feature = "lsx")
+                ))]
                 if self.len() <= 32 {
                     if let Some(result) = simd_contains(self, haystack) {
                         return result;
@@ -1775,11 +1778,18 @@ impl TwoWayStrategy for RejectAndMatch {
 /// If we ever ship std with for x86-64-v3 or adapt this for other platforms then wider vectors
 /// should be evaluated.
 ///
+/// Similarly, on LoongArch the 128-bit LSX vector extension is the baseline,
+/// so we also use `u8x16` there. Wider vector widths may be considered
+/// for future LoongArch extensions (e.g., LASX).
+///
 /// For haystacks smaller than vector-size + needle length it falls back to
 /// a naive O(n*m) search so this implementation should not be called on larger needles.
 ///
 /// [0]: http://0x80.pl/articles/simd-strfind.html#sse-avx2
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+#[cfg(any(
+    all(target_arch = "x86_64", target_feature = "sse2"),
+    all(target_arch = "loongarch64", target_feature = "lsx")
+))]
 #[inline]
 fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
     let needle = needle.as_bytes();
@@ -1911,7 +1921,10 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
 /// # Safety
 ///
 /// Both slices must have the same length.
-#[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))] // only called on x86
+#[cfg(any(
+    all(target_arch = "x86_64", any(kani, target_feature = "sse2")),
+    all(target_arch = "loongarch64", target_feature = "lsx")
+))]
 #[inline]
 #[requires(x.len() == y.len())]
 unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
@@ -1958,11 +1971,11 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
     unsafe {
         let (mut px, mut py) = (x.as_ptr(), y.as_ptr());
         let (pxend, pyend) = (px.add(x.len() - 4), py.add(y.len() - 4));
-        #[loop_invariant(crate::ub_checks::same_allocation(x.as_ptr(), px)
-        && crate::ub_checks::same_allocation(y.as_ptr(), py)
-        && px.addr() >= x.as_ptr().addr()
-        && py.addr() >= y.as_ptr().addr()
-        && px.addr() - x.as_ptr().addr() == py.addr() - y.as_ptr().addr())]
+        #[loop_invariant(crate::ub_checks::same_allocation(on_entry(px), px)
+        && crate::ub_checks::same_allocation(on_entry(py), py)
+        && px.addr() >= on_entry(px).addr()
+        && py.addr() >= on_entry(py).addr()
+        && px.addr() - on_entry(px).addr() == py.addr() - on_entry(py).addr())]
         while px < pxend {
             let vx = (px as *const u32).read_unaligned();
             let vy = (py as *const u32).read_unaligned();

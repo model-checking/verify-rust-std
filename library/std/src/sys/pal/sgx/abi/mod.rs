@@ -1,7 +1,7 @@
 #![cfg_attr(test, allow(unused))] // RT initialization logic is not compiled for test
 
 use core::arch::global_asm;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{Atomic, AtomicUsize, Ordering};
 
 use crate::io::Write;
 
@@ -31,7 +31,7 @@ unsafe extern "C" fn tcs_init(secondary: bool) {
     const BUSY: usize = 1;
     const DONE: usize = 2;
     // Three-state spin-lock
-    static RELOC_STATE: AtomicUsize = AtomicUsize::new(UNINIT);
+    static RELOC_STATE: Atomic<usize> = AtomicUsize::new(UNINIT);
 
     if secondary && RELOC_STATE.load(Ordering::Relaxed) != DONE {
         rtabort!("Entered secondary TCS before main TCS!")
@@ -67,7 +67,7 @@ extern "C" fn entry(p1: u64, p2: u64, p3: u64, secondary: bool, p4: u64, p5: u64
     let tls_guard = unsafe { tls.activate() };
 
     if secondary {
-        let join_notifier = super::thread::Thread::entry();
+        let join_notifier = crate::sys::thread::Thread::entry();
         drop(tls_guard);
         drop(join_notifier);
 

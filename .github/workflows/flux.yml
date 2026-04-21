@@ -1,0 +1,72 @@
+name: Flux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  FLUX_VERSION: "6b080b32801f923bfb590ac48e729de38f829f21"
+  FIXPOINT_VERSION: "nightly-10-15-2025"
+
+jobs:
+  check-flux-on-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Local Binaries
+        run: |
+          mkdir -p ~/.local/bin
+          echo ~/.cargo/bin >> $GITHUB_PATH
+          echo ~/.local/bin >> $GITHUB_PATH
+
+      - name: Download and install fixpoint
+        run: |
+          set -e
+          NAME="fixpoint-x86_64-linux-gnu.tar.gz"
+          URL="https://github.com/ucsd-progsys/liquid-fixpoint/releases/download/${FIXPOINT_VERSION}/${NAME}"
+
+          echo "Downloading from $URL"
+          curl -fsSL --retry 3 -o "$NAME" "$URL"
+
+          echo "Extracting archive"
+          tar -xzf "$NAME"
+          mkdir -p ~/.local/bin
+          cp fixpoint ~/.local/bin/fixpoint
+
+          echo "Cleaning up"
+          rm -f "$NAME"
+
+      - name: Install Z3
+        uses: cda-tum/setup-z3@v1.6.1
+        with:
+          version: 4.12.1
+          platform: linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clone Flux
+        run: |
+          git clone https://github.com/flux-rs/flux.git
+          cd flux
+          git checkout $FLUX_VERSION
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.7.8
+        with:
+          workspaces: flux
+
+      - name: Install Flux
+        run: |
+          cd flux
+          cargo x install
+
+      - name: Verify Core
+        run: |
+          cd library
+          FLUXFLAGS="-Ftimings" cargo flux -p core

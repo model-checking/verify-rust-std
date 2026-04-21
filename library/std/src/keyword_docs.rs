@@ -1,6 +1,8 @@
 #[doc(keyword = "as")]
 //
-/// Cast between types, or rename an import.
+/// Cast between types, rename an import, or qualify paths to associated items.
+///
+/// # Type casting
 ///
 /// `as` is most commonly used to turn primitive types into other primitive types, but it has other
 /// uses that include turning pointers into addresses, addresses into pointers, and pointers into
@@ -30,6 +32,8 @@
 /// `as *mut _` though the [`cast`][const-cast] method is recommended over `as *const _` and it is
 /// [the same][mut-cast] for `as *mut _`: those methods make the intent clearer.
 ///
+/// # Renaming imports
+///
 /// `as` is also used to rename imports in [`use`] and [`extern crate`][`crate`] statements:
 ///
 /// ```
@@ -37,9 +41,34 @@
 /// use std::{mem as memory, net as network};
 /// // Now you can use the names `memory` and `network` to refer to `std::mem` and `std::net`.
 /// ```
-/// For more information on what `as` is capable of, see the [Reference].
 ///
-/// [Reference]: ../reference/expressions/operator-expr.html#type-cast-expressions
+/// # Qualifying paths
+///
+/// You'll also find with `From` and `Into`, and indeed all traits, that `as` is used for the
+/// _fully qualified path_, a means of disambiguating associated items, i.e. functions,
+/// constants, and types.  For example, if you have a type which implements two traits with identical
+/// method names (e.g. `Into::<u32>::into` and `Into::<u64>::into`), you can clarify which method
+/// you'll use with `<MyThing as Into<u32>>::into(my_thing)`[^as-use-from].  This is quite verbose,
+/// but fortunately, Rust's type inference usually saves you from needing this, although it is
+/// occasionally necessary, especially with methods that return a generic type like `Into::into` or
+/// methods that don't take `self`.  It's more common to use in macros where it can provide necessary
+/// hygiene.
+///
+/// [^as-use-from]: You should probably never use this syntax with `Into` and instead write
+/// `T::from(my_thing)`.  It just happens that there aren't any great examples for this syntax in
+/// the standard library.  Also, at time of writing, the compiler tends to suggest fully-qualified
+/// paths to fix ambiguous `Into::into` calls, so the example should hopefully be familiar.
+///
+/// # Further reading
+///
+/// For more information on what `as` is capable of, see the Reference on [type cast expressions],
+/// [renaming imported entities], [renaming `extern` crates]
+/// and [qualified paths].
+///
+/// [type cast expressions]: ../reference/expressions/operator-expr.html#type-cast-expressions
+/// [renaming imported entities]: https://doc.rust-lang.org/reference/items/use-declarations.html#as-renames
+/// [renaming `extern` crates]: https://doc.rust-lang.org/reference/items/extern-crates.html#r-items.extern-crate.as
+/// [qualified paths]: ../reference/paths.html#qualified-paths
 /// [`crate`]: keyword.crate.html
 /// [`use`]: keyword.use.html
 /// [const-cast]: pointer::cast
@@ -91,7 +120,7 @@ mod as_keyword {}
 ///
 /// When associated with `loop`, a break expression may be used to return a value from that loop.
 /// This is only valid with `loop` and not with any other type of loop.
-/// If no value is specified, `break;` returns `()`.
+/// If no value is specified for `break;` it returns `()`.
 /// Every `break` within a loop must return the same type.
 ///
 /// ```rust
@@ -109,6 +138,33 @@ mod as_keyword {}
 /// println!("{result}");
 /// ```
 ///
+/// It is also possible to exit from any *labelled* block returning the value early.
+/// If no value is specified for `break;` it returns `()`.
+///
+/// ```rust
+/// let inputs = vec!["Cow", "Cat", "Dog", "Snake", "Cod"];
+///
+/// let mut results = vec![];
+/// for input in inputs {
+///     let result = 'filter: {
+///         if input.len() > 3 {
+///             break 'filter Err("Too long");
+///         };
+///
+///         if !input.contains("C") {
+///             break 'filter Err("No Cs");
+///         };
+///
+///         Ok(input.to_uppercase())
+///     };
+///
+///     results.push(result);
+/// }
+///
+/// // [Ok("COW"), Ok("CAT"), Err("No Cs"), Err("Too long"), Ok("COD")]
+/// println!("{:?}", results)
+/// ```
+///
 /// For more details consult the [Reference on "break expression"] and the [Reference on "break and
 /// loop values"].
 ///
@@ -119,7 +175,7 @@ mod break_keyword {}
 
 #[doc(keyword = "const")]
 //
-/// Compile-time constants, compile-time evaluable functions, and raw pointers.
+/// Compile-time constants, compile-time blocks, compile-time evaluable functions, and raw pointers.
 ///
 /// ## Compile-time constants
 ///
@@ -166,6 +222,12 @@ mod break_keyword {}
 ///
 /// For more detail on `const`, see the [Rust Book] or the [Reference].
 ///
+/// ## Compile-time blocks
+///
+/// The `const` keyword can also be used to define a block of code that is evaluated at compile time.
+/// This is useful for ensuring certain computations are completed before optimizations happen, as well as
+/// before runtime. For more details, see the [Reference][const-blocks].
+///
 /// ## Compile-time evaluable functions
 ///
 /// The other main use of the `const` keyword is in `const fn`. This marks a function as being
@@ -184,6 +246,7 @@ mod break_keyword {}
 /// [pointer primitive]: pointer
 /// [Rust Book]: ../book/ch03-01-variables-and-mutability.html#constants
 /// [Reference]: ../reference/items/constant-items.html
+/// [const-blocks]: ../reference/expressions/block-expr.html#const-blocks
 /// [const-eval]: ../reference/const_eval.html
 mod const_keyword {}
 
@@ -381,11 +444,15 @@ mod enum_keyword {}
 /// lazy_static;`. The other use is in foreign function interfaces (FFI).
 ///
 /// `extern` is used in two different contexts within FFI. The first is in the form of external
-/// blocks, for declaring function interfaces that Rust code can call foreign code by.
+/// blocks, for declaring function interfaces that Rust code can call foreign code by. This use
+/// of `extern` is unsafe, since we are asserting to the compiler that all function declarations
+/// are correct. If they are not, using these items may lead to undefined behavior.
 ///
 /// ```rust ignore
+/// // SAFETY: The function declarations given below are in
+/// // line with the header files of `my_c_library`.
 /// #[link(name = "my_c_library")]
-/// extern "C" {
+/// unsafe extern "C" {
 ///     fn my_c_function(x: i32) -> bool;
 /// }
 /// ```
@@ -1195,7 +1262,131 @@ mod ref_keyword {}
 ///     Ok(())
 /// }
 /// ```
+///
+/// Within [closures] and [`async`] blocks, `return` returns a value from within the closure or
+/// `async` block, not from the parent function:
+///
+/// ```rust
+/// fn foo() -> i32 {
+///     let closure = || {
+///         return 5;
+///     };
+///
+///     let future = async {
+///         return 10;
+///     };
+///
+///     return 15;
+/// }
+///
+/// assert_eq!(foo(), 15);
+/// ```
+///
+/// [closures]: ../book/ch13-01-closures.html
+/// [`async`]: ../std/keyword.async.html
 mod return_keyword {}
+
+#[doc(keyword = "become")]
+//
+/// Perform a tail-call of a function.
+///
+/// <div class="warning">
+///
+/// `feature(explicit_tail_calls)` is currently incomplete and may not work properly.
+/// </div>
+///
+/// When tail calling a function, instead of its stack frame being added to the
+/// stack, the stack frame of the caller is directly replaced with the callee's.
+/// This means that as long as a loop in a call graph only uses tail calls, the
+/// stack growth will be bounded.
+///
+/// This is useful for writing functional-style code (since it prevents recursion
+/// from exhausting resources) or for code optimization (since a tail call
+/// *might* be cheaper than a normal call, tail calls can be used in a similar
+/// manner to computed goto).
+///
+/// Example of using `become` to implement functional-style `fold`:
+/// ```
+/// #![feature(explicit_tail_calls)]
+/// #![expect(incomplete_features)]
+///
+/// fn fold<T: Copy, S>(slice: &[T], init: S, f: impl Fn(S, T) -> S) -> S {
+///     match slice {
+///         // without `become`, on big inputs this could easily overflow the
+///         // stack. using a tail call guarantees that the stack will not grow unboundedly
+///         [first, rest @ ..] => become fold(rest, f(init, *first), f),
+///         [] => init,
+///     }
+/// }
+/// ```
+///
+/// Compilers can already perform "tail call optimization" -- they can replace normal
+/// calls with tail calls, although there are no guarantees that this will be done.
+/// However, to perform TCO, the call needs to be the last thing that happens
+/// in the functions and be returned from it. This requirement is often broken
+/// by drop code for locals, which is run after computing the return expression:
+///
+/// ```
+/// fn example() {
+///     let string = "meow".to_owned();
+///     println!("{string}");
+///     return help(); // this is *not* the last thing that happens in `example`...
+/// }
+///
+/// // ... because it is desugared to this:
+/// fn example_desugared() {
+///     let string = "meow".to_owned();
+///     println!("{string}");
+///     let tmp = help();
+///     drop(string);
+///     return tmp;
+/// }
+///
+/// fn help() {}
+/// ```
+///
+/// For this reason, `become` also changes the drop order, such that locals are
+/// dropped *before* evaluating the call.
+///
+/// In order to guarantee that the compiler can perform a tail call, `become`
+/// currently has these requirements:
+/// 1. callee and caller must have the same ABI, arguments, and return type
+/// 2. callee and caller must not have varargs
+/// 3. caller must not be marked with `#[track_caller]`
+///    - callee is allowed to be marked with `#[track_caller]` as otherwise
+///      adding `#[track_caller]` would be a breaking change. if callee is
+///      marked with `#[track_caller]` a tail call is not guaranteed.
+/// 4. callee and caller cannot be a closure
+///    (unless it's coerced to a function pointer)
+///
+/// It is possible to tail-call a function pointer:
+/// ```
+/// #![feature(explicit_tail_calls)]
+/// #![expect(incomplete_features)]
+///
+/// #[derive(Copy, Clone)]
+/// enum Inst { Inc, Dec }
+///
+/// fn dispatch(stream: &[Inst], state: u32) -> u32 {
+///     const TABLE: &[fn(&[Inst], u32) -> u32] = &[increment, decrement];
+///     match stream {
+///         [inst, rest @ ..] => become TABLE[*inst as usize](rest, state),
+///         [] => state,
+///     }
+/// }
+///
+/// fn increment(stream: &[Inst], state: u32) -> u32 {
+///     become dispatch(stream, state + 1)
+/// }
+///
+/// fn decrement(stream: &[Inst], state: u32) -> u32 {
+///     become dispatch(stream, state - 1)
+/// }
+///
+/// let program = &[Inst::Inc, Inst::Inc, Inst::Dec, Inst::Inc];
+/// assert_eq!(dispatch(program, 0), 2);
+/// ```
+mod become_keyword {}
 
 #[doc(keyword = "self")]
 //
@@ -1856,10 +2047,6 @@ mod type_keyword {}
 /// - and to declare that a programmer has checked that these contracts have been upheld (`unsafe
 /// {}` and `unsafe impl`, but also `unsafe fn` -- see below).
 ///
-/// They are not mutually exclusive, as can be seen in `unsafe fn`: the body of an `unsafe fn` is,
-/// by default, treated like an unsafe block. The `unsafe_op_in_unsafe_fn` lint can be enabled to
-/// change that.
-///
 /// # Unsafe abilities
 ///
 /// **No matter what, Safe Rust can't cause Undefined Behavior**. This is
@@ -1900,13 +2087,6 @@ mod type_keyword {}
 /// block has been checked by the programmer and is guaranteed to be respected.
 /// - `unsafe impl`: the contract necessary to implement the trait has been
 /// checked by the programmer and is guaranteed to be respected.
-///
-/// By default, `unsafe fn` also acts like an `unsafe {}` block
-/// around the code inside the function. This means it is not just a signal to
-/// the caller, but also promises that the preconditions for the operations
-/// inside the function are upheld. Mixing these two meanings can be confusing, so the
-/// `unsafe_op_in_unsafe_fn` lint can be enabled to warn against that and require explicit unsafe
-/// blocks even inside `unsafe fn`.
 ///
 /// See the [Rustonomicon] and the [Reference] for more information.
 ///
@@ -2049,6 +2229,7 @@ mod type_keyword {}
 /// impl Indexable for i32 {
 ///     const LEN: usize = 1;
 ///
+///     /// See `Indexable` for the safety contract.
 ///     unsafe fn idx_unchecked(&self, idx: usize) -> i32 {
 ///         debug_assert_eq!(idx, 0);
 ///         *self
@@ -2060,6 +2241,7 @@ mod type_keyword {}
 /// impl Indexable for [i32; 42] {
 ///     const LEN: usize = 42;
 ///
+///     /// See `Indexable` for the safety contract.
 ///     unsafe fn idx_unchecked(&self, idx: usize) -> i32 {
 ///         // SAFETY: As per this trait's documentation, the caller ensures
 ///         // that `idx < 42`.
@@ -2072,6 +2254,7 @@ mod type_keyword {}
 /// impl Indexable for ! {
 ///     const LEN: usize = 0;
 ///
+///     /// See `Indexable` for the safety contract.
 ///     unsafe fn idx_unchecked(&self, idx: usize) -> i32 {
 ///         // SAFETY: As per this trait's documentation, the caller ensures
 ///         // that `idx < 0`, which is impossible, so this is dead code.
@@ -2093,11 +2276,14 @@ mod type_keyword {}
 /// contract of `idx_unchecked`. Implementing `Indexable` is safe because when writing
 /// `idx_unchecked`, we don't have to worry: our *callers* need to discharge a proof obligation
 /// (like `use_indexable` does), but the *implementation* of `get_unchecked` has no proof obligation
-/// to contend with. Of course, the implementation of `Indexable` may choose to call other unsafe
-/// operations, and then it needs an `unsafe` *block* to indicate it discharged the proof
-/// obligations of its callees. (We enabled `unsafe_op_in_unsafe_fn`, so the body of `idx_unchecked`
-/// is not implicitly an unsafe block.) For that purpose it can make use of the contract that all
-/// its callers must uphold -- the fact that `idx < LEN`.
+/// to contend with. Of course, the implementation may choose to call other unsafe operations, and
+/// then it needs an `unsafe` *block* to indicate it discharged the proof obligations of its
+/// callees. For that purpose it can make use of the contract that all its callers must uphold --
+/// the fact that `idx < LEN`.
+///
+/// Note that unlike normal `unsafe fn`, an `unsafe fn` in a trait implementation does not get to
+/// just pick an arbitrary safety contract! It *has* to use the safety contract defined by the trait
+/// (or one with weaker preconditions).
 ///
 /// Formally speaking, an `unsafe fn` in a trait is a function with *preconditions* that go beyond
 /// those encoded by the argument types (such as `idx < LEN`), whereas an `unsafe trait` can declare
@@ -2388,6 +2574,39 @@ mod while_keyword {}
 ///
 /// We have written an [async book] detailing `async`/`await` and trade-offs compared to using threads.
 ///
+/// ## Control Flow
+/// [`return`] statements and [`?`][try operator] operators within `async` blocks do not cause
+/// a return from the parent function; rather, they cause the `Future` returned by the block to
+/// return with that value.
+///
+/// For example, the following Rust function will return `5`, causing `x` to take the [`!` type][never type]:
+/// ```rust
+/// #[expect(unused_variables)]
+/// fn example() -> i32 {
+///     let x = {
+///         return 5;
+///     };
+/// }
+/// ```
+/// In contrast, the following asynchronous function assigns a `Future<Output = i32>` to `x`, and
+/// only returns `5` when `x` is `.await`ed:
+/// ```rust
+/// async fn example() -> i32 {
+///     let x = async {
+///         return 5;
+///     };
+///
+///     x.await
+/// }
+/// ```
+/// Code using `?` behaves similarly - it causes the `async` block to return a [`Result`] without
+/// affecting the parent function.
+///
+/// Note that you cannot use `break` or `continue` from within an `async` block to affect the
+/// control flow of a loop in the parent function.
+///
+/// Control flow in `async` blocks is documented further in the [async book][async book blocks].
+///
 /// ## Editions
 ///
 /// `async` is a keyword from the 2018 edition onwards.
@@ -2397,6 +2616,11 @@ mod while_keyword {}
 /// [`Future`]: future::Future
 /// [`.await`]: ../std/keyword.await.html
 /// [async book]: https://rust-lang.github.io/async-book/
+/// [`return`]: ../std/keyword.return.html
+/// [try operator]: ../reference/expressions/operator-expr.html#r-expr.try
+/// [never type]: ../reference/types/never.html
+/// [`Result`]: result::Result
+/// [async book blocks]: https://rust-lang.github.io/async-book/part-guide/more-async-await.html#async-blocks
 mod async_keyword {}
 
 #[doc(keyword = "await")]

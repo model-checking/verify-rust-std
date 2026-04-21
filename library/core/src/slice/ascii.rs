@@ -54,7 +54,7 @@ impl [u8] {
     /// Same as `to_ascii_lowercase(a) == to_ascii_lowercase(b)`,
     /// but without allocating and copying temporaries.
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
-    #[rustc_const_unstable(feature = "const_eq_ignore_ascii_case", issue = "131719")]
+    #[rustc_const_stable(feature = "const_eq_ignore_ascii_case", since = "1.89.0")]
     #[must_use]
     #[inline]
     pub const fn eq_ignore_ascii_case(&self, other: &[u8]) -> bool {
@@ -130,7 +130,6 @@ impl [u8] {
     /// # Examples
     ///
     /// ```
-    ///
     /// let s = b"0\t\r\n'\"\\\x9d";
     /// let escaped = s.escape_ascii().to_string();
     /// assert_eq!(escaped, "0\\t\\r\\n\\'\\\"\\\\\\x9d");
@@ -311,7 +310,7 @@ impl<'a> fmt::Display for EscapeAscii<'a> {
 
             if let Some(&b) = bytes.first() {
                 // guaranteed to be non-empty, better to write it as a str
-                f.write_str(ascii::escape_default(b).as_str())?;
+                fmt::Display::fmt(&ascii::escape_default(b), f)?;
                 bytes = &bytes[1..];
             }
         }
@@ -478,6 +477,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
 
     let mut i = 0;
 
+    #[safety::loop_invariant(i <= bytes.len())]
     while i + CHUNK_SIZE <= bytes.len() {
         let chunk_end = i + CHUNK_SIZE;
 
@@ -486,6 +486,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
         // ASCII bytes are less than 128 (0x80), so their most significant
         // bit is unset.
         let mut count = 0;
+        #[safety::loop_invariant(i <= chunk_end && chunk_end - i <= CHUNK_SIZE && i - (chunk_end - CHUNK_SIZE) >= count as usize)]
         while i < chunk_end {
             count += bytes[i].is_ascii() as u8;
             i += 1;
@@ -499,6 +500,7 @@ const fn is_ascii(bytes: &[u8]) -> bool {
 
     // Process the remaining `bytes.len() % N` bytes.
     let mut is_ascii = true;
+    #[safety::loop_invariant(i <= bytes.len())]
     while i < bytes.len() {
         is_ascii &= bytes[i].is_ascii();
         i += 1;
@@ -514,6 +516,10 @@ pub mod verify {
 
     #[kani::proof]
     #[kani::unwind(8)]
+    // FIXME: the loop invariant in the x_64 & sse2 version of is_ascii
+    // fails because Kani does not yet support modifies clauses for loop invariants.
+    // Once it does, remove this cfg.
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
     pub fn check_is_ascii() {
         if kani::any() {
             // TODO: ARR_SIZE can be much larger with cbmc argument
