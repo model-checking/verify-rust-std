@@ -1,5 +1,7 @@
 //! This module contains a variety of sort implementations that are optimized for small lengths.
 
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::slice::sort::shared::FreezeMarker;
 use crate::{hint, intrinsics, ptr, slice};
@@ -539,6 +541,7 @@ where
 ///
 /// # Safety
 /// begin < tail and p must be valid and initialized for all begin <= p <= tail.
+#[safety::requires(begin < tail)]
 unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, is_less: &mut F) {
     // SAFETY: see individual comments.
     unsafe {
@@ -577,6 +580,7 @@ unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, 
 }
 
 /// Sort `v` assuming `v[..offset]` is already sorted.
+#[safety::requires(offset > 0 && offset <= v.len())]
 pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
     v: &mut [T],
     offset: usize,
@@ -864,4 +868,109 @@ fn panic_on_ord_violation() -> ! {
 pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
     // Heuristic that holds true on all tested 64-bit capable architectures.
     size_of::<T>() <= 8 // size_of::<u64>()
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    /// Helper: check that a slice is sorted in ascending order.
+    fn is_sorted(v: &[i32]) -> bool {
+        if v.len() <= 1 {
+            return true;
+        }
+        let mut i = 0;
+        while i + 1 < v.len() {
+            if v[i] > v[i + 1] {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    // --- has_efficient_in_place_swap ---
+
+    #[kani::proof]
+    fn verify_has_efficient_in_place_swap_u8() {
+        assert!(has_efficient_in_place_swap::<u8>());
+    }
+
+    #[kani::proof]
+    fn verify_has_efficient_in_place_swap_u64() {
+        assert!(has_efficient_in_place_swap::<u64>());
+    }
+
+    #[kani::proof]
+    fn verify_has_efficient_in_place_swap_u128() {
+        assert!(!has_efficient_in_place_swap::<u128>());
+    }
+
+    // --- swap_if_less ---
+
+    #[kani::proof]
+    fn verify_swap_if_less() {
+        let mut arr: [i32; 4] = kani::any();
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        kani::assume(a < 4 && b < 4);
+        unsafe {
+            swap_if_less(arr.as_mut_ptr(), a, b, &mut |x, y| *x < *y);
+        }
+        assert!(arr[a] <= arr[b]);
+    }
+
+    // --- sort4_stable: proves sorting correctness for 4 elements ---
+
+    #[kani::proof]
+    fn verify_sort4_stable() {
+        let src: [i32; 4] = kani::any();
+        let mut dst = [MaybeUninit::<i32>::uninit(); 4];
+        unsafe {
+            sort4_stable(src.as_ptr(), dst.as_mut_ptr() as *mut i32, &mut |x, y| *x < *y);
+        }
+        let result = unsafe {
+            [dst[0].assume_init(), dst[1].assume_init(), dst[2].assume_init(), dst[3].assume_init()]
+        };
+        assert!(is_sorted(&result));
+    }
+
+    // --- insertion_sort_shift_left: contract + sorting proof ---
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_insertion_sort_shift_left() {
+        let mut arr: [i32; 4] = kani::any();
+        insertion_sort_shift_left(&mut arr, 1, &mut |a, b| *a < *b);
+        assert!(is_sorted(&arr));
+    }
+
+    // --- Sorting contracts: prove all 3 small_sort variants sort ---
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_stable_small_sort() {
+        let mut arr: [i32; 4] = kani::any();
+        let mut scratch = [MaybeUninit::<i32>::uninit(); 20];
+        <i32 as StableSmallSortTypeImpl>::small_sort(&mut arr, &mut scratch, &mut |a, b| *a < *b);
+        assert!(is_sorted(&arr));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_unstable_small_sort() {
+        let mut arr: [i32; 4] = kani::any();
+        <i32 as UnstableSmallSortTypeImpl>::small_sort(&mut arr, &mut |a, b| *a < *b);
+        assert!(is_sorted(&arr));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_unstable_freeze_small_sort() {
+        let mut arr: [i32; 4] = kani::any();
+        <i32 as UnstableSmallSortFreezeTypeImpl>::small_sort(&mut arr, &mut |a, b| *a < *b);
+        assert!(is_sorted(&arr));
+    }
 }
