@@ -1215,6 +1215,8 @@ impl OsStr {
 
     /// Checks if all characters in this string are within the ASCII range.
     ///
+    /// An empty string returns `true`.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1283,8 +1285,7 @@ impl From<&OsStr> for Box<OsStr> {
     /// Copies the string into a newly allocated <code>[Box]&lt;[OsStr]&gt;</code>.
     #[inline]
     fn from(s: &OsStr) -> Box<OsStr> {
-        let rw = Box::into_raw(s.inner.into_box()) as *mut OsStr;
-        unsafe { Box::from_raw(rw) }
+        Box::clone_from_ref(s)
     }
 }
 

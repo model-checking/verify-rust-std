@@ -15,28 +15,6 @@ use crate::kani;
 use crate::ptr::NonNull;
 use crate::ub_checks::Invariant;
 
-#[lang = "format_placeholder"]
-#[derive(Copy, Clone)]
-pub struct Placeholder {
-    pub position: usize,
-    pub flags: u32,
-    pub precision: Count,
-    pub width: Count,
-}
-
-/// Used by [width](https://doc.rust-lang.org/std/fmt/#width)
-/// and [precision](https://doc.rust-lang.org/std/fmt/#precision) specifiers.
-#[lang = "format_count"]
-#[derive(Copy, Clone)]
-pub enum Count {
-    /// Specified with a literal number, stores the value
-    Is(u16),
-    /// Specified using `$` and `*` syntaxes, stores the index into `args`
-    Param(usize),
-    /// Not specified
-    Implied,
-}
-
 #[derive(Copy, Clone)]
 enum ArgumentType<'a> {
     Placeholder {
@@ -61,6 +39,7 @@ enum ArgumentType<'a> {
 ///   precision and width.
 #[lang = "format_argument"]
 #[derive(Copy, Clone)]
+#[repr(align(2))] // To ensure pointers to this struct always have their lowest bit cleared.
 pub struct Argument<'a> {
     ty: ArgumentType<'a>,
 }
@@ -190,6 +169,7 @@ impl Argument<'_> {
         }
     }
 }
+<<<<<<< HEAD
 
 /// Used by the format_args!() macro to create a fmt::Arguments object.
 #[doc(hidden)]
@@ -243,3 +223,5 @@ impl<'a> Arguments<'a> {
         Arguments { pieces, fmt: Some(fmt), args }
     }
 }
+=======
+>>>>>>> subtree/library
