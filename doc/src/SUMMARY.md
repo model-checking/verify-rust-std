@@ -42,3 +42,6 @@
   - [25: Verify the safety of `VecDeque` functions](./challenges/0025-vecdeque.md)
   - [26: Verify reference-counted Cell implementation](./challenges/0026-rc.md)
   - [27: Verify atomically reference-counted Cell implementation](./challenges/0027-arc.md)
+  - [28: Verify float to decimal conversion module](./challenges/0028-flt2dec.md)
+  - [29: Safety of boxed](./challenges/0029-boxed.md)
+  - [30: Progressing Public MIR for verification tool infrastructure](./challenges/0030-progress-public-mir.md)
