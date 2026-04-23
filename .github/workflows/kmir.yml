@@ -13,7 +13,7 @@ on:
 
 jobs:
   run-kmir-proofs:
-    name: Run supplied KMIR proofs
+    name: Run KMIR proofs
     runs-on: ubuntu-latest
     env:
       container_name: "kmir-${{ github.run_id }}"
@@ -31,3 +31,23 @@ jobs:
             -v $PWD:/home/kmir/workspace \
             runtimeverificationinc/kmir:ubuntu-jammy-latest \
             kmir-proofs/0011-floats-ints/run-proofs.sh
+
+  run-kmir-proofs-negative:
+    name: Run KMIR negative proofs
+    runs-on: ubuntu-latest
+    env:
+      container_name: "kmir-neg-${{ github.run_id }}"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Challenge 11 Negative Proofs
+        run: |
+          docker run --rm -t \
+            --name ${{ env.container_name }} \
+            -w /home/kmir/workspace \
+            -u $(id -u):$(id -g) \
+            -v $PWD:/home/kmir/workspace \
+            runtimeverificationinc/kmir:ubuntu-jammy-latest \
+            kmir-proofs/0011-floats-ints/run-proofs.sh --negative
