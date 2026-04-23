@@ -541,3 +541,165 @@ unsafe impl<T> AsVecIntoIter for IntoIter<T> {
         self
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::vec::Vec;
+
+    const N: usize = 3;
+
+    #[kani::proof]
+    fn verify_as_slice() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let it = v.into_iter();
+        assert!(it.as_slice().len() == N);
+    }
+
+    #[kani::proof]
+    fn verify_as_mut_slice() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let mut it = v.into_iter();
+        it.as_mut_slice()[0] = 42;
+    }
+
+    #[kani::proof]
+    fn verify_next() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let mut it = v.into_iter();
+        assert!(it.next() == Some(1));
+    }
+
+    #[kani::proof]
+    fn verify_size_hint() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let it = v.into_iter();
+        assert!(it.size_hint() == (N, Some(N)));
+    }
+
+    #[kani::proof]
+    fn verify_advance_by() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let mut it = v.into_iter();
+        let _ = it.advance_by(2);
+        assert!(it.len() == 1);
+    }
+
+    #[kani::proof]
+    fn verify_next_chunk() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let mut it = v.into_iter();
+        let chunk = it.next_chunk::<2>();
+        assert!(chunk.is_ok());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn verify_fold() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let sum = v.into_iter().fold(0i32, |a, x| a + x);
+        assert!(sum == 6);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn verify_try_fold() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let r: Result<i32, ()> = v.into_iter().try_fold(0, |a, x| Ok(a + x));
+        assert!(r == Ok(6));
+    }
+
+    #[kani::proof]
+    fn verify_iterator_get_unchecked() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let mut it = v.into_iter();
+        let val = unsafe { it.__iterator_get_unchecked(1) };
+        assert!(val == 2);
+    }
+
+    #[kani::proof]
+    fn verify_next_back() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let mut it = v.into_iter();
+        assert!(it.next_back() == Some(3));
+    }
+
+    #[kani::proof]
+    fn verify_advance_back_by() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let mut it = v.into_iter();
+        let _ = it.advance_back_by(2);
+        assert!(it.len() == 1);
+    }
+
+    #[kani::proof]
+    fn verify_drop() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        drop(v.into_iter());
+    }
+
+    #[kani::proof]
+    fn verify_forget_allocation_drop_remaining() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let mut it = v.into_iter();
+        it.next();
+        it.forget_allocation_drop_remaining();
+    }
+
+    #[kani::proof]
+    fn verify_into_vecdeque() {
+        let v = Vec::from(&[1i32, 2, 3]);
+        let d = v.into_iter().into_vecdeque();
+        assert!(d.len() == N);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn verify_extract_if_next() {
+        let mut v = Vec::from(&[1i32, 2, 3]);
+        let e: Vec<i32> = v.extract_if(.., |x| *x > 1).collect();
+        assert!(v.len() + e.len() == N);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn verify_spec_extend_into_iter() {
+        let mut v1 = Vec::from(&[1i32, 2]);
+        let v2 = Vec::from(&[3i32, 4]);
+        v1.extend(v2);
+        assert!(v1.len() == 4);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn verify_spec_extend_slice_iter() {
+        let mut v = Vec::from(&[1i32, 2]);
+        v.extend([3i32, 4].iter());
+        assert!(v.len() == 4);
+    }
+
+    #[kani::proof]
+    fn verify_from_elem_i8() {
+        let v: Vec<i8> = crate::vec![42i8; 3];
+        assert!(v.len() == 3 && v[0] == 42);
+    }
+
+    #[kani::proof]
+    fn verify_from_elem_u8() {
+        let v: Vec<u8> = crate::vec![7u8; 3];
+        assert!(v.len() == 3 && v[0] == 7);
+    }
+
+    #[kani::proof]
+    fn verify_from_elem_unit() {
+        let v: Vec<()> = crate::vec![(); 3];
+        assert!(v.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_from_iter() {
+        let v: Vec<i32> = [1i32, 2, 3].iter().copied().collect();
+        assert!(v.len() == 3);
+    }
+}
