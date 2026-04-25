@@ -4296,7 +4296,10 @@ mod verify {
     #[kani::proof]
     fn verify_into_inner_with_allocator() {
         let rc = Rc::new_in(42i32, Global);
-        drop(rc);
+        let (ptr, alloc) = Rc::into_inner_with_allocator(rc);
+        // Reconstruct the Rc so the allocation is dropped correctly.
+        let rc2 = unsafe { Rc::from_inner_in(ptr, alloc) };
+        assert!(*rc2 == 42);
     }
 
     #[kani::proof]
@@ -4402,8 +4405,10 @@ mod verify {
     #[kani::proof]
     fn verify_into_array() {
         let rc: Rc<[i32]> = Rc::from([1, 2, 3]);
-        let r: Result<Rc<[i32; 3]>, _> = rc.try_into();
-        assert!(r.is_ok());
+        let opt: Option<Rc<[i32; 3]>> = rc.into_array();
+        assert!(opt.is_some());
+        let arr = opt.unwrap();
+        assert!(arr[0] == 1 && arr[1] == 2 && arr[2] == 3);
     }
 
     #[kani::proof]
