@@ -4769,8 +4769,19 @@ mod verify {
     #[kani::proof]
     fn verify_into_array() {
         let a: Arc<[i32]> = Arc::from([1, 2, 3]);
-        let r: Result<Arc<[i32; 3]>, _> = a.try_into();
-        assert!(r.is_ok());
+        let opt: Option<Arc<[i32; 3]>> = a.into_array();
+        assert!(opt.is_some());
+        let arr = opt.unwrap();
+        assert!(arr[0] == 1 && arr[1] == 2 && arr[2] == 3);
+    }
+
+    #[kani::proof]
+    fn verify_into_inner_with_allocator() {
+        let a = Arc::new_in(42i32, Global);
+        let (ptr, alloc) = Arc::into_inner_with_allocator(a);
+        // Reconstruct so the allocation is dropped correctly.
+        let a2 = unsafe { Arc::from_inner_in(ptr, alloc) };
+        assert!(*a2 == 42);
     }
 
     #[kani::proof]
