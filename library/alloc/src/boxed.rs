@@ -2305,8 +2305,10 @@ mod verify {
     #[kani::proof]
     fn verify_into_array() {
         let b: Box<[i32]> = Box::from([1, 2, 3]);
-        let r: Result<Box<[i32; 3]>, _> = b.try_into();
-        assert!(r.is_ok());
+        let opt: Option<Box<[i32; 3]>> = b.into_array();
+        assert!(opt.is_some());
+        let arr = opt.unwrap();
+        assert!(arr[0] == 1 && arr[1] == 2 && arr[2] == 3);
     }
 
     #[kani::proof]
