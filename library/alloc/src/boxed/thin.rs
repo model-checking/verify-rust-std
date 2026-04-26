@@ -441,7 +441,7 @@ impl<T: ?Sized + Error> Error for ThinBox<T> {
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
-mod verify_146 {
+mod verify {
     use core::any::Any;
 
     use super::*;
@@ -514,14 +514,6 @@ mod verify_146 {
     gen_thinbox_deref_slice_harness!(harness_thinbox_deref_slice_u32, u32);
     gen_thinbox_deref_slice_harness!(harness_thinbox_deref_slice_u64, u64);
     gen_thinbox_deref_slice_harness!(harness_thinbox_deref_slice_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_156 {
-    use core::any::Any;
-
-    use super::*;
 
     macro_rules! gen_thinbox_deref_mut_harness {
         ($name:ident, $ty:ty) => {
@@ -591,14 +583,6 @@ mod verify_156 {
     gen_thinbox_deref_mut_slice_harness!(harness_thinbox_deref_mut_slice_u32, u32);
     gen_thinbox_deref_mut_slice_harness!(harness_thinbox_deref_mut_slice_u64, u64);
     gen_thinbox_deref_mut_slice_harness!(harness_thinbox_deref_mut_slice_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_166 {
-    use core::any::Any;
-
-    use super::*;
 
     macro_rules! gen_thinbox_drop_harness {
         ($name:ident, $ty:ty) => {
@@ -668,14 +652,6 @@ mod verify_166 {
     gen_thinbox_drop_slice_harness!(harness_thinbox_drop_slice_u32, u32);
     gen_thinbox_drop_slice_harness!(harness_thinbox_drop_slice_u64, u64);
     gen_thinbox_drop_slice_harness!(harness_thinbox_drop_slice_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_177 {
-    use core::any::Any;
-
-    use super::*;
 
     macro_rules! gen_thinbox_meta_harness {
         ($name:ident, $ty:ty) => {
@@ -745,14 +721,6 @@ mod verify_177 {
     gen_thinbox_meta_slice_harness!(harness_thinbox_meta_slice_u32, u32);
     gen_thinbox_meta_slice_harness!(harness_thinbox_meta_slice_u64, u64);
     gen_thinbox_meta_slice_harness!(harness_thinbox_meta_slice_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_187 {
-    use core::any::Any;
-
-    use super::*;
 
     macro_rules! gen_thinbox_with_header_harness {
         ($name:ident, $ty:ty) => {
@@ -822,14 +790,6 @@ mod verify_187 {
     gen_thinbox_with_header_slice_harness!(harness_thinbox_with_header_slice_u32, u32);
     gen_thinbox_with_header_slice_harness!(harness_thinbox_with_header_slice_u64, u64);
     gen_thinbox_with_header_slice_harness!(harness_thinbox_with_header_slice_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_230 {
-    use core::any::Any;
-
-    use super::*;
 
     macro_rules! gen_with_header_new_harness {
         ($name:ident, $ty:ty) => {
@@ -914,14 +874,6 @@ mod verify_230 {
     gen_with_header_new_slice_harness!(harness_with_header_new_slice_u32, u32);
     gen_with_header_new_slice_harness!(harness_with_header_new_slice_u64, u64);
     gen_with_header_new_slice_harness!(harness_with_header_new_slice_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_273 {
-    use core::any::Any;
-
-    use super::*;
 
     macro_rules! gen_with_header_try_new_harness {
         ($name:ident, $ty:ty) => {
@@ -1021,15 +973,6 @@ mod verify_273 {
     gen_with_header_try_new_slice_harness!(harness_with_header_try_new_slice_u32, u32);
     gen_with_header_try_new_slice_harness!(harness_with_header_try_new_slice_u64, u64);
     gen_with_header_try_new_slice_harness!(harness_with_header_try_new_slice_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_311 {
-    use core::any::Any;
-
-    use super::*;
-
     // `WithHeader<H>::new_unsize_zst<Dyn, T>` is the special constructor used
     // when a zero-sized source `T` is unsized into some `Dyn`.
     macro_rules! gen_with_header_new_unsize_zst_slice_harness {
@@ -1080,14 +1023,6 @@ mod verify_311 {
     // the const allocation model and reports `value_ptr.is_aligned()` as
     // possibly false.
     gen_with_header_new_unsize_zst_dyn_any_harness!(harness_with_header_new_unsize_zst_dyn_any, ());
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_403 {
-    use core::any::Any;
-
-    use super::*;
 
     macro_rules! gen_with_header_header_harness {
         ($name:ident, $ty:ty) => {

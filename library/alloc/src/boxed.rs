@@ -2296,7 +2296,11 @@ mod kani_box_harness_helpers {
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
-mod verify_944 {
+mod verify {
+    use core::any::Any;
+    use core::marker::PhantomPinned;
+
+    use super::kani_box_harness_helpers::*;
     use super::*;
 
     // Kani limitation: proof_for_contract is not reliable for this
@@ -2346,13 +2350,6 @@ mod verify_944 {
     gen_assume_init_harness!(harness_box_assume_init_unit, ());
     gen_assume_init_harness!(harness_box_assume_init_array, [u8; 4]);
     gen_assume_init_harness!(harness_box_assume_init_bool, bool);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1011 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     // Kani limitation: proof_for_contract is not reliable for this
     // MaybeUninit-based slice impl in boxed.rs, so these harnesses use
@@ -2401,13 +2398,6 @@ mod verify_1011 {
     gen_assume_init_slice_harness!(harness_box_assume_init_slice_u128, u128);
     gen_assume_init_slice_harness!(harness_box_assume_init_slice_unit, ());
     gen_assume_init_slice_harness!(harness_box_assume_init_slice_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1079 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_from_raw_sized_harness {
         ($name:ident, $ty:ty) => {
@@ -2463,13 +2453,6 @@ mod verify_1079 {
     gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u32, u32);
     gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u64, u64);
     gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1147 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_from_non_null_sized_harness {
         ($name:ident, $ty:ty) => {
@@ -2525,13 +2508,6 @@ mod verify_1147 {
     gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u32, u32);
     gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u64, u64);
     gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1306 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     // These harnesses allocate raw memory directly instead of using higher-level
     // Box constructors. `proof_for_contract` requires a single top-level call to
@@ -2636,13 +2612,6 @@ mod verify_1306 {
     gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u32, u32);
     gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u64, u64);
     gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1405 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_from_non_null_in_sized_harness {
         ($name:ident, $ty:ty) => {
@@ -2700,15 +2669,8 @@ mod verify_1405 {
     gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u32, u32);
     gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u64, u64);
     gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u128, u128);
-}
 
-// === SAFE FUNCTIONS ===
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_410 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
+    // === SAFE FUNCTIONS ===
 
     macro_rules! gen_box_new_in_harness {
         ($name:ident, $ty:ty) => {
@@ -2756,13 +2718,6 @@ mod verify_410 {
     gen_box_new_in_vec_harness!(harness_box_new_in_vec_u32, u32);
     gen_box_new_in_vec_harness!(harness_box_new_in_vec_u64, u64);
     gen_box_new_in_vec_harness!(harness_box_new_in_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_436 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_try_new_in_harness {
         ($name:ident, $ty:ty) => {
@@ -2809,12 +2764,6 @@ mod verify_436 {
     gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u32, u32);
     gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u64, u64);
     gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_496 {
-    use super::*;
 
     macro_rules! gen_box_try_new_uninit_in_harness {
         ($name:ident, $ty:ty) => {
@@ -2839,12 +2788,6 @@ mod verify_496 {
     gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_unit, ());
     gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_array, [u8; 4]);
     gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_bool, bool);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_568 {
-    use super::*;
 
     macro_rules! gen_box_try_new_zeroed_in_harness {
         ($name:ident, $ty:ty) => {
@@ -2869,13 +2812,6 @@ mod verify_568 {
     gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_unit, ());
     gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_array, [u8; 4]);
     gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_bool, bool);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_603 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_into_boxed_slice_harness {
         ($name:ident, $ty:ty) => {
@@ -2930,13 +2866,6 @@ mod verify_603 {
     gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u32, u32);
     gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u64, u64);
     gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_675 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_new_uninit_slice_harness {
         ($name:ident, $ty:ty) => {
@@ -2964,13 +2893,6 @@ mod verify_675 {
     gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_unit, ());
     gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_bool, bool);
     gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_698 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_new_zeroed_slice_harness {
         ($name:ident, $elem_ty:ty) => {
@@ -2999,13 +2921,6 @@ mod verify_698 {
     gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_unit, ());
     gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_bool, bool);
     gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_722 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_try_new_uninit_slice_harness {
         ($name:ident, $ty:ty) => {
@@ -3034,12 +2949,6 @@ mod verify_722 {
     gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_unit, ());
     gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_bool, bool);
     gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_756 {
-    use super::*;
 
     macro_rules! gen_box_try_new_zeroed_slice_harness {
         ($name:ident, $ty:ty) => {
@@ -3068,13 +2977,6 @@ mod verify_756 {
     gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_unit, ());
     gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_bool, bool);
     gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_777 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     // `Box<[T]>::into_array::<N>` branches only on `self.len() == N`.
     //
@@ -3116,13 +3018,6 @@ mod verify_777 {
     gen_box_into_array_slice_harness!(harness_box_into_array_slice_u128, u128);
     gen_box_into_array_slice_harness!(harness_box_into_array_slice_unit, ());
     gen_box_into_array_slice_harness!(harness_box_into_array_slice_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_812 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_new_uninit_slice_in_harness {
         ($name:ident, $ty:ty) => {
@@ -3151,13 +3046,6 @@ mod verify_812 {
     gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_unit, ());
     gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_bool, bool);
     gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_839 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_new_zeroed_slice_in_harness {
         ($name:ident, $elem_ty:ty) => {
@@ -3189,12 +3077,6 @@ mod verify_839 {
     gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_unit, ());
     gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_bool, bool);
     gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_865 {
-    use super::*;
 
     macro_rules! gen_box_try_new_uninit_slice_in_harness {
         ($name:ident, $ty:ty) => {
@@ -3223,12 +3105,6 @@ mod verify_865 {
     gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_unit, ());
     gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_bool, bool);
     gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_904 {
-    use super::*;
 
     macro_rules! gen_box_try_new_zeroed_slice_in_harness {
         ($name:ident, $ty:ty) => {
@@ -3258,13 +3134,6 @@ mod verify_904 {
     gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_unit, ());
     gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_bool, bool);
     gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_985 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_write_harness {
         ($name:ident, $ty:ty) => {
@@ -3319,15 +3188,6 @@ mod verify_985 {
     gen_box_write_vec_harness!(harness_box_write_vec_u32, u32);
     gen_box_write_vec_harness!(harness_box_write_vec_u64, u64);
     gen_box_write_vec_harness!(harness_box_write_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1281 {
-    use core::any::Any;
-
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_into_non_null_sized_harness {
         ($name:ident, dyn Any) => {
@@ -3406,15 +3266,6 @@ mod verify_1281 {
     gen_box_into_non_null_unsized_harness!(harness_box_into_non_null_vec_u32, u32);
     gen_box_into_non_null_unsized_harness!(harness_box_into_non_null_vec_u64, u64);
     gen_box_into_non_null_unsized_harness!(harness_box_into_non_null_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1470 {
-    use core::any::Any;
-
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_into_raw_with_allocator_sized_harness {
         ($name:ident, dyn Any) => {
@@ -3520,15 +3371,6 @@ mod verify_1470 {
         harness_box_into_raw_with_allocator_vec_u128,
         u128
     );
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1531 {
-    use core::any::Any;
-
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_into_non_null_with_allocator_sized_harness {
         ($name:ident, dyn Any) => {
@@ -3670,15 +3512,6 @@ mod verify_1531 {
         harness_box_into_non_null_with_allocator_vec_u128,
         u128
     );
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1544 {
-    use core::any::Any;
-
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_into_unique_sized_harness {
         ($name:ident, dyn Any) => {
@@ -3771,15 +3604,6 @@ mod verify_1544 {
     gen_box_into_unique_unsized_harness!(harness_box_into_unique_vec_u32, u32);
     gen_box_into_unique_unsized_harness!(harness_box_into_unique_vec_u64, u64);
     gen_box_into_unique_unsized_harness!(harness_box_into_unique_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1696 {
-    use core::any::Any;
-
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_leak_sized_harness {
         ($name:ident, dyn Any) => {
@@ -3867,16 +3691,6 @@ mod verify_1696 {
     gen_box_leak_unsized_harness!(harness_box_leak_vec_u32, u32);
     gen_box_leak_unsized_harness!(harness_box_leak_vec_u64, u64);
     gen_box_leak_unsized_harness!(harness_box_leak_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1736 {
-    use core::any::Any;
-    use core::marker::PhantomPinned;
-
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     struct NotUnpinSentinel(u8, PhantomPinned);
 
@@ -3963,15 +3777,6 @@ mod verify_1736 {
     gen_box_into_pin_unsized_harness!(harness_box_into_pin_vec_u32, u32);
     gen_box_into_pin_unsized_harness!(harness_box_into_pin_vec_u64, u64);
     gen_box_into_pin_unsized_harness!(harness_box_into_pin_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1750 {
-    use core::any::Any;
-
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     // `Drop for Box<T, A>` has one explicit control-flow split:
     // - `layout.size() != 0`: after the compiler has already dropped `T`, the
@@ -4057,12 +3862,6 @@ mod verify_1750 {
     gen_box_drop_unsized_harness!(harness_box_drop_vec_u64, u64);
     gen_box_drop_unsized_harness!(harness_box_drop_vec_u128, u128);
     gen_box_drop_unsized_harness!(harness_box_drop_vec_unit, ());
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1769 {
-    use super::*;
 
     macro_rules! gen_box_default_harness {
         ($name:ident, $ty:ty) => {
@@ -4092,12 +3891,6 @@ mod verify_1769 {
     gen_box_default_harness!(harness_box_default_vec_u32, Vec<u32>);
     gen_box_default_harness!(harness_box_default_vec_u64, Vec<u64>);
     gen_box_default_harness!(harness_box_default_vec_u128, Vec<u128>);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1802 {
-    use super::*;
 
     macro_rules! gen_box_str_default_harness {
         ($name:ident, $ty:ty) => {
@@ -4110,13 +3903,6 @@ mod verify_1802 {
     }
 
     gen_box_str_default_harness!(harness_box_default_str, str);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1843 {
-    use super::kani_box_harness_helpers::*;
-    use super::*;
 
     macro_rules! gen_box_clone_harness {
         ($name:ident, $ty:ty) => {
@@ -4169,12 +3955,6 @@ mod verify_1843 {
     gen_box_clone_vec_harness!(harness_box_clone_vec_u32, u32);
     gen_box_clone_vec_harness!(harness_box_clone_vec_u64, u64);
     gen_box_clone_vec_harness!(harness_box_clone_vec_u128, u128);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_1913 {
-    use super::*;
 
     macro_rules! gen_box_str_clone_harness {
         ($name:ident, $value:expr) => {

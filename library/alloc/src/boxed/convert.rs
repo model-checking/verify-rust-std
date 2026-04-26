@@ -848,8 +848,11 @@ mod kani_box_convert_harness_helpers {
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
-mod verify_394 {
+mod verify {
+    use super::super::kani_box_harness_helpers::*;
+    use super::kani_box_convert_harness_helpers::*;
     use super::*;
+    use crate::string::String;
 
     // `proof_for_contract` currently fails to resolve targets such as
     // `Box<dyn Any>::downcast_unchecked::<T>`. This is not a failure to find
@@ -892,12 +895,6 @@ mod verify_394 {
     gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_bool, bool);
     gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_unit, ());
     gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_453 {
-    use super::*;
 
     // `proof_for_contract` currently fails to resolve targets such as
     // `Box<dyn Any + Send>::downcast_unchecked::<T>`. This is not a failure to
@@ -943,12 +940,6 @@ mod verify_453 {
         harness_box_dyn_any_send_downcast_unchecked_array,
         [u8; 4]
     );
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_512 {
-    use super::*;
 
     // `proof_for_contract` currently fails to resolve targets such as
     // `Box<dyn Any + Send + Sync>::downcast_unchecked::<T>`. This is not a
@@ -1031,14 +1022,8 @@ mod verify_512 {
         harness_box_dyn_any_send_sync_downcast_unchecked_array,
         [u8; 4]
     );
-}
 
-// === SAFE FUNCTIONS ===
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_170 {
-    use super::*;
+    // === SAFE FUNCTIONS ===
 
     macro_rules! gen_box_from_str_harness {
         ($name:ident, $value:expr) => {
@@ -1052,12 +1037,6 @@ mod verify_170 {
 
     gen_box_from_str_harness!(harness_box_from_str_empty, "");
     gen_box_from_str_harness!(harness_box_from_str_nonempty, "test");
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_251 {
-    use super::*;
 
     macro_rules! gen_box_from_box_str_to_u8_slice_harness {
         ($name:ident, $value:expr) => {
@@ -1077,13 +1056,6 @@ mod verify_251 {
         harness_box_from_box_str_to_u8_slice_nonempty,
         "test"
     );
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_304 {
-    use super::super::kani_box_harness_helpers::*;
-    use super::*;
 
     // `<Box<[T; N]> as TryFrom<Box<[T]>>>::try_from` branches only on
     // `boxed_slice.len() == N`.
@@ -1134,13 +1106,6 @@ mod verify_304 {
         harness_box_try_from_box_slice_to_array_array,
         [u8; 4]
     );
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_336 {
-    use super::super::kani_box_harness_helpers::*;
-    use super::*;
 
     // `<Box<[T; N]> as TryFrom<Vec<T>>>::try_from` branches explicitly only on
     // `vec.len() == N`.
@@ -1179,13 +1144,6 @@ mod verify_336 {
     gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_u128, u128);
     gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_unit, ());
     gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_366 {
-    use super::*;
-    use crate::string::String;
 
     // `Box<dyn Any, A>::downcast::<T>` branches only on `self.is::<T>()`.
     // The safe wrapper uses that runtime type test to protect the internal
@@ -1243,13 +1201,6 @@ mod verify_366 {
     gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_unit, ());
     gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_bool, bool);
     gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_426 {
-    use super::*;
-    use crate::string::String;
 
     // `Box<dyn Any + Send, A>::downcast::<T>` branches only on `self.is::<T>()`.
     // The safe wrapper uses that runtime type test to protect the internal
@@ -1307,13 +1258,6 @@ mod verify_426 {
     gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_unit, ());
     gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_bool, bool);
     gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_array, [u8; 4]);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_486 {
-    use super::*;
-    use crate::string::String;
 
     // `Box<dyn Any + Send + Sync, A>::downcast::<T>` branches only on
     // `self.is::<T>()`.
@@ -1377,13 +1321,6 @@ mod verify_486 {
         harness_box_dyn_any_send_sync_downcast_array,
         [u8; 4]
     );
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_746 {
-    use super::kani_box_convert_harness_helpers::*;
-    use super::*;
 
     // `<dyn Error>::downcast::<T>` branches only on `self.is::<T>()`.
     // The safe wrapper uses that runtime type test to protect the raw pointer
@@ -1430,13 +1367,6 @@ mod verify_746 {
     gen_box_dyn_error_downcast_harness!(harness_box_dyn_error_downcast_byte, ByteError);
     gen_box_dyn_error_downcast_harness!(harness_box_dyn_error_downcast_bool, BoolError);
     gen_box_dyn_error_downcast_harness!(harness_box_dyn_error_downcast_array, ArrayError);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_763 {
-    use super::kani_box_convert_harness_helpers::*;
-    use super::*;
 
     // `<dyn Error + Send>::downcast::<T>` delegates to `<dyn Error>::downcast`
     // after first coercing `Box<dyn Error + Send>` into `Box<dyn Error>`.
@@ -1482,13 +1412,6 @@ mod verify_763 {
     gen_box_dyn_error_send_downcast_harness!(harness_box_dyn_error_send_downcast_byte, ByteError);
     gen_box_dyn_error_send_downcast_harness!(harness_box_dyn_error_send_downcast_bool, BoolError);
     gen_box_dyn_error_send_downcast_harness!(harness_box_dyn_error_send_downcast_array, ArrayError);
-}
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod verify_777 {
-    use super::kani_box_convert_harness_helpers::*;
-    use super::*;
 
     // `<dyn Error + Send + Sync>::downcast::<T>` also delegates to
     // `<dyn Error>::downcast` after coercing the boxed trait object to
