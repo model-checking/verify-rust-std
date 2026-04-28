@@ -94,11 +94,12 @@ pub fn breakpoint() {
 ///
 /// ## Example
 /// ```
-/// # #![cfg(not(miri))] // FIXME: Figure out how to make miri work before stabilizing this macro
 /// #![feature(return_address)]
-///
+/// # #[cfg(not(miri))] // FIXME: Figure out how to make miri work before stabilizing this macro
+/// # {
 /// let addr = core::arch::return_address!();
 /// println!("Caller is {addr:p}");
+/// # }
 /// ```
 #[unstable(feature = "return_address", issue = "154966")]
 #[allow_internal_unstable(core_intrinsics)]
