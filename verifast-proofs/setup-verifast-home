@@ -18,6 +18,20 @@ if [[ ! -d "$VERIFAST_HOME" ]]; then
   fi
 
   case "$VFVERSION,$VFPLATFORM" in
+    25.11-slice-support,linux)
+      # Custom VeriFast build with &[T] slice reference support
+      # https://github.com/jrey8343/verifast/releases/tag/25.11-slice-support
+      VFHASH=7132cc8882d35ba9c9d75b9c0f8d43570faa9c798d7642ab5096a92093ca80d1
+      VFREPO=jrey8343/verifast
+      RUST_VERSION=nightly-2025-11-25
+      ;;
+    25.11-slice-support,macos-aarch)
+      # Custom VeriFast build with &[T] slice reference support
+      # https://github.com/jrey8343/verifast/releases/tag/25.11-slice-support
+      VFHASH=caa4e16d86476721f5e966aa48761421014debc5518d7193f48358d01f37c8fd
+      VFREPO=jrey8343/verifast
+      RUST_VERSION=nightly-2025-11-25
+      ;;
     25.11,linux)
       # https://github.com/verifast/verifast/attestations/14103492
       VFHASH=990c3cadba7cfc9ef9c19d5f1ff039fd746155164fe4a5ec365c625182400f3e
@@ -57,7 +71,8 @@ if [[ ! -d "$VERIFAST_HOME" ]]; then
   pushd "${TMPDIR:-/tmp}"
     if [[ ! -d verifast-$VFVERSION ]]; then
       if [[ ! -e $VFASSET ]]; then
-        curl -OL https://github.com/verifast/verifast/releases/download/$VFVERSION/$VFASSET
+        : "${VFREPO:=verifast/verifast}"
+        curl -OL https://github.com/$VFREPO/releases/download/$VFVERSION/$VFASSET
       fi
       echo "$VFHASH  $VFASSET" | shasum -a 256 -c
       tar xf $VFASSET
