@@ -806,6 +806,7 @@ pub enum UnsafetyComment {
     NonTemporal,
     Neon,
     NoProvenance(String),
+    PointerWrite(String),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -873,6 +874,10 @@ impl fmt::Display for UnsafetyComment {
                 "Addresses passed in `{arg}` lack provenance, so this is similar to using a \
                 `usize as ptr` cast (or [`core::ptr::with_exposed_provenance`]) on each lane \
                 before  using it."
+            ),
+            Self::PointerWrite(arg) => write!(
+                f,
+                "The pointer in `{arg}` must satisfy the requirements of [`core::ptr::write`]."
             ),
             Self::UnpredictableOnFault => write!(
                 f,
