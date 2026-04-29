@@ -2,7 +2,7 @@
 
 - **Status:** *Open*
 - **Solution:** *Option field to point to the PR that solved this challenge.*
-- **Tracking Issue:** *TBD*
+- **Tracking Issue:** *https://github.com/model-checking/verify-rust-std/issues/594*
 - **Start date:** *TBD*
 - **End date:** *TBD*
 - **Reward:** *TBD*
