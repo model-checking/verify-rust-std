@@ -82,8 +82,8 @@ pub fn decode_error_kind(errno: i32) -> io::ErrorKind {
         c::WSAENETUNREACH => NetworkUnreachable,
         c::WSAEDQUOT => QuotaExceeded,
         // Not a prefect mapping but this error is only returned when writing to
-        // the closed end of a socket. On Unix targets EPIPE is returned in those
-        // cases.
+        // a socket after shutting down the write-end. On Unix targets, EPIPE is
+        // returned in those cases.
         c::WSAESHUTDOWN => BrokenPipe,
 
         _ => Uncategorized,
