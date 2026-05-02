@@ -422,6 +422,7 @@ impl<'f> VaList<'f> {
     /// [`c_void`]: core::ffi::c_void
     #[inline] // Avoid codegen when not used to help backends that don't support VaList.
     #[rustc_const_unstable(feature = "const_c_variadic", issue = "151787")]
+    #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     pub const unsafe fn next_arg<T: VaArgSafe>(&mut self) -> T {
         // SAFETY: the caller must uphold the safety contract for `va_arg`.
         unsafe { va_arg(self) }
