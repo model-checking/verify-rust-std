@@ -15,7 +15,7 @@ mod common;
 
 cfg_select! {
     any(
-        all(target_family = "unix", not(any(target_family = "wasm", target_os = "espidf", target_os = "vita"))),
+        all(target_family = "unix", not(any(all(target_family = "wasm", target_os = "linux"), target_os = "espidf", target_os = "vita"))),
         target_os = "hermit",
     ) => {
         mod unix;
