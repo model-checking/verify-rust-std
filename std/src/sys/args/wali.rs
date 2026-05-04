@@ -39,9 +39,7 @@ mod imp {
             __cl_copy_argv(ptr, idx);
             CString::from_raw(ptr)
         };
-        let mut arg_buf = arg_buf.into_bytes_with_nul();
-        let _ = arg_buf.pop();
-        OsStringExt::from_vec(arg_buf)
+        OsStringExt::from_vec(arg_buf.into_bytes())
     }
 
     fn argc_argv() -> Vec<OsString> {
