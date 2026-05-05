@@ -173,7 +173,7 @@ use crate::{error, fmt};
 /// println!("{}", recv.recv().unwrap()); // Received after 2 seconds
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
-#[cfg_attr(not(test), rustc_diagnostic_item = "Receiver")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "MpscReceiver")]
 pub struct Receiver<T> {
     inner: mpmc::Receiver<T>,
 }
@@ -330,6 +330,7 @@ pub struct IntoIter<T> {
 /// assert_eq!(3, msg + msg2);
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "MpscSender")]
 pub struct Sender<T> {
     inner: mpmc::Sender<T>,
 }

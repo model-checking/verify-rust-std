@@ -131,6 +131,7 @@
 #![feature(deprecated_suggestion)]
 #![feature(derive_const)]
 #![feature(diagnostic_on_const)]
+#![feature(diagnostic_on_unmatch_args)]
 #![feature(doc_cfg)]
 #![feature(doc_notable_trait)]
 #![feature(extern_types)]
@@ -156,6 +157,7 @@
 #![feature(no_core)]
 #![feature(optimize_attribute)]
 #![feature(pattern_types)]
+#![feature(pin_macro_internals)]
 #![feature(prelude_import)]
 #![feature(repr_simd)]
 #![feature(rustc_attrs)]
@@ -207,7 +209,7 @@ use prelude::rust_2024::*;
 #[macro_use]
 mod macros;
 
-#[stable(feature = "assert_matches", since = "1.95.0")]
+#[stable(feature = "assert_matches", since = "1.96.0")]
 pub use crate::macros::{assert_matches, debug_assert_matches};
 
 #[unstable(feature = "derive_from", issue = "144889")]
@@ -305,7 +307,7 @@ pub mod bstr;
 pub mod cell;
 pub mod char;
 pub mod ffi;
-#[unstable(feature = "core_io_borrowed_buf", issue = "117693")]
+#[unstable(feature = "core_io", issue = "154046")]
 pub mod io;
 pub mod iter;
 pub mod net;

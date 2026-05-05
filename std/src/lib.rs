@@ -278,6 +278,7 @@
 #![feature(const_trait_impl)]
 #![feature(decl_macro)]
 #![feature(deprecated_suggestion)]
+#![feature(diagnostic_on_move)]
 #![feature(doc_cfg)]
 #![feature(doc_masked)]
 #![feature(doc_notable_trait)]
@@ -321,7 +322,9 @@
 #![feature(const_default)]
 #![feature(core_float_math)]
 #![feature(core_intrinsics)]
+#![feature(core_io)]
 #![feature(core_io_borrowed_buf)]
+#![feature(core_io_internals)]
 #![feature(cstr_display)]
 #![feature(drop_guard)]
 #![feature(duration_constants)]
@@ -344,6 +347,9 @@
 #![feature(hashmap_internals)]
 #![feature(hint_must_use)]
 #![feature(int_from_ascii)]
+#![feature(io_error_inprogress)]
+#![feature(io_error_more)]
+#![feature(io_error_uncategorized)]
 #![feature(ip)]
 #![feature(iter_advance_by)]
 #![feature(iter_next_chunk)]
@@ -358,6 +364,7 @@
 #![feature(ptr_as_uninit)]
 #![feature(ptr_mask)]
 #![feature(random)]
+#![feature(raw_os_error_ty)]
 #![feature(slice_internals)]
 #![feature(slice_ptr_get)]
 #![feature(slice_range)]
@@ -739,7 +746,7 @@ pub use core::{
     assert_eq, assert_ne, debug_assert, debug_assert_eq, debug_assert_ne, r#try, unimplemented,
     unreachable, write, writeln,
 };
-#[stable(feature = "assert_matches", since = "1.95.0")]
+#[stable(feature = "assert_matches", since = "1.96.0")]
 pub use core::{assert_matches, debug_assert_matches};
 
 // Re-export unstable derive macro defined through core.
