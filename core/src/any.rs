@@ -839,7 +839,7 @@ impl TypeId {
         self,
         trait_represented_by_type_id: TypeId,
     ) -> Option<TraitImpl<*const ()>> {
-        if self.info().size.is_none() {
+        if self.size().is_none() {
             return None;
         }
 
