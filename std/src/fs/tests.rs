@@ -856,10 +856,12 @@ fn recursive_mkdir_failure() {
 
 #[test]
 fn concurrent_recursive_mkdir() {
-    for _ in 0..100 {
+    let count = if cfg!(miri) { 10 } else { 100 };
+    let nest = if cfg!(miri) { 10 } else { 40 };
+    for _ in 0..count {
         let dir = tmpdir();
         let mut dir = dir.join("a");
-        for _ in 0..40 {
+        for _ in 0..nest {
             dir = dir.join("a");
         }
         let mut join = vec![];
@@ -1869,7 +1871,7 @@ fn create_dir_long_paths() {
 fn read_large_dir() {
     let tmpdir = tmpdir();
 
-    let count = 32 * 1024;
+    let count = if cfg!(miri) { 1024 } else { 32 * 1024 };
     for i in 0..count {
         check!(fs::File::create(tmpdir.join(&i.to_string())));
     }
@@ -1954,6 +1956,7 @@ fn test_eq_windows_file_type() {
 /// Regression test for https://github.com/rust-lang/rust/issues/50619.
 #[test]
 #[cfg(target_os = "linux")]
+#[cfg_attr(miri, ignore)] // Cannot spawn processes on Miri
 fn test_read_dir_infinite_loop() {
     use crate::io::ErrorKind;
     use crate::process::Command;
