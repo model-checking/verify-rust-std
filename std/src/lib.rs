@@ -326,6 +326,7 @@
 #![feature(core_io_borrowed_buf)]
 #![feature(core_io_internals)]
 #![feature(cstr_display)]
+#![feature(cursor_split)]
 #![feature(drop_guard)]
 #![feature(duration_constants)]
 #![feature(error_generic_member_access)]
