@@ -232,9 +232,9 @@ where
         let inner_len = self.iter.size();
         let mut i = 0;
         // Use a while loop because (0..len).step_by(N) doesn't optimize well.
-        // Loop invariant: __iterator_get_unchecked is read-only for
+        // Safety argument: __iterator_get_unchecked is read-only for
         // TrustedRandomAccessNoCoerce iterators, so iter.size() is preserved.
-        // Loop invariant: i tracks the consumed element count and stays within
+        // Safety argument: i tracks the consumed element count and stays within
         // inner_len. Combined with the while condition (inner_len - i >= N),
         // this ensures i + local < inner_len = iter.size() for all accesses.
         while inner_len - i >= N {

@@ -1,5 +1,3 @@
-use safety::loop_invariant;
-
 use crate::cmp;
 use crate::iter::adapters::SourceIter;
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, TrustedRandomAccess};
@@ -303,8 +301,10 @@ impl<I: Iterator + TrustedRandomAccess> SpecTake for Take<I> {
     {
         let mut acc = init;
         let end = self.n.min(self.iter.size());
-        // Loop invariant: __iterator_get_unchecked is a read-only operation for
-        // TrustedRandomAccess iterators, so iter.size() is preserved across iterations.
+        // __iterator_get_unchecked is a read-only operation for TrustedRandomAccess
+        // iterators, so iter.size() is preserved across iterations.
+        // The Kani loop invariant below is intentionally vacuous (`true`) and
+        // is used only to enable loop-contract mode.
         #[cfg_attr(kani, kani::loop_invariant(true))]
         for i in 0..end {
             // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end

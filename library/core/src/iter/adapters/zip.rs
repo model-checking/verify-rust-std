@@ -1,4 +1,4 @@
-use safety::{loop_invariant, requires};
+use safety::requires;
 
 use crate::cmp;
 use crate::fmt::{self, Debug};
@@ -271,7 +271,12 @@ where
     }
 
     #[inline]
-    #[requires(self.index + idx < self.a.size() && self.index + idx < self.b.size())]
+    #[requires(
+        self.index <= self.a.size()
+            && idx < self.a.size() - self.index
+            && self.index <= self.b.size()
+            && idx < self.b.size() - self.index
+    )]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item {
         let idx = self.index + idx;
@@ -287,12 +292,14 @@ where
     {
         let mut accum = init;
         let len = ZipImpl::size_hint(&self).0;
-        // Loop invariant: get_unchecked is a read-only operation for
-        // TrustedRandomAccessNoCoerce iterators, so sizes are preserved.
-        // Loop invariant enables loop contracts for unbounded verification.
+        // For TrustedRandomAccessNoCoerce iterators, get_unchecked is a
+        // read-only operation, so sizes are preserved.
         // Safety of get_unchecked(i) is established by the pre-loop state:
         // len = min(a.size(), b.size()) - index, and get_unchecked adds index
         // back, so the actual index is always < both sizes.
+        // The Kani loop invariant below is intentionally vacuous (`true`) and
+        // is used only to enable loop-contract mode, not to encode these
+        // bounds or size properties directly.
         #[cfg_attr(kani, kani::loop_invariant(true))]
         for i in 0..len {
             // SAFETY: since Self: TrustedRandomAccessNoCoerce we can trust the size-hint to
