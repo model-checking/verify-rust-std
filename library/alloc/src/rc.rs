@@ -4461,7 +4461,8 @@ mod kani_rc_harness_helpers {
         unsafe {
             let sz: usize = kani::any();
             kani::assume(sz <= cap);
-            // Keep macOS CI from timing out or running out of memory.
+            // Bound the macOS CI search space to avoid CBMC timeouts / memory pressure.
+            // Linux/Ubuntu CI keeps the original, less-constrained path.
             #[cfg(target_os = "macos")]
             kani::assume(sz <= 1024);
             v.set_len(sz);
@@ -4482,7 +4483,8 @@ mod kani_rc_harness_helpers {
 
     pub(super) fn nondet_rc_slice<T>(vec: &Vec<T>) -> &[T] {
         let len = vec.len();
-        // Keep macOS CI from timing out or running out of memory.
+        // Bound the macOS CI search space to avoid CBMC timeouts / memory pressure.
+        // Linux/Ubuntu CI keeps the original, less-constrained path.
         #[cfg(target_os = "macos")]
         kani::assume(len <= 1024);
         kani::assume(rc_slice_layout_ok::<T>(len));
@@ -4614,15 +4616,6 @@ mod verify {
                 let _: Rc<[$elem]> = unsafe { Rc::from_raw(ptr) };
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Rc::<dyn Any>::from_raw)]
-            pub fn $name() {
-                let rc: Rc<$ty> = Rc::new(kani::any::<$ty>());
-                let rc: Rc<dyn Any> = rc;
-                let ptr: *const dyn Any = Rc::into_raw(rc);
-                let _: Rc<dyn Any> = unsafe { Rc::from_raw(ptr) };
-            }
-        };
     }
 
     gen_from_raw_sized_harness!(harness_rc_from_raw_i8, i8);
@@ -4644,45 +4637,6 @@ mod verify {
     gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u32, [u32]);
     gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u64, [u64]);
     gen_from_raw_unsized_harness!(harness_rc_from_raw_vec_u128, [u128]);
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_i8, i8);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_i16, i16);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_i32, i32);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_i64, i64);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_i128, i128);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_u8, u8);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_u16, u16);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_u32, u32);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_u64, u64);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_u128, u128);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_bool, bool);
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_unit, ());
-*/
-/*
-    gen_from_raw_unsized_harness!(harness_rc_from_raw_dyn_any_array, [u8; 4]);
-*/
 
     // Rc::increment_strong_count harnesses.
     macro_rules! gen_increment_strong_count_sized_harness {
@@ -4715,19 +4669,6 @@ mod verify {
                 }
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Rc::<dyn Any>::increment_strong_count)]
-            pub fn $name() {
-                let rc: Rc<$ty> = Rc::new(kani::any::<$ty>());
-                let rc: Rc<dyn Any> = rc;
-                let ptr: *const dyn Any = Rc::into_raw(rc);
-                unsafe {
-                    Rc::<dyn Any>::increment_strong_count(ptr);
-                    let _recovered: Rc<dyn Any> = Rc::from_raw(ptr);
-                    Rc::<dyn Any>::decrement_strong_count(ptr);
-                }
-            }
-        };
     }
 
     gen_increment_strong_count_sized_harness!(harness_increment_strong_count_i8, i8);
@@ -4749,48 +4690,6 @@ mod verify {
     gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_vec_u32, [u32]);
     gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_vec_u64, [u64]);
     gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_vec_u128, [u128]);
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_i8, i8);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_i16, i16);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_i32, i32);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_i64, i64);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_i128, i128);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_u8, u8);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_u16, u16);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_u32, u32);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_u64, u64);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_u128, u128);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_bool, bool);
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(harness_increment_strong_count_dyn_any_unit, ());
-*/
-/*
-    gen_increment_strong_count_unsized_harness!(
-        harness_increment_strong_count_dyn_any_array,
-        [u8; 4]
-    );
-*/
 
     // Rc::decrement_strong_count harnesses.
     macro_rules! gen_decrement_strong_count_sized_harness {
@@ -4823,19 +4722,6 @@ mod verify {
                 }
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Rc::<dyn Any>::decrement_strong_count)]
-            pub fn $name() {
-                let rc: Rc<$ty> = Rc::new(kani::any::<$ty>());
-                let rc: Rc<dyn Any> = rc;
-                let ptr: *const dyn Any = Rc::into_raw(rc);
-                unsafe {
-                    Rc::<dyn Any>::increment_strong_count(ptr);
-                    Rc::<dyn Any>::decrement_strong_count(ptr);
-                    let _: Rc<dyn Any> = Rc::from_raw(ptr);
-                }
-            }
-        };
     }
 
     gen_decrement_strong_count_sized_harness!(harness_rc_decrement_strong_count_i8, i8);
@@ -4857,57 +4743,6 @@ mod verify {
     gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u32, [u32]);
     gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u64, [u64]);
     gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_vec_u128, [u128]);
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_i8, i8);
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_i16, i16);
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_i32, i32);
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_i64, i64);
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(
-        harness_rc_decrement_strong_count_dyn_any_i128,
-        i128
-    );
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_u8, u8);
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_u16, u16);
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_u32, u32);
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_u64, u64);
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(
-        harness_rc_decrement_strong_count_dyn_any_u128,
-        u128
-    );
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(
-        harness_rc_decrement_strong_count_dyn_any_bool,
-        bool
-    );
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(harness_rc_decrement_strong_count_dyn_any_unit, ());
-*/
-/*
-    gen_decrement_strong_count_unsized_harness!(
-        harness_rc_decrement_strong_count_dyn_any_array,
-        [u8; 4]
-    );
-*/
 
     // Rc::from_raw_in harnesses.
     macro_rules! gen_from_raw_in_sized_harness {
@@ -4932,15 +4767,6 @@ mod verify {
                 let _: Rc<[$elem], Global> = unsafe { Rc::from_raw_in(ptr, alloc) };
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Rc::<dyn Any, Global>::from_raw_in)]
-            pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                let (ptr, alloc): (*const dyn Any, Global) = Rc::into_raw_with_allocator(rc);
-                let _: Rc<dyn Any, Global> = unsafe { Rc::from_raw_in(ptr, alloc) };
-            }
-        };
     }
 
     gen_from_raw_in_sized_harness!(harness_rc_from_raw_in_i8, i8);
@@ -4962,45 +4788,6 @@ mod verify {
     gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u32, [u32]);
     gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u64, [u64]);
     gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_vec_u128, [u128]);
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_i8, i8);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_i16, i16);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_i32, i32);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_i64, i64);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_i128, i128);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_u8, u8);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_u16, u16);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_u32, u32);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_u64, u64);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_u128, u128);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_bool, bool);
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_unit, ());
-*/
-/*
-    gen_from_raw_in_unsized_harness!(harness_rc_from_raw_in_dyn_any_array, [u8; 4]);
-*/
 
     // Rc::increment_strong_count_in harnesses.
     macro_rules! gen_increment_strong_count_in_sized_harness {
@@ -5030,19 +4817,6 @@ mod verify {
                     Rc::<[$elem], Global>::increment_strong_count_in(ptr, Global);
                     let _: Rc<[$elem], Global> = Rc::<[$elem], Global>::from_raw_in(ptr, Global);
                     Rc::<[$elem], Global>::decrement_strong_count_in(ptr, Global);
-                }
-            }
-        };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Rc::<dyn Any, Global>::increment_strong_count_in)]
-            pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                let (ptr, _alloc): (*const dyn Any, Global) = Rc::into_raw_with_allocator(rc);
-                unsafe {
-                    Rc::<dyn Any, Global>::increment_strong_count_in(ptr, Global);
-                    let _: Rc<dyn Any, Global> = Rc::<dyn Any, Global>::from_raw_in(ptr, Global);
-                    Rc::<dyn Any, Global>::decrement_strong_count_in(ptr, Global);
                 }
             }
         };
@@ -5085,84 +4859,6 @@ mod verify {
         harness_rc_increment_strong_count_in_vec_u128,
         [u128]
     );
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_i8,
-        i8
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_i16,
-        i16
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_i32,
-        i32
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_i64,
-        i64
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_i128,
-        i128
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_u8,
-        u8
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_u16,
-        u16
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_u32,
-        u32
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_u64,
-        u64
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_u128,
-        u128
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_bool,
-        bool
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_unit,
-        ()
-    );
-*/
-/*
-    gen_increment_strong_count_in_unsized_harness!(
-        harness_rc_increment_strong_count_in_dyn_any_array,
-        [u8; 4]
-    );
-*/
 
     // Rc::decrement_strong_count_in harnesses.
     macro_rules! gen_decrement_strong_count_in_sized_harness {
@@ -5190,18 +4886,6 @@ mod verify {
                 let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc2);
                 unsafe {
                     Rc::<[$elem], Global>::decrement_strong_count_in(ptr, alloc);
-                }
-            }
-        };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Rc::<dyn Any, Global>::decrement_strong_count_in)]
-            pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                let rc2: Rc<dyn Any, Global> = rc.clone();
-                let (ptr, alloc): (*const dyn Any, Global) = Rc::into_raw_with_allocator(rc2);
-                unsafe {
-                    Rc::<dyn Any, Global>::decrement_strong_count_in(ptr, alloc);
                 }
             }
         };
@@ -5244,84 +4928,6 @@ mod verify {
         harness_rc_decrement_strong_count_in_vec_u128,
         [u128]
     );
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_i8,
-        i8
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_i16,
-        i16
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_i32,
-        i32
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_i64,
-        i64
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_i128,
-        i128
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_u8,
-        u8
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_u16,
-        u16
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_u32,
-        u32
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_u64,
-        u64
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_u128,
-        u128
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_bool,
-        bool
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_unit,
-        ()
-    );
-*/
-/*
-    gen_decrement_strong_count_in_unsized_harness!(
-        harness_rc_decrement_strong_count_in_dyn_any_array,
-        [u8; 4]
-    );
-*/
 
     // Rc::get_mut_unchecked harnesses.
     macro_rules! gen_get_mut_unchecked_sized_harness {
@@ -5352,16 +4958,6 @@ mod verify {
                 }
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Rc::<dyn Any>::get_mut_unchecked)]
-            pub fn $name() {
-                let rc: Rc<$ty> = Rc::new(kani::any::<$ty>());
-                let mut rc: Rc<dyn Any> = rc;
-                unsafe {
-                    let _: &mut dyn Any = Rc::get_mut_unchecked(&mut rc);
-                }
-            }
-        };
     }
 
     gen_get_mut_unchecked_sized_harness!(harness_get_mut_unchecked_i8, i8);
@@ -5383,45 +4979,6 @@ mod verify {
     gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_vec_u32, [u32]);
     gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_vec_u64, [u64]);
     gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_vec_u128, [u128]);
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_i8, i8);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_i16, i16);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_i32, i32);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_i64, i64);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_i128, i128);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_u8, u8);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_u16, u16);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_u32, u32);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_u64, u64);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_u128, u128);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_bool, bool);
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_unit, ());
-*/
-/*
-    gen_get_mut_unchecked_unsized_harness!(harness_get_mut_unchecked_dyn_any_array, [u8; 4]);
-*/
 
     // Rc<dyn Any>::downcast_unchecked harnesses.
     macro_rules! gen_downcast_unchecked_harness {
@@ -5492,16 +5049,6 @@ mod verify {
                 let _recovered: Weak<[$elem]> = unsafe { Weak::from_raw(ptr) };
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Weak::<dyn Any>::from_raw)]
-            pub fn $name() {
-                let strong: Rc<$ty> = Rc::new(kani::any::<$ty>());
-                let strong: Rc<dyn Any> = strong;
-                let weak: Weak<dyn Any> = Rc::downgrade(&strong);
-                let ptr: *const dyn Any = weak.into_raw();
-                let _recovered: Weak<dyn Any> = unsafe { Weak::from_raw(ptr) };
-            }
-        };
     }
 
     gen_weak_from_raw_sized_harness!(harness_weak_from_raw_i8, i8);
@@ -5523,45 +5070,6 @@ mod verify {
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u32, [u32]);
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u64, [u64]);
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u128, [u128]);
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_i8, i8);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_i16, i16);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_i32, i32);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_i64, i64);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_i128, i128);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_u8, u8);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_u16, u16);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_u32, u32);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_u64, u64);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_u128, u128);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_bool, bool);
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_unit, ());
-*/
-/*
-    gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_dyn_any_array, [u8; 4]);
-*/
 
     // Weak::from_raw_in harnesses.
     macro_rules! gen_weak_from_raw_in_sized_harness {
@@ -5588,16 +5096,6 @@ mod verify {
                 let _recovered: Weak<[$elem], Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof_for_contract(Weak::<dyn Any, Global>::from_raw_in)]
-            pub fn $name() {
-                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let strong: Rc<dyn Any, Global> = strong;
-                let weak: Weak<dyn Any, Global> = Rc::downgrade(&strong);
-                let (ptr, alloc): (*const dyn Any, Global) = weak.into_raw_with_allocator();
-                let _recovered: Weak<dyn Any, Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
-            }
-        };
     }
 
     gen_weak_from_raw_in_sized_harness!(harness_weak_from_raw_in_i8, i8);
@@ -5619,45 +5117,6 @@ mod verify {
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u32, [u32]);
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u64, [u64]);
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u128, [u128]);
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_i8, i8);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_i16, i16);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_i32, i32);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_i64, i64);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_i128, i128);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_u8, u8);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_u16, u16);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_u32, u32);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_u64, u64);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_u128, u128);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_bool, bool);
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_unit, ());
-*/
-/*
-    gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_dyn_any_array, [u8; 4]);
-*/
 
     // === SAFE FUNCTIONS (51 of 54) ===
 
@@ -5717,31 +5176,6 @@ mod verify {
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 let _ = Rc::<[$elem], Global>::get_mut(&mut rc);
-            }
-        };
-        ($(#[$unique_attr:meta])* $unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
-            $(#[$unique_attr])*
-            #[kani::proof]
-            pub fn $unique() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let mut rc: Rc<dyn Any, Global> = rc;
-                let _ = Rc::<dyn Any, Global>::get_mut(&mut rc);
-            }
-
-            #[kani::proof]
-            pub fn $shared() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let mut rc: Rc<dyn Any, Global> = rc;
-                let _shared: Rc<dyn Any, Global> = Rc::clone(&rc);
-                let _ = Rc::<dyn Any, Global>::get_mut(&mut rc);
-            }
-
-            #[kani::proof]
-            pub fn $weak_present() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let mut rc: Rc<dyn Any, Global> = rc;
-                let _weak: Weak<dyn Any, Global> = Rc::downgrade(&rc);
-                let _ = Rc::<dyn Any, Global>::get_mut(&mut rc);
             }
         };
     }
@@ -5849,110 +5283,6 @@ mod verify {
         harness_get_mut_vec_u128_weak_present_none,
         [u128]
     );
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_i8_unique_some,
-        harness_get_mut_dyn_any_i8_shared_none,
-        harness_get_mut_dyn_any_i8_weak_present_none,
-        i8
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_i16_unique_some,
-        harness_get_mut_dyn_any_i16_shared_none,
-        harness_get_mut_dyn_any_i16_weak_present_none,
-        i16
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_i32_unique_some,
-        harness_get_mut_dyn_any_i32_shared_none,
-        harness_get_mut_dyn_any_i32_weak_present_none,
-        i32
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_i64_unique_some,
-        harness_get_mut_dyn_any_i64_shared_none,
-        harness_get_mut_dyn_any_i64_weak_present_none,
-        i64
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_i128_unique_some,
-        harness_get_mut_dyn_any_i128_shared_none,
-        harness_get_mut_dyn_any_i128_weak_present_none,
-        i128
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_u8_unique_some,
-        harness_get_mut_dyn_any_u8_shared_none,
-        harness_get_mut_dyn_any_u8_weak_present_none,
-        u8
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_u16_unique_some,
-        harness_get_mut_dyn_any_u16_shared_none,
-        harness_get_mut_dyn_any_u16_weak_present_none,
-        u16
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_u32_unique_some,
-        harness_get_mut_dyn_any_u32_shared_none,
-        harness_get_mut_dyn_any_u32_weak_present_none,
-        u32
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_u64_unique_some,
-        harness_get_mut_dyn_any_u64_shared_none,
-        harness_get_mut_dyn_any_u64_weak_present_none,
-        u64
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_u128_unique_some,
-        harness_get_mut_dyn_any_u128_shared_none,
-        harness_get_mut_dyn_any_u128_weak_present_none,
-        u128
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_bool_unique_some,
-        harness_get_mut_dyn_any_bool_shared_none,
-        harness_get_mut_dyn_any_bool_weak_present_none,
-        bool
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_unit_unique_some,
-        harness_get_mut_dyn_any_unit_shared_none,
-        harness_get_mut_dyn_any_unit_weak_present_none,
-        ()
-    );
-*/
-/*
-    gen_get_mut_unsized_harness!(
-        harness_get_mut_dyn_any_array_unique_some,
-        harness_get_mut_dyn_any_array_shared_none,
-        harness_get_mut_dyn_any_array_weak_present_none,
-        [u8; 4]
-    );
-*/
 
     // `Rc::make_mut` has three behavior-defining states:
     // 1) `strong_count == 1` and `weak_count == 0`: return mutable access in place (no clone, no move);
@@ -5964,7 +5294,7 @@ mod verify {
     // - shared: keep one extra strong clone alive before `make_mut`;
     // - weak-present: keep one weak reference alive before `make_mut`.
     // Rc::make_mut harnesses.
-    macro_rules! gen_make_mut_harness {
+    macro_rules! gen_make_mut_sized_harness {
         ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $unique() {
@@ -6024,73 +5354,73 @@ mod verify {
         };
     }
 
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_i8_unique,
         harness_make_mut_i8_shared,
         harness_make_mut_i8_weak_present,
         i8
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_i16_unique,
         harness_make_mut_i16_shared,
         harness_make_mut_i16_weak_present,
         i16
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_i32_unique,
         harness_make_mut_i32_shared,
         harness_make_mut_i32_weak_present,
         i32
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_i64_unique,
         harness_make_mut_i64_shared,
         harness_make_mut_i64_weak_present,
         i64
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_i128_unique,
         harness_make_mut_i128_shared,
         harness_make_mut_i128_weak_present,
         i128
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_u8_unique,
         harness_make_mut_u8_shared,
         harness_make_mut_u8_weak_present,
         u8
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_u16_unique,
         harness_make_mut_u16_shared,
         harness_make_mut_u16_weak_present,
         u16
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_u32_unique,
         harness_make_mut_u32_shared,
         harness_make_mut_u32_weak_present,
         u32
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_u64_unique,
         harness_make_mut_u64_shared,
         harness_make_mut_u64_weak_present,
         u64
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_u128_unique,
         harness_make_mut_u128_shared,
         harness_make_mut_u128_weak_present,
         u128
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_unit_unique,
         harness_make_mut_unit_shared,
         harness_make_mut_unit_weak_present,
         ()
     );
-    gen_make_mut_harness!(
+    gen_make_mut_sized_harness!(
         harness_make_mut_arr4_unique,
         harness_make_mut_arr4_shared,
         harness_make_mut_arr4_weak_present,
@@ -6230,14 +5560,6 @@ mod verify {
                 let _ = Rc::<[$elem], Global>::from_box_in(src);
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let boxed: Box<$ty, Global> = Box::new_in(kani::any::<$ty>(), Global);
-                let src: Box<dyn Any, Global> = boxed;
-                let _ = Rc::<dyn Any, Global>::from_box_in(src);
-            }
-        };
     }
 
     gen_from_box_in_sized_harness!(harness_from_box_in_i8, i8);
@@ -6259,45 +5581,6 @@ mod verify {
     gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u32, [u32]);
     gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u64, [u64]);
     gen_from_box_in_unsized_harness!(harness_from_box_in_vec_u128, [u128]);
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_i8, i8);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_i16, i16);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_i32, i32);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_i64, i64);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_i128, i128);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_u8, u8);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_u16, u16);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_u32, u32);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_u64, u64);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_u128, u128);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_bool, bool);
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_unit, ());
-*/
-/*
-    gen_from_box_in_unsized_harness!(harness_from_box_in_dyn_any_array, [u8; 4]);
-*/
 
     // `Weak::as_ptr` has two branches:
     // 1) `is_dangling(ptr)` is true: returns the sentinel pointer itself.
@@ -6352,28 +5635,6 @@ mod verify {
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
                 let _ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
-            }
-        };
-        ($live:ident, $dangling:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $live() {
-                // `strong` stays alive in this function scope.
-                // `Rc::downgrade(&strong)` therefore points to a real allocation, not sentinel.
-                // So `Weak::as_ptr` goes to `is_dangling == false` branch.
-                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let strong: Rc<dyn Any, Global> = strong;
-                let weak: Weak<dyn Any, Global> = Rc::downgrade(&strong);
-                let _ptr: *const dyn Any = Weak::<dyn Any, Global>::as_ptr(&weak);
-            }
-
-            #[kani::proof]
-            pub fn $dangling() {
-                // `Weak::new_in` constructs an empty weak with sentinel address (`usize::MAX`).
-                // `is_dangling` checks exactly this sentinel encoding.
-                // So `Weak::as_ptr` goes to `is_dangling == true` branch.
-                let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let weak: Weak<dyn Any, Global> = weak;
-                let _ptr: *const dyn Any = Weak::<dyn Any, Global>::as_ptr(&weak);
             }
         };
     }
@@ -6469,97 +5730,6 @@ mod verify {
         harness_weak_as_ptr_vec_u128_dangling,
         [u128]
     );
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_i8_live,
-        harness_weak_as_ptr_dyn_any_i8_dangling,
-        i8
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_i16_live,
-        harness_weak_as_ptr_dyn_any_i16_dangling,
-        i16
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_i32_live,
-        harness_weak_as_ptr_dyn_any_i32_dangling,
-        i32
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_i64_live,
-        harness_weak_as_ptr_dyn_any_i64_dangling,
-        i64
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_i128_live,
-        harness_weak_as_ptr_dyn_any_i128_dangling,
-        i128
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_u8_live,
-        harness_weak_as_ptr_dyn_any_u8_dangling,
-        u8
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_u16_live,
-        harness_weak_as_ptr_dyn_any_u16_dangling,
-        u16
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_u32_live,
-        harness_weak_as_ptr_dyn_any_u32_dangling,
-        u32
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_u64_live,
-        harness_weak_as_ptr_dyn_any_u64_dangling,
-        u64
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_u128_live,
-        harness_weak_as_ptr_dyn_any_u128_dangling,
-        u128
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_bool_live,
-        harness_weak_as_ptr_dyn_any_bool_dangling,
-        bool
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_unit_live,
-        harness_weak_as_ptr_dyn_any_unit_dangling,
-        ()
-    );
-*/
-/*
-    gen_weak_as_ptr_unsized_harness!(
-        harness_weak_as_ptr_dyn_any_array_live,
-        harness_weak_as_ptr_dyn_any_array_dangling,
-        [u8; 4]
-    );
-*/
 
     // `Weak::into_raw_with_allocator` itself has no explicit `if/else`,
     // but it calls `Weak::as_ptr()`, whose control flow depends on weak state:
@@ -6596,7 +5766,7 @@ mod verify {
         };
     }
 
-    // Unsized (`T = [E]` or `T = dyn Any`) also covers two states:
+    // Unsized (`T = [E]`) also covers two states:
     // - live: build an unsized weak from an in-scope strong Rc;
     // - dangling: start from a sized sentinel weak and coerce to the unsized type.
     macro_rules! gen_weak_into_raw_with_allocator_unsized_harness {
@@ -6622,30 +5792,6 @@ mod verify {
                     Weak::<[$elem], Global>::into_raw_with_allocator(weak);
                 let _recovered: Weak<[$elem], Global> =
                     unsafe { Weak::<[$elem], Global>::from_raw_in(ptr, alloc) };
-            }
-        };
-        ($live:ident, $dangling:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $live() {
-                // Live unsized path: weak points into a real dyn Any allocation.
-                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let strong: Rc<dyn Any, Global> = strong;
-                let weak: Weak<dyn Any, Global> = Rc::downgrade(&strong);
-                let (ptr, alloc): (*const dyn Any, Global) =
-                    Weak::<dyn Any, Global>::into_raw_with_allocator(weak);
-                let _recovered: Weak<dyn Any, Global> =
-                    unsafe { Weak::<dyn Any, Global>::from_raw_in(ptr, alloc) };
-            }
-
-            #[kani::proof]
-            pub fn $dangling() {
-                // Dangling unsized path: sentinel survives coercion to dyn Any.
-                let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let weak: Weak<dyn Any, Global> = weak;
-                let (ptr, alloc): (*const dyn Any, Global) =
-                    Weak::<dyn Any, Global>::into_raw_with_allocator(weak);
-                let _recovered: Weak<dyn Any, Global> =
-                    unsafe { Weak::<dyn Any, Global>::from_raw_in(ptr, alloc) };
             }
         };
     }
@@ -6736,97 +5882,6 @@ mod verify {
         harness_weak_into_raw_with_allocator_vec_u128_dangling,
         [u128]
     );
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_i8_live,
-        harness_weak_into_raw_with_allocator_dyn_any_i8_dangling,
-        i8
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_i16_live,
-        harness_weak_into_raw_with_allocator_dyn_any_i16_dangling,
-        i16
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_i32_live,
-        harness_weak_into_raw_with_allocator_dyn_any_i32_dangling,
-        i32
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_i64_live,
-        harness_weak_into_raw_with_allocator_dyn_any_i64_dangling,
-        i64
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_i128_live,
-        harness_weak_into_raw_with_allocator_dyn_any_i128_dangling,
-        i128
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_u8_live,
-        harness_weak_into_raw_with_allocator_dyn_any_u8_dangling,
-        u8
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_u16_live,
-        harness_weak_into_raw_with_allocator_dyn_any_u16_dangling,
-        u16
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_u32_live,
-        harness_weak_into_raw_with_allocator_dyn_any_u32_dangling,
-        u32
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_u64_live,
-        harness_weak_into_raw_with_allocator_dyn_any_u64_dangling,
-        u64
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_u128_live,
-        harness_weak_into_raw_with_allocator_dyn_any_u128_dangling,
-        u128
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_bool_live,
-        harness_weak_into_raw_with_allocator_dyn_any_bool_dangling,
-        bool
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_unit_live,
-        harness_weak_into_raw_with_allocator_dyn_any_unit_dangling,
-        ()
-    );
-*/
-/*
-    gen_weak_into_raw_with_allocator_unsized_harness!(
-        harness_weak_into_raw_with_allocator_dyn_any_array_live,
-        harness_weak_into_raw_with_allocator_dyn_any_array_dangling,
-        [u8; 4]
-    );
-*/
 
     // `Weak::upgrade` has three behavior paths:
     // 1) `self.inner()?` returns `None` (dangling sentinel weak): returns `None`.
@@ -6866,7 +5921,7 @@ mod verify {
         };
     }
 
-    // Unsized (`T = [E]` or `T = dyn Any`) with the same 3-path coverage strategy.
+    // Unsized (`T = [E]`) with the same 3-path coverage strategy.
     macro_rules! gen_weak_upgrade_unsized_harness {
         ($live:ident, $strong_zero:ident, $dangling:ident, [$elem:ty]) => {
             #[kani::proof]
@@ -6894,34 +5949,6 @@ mod verify {
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
                 let _ = Weak::<[$elem], Global>::upgrade(&weak);
-            }
-        };
-        ($live:ident, $strong_zero:ident, $dangling:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $live() {
-                // Path (3): downgrade from a live `Rc<dyn Any>`.
-                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let strong: Rc<dyn Any, Global> = strong;
-                let weak: Weak<dyn Any, Global> = Rc::downgrade(&strong);
-                let _ = Weak::<dyn Any, Global>::upgrade(&weak);
-            }
-
-            #[kani::proof]
-            pub fn $strong_zero() {
-                // Path (2): dyn Any weak points to allocation, then strong owner is dropped.
-                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let strong: Rc<dyn Any, Global> = strong;
-                let weak: Weak<dyn Any, Global> = Rc::downgrade(&strong);
-                drop(strong);
-                let _ = Weak::<dyn Any, Global>::upgrade(&weak);
-            }
-
-            #[kani::proof]
-            pub fn $dangling() {
-                // Path (1): sentinel weak coerced to dyn Any.
-                let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let weak: Weak<dyn Any, Global> = weak;
-                let _ = Weak::<dyn Any, Global>::upgrade(&weak);
             }
         };
     }
@@ -7035,110 +6062,6 @@ mod verify {
         harness_weak_upgrade_vec_u128_dangling,
         [u128]
     );
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_i8_live,
-        harness_weak_upgrade_dyn_any_i8_strong_zero,
-        harness_weak_upgrade_dyn_any_i8_dangling,
-        i8
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_i16_live,
-        harness_weak_upgrade_dyn_any_i16_strong_zero,
-        harness_weak_upgrade_dyn_any_i16_dangling,
-        i16
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_i32_live,
-        harness_weak_upgrade_dyn_any_i32_strong_zero,
-        harness_weak_upgrade_dyn_any_i32_dangling,
-        i32
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_i64_live,
-        harness_weak_upgrade_dyn_any_i64_strong_zero,
-        harness_weak_upgrade_dyn_any_i64_dangling,
-        i64
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_i128_live,
-        harness_weak_upgrade_dyn_any_i128_strong_zero,
-        harness_weak_upgrade_dyn_any_i128_dangling,
-        i128
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_u8_live,
-        harness_weak_upgrade_dyn_any_u8_strong_zero,
-        harness_weak_upgrade_dyn_any_u8_dangling,
-        u8
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_u16_live,
-        harness_weak_upgrade_dyn_any_u16_strong_zero,
-        harness_weak_upgrade_dyn_any_u16_dangling,
-        u16
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_u32_live,
-        harness_weak_upgrade_dyn_any_u32_strong_zero,
-        harness_weak_upgrade_dyn_any_u32_dangling,
-        u32
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_u64_live,
-        harness_weak_upgrade_dyn_any_u64_strong_zero,
-        harness_weak_upgrade_dyn_any_u64_dangling,
-        u64
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_u128_live,
-        harness_weak_upgrade_dyn_any_u128_strong_zero,
-        harness_weak_upgrade_dyn_any_u128_dangling,
-        u128
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_bool_live,
-        harness_weak_upgrade_dyn_any_bool_strong_zero,
-        harness_weak_upgrade_dyn_any_bool_dangling,
-        bool
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_unit_live,
-        harness_weak_upgrade_dyn_any_unit_strong_zero,
-        harness_weak_upgrade_dyn_any_unit_dangling,
-        ()
-    );
-*/
-/*
-    gen_weak_upgrade_unsized_harness!(
-        harness_weak_upgrade_dyn_any_array_live,
-        harness_weak_upgrade_dyn_any_array_strong_zero,
-        harness_weak_upgrade_dyn_any_array_dangling,
-        [u8; 4]
-    );
-*/
 
     // `Weak::inner` has exactly two branches:
     // 1) `is_dangling(self.ptr.as_ptr()) == true`  -> `None`
@@ -7167,7 +6090,7 @@ mod verify {
         };
     }
 
-    // Unsized (`T = [E]` or `T = dyn Any`) with the same two-branch coverage.
+    // Unsized (`T = [E]`) with the same two-branch coverage.
     macro_rules! gen_weak_inner_unsized_harness {
         ($some:ident, $none:ident, [$elem:ty]) => {
             #[kani::proof]
@@ -7185,24 +6108,6 @@ mod verify {
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
                 let _inner = Weak::<[$elem], Global>::inner(&weak);
-            }
-        };
-        ($some:ident, $none:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $some() {
-                // Branch (2): non-dangling weak from live `Rc<dyn Any>`.
-                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let strong: Rc<dyn Any, Global> = strong;
-                let weak: Weak<dyn Any, Global> = Rc::downgrade(&strong);
-                let _inner = Weak::<dyn Any, Global>::inner(&weak);
-            }
-
-            #[kani::proof]
-            pub fn $none() {
-                // Branch (1): sentinel weak remains dangling after coercion to dyn Any.
-                let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let weak: Weak<dyn Any, Global> = weak;
-                let _inner = Weak::<dyn Any, Global>::inner(&weak);
             }
         };
     }
@@ -7249,97 +6154,6 @@ mod verify {
         harness_weak_inner_vec_u128_none,
         [u128]
     );
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_i8_some,
-        harness_weak_inner_dyn_any_i8_none,
-        i8
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_i16_some,
-        harness_weak_inner_dyn_any_i16_none,
-        i16
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_i32_some,
-        harness_weak_inner_dyn_any_i32_none,
-        i32
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_i64_some,
-        harness_weak_inner_dyn_any_i64_none,
-        i64
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_i128_some,
-        harness_weak_inner_dyn_any_i128_none,
-        i128
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_u8_some,
-        harness_weak_inner_dyn_any_u8_none,
-        u8
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_u16_some,
-        harness_weak_inner_dyn_any_u16_none,
-        u16
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_u32_some,
-        harness_weak_inner_dyn_any_u32_none,
-        u32
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_u64_some,
-        harness_weak_inner_dyn_any_u64_none,
-        u64
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_u128_some,
-        harness_weak_inner_dyn_any_u128_none,
-        u128
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_bool_some,
-        harness_weak_inner_dyn_any_bool_none,
-        bool
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_unit_some,
-        harness_weak_inner_dyn_any_unit_none,
-        ()
-    );
-*/
-/*
-    gen_weak_inner_unsized_harness!(
-        harness_weak_inner_dyn_any_array_some,
-        harness_weak_inner_dyn_any_array_none,
-        [u8; 4]
-    );
-*/
 
     // `Drop for Weak` executes the following decision chain:
     // 1) `self.inner()` checks whether `self.ptr` is sentinel-dangling.
@@ -7393,7 +6207,7 @@ mod verify {
         };
     }
 
-    // Unsized (`T = [E]` or `T = dyn Any`) follows the exact same three-path state machine.
+    // Unsized (`T = [E]`) follows the exact same three-path state machine.
     // The only difference is construction:
     // - live / after-strong-drop use a real unsized allocation;
     // - dangling uses sentinel weak coerced to the unsized type.
@@ -7430,35 +6244,6 @@ mod verify {
                 // Coerce metadata to slice form; pointer remains sentinel.
                 let weak: Weak<[$elem], Global> = weak_arr;
                 // Dropping weak triggers early-return (`inner() == None`).
-                let _ = weak;
-            }
-        };
-        ($live:ident, $after_drop:ident, $dangling:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $live() {
-                // Build live dyn Any allocation and keep strong owner alive.
-                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let strong: Rc<dyn Any, Global> = strong;
-                {
-                    let _weak: Weak<dyn Any, Global> = Rc::downgrade(&strong);
-                }
-            }
-
-            #[kani::proof]
-            pub fn $after_drop() {
-                // Create explicit dyn Any weak, then drop the strong owner first.
-                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let strong: Rc<dyn Any, Global> = strong;
-                let weak: Weak<dyn Any, Global> = Rc::downgrade(&strong);
-                drop(strong);
-                let _ = weak;
-            }
-
-            #[kani::proof]
-            pub fn $dangling() {
-                // Sentinel weak remains dangling after coercion to dyn Any.
-                let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let weak: Weak<dyn Any, Global> = weak;
                 let _ = weak;
             }
         };
@@ -7572,110 +6357,6 @@ mod verify {
         harness_drop_weak_vec_u128_dangling,
         [u128]
     );
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_i8_live,
-        harness_drop_weak_dyn_any_i8_after_strong_drop,
-        harness_drop_weak_dyn_any_i8_dangling,
-        i8
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_i16_live,
-        harness_drop_weak_dyn_any_i16_after_strong_drop,
-        harness_drop_weak_dyn_any_i16_dangling,
-        i16
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_i32_live,
-        harness_drop_weak_dyn_any_i32_after_strong_drop,
-        harness_drop_weak_dyn_any_i32_dangling,
-        i32
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_i64_live,
-        harness_drop_weak_dyn_any_i64_after_strong_drop,
-        harness_drop_weak_dyn_any_i64_dangling,
-        i64
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_i128_live,
-        harness_drop_weak_dyn_any_i128_after_strong_drop,
-        harness_drop_weak_dyn_any_i128_dangling,
-        i128
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_u8_live,
-        harness_drop_weak_dyn_any_u8_after_strong_drop,
-        harness_drop_weak_dyn_any_u8_dangling,
-        u8
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_u16_live,
-        harness_drop_weak_dyn_any_u16_after_strong_drop,
-        harness_drop_weak_dyn_any_u16_dangling,
-        u16
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_u32_live,
-        harness_drop_weak_dyn_any_u32_after_strong_drop,
-        harness_drop_weak_dyn_any_u32_dangling,
-        u32
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_u64_live,
-        harness_drop_weak_dyn_any_u64_after_strong_drop,
-        harness_drop_weak_dyn_any_u64_dangling,
-        u64
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_u128_live,
-        harness_drop_weak_dyn_any_u128_after_strong_drop,
-        harness_drop_weak_dyn_any_u128_dangling,
-        u128
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_bool_live,
-        harness_drop_weak_dyn_any_bool_after_strong_drop,
-        harness_drop_weak_dyn_any_bool_dangling,
-        bool
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_unit_live,
-        harness_drop_weak_dyn_any_unit_after_strong_drop,
-        harness_drop_weak_dyn_any_unit_dangling,
-        ()
-    );
-*/
-/*
-    gen_drop_weak_unsized_harness!(
-        harness_drop_weak_dyn_any_array_live,
-        harness_drop_weak_dyn_any_array_after_strong_drop,
-        harness_drop_weak_dyn_any_array_dangling,
-        [u8; 4]
-    );
-*/
 
     // `inc_strong` has two behavior paths:
     // 1) non-overflow path: `strong.wrapping_add(1) != 0`, then return normally;
@@ -7718,20 +6399,6 @@ mod verify {
                 let _ = rc;
             }
         };
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create `Rc<dyn Any>` through coercion from a concrete source type.
-                let rc_src: Rc<$src_ty, Global> = Rc::new_in(kani::any::<$src_ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc_src;
-                let inner = rc.inner();
-                // Call under normal non-overflow state.
-                inner.inc_strong();
-                // Restore count immediately to avoid leaking one strong reference.
-                inner.dec_strong();
-                let _ = rc;
-            }
-        };
     }
 
     #[kani::proof]
@@ -7767,45 +6434,6 @@ mod verify {
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u32, [u32]);
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u64, [u64]);
     gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_vec_u128, [u128]);
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_i8, i8);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_i16, i16);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_i32, i32);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_i64, i64);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_i128, i128);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_u8, u8);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_u16, u16);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_u32, u32);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_u64, u64);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_u128, u128);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_bool, bool);
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_unit, ());
-*/
-/*
-    gen_inc_strong_non_overflow_unsized_harness!(harness_inc_strong_dyn_any_array, [u8; 4]);
-*/
 
     // `inc_weak` has two behavior paths controlled by the post-increment value:
     // 1) non-overflow path: `weak.wrapping_add(1) != 0`, function returns normally;
@@ -7817,7 +6445,7 @@ mod verify {
     // - Path (2): force `weak == usize::MAX` immediately before calling `inc_weak`.
     //
     // Coverage in this module:
-    // - `*_non_overflow` harnesses cover path (1) for sized, unsized, and `dyn Any`.
+    // - `*_non_overflow` harnesses cover path (1) for sized and unsized values.
     // - `harness_inc_weak_overflow_should_panic` covers path (2).
     // RcInnerPtr::inc_weak harnesses.
     macro_rules! gen_inc_weak_non_overflow_sized_harness {
@@ -7847,20 +6475,6 @@ mod verify {
                 // Trigger path (1) on an unsized payload.
                 inner.inc_weak();
                 // Restore the weak count.
-                inner.dec_weak();
-                let _ = rc;
-            }
-        };
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build trait object `Rc<dyn Any>` from a concrete source type.
-                let rc_src: Rc<$src_ty, Global> = Rc::new_in(kani::any::<$src_ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc_src;
-                let inner = rc.inner();
-                // Trigger path (1) in the same way as sized values.
-                inner.inc_weak();
-                // Restore weak count immediately.
                 inner.dec_weak();
                 let _ = rc;
             }
@@ -7900,45 +6514,6 @@ mod verify {
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u32, [u32]);
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u64, [u64]);
     gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_vec_u128, [u128]);
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_i8, i8);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_i16, i16);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_i32, i32);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_i64, i64);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_i128, i128);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_u8, u8);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_u16, u16);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_u32, u32);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_u64, u64);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_u128, u128);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_bool, bool);
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_unit, ());
-*/
-/*
-    gen_inc_weak_non_overflow_unsized_harness!(harness_inc_weak_dyn_any_array, [u8; 4]);
-*/
 
     // UniqueRc::into_rc harnesses.
     macro_rules! gen_uniquerc_into_rc_sized_harness {
@@ -7947,18 +6522,6 @@ mod verify {
             pub fn $name() {
                 let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
                 let _rc: Rc<$ty, Global> = UniqueRc::into_rc(unique);
-            }
-        };
-    }
-
-    macro_rules! gen_uniquerc_into_rc_unsized_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let unique_src: UniqueRc<$src_ty, Global> =
-                    UniqueRc::new_in(kani::any::<$src_ty>(), Global);
-                let unique_dyn: UniqueRc<dyn Any, Global> = unique_src;
-                let _rc: Rc<dyn Any, Global> = UniqueRc::into_rc(unique_dyn);
             }
         };
     }
@@ -7976,45 +6539,6 @@ mod verify {
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_bool, bool);
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_unit, ());
     gen_uniquerc_into_rc_sized_harness!(harness_uniquerc_into_rc_array, [u8; 4]);
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_i8, i8);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_i16, i16);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_i32, i32);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_i64, i64);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_i128, i128);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_u8, u8);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_u16, u16);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_u32, u32);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_u64, u64);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_u128, u128);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_bool, bool);
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_unit, ());
-*/
-/*
-    gen_uniquerc_into_rc_unsized_harness!(harness_uniquerc_into_rc_dyn_any_array, [u8; 4]);
-*/
 
     // UniqueRc::downgrade harnesses.
     macro_rules! gen_downgrade_sized_harness {
@@ -8023,18 +6547,6 @@ mod verify {
             pub fn $name() {
                 let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
                 let _weak: Weak<$ty, Global> = UniqueRc::downgrade(&unique);
-            }
-        };
-    }
-
-    macro_rules! gen_downgrade_unsized_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let unique_src: UniqueRc<$src_ty, Global> =
-                    UniqueRc::new_in(kani::any::<$src_ty>(), Global);
-                let unique_dyn: UniqueRc<dyn Any, Global> = unique_src;
-                let _weak: Weak<dyn Any, Global> = UniqueRc::downgrade(&unique_dyn);
             }
         };
     }
@@ -8052,45 +6564,6 @@ mod verify {
     gen_downgrade_sized_harness!(harness_downgrade_unit, ());
     gen_downgrade_sized_harness!(harness_downgrade_array, [u8; 4]);
     gen_downgrade_sized_harness!(harness_downgrade_bool, bool);
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_i8, i8);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_i16, i16);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_i32, i32);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_i64, i64);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_i128, i128);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_u8, u8);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_u16, u16);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_u32, u32);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_u64, u64);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_u128, u128);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_bool, bool);
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_unit, ());
-*/
-/*
-    gen_downgrade_unsized_harness!(harness_downgrade_dyn_any_array, [u8; 4]);
-*/
 
     // UniqueRc::deref_mut harnesses.
     macro_rules! gen_deref_mut_sized_harness {
@@ -8100,18 +6573,6 @@ mod verify {
                 let mut unique: UniqueRc<$ty, Global> =
                     UniqueRc::new_in(kani::any::<$ty>(), Global);
                 let _: &mut $ty = core::ops::DerefMut::deref_mut(&mut unique);
-            }
-        };
-    }
-
-    macro_rules! gen_deref_mut_unsized_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let unique_src: UniqueRc<$src_ty, Global> =
-                    UniqueRc::new_in(kani::any::<$src_ty>(), Global);
-                let mut unique_dyn: UniqueRc<dyn Any, Global> = unique_src;
-                let _: &mut dyn Any = core::ops::DerefMut::deref_mut(&mut unique_dyn);
             }
         };
     }
@@ -8129,45 +6590,6 @@ mod verify {
     gen_deref_mut_sized_harness!(harness_deref_mut_bool, bool);
     gen_deref_mut_sized_harness!(harness_deref_mut_unit, ());
     gen_deref_mut_sized_harness!(harness_deref_mut_array, [u8; 4]);
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_i8, i8);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_i16, i16);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_i32, i32);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_i64, i64);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_i128, i128);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_u8, u8);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_u16, u16);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_u32, u32);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_u64, u64);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_u128, u128);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_bool, bool);
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_unit, ());
-*/
-/*
-    gen_deref_mut_unsized_harness!(harness_deref_mut_dyn_any_array, [u8; 4]);
-*/
 
     // UniqueRc::deref harnesses.
     macro_rules! gen_deref_sized_harness {
@@ -8176,18 +6598,6 @@ mod verify {
             pub fn $name() {
                 let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
                 let _: &$ty = core::ops::Deref::deref(&unique);
-            }
-        };
-    }
-
-    macro_rules! gen_deref_unsized_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let unique_src: UniqueRc<$src_ty, Global> =
-                    UniqueRc::new_in(kani::any::<$src_ty>(), Global);
-                let unique_dyn: UniqueRc<dyn Any, Global> = unique_src;
-                let _: &dyn Any = core::ops::Deref::deref(&unique_dyn);
             }
         };
     }
@@ -8205,45 +6615,6 @@ mod verify {
     gen_deref_sized_harness!(harness_deref_bool, bool);
     gen_deref_sized_harness!(harness_deref_unit, ());
     gen_deref_sized_harness!(harness_deref_array, [u8; 4]);
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_i8, i8);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_i16, i16);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_i32, i32);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_i64, i64);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_i128, i128);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_u8, u8);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_u16, u16);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_u32, u32);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_u64, u64);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_u128, u128);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_bool, bool);
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_unit, ());
-*/
-/*
-    gen_deref_unsized_harness!(harness_deref_dyn_any_array, [u8; 4]);
-*/
 
     // `UniqueRc::drop` has one branch that matters for allocator deallocation:
     // - after dropping value and calling `dec_weak()`,
@@ -8272,31 +6643,6 @@ mod verify {
                     let _dropped_strong = unique;
                 }
                 // Keep weak alive across the strong drop to preserve the branch condition.
-                let _ = weak;
-            }
-        };
-    }
-
-    macro_rules! gen_drop_unique_rc_unsized_harness {
-        ($unique:ident, $weak_present:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $unique() {
-                // Build `UniqueRc<dyn Any>` from a concrete source type and drop directly.
-                let unique_src: UniqueRc<$src_ty, Global> =
-                    UniqueRc::new_in(kani::any::<$src_ty>(), Global);
-                let _unique_dyn: UniqueRc<dyn Any, Global> = unique_src;
-            }
-
-            #[kani::proof]
-            pub fn $weak_present() {
-                // Build trait object, create weak alias, then drop strong owner.
-                let unique_src: UniqueRc<$src_ty, Global> =
-                    UniqueRc::new_in(kani::any::<$src_ty>(), Global);
-                let unique_dyn: UniqueRc<dyn Any, Global> = unique_src;
-                let weak: Weak<dyn Any, Global> = UniqueRc::downgrade(&unique_dyn);
-                {
-                    let _dropped_strong = unique_dyn;
-                }
                 let _ = weak;
             }
         };
@@ -8367,97 +6713,6 @@ mod verify {
         harness_drop_unique_rc_bool_weak_present,
         bool
     );
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_i8_unique,
-        harness_drop_unique_rc_dyn_any_i8_weak_present,
-        i8
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_i16_unique,
-        harness_drop_unique_rc_dyn_any_i16_weak_present,
-        i16
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_i32_unique,
-        harness_drop_unique_rc_dyn_any_i32_weak_present,
-        i32
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_i64_unique,
-        harness_drop_unique_rc_dyn_any_i64_weak_present,
-        i64
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_i128_unique,
-        harness_drop_unique_rc_dyn_any_i128_weak_present,
-        i128
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_u8_unique,
-        harness_drop_unique_rc_dyn_any_u8_weak_present,
-        u8
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_u16_unique,
-        harness_drop_unique_rc_dyn_any_u16_weak_present,
-        u16
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_u32_unique,
-        harness_drop_unique_rc_dyn_any_u32_weak_present,
-        u32
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_u64_unique,
-        harness_drop_unique_rc_dyn_any_u64_weak_present,
-        u64
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_u128_unique,
-        harness_drop_unique_rc_dyn_any_u128_weak_present,
-        u128
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_bool_unique,
-        harness_drop_unique_rc_dyn_any_bool_weak_present,
-        bool
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_unit_unique,
-        harness_drop_unique_rc_dyn_any_unit_weak_present,
-        ()
-    );
-*/
-/*
-    gen_drop_unique_rc_unsized_harness!(
-        harness_drop_unique_rc_dyn_any_array_unique,
-        harness_drop_unique_rc_dyn_any_array_weak_present,
-        [u8; 4]
-    );
-*/
 
     // UniqueRcUninit::new harnesses.
     macro_rules! gen_unique_rc_uninit_new_sized_harness {
@@ -8478,15 +6733,6 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let slice: &[$elem] = nondet_rc_slice(&vec);
                 let _uninit: UniqueRcUninit<[$elem], Global> = UniqueRcUninit::new(slice, Global);
-            }
-        };
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let value: $src_ty = kani::any::<$src_ty>();
-                let trait_obj: &dyn Any = &value;
-                let _uninit: UniqueRcUninit<dyn Any, Global> =
-                    UniqueRcUninit::new(trait_obj, Global);
             }
         };
     }
@@ -8510,45 +6756,6 @@ mod verify {
     gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u32, [u32]);
     gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u64, [u64]);
     gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_slice_u128, [u128]);
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_i8, i8);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_i16, i16);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_i32, i32);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_i64, i64);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_i128, i128);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_u8, u8);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_u16, u16);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_u32, u32);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_u64, u64);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_u128, u128);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_bool, bool);
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_unit, ());
-*/
-/*
-    gen_unique_rc_uninit_new_unsized_harness!(harness_unique_rc_uninit_new_dyn_any_array, [u8; 4]);
-*/
 
     // UniqueRcUninit::data_ptr harnesses.
     macro_rules! gen_data_ptr_sized_harness {
@@ -8573,16 +6780,6 @@ mod verify {
                 let _ptr: *mut [$elem] = uninit.data_ptr();
             }
         };
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let value: $src_ty = kani::any::<$src_ty>();
-                let trait_obj: &dyn Any = &value;
-                let mut uninit: UniqueRcUninit<dyn Any, Global> =
-                    UniqueRcUninit::new(trait_obj, Global);
-                let _ptr: *mut dyn Any = uninit.data_ptr();
-            }
-        };
     }
 
     gen_data_ptr_sized_harness!(harness_data_ptr_i8, i8);
@@ -8604,45 +6801,6 @@ mod verify {
     gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u32, [u32]);
     gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u64, [u64]);
     gen_data_ptr_unsized_harness!(harness_data_ptr_slice_u128, [u128]);
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_i8, i8);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_i16, i16);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_i32, i32);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_i64, i64);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_i128, i128);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_u8, u8);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_u16, u16);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_u32, u32);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_u64, u64);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_u128, u128);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_bool, bool);
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_unit, ());
-*/
-/*
-    gen_data_ptr_unsized_harness!(harness_data_ptr_dyn_any_array, [u8; 4]);
-*/
 
     // UniqueRcUninit::drop harnesses.
     macro_rules! gen_unique_rc_uninit_drop_sized_harness {
@@ -8662,15 +6820,6 @@ mod verify {
                 let vec = verifier_nondet_vec::<$elem>();
                 let slice = nondet_rc_slice(&vec);
                 let _uninit: UniqueRcUninit<[$elem], Global> = UniqueRcUninit::new(slice, Global);
-            }
-        };
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let value: $src_ty = kani::any::<$src_ty>();
-                let trait_obj: &dyn Any = &value;
-                let _uninit: UniqueRcUninit<dyn Any, Global> =
-                    UniqueRcUninit::new(trait_obj, Global);
             }
         };
     }
@@ -8694,48 +6843,6 @@ mod verify {
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u32, [u32]);
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u64, [u64]);
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u128, [u128]);
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_i8, i8);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_i16, i16);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_i32, i32);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_i64, i64);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_i128, i128);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_u8, u8);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_u16, u16);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_u32, u32);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_u64, u64);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_u128, u128);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_bool, bool);
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_dyn_any_unit, ());
-*/
-/*
-    gen_unique_rc_uninit_drop_unsized_harness!(
-        harness_unique_rc_uninit_drop_dyn_any_array,
-        [u8; 4]
-    );
-*/
 
     // RcInnerPtr::inner harnesses.
     macro_rules! gen_inner_sized_harness {
@@ -8754,14 +6861,6 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let _ = rc.inner();
-            }
-        };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
                 let _ = rc.inner();
             }
         };
@@ -8786,45 +6885,6 @@ mod verify {
     gen_inner_unsized_harness!(harness_inner_vec_u32, [u32]);
     gen_inner_unsized_harness!(harness_inner_vec_u64, [u64]);
     gen_inner_unsized_harness!(harness_inner_vec_u128, [u128]);
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_i8, i8);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_i16, i16);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_i32, i32);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_i64, i64);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_i128, i128);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_u8, u8);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_u16, u16);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_u32, u32);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_u64, u64);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_u128, u128);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_bool, bool);
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_unit, ());
-*/
-/*
-    gen_inner_unsized_harness!(harness_inner_dyn_any_array, [u8; 4]);
-*/
 
     // Rc::into_inner_with_allocator harnesses.
     macro_rules! gen_into_inner_with_allocator_harness {
@@ -8848,16 +6908,6 @@ mod verify {
                 let (ptr, alloc) = Rc::<[$elem], Global>::into_inner_with_allocator(rc);
                 let _recovered: Rc<[$elem], Global> =
                     unsafe { Rc::<[$elem], Global>::from_inner_in(ptr, alloc) };
-            }
-        };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                let (ptr, alloc) = Rc::<dyn Any, Global>::into_inner_with_allocator(rc);
-                let _recovered: Rc<dyn Any, Global> =
-                    unsafe { Rc::<dyn Any, Global>::from_inner_in(ptr, alloc) };
             }
         };
     }
@@ -8893,84 +6943,6 @@ mod verify {
         harness_into_inner_with_allocator_vec_u128,
         [u128]
     );
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_i8,
-        i8
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_i16,
-        i16
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_i32,
-        i32
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_i64,
-        i64
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_i128,
-        i128
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_u8,
-        u8
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_u16,
-        u16
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_u32,
-        u32
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_u64,
-        u64
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_u128,
-        u128
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_bool,
-        bool
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_unit,
-        ()
-    );
-*/
-/*
-    gen_into_inner_with_allocator_unsized_harness!(
-        harness_into_inner_with_allocator_dyn_any_array,
-        [u8; 4]
-    );
-*/
 
     // Rc::new harnesses.
     macro_rules! gen_rc_new_harness {
@@ -9678,16 +7650,6 @@ mod verify {
                 let _clone_ptr = Rc::<[$elem], Global>::as_ptr(&rc_clone);
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                let rc_clone: Rc<dyn Any, Global> = Rc::clone(&rc);
-                let _ptr = Rc::<dyn Any, Global>::as_ptr(&rc);
-                let _clone_ptr = Rc::<dyn Any, Global>::as_ptr(&rc_clone);
-            }
-        };
     }
 
     gen_as_ptr_harness!(harness_rc_as_ptr_i8, i8);
@@ -9709,45 +7671,6 @@ mod verify {
     gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u32, [u32]);
     gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u64, [u64]);
     gen_as_ptr_unsized_harness!(harness_rc_as_ptr_vec_u128, [u128]);
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_i8, i8);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_i16, i16);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_i32, i32);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_i64, i64);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_i128, i128);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_u8, u8);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_u16, u16);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_u32, u32);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_u64, u64);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_u128, u128);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_bool, bool);
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_unit, ());
-*/
-/*
-    gen_as_ptr_unsized_harness!(harness_rc_as_ptr_dyn_any_array, [u8; 4]);
-*/
 
     // Rc::copy_from_slice harnesses.
     macro_rules! gen_from_slice_copy_harness {
@@ -9847,41 +7770,6 @@ mod verify {
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
                 // Keep a weak owner so dropping `rc` sees strong == 0 with weak > 0.
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
-                {
-                    let _dropped = rc;
-                }
-                // Keep weak alive through the drop point.
-                let _ = weak;
-            }
-        };
-        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $unique() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                // Unique drop scenario: strong == 1, weak == 0.
-                let _ = rc;
-            }
-
-            #[kani::proof]
-            pub fn $shared() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                // Keep another strong owner alive so dropping `rc` sees strong > 1.
-                let rc_clone: Rc<dyn Any, Global> = Rc::clone(&rc);
-                {
-                    let _dropped = rc;
-                }
-                // Final drop happens when this last strong ref leaves scope.
-                let _ = rc_clone;
-            }
-
-            #[kani::proof]
-            pub fn $weak_present() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                // Keep a weak owner so dropping `rc` sees strong == 0 with weak > 0.
-                let weak: Weak<dyn Any, Global> = Rc::downgrade(&rc);
                 {
                     let _dropped = rc;
                 }
@@ -10000,110 +7888,6 @@ mod verify {
         harness_drop_rc_vec_u128_weak_present,
         [u128]
     );
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_i8_unique,
-        harness_drop_rc_dyn_any_i8_shared,
-        harness_drop_rc_dyn_any_i8_weak_present,
-        i8
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_i16_unique,
-        harness_drop_rc_dyn_any_i16_shared,
-        harness_drop_rc_dyn_any_i16_weak_present,
-        i16
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_i32_unique,
-        harness_drop_rc_dyn_any_i32_shared,
-        harness_drop_rc_dyn_any_i32_weak_present,
-        i32
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_i64_unique,
-        harness_drop_rc_dyn_any_i64_shared,
-        harness_drop_rc_dyn_any_i64_weak_present,
-        i64
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_i128_unique,
-        harness_drop_rc_dyn_any_i128_shared,
-        harness_drop_rc_dyn_any_i128_weak_present,
-        i128
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_u8_unique,
-        harness_drop_rc_dyn_any_u8_shared,
-        harness_drop_rc_dyn_any_u8_weak_present,
-        u8
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_u16_unique,
-        harness_drop_rc_dyn_any_u16_shared,
-        harness_drop_rc_dyn_any_u16_weak_present,
-        u16
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_u32_unique,
-        harness_drop_rc_dyn_any_u32_shared,
-        harness_drop_rc_dyn_any_u32_weak_present,
-        u32
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_u64_unique,
-        harness_drop_rc_dyn_any_u64_shared,
-        harness_drop_rc_dyn_any_u64_weak_present,
-        u64
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_u128_unique,
-        harness_drop_rc_dyn_any_u128_shared,
-        harness_drop_rc_dyn_any_u128_weak_present,
-        u128
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_bool_unique,
-        harness_drop_rc_dyn_any_bool_shared,
-        harness_drop_rc_dyn_any_bool_weak_present,
-        bool
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_unit_unique,
-        harness_drop_rc_dyn_any_unit_shared,
-        harness_drop_rc_dyn_any_unit_weak_present,
-        ()
-    );
-*/
-/*
-    gen_drop_rc_unsized!(
-        harness_drop_rc_dyn_any_array_unique,
-        harness_drop_rc_dyn_any_array_shared,
-        harness_drop_rc_dyn_any_array_weak_present,
-        [u8; 4]
-    );
-*/
 
     // Rc::clone harnesses.
     macro_rules! gen_clone_rc_sized_harness {
@@ -10122,14 +7906,6 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let _ = Rc::clone(&rc);
-            }
-        };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
                 let _ = Rc::clone(&rc);
             }
         };
@@ -10154,45 +7930,6 @@ mod verify {
     gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u32, [u32]);
     gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u64, [u64]);
     gen_clone_rc_unsized_harness!(harness_clone_rc_vec_u128, [u128]);
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_i8, i8);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_i16, i16);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_i32, i32);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_i64, i64);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_i128, i128);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_u8, u8);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_u16, u16);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_u32, u32);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_u64, u64);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_u128, u128);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_bool, bool);
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_unit, ());
-*/
-/*
-    gen_clone_rc_unsized_harness!(harness_clone_rc_dyn_any_array, [u8; 4]);
-*/
 
     // Rc::default harnesses.
     macro_rules! gen_rc_default_harness {
@@ -10307,17 +8044,6 @@ mod verify {
                     unsafe { Rc::<[$elem], Global>::from_raw_in(ptr, alloc) };
             }
         };
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let rc: Rc<dyn Any, Global> = rc;
-                let (ptr, alloc): (*const dyn Any, Global) =
-                    Rc::<dyn Any, Global>::into_raw_with_allocator(rc);
-                let _recovered: Rc<dyn Any, Global> =
-                    unsafe { Rc::<dyn Any, Global>::from_raw_in(ptr, alloc) };
-            }
-        };
     }
 
     gen_into_raw_with_allocator_sized_harness!(harness_into_raw_with_allocator_i8, i8);
@@ -10339,55 +8065,4 @@ mod verify {
     gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u32, [u32]);
     gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u64, [u64]);
     gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_vec_u128, [u128]);
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_i8, i8);
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_i16, i16);
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_i32, i32);
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_i64, i64);
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(
-        harness_into_raw_with_allocator_dyn_any_i128,
-        i128
-    );
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_u8, u8);
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_u16, u16);
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_u32, u32);
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_u64, u64);
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(
-        harness_into_raw_with_allocator_dyn_any_u128,
-        u128
-    );
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(
-        harness_into_raw_with_allocator_dyn_any_bool,
-        bool
-    );
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(harness_into_raw_with_allocator_dyn_any_unit, ());
-*/
-/*
-    gen_into_raw_with_allocator_unsized_harness!(
-        harness_into_raw_with_allocator_dyn_any_array,
-        [u8; 4]
-    );
-*/
 }
