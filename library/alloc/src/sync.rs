@@ -4813,6 +4813,9 @@ mod kani_arc_harness_helpers {
         unsafe {
             let sz: usize = kani::any();
             kani::assume(sz <= cap);
+            // Keep macOS CI from timing out or running out of memory.
+            #[cfg(target_os = "macos")]
+            kani::assume(sz <= 1024);
             v.set_len(sz);
             ptr::write_bytes(
                 v.as_mut_ptr().cast::<u8>(),
@@ -4831,6 +4834,8 @@ mod kani_arc_harness_helpers {
 
     pub(super) fn nondet_arc_slice<T>(vec: &Vec<T>) -> &[T] {
         let len = vec.len();
+        #[cfg(target_os = "macos")]
+        kani::assume(len <= 1024);
         kani::assume(arc_slice_layout_ok::<T>(len));
         vec.as_slice()
     }
