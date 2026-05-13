@@ -420,12 +420,48 @@ pub trait ChildExt: Sealed {
     /// }
     /// ```
     fn send_signal(&self, signal: i32) -> io::Result<()>;
+
+    /// Sends a signal to a child process's process group.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if the signal is invalid or if the
+    /// child process does not have a process group. The integer values
+    /// associated with signals are implementation-specific, so it's encouraged
+    /// to use a crate that provides posix bindings.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// #![feature(unix_send_signal)]
+    ///
+    /// use std::{io, os::unix::process::{ChildExt, CommandExt}, process::{Command, Stdio}};
+    ///
+    /// use libc::SIGTERM;
+    ///
+    /// fn main() -> io::Result<()> {
+    ///     # if cfg!(not(all(target_vendor = "apple", not(target_os = "macos")))) {
+    ///     let child = Command::new("cat")
+    ///         .stdin(Stdio::piped())
+    ///         .process_group(0)
+    ///         .spawn()?;
+    ///     child.send_process_group_signal(SIGTERM)?;
+    ///     # }
+    ///     Ok(())
+    /// }
+    /// ```
+    #[unstable(feature = "unix_send_signal", issue = "141975")]
+    fn send_process_group_signal(&self, signal: i32) -> io::Result<()>;
 }
 
 #[unstable(feature = "unix_send_signal", issue = "141975")]
 impl ChildExt for process::Child {
     fn send_signal(&self, signal: i32) -> io::Result<()> {
         self.handle.send_signal(signal)
+    }
+
+    fn send_process_group_signal(&self, signal: i32) -> io::Result<()> {
+        self.handle.send_process_group_signal(signal)
     }
 }
 
