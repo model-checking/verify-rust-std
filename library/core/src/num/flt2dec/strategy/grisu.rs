@@ -5,6 +5,8 @@
 //! [^1]: Florian Loitsch. 2010. Printing floating-point numbers quickly and
 //!   accurately with integers. SIGPLAN Not. 45, 6 (June 2010), 233-243.
 
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::num::diy_float::Fp;
 use crate::num::flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
@@ -772,5 +774,71 @@ pub fn format_exact<'a>(
     match format_exact_opt(d, unsafe { &mut *(buf as *mut _) }, limit) {
         Some(ret) => ret,
         None => fallback(d, buf, limit),
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Builds a symbolic `Decoded` whose `mant`, `minus`, `plus`, and `exp` are
+    // constrained to small ranges. Grisu's algorithm walks bit-shift loops
+    // proportional to the magnitude of these values; tightening the inputs is
+    // the difference between "verifies in seconds" and "Kani never returns".
+    fn arbitrary_small_decoded() -> Decoded {
+        let mant: u64 = kani::any();
+        let minus: u64 = kani::any();
+        let plus: u64 = kani::any();
+        let exp: i16 = kani::any();
+        let inclusive: bool = kani::any();
+        // Tight bounds: large enough to exercise the algorithm branches but
+        // small enough to keep CBMC's bit-blasted formula in single-digit GiB.
+        kani::assume(mant >= 2 && mant <= 0xFF);
+        kani::assume(minus >= 1 && minus < mant);
+        kani::assume(plus >= 1 && plus <= 0x0F);
+        kani::assume(exp >= -4 && exp <= 4);
+        Decoded { mant, minus, plus, exp, inclusive }
+    }
+
+    /// Proof for `grisu::format_shortest`.
+    ///
+    /// Rules out UB in the lifetime-laundering reborrow at
+    /// `unsafe { &mut *(buf as *mut _) }`. The safety argument is that the
+    /// laundered pointer is only used in the `None` branch, after
+    /// `format_shortest_opt` has returned and dropped its borrow. Kani's
+    /// aliasing checks verify this holds.
+    ///
+    /// Inputs are bounded so the algorithm's inner loops terminate within
+    /// the unwind budget. The harness does not attempt to prove the
+    /// algorithm correct; it only proves no UB.
+    #[kani::proof]
+    #[kani::unwind(32)]
+    fn check_format_shortest_small() {
+        let d = arbitrary_small_decoded();
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let (out, _exp) = format_shortest(&d, &mut buf);
+        // Force a read of the returned slice to surface uninit reads.
+        let _ = out.len();
+        if !out.is_empty() {
+            let _ = out[0];
+        }
+    }
+
+    /// Proof for `grisu::format_exact`. Same shape as the shortest variant.
+    #[kani::proof]
+    #[kani::unwind(32)]
+    fn check_format_exact_small() {
+        let d = arbitrary_small_decoded();
+        let limit: i16 = kani::any();
+        kani::assume(limit >= -20 && limit <= 20);
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let (out, _exp) = format_exact(&d, &mut buf, limit);
+        let _ = out.len();
+        if !out.is_empty() {
+            let _ = out[0];
+        }
     }
 }

@@ -55,6 +55,7 @@
           openssl
           zlib
           curl
+          systemd  # for systemd-run --user memory cap
         ];
 
         verifyApp = pkgs.writeShellApplication {
@@ -79,6 +80,21 @@
                   "num::flt2dec::verify::check_to_exact_fixed_str_f32"
                 )
                 ;;
+              flt2dec-grisu)
+                # Experimental. Whole-program verification of the Grisu
+                # strategy currently OOMs at any reasonable memory cap (12+
+                # GiB peak). The proper fix is contract-based decomposition:
+                # add #[ensures] to format_shortest_opt / format_exact_opt,
+                # verify those in isolation against the contract, then verify
+                # the lifetime-laundering wrappers (format_shortest /
+                # format_exact) using the contracts as stubs via
+                # #[kani::stub_for_contract]. Tracked in
+                # docs/decisions/0003-grisu-needs-contract-decomposition.md.
+                harnesses=(
+                  "num::flt2dec::strategy::grisu::verify::check_format_shortest_small"
+                  "num::flt2dec::strategy::grisu::verify::check_format_exact_small"
+                )
+                ;;
               *)
                 echo "unknown challenge: $challenge" >&2
                 echo "challenges: flt2dec" >&2
@@ -89,6 +105,24 @@
             for h in "''${harnesses[@]}"; do
               harness_args+=(--harness "$h")
             done
+
+            # Memory cap. CBMC can balloon to tens of GiB on dense harnesses.
+            # Cap at 12 GiB by default to leave the system responsive; override
+            # with VERIFY_MEMORY_MAX (e.g. "24G" or "0" to disable).
+            mem_max="''${VERIFY_MEMORY_MAX:-12G}"
+            if [[ "$mem_max" == "0" ]] || ! command -v systemd-run >/dev/null; then
+              runner=()
+              if [[ "$mem_max" != "0" ]]; then
+                echo ">>> systemd-run not available; running without memory cap" >&2
+              fi
+            else
+              echo ">>> Memory cap: $mem_max (override with VERIFY_MEMORY_MAX)"
+              runner=(
+                systemd-run --user --scope --quiet
+                -p "MemoryMax=$mem_max"
+                -p "MemorySwapMax=0"
+              )
+            fi
 
             # On NixOS /bin/bash does not exist, so the script's shebang fails.
             # Patch any /bin/bash shebangs we find under the repo to env-bash.
@@ -141,7 +175,7 @@
               rm -rf kani_build
             fi
 
-            exec bash ./scripts/run-kani.sh --kani-args "''${harness_args[@]}" --exact
+            exec "''${runner[@]}" bash ./scripts/run-kani.sh --kani-args "''${harness_args[@]}" --exact
           '';
         };
       in {
