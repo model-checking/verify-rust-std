@@ -666,3 +666,113 @@ where
         }
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Maximum digit buffer length we exercise. Small enough to verify fast, large
+    // enough to cover every branch in both targets (1, len == exp, len > exp,
+    // len < exp boundaries all become reachable).
+    const MAX_BUF_LEN: usize = 4;
+
+    // Reads every returned `Part` so that any uninitialized element would surface
+    // as a discriminant read on poisoned memory and trip Kani.
+    fn touch_parts(rendered: &[Part<'_>]) {
+        for part in rendered {
+            match *part {
+                Part::Zero(n) => {
+                    let _ = n;
+                }
+                Part::Num(v) => {
+                    let _ = v;
+                }
+                Part::Copy(bytes) => {
+                    // Force a real read of the slice header (ptr + len) and at
+                    // least one byte when non-empty.
+                    let _ = bytes.len();
+                    if !bytes.is_empty() {
+                        let _ = bytes[0];
+                    }
+                }
+            }
+        }
+    }
+
+    /// Proof for `digits_to_dec_str`.
+    ///
+    /// Rules out the following UB inside the function body:
+    ///   - `MaybeUninit::assume_init_ref` reading an uninitialized `Part<'a>`
+    ///     slot (every index covered by the `..N` slice returned in each of the
+    ///     six branches must have been written first).
+    ///   - Constructing an invalid `Part` value or an invalid `&[u8]` slice
+    ///     reference, which would be observed when `touch_parts` reads the
+    ///     enum discriminant and each variant payload.
+    #[kani::proof]
+    fn check_digits_to_dec_str() {
+        // Symbolic buffer of length 1..=MAX_BUF_LEN. We back it with a fixed
+        // array and pick an arbitrary sub-slice via `any_slice_of_array`.
+        let buf_storage: [u8; MAX_BUF_LEN] = kani::any();
+        let buf: &[u8] = kani::slice::any_slice_of_array(&buf_storage);
+
+        // Honour the function's documented preconditions.
+        kani::assume(!buf.is_empty());
+        kani::assume(buf[0] > b'0');
+
+        // `parts` must have len >= 4. Use exactly 4 (the minimum) to keep the
+        // search space tight; the function never writes past index 3.
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] =
+            [const { MaybeUninit::uninit() }; 4];
+
+        // `exp: i16` is fully symbolic. The function admits any value in its
+        // domain. `frac_digits: usize` is bounded so that the symbolic state
+        // remains tractable while still covering the
+        // `frac_digits > buf.len()` / `frac_digits == 0` branches.
+        let exp: i16 = kani::any();
+        let frac_digits: usize = kani::any();
+        kani::assume(frac_digits <= 8);
+
+        let rendered = digits_to_dec_str(buf, exp, frac_digits, &mut parts_storage);
+        // The returned slice must be one of `..2`, `..3`, or `..4`.
+        assert!(rendered.len() >= 2 && rendered.len() <= 4);
+        touch_parts(rendered);
+    }
+
+    /// Proof for `digits_to_exp_str`.
+    ///
+    /// Rules out the following UB inside the function body:
+    ///   - `MaybeUninit::assume_init_ref` reading an uninitialized `Part<'a>`
+    ///     slot when the function returns `parts[..n + 2]`; every index in
+    ///     `0..n + 2` must have been initialized along the taken branch.
+    ///   - Constructing an invalid `Part::Num(u16)` from `-exp as u16` when
+    ///     `exp` was `i16::MIN` (the function compensates by casting through
+    ///     `i32` first; Kani sees the full domain of `exp`).
+    #[kani::proof]
+    fn check_digits_to_exp_str() {
+        let buf_storage: [u8; MAX_BUF_LEN] = kani::any();
+        let buf: &[u8] = kani::slice::any_slice_of_array(&buf_storage);
+
+        kani::assume(!buf.is_empty());
+        kani::assume(buf[0] > b'0');
+
+        // `parts` must have len >= 6. The function writes at most six entries
+        // (`buf.len() > 1 || min_ndigits > 1` plus `min_ndigits > buf.len()`
+        // gives `n == 4`, then the trailing exponent pair brings the upper
+        // bound to `n + 2 == 6`).
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] =
+            [const { MaybeUninit::uninit() }; 6];
+
+        let exp: i16 = kani::any();
+        let min_ndigits: usize = kani::any();
+        kani::assume(min_ndigits <= 8);
+        let upper: bool = kani::any();
+
+        let rendered =
+            digits_to_exp_str(buf, exp, min_ndigits, upper, &mut parts_storage);
+        // The returned slice is `parts[..n + 2]` with `n` in {1, 3, 4}, so the
+        // length is in {3, 5, 6}.
+        assert!(rendered.len() >= 3 && rendered.len() <= 6);
+        touch_parts(rendered);
+    }
+}
