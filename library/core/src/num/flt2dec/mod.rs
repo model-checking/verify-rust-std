@@ -779,4 +779,206 @@ mod verify {
         assert!(rendered.len() >= 3 && rendered.len() <= 6);
         touch_parts(rendered);
     }
+
+    // Stub digit-generation callback used by the public-wrapper proofs.
+    //
+    // The wrappers (`to_shortest_str`, `to_shortest_exp_str`, `to_exact_*_str`)
+    // accept any `FnMut(&Decoded, &'a mut [MaybeUninit<u8>]) -> (&'a [u8], i16)`
+    // that satisfies the documented preconditions of the helper it forwards to
+    // (`!buf.is_empty()`, `buf[0] > b'0'`). The shortest mode in particular
+    // requires the caller to provide a buffer with at least `MAX_SIG_DIGITS`
+    // bytes; the callback fills some prefix of it and returns that prefix.
+    //
+    // For verification we replace the real Grisu/Dragon callback with a stub
+    // that writes a single '1' digit. This keeps the proof focused on the
+    // wrapper's branching and `assume_init_ref` calls; the digit-generation
+    // strategies themselves are separate verification targets.
+    fn stub_format_shortest<'a>(
+        _decoded: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> (&'a [u8], i16) {
+        buf[0] = MaybeUninit::new(b'1');
+        // SAFETY: index 0 was just initialised.
+        let s = unsafe { buf[..1].assume_init_ref() };
+        (s, 0_i16)
+    }
+
+    /// Proof for `to_shortest_str`, monomorphised to `f32`.
+    ///
+    /// Rules out UB across all four `FullDecoded` branches:
+    ///   - `Nan` and `Infinite` branches write one `Part::Copy` slot and
+    ///     `assume_init_ref` only that slot.
+    ///   - `Zero` branch writes one or two slots depending on `frac_digits`
+    ///     and assumes init of the matching prefix.
+    ///   - `Finite` branch delegates to the already-verified
+    ///     `digits_to_dec_str`. The stubbed callback satisfies its
+    ///     documented preconditions.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_to_shortest_str_f32() {
+        let v: f32 = kani::any();
+        let frac_digits: usize = kani::any();
+        kani::assume(frac_digits <= 8);
+        let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
+
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] =
+            [const { MaybeUninit::uninit() }; 4];
+
+        let formatted = to_shortest_str::<f32, _>(
+            stub_format_shortest,
+            v,
+            sign,
+            frac_digits,
+            &mut buf_storage,
+            &mut parts_storage,
+        );
+
+        touch_parts(formatted.parts);
+    }
+
+    /// Proof for `to_shortest_exp_str`, monomorphised to `f32`.
+    ///
+    /// Same shape as `check_to_shortest_str_f32`. The Zero branch writes one
+    /// `Part::Copy` depending on whether `0` lies inside `dec_bounds`. The
+    /// Finite branch dispatches to either `digits_to_dec_str` (already
+    /// proven) or `digits_to_exp_str` (already proven) based on the
+    /// computed `vis_exp`.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_to_shortest_exp_str_f32() {
+        let v: f32 = kani::any();
+        let dec_lo: i16 = kani::any();
+        let dec_hi: i16 = kani::any();
+        kani::assume(dec_lo <= dec_hi);
+        let upper: bool = kani::any();
+        let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
+
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] =
+            [const { MaybeUninit::uninit() }; 6];
+
+        let formatted = to_shortest_exp_str::<f32, _>(
+            stub_format_shortest,
+            v,
+            sign,
+            (dec_lo, dec_hi),
+            upper,
+            &mut buf_storage,
+            &mut parts_storage,
+        );
+
+        touch_parts(formatted.parts);
+    }
+
+    // Stubs for the `to_exact_*` callback shape.
+    //
+    // The real callbacks (`strategy::grisu::format_exact`, `strategy::dragon::
+    // format_exact`) either render at least one digit with `exp > limit` or
+    // return an empty buffer with `exp == limit` to signal "could not satisfy
+    // the limit". `to_exact_exp_str` ignores the empty case (it always calls
+    // `digits_to_exp_str` afterwards, which requires `!buf.is_empty()`).
+    // `to_exact_fixed_str` branches on `exp <= limit` and expects an empty
+    // buffer in that path. Two stubs handle the two contracts.
+
+    // Always returns one digit. Suitable for `to_exact_exp_str`.
+    fn stub_format_exact_nonempty<'a>(
+        _decoded: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        limit: i16,
+    ) -> (&'a [u8], i16) {
+        buf[0] = MaybeUninit::new(b'1');
+        // SAFETY: index 0 was just initialised.
+        let s = unsafe { buf[..1].assume_init_ref() };
+        // Ensure `exp > limit` for callers that branch on it.
+        (s, limit.saturating_add(1))
+    }
+
+    // Non-deterministically chooses between the "rendered" and "could not
+    // meet limit" outcomes. Suitable for `to_exact_fixed_str`, whose Finite
+    // branch needs both paths covered.
+    fn stub_format_exact_nondet<'a>(
+        _decoded: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        limit: i16,
+    ) -> (&'a [u8], i16) {
+        if kani::any::<bool>() {
+            // SAFETY: empty range, no element needs initialisation.
+            let empty = unsafe { buf[..0].assume_init_ref() };
+            (empty, limit)
+        } else {
+            buf[0] = MaybeUninit::new(b'1');
+            // SAFETY: index 0 was just initialised.
+            let s = unsafe { buf[..1].assume_init_ref() };
+            (s, limit.saturating_add(1))
+        }
+    }
+
+    /// Proof for `to_exact_exp_str`, monomorphised to `f32`.
+    ///
+    /// Branches: Nan/Infinite/Zero each `assume_init_ref` 1 or 3 slots
+    /// depending on `ndigits` and `upper`. Finite branch delegates to
+    /// `digits_to_exp_str` (already proven). `ndigits` is bounded so the
+    /// `buf.len() >= ndigits` precondition is trivially met.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_to_exact_exp_str_f32() {
+        let v: f32 = kani::any();
+        let ndigits: usize = kani::any();
+        kani::assume(ndigits >= 1 && ndigits <= 8);
+        let upper: bool = kani::any();
+        let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
+
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] =
+            [const { MaybeUninit::uninit() }; 6];
+
+        let formatted = to_exact_exp_str::<f32, _>(
+            stub_format_exact_nonempty,
+            v,
+            sign,
+            ndigits,
+            upper,
+            &mut buf_storage,
+            &mut parts_storage,
+        );
+
+        touch_parts(formatted.parts);
+    }
+
+    /// Proof for `to_exact_fixed_str`, monomorphised to `f32`.
+    ///
+    /// Same shape as the other wrappers. The Finite branch has an extra
+    /// "rendered as zero after rounding" path that initialises 1 or 2 parts
+    /// depending on `frac_digits`. Uses a 256-byte buffer to satisfy the
+    /// `buf.len() >= maxlen` precondition for any `f32` exponent
+    /// (`estimate_max_buf_len` peaks around 133 for subnormal f32 inputs).
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_to_exact_fixed_str_f32() {
+        let v: f32 = kani::any();
+        let frac_digits: usize = kani::any();
+        kani::assume(frac_digits <= 8);
+        let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
+
+        // 256 covers the worst-case `estimate_max_buf_len` for any f32 input.
+        let mut buf_storage: [MaybeUninit<u8>; 256] =
+            [const { MaybeUninit::uninit() }; 256];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] =
+            [const { MaybeUninit::uninit() }; 4];
+
+        let formatted = to_exact_fixed_str::<f32, _>(
+            stub_format_exact_nondet,
+            v,
+            sign,
+            frac_digits,
+            &mut buf_storage,
+            &mut parts_storage,
+        );
+
+        touch_parts(formatted.parts);
+    }
 }

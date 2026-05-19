@@ -73,6 +73,10 @@
                 harnesses=(
                   "num::flt2dec::verify::check_digits_to_dec_str"
                   "num::flt2dec::verify::check_digits_to_exp_str"
+                  "num::flt2dec::verify::check_to_shortest_str_f32"
+                  "num::flt2dec::verify::check_to_shortest_exp_str_f32"
+                  "num::flt2dec::verify::check_to_exact_exp_str_f32"
+                  "num::flt2dec::verify::check_to_exact_fixed_str_f32"
                 )
                 ;;
               *)
