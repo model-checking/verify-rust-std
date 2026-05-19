@@ -1,0 +1,157 @@
+{
+  description = "verify-rust-std reproducible verification environment";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { self, nixpkgs, flake-utils, fenix }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+
+        # Rust toolchain pinned to match rust-toolchain.toml.
+        # Channel and date come from rust-toolchain.toml (nightly-2025-10-09).
+        # The sha256 below is the hash of the toolchain manifest; if it is
+        # wrong, `nix develop` will print the expected hash and you can
+        # replace it.
+        toolchain = (fenix.packages.${system}.toolchainOf {
+          channel = "nightly";
+          date = "2025-10-09";
+          sha256 = "sha256-X/HlN8ktnN9cAnz4Ro0cYfxEyDP/wC5FgQU8vB1ndz4=";
+        }).withComponents [
+          "cargo"
+          "rustc"
+          "rust-src"
+          "rustfmt"
+          "llvm-tools-preview"
+          "rustc-dev"
+        ];
+
+        # CBMC version in nixpkgs (6.8.0) is newer than the version Kani's
+        # kani-dependencies pins (6.7.1). Kani's check-cbmc-version.py uses
+        # "desired > current" comparison, so a newer CBMC satisfies the
+        # check. goto-synthesizer ships with the same cbmc package and shares
+        # the version, satisfying the strict equality check between the two.
+        # Kissat in nixpkgs (4.0.4) is newer than the pinned 4.0.1; the
+        # check_kissat_version.sh script uses lexicographic comparison so
+        # newer is fine.
+        runtimeDeps = with pkgs; [
+          toolchain
+          cbmc
+          kissat
+          python3
+          git
+          jq
+          gnumake
+          gcc
+          cmake
+          pkg-config
+          openssl
+          zlib
+          curl
+        ];
+
+        verifyApp = pkgs.writeShellApplication {
+          name = "verify";
+          runtimeInputs = runtimeDeps;
+          text = ''
+            set -euo pipefail
+            challenge="''${1:-}"
+            if [[ -z "$challenge" ]]; then
+              echo "usage: verify <challenge>" >&2
+              echo "challenges: flt2dec" >&2
+              exit 1
+            fi
+            case "$challenge" in
+              flt2dec|28)
+                harnesses=(
+                  "num::flt2dec::verify::check_digits_to_dec_str"
+                  "num::flt2dec::verify::check_digits_to_exp_str"
+                )
+                ;;
+              *)
+                echo "unknown challenge: $challenge" >&2
+                echo "challenges: flt2dec" >&2
+                exit 1
+                ;;
+            esac
+            harness_args=()
+            for h in "''${harnesses[@]}"; do
+              harness_args+=(--harness "$h")
+            done
+
+            # On NixOS /bin/bash does not exist, so the script's shebang fails.
+            # Patch any /bin/bash shebangs we find under the repo to env-bash.
+            for script in scripts/run-kani.sh scripts/*.sh; do
+              if [[ -f "$script" ]] && head -1 "$script" | grep -q '^#!/bin/bash'; then
+                sed -i '1s|^#!/bin/bash|#!/usr/bin/env bash|' "$script"
+              fi
+            done
+
+            # Kani's build expects a rustup layout. With fenix we have no
+            # rustup, so synthesise a fake RUSTUP_HOME with a single toolchain
+            # symlink pointing at the fenix-managed rustc sysroot. This
+            # satisfies both env!("RUSTUP_TOOLCHAIN") (used by build-kani) and
+            # the RUSTUP_HOME/toolchains/$TC/lib rpath constructed by
+            # kani-compiler/build.rs.
+            RUSTUP_TOOLCHAIN="$(awk -F'"' '/^channel/ {print $2}' rust-toolchain.toml)"
+            export RUSTUP_TOOLCHAIN
+
+            RUSTC_SYSROOT="$(rustc --print sysroot)"
+            RUSTUP_HOME="$PWD/.rustup-fake"
+            export RUSTUP_HOME
+            mkdir -p "$RUSTUP_HOME/toolchains"
+            ln -sfn "$RUSTC_SYSROOT" "$RUSTUP_HOME/toolchains/$RUSTUP_TOOLCHAIN"
+
+            # Kani-driver invokes `cargo +<toolchain>` which is a rustup-ism.
+            # Fenix's cargo does not understand the +toolchain prefix and treats
+            # it as an unknown subcommand. Install a thin shim that strips
+            # a leading +toolchain arg and forwards to the real cargo.
+            WRAPPER_DIR="$PWD/.toolchain-wrapper"
+            mkdir -p "$WRAPPER_DIR"
+            REAL_CARGO="$(command -v cargo)"
+            cat > "$WRAPPER_DIR/cargo" <<EOF
+            #!/usr/bin/env bash
+            if [ \$# -gt 0 ]; then
+              case "\$1" in
+                +*) shift ;;
+              esac
+            fi
+            exec "$REAL_CARGO" "\$@"
+            EOF
+            chmod +x "$WRAPPER_DIR/cargo"
+            export PATH="$WRAPPER_DIR:$PATH"
+
+            # run-kani.sh's "is Kani up to date" check only inspects the git
+            # commit, not the actual built binary. If a previous build failed
+            # partway through, the directory will trick the check. Detect and
+            # repair.
+            if [[ -d kani_build ]] && [[ ! -f kani_build/target/kani/bin/kani-driver ]]; then
+              echo ">>> Found half-built kani_build; removing to force rebuild"
+              rm -rf kani_build
+            fi
+
+            exec bash ./scripts/run-kani.sh --kani-args "''${harness_args[@]}" --exact
+          '';
+        };
+      in {
+        devShells.default = pkgs.mkShell {
+          packages = runtimeDeps;
+          # Some Rust crates need to find native libraries at build time.
+          shellHook = ''
+            export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:''${PKG_CONFIG_PATH:-}"
+          '';
+        };
+
+        apps = {
+          verify = flake-utils.lib.mkApp { drv = verifyApp; };
+          default = flake-utils.lib.mkApp { drv = verifyApp; };
+        };
+      });
+}

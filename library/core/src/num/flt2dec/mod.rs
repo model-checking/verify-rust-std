@@ -124,6 +124,8 @@ functions.
 
 pub use self::decoder::{DecodableFloat, Decoded, FullDecoded, decode};
 use super::fmt::{Formatted, Part};
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 
 pub mod decoder;
@@ -710,6 +712,7 @@ mod verify {
     ///     reference, which would be observed when `touch_parts` reads the
     ///     enum discriminant and each variant payload.
     #[kani::proof]
+    #[kani::unwind(7)]
     fn check_digits_to_dec_str() {
         // Symbolic buffer of length 1..=MAX_BUF_LEN. We back it with a fixed
         // array and pick an arbitrary sub-slice via `any_slice_of_array`.
@@ -749,6 +752,7 @@ mod verify {
     ///     `exp` was `i16::MIN` (the function compensates by casting through
     ///     `i32` first; Kani sees the full domain of `exp`).
     #[kani::proof]
+    #[kani::unwind(7)]
     fn check_digits_to_exp_str() {
         let buf_storage: [u8; MAX_BUF_LEN] = kani::any();
         let buf: &[u8] = kani::slice::any_slice_of_array(&buf_storage);
