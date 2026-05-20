@@ -5,10 +5,13 @@
 //!   quickly and accurately. SIGPLAN Not. 31, 5 (May. 1996), 108-116.
 
 use crate::cmp::Ordering;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::num::bignum::{Big32x40 as Big, Digit32 as Digit};
 use crate::num::flt2dec::estimator::estimate_scaling_factor;
 use crate::num::flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
+use safety::requires;
 
 static POW10: [Digit; 10] =
     [1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000];
@@ -99,6 +102,12 @@ fn div_rem_upto_16<'a>(
 }
 
 /// The shortest mode implementation for Dragon.
+#[requires(d.mant > 0)]
+#[requires(d.minus > 0)]
+#[requires(d.plus > 0)]
+#[requires(d.mant.checked_add(d.plus).is_some())]
+#[requires(d.mant.checked_sub(d.minus).is_some())]
+#[requires(buf.len() >= MAX_SIG_DIGITS)]
 pub fn format_shortest<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -259,6 +268,11 @@ pub fn format_shortest<'a>(
 }
 
 /// The exact and fixed mode implementation for Dragon.
+#[requires(d.mant > 0)]
+#[requires(d.minus > 0)]
+#[requires(d.plus > 0)]
+#[requires(d.mant.checked_add(d.plus).is_some())]
+#[requires(d.mant.checked_sub(d.minus).is_some())]
 pub fn format_exact<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -386,4 +400,162 @@ pub fn format_exact<'a>(
 
     // SAFETY: we initialized that memory above.
     (unsafe { buf[..len].assume_init_ref() }, k)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // ===== Stubs for the Big32x40 arithmetic =====
+    //
+    // CBMC OOMs (>24 GiB) when whole-program harnesses trace through the
+    // 40-limb fixed-size bignum arithmetic. We replace each heavy mutator
+    // with a nondeterministic havoc that preserves only the bit-length
+    // invariant the dragon algorithm depends on for safety.
+    //
+    // Soundness sketch: the safety obligations of `format_*` are
+    //   1) every `buf[i] = MaybeUninit::new(_)` write has `i < buf.len()`,
+    //   2) every `buf[..len].assume_init_*()` read covers only initialized
+    //      bytes,
+    //   3) no shift inside `Big32x40` exceeds 40 limbs (the only panic
+    //      source inside the bignum that's reachable from dragon),
+    //   4) no arithmetic overflow / division-by-zero on the index/exponent
+    //      bookkeeping.
+    // None of these depend on the exact numeric value of the bignums; only
+    // on the bit-length bound, which the stubs preserve.
+    //
+    // `from_u64`, `from_small`, `is_zero`, `bit_length`, `clone`, and the
+    // comparison operators (`Ord`, `PartialOrd`, `PartialEq`) use their real
+    // implementations: they're cheap (no carrying loop) and CBMC handles
+    // them fine.
+
+    // Maximum representable bit length of a Big32x40: 40 limbs * 32 bits.
+    const BIG_MAX_BITS: usize = 40 * 32;
+
+    /// Havoc `b` to a nondeterministic value with bit length bounded by
+    /// `max_bits` (saturated to the capacity).
+    fn havoc_big_with_bitlen(b: &mut Big, max_bits: usize) {
+        let cap = if max_bits > BIG_MAX_BITS { BIG_MAX_BITS } else { max_bits };
+        b.kani_havoc(cap);
+    }
+
+    fn stub_mul_small(b: &mut Big, other: u32) -> &mut Big {
+        let _ = other;
+        // New bit_length <= old + 32.
+        let new_max = b.bit_length().saturating_add(32);
+        havoc_big_with_bitlen(b, new_max);
+        b
+    }
+
+    fn stub_mul_pow2(b: &mut Big, bits: usize) -> &mut Big {
+        // Real impl asserts `bits / digitbits < self.base.len()` (i.e.
+        // `bits / 32 < 40`). Preserve that panic shape so the caller's
+        // reachability of out-of-range shifts is still checked.
+        assert!(bits / 32 < 40);
+        let new_max = b.bit_length().saturating_add(bits);
+        havoc_big_with_bitlen(b, new_max);
+        b
+    }
+
+    fn stub_mul_pow5(b: &mut Big, e: usize) -> &mut Big {
+        // log2(5) < 3, so 5^e fits in 3*e bits; product bit_length <=
+        // old + 3*e.
+        let new_max = b.bit_length().saturating_add(e.saturating_mul(3));
+        havoc_big_with_bitlen(b, new_max);
+        b
+    }
+
+    fn stub_mul_digits<'a>(b: &'a mut Big, other: &[u32]) -> &'a mut Big {
+        let new_max = b.bit_length().saturating_add(other.len().saturating_mul(32));
+        havoc_big_with_bitlen(b, new_max);
+        b
+    }
+
+    fn stub_div_rem_small(b: &mut Big, k: u32) -> (&mut Big, u32) {
+        // Real impl panics on k == 0; preserve.
+        assert!(k != 0);
+        let old_bits = b.bit_length();
+        havoc_big_with_bitlen(b, old_bits);
+        let r: u32 = kani::any();
+        kani::assume(r < k);
+        (b, r)
+    }
+
+    fn stub_add<'a>(b: &'a mut Big, other: &Big) -> &'a mut Big {
+        let lhs = b.bit_length();
+        let rhs = other.bit_length();
+        let new_max = lhs.max(rhs).saturating_add(1);
+        havoc_big_with_bitlen(b, new_max);
+        b
+    }
+
+    fn stub_add_small(b: &mut Big, other: u32) -> &mut Big {
+        let _ = other;
+        let new_max = b.bit_length().max(32).saturating_add(1);
+        havoc_big_with_bitlen(b, new_max);
+        b
+    }
+
+    fn stub_sub<'a>(b: &'a mut Big, other: &Big) -> &'a mut Big {
+        // Caller is required to have `self >= other`; result bit_length is
+        // bounded by self's old bit_length.
+        let _ = other;
+        let old_bits = b.bit_length();
+        havoc_big_with_bitlen(b, old_bits);
+        b
+    }
+
+    fn arbitrary_small_decoded() -> Decoded {
+        let mant: u64 = kani::any();
+        let minus: u64 = kani::any();
+        let plus: u64 = kani::any();
+        let exp: i16 = kani::any();
+        let inclusive: bool = kani::any();
+        kani::assume(mant >= 2 && mant <= 0xFF);
+        kani::assume(minus >= 1 && minus < mant);
+        kani::assume(plus >= 1 && plus <= 0x0F);
+        kani::assume(exp >= -4 && exp <= 4);
+        Decoded { mant, minus, plus, exp, inclusive }
+    }
+
+    /// Verifies safety of `dragon::format_shortest` under documented
+    /// preconditions.
+    #[kani::proof]
+    #[kani::unwind(20)]
+    #[kani::stub(crate::num::bignum::Big32x40::mul_small, stub_mul_small)]
+    #[kani::stub(crate::num::bignum::Big32x40::mul_pow2, stub_mul_pow2)]
+    #[kani::stub(crate::num::bignum::Big32x40::mul_pow5, stub_mul_pow5)]
+    #[kani::stub(crate::num::bignum::Big32x40::mul_digits, stub_mul_digits)]
+    #[kani::stub(crate::num::bignum::Big32x40::div_rem_small, stub_div_rem_small)]
+    #[kani::stub(crate::num::bignum::Big32x40::add, stub_add)]
+    #[kani::stub(crate::num::bignum::Big32x40::add_small, stub_add_small)]
+    #[kani::stub(crate::num::bignum::Big32x40::sub, stub_sub)]
+    fn check_format_shortest_safety() {
+        let d = arbitrary_small_decoded();
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_shortest(&d, &mut buf);
+    }
+
+    /// Verifies safety of `dragon::format_exact` under documented
+    /// preconditions.
+    #[kani::proof]
+    #[kani::unwind(20)]
+    #[kani::stub(crate::num::bignum::Big32x40::mul_small, stub_mul_small)]
+    #[kani::stub(crate::num::bignum::Big32x40::mul_pow2, stub_mul_pow2)]
+    #[kani::stub(crate::num::bignum::Big32x40::mul_pow5, stub_mul_pow5)]
+    #[kani::stub(crate::num::bignum::Big32x40::mul_digits, stub_mul_digits)]
+    #[kani::stub(crate::num::bignum::Big32x40::div_rem_small, stub_div_rem_small)]
+    #[kani::stub(crate::num::bignum::Big32x40::add, stub_add)]
+    #[kani::stub(crate::num::bignum::Big32x40::add_small, stub_add_small)]
+    #[kani::stub(crate::num::bignum::Big32x40::sub, stub_sub)]
+    fn check_format_exact_safety() {
+        let d = arbitrary_small_decoded();
+        let limit: i16 = kani::any();
+        kani::assume(limit >= -10 && limit <= 10);
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_exact(&d, &mut buf, limit);
+    }
 }

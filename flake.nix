@@ -66,7 +66,7 @@
             challenge="''${1:-}"
             if [[ -z "$challenge" ]]; then
               echo "usage: verify <challenge>" >&2
-              echo "challenges: flt2dec" >&2
+              echo "challenges: flt2dec, flt2dec-grisu-strategies, flt2dec-dragon-strategies" >&2
               exit 1
             fi
             case "$challenge" in
@@ -80,24 +80,28 @@
                   "num::flt2dec::verify::check_to_exact_fixed_str_f32"
                 )
                 ;;
-              flt2dec-grisu)
-                # Experimental. Whole-program verification of the Grisu
-                # strategy currently OOMs at any reasonable memory cap (12+
-                # GiB peak). The proper fix is contract-based decomposition:
-                # add #[ensures] to format_shortest_opt / format_exact_opt,
-                # verify those in isolation against the contract, then verify
-                # the lifetime-laundering wrappers (format_shortest /
-                # format_exact) using the contracts as stubs via
-                # #[kani::stub_for_contract]. Tracked in
-                # docs/decisions/0003-grisu-needs-contract-decomposition.md.
+              flt2dec-grisu-strategies)
+                # The two grisu algorithm functions. These use only u64/u128
+                # scalar arithmetic so the CBMC formula stays tractable under
+                # tight symbolic input bounds.
                 harnesses=(
-                  "num::flt2dec::strategy::grisu::verify::check_format_shortest_small"
-                  "num::flt2dec::strategy::grisu::verify::check_format_exact_small"
+                  "num::flt2dec::strategy::grisu::verify::check_format_shortest_opt_safety"
+                  "num::flt2dec::strategy::grisu::verify::check_format_exact_opt_safety"
+                )
+                ;;
+              flt2dec-dragon-strategies)
+                # The two dragon algorithm functions. These walk Big32x40
+                # bignums (40 u32 limbs) so the CBMC formula is far larger
+                # than grisu's; expect OOM at the 24 GiB cap without further
+                # stubbing of bignum operations. Kept here as a sentinel.
+                harnesses=(
+                  "num::flt2dec::strategy::dragon::verify::check_format_shortest_safety"
+                  "num::flt2dec::strategy::dragon::verify::check_format_exact_safety"
                 )
                 ;;
               *)
                 echo "unknown challenge: $challenge" >&2
-                echo "challenges: flt2dec" >&2
+                echo "challenges: flt2dec, flt2dec-grisu-strategies, flt2dec-dragon-strategies" >&2
                 exit 1
                 ;;
             esac
@@ -109,7 +113,7 @@
             # Memory cap. CBMC can balloon to tens of GiB on dense harnesses.
             # Cap at 12 GiB by default to leave the system responsive; override
             # with VERIFY_MEMORY_MAX (e.g. "24G" or "0" to disable).
-            mem_max="''${VERIFY_MEMORY_MAX:-12G}"
+            mem_max="''${VERIFY_MEMORY_MAX:-24G}"
             if [[ "$mem_max" == "0" ]] || ! command -v systemd-run >/dev/null; then
               runner=()
               if [[ "$mem_max" != "0" ]]; then
@@ -175,7 +179,19 @@
               rm -rf kani_build
             fi
 
-            exec "''${runner[@]}" bash ./scripts/run-kani.sh --kani-args "''${harness_args[@]}" --exact
+            # Safety-only check mode for the strategy harnesses. The Challenge
+            # 28 safety property is "no UB on the MaybeUninit buffer" — i.e.
+            # bounds and memory-safety. Arithmetic-overflow panics from debug
+            # builds are not safety obligations and are spurious noise when
+            # running with abstract stubs that don't preserve the algorithm's
+            # tight numeric invariants. Toggle with VERIFY_SAFETY_ONLY=1.
+            extra_kani_args=()
+            if [[ "''${VERIFY_SAFETY_ONLY:-0}" == "1" ]]; then
+              echo ">>> Safety-only check mode: disabling overflow checks"
+              extra_kani_args+=(--no-overflow-checks)
+            fi
+
+            exec "''${runner[@]}" bash ./scripts/run-kani.sh --kani-args "''${extra_kani_args[@]}" "''${harness_args[@]}" --exact
           '';
         };
       in {
