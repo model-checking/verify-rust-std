@@ -343,35 +343,18 @@ macro_rules! define_bignum {
             #[doc(hidden)]
             pub fn kani_havoc(&mut self, max_bits: usize) {
                 let digitbits = <$ty>::BITS as usize;
-                // Cap at the array capacity.
                 let cap_bits = $n * digitbits;
                 let bound = if max_bits > cap_bits { cap_bits } else { max_bits };
                 let sz: usize = crate::kani::any();
-                // size in 0..=ceil(bound / digitbits), and <= $n
                 let max_sz = (bound + digitbits - 1) / digitbits;
                 crate::kani::assume(sz <= max_sz);
-                let mut base = [0 as $ty; $n];
-                let mut i = 0;
-                while i < sz {
-                    base[i] = crate::kani::any();
-                    i += 1;
-                }
-                // If the bit_length must be <= bound, constrain the top limb's
-                // high bits when sz is exactly max_sz and bound is not a
-                // multiple of digitbits.
-                if sz > 0 && sz == max_sz {
-                    let rem = bound - (sz - 1) * digitbits;
-                    if rem < digitbits {
-                        let mask: $ty = ((1 as $ty) << rem) - 1;
-                        base[sz - 1] = base[sz - 1] & mask;
-                    }
-                }
-                // Ensure top limb is non-zero when sz > 0 (canonicalize size).
-                if sz > 0 {
-                    crate::kani::assume(base[sz - 1] != 0);
-                }
+                // Whole-array nondet; CBMC models this as a symbolic array
+                // without per-element loop unwinding. Skip the canonical-
+                // size mask and non-zero-top-limb constraints: dragon's
+                // safety stubs only depend on `size`, and adding those
+                // constraints would re-introduce per-limb reasoning.
                 self.size = sz;
-                self.base = base;
+                self.base = crate::kani::any();
             }
         }
 

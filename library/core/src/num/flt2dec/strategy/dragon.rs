@@ -433,77 +433,94 @@ mod verify {
     // Maximum representable bit length of a Big32x40: 40 limbs * 32 bits.
     const BIG_MAX_BITS: usize = 40 * 32;
 
-    /// Havoc `b` to a nondeterministic value with bit length bounded by
-    /// `max_bits` (saturated to the capacity).
-    fn havoc_big_with_bitlen(b: &mut Big, max_bits: usize) {
-        let cap = if max_bits > BIG_MAX_BITS { BIG_MAX_BITS } else { max_bits };
-        b.kani_havoc(cap);
+    /// Havoc `b` with the maximum bit-length bound. The bit-length tracking
+    /// the dragon agent originally proposed turns out to be too expensive:
+    /// computing `bit_length()` requires unrolling `rposition` across all 40
+    /// limbs per call site. For safety verification the only invariant that
+    /// matters is `size <= 40`, which `kani_havoc` always enforces, so we
+    /// drop the per-call bit-length accumulation.
+    fn havoc_big(b: &mut Big) {
+        b.kani_havoc(BIG_MAX_BITS);
     }
 
-    fn stub_mul_small(b: &mut Big, other: u32) -> &mut Big {
-        let _ = other;
-        // New bit_length <= old + 32.
-        let new_max = b.bit_length().saturating_add(32);
-        havoc_big_with_bitlen(b, new_max);
+    fn stub_mul_small(b: &mut Big, _other: u32) -> &mut Big {
+        havoc_big(b);
         b
     }
 
     fn stub_mul_pow2(b: &mut Big, bits: usize) -> &mut Big {
-        // Real impl asserts `bits / digitbits < self.base.len()` (i.e.
-        // `bits / 32 < 40`). Preserve that panic shape so the caller's
-        // reachability of out-of-range shifts is still checked.
+        // Real impl asserts `bits / 32 < 40`; preserve the panic shape.
         assert!(bits / 32 < 40);
-        let new_max = b.bit_length().saturating_add(bits);
-        havoc_big_with_bitlen(b, new_max);
+        havoc_big(b);
         b
     }
 
-    fn stub_mul_pow5(b: &mut Big, e: usize) -> &mut Big {
-        // log2(5) < 3, so 5^e fits in 3*e bits; product bit_length <=
-        // old + 3*e.
-        let new_max = b.bit_length().saturating_add(e.saturating_mul(3));
-        havoc_big_with_bitlen(b, new_max);
+    fn stub_mul_pow5(b: &mut Big, _e: usize) -> &mut Big {
+        havoc_big(b);
         b
     }
 
-    fn stub_mul_digits<'a>(b: &'a mut Big, other: &[u32]) -> &'a mut Big {
-        let new_max = b.bit_length().saturating_add(other.len().saturating_mul(32));
-        havoc_big_with_bitlen(b, new_max);
+    fn stub_mul_digits<'a>(b: &'a mut Big, _other: &[u32]) -> &'a mut Big {
+        havoc_big(b);
         b
     }
 
     fn stub_div_rem_small(b: &mut Big, k: u32) -> (&mut Big, u32) {
-        // Real impl panics on k == 0; preserve.
         assert!(k != 0);
-        let old_bits = b.bit_length();
-        havoc_big_with_bitlen(b, old_bits);
+        havoc_big(b);
         let r: u32 = kani::any();
         kani::assume(r < k);
         (b, r)
     }
 
-    fn stub_add<'a>(b: &'a mut Big, other: &Big) -> &'a mut Big {
-        let lhs = b.bit_length();
-        let rhs = other.bit_length();
-        let new_max = lhs.max(rhs).saturating_add(1);
-        havoc_big_with_bitlen(b, new_max);
+    fn stub_add<'a>(b: &'a mut Big, _other: &Big) -> &'a mut Big {
+        havoc_big(b);
         b
     }
 
-    fn stub_add_small(b: &mut Big, other: u32) -> &mut Big {
-        let _ = other;
-        let new_max = b.bit_length().max(32).saturating_add(1);
-        havoc_big_with_bitlen(b, new_max);
+    fn stub_add_small(b: &mut Big, _other: u32) -> &mut Big {
+        havoc_big(b);
         b
     }
 
-    fn stub_sub<'a>(b: &'a mut Big, other: &Big) -> &'a mut Big {
-        // Caller is required to have `self >= other`; result bit_length is
-        // bounded by self's old bit_length.
-        let _ = other;
-        let old_bits = b.bit_length();
-        havoc_big_with_bitlen(b, old_bits);
+    fn stub_sub<'a>(b: &'a mut Big, _other: &Big) -> &'a mut Big {
+        havoc_big(b);
         b
+    }
+
+    fn stub_bit_length(_b: &Big) -> usize {
+        // Real `bit_length` walks limbs via an iterator; abstract to nondet
+        // in [0, 1280].
+        let n: usize = kani::any();
+        kani::assume(n <= BIG_MAX_BITS);
+        n
+    }
+
+    fn stub_big_cmp(_a: &Big, _b: &Big) -> crate::cmp::Ordering {
+        // Real `cmp` walks 40 limbs via an iterator chain (`iter().cloned()
+        // .rev().cmp(...)`), which CBMC unwinds per call site and blows up
+        // the formula. For safety verification we return a nondet ordering;
+        // the algorithm's loop-termination obligations are then over-
+        // approximated by Kani's `unwind` cap.
+        let r: u8 = kani::any();
+        kani::assume(r < 3);
+        match r {
+            0 => crate::cmp::Ordering::Less,
+            1 => crate::cmp::Ordering::Equal,
+            _ => crate::cmp::Ordering::Greater,
+        }
+    }
+
+    fn stub_big_eq(_a: &Big, _b: &Big) -> bool {
+        kani::any()
+    }
+
+    fn stub_round_up(_d: &mut [u8]) -> Option<u8> {
+        // `round_up` walks `d` from the right via `rposition` + `fill`, both
+        // of which CBMC unrolls to ~buf.len() iterations per call site.
+        // We model it as nondet Some(b'1') / None; the caller's buf is
+        // already initialised before `round_up` returns either way.
+        if kani::any() { Some(b'1') } else { None }
     }
 
     fn arbitrary_small_decoded() -> Decoded {
@@ -531,6 +548,10 @@ mod verify {
     #[kani::stub(crate::num::bignum::Big32x40::add, stub_add)]
     #[kani::stub(crate::num::bignum::Big32x40::add_small, stub_add_small)]
     #[kani::stub(crate::num::bignum::Big32x40::sub, stub_sub)]
+    #[kani::stub(crate::num::bignum::Big32x40::cmp, stub_big_cmp)]
+    #[kani::stub(crate::num::bignum::Big32x40::eq, stub_big_eq)]
+    #[kani::stub(crate::num::flt2dec::round_up, stub_round_up)]
+    #[kani::stub(crate::num::bignum::Big32x40::bit_length, stub_bit_length)]
     fn check_format_shortest_safety() {
         let d = arbitrary_small_decoded();
         let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
@@ -550,6 +571,10 @@ mod verify {
     #[kani::stub(crate::num::bignum::Big32x40::add, stub_add)]
     #[kani::stub(crate::num::bignum::Big32x40::add_small, stub_add_small)]
     #[kani::stub(crate::num::bignum::Big32x40::sub, stub_sub)]
+    #[kani::stub(crate::num::bignum::Big32x40::cmp, stub_big_cmp)]
+    #[kani::stub(crate::num::bignum::Big32x40::eq, stub_big_eq)]
+    #[kani::stub(crate::num::flt2dec::round_up, stub_round_up)]
+    #[kani::stub(crate::num::bignum::Big32x40::bit_length, stub_bit_length)]
     fn check_format_exact_safety() {
         let d = arbitrary_small_decoded();
         let limit: i16 = kani::any();
