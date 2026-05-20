@@ -4,17 +4,19 @@ Working notes for this fork. Not part of the upstream `doc/` mdBook.
 
 ## Status
 
-Challenge 28 (flt2dec): **8 of 12 functions verified end-to-end via Kani**, plus safety contracts on the remaining 4. PR not yet opened. Run `nix run .#verify -- flt2dec` from the repo root to reproduce. Verified so far:
+Challenge 28 (flt2dec): **10 of 12 functions verified end-to-end via Kani**, plus documented safety contracts on the remaining 2. PR not yet opened. Run `nix run .#verify -- flt2dec` from the repo root to reproduce. Verified so far:
 
 - `digits_to_dec_str`, `digits_to_exp_str`, `to_shortest_str`, `to_shortest_exp_str`, `to_exact_exp_str`, `to_exact_fixed_str` (the last four monomorphised to `f32`)
 - `grisu::format_shortest_opt` and `grisu::format_exact_opt` via the Loitsch-paper-derived stubs and a hoisted `round_and_weed`
+- `grisu::format_shortest` and `grisu::format_exact` (the two lifetime-laundering wrappers) via hand-written stubs of the inner `_opt` calls and the dragon fallback
 
-The remaining four (`grisu::format_shortest`, `grisu::format_exact`, `dragon::format_shortest`, `dragon::format_exact`) have safety contracts merged. The two dragon strategy functions additionally have a working Kani harness scaffold under `flt2dec-dragon-strategies` that runs to completion within the memory cap but reports stub-precision failures; see [decisions/0004](decisions/0004-dragon-stubs-too-loose-for-safety.md) for the gap and the path forward.
+The remaining two (`dragon::format_shortest`, `dragon::format_exact`) have documented safety contracts (in rustdoc `# Safety contract` sections rather than `safety::requires` attributes — see commit log) and a working Kani harness scaffold under `flt2dec-dragon-strategies` that runs to completion within the memory cap but reports stub-precision failures; see [decisions/0004](decisions/0004-dragon-stubs-too-loose-for-safety.md) for the gap and the path forward.
 
 ## Reproducing locally
 
 - `nix run .#verify -- flt2dec` — Verifies the 6 public/helper functions (passes).
 - `nix run .#verify -- flt2dec-grisu-strategies` — Verifies the 2 grisu `_opt` functions (passes).
+- `nix run .#verify -- flt2dec-grisu-wrappers` — Verifies the 2 grisu wrapper functions (passes, sub-second each).
 - `nix run .#verify -- flt2dec-dragon-strategies` — Runs the dragon strategy harnesses (currently reports stub-precision failures, see ADR 0004).
 
 Set `VERIFY_MEMORY_MAX` to override the default 24 GiB systemd-cgroup memory cap.

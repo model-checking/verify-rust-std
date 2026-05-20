@@ -341,6 +341,12 @@ macro_rules! define_bignum {
             /// stubs to avoid tracing through the full multi-limb arithmetic.
             #[cfg(kani)]
             #[doc(hidden)]
+            pub fn kani_size(&self) -> usize {
+                self.size
+            }
+
+            #[cfg(kani)]
+            #[doc(hidden)]
             pub fn kani_havoc(&mut self, max_bits: usize) {
                 let digitbits = <$ty>::BITS as usize;
                 let cap_bits = $n * digitbits;

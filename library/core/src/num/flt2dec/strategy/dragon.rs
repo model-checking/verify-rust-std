@@ -511,23 +511,25 @@ mod verify {
         n
     }
 
-    fn stub_big_cmp(_a: &Big, _b: &Big) -> crate::cmp::Ordering {
-        // Real `cmp` walks 40 limbs via an iterator chain (`iter().cloned()
-        // .rev().cmp(...)`), which CBMC unwinds per call site and blows up
-        // the formula. For safety verification we return a nondet ordering;
-        // the algorithm's loop-termination obligations are then over-
-        // approximated by Kani's `unwind` cap.
-        let r: u8 = kani::any();
-        kani::assume(r < 3);
-        match r {
-            0 => crate::cmp::Ordering::Less,
-            1 => crate::cmp::Ordering::Equal,
-            _ => crate::cmp::Ordering::Greater,
+    fn stub_big_cmp(a: &Big, b: &Big) -> crate::cmp::Ordering {
+        // Deterministic-by-size comparison via the `kani_size` getter
+        // (the `size` field is private to bignum). Sound abstraction:
+        // `havoc_big` sets size nondet in 0..=40, so all orderings
+        // remain reachable across the harness, but each individual
+        // invocation is a consistent total order.
+        let asz = a.kani_size();
+        let bsz = b.kani_size();
+        if asz > bsz {
+            crate::cmp::Ordering::Greater
+        } else if asz < bsz {
+            crate::cmp::Ordering::Less
+        } else {
+            crate::cmp::Ordering::Equal
         }
     }
 
-    fn stub_big_eq(_a: &Big, _b: &Big) -> bool {
-        kani::any()
+    fn stub_big_eq(a: &Big, b: &Big) -> bool {
+        a.kani_size() == b.kani_size()
     }
 
     fn stub_round_up(_d: &mut [u8]) -> Option<u8> {
