@@ -80,6 +80,15 @@
                   "num::flt2dec::verify::check_to_exact_fixed_str_f32"
                 )
                 ;;
+              flt2dec-grisu-wrappers)
+                # The two lifetime-laundering wrappers. Both inner calls
+                # (format_*_opt and the dragon fallback) are stubbed, so
+                # only the wrapper's own unsafe reborrow is exercised.
+                harnesses=(
+                  "num::flt2dec::strategy::grisu::verify::check_format_shortest_wrapper_safety"
+                  "num::flt2dec::strategy::grisu::verify::check_format_exact_wrapper_safety"
+                )
+                ;;
               flt2dec-grisu-strategies)
                 # The two grisu algorithm functions. These use only u64/u128
                 # scalar arithmetic so the CBMC formula stays tractable under

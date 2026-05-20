@@ -11,7 +11,6 @@ use crate::mem::MaybeUninit;
 use crate::num::bignum::{Big32x40 as Big, Digit32 as Digit};
 use crate::num::flt2dec::estimator::estimate_scaling_factor;
 use crate::num::flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
-use safety::requires;
 
 static POW10: [Digit; 10] =
     [1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000];
@@ -102,12 +101,21 @@ fn div_rem_upto_16<'a>(
 }
 
 /// The shortest mode implementation for Dragon.
-#[requires(d.mant > 0)]
-#[requires(d.minus > 0)]
-#[requires(d.plus > 0)]
-#[requires(d.mant.checked_add(d.plus).is_some())]
-#[requires(d.mant.checked_sub(d.minus).is_some())]
-#[requires(buf.len() >= MAX_SIG_DIGITS)]
+///
+/// # Safety contract
+///
+/// The following preconditions are documented but not enforced via
+/// `safety::requires` so that this function can be replaced via
+/// `#[kani::stub]` in the grisu wrapper harness (Kani 0.65 cannot stub
+/// a function that has `#[requires]` attached). The same preconditions
+/// are enforced in the function body via `assert!`.
+///
+/// - `d.mant > 0`
+/// - `d.minus > 0`
+/// - `d.plus > 0`
+/// - `d.mant.checked_add(d.plus).is_some()`
+/// - `d.mant.checked_sub(d.minus).is_some()`
+/// - `buf.len() >= MAX_SIG_DIGITS`
 pub fn format_shortest<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -268,11 +276,18 @@ pub fn format_shortest<'a>(
 }
 
 /// The exact and fixed mode implementation for Dragon.
-#[requires(d.mant > 0)]
-#[requires(d.minus > 0)]
-#[requires(d.plus > 0)]
-#[requires(d.mant.checked_add(d.plus).is_some())]
-#[requires(d.mant.checked_sub(d.minus).is_some())]
+///
+/// # Safety contract
+///
+/// As with `format_shortest`, preconditions are documented here rather
+/// than enforced via `safety::requires` so this function can be
+/// replaced via `#[kani::stub]` in the grisu wrapper harness.
+///
+/// - `d.mant > 0`
+/// - `d.minus > 0`
+/// - `d.plus > 0`
+/// - `d.mant.checked_add(d.plus).is_some()`
+/// - `d.mant.checked_sub(d.minus).is_some()`
 pub fn format_exact<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],

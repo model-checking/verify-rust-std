@@ -10,7 +10,6 @@ use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::num::diy_float::Fp;
 use crate::num::flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
-use safety::requires;
 
 // see the comments in `format_shortest_opt` for the rationale.
 #[doc(hidden)]
@@ -165,13 +164,21 @@ pub fn max_pow10_no_more_than(x: u32) -> (u8, u32) {
 /// The shortest mode implementation for Grisu.
 ///
 /// It returns `None` when it would return an inexact representation otherwise.
-#[requires(d.mant > 0)]
-#[requires(d.minus > 0)]
-#[requires(d.plus > 0)]
-#[requires(d.mant.checked_add(d.plus).is_some())]
-#[requires(d.mant.checked_sub(d.minus).is_some())]
-#[requires(buf.len() >= MAX_SIG_DIGITS)]
-#[requires(d.mant + d.plus < (1 << 61))]
+///
+/// # Safety contract
+///
+/// Preconditions documented here rather than enforced via `safety::requires`
+/// so the function can be replaced via `#[kani::stub]` in the wrapper
+/// harness. The same preconditions are enforced in the function body via
+/// `assert!`, and the strategy harness assumes them via `kani::assume`.
+///
+/// - `d.mant > 0`
+/// - `d.minus > 0`
+/// - `d.plus > 0`
+/// - `d.mant.checked_add(d.plus).is_some()`
+/// - `d.mant.checked_sub(d.minus).is_some()`
+/// - `buf.len() >= MAX_SIG_DIGITS`
+/// - `d.mant + d.plus < (1 << 61)`
 pub fn format_shortest_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -430,9 +437,16 @@ pub fn format_shortest<'a>(
 /// The exact and fixed mode implementation for Grisu.
 ///
 /// It returns `None` when it would return an inexact representation otherwise.
-#[requires(d.mant > 0)]
-#[requires(d.mant < (1 << 61))]
-#[requires(!buf.is_empty())]
+///
+/// # Safety contract
+///
+/// Preconditions documented here for the same reason as
+/// `format_shortest_opt`; enforced via `assert!` in the body and via
+/// `kani::assume` in the strategy harness.
+///
+/// - `d.mant > 0`
+/// - `d.mant < (1 << 61)`
+/// - `!buf.is_empty()`
 pub fn format_exact_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -836,6 +850,81 @@ mod verify {
         (kappa, pow)
     }
 
+    // Hand-written stubs for the wrapper harnesses. (&[u8], i16) cannot
+    // implement kani::Arbitrary because the slice reference needs a real
+    // allocation; these stubs synthesise such a slice from the caller's
+    // buf, satisfying the lifetime and initialisation obligations of the
+    // wrapper's `assume_init_ref` chain.
+    fn stub_format_shortest_opt_wrapper<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> Option<(&'a [u8], i16)> {
+        let n: usize = kani::any();
+        kani::assume(n <= buf.len());
+        let mut k = 0;
+        while k < n {
+            buf[k] = MaybeUninit::new(b'0');
+            k += 1;
+        }
+        if kani::any() {
+            let exp: i16 = kani::any();
+            Some((unsafe { buf[..n].assume_init_ref() }, exp))
+        } else {
+            None
+        }
+    }
+
+    fn stub_format_exact_opt_wrapper<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> Option<(&'a [u8], i16)> {
+        let n: usize = kani::any();
+        kani::assume(n <= buf.len());
+        let mut k = 0;
+        while k < n {
+            buf[k] = MaybeUninit::new(b'0');
+            k += 1;
+        }
+        if kani::any() {
+            let exp: i16 = kani::any();
+            Some((unsafe { buf[..n].assume_init_ref() }, exp))
+        } else {
+            None
+        }
+    }
+
+    fn stub_dragon_format_shortest<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> (&'a [u8], i16) {
+        let n: usize = kani::any();
+        kani::assume(n > 0 && n <= buf.len());
+        let mut k = 0;
+        while k < n {
+            buf[k] = MaybeUninit::new(b'0');
+            k += 1;
+        }
+        let exp: i16 = kani::any();
+        (unsafe { buf[..n].assume_init_ref() }, exp)
+    }
+
+    fn stub_dragon_format_exact<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> (&'a [u8], i16) {
+        let n: usize = kani::any();
+        kani::assume(n > 0 && n <= buf.len());
+        let mut k = 0;
+        while k < n {
+            buf[k] = MaybeUninit::new(b'0');
+            k += 1;
+        }
+        let exp: i16 = kani::any();
+        (unsafe { buf[..n].assume_init_ref() }, exp)
+    }
+
     fn stub_round_and_weed<'a>(
         buf: &'a mut [u8],
         exp: i16,
@@ -917,5 +1006,34 @@ mod verify {
         let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
             [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
         let _ = format_exact_opt(&d, &mut buf, limit);
+    }
+
+    /// Verifies the unsafe lifetime-laundering reborrow in
+    /// `format_shortest` is sound. Both the Grisu attempt and the Dragon
+    /// fallback are stubbed; only the wrapper's own unsafe pattern is
+    /// exercised.
+    #[kani::proof]
+    #[kani::unwind(20)]
+    #[kani::stub(format_shortest_opt, stub_format_shortest_opt_wrapper)]
+    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_shortest, stub_dragon_format_shortest)]
+    fn check_format_shortest_wrapper_safety() {
+        let d = arbitrary_small_decoded();
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_shortest(&d, &mut buf);
+    }
+
+    /// Same as above but for `format_exact`.
+    #[kani::proof]
+    #[kani::unwind(20)]
+    #[kani::stub(format_exact_opt, stub_format_exact_opt_wrapper)]
+    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_exact, stub_dragon_format_exact)]
+    fn check_format_exact_wrapper_safety() {
+        let d = arbitrary_small_decoded_exact();
+        let limit: i16 = kani::any();
+        kani::assume(limit >= -10 && limit <= 10);
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_exact(&d, &mut buf, limit);
     }
 }
