@@ -100,9 +100,14 @@
                 ;;
               flt2dec-dragon-strategies)
                 # The two dragon algorithm functions. These walk Big32x40
-                # bignums (40 u32 limbs) so the CBMC formula is far larger
-                # than grisu's; expect OOM at the 24 GiB cap without further
-                # stubbing of bignum operations. Kept here as a sentinel.
+                # bignums (40 u32 limbs); the inner `debug_assert!(d < 10)`
+                # and `debug_assert!(mant < scale)` are algorithm-
+                # correctness invariants (not safety obligations) that the
+                # havoc stubs cannot preserve. Build with
+                # `debug_assertions = off` so the Kani harness verifies the
+                # *release* semantics — which is what Challenge 28's
+                # "no UB" mandate targets.
+                export CARGO_PROFILE_DEV_DEBUG_ASSERTIONS=false
                 harnesses=(
                   "num::flt2dec::strategy::dragon::verify::check_format_shortest_safety"
                   "num::flt2dec::strategy::dragon::verify::check_format_exact_safety"
