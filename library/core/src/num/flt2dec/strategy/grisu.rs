@@ -171,6 +171,8 @@ pub fn max_pow10_no_more_than(x: u32) -> (u8, u32) {
 /// so the function can be replaced via `#[kani::stub]` in the wrapper
 /// harness. The same preconditions are enforced in the function body via
 /// `assert!`, and the strategy harness assumes them via `kani::assume`.
+/// When `model-checking/kani#4591` lands the doc-section can be replaced
+/// by `#[safety::requires(...)]` attributes and the body asserts dropped.
 ///
 /// - `d.mant > 0`
 /// - `d.minus > 0`
@@ -441,8 +443,8 @@ pub fn format_shortest<'a>(
 /// # Safety contract
 ///
 /// Preconditions documented here for the same reason as
-/// `format_shortest_opt`; enforced via `assert!` in the body and via
-/// `kani::assume` in the strategy harness.
+/// `format_shortest_opt` (see `model-checking/kani#4591`); enforced via
+/// `assert!` in the body and via `kani::assume` in the strategy harness.
 ///
 /// - `d.mant > 0`
 /// - `d.mant < (1 << 61)`

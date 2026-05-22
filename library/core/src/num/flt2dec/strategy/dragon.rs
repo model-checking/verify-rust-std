@@ -106,9 +106,10 @@ fn div_rem_upto_16<'a>(
 ///
 /// The following preconditions are documented but not enforced via
 /// `safety::requires` so that this function can be replaced via
-/// `#[kani::stub]` in the grisu wrapper harness (Kani 0.65 cannot stub
-/// a function that has `#[requires]` attached). The same preconditions
-/// are enforced in the function body via `assert!`.
+/// `#[kani::stub]` in the grisu wrapper harness: Kani 0.65 cannot stub
+/// a function that has `#[requires]` attached (tracked upstream as
+/// `model-checking/kani#4591`; when fixed, swap to attributes). The
+/// same preconditions are enforced in the function body via `assert!`.
 ///
 /// - `d.mant > 0`
 /// - `d.minus > 0`
@@ -281,7 +282,8 @@ pub fn format_shortest<'a>(
 ///
 /// As with `format_shortest`, preconditions are documented here rather
 /// than enforced via `safety::requires` so this function can be
-/// replaced via `#[kani::stub]` in the grisu wrapper harness.
+/// replaced via `#[kani::stub]` in the grisu wrapper harness (see
+/// `model-checking/kani#4591`).
 ///
 /// - `d.mant > 0`
 /// - `d.minus > 0`
