@@ -100,14 +100,11 @@
                 ;;
               flt2dec-dragon-strategies)
                 # The two dragon algorithm functions. These walk Big32x40
-                # bignums (40 u32 limbs); the inner `debug_assert!(d < 10)`
-                # and `debug_assert!(mant < scale)` are algorithm-
-                # correctness invariants (not safety obligations) that the
-                # havoc stubs cannot preserve. Build with
-                # `debug_assertions = off` so the Kani harness verifies the
-                # *release* semantics — which is what Challenge 28's
-                # "no UB" mandate targets.
-                export CARGO_PROFILE_DEV_DEBUG_ASSERTIONS=false
+                # bignums (40 u32 limbs); the inner debug_asserts in
+                # `format_exact`'s digit-extraction loop are gated with
+                # `#[cfg(not(kani))]` in dragon.rs (matching the implicit
+                # gating that `format_shortest` gets from stubbing
+                # `div_rem_upto_16`). No build-profile override needed.
                 harnesses=(
                   "num::flt2dec::strategy::dragon::verify::check_format_shortest_safety"
                   "num::flt2dec::strategy::dragon::verify::check_format_exact_safety"

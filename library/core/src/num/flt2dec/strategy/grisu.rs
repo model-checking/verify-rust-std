@@ -1017,7 +1017,10 @@ mod verify {
     #[kani::proof]
     #[kani::unwind(20)]
     #[kani::stub(format_shortest_opt, stub_format_shortest_opt_wrapper)]
-    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_shortest, stub_dragon_format_shortest)]
+    #[kani::stub(
+        crate::num::flt2dec::strategy::dragon::format_shortest,
+        stub_dragon_format_shortest
+    )]
     fn check_format_shortest_wrapper_safety() {
         let d = arbitrary_small_decoded();
         let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
@@ -1029,7 +1032,10 @@ mod verify {
     #[kani::proof]
     #[kani::unwind(20)]
     #[kani::stub(format_exact_opt, stub_format_exact_opt_wrapper)]
-    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_exact, stub_dragon_format_exact)]
+    #[kani::stub(
+        crate::num::flt2dec::strategy::dragon::format_exact,
+        stub_dragon_format_exact
+    )]
     fn check_format_exact_wrapper_safety() {
         let d = arbitrary_small_decoded_exact();
         let limit: i16 = kani::any();

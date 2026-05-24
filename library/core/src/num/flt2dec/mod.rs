@@ -725,8 +725,7 @@ mod verify {
 
         // `parts` must have len >= 4. Use exactly 4 (the minimum) to keep the
         // search space tight; the function never writes past index 3.
-        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] =
-            [const { MaybeUninit::uninit() }; 4];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
 
         // `exp: i16` is fully symbolic. The function admits any value in its
         // domain. `frac_digits: usize` is bounded so that the symbolic state
@@ -764,16 +763,14 @@ mod verify {
         // (`buf.len() > 1 || min_ndigits > 1` plus `min_ndigits > buf.len()`
         // gives `n == 4`, then the trailing exponent pair brings the upper
         // bound to `n + 2 == 6`).
-        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] =
-            [const { MaybeUninit::uninit() }; 6];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
 
         let exp: i16 = kani::any();
         let min_ndigits: usize = kani::any();
         kani::assume(min_ndigits <= 8);
         let upper: bool = kani::any();
 
-        let rendered =
-            digits_to_exp_str(buf, exp, min_ndigits, upper, &mut parts_storage);
+        let rendered = digits_to_exp_str(buf, exp, min_ndigits, upper, &mut parts_storage);
         // The returned slice is `parts[..n + 2]` with `n` in {1, 3, 4}, so the
         // length is in {3, 5, 6}.
         assert!(rendered.len() >= 3 && rendered.len() <= 6);
@@ -821,10 +818,8 @@ mod verify {
         kani::assume(frac_digits <= 8);
         let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
 
-        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
-            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
-        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] =
-            [const { MaybeUninit::uninit() }; 4];
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] = [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
 
         let formatted = to_shortest_str::<f32, _>(
             stub_format_shortest,
@@ -855,10 +850,8 @@ mod verify {
         let upper: bool = kani::any();
         let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
 
-        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
-            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
-        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] =
-            [const { MaybeUninit::uninit() }; 6];
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] = [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
 
         let formatted = to_shortest_exp_str::<f32, _>(
             stub_format_shortest,
@@ -931,10 +924,8 @@ mod verify {
         let upper: bool = kani::any();
         let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
 
-        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
-            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
-        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] =
-            [const { MaybeUninit::uninit() }; 6];
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] = [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
 
         let formatted = to_exact_exp_str::<f32, _>(
             stub_format_exact_nonempty,
@@ -967,8 +958,7 @@ mod verify {
         // 256 covers the worst-case `estimate_max_buf_len` for any f32 input.
         let mut buf_storage: [MaybeUninit<u8>; 256] =
             [const { MaybeUninit::uninit() }; 256];
-        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] =
-            [const { MaybeUninit::uninit() }; 4];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
 
         let formatted = to_exact_fixed_str::<f32, _>(
             stub_format_exact_nondet,

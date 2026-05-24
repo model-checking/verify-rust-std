@@ -384,7 +384,16 @@ pub fn format_exact<'a>(
                 mant.sub(&scale);
                 d += 1;
             }
+            // These two debug_asserts encode the loop invariant
+            // `mant + plus <= scale * 10`, which holds in the real
+            // algorithm but not under the havoc-stubbed `Big32x40::sub`
+            // and `Big32x40::cmp` used in `verify::check_format_exact_safety`.
+            // They are algorithm-correctness invariants, not safety
+            // obligations: `format_shortest` already hides the equivalent
+            // assert behind the stubbed `div_rem_upto_16` helper.
+            #[cfg(not(kani))]
             debug_assert!(mant < scale);
+            #[cfg(not(kani))]
             debug_assert!(d < 10);
             buf[i] = MaybeUninit::new(b'0' + d);
             mant.mul_small(10);
@@ -628,7 +637,9 @@ mod verify {
     #[kani::stub(crate::num::bignum::Big32x40::is_zero, stub_is_zero)]
     #[kani::stub(crate::num::flt2dec::strategy::dragon::div_rem_upto_16, stub_div_rem_upto_16)]
     fn check_format_shortest_safety() {
-        unsafe { CMP_CALLS = 0; }
+        unsafe {
+            CMP_CALLS = 0;
+        }
         let d = arbitrary_small_decoded();
         // One slot beyond MAX_SIG_DIGITS for the round-up extension at the
         // end of `format_shortest`: under havoc stubs of `Big::cmp` the loop
@@ -663,7 +674,9 @@ mod verify {
     #[kani::stub(crate::num::bignum::Big32x40::is_zero, stub_is_zero)]
     #[kani::stub(crate::num::flt2dec::strategy::dragon::div_rem_upto_16, stub_div_rem_upto_16)]
     fn check_format_exact_safety() {
-        unsafe { CMP_CALLS = 0; }
+        unsafe {
+            CMP_CALLS = 0;
+        }
         let d = arbitrary_small_decoded();
         let limit: i16 = kani::any();
         kani::assume(limit >= -10 && limit <= 10);
