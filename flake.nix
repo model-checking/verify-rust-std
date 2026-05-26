@@ -99,12 +99,10 @@
                 )
                 ;;
               flt2dec-dragon-strategies)
-                # The two dragon algorithm functions. These walk Big32x40
-                # bignums (40 u32 limbs); the inner debug_asserts in
-                # `format_exact`'s digit-extraction loop are gated with
-                # `#[cfg(not(kani))]` in dragon.rs (matching the implicit
-                # gating that `format_shortest` gets from stubbing
-                # `div_rem_upto_16`). No build-profile override needed.
+                # The two dragon algorithm functions. Both `format_shortest`
+                # and `format_exact` now share `div_rem_upto_16` for digit
+                # extraction, so the Kani harness can stub that one helper
+                # to cover both paths.
                 harnesses=(
                   "num::flt2dec::strategy::dragon::verify::check_format_shortest_safety"
                   "num::flt2dec::strategy::dragon::verify::check_format_exact_safety"

@@ -818,7 +818,8 @@ mod verify {
         kani::assume(frac_digits <= 8);
         let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
 
-        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] = [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
         let mut parts_storage: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
 
         let formatted = to_shortest_str::<f32, _>(
@@ -850,7 +851,8 @@ mod verify {
         let upper: bool = kani::any();
         let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
 
-        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] = [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
         let mut parts_storage: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
 
         let formatted = to_shortest_exp_str::<f32, _>(
@@ -924,7 +926,8 @@ mod verify {
         let upper: bool = kani::any();
         let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
 
-        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] = [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
         let mut parts_storage: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
 
         let formatted = to_exact_exp_str::<f32, _>(
@@ -956,8 +959,7 @@ mod verify {
         let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
 
         // 256 covers the worst-case `estimate_max_buf_len` for any f32 input.
-        let mut buf_storage: [MaybeUninit<u8>; 256] =
-            [const { MaybeUninit::uninit() }; 256];
+        let mut buf_storage: [MaybeUninit<u8>; 256] = [const { MaybeUninit::uninit() }; 256];
         let mut parts_storage: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
 
         let formatted = to_exact_fixed_str::<f32, _>(

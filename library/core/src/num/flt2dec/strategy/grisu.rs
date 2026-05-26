@@ -1032,10 +1032,7 @@ mod verify {
     #[kani::proof]
     #[kani::unwind(20)]
     #[kani::stub(format_exact_opt, stub_format_exact_opt_wrapper)]
-    #[kani::stub(
-        crate::num::flt2dec::strategy::dragon::format_exact,
-        stub_dragon_format_exact
-    )]
+    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_exact, stub_dragon_format_exact)]
     fn check_format_exact_wrapper_safety() {
         let d = arbitrary_small_decoded_exact();
         let limit: i16 = kani::any();

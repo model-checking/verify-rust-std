@@ -367,33 +367,12 @@ pub fn format_exact<'a>(
                 return (unsafe { buf[..len].assume_init_ref() }, k);
             }
 
-            let mut d = 0;
-            if mant >= scale8 {
-                mant.sub(&scale8);
-                d += 8;
-            }
-            if mant >= scale4 {
-                mant.sub(&scale4);
-                d += 4;
-            }
-            if mant >= scale2 {
-                mant.sub(&scale2);
-                d += 2;
-            }
-            if mant >= scale {
-                mant.sub(&scale);
-                d += 1;
-            }
-            // These two debug_asserts encode the loop invariant
-            // `mant + plus <= scale * 10`, which holds in the real
-            // algorithm but not under the havoc-stubbed `Big32x40::sub`
-            // and `Big32x40::cmp` used in `verify::check_format_exact_safety`.
-            // They are algorithm-correctness invariants, not safety
-            // obligations: `format_shortest` already hides the equivalent
-            // assert behind the stubbed `div_rem_upto_16` helper.
-            #[cfg(not(kani))]
-            debug_assert!(mant < scale);
-            #[cfg(not(kani))]
+            // Delegate to `div_rem_upto_16` (same helper used by
+            // `format_shortest`); the inlined block here was a byte-identical
+            // copy. Reusing the helper deduplicates the code and lets the
+            // dragon Kani harness stub one extraction routine for both
+            // `format_shortest` and `format_exact`.
+            let (d, _) = div_rem_upto_16(&mut mant, &scale, &scale2, &scale4, &scale8);
             debug_assert!(d < 10);
             buf[i] = MaybeUninit::new(b'0' + d);
             mant.mul_small(10);
