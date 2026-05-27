@@ -30,12 +30,6 @@ Cargo.lock
 /doc/mdbook-metrics/target
 *.png
 
-## Nix flake runtime artefacts
-/.rustup-fake/
-/.toolchain-wrapper/
-/kani-list.md
-/result
-
 ## Temporary files
 *~
 \#*

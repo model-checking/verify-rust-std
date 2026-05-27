@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # Script to find files with specific annotations and print contracts
 # containing those annotations up to a line with "fn"

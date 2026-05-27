@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Runs the Rust bootstrap script in order to ensure the changes to this repo
 # are compliant with the Rust repository tests.
 #

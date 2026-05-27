@@ -181,6 +181,16 @@ pub fn max_pow10_no_more_than(x: u32) -> (u8, u32) {
 /// - `d.mant.checked_sub(d.minus).is_some()`
 /// - `buf.len() >= MAX_SIG_DIGITS`
 /// - `d.mant + d.plus < (1 << 61)`
+///
+/// # Kani verification scope
+///
+/// The proof in `verify::check_format_shortest_opt_safety` exercises this
+/// function on the symbolic subdomain `mant in 2..=0xF`, `exp in -2..=2`,
+/// with `plus in 1..=7` and `0 < minus < mant`. The stub
+/// `stub_fp_mul` is an identity on the mantissa, so the safety conclusion
+/// is independent of the specific `Fp` values; the bound narrowing is a
+/// CBMC-tractability choice rather than a precondition of the real
+/// function.
 pub fn format_shortest_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -449,6 +459,14 @@ pub fn format_shortest<'a>(
 /// - `d.mant > 0`
 /// - `d.mant < (1 << 61)`
 /// - `!buf.is_empty()`
+///
+/// # Kani verification scope
+///
+/// The proof in `verify::check_format_exact_opt_safety` exercises this
+/// function on the symbolic subdomain `mant in 1..=0xFF`, `exp in -4..=4`,
+/// `minus == 1`, `plus == 1`, with `limit in -8..=8`. Same justification
+/// as `format_shortest_opt`: the identity-on-`f` `stub_fp_mul` decouples
+/// the safety conclusion from concrete `Fp` values.
 pub fn format_exact_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],

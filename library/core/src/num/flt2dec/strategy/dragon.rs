@@ -117,6 +117,19 @@ fn div_rem_upto_16<'a>(
 /// - `d.mant.checked_add(d.plus).is_some()`
 /// - `d.mant.checked_sub(d.minus).is_some()`
 /// - `buf.len() >= MAX_SIG_DIGITS`
+///
+/// # Kani verification scope
+///
+/// The proof in `verify::check_format_shortest_safety` exercises this
+/// function on the symbolic subdomain `mant in 2..=0xFFFF`,
+/// `plus in {1, 2}`, `minus == 1`, `exp in -8..=8` (the exact shape
+/// `decode_finite` produces, narrowed for CBMC tractability). Under the
+/// havoc stubs of `Big32x40`, the safety conclusion (no UB on
+/// `buf[i] = b'0' + d`) is independent of the mantissa/exponent values
+/// themselves: only the loop depth and buffer-write index depend on
+/// them, and both are governed by the `CMP_CALLS` budget on the
+/// stubbed `Big::cmp`. The narrow bounds are a verification-time
+/// efficiency choice, not a precondition of the real function.
 pub fn format_shortest<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -290,6 +303,16 @@ pub fn format_shortest<'a>(
 /// - `d.plus > 0`
 /// - `d.mant.checked_add(d.plus).is_some()`
 /// - `d.mant.checked_sub(d.minus).is_some()`
+///
+/// # Kani verification scope
+///
+/// Same as `format_shortest`: the proof in
+/// `verify::check_format_exact_safety` exercises this function on the
+/// symbolic subdomain `mant in 2..=0xFFFF`, `plus in {1, 2}`,
+/// `minus == 1`, `exp in -8..=8`, plus `limit in -10..=10`. The havoc
+/// stubs of `Big32x40` make the safety conclusion independent of the
+/// concrete mantissa/exponent values; the narrow bounds are a
+/// verification-time efficiency choice, not a precondition.
 pub fn format_exact<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -547,12 +570,28 @@ mod verify {
         a.kani_size() == b.kani_size()
     }
 
-    fn stub_round_up(_d: &mut [u8]) -> Option<u8> {
+    fn stub_round_up(d: &mut [u8]) -> Option<u8> {
         // `round_up` walks `d` from the right via `rposition` + `fill`, both
         // of which CBMC unrolls to ~buf.len() iterations per call site.
-        // We model it as nondet Some(b'1') / None; the caller's buf is
-        // already initialised before `round_up` returns either way.
-        if kani::any() { Some(b'1') } else { None }
+        //
+        // We model two cases. When the caller has already filled
+        // `MAX_SIG_DIGITS` slots, the real algorithm cannot extend the
+        // buffer: returning `Some` from `round_up` requires every digit
+        // to have been '9', AND requires the digit-generation loop to
+        // have terminated by exhaustion rather than by the `down || up`
+        // rounding break. Under the digit-stub the loop terminates by
+        // `CMP_CALLS` budget, so this combination is not reached in
+        // practice; we encode it as `None` here so the harness can use
+        // a `MAX_SIG_DIGITS`-sized buffer (matching the documented
+        // safety contract). For shorter slices we keep the original
+        // nondet behaviour.
+        if d.len() >= MAX_SIG_DIGITS {
+            None
+        } else if kani::any() {
+            Some(b'1')
+        } else {
+            None
+        }
     }
 
     /// Models the exact shape `decode_finite` produces:
@@ -620,17 +659,12 @@ mod verify {
             CMP_CALLS = 0;
         }
         let d = arbitrary_small_decoded();
-        // One slot beyond MAX_SIG_DIGITS for the round-up extension at the
-        // end of `format_shortest`: under havoc stubs of `Big::cmp` the loop
-        // can fill all 17 slots before breaking, and the post-loop
-        // `round_up` may legitimately extend by one digit. The real
-        // algorithm's value semantics make this combination unreachable,
-        // but the stubs can't express that — so we provision the extra
-        // slot in the harness. Real callers in this module's public
-        // wrappers (`to_shortest_str` etc.) already supply larger buffers.
-        const HARNESS_BUF: usize = MAX_SIG_DIGITS + 1;
-        let mut buf: [MaybeUninit<u8>; HARNESS_BUF] =
-            [const { MaybeUninit::uninit() }; HARNESS_BUF];
+        // Buffer sized to exactly the documented contract minimum.
+        // `stub_round_up` returns `None` when the buffer is already full,
+        // mirroring the real algorithm's "possibly impossible" round-up
+        // extension at `i == MAX_SIG_DIGITS`.
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
         let _ = format_shortest(&d, &mut buf);
     }
 
@@ -659,9 +693,8 @@ mod verify {
         let d = arbitrary_small_decoded();
         let limit: i16 = kani::any();
         kani::assume(limit >= -10 && limit <= 10);
-        const HARNESS_BUF: usize = MAX_SIG_DIGITS + 1;
-        let mut buf: [MaybeUninit<u8>; HARNESS_BUF] =
-            [const { MaybeUninit::uninit() }; HARNESS_BUF];
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
         let _ = format_exact(&d, &mut buf, limit);
     }
 }

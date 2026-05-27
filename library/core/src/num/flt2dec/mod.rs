@@ -834,6 +834,37 @@ mod verify {
         touch_parts(formatted.parts);
     }
 
+    /// Proof for `to_shortest_str`, monomorphised to `f64`.
+    ///
+    /// Same structure as the `f32` sibling: the wrapper's buffer
+    /// precondition is `buf.len() >= MAX_SIG_DIGITS`, independent of float
+    /// bitwidth. Only `decode::<f64>` and `min_pos_norm_value::<f64>` differ
+    /// at the monomorphised IR; covering both primitives addresses
+    /// Challenge 28's "primitive types" generic-T scope.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_to_shortest_str_f64() {
+        let v: f64 = kani::any();
+        let frac_digits: usize = kani::any();
+        kani::assume(frac_digits <= 8);
+        let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
+
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
+
+        let formatted = to_shortest_str::<f64, _>(
+            stub_format_shortest,
+            v,
+            sign,
+            frac_digits,
+            &mut buf_storage,
+            &mut parts_storage,
+        );
+
+        touch_parts(formatted.parts);
+    }
+
     /// Proof for `to_shortest_exp_str`, monomorphised to `f32`.
     ///
     /// Same shape as `check_to_shortest_str_f32`. The Zero branch writes one
@@ -856,6 +887,34 @@ mod verify {
         let mut parts_storage: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
 
         let formatted = to_shortest_exp_str::<f32, _>(
+            stub_format_shortest,
+            v,
+            sign,
+            (dec_lo, dec_hi),
+            upper,
+            &mut buf_storage,
+            &mut parts_storage,
+        );
+
+        touch_parts(formatted.parts);
+    }
+
+    /// Proof for `to_shortest_exp_str`, monomorphised to `f64`.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_to_shortest_exp_str_f64() {
+        let v: f64 = kani::any();
+        let dec_lo: i16 = kani::any();
+        let dec_hi: i16 = kani::any();
+        kani::assume(dec_lo <= dec_hi);
+        let upper: bool = kani::any();
+        let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
+
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
+
+        let formatted = to_shortest_exp_str::<f64, _>(
             stub_format_shortest,
             v,
             sign,
@@ -943,6 +1002,39 @@ mod verify {
         touch_parts(formatted.parts);
     }
 
+    /// Proof for `to_exact_exp_str`, monomorphised to `f64`.
+    ///
+    /// The Finite branch asserts `buf.len() >= ndigits || buf.len() >= maxlen`.
+    /// With `ndigits <= 8` and a `MAX_SIG_DIGITS`-byte buffer the first
+    /// disjunct holds regardless of `decoded.exp`, so the f64
+    /// `estimate_max_buf_len` ceiling (up to 826 at `exp = -1074`) is never
+    /// the limiting term.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_to_exact_exp_str_f64() {
+        let v: f64 = kani::any();
+        let ndigits: usize = kani::any();
+        kani::assume(ndigits >= 1 && ndigits <= 8);
+        let upper: bool = kani::any();
+        let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
+
+        let mut buf_storage: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
+
+        let formatted = to_exact_exp_str::<f64, _>(
+            stub_format_exact_nonempty,
+            v,
+            sign,
+            ndigits,
+            upper,
+            &mut buf_storage,
+            &mut parts_storage,
+        );
+
+        touch_parts(formatted.parts);
+    }
+
     /// Proof for `to_exact_fixed_str`, monomorphised to `f32`.
     ///
     /// Same shape as the other wrappers. The Finite branch has an extra
@@ -963,6 +1055,36 @@ mod verify {
         let mut parts_storage: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
 
         let formatted = to_exact_fixed_str::<f32, _>(
+            stub_format_exact_nondet,
+            v,
+            sign,
+            frac_digits,
+            &mut buf_storage,
+            &mut parts_storage,
+        );
+
+        touch_parts(formatted.parts);
+    }
+
+    /// Proof for `to_exact_fixed_str`, monomorphised to `f64`.
+    ///
+    /// The Finite branch asserts `buf.len() >= maxlen` unconditionally.
+    /// For `f64` the worst-case `estimate_max_buf_len(decoded.exp)` is
+    /// 826 bytes (at `exp = -1074`, per the helper's doc comment); 832
+    /// bytes covers every reachable `decoded.exp` with margin.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_to_exact_fixed_str_f64() {
+        let v: f64 = kani::any();
+        let frac_digits: usize = kani::any();
+        kani::assume(frac_digits <= 8);
+        let sign = if kani::any::<bool>() { Sign::Minus } else { Sign::MinusPlus };
+
+        // 832 covers the f64 worst-case `estimate_max_buf_len`.
+        let mut buf_storage: [MaybeUninit<u8>; 832] = [const { MaybeUninit::uninit() }; 832];
+        let mut parts_storage: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
+
+        let formatted = to_exact_fixed_str::<f64, _>(
             stub_format_exact_nondet,
             v,
             sign,
