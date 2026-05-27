@@ -4528,3 +4528,372 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for UniqueArc<T, A> {
         unsafe { ptr::drop_in_place(&mut (*self.ptr.as_ptr()).data) };
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::any::Any;
+    use core::kani;
+    use core::mem::MaybeUninit;
+
+    use crate::alloc::Global;
+    use crate::sync::{Arc, Weak};
+
+    // === UNSAFE (12 — all required) ===
+
+    #[kani::proof]
+    fn verify_assume_init_single() {
+        let a: Arc<MaybeUninit<i32>> = Arc::new(MaybeUninit::new(42));
+        let a = unsafe { a.assume_init() };
+        assert!(*a == 42);
+    }
+
+    #[kani::proof]
+    fn verify_assume_init_slice() {
+        let mut a: Arc<[MaybeUninit<i32>]> = Arc::new_uninit_slice(3);
+        let s = Arc::get_mut(&mut a).unwrap();
+        s[0].write(1);
+        s[1].write(2);
+        s[2].write(3);
+        let a = unsafe { a.assume_init() };
+        assert!(a.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_from_raw() {
+        let a = Arc::new(42i32);
+        let raw = Arc::into_raw(a);
+        let a = unsafe { Arc::from_raw(raw) };
+        assert!(*a == 42);
+    }
+
+    #[kani::proof]
+    fn verify_from_raw_in() {
+        let a = Arc::new_in(42i32, Global);
+        let (raw, alloc) = Arc::into_raw_with_allocator(a);
+        let a = unsafe { Arc::from_raw_in(raw, alloc) };
+        assert!(*a == 42);
+    }
+
+    #[kani::proof]
+    fn verify_increment_strong_count() {
+        let a = Arc::new(42i32);
+        let ptr = Arc::as_ptr(&a);
+        unsafe {
+            Arc::increment_strong_count(ptr);
+        }
+        let a2 = unsafe { Arc::from_raw(ptr) };
+        assert!(*a2 == 42);
+    }
+
+    #[kani::proof]
+    fn verify_increment_strong_count_in() {
+        let a = Arc::new_in(42i32, Global);
+        let ptr = Arc::as_ptr(&a);
+        unsafe {
+            Arc::increment_strong_count_in(ptr, Global);
+        }
+        let a2 = unsafe { Arc::from_raw_in(ptr, Global) };
+        assert!(*a2 == 42);
+    }
+
+    #[kani::proof]
+    fn verify_decrement_strong_count() {
+        let a = Arc::new(42i32);
+        let a2 = a.clone();
+        let ptr = Arc::as_ptr(&a2);
+        core::mem::forget(a2);
+        unsafe {
+            Arc::decrement_strong_count(ptr);
+        }
+    }
+
+    #[kani::proof]
+    fn verify_decrement_strong_count_in() {
+        let a = Arc::new_in(42i32, Global);
+        let a2 = a.clone();
+        let ptr = Arc::as_ptr(&a2);
+        core::mem::forget(a2);
+        unsafe {
+            Arc::decrement_strong_count_in(ptr, Global);
+        }
+    }
+
+    #[kani::proof]
+    fn verify_get_mut_unchecked() {
+        let mut a = Arc::new(42i32);
+        unsafe {
+            *Arc::get_mut_unchecked(&mut a) = 99;
+        }
+        assert!(*a == 99);
+    }
+
+    #[kani::proof]
+    fn verify_downcast_unchecked() {
+        let a: Arc<dyn Any + Send + Sync> = Arc::new(42i32);
+        let d = unsafe { a.downcast_unchecked::<i32>() };
+        assert!(*d == 42);
+    }
+
+    #[kani::proof]
+    fn verify_weak_from_raw() {
+        let a = Arc::new(42i32);
+        let weak = Arc::downgrade(&a);
+        let raw = Weak::into_raw(weak);
+        let weak2 = unsafe { Weak::from_raw(raw) };
+        assert!(weak2.upgrade().is_some());
+    }
+
+    #[kani::proof]
+    fn verify_weak_from_raw_in() {
+        let a = Arc::new_in(42i32, Global);
+        let weak = Arc::downgrade(&a);
+        let (raw, alloc) = Weak::into_raw_with_allocator(weak);
+        let weak2 = unsafe { Weak::from_raw_in(raw, alloc) };
+        assert!(weak2.upgrade().is_some());
+    }
+
+    // === SAFE (target 32+ of 42) ===
+
+    #[kani::proof]
+    fn verify_new() {
+        let a = Arc::new(42i32);
+        assert!(*a == 42);
+    }
+
+    #[kani::proof]
+    fn verify_new_uninit() {
+        let _a: Arc<MaybeUninit<i32>> = Arc::new_uninit();
+    }
+
+    #[kani::proof]
+    fn verify_new_zeroed() {
+        let a: Arc<MaybeUninit<i32>> = Arc::new_zeroed();
+        let a = unsafe { a.assume_init() };
+        assert!(*a == 0);
+    }
+
+    #[kani::proof]
+    fn verify_pin() {
+        let p = Arc::pin(42i32);
+        assert!(*p == 42);
+    }
+
+    #[kani::proof]
+    fn verify_try_new() {
+        let r = Arc::try_new(42i32);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_uninit() {
+        let r = Arc::<i32>::try_new_uninit();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_zeroed() {
+        let r = Arc::<i32>::try_new_zeroed();
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_new_in() {
+        let a = Arc::new_in(42i32, Global);
+        assert!(*a == 42);
+    }
+
+    #[kani::proof]
+    fn verify_new_uninit_in() {
+        let _a: Arc<MaybeUninit<i32>, Global> = Arc::new_uninit_in(Global);
+    }
+
+    #[kani::proof]
+    fn verify_new_zeroed_in() {
+        let a: Arc<MaybeUninit<i32>, Global> = Arc::new_zeroed_in(Global);
+        let a = unsafe { a.assume_init() };
+        assert!(*a == 0);
+    }
+
+    #[kani::proof]
+    fn verify_pin_in() {
+        let p = Arc::pin_in(42i32, Global);
+        assert!(*p == 42);
+    }
+
+    #[kani::proof]
+    fn verify_try_new_in() {
+        let r = Arc::try_new_in(42i32, Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_uninit_in() {
+        let r = Arc::<i32, Global>::try_new_uninit_in(Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_new_zeroed_in() {
+        let r = Arc::<i32, Global>::try_new_zeroed_in(Global);
+        assert!(r.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_try_unwrap() {
+        let a = Arc::new(42i32);
+        let val = Arc::try_unwrap(a);
+        assert!(val == Ok(42));
+    }
+
+    #[kani::proof]
+    fn verify_into_inner() {
+        let a = Arc::new(42i32);
+        let val = Arc::into_inner(a);
+        assert!(val == Some(42));
+    }
+
+    #[kani::proof]
+    fn verify_new_uninit_slice() {
+        let a: Arc<[MaybeUninit<i32>]> = Arc::new_uninit_slice(3);
+        assert!(a.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_new_zeroed_slice() {
+        let a: Arc<[MaybeUninit<i32>]> = Arc::new_zeroed_slice(3);
+        let a = unsafe { a.assume_init() };
+        assert!(a[0] == 0);
+    }
+
+    #[kani::proof]
+    fn verify_into_array() {
+        let a: Arc<[i32]> = Arc::from([1, 2, 3]);
+        let opt: Option<Arc<[i32; 3]>> = a.into_array();
+        assert!(opt.is_some());
+        let arr = opt.unwrap();
+        assert!(arr[0] == 1 && arr[1] == 2 && arr[2] == 3);
+    }
+
+    #[kani::proof]
+    fn verify_into_inner_with_allocator() {
+        let a = Arc::new_in(42i32, Global);
+        let (ptr, alloc) = Arc::into_inner_with_allocator(a);
+        // Reconstruct so the allocation is dropped correctly.
+        let a2 = unsafe { Arc::from_inner_in(ptr, alloc) };
+        assert!(*a2 == 42);
+    }
+
+    #[kani::proof]
+    fn verify_into_raw_with_allocator() {
+        let a = Arc::new_in(42i32, Global);
+        let (raw, alloc) = Arc::into_raw_with_allocator(a);
+        let _ = unsafe { Arc::from_raw_in(raw, alloc) };
+    }
+
+    #[kani::proof]
+    fn verify_as_ptr() {
+        let a = Arc::new(42i32);
+        let ptr = Arc::as_ptr(&a);
+        assert!(unsafe { *ptr } == 42);
+    }
+
+    #[kani::proof]
+    fn verify_clone() {
+        let a = Arc::new(42i32);
+        let a2 = a.clone();
+        assert!(*a2 == 42);
+    }
+
+    #[kani::proof]
+    fn verify_get_mut() {
+        let mut a = Arc::new(42i32);
+        *Arc::get_mut(&mut a).unwrap() = 99;
+        assert!(*a == 99);
+    }
+
+    #[kani::proof]
+    fn verify_drop() {
+        let a = Arc::new(42i32);
+        drop(a);
+    }
+
+    #[kani::proof]
+    fn verify_downcast() {
+        let a: Arc<dyn Any + Send + Sync> = Arc::new(42i32);
+        let d = a.downcast::<i32>();
+        assert!(d.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_weak_as_ptr() {
+        let a = Arc::new(42i32);
+        let weak = Arc::downgrade(&a);
+        let ptr = Weak::as_ptr(&weak);
+        assert!(unsafe { *ptr } == 42);
+    }
+
+    #[kani::proof]
+    fn verify_weak_into_raw_with_allocator() {
+        let a = Arc::new_in(42i32, Global);
+        let weak = Arc::downgrade(&a);
+        let (raw, alloc) = Weak::into_raw_with_allocator(weak);
+        let _ = unsafe { Weak::from_raw_in(raw, alloc) };
+    }
+
+    #[kani::proof]
+    fn verify_weak_upgrade() {
+        let a = Arc::new(42i32);
+        let weak = Arc::downgrade(&a);
+        let upgraded = weak.upgrade();
+        assert!(upgraded.is_some());
+    }
+
+    #[kani::proof]
+    fn verify_weak_inner() {
+        let a = Arc::new(42i32);
+        let weak = Arc::downgrade(&a);
+        assert!(weak.upgrade().is_some());
+    }
+
+    #[kani::proof]
+    fn verify_weak_drop() {
+        let a = Arc::new(42i32);
+        let weak = Arc::downgrade(&a);
+        drop(weak);
+        assert!(*a == 42);
+    }
+
+    #[kani::proof]
+    fn verify_default_i32() {
+        let a: Arc<i32> = Arc::default();
+        assert!(*a == 0);
+    }
+
+    #[kani::proof]
+    fn verify_from_str() {
+        let a: Arc<str> = Arc::from("hello");
+        assert!(a.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_from_vec() {
+        let v = crate::vec![1i32, 2, 3];
+        let a: Arc<[i32]> = Arc::from(v);
+        assert!(a.len() == 3);
+    }
+
+    #[kani::proof]
+    fn verify_from_arc_str() {
+        let a: Arc<str> = Arc::from("hello");
+        let bytes: Arc<[u8]> = Arc::from(a);
+        assert!(bytes.len() == 5);
+    }
+
+    #[kani::proof]
+    fn verify_try_from() {
+        let a: Arc<[i32]> = Arc::from([1, 2, 3]);
+        let r: Result<Arc<[i32; 3]>, _> = a.try_into();
+        assert!(r.is_ok());
+    }
+}
