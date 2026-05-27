@@ -335,6 +335,33 @@ macro_rules! define_bignum {
                 }
                 (self, borrow)
             }
+
+            /// Havoc the bignum to a nondeterministic value whose bit length is
+            /// bounded by `max_bits`. Used exclusively by Kani verification
+            /// stubs to avoid tracing through the full multi-limb arithmetic.
+            #[cfg(kani)]
+            #[doc(hidden)]
+            pub fn kani_size(&self) -> usize {
+                self.size
+            }
+
+            #[cfg(kani)]
+            #[doc(hidden)]
+            pub fn kani_havoc(&mut self, max_bits: usize) {
+                let digitbits = <$ty>::BITS as usize;
+                let cap_bits = $n * digitbits;
+                let bound = if max_bits > cap_bits { cap_bits } else { max_bits };
+                let sz: usize = crate::kani::any();
+                let max_sz = (bound + digitbits - 1) / digitbits;
+                crate::kani::assume(sz <= max_sz);
+                // Whole-array nondet; CBMC models this as a symbolic array
+                // without per-element loop unwinding. Skip the canonical-
+                // size mask and non-zero-top-limb constraints: dragon's
+                // safety stubs only depend on `size`, and adding those
+                // constraints would re-introduce per-limb reasoning.
+                self.size = sz;
+                self.base = crate::kani::any();
+            }
         }
 
         impl crate::cmp::PartialEq for $name {
