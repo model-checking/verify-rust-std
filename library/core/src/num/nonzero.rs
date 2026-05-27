@@ -3025,4 +3025,941 @@ mod verify {
     nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
     nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
     nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
+
+    // =====================================================================
+    // Bitwise & Conversion Operations
+    // =====================================================================
+
+    // --- bitor (NonZero | NonZero) ---
+    macro_rules! nonzero_check_bitor_nznz {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x | y;
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_bitor_nznz!(core::num::NonZeroI8, nonzero_check_bitor_nznz_for_i8);
+    nonzero_check_bitor_nznz!(core::num::NonZeroI16, nonzero_check_bitor_nznz_for_i16);
+    nonzero_check_bitor_nznz!(core::num::NonZeroI32, nonzero_check_bitor_nznz_for_i32);
+    nonzero_check_bitor_nznz!(core::num::NonZeroI64, nonzero_check_bitor_nznz_for_i64);
+    nonzero_check_bitor_nznz!(core::num::NonZeroI128, nonzero_check_bitor_nznz_for_i128);
+    nonzero_check_bitor_nznz!(core::num::NonZeroIsize, nonzero_check_bitor_nznz_for_isize);
+    nonzero_check_bitor_nznz!(core::num::NonZeroU8, nonzero_check_bitor_nznz_for_u8);
+    nonzero_check_bitor_nznz!(core::num::NonZeroU16, nonzero_check_bitor_nznz_for_u16);
+    nonzero_check_bitor_nznz!(core::num::NonZeroU32, nonzero_check_bitor_nznz_for_u32);
+    nonzero_check_bitor_nznz!(core::num::NonZeroU64, nonzero_check_bitor_nznz_for_u64);
+    nonzero_check_bitor_nznz!(core::num::NonZeroU128, nonzero_check_bitor_nznz_for_u128);
+    nonzero_check_bitor_nznz!(core::num::NonZeroUsize, nonzero_check_bitor_nznz_for_usize);
+
+    // --- bitor (NonZero | T) ---
+    macro_rules! nonzero_check_bitor_nzt {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $t = kani::any();
+                let result = x | y;
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_bitor_nzt!(i8, core::num::NonZeroI8, nonzero_check_bitor_nzt_for_i8);
+    nonzero_check_bitor_nzt!(i16, core::num::NonZeroI16, nonzero_check_bitor_nzt_for_i16);
+    nonzero_check_bitor_nzt!(i32, core::num::NonZeroI32, nonzero_check_bitor_nzt_for_i32);
+    nonzero_check_bitor_nzt!(i64, core::num::NonZeroI64, nonzero_check_bitor_nzt_for_i64);
+    nonzero_check_bitor_nzt!(i128, core::num::NonZeroI128, nonzero_check_bitor_nzt_for_i128);
+    nonzero_check_bitor_nzt!(isize, core::num::NonZeroIsize, nonzero_check_bitor_nzt_for_isize);
+    nonzero_check_bitor_nzt!(u8, core::num::NonZeroU8, nonzero_check_bitor_nzt_for_u8);
+    nonzero_check_bitor_nzt!(u16, core::num::NonZeroU16, nonzero_check_bitor_nzt_for_u16);
+    nonzero_check_bitor_nzt!(u32, core::num::NonZeroU32, nonzero_check_bitor_nzt_for_u32);
+    nonzero_check_bitor_nzt!(u64, core::num::NonZeroU64, nonzero_check_bitor_nzt_for_u64);
+    nonzero_check_bitor_nzt!(u128, core::num::NonZeroU128, nonzero_check_bitor_nzt_for_u128);
+    nonzero_check_bitor_nzt!(usize, core::num::NonZeroUsize, nonzero_check_bitor_nzt_for_usize);
+
+    // --- bitor (T | NonZero) ---
+    macro_rules! nonzero_check_bitor_tnz {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $t = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x | y;
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_bitor_tnz!(i8, core::num::NonZeroI8, nonzero_check_bitor_tnz_for_i8);
+    nonzero_check_bitor_tnz!(i16, core::num::NonZeroI16, nonzero_check_bitor_tnz_for_i16);
+    nonzero_check_bitor_tnz!(i32, core::num::NonZeroI32, nonzero_check_bitor_tnz_for_i32);
+    nonzero_check_bitor_tnz!(i64, core::num::NonZeroI64, nonzero_check_bitor_tnz_for_i64);
+    nonzero_check_bitor_tnz!(i128, core::num::NonZeroI128, nonzero_check_bitor_tnz_for_i128);
+    nonzero_check_bitor_tnz!(isize, core::num::NonZeroIsize, nonzero_check_bitor_tnz_for_isize);
+    nonzero_check_bitor_tnz!(u8, core::num::NonZeroU8, nonzero_check_bitor_tnz_for_u8);
+    nonzero_check_bitor_tnz!(u16, core::num::NonZeroU16, nonzero_check_bitor_tnz_for_u16);
+    nonzero_check_bitor_tnz!(u32, core::num::NonZeroU32, nonzero_check_bitor_tnz_for_u32);
+    nonzero_check_bitor_tnz!(u64, core::num::NonZeroU64, nonzero_check_bitor_tnz_for_u64);
+    nonzero_check_bitor_tnz!(u128, core::num::NonZeroU128, nonzero_check_bitor_tnz_for_u128);
+    nonzero_check_bitor_tnz!(usize, core::num::NonZeroUsize, nonzero_check_bitor_tnz_for_usize);
+
+    // --- count_ones ---
+    macro_rules! nonzero_check_count_ones {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.count_ones();
+                assert!(result.get() > 0);
+            }
+        };
+    }
+
+    nonzero_check_count_ones!(core::num::NonZeroI8, nonzero_check_count_ones_for_i8);
+    nonzero_check_count_ones!(core::num::NonZeroI16, nonzero_check_count_ones_for_i16);
+    nonzero_check_count_ones!(core::num::NonZeroI32, nonzero_check_count_ones_for_i32);
+    nonzero_check_count_ones!(core::num::NonZeroI64, nonzero_check_count_ones_for_i64);
+    nonzero_check_count_ones!(core::num::NonZeroI128, nonzero_check_count_ones_for_i128);
+    nonzero_check_count_ones!(core::num::NonZeroIsize, nonzero_check_count_ones_for_isize);
+    nonzero_check_count_ones!(core::num::NonZeroU8, nonzero_check_count_ones_for_u8);
+    nonzero_check_count_ones!(core::num::NonZeroU16, nonzero_check_count_ones_for_u16);
+    nonzero_check_count_ones!(core::num::NonZeroU32, nonzero_check_count_ones_for_u32);
+    nonzero_check_count_ones!(core::num::NonZeroU64, nonzero_check_count_ones_for_u64);
+    nonzero_check_count_ones!(core::num::NonZeroU128, nonzero_check_count_ones_for_u128);
+    nonzero_check_count_ones!(core::num::NonZeroUsize, nonzero_check_count_ones_for_usize);
+
+    // --- rotate_left ---
+    macro_rules! nonzero_check_rotate_left {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let n: u32 = kani::any();
+                let result = x.rotate_left(n);
+                assert!(result.rotate_right(n) == x);
+            }
+        };
+    }
+
+    nonzero_check_rotate_left!(core::num::NonZeroI8, nonzero_check_rotate_left_for_i8);
+    nonzero_check_rotate_left!(core::num::NonZeroI16, nonzero_check_rotate_left_for_i16);
+    nonzero_check_rotate_left!(core::num::NonZeroI32, nonzero_check_rotate_left_for_i32);
+    nonzero_check_rotate_left!(core::num::NonZeroI64, nonzero_check_rotate_left_for_i64);
+    nonzero_check_rotate_left!(core::num::NonZeroI128, nonzero_check_rotate_left_for_i128);
+    nonzero_check_rotate_left!(core::num::NonZeroIsize, nonzero_check_rotate_left_for_isize);
+    nonzero_check_rotate_left!(core::num::NonZeroU8, nonzero_check_rotate_left_for_u8);
+    nonzero_check_rotate_left!(core::num::NonZeroU16, nonzero_check_rotate_left_for_u16);
+    nonzero_check_rotate_left!(core::num::NonZeroU32, nonzero_check_rotate_left_for_u32);
+    nonzero_check_rotate_left!(core::num::NonZeroU64, nonzero_check_rotate_left_for_u64);
+    nonzero_check_rotate_left!(core::num::NonZeroU128, nonzero_check_rotate_left_for_u128);
+    nonzero_check_rotate_left!(core::num::NonZeroUsize, nonzero_check_rotate_left_for_usize);
+
+    // --- rotate_right ---
+    macro_rules! nonzero_check_rotate_right {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let n: u32 = kani::any();
+                let result = x.rotate_right(n);
+                assert!(result.rotate_left(n) == x);
+            }
+        };
+    }
+
+    nonzero_check_rotate_right!(core::num::NonZeroI8, nonzero_check_rotate_right_for_i8);
+    nonzero_check_rotate_right!(core::num::NonZeroI16, nonzero_check_rotate_right_for_i16);
+    nonzero_check_rotate_right!(core::num::NonZeroI32, nonzero_check_rotate_right_for_i32);
+    nonzero_check_rotate_right!(core::num::NonZeroI64, nonzero_check_rotate_right_for_i64);
+    nonzero_check_rotate_right!(core::num::NonZeroI128, nonzero_check_rotate_right_for_i128);
+    nonzero_check_rotate_right!(core::num::NonZeroIsize, nonzero_check_rotate_right_for_isize);
+    nonzero_check_rotate_right!(core::num::NonZeroU8, nonzero_check_rotate_right_for_u8);
+    nonzero_check_rotate_right!(core::num::NonZeroU16, nonzero_check_rotate_right_for_u16);
+    nonzero_check_rotate_right!(core::num::NonZeroU32, nonzero_check_rotate_right_for_u32);
+    nonzero_check_rotate_right!(core::num::NonZeroU64, nonzero_check_rotate_right_for_u64);
+    nonzero_check_rotate_right!(core::num::NonZeroU128, nonzero_check_rotate_right_for_u128);
+    nonzero_check_rotate_right!(core::num::NonZeroUsize, nonzero_check_rotate_right_for_usize);
+
+    // --- swap_bytes ---
+    macro_rules! nonzero_check_swap_bytes {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.swap_bytes();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_swap_bytes!(core::num::NonZeroI8, nonzero_check_swap_bytes_for_i8);
+    nonzero_check_swap_bytes!(core::num::NonZeroI16, nonzero_check_swap_bytes_for_i16);
+    nonzero_check_swap_bytes!(core::num::NonZeroI32, nonzero_check_swap_bytes_for_i32);
+    nonzero_check_swap_bytes!(core::num::NonZeroI64, nonzero_check_swap_bytes_for_i64);
+    nonzero_check_swap_bytes!(core::num::NonZeroI128, nonzero_check_swap_bytes_for_i128);
+    nonzero_check_swap_bytes!(core::num::NonZeroIsize, nonzero_check_swap_bytes_for_isize);
+    nonzero_check_swap_bytes!(core::num::NonZeroU8, nonzero_check_swap_bytes_for_u8);
+    nonzero_check_swap_bytes!(core::num::NonZeroU16, nonzero_check_swap_bytes_for_u16);
+    nonzero_check_swap_bytes!(core::num::NonZeroU32, nonzero_check_swap_bytes_for_u32);
+    nonzero_check_swap_bytes!(core::num::NonZeroU64, nonzero_check_swap_bytes_for_u64);
+    nonzero_check_swap_bytes!(core::num::NonZeroU128, nonzero_check_swap_bytes_for_u128);
+    nonzero_check_swap_bytes!(core::num::NonZeroUsize, nonzero_check_swap_bytes_for_usize);
+
+    // --- reverse_bits ---
+    macro_rules! nonzero_check_reverse_bits {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.reverse_bits();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_reverse_bits!(core::num::NonZeroI8, nonzero_check_reverse_bits_for_i8);
+    nonzero_check_reverse_bits!(core::num::NonZeroI16, nonzero_check_reverse_bits_for_i16);
+    nonzero_check_reverse_bits!(core::num::NonZeroI32, nonzero_check_reverse_bits_for_i32);
+    nonzero_check_reverse_bits!(core::num::NonZeroI64, nonzero_check_reverse_bits_for_i64);
+    nonzero_check_reverse_bits!(core::num::NonZeroI128, nonzero_check_reverse_bits_for_i128);
+    nonzero_check_reverse_bits!(core::num::NonZeroIsize, nonzero_check_reverse_bits_for_isize);
+    nonzero_check_reverse_bits!(core::num::NonZeroU8, nonzero_check_reverse_bits_for_u8);
+    nonzero_check_reverse_bits!(core::num::NonZeroU16, nonzero_check_reverse_bits_for_u16);
+    nonzero_check_reverse_bits!(core::num::NonZeroU32, nonzero_check_reverse_bits_for_u32);
+    nonzero_check_reverse_bits!(core::num::NonZeroU64, nonzero_check_reverse_bits_for_u64);
+    nonzero_check_reverse_bits!(core::num::NonZeroU128, nonzero_check_reverse_bits_for_u128);
+    nonzero_check_reverse_bits!(core::num::NonZeroUsize, nonzero_check_reverse_bits_for_usize);
+
+    // --- from_be ---
+    macro_rules! nonzero_check_from_be {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = <$nonzero_type>::from_be(x);
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_from_be!(core::num::NonZeroI8, nonzero_check_from_be_for_i8);
+    nonzero_check_from_be!(core::num::NonZeroI16, nonzero_check_from_be_for_i16);
+    nonzero_check_from_be!(core::num::NonZeroI32, nonzero_check_from_be_for_i32);
+    nonzero_check_from_be!(core::num::NonZeroI64, nonzero_check_from_be_for_i64);
+    nonzero_check_from_be!(core::num::NonZeroI128, nonzero_check_from_be_for_i128);
+    nonzero_check_from_be!(core::num::NonZeroIsize, nonzero_check_from_be_for_isize);
+    nonzero_check_from_be!(core::num::NonZeroU8, nonzero_check_from_be_for_u8);
+    nonzero_check_from_be!(core::num::NonZeroU16, nonzero_check_from_be_for_u16);
+    nonzero_check_from_be!(core::num::NonZeroU32, nonzero_check_from_be_for_u32);
+    nonzero_check_from_be!(core::num::NonZeroU64, nonzero_check_from_be_for_u64);
+    nonzero_check_from_be!(core::num::NonZeroU128, nonzero_check_from_be_for_u128);
+    nonzero_check_from_be!(core::num::NonZeroUsize, nonzero_check_from_be_for_usize);
+
+    // --- from_le ---
+    macro_rules! nonzero_check_from_le {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = <$nonzero_type>::from_le(x);
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_from_le!(core::num::NonZeroI8, nonzero_check_from_le_for_i8);
+    nonzero_check_from_le!(core::num::NonZeroI16, nonzero_check_from_le_for_i16);
+    nonzero_check_from_le!(core::num::NonZeroI32, nonzero_check_from_le_for_i32);
+    nonzero_check_from_le!(core::num::NonZeroI64, nonzero_check_from_le_for_i64);
+    nonzero_check_from_le!(core::num::NonZeroI128, nonzero_check_from_le_for_i128);
+    nonzero_check_from_le!(core::num::NonZeroIsize, nonzero_check_from_le_for_isize);
+    nonzero_check_from_le!(core::num::NonZeroU8, nonzero_check_from_le_for_u8);
+    nonzero_check_from_le!(core::num::NonZeroU16, nonzero_check_from_le_for_u16);
+    nonzero_check_from_le!(core::num::NonZeroU32, nonzero_check_from_le_for_u32);
+    nonzero_check_from_le!(core::num::NonZeroU64, nonzero_check_from_le_for_u64);
+    nonzero_check_from_le!(core::num::NonZeroU128, nonzero_check_from_le_for_u128);
+    nonzero_check_from_le!(core::num::NonZeroUsize, nonzero_check_from_le_for_usize);
+
+    // --- to_be ---
+    macro_rules! nonzero_check_to_be {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.to_be();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_to_be!(core::num::NonZeroI8, nonzero_check_to_be_for_i8);
+    nonzero_check_to_be!(core::num::NonZeroI16, nonzero_check_to_be_for_i16);
+    nonzero_check_to_be!(core::num::NonZeroI32, nonzero_check_to_be_for_i32);
+    nonzero_check_to_be!(core::num::NonZeroI64, nonzero_check_to_be_for_i64);
+    nonzero_check_to_be!(core::num::NonZeroI128, nonzero_check_to_be_for_i128);
+    nonzero_check_to_be!(core::num::NonZeroIsize, nonzero_check_to_be_for_isize);
+    nonzero_check_to_be!(core::num::NonZeroU8, nonzero_check_to_be_for_u8);
+    nonzero_check_to_be!(core::num::NonZeroU16, nonzero_check_to_be_for_u16);
+    nonzero_check_to_be!(core::num::NonZeroU32, nonzero_check_to_be_for_u32);
+    nonzero_check_to_be!(core::num::NonZeroU64, nonzero_check_to_be_for_u64);
+    nonzero_check_to_be!(core::num::NonZeroU128, nonzero_check_to_be_for_u128);
+    nonzero_check_to_be!(core::num::NonZeroUsize, nonzero_check_to_be_for_usize);
+
+    // --- to_le ---
+    macro_rules! nonzero_check_to_le {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.to_le();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_to_le!(core::num::NonZeroI8, nonzero_check_to_le_for_i8);
+    nonzero_check_to_le!(core::num::NonZeroI16, nonzero_check_to_le_for_i16);
+    nonzero_check_to_le!(core::num::NonZeroI32, nonzero_check_to_le_for_i32);
+    nonzero_check_to_le!(core::num::NonZeroI64, nonzero_check_to_le_for_i64);
+    nonzero_check_to_le!(core::num::NonZeroI128, nonzero_check_to_le_for_i128);
+    nonzero_check_to_le!(core::num::NonZeroIsize, nonzero_check_to_le_for_isize);
+    nonzero_check_to_le!(core::num::NonZeroU8, nonzero_check_to_le_for_u8);
+    nonzero_check_to_le!(core::num::NonZeroU16, nonzero_check_to_le_for_u16);
+    nonzero_check_to_le!(core::num::NonZeroU32, nonzero_check_to_le_for_u32);
+    nonzero_check_to_le!(core::num::NonZeroU64, nonzero_check_to_le_for_u64);
+    nonzero_check_to_le!(core::num::NonZeroU128, nonzero_check_to_le_for_u128);
+    nonzero_check_to_le!(core::num::NonZeroUsize, nonzero_check_to_le_for_usize);
+
+    // =====================================================================
+    // Arithmetic Operations + Creation Wrappers
+    // =====================================================================
+
+    // --- checked_mul ---
+    macro_rules! nonzero_check_checked_mul {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x.checked_mul(y);
+                if let Some(nz) = result {
+                    let _ = nz.get();
+                }
+            }
+        };
+    }
+
+    nonzero_check_checked_mul!(core::num::NonZeroI8, nonzero_check_checked_mul_for_i8);
+    nonzero_check_checked_mul!(core::num::NonZeroI16, nonzero_check_checked_mul_for_i16);
+    nonzero_check_checked_mul!(core::num::NonZeroI32, nonzero_check_checked_mul_for_i32);
+    nonzero_check_checked_mul!(core::num::NonZeroI64, nonzero_check_checked_mul_for_i64);
+    nonzero_check_checked_mul!(core::num::NonZeroI128, nonzero_check_checked_mul_for_i128);
+    nonzero_check_checked_mul!(core::num::NonZeroIsize, nonzero_check_checked_mul_for_isize);
+    nonzero_check_checked_mul!(core::num::NonZeroU8, nonzero_check_checked_mul_for_u8);
+    nonzero_check_checked_mul!(core::num::NonZeroU16, nonzero_check_checked_mul_for_u16);
+    nonzero_check_checked_mul!(core::num::NonZeroU32, nonzero_check_checked_mul_for_u32);
+    nonzero_check_checked_mul!(core::num::NonZeroU64, nonzero_check_checked_mul_for_u64);
+    nonzero_check_checked_mul!(core::num::NonZeroU128, nonzero_check_checked_mul_for_u128);
+    nonzero_check_checked_mul!(core::num::NonZeroUsize, nonzero_check_checked_mul_for_usize);
+
+    // --- saturating_mul ---
+    macro_rules! nonzero_check_saturating_mul {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x.saturating_mul(y);
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_saturating_mul!(core::num::NonZeroI8, nonzero_check_saturating_mul_for_i8);
+    nonzero_check_saturating_mul!(core::num::NonZeroI16, nonzero_check_saturating_mul_for_i16);
+    nonzero_check_saturating_mul!(core::num::NonZeroI32, nonzero_check_saturating_mul_for_i32);
+    nonzero_check_saturating_mul!(core::num::NonZeroI64, nonzero_check_saturating_mul_for_i64);
+    nonzero_check_saturating_mul!(core::num::NonZeroI128, nonzero_check_saturating_mul_for_i128);
+    nonzero_check_saturating_mul!(core::num::NonZeroIsize, nonzero_check_saturating_mul_for_isize);
+    nonzero_check_saturating_mul!(core::num::NonZeroU8, nonzero_check_saturating_mul_for_u8);
+    nonzero_check_saturating_mul!(core::num::NonZeroU16, nonzero_check_saturating_mul_for_u16);
+    nonzero_check_saturating_mul!(core::num::NonZeroU32, nonzero_check_saturating_mul_for_u32);
+    nonzero_check_saturating_mul!(core::num::NonZeroU64, nonzero_check_saturating_mul_for_u64);
+    nonzero_check_saturating_mul!(core::num::NonZeroU128, nonzero_check_saturating_mul_for_u128);
+    nonzero_check_saturating_mul!(core::num::NonZeroUsize, nonzero_check_saturating_mul_for_usize);
+
+    // --- checked_pow ---
+    macro_rules! nonzero_check_checked_pow {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let exp: u32 = kani::any();
+                let result = x.checked_pow(exp);
+                if let Some(nz) = result {
+                    let _ = nz.get();
+                }
+            }
+        };
+    }
+
+    nonzero_check_checked_pow!(core::num::NonZeroI8, nonzero_check_checked_pow_for_i8);
+    nonzero_check_checked_pow!(core::num::NonZeroI16, nonzero_check_checked_pow_for_i16);
+    nonzero_check_checked_pow!(core::num::NonZeroI32, nonzero_check_checked_pow_for_i32);
+    nonzero_check_checked_pow!(core::num::NonZeroI64, nonzero_check_checked_pow_for_i64);
+    nonzero_check_checked_pow!(core::num::NonZeroI128, nonzero_check_checked_pow_for_i128);
+    nonzero_check_checked_pow!(core::num::NonZeroIsize, nonzero_check_checked_pow_for_isize);
+    nonzero_check_checked_pow!(core::num::NonZeroU8, nonzero_check_checked_pow_for_u8);
+    nonzero_check_checked_pow!(core::num::NonZeroU16, nonzero_check_checked_pow_for_u16);
+    nonzero_check_checked_pow!(core::num::NonZeroU32, nonzero_check_checked_pow_for_u32);
+    nonzero_check_checked_pow!(core::num::NonZeroU64, nonzero_check_checked_pow_for_u64);
+    nonzero_check_checked_pow!(core::num::NonZeroU128, nonzero_check_checked_pow_for_u128);
+    nonzero_check_checked_pow!(core::num::NonZeroUsize, nonzero_check_checked_pow_for_usize);
+
+    // --- saturating_pow ---
+    macro_rules! nonzero_check_saturating_pow {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let exp: u32 = kani::any();
+                let result = x.saturating_pow(exp);
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_saturating_pow!(core::num::NonZeroI8, nonzero_check_saturating_pow_for_i8);
+    nonzero_check_saturating_pow!(core::num::NonZeroI16, nonzero_check_saturating_pow_for_i16);
+    nonzero_check_saturating_pow!(core::num::NonZeroI32, nonzero_check_saturating_pow_for_i32);
+    nonzero_check_saturating_pow!(core::num::NonZeroI64, nonzero_check_saturating_pow_for_i64);
+    nonzero_check_saturating_pow!(core::num::NonZeroI128, nonzero_check_saturating_pow_for_i128);
+    nonzero_check_saturating_pow!(core::num::NonZeroIsize, nonzero_check_saturating_pow_for_isize);
+    nonzero_check_saturating_pow!(core::num::NonZeroU8, nonzero_check_saturating_pow_for_u8);
+    nonzero_check_saturating_pow!(core::num::NonZeroU16, nonzero_check_saturating_pow_for_u16);
+    nonzero_check_saturating_pow!(core::num::NonZeroU32, nonzero_check_saturating_pow_for_u32);
+    nonzero_check_saturating_pow!(core::num::NonZeroU64, nonzero_check_saturating_pow_for_u64);
+    nonzero_check_saturating_pow!(core::num::NonZeroU128, nonzero_check_saturating_pow_for_u128);
+    nonzero_check_saturating_pow!(core::num::NonZeroUsize, nonzero_check_saturating_pow_for_usize);
+
+    // --- checked_add (unsigned only) ---
+    macro_rules! nonzero_check_checked_add {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $t = kani::any();
+                let result = x.checked_add(y);
+                if let Some(nz) = result {
+                    let _ = nz.get();
+                }
+            }
+        };
+    }
+
+    nonzero_check_checked_add!(u8, core::num::NonZeroU8, nonzero_check_checked_add_for_u8);
+    nonzero_check_checked_add!(u16, core::num::NonZeroU16, nonzero_check_checked_add_for_u16);
+    nonzero_check_checked_add!(u32, core::num::NonZeroU32, nonzero_check_checked_add_for_u32);
+    nonzero_check_checked_add!(u64, core::num::NonZeroU64, nonzero_check_checked_add_for_u64);
+    nonzero_check_checked_add!(u128, core::num::NonZeroU128, nonzero_check_checked_add_for_u128);
+    nonzero_check_checked_add!(usize, core::num::NonZeroUsize, nonzero_check_checked_add_for_usize);
+
+    // --- saturating_add (unsigned only) ---
+    macro_rules! nonzero_check_saturating_add {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $t = kani::any();
+                let result = x.saturating_add(y);
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_saturating_add!(u8, core::num::NonZeroU8, nonzero_check_saturating_add_for_u8);
+    nonzero_check_saturating_add!(u16, core::num::NonZeroU16, nonzero_check_saturating_add_for_u16);
+    nonzero_check_saturating_add!(u32, core::num::NonZeroU32, nonzero_check_saturating_add_for_u32);
+    nonzero_check_saturating_add!(u64, core::num::NonZeroU64, nonzero_check_saturating_add_for_u64);
+    nonzero_check_saturating_add!(
+        u128,
+        core::num::NonZeroU128,
+        nonzero_check_saturating_add_for_u128
+    );
+    nonzero_check_saturating_add!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_saturating_add_for_usize
+    );
+
+    // --- checked_next_power_of_two (unsigned only) ---
+    macro_rules! nonzero_check_checked_next_power_of_two {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.checked_next_power_of_two();
+                if let Some(nz) = result {
+                    let _ = nz.get();
+                }
+            }
+        };
+    }
+
+    nonzero_check_checked_next_power_of_two!(
+        core::num::NonZeroU8,
+        nonzero_check_checked_next_power_of_two_for_u8
+    );
+    nonzero_check_checked_next_power_of_two!(
+        core::num::NonZeroU16,
+        nonzero_check_checked_next_power_of_two_for_u16
+    );
+    nonzero_check_checked_next_power_of_two!(
+        core::num::NonZeroU32,
+        nonzero_check_checked_next_power_of_two_for_u32
+    );
+    nonzero_check_checked_next_power_of_two!(
+        core::num::NonZeroU64,
+        nonzero_check_checked_next_power_of_two_for_u64
+    );
+    nonzero_check_checked_next_power_of_two!(
+        core::num::NonZeroU128,
+        nonzero_check_checked_next_power_of_two_for_u128
+    );
+    nonzero_check_checked_next_power_of_two!(
+        core::num::NonZeroUsize,
+        nonzero_check_checked_next_power_of_two_for_usize
+    );
+
+    // --- midpoint (unsigned only) ---
+    macro_rules! nonzero_check_midpoint {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let result = x.midpoint(y);
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_midpoint!(core::num::NonZeroU8, nonzero_check_midpoint_for_u8);
+    nonzero_check_midpoint!(core::num::NonZeroU16, nonzero_check_midpoint_for_u16);
+    nonzero_check_midpoint!(core::num::NonZeroU32, nonzero_check_midpoint_for_u32);
+    nonzero_check_midpoint!(core::num::NonZeroU64, nonzero_check_midpoint_for_u64);
+    nonzero_check_midpoint!(core::num::NonZeroU128, nonzero_check_midpoint_for_u128);
+    nonzero_check_midpoint!(core::num::NonZeroUsize, nonzero_check_midpoint_for_usize);
+
+    // --- isqrt (unsigned only) ---
+    macro_rules! nonzero_check_isqrt {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            #[kani::unwind(65)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.isqrt();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_isqrt!(core::num::NonZeroU8, nonzero_check_isqrt_for_u8);
+    nonzero_check_isqrt!(core::num::NonZeroU16, nonzero_check_isqrt_for_u16);
+    nonzero_check_isqrt!(core::num::NonZeroU32, nonzero_check_isqrt_for_u32);
+    nonzero_check_isqrt!(core::num::NonZeroU64, nonzero_check_isqrt_for_u64);
+    nonzero_check_isqrt!(core::num::NonZeroU128, nonzero_check_isqrt_for_u128);
+    nonzero_check_isqrt!(core::num::NonZeroUsize, nonzero_check_isqrt_for_usize);
+
+    // --- new (Part 1: iff assertion) ---
+    macro_rules! nonzero_check_new {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let n: $t = kani::any();
+                let result = <$nonzero_type>::new(n);
+                assert!(result.is_some() == (n != 0));
+                if let Some(nz) = result {
+                    assert!(nz.get() == n);
+                }
+            }
+        };
+    }
+
+    nonzero_check_new!(i8, core::num::NonZeroI8, nonzero_check_new_for_i8);
+    nonzero_check_new!(i16, core::num::NonZeroI16, nonzero_check_new_for_i16);
+    nonzero_check_new!(i32, core::num::NonZeroI32, nonzero_check_new_for_i32);
+    nonzero_check_new!(i64, core::num::NonZeroI64, nonzero_check_new_for_i64);
+    nonzero_check_new!(i128, core::num::NonZeroI128, nonzero_check_new_for_i128);
+    nonzero_check_new!(isize, core::num::NonZeroIsize, nonzero_check_new_for_isize);
+    nonzero_check_new!(u8, core::num::NonZeroU8, nonzero_check_new_for_u8);
+    nonzero_check_new!(u16, core::num::NonZeroU16, nonzero_check_new_for_u16);
+    nonzero_check_new!(u32, core::num::NonZeroU32, nonzero_check_new_for_u32);
+    nonzero_check_new!(u64, core::num::NonZeroU64, nonzero_check_new_for_u64);
+    nonzero_check_new!(u128, core::num::NonZeroU128, nonzero_check_new_for_u128);
+    nonzero_check_new!(usize, core::num::NonZeroUsize, nonzero_check_new_for_usize);
+
+    // --- from_mut (Part 1: iff assertion + dereference) ---
+    macro_rules! nonzero_check_from_mut {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let mut n: $t = kani::any();
+                let original = n;
+                let result = <$nonzero_type>::from_mut(&mut n);
+                assert!(result.is_some() == (original != 0));
+                if let Some(nz_ref) = result {
+                    assert!(nz_ref.get() == original);
+                }
+            }
+        };
+    }
+
+    nonzero_check_from_mut!(i8, core::num::NonZeroI8, nonzero_check_from_mut_for_i8);
+    nonzero_check_from_mut!(i16, core::num::NonZeroI16, nonzero_check_from_mut_for_i16);
+    nonzero_check_from_mut!(i32, core::num::NonZeroI32, nonzero_check_from_mut_for_i32);
+    nonzero_check_from_mut!(i64, core::num::NonZeroI64, nonzero_check_from_mut_for_i64);
+    nonzero_check_from_mut!(i128, core::num::NonZeroI128, nonzero_check_from_mut_for_i128);
+    nonzero_check_from_mut!(isize, core::num::NonZeroIsize, nonzero_check_from_mut_for_isize);
+    nonzero_check_from_mut!(u8, core::num::NonZeroU8, nonzero_check_from_mut_for_u8);
+    nonzero_check_from_mut!(u16, core::num::NonZeroU16, nonzero_check_from_mut_for_u16);
+    nonzero_check_from_mut!(u32, core::num::NonZeroU32, nonzero_check_from_mut_for_u32);
+    nonzero_check_from_mut!(u64, core::num::NonZeroU64, nonzero_check_from_mut_for_u64);
+    nonzero_check_from_mut!(u128, core::num::NonZeroU128, nonzero_check_from_mut_for_u128);
+    nonzero_check_from_mut!(usize, core::num::NonZeroUsize, nonzero_check_from_mut_for_usize);
+
+    // =====================================================================
+    // Signed Operations (abs, neg variants — signed types only)
+    // =====================================================================
+
+    // --- abs ---
+    // abs() uses #[rustc_inherit_overflow_checks] which panics on MIN in debug.
+    // The MIN case is verified separately by overflowing_abs/wrapping_abs harnesses.
+    macro_rules! nonzero_check_abs {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                kani::assume(x.get() != <$t>::MIN);
+                let result = x.abs();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_abs!(i8, core::num::NonZeroI8, nonzero_check_abs_for_i8);
+    nonzero_check_abs!(i16, core::num::NonZeroI16, nonzero_check_abs_for_i16);
+    nonzero_check_abs!(i32, core::num::NonZeroI32, nonzero_check_abs_for_i32);
+    nonzero_check_abs!(i64, core::num::NonZeroI64, nonzero_check_abs_for_i64);
+    nonzero_check_abs!(i128, core::num::NonZeroI128, nonzero_check_abs_for_i128);
+    nonzero_check_abs!(isize, core::num::NonZeroIsize, nonzero_check_abs_for_isize);
+
+    // --- checked_abs ---
+    macro_rules! nonzero_check_checked_abs {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.checked_abs();
+                if let Some(nz) = result {
+                    let _ = nz.get();
+                }
+            }
+        };
+    }
+
+    nonzero_check_checked_abs!(core::num::NonZeroI8, nonzero_check_checked_abs_for_i8);
+    nonzero_check_checked_abs!(core::num::NonZeroI16, nonzero_check_checked_abs_for_i16);
+    nonzero_check_checked_abs!(core::num::NonZeroI32, nonzero_check_checked_abs_for_i32);
+    nonzero_check_checked_abs!(core::num::NonZeroI64, nonzero_check_checked_abs_for_i64);
+    nonzero_check_checked_abs!(core::num::NonZeroI128, nonzero_check_checked_abs_for_i128);
+    nonzero_check_checked_abs!(core::num::NonZeroIsize, nonzero_check_checked_abs_for_isize);
+
+    // --- overflowing_abs ---
+    macro_rules! nonzero_check_overflowing_abs {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let (result, overflowed) = x.overflowing_abs();
+                let _ = result.get();
+                let _ = overflowed;
+            }
+        };
+    }
+
+    nonzero_check_overflowing_abs!(core::num::NonZeroI8, nonzero_check_overflowing_abs_for_i8);
+    nonzero_check_overflowing_abs!(core::num::NonZeroI16, nonzero_check_overflowing_abs_for_i16);
+    nonzero_check_overflowing_abs!(core::num::NonZeroI32, nonzero_check_overflowing_abs_for_i32);
+    nonzero_check_overflowing_abs!(core::num::NonZeroI64, nonzero_check_overflowing_abs_for_i64);
+    nonzero_check_overflowing_abs!(core::num::NonZeroI128, nonzero_check_overflowing_abs_for_i128);
+    nonzero_check_overflowing_abs!(
+        core::num::NonZeroIsize,
+        nonzero_check_overflowing_abs_for_isize
+    );
+
+    // --- saturating_abs ---
+    macro_rules! nonzero_check_saturating_abs {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.saturating_abs();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_saturating_abs!(core::num::NonZeroI8, nonzero_check_saturating_abs_for_i8);
+    nonzero_check_saturating_abs!(core::num::NonZeroI16, nonzero_check_saturating_abs_for_i16);
+    nonzero_check_saturating_abs!(core::num::NonZeroI32, nonzero_check_saturating_abs_for_i32);
+    nonzero_check_saturating_abs!(core::num::NonZeroI64, nonzero_check_saturating_abs_for_i64);
+    nonzero_check_saturating_abs!(core::num::NonZeroI128, nonzero_check_saturating_abs_for_i128);
+    nonzero_check_saturating_abs!(core::num::NonZeroIsize, nonzero_check_saturating_abs_for_isize);
+
+    // --- wrapping_abs ---
+    macro_rules! nonzero_check_wrapping_abs {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.wrapping_abs();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_wrapping_abs!(core::num::NonZeroI8, nonzero_check_wrapping_abs_for_i8);
+    nonzero_check_wrapping_abs!(core::num::NonZeroI16, nonzero_check_wrapping_abs_for_i16);
+    nonzero_check_wrapping_abs!(core::num::NonZeroI32, nonzero_check_wrapping_abs_for_i32);
+    nonzero_check_wrapping_abs!(core::num::NonZeroI64, nonzero_check_wrapping_abs_for_i64);
+    nonzero_check_wrapping_abs!(core::num::NonZeroI128, nonzero_check_wrapping_abs_for_i128);
+    nonzero_check_wrapping_abs!(core::num::NonZeroIsize, nonzero_check_wrapping_abs_for_isize);
+
+    // --- unsigned_abs ---
+    macro_rules! nonzero_check_unsigned_abs {
+        ($nonzero_type:ty, $unsigned_nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result: $unsigned_nonzero_type = x.unsigned_abs();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_unsigned_abs!(
+        core::num::NonZeroI8,
+        core::num::NonZeroU8,
+        nonzero_check_unsigned_abs_for_i8
+    );
+    nonzero_check_unsigned_abs!(
+        core::num::NonZeroI16,
+        core::num::NonZeroU16,
+        nonzero_check_unsigned_abs_for_i16
+    );
+    nonzero_check_unsigned_abs!(
+        core::num::NonZeroI32,
+        core::num::NonZeroU32,
+        nonzero_check_unsigned_abs_for_i32
+    );
+    nonzero_check_unsigned_abs!(
+        core::num::NonZeroI64,
+        core::num::NonZeroU64,
+        nonzero_check_unsigned_abs_for_i64
+    );
+    nonzero_check_unsigned_abs!(
+        core::num::NonZeroI128,
+        core::num::NonZeroU128,
+        nonzero_check_unsigned_abs_for_i128
+    );
+    nonzero_check_unsigned_abs!(
+        core::num::NonZeroIsize,
+        core::num::NonZeroUsize,
+        nonzero_check_unsigned_abs_for_isize
+    );
+
+    // --- neg (Neg trait) ---
+    // neg() overflows on MIN (e.g. -(-128i8) = 128 > i8::MAX).
+    // The MIN case is verified by overflowing_neg/wrapping_neg harnesses.
+    macro_rules! nonzero_check_neg {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                kani::assume(x.get() != <$t>::MIN);
+                let result = -x;
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_neg!(i8, core::num::NonZeroI8, nonzero_check_neg_for_i8);
+    nonzero_check_neg!(i16, core::num::NonZeroI16, nonzero_check_neg_for_i16);
+    nonzero_check_neg!(i32, core::num::NonZeroI32, nonzero_check_neg_for_i32);
+    nonzero_check_neg!(i64, core::num::NonZeroI64, nonzero_check_neg_for_i64);
+    nonzero_check_neg!(i128, core::num::NonZeroI128, nonzero_check_neg_for_i128);
+    nonzero_check_neg!(isize, core::num::NonZeroIsize, nonzero_check_neg_for_isize);
+
+    // --- checked_neg ---
+    macro_rules! nonzero_check_checked_neg {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.checked_neg();
+                if let Some(nz) = result {
+                    let _ = nz.get();
+                }
+            }
+        };
+    }
+
+    nonzero_check_checked_neg!(core::num::NonZeroI8, nonzero_check_checked_neg_for_i8);
+    nonzero_check_checked_neg!(core::num::NonZeroI16, nonzero_check_checked_neg_for_i16);
+    nonzero_check_checked_neg!(core::num::NonZeroI32, nonzero_check_checked_neg_for_i32);
+    nonzero_check_checked_neg!(core::num::NonZeroI64, nonzero_check_checked_neg_for_i64);
+    nonzero_check_checked_neg!(core::num::NonZeroI128, nonzero_check_checked_neg_for_i128);
+    nonzero_check_checked_neg!(core::num::NonZeroIsize, nonzero_check_checked_neg_for_isize);
+
+    // --- overflowing_neg ---
+    macro_rules! nonzero_check_overflowing_neg {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let (result, overflowed) = x.overflowing_neg();
+                let _ = result.get();
+                let _ = overflowed;
+            }
+        };
+    }
+
+    nonzero_check_overflowing_neg!(core::num::NonZeroI8, nonzero_check_overflowing_neg_for_i8);
+    nonzero_check_overflowing_neg!(core::num::NonZeroI16, nonzero_check_overflowing_neg_for_i16);
+    nonzero_check_overflowing_neg!(core::num::NonZeroI32, nonzero_check_overflowing_neg_for_i32);
+    nonzero_check_overflowing_neg!(core::num::NonZeroI64, nonzero_check_overflowing_neg_for_i64);
+    nonzero_check_overflowing_neg!(core::num::NonZeroI128, nonzero_check_overflowing_neg_for_i128);
+    nonzero_check_overflowing_neg!(
+        core::num::NonZeroIsize,
+        nonzero_check_overflowing_neg_for_isize
+    );
+
+    // --- wrapping_neg ---
+    macro_rules! nonzero_check_wrapping_neg {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let result = x.wrapping_neg();
+                let _ = result.get();
+            }
+        };
+    }
+
+    nonzero_check_wrapping_neg!(core::num::NonZeroI8, nonzero_check_wrapping_neg_for_i8);
+    nonzero_check_wrapping_neg!(core::num::NonZeroI16, nonzero_check_wrapping_neg_for_i16);
+    nonzero_check_wrapping_neg!(core::num::NonZeroI32, nonzero_check_wrapping_neg_for_i32);
+    nonzero_check_wrapping_neg!(core::num::NonZeroI64, nonzero_check_wrapping_neg_for_i64);
+    nonzero_check_wrapping_neg!(core::num::NonZeroI128, nonzero_check_wrapping_neg_for_i128);
+    nonzero_check_wrapping_neg!(core::num::NonZeroIsize, nonzero_check_wrapping_neg_for_isize);
+
+    // =====================================================================
+    // Semantic Correctness Harnesses (per reviewer feedback)
+    // Verify functional correctness on representative types (i8/u8).
+    // The full-type harnesses above verify UB-freedom for all 12 types.
+    // =====================================================================
+
+    #[kani::proof]
+    fn correctness_bitor_u8() {
+        let x: core::num::NonZeroU8 = kani::any();
+        let y: core::num::NonZeroU8 = kani::any();
+        assert!((x | y).get() == (x.get() | y.get()));
+    }
+
+    #[kani::proof]
+    fn correctness_swap_bytes_u16() {
+        let x: core::num::NonZeroU16 = kani::any();
+        assert!(x.swap_bytes().swap_bytes() == x);
+    }
+
+    #[kani::proof]
+    fn correctness_reverse_bits_u8() {
+        let x: core::num::NonZeroU8 = kani::any();
+        assert!(x.reverse_bits().reverse_bits() == x);
+    }
+
+    #[kani::proof]
+    fn correctness_from_be_roundtrip_u16() {
+        let x: core::num::NonZeroU16 = kani::any();
+        assert!(core::num::NonZeroU16::from_be(x.to_be()) == x);
+    }
+
+    #[kani::proof]
+    fn correctness_from_le_roundtrip_u16() {
+        let x: core::num::NonZeroU16 = kani::any();
+        assert!(core::num::NonZeroU16::from_le(x.to_le()) == x);
+    }
+
+    #[kani::proof]
+    fn correctness_checked_mul_u8() {
+        let x: core::num::NonZeroU8 = kani::any();
+        let y: core::num::NonZeroU8 = kani::any();
+        assert!(x.checked_mul(y).map(|r| r.get()) == x.get().checked_mul(y.get()));
+    }
+
+    #[kani::proof]
+    fn correctness_saturating_mul_u8() {
+        let x: core::num::NonZeroU8 = kani::any();
+        let y: core::num::NonZeroU8 = kani::any();
+        assert!(x.saturating_mul(y).get() == x.get().saturating_mul(y.get()));
+    }
+
+    #[kani::proof]
+    fn correctness_checked_add_u8() {
+        let x: core::num::NonZeroU8 = kani::any();
+        let y: u8 = kani::any();
+        assert!(x.checked_add(y).map(|r| r.get()) == x.get().checked_add(y));
+    }
+
+    #[kani::proof]
+    fn correctness_saturating_add_u8() {
+        let x: core::num::NonZeroU8 = kani::any();
+        let y: u8 = kani::any();
+        assert!(x.saturating_add(y).get() == x.get().saturating_add(y));
+    }
+
+    #[kani::proof]
+    fn correctness_abs_i8() {
+        let x: core::num::NonZeroI8 = kani::any();
+        kani::assume(x.get() != i8::MIN);
+        assert!(x.abs().get() == x.get().abs());
+    }
+
+    #[kani::proof]
+    fn correctness_wrapping_neg_i8() {
+        let x: core::num::NonZeroI8 = kani::any();
+        assert!(x.wrapping_neg().get() == x.get().wrapping_neg());
+    }
+
+    #[kani::proof]
+    fn correctness_wrapping_abs_i8() {
+        let x: core::num::NonZeroI8 = kani::any();
+        assert!(x.wrapping_abs().get() == x.get().wrapping_abs());
+    }
+
+    #[kani::proof]
+    fn correctness_neg_i8() {
+        let x: core::num::NonZeroI8 = kani::any();
+        kani::assume(x.get() != i8::MIN);
+        assert!((-x).get() == -x.get());
+    }
+
+    // Note: isqrt unwind bound explanation
+    // 64 iterations max for u128 isqrt loop + 1 for exit check
 }
