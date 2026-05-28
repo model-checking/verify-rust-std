@@ -3408,4 +3408,509 @@ mod verify {
     check_iter_with_ty!(verify_u8, u8, u32::MAX as usize);
     check_iter_with_ty!(verify_char, char, 50);
     check_iter_with_ty!(verify_tup, (char, u8), 50);
+
+    // --- Challenge #18: Slice Iter harnesses ---
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_iter_last() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let iter = s.iter();
+        let last = iter.last();
+        assert_eq!(*last.unwrap(), arr[4]);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_iter_fold() {
+        let arr: [i32; 3] = kani::any();
+        let s: &[i32] = &arr;
+        let sum = s.iter().fold(0i32, |acc, &x| acc.wrapping_add(x));
+        assert_eq!(sum, arr[0].wrapping_add(arr[1]).wrapping_add(arr[2]));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_iter_for_each() {
+        let arr: [i32; 3] = kani::any();
+        let s: &[i32] = &arr;
+        let mut count: usize = 0;
+        s.iter().for_each(|_| count += 1);
+        assert_eq!(count, 3);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_iter_position() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let target = arr[2];
+        let pos = s.iter().position(|&x| x == target);
+        assert!(pos.is_some());
+        assert!(pos.unwrap() <= 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_iter_rposition() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let target = arr[2];
+        let pos = s.iter().rposition(|&x| x == target);
+        assert!(pos.is_some());
+        assert!(pos.unwrap() >= 2);
+    }
+
+    #[kani::proof]
+    fn verify_iter_mut_new() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let iter = s.iter_mut();
+        assert_eq!(iter.len(), 5);
+    }
+
+    #[kani::proof]
+    fn verify_iter_mut_into_slice() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let iter = s.iter_mut();
+        let slice = iter.into_slice();
+        assert_eq!(slice.len(), 5);
+    }
+
+    #[kani::proof]
+    fn verify_iter_mut_as_mut_slice() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut iter = s.iter_mut();
+        let ms = iter.as_mut_slice();
+        assert_eq!(ms.len(), 5);
+        ms[0] = 42;
+        assert_eq!(arr[0], 42);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_next() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut split = s.split(|&x| x == 0);
+        let first = split.next();
+        assert!(first.is_some());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_split_next_back() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut split = s.split(|&x| x == 0);
+        let last = split.next_back();
+        assert!(last.is_some());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_next_back() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut chunks = s.chunks(2);
+        let last = chunks.next_back();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().len(), 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_mut_next() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut chunks = s.chunks_mut(2);
+        let first = chunks.next();
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_mut_nth() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut chunks = s.chunks_mut(2);
+        let second = chunks.nth(1);
+        assert!(second.is_some());
+        assert_eq!(second.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_mut_next_back() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut chunks = s.chunks_mut(2);
+        let last = chunks.next_back();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().len(), 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_mut_nth_back() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut chunks = s.chunks_mut(2);
+        let second_last = chunks.nth_back(1);
+        assert!(second_last.is_some());
+        assert_eq!(second_last.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    fn verify_chunks_exact_new() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let chunks = s.chunks_exact(2);
+        assert_eq!(chunks.remainder().len(), 1);
+    }
+
+    #[kani::proof]
+    fn verify_chunks_exact_mut_new() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let chunks = s.chunks_exact_mut(2);
+        assert_eq!(chunks.into_remainder().len(), 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_exact_mut_next() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut chunks = s.chunks_exact_mut(2);
+        let first = chunks.next();
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_exact_mut_nth() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut chunks = s.chunks_exact_mut(2);
+        let second = chunks.nth(1);
+        assert!(second.is_some());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_exact_mut_next_back() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut chunks = s.chunks_exact_mut(2);
+        let last = chunks.next_back();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_chunks_exact_mut_nth_back() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut chunks = s.chunks_exact_mut(2);
+        let item = chunks.nth_back(0);
+        assert!(item.is_some());
+        assert_eq!(item.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_array_windows_next() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut windows = s.array_windows::<3>();
+        let first = windows.next();
+        assert!(first.is_some());
+        assert_eq!(first.unwrap()[0], arr[0]);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_array_windows_nth() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut windows = s.array_windows::<3>();
+        let second = windows.nth(1);
+        assert!(second.is_some());
+        assert_eq!(second.unwrap()[0], arr[1]);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_array_windows_next_back() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut windows = s.array_windows::<3>();
+        let last = windows.next_back();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap()[0], arr[2]);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_array_windows_nth_back() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut windows = s.array_windows::<3>();
+        let item = windows.nth_back(1);
+        assert!(item.is_some());
+        assert_eq!(item.unwrap()[0], arr[1]);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_next() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut rchunks = s.rchunks(2);
+        let first = rchunks.next();
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_next_back() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut rchunks = s.rchunks(2);
+        let last = rchunks.next_back();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().len(), 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_mut_next() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut rchunks = s.rchunks_mut(2);
+        let first = rchunks.next();
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_mut_nth() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut rchunks = s.rchunks_mut(2);
+        let second = rchunks.nth(1);
+        assert!(second.is_some());
+        assert_eq!(second.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_mut_last() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let rchunks = s.rchunks_mut(2);
+        let last = rchunks.last();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().len(), 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_mut_next_back() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut rchunks = s.rchunks_mut(2);
+        let last = rchunks.next_back();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().len(), 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_mut_nth_back() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut rchunks = s.rchunks_mut(2);
+        let second_last = rchunks.nth_back(1);
+        assert!(second_last.is_some());
+        assert_eq!(second_last.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    fn verify_rchunks_exact_new() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let rchunks = s.rchunks_exact(2);
+        assert_eq!(rchunks.remainder().len(), 1);
+    }
+
+    #[kani::proof]
+    fn verify_rchunks_exact_mut_new() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let rchunks = s.rchunks_exact_mut(2);
+        assert_eq!(rchunks.into_remainder().len(), 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_exact_mut_next() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut rchunks = s.rchunks_exact_mut(2);
+        let first = rchunks.next();
+        assert!(first.is_some());
+        assert_eq!(first.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_exact_mut_nth() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut rchunks = s.rchunks_exact_mut(2);
+        let second = rchunks.nth(1);
+        assert!(second.is_some());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_exact_mut_next_back() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut rchunks = s.rchunks_exact_mut(2);
+        let last = rchunks.next_back();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().len(), 2);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_rchunks_exact_mut_nth_back() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut rchunks = s.rchunks_exact_mut(2);
+        let item = rchunks.nth_back(0);
+        assert!(item.is_some());
+        assert_eq!(item.unwrap().len(), 2);
+    }
+
+    // --- __iterator_get_unchecked harnesses ---
+
+    #[kani::proof]
+    fn verify_windows_get_unchecked() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut iter = s.windows(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert_eq!(val.len(), 2);
+    }
+
+    #[kani::proof]
+    fn verify_chunks_get_unchecked() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut iter = s.chunks(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert!(val.len() > 0 && val.len() <= 2);
+    }
+
+    #[kani::proof]
+    fn verify_chunks_mut_get_unchecked() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut iter = s.chunks_mut(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert!(val.len() > 0 && val.len() <= 2);
+    }
+
+    #[kani::proof]
+    fn verify_chunks_exact_get_unchecked() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut iter = s.chunks_exact(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert_eq!(val.len(), 2);
+    }
+
+    #[kani::proof]
+    fn verify_chunks_exact_mut_get_unchecked() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut iter = s.chunks_exact_mut(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert_eq!(val.len(), 2);
+    }
+
+    #[kani::proof]
+    fn verify_rchunks_get_unchecked() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut iter = s.rchunks(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert!(val.len() > 0 && val.len() <= 2);
+    }
+
+    #[kani::proof]
+    fn verify_rchunks_mut_get_unchecked() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut iter = s.rchunks_mut(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert!(val.len() > 0 && val.len() <= 2);
+    }
+
+    #[kani::proof]
+    fn verify_rchunks_exact_get_unchecked() {
+        let arr: [i32; 5] = kani::any();
+        let s: &[i32] = &arr;
+        let mut iter = s.rchunks_exact(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert_eq!(val.len(), 2);
+    }
+
+    #[kani::proof]
+    fn verify_rchunks_exact_mut_get_unchecked() {
+        let mut arr: [i32; 5] = kani::any();
+        let s: &mut [i32] = &mut arr;
+        let mut iter = s.rchunks_exact_mut(2);
+        let len = iter.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any_where(|&i: &usize| i < len);
+        let val = unsafe { iter.__iterator_get_unchecked(i) };
+        assert_eq!(val.len(), 2);
+    }
 }
