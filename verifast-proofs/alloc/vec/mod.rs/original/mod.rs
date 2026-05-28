@@ -73,11 +73,9 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-#[cfg(not(no_global_oom_handling))]
 use core::cmp;
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
-#[cfg(not(no_global_oom_handling))]
 use core::iter;
 use core::marker::PhantomData;
 use core::mem::{self, ManuallyDrop, MaybeUninit, SizedTypeProperties};
@@ -96,11 +94,9 @@ use crate::raw_vec::RawVec;
 
 mod extract_if;
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "vec_splice", since = "1.21.0")]
 pub use self::splice::Splice;
 
-#[cfg(not(no_global_oom_handling))]
 mod splice;
 
 #[stable(feature = "drain", since = "1.6.0")]
@@ -118,10 +114,8 @@ pub use self::into_iter::IntoIter;
 
 mod into_iter;
 
-#[cfg(not(no_global_oom_handling))]
 use self::is_zero::IsZero;
 
-#[cfg(not(no_global_oom_handling))]
 mod is_zero;
 
 #[cfg(not(no_global_oom_handling))]
@@ -134,16 +128,12 @@ pub use self::peek_mut::PeekMut;
 
 mod peek_mut;
 
-#[cfg(not(no_global_oom_handling))]
 use self::spec_from_elem::SpecFromElem;
 
-#[cfg(not(no_global_oom_handling))]
 mod spec_from_elem;
 
-#[cfg(not(no_global_oom_handling))]
 use self::set_len_on_drop::SetLenOnDrop;
 
-#[cfg(not(no_global_oom_handling))]
 mod set_len_on_drop;
 
 #[cfg(not(no_global_oom_handling))]
@@ -152,22 +142,16 @@ use self::in_place_drop::{InPlaceDrop, InPlaceDstDataSrcBufDrop};
 #[cfg(not(no_global_oom_handling))]
 mod in_place_drop;
 
-#[cfg(not(no_global_oom_handling))]
 use self::spec_from_iter_nested::SpecFromIterNested;
 
-#[cfg(not(no_global_oom_handling))]
 mod spec_from_iter_nested;
 
-#[cfg(not(no_global_oom_handling))]
 use self::spec_from_iter::SpecFromIter;
 
-#[cfg(not(no_global_oom_handling))]
 mod spec_from_iter;
 
-#[cfg(not(no_global_oom_handling))]
 use self::spec_extend::SpecExtend;
 
-#[cfg(not(no_global_oom_handling))]
 mod spec_extend;
 
 /// A contiguous growable array type, written as `Vec<T>`, short for 'vector'.
@@ -429,7 +413,7 @@ mod spec_extend;
 /// [owned slice]: Box
 /// [`into_boxed_slice`]: Vec::into_boxed_slice
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_diagnostic_item = "Vec"]
+
 #[rustc_insignificant_dtor]
 pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
     buf: RawVec<T, A>,
@@ -453,7 +437,7 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[rustc_const_stable(feature = "const_vec_new", since = "1.39.0")]
-    #[rustc_diagnostic_item = "vec_new"]
+    
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
     pub const fn new() -> Self {
@@ -510,11 +494,11 @@ impl<T> Vec<T> {
     /// let vec_units = Vec::<()>::with_capacity(10);
     /// assert_eq!(vec_units.capacity(), usize::MAX);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
-    #[rustc_diagnostic_item = "vec_with_capacity"]
+    
     pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_in(capacity, Global)
     }
@@ -643,7 +627,8 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub unsafe fn from_raw_parts(ptr: *mut T, length: usize, capacity: usize) -> Self {
+    pub unsafe fn from_raw_parts(ptr: *mut T, length: usize, capacity: usize) -> Self
+    {
         unsafe { Self::from_raw_parts_in(ptr, length, capacity, Global) }
     }
 
@@ -755,7 +740,8 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
-    pub unsafe fn from_parts(ptr: NonNull<T>, length: usize, capacity: usize) -> Self {
+    pub unsafe fn from_parts(ptr: NonNull<T>, length: usize, capacity: usize) -> Self
+    {
         unsafe { Self::from_parts_in(ptr, length, capacity, Global) }
     }
 
@@ -922,7 +908,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// let vec_units = Vec::<(), System>::with_capacity_in(10, System);
     /// assert_eq!(vec_units.capacity(), usize::MAX);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
@@ -1057,13 +1043,25 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    pub unsafe fn from_raw_parts_in(ptr: *mut T, length: usize, capacity: usize, alloc: A) -> Self {
-        ub_checks::assert_unsafe_precondition!(
-            check_library_ub,
-            "Vec::from_raw_parts_in requires that length <= capacity",
-            (length: usize = length, capacity: usize = capacity) => length <= capacity
-        );
-        unsafe { Vec { buf: RawVec::from_raw_parts_in(ptr, capacity, alloc), len: length } }
+    pub unsafe fn from_raw_parts_in(ptr: *mut T, length: usize, capacity: usize, alloc: A) -> Self
+    {
+        const fn precondition_check(length: usize, capacity: usize) {
+            if !(length <= capacity) {
+                let msg = concat!("unsafe precondition(s) violated: ", "Vec::from_raw_parts_in requires that length <= capacity",
+                    "\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety.");
+                ::core::panicking::panic_nounwind_fmt(::core::fmt::Arguments::new_const(&[msg]), false);
+            }
+        }
+        if ::core::ub_checks::check_library_ub() { //~allow_dead_code
+            precondition_check(length, capacity); //~allow_dead_code
+        }
+        //ub_checks::assert_unsafe_precondition!(
+        //    check_library_ub,
+        //    "Vec::from_raw_parts_in requires that length <= capacity",
+        //    (length: usize = length, capacity: usize = capacity) => length <= capacity //~allow_dead_code
+        //);
+        let r = unsafe { Vec { buf: RawVec::from_raw_parts_in(ptr, capacity, alloc), len: length } };
+        r
     }
 
     #[doc(alias = "from_non_null_parts_in")]
@@ -1178,13 +1176,25 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", reason = "new API", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", issue = "130364")]
-    pub unsafe fn from_parts_in(ptr: NonNull<T>, length: usize, capacity: usize, alloc: A) -> Self {
-        ub_checks::assert_unsafe_precondition!(
-            check_library_ub,
-            "Vec::from_parts_in requires that length <= capacity",
-            (length: usize = length, capacity: usize = capacity) => length <= capacity
-        );
-        unsafe { Vec { buf: RawVec::from_nonnull_in(ptr, capacity, alloc), len: length } }
+    pub unsafe fn from_parts_in(ptr: NonNull<T>, length: usize, capacity: usize, alloc: A) -> Self
+    {
+        const fn precondition_check(length: usize, capacity: usize) {
+            if !(length <= capacity) {
+                let msg = concat!("unsafe precondition(s) violated: ", "Vec::from_parts_in requires that length <= capacity",
+                    "\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety.");
+                ::core::panicking::panic_nounwind_fmt(::core::fmt::Arguments::new_const(&[msg]), false);
+            }
+        }
+        if ::core::ub_checks::check_library_ub() { //~allow_dead_code
+            precondition_check(length, capacity); //~allow_dead_code
+        }
+        //ub_checks::assert_unsafe_precondition!(
+        //    check_library_ub,
+        //    "Vec::from_parts_in requires that length <= capacity",
+        //    (length: usize = length, capacity: usize = capacity) => length <= capacity
+        //);
+        let r = unsafe { Vec { buf: RawVec::from_nonnull_in(ptr, capacity, alloc), len: length } };
+        r
     }
 
     /// Decomposes a `Vec<T>` into its raw components: `(pointer, length, capacity, allocator)`.
@@ -1227,12 +1237,28 @@ impl<T, A: Allocator> Vec<T, A> {
     #[must_use = "losing the pointer will leak memory"]
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
-    pub fn into_raw_parts_with_alloc(self) -> (*mut T, usize, usize, A) {
+    pub fn into_raw_parts_with_alloc(self) -> (*mut T, usize, usize, A)
+    {
         let mut me = ManuallyDrop::new(self);
-        let len = me.len();
-        let capacity = me.capacity();
+        
+        let len;
+        let capacity;
+        {
+            
+            len = me.len();
+            
+            capacity = me.capacity();
+        }
+        
         let ptr = me.as_mut_ptr();
-        let alloc = unsafe { ptr::read(me.allocator()) };
+        
+        use core::ops::Deref;
+        let me_deref = me.deref();
+        
+        let alloc_ref = unsafe { (*(me_deref as *const Vec<T, A>)).allocator() };
+        
+        let alloc = unsafe { ptr::read(alloc_ref) };
+        
         (ptr, len, capacity, alloc)
     }
 
@@ -1310,8 +1336,10 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
-    pub const fn capacity(&self) -> usize {
-        self.buf.capacity()
+    pub const fn capacity<'a>(&'a self) -> usize
+    {
+        let r = self.buf.capacity();
+        r
     }
 
     /// Reserves capacity for at least `additional` more elements to be inserted
@@ -1331,9 +1359,9 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.reserve(10);
     /// assert!(vec.capacity() >= 11);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_diagnostic_item = "vec_reserve"]
+    
     pub fn reserve(&mut self, additional: usize) {
         self.buf.reserve(self.len, additional);
     }
@@ -1362,7 +1390,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.reserve_exact(10);
     /// assert!(vec.capacity() >= 11);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn reserve_exact(&mut self, additional: usize) {
         self.buf.reserve_exact(self.len, additional);
@@ -1465,15 +1493,21 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.shrink_to_fit();
     /// assert!(vec.capacity() >= 3);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn shrink_to_fit(&mut self) {
+    pub fn shrink_to_fit(&mut self)
+    {
+        let capacity;
+        {
+            capacity = self.capacity();
+        }
+        
         // The capacity is never less than the length, and there's nothing to do when
         // they are equal, so we can avoid the panic case in `RawVec::shrink_to_fit`
         // by only calling it with a greater capacity.
-        if self.capacity() > self.len {
+        if capacity > self.len {
             self.buf.shrink_to_fit(self.len);
+            
         }
     }
 
@@ -1495,7 +1529,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.shrink_to(0);
     /// assert!(vec.capacity() >= 3);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "shrink_to", since = "1.56.0")]
     pub fn shrink_to(&mut self, min_capacity: usize) {
         if self.capacity() > min_capacity {
@@ -1528,14 +1562,17 @@ impl<T, A: Allocator> Vec<T, A> {
     /// let slice = vec.into_boxed_slice();
     /// assert_eq!(slice.into_vec().capacity(), 3);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn into_boxed_slice(mut self) -> Box<[T], A> {
+    pub fn into_boxed_slice(mut self) -> Box<[T], A>
+    {
         unsafe {
             self.shrink_to_fit();
-            let me = ManuallyDrop::new(self);
+            let  me = ManuallyDrop::new(self);
+            
             let buf = ptr::read(&me.buf);
-            let len = me.len();
+            
+            let len = (&me).len();
+            
             buf.into_box(len).assume_init()
         }
     }
@@ -1583,7 +1620,8 @@ impl<T, A: Allocator> Vec<T, A> {
     /// [`clear`]: Vec::clear
     /// [`drain`]: Vec::drain
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn truncate(&mut self, len: usize) {
+    pub fn truncate(&mut self, len: usize)
+    {
         // This is safe because:
         //
         // * the slice passed to `drop_in_place` is valid; the `len > self.len`
@@ -1595,7 +1633,8 @@ impl<T, A: Allocator> Vec<T, A> {
             // Note: It's intentional that this is `>` and not `>=`.
             //       Changing it to `>=` has negative performance
             //       implications in some cases. See #78884 for more.
-            if len > self.len {
+            let self_len = self.len;
+            if len > self_len {
                 return;
             }
             let remaining_len = self.len - len;
@@ -1618,7 +1657,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[stable(feature = "vec_as_slice", since = "1.7.0")]
-    #[rustc_diagnostic_item = "vec_as_slice"]
+    
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     pub const fn as_slice(&self) -> &[T] {
         // SAFETY: `slice::from_raw_parts` requires pointee is a contiguous, aligned buffer of size
@@ -1650,7 +1689,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[stable(feature = "vec_as_slice", since = "1.7.0")]
-    #[rustc_diagnostic_item = "vec_as_mut_slice"]
+    
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     pub const fn as_mut_slice(&mut self) -> &mut [T] {
         // SAFETY: `slice::from_raw_parts_mut` requires pointee is a contiguous, aligned buffer of
@@ -1727,10 +1766,12 @@ impl<T, A: Allocator> Vec<T, A> {
     #[rustc_never_returns_null_ptr]
     #[rustc_as_ptr]
     #[inline]
-    pub const fn as_ptr(&self) -> *const T {
+    pub const fn as_ptr(&self) -> *const T
+    {
         // We shadow the slice method of the same name to avoid going through
         // `deref`, which creates an intermediate reference.
-        self.buf.ptr()
+        let r = self.buf.ptr();
+        r
     }
 
     /// Returns a raw mutable pointer to the vector's buffer, or a dangling
@@ -1811,10 +1852,13 @@ impl<T, A: Allocator> Vec<T, A> {
     #[rustc_never_returns_null_ptr]
     #[rustc_as_ptr]
     #[inline]
-    pub const fn as_mut_ptr(&mut self) -> *mut T {
+    pub const fn as_mut_ptr(&mut self) -> *mut T
+    {
         // We shadow the slice method of the same name to avoid going through
         // `deref_mut`, which creates an intermediate reference.
-        self.buf.ptr()
+        
+        let r = self.buf.ptr();
+        r
     }
 
     /// Returns a `NonNull` pointer to the vector's buffer, or a dangling
@@ -1883,8 +1927,10 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Returns a reference to the underlying allocator.
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
-    pub fn allocator(&self) -> &A {
-        self.buf.allocator()
+    pub fn allocator(&self) -> &A
+    {
+        let r = self.buf.allocator();
+        r
     }
 
     /// Forces the length of the vector to `new_len`.
@@ -1975,12 +2021,23 @@ impl<T, A: Allocator> Vec<T, A> {
     /// [`spare_capacity_mut()`]: Vec::spare_capacity_mut
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub unsafe fn set_len(&mut self, new_len: usize) {
-        ub_checks::assert_unsafe_precondition!(
-            check_library_ub,
-            "Vec::set_len requires that new_len <= capacity()",
-            (new_len: usize = new_len, capacity: usize = self.capacity()) => new_len <= capacity
-        );
+    pub unsafe fn set_len(&mut self, new_len: usize)
+    {
+        const fn precondition_check(new_len: usize, capacity: usize) {
+            if !(new_len <= capacity) {
+                let msg = concat!("unsafe precondition(s) violated: ", "Vec::set_len requires that new_len <= capacity()",
+                    "\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety.");
+                ::core::panicking::panic_nounwind_fmt(::core::fmt::Arguments::new_const(&[msg]), false);
+            }
+        }
+        if ::core::ub_checks::check_library_ub() { //~allow_dead_code
+            precondition_check(new_len, self.capacity()); //~allow_dead_code
+        }
+        //ub_checks::assert_unsafe_precondition!(
+        //    check_library_ub,
+        //    "Vec::set_len requires that new_len <= capacity()",
+        //    (new_len: usize = new_len, capacity: usize = self.capacity()) => new_len <= capacity
+        //);
 
         self.len = new_len;
     }
@@ -2011,7 +2068,8 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn swap_remove(&mut self, index: usize) -> T {
+    pub fn swap_remove(&mut self, index: usize) -> T
+    {
         #[cold]
         #[cfg_attr(not(panic = "immediate-abort"), inline(never))]
         #[optimize(size)]
@@ -2020,14 +2078,18 @@ impl<T, A: Allocator> Vec<T, A> {
         }
 
         let len = self.len();
+        
         if index >= len {
-            assert_failed(index, len);
+            assert_failed(index, len); //~allow_dead_code
         }
         unsafe {
             // We replace self[index] with the last element. Note that if the
             // bounds check above succeeds there must be a last element (which
             // can be self[index] itself).
+            
+            
             let value = ptr::read(self.as_ptr().add(index));
+            
             let base_ptr = self.as_mut_ptr();
             ptr::copy(base_ptr.add(len - 1), base_ptr.add(index), 1);
             self.set_len(len - 1);
@@ -2057,10 +2119,10 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Takes *O*([`Vec::len`]) time. All items after the insertion index must be
     /// shifted to the right. In the worst case, all elements are shifted when
     /// the insertion index is 0.
-    #[cfg(not(no_global_oom_handling))]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[track_caller]
-    pub fn insert(&mut self, index: usize, element: T) {
+    pub fn insert(&mut self, index: usize, element: T)
+    {
         let _ = self.insert_mut(index, element);
     }
 
@@ -2087,7 +2149,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Takes *O*([`Vec::len`]) time. All items after the insertion index must be
     /// shifted to the right. In the worst case, all elements are shifted when
     /// the insertion index is 0.
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[unstable(feature = "push_mut", issue = "135974")]
     #[track_caller]
@@ -2156,7 +2218,8 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[track_caller]
     #[rustc_confusables("delete", "take")]
-    pub fn remove(&mut self, index: usize) -> T {
+    pub fn remove(&mut self, index: usize) -> T
+    {
         #[cold]
         #[cfg_attr(not(panic = "immediate-abort"), inline(never))]
         #[track_caller]
@@ -2556,11 +2619,11 @@ impl<T, A: Allocator> Vec<T, A> {
     /// capacity after the push, *O*(*capacity*) time is taken to copy the
     /// vector's elements to a larger allocation. This expensive operation is
     /// offset by the *capacity* *O*(1) insertions it allows.
-    #[cfg(not(no_global_oom_handling))]
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_confusables("push_back", "put", "append")]
-    pub fn push(&mut self, value: T) {
+    pub fn push(&mut self, value: T)
+    {
         let _ = self.push_mut(value);
     }
 
@@ -2633,7 +2696,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// capacity after the push, *O*(*capacity*) time is taken to copy the
     /// vector's elements to a larger allocation. This expensive operation is
     /// offset by the *capacity* *O*(1) insertions it allows.
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[unstable(feature = "push_mut", issue = "135974")]
     #[must_use = "if you don't need a reference to the value, use `Vec::push` instead"]
@@ -2705,8 +2768,9 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Takes *O*(1) time.
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_diagnostic_item = "vec_pop"]
-    pub fn pop(&mut self) -> Option<T> {
+    
+    pub fn pop(&mut self) -> Option<T>
+    {
         if self.len == 0 {
             None
         } else {
@@ -2780,10 +2844,10 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(vec, [1, 2, 3, 4, 5, 6]);
     /// assert_eq!(vec2, []);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
     #[inline]
     #[stable(feature = "append", since = "1.4.0")]
-    pub fn append(&mut self, other: &mut Self) {
+    pub fn append(&mut self, other: &mut Self)
+    {
         unsafe {
             self.append_elements(other.as_slice() as _);
             other.set_len(0);
@@ -2791,9 +2855,9 @@ impl<T, A: Allocator> Vec<T, A> {
     }
 
     /// Appends elements to `self` from other buffer.
-    #[cfg(not(no_global_oom_handling))]
     #[inline]
-    unsafe fn append_elements(&mut self, other: *const [T]) {
+    unsafe fn append_elements(&mut self, other: *const [T])
+    {
         let count = other.len();
         self.reserve(count);
         let len = self.len();
@@ -2880,7 +2944,8 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self)
+    {
         let elems: *mut [T] = self.as_mut_slice();
 
         // SAFETY:
@@ -2908,9 +2973,12 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     #[rustc_confusables("length", "size")]
-    pub const fn len(&self) -> usize {
+    pub const fn len<'a>(&'a self) -> usize
+    // req [?q]lifetime_token('a) &*& [_]Vec_share_('a, currentThread, self, ?alloc_id, ?ptr, ?capacity, ?length);
+    // ens [q]lifetime_token('a) &*& result == length;
+    {
         let len = self.len;
-
+        
         // SAFETY: The maximum capacity of `Vec<T>` is `isize::MAX` bytes, so the maximum value can
         // be returned is `usize::checked_div(size_of::<T>()).unwrap_or(usize::MAX)`, which
         // matches the definition of `T::MAX_SLICE_LEN`.
@@ -2931,7 +2999,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert!(!v.is_empty());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_diagnostic_item = "vec_is_empty"]
+    
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
@@ -2961,7 +3029,6 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(vec, ['a']);
     /// assert_eq!(vec2, ['b', 'c']);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
     #[inline]
     #[must_use = "use `.truncate()` if you don't need the other half"]
     #[stable(feature = "split_off", since = "1.4.0")]
@@ -3025,7 +3092,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.resize_with(4, || { p *= 2; p });
     /// assert_eq!(vec, [2, 4, 8, 16]);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "vec_resize_with", since = "1.33.0")]
     pub fn resize_with<F>(&mut self, new_len: usize, f: F)
     where
@@ -3229,7 +3296,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// let reshaped: Vec<[[[u8; 8]; 8]; 8]> = flat.into_chunks().into_chunks().into_chunks();
     /// assert_eq!(reshaped.len(), 1);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[unstable(feature = "vec_into_chunks", issue = "142137")]
     pub fn into_chunks<const N: usize>(mut self) -> Vec<[T; N], A> {
         const {
@@ -3289,7 +3356,7 @@ impl<T: Clone, A: Allocator> Vec<T, A> {
     /// vec.resize(2, '_');
     /// assert_eq!(vec, ['a', 'b']);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "vec_resize", since = "1.5.0")]
     pub fn resize(&mut self, new_len: usize, value: T) {
         let len = self.len();
@@ -3319,7 +3386,7 @@ impl<T: Clone, A: Allocator> Vec<T, A> {
     /// ```
     ///
     /// [`extend`]: Vec::extend
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "vec_extend_from_slice", since = "1.6.0")]
     pub fn extend_from_slice(&mut self, other: &[T]) {
         self.spec_extend(other.iter())
@@ -3410,9 +3477,9 @@ impl<T, A: Allocator, const N: usize> Vec<[T; N], A> {
 }
 
 impl<T: Clone, A: Allocator> Vec<T, A> {
-    #[cfg(not(no_global_oom_handling))]
     /// Extend the vector by `n` clones of value.
-    fn extend_with(&mut self, n: usize, value: T) {
+    fn extend_with(&mut self, n: usize, value: T)
+    {
         self.reserve(n);
 
         unsafe {
@@ -3468,15 +3535,15 @@ impl<T: PartialEq, A: Allocator> Vec<T, A> {
 ////////////////////////////////////////////////////////////////////////////////
 
 #[doc(hidden)]
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_diagnostic_item = "vec_from_elem"]
+
 pub fn from_elem<T: Clone>(elem: T, n: usize) -> Vec<T> {
     <T as SpecFromElem>::from_elem(elem, n, Global)
 }
 
 #[doc(hidden)]
-#[cfg(not(no_global_oom_handling))]
+
 #[unstable(feature = "allocator_api", issue = "32838")]
 pub fn from_elem_in<T: Clone, A: Allocator>(elem: T, n: usize, alloc: A) -> Vec<T, A> {
     <T as SpecFromElem>::from_elem(elem, n, alloc)
@@ -3565,12 +3632,12 @@ impl<T, A: Allocator> ops::DerefMut for Vec<T, A> {
 #[unstable(feature = "deref_pure_trait", issue = "87121")]
 unsafe impl<T, A: Allocator> ops::DerefPure for Vec<T, A> {}
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
     fn clone(&self) -> Self {
         let alloc = self.allocator().clone();
-        <[T]>::to_vec_in(&**self, alloc)
+        let v = <[T]>::to_vec_in(&**self, alloc);
+        unsafe { core::ptr::read(&v as *const std::vec::Vec<T, A> as *const Self) }
     }
 
     /// Overwrites the contents of `self` with a clone of the contents of `source`.
@@ -3595,6 +3662,7 @@ impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
     /// // And no reallocation occurred
     /// assert_eq!(yp, y.as_ptr());
     /// ```
+    #[cfg(not(no_global_oom_handling))]
     fn clone_from(&mut self, source: &Self) {
         crate::slice::SpecCloneIntoVec::clone_into(source.as_slice(), self);
     }
@@ -3681,7 +3749,7 @@ impl<T, I: SliceIndex<[T]>, A: Allocator> IndexMut<I> for Vec<T, A> {
 ///     LONG_LIVED.lock().unwrap().push(result);
 /// }
 /// ```
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> FromIterator<T> for Vec<T> {
     #[inline]
@@ -3749,7 +3817,6 @@ impl<'a, T, A: Allocator> IntoIterator for &'a mut Vec<T, A> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> Extend<T> for Vec<T, A> {
     #[inline]
@@ -3768,6 +3835,7 @@ impl<T, A: Allocator> Extend<T> for Vec<T, A> {
     }
 
     #[inline]
+    #[cfg(not(no_global_oom_handling))]
     unsafe fn extend_one_unchecked(&mut self, item: T) {
         // SAFETY: Our preconditions ensure the space has been reserved, and `extend_reserve` is implemented correctly.
         unsafe {
@@ -3781,7 +3849,6 @@ impl<T, A: Allocator> Extend<T> for Vec<T, A> {
 impl<T, A: Allocator> Vec<T, A> {
     // leaf method to which various SpecFrom/SpecExtend implementations delegate when
     // they have no further optimizations to apply
-    #[cfg(not(no_global_oom_handling))]
     fn extend_desugared<I: Iterator<Item = T>>(&mut self, mut iterator: I) {
         // This is the case for a general iterator.
         //
@@ -3808,7 +3875,6 @@ impl<T, A: Allocator> Vec<T, A> {
 
     // specific extend for `TrustedLen` iterators, called both by the specializations
     // and internal places where resolving specialization makes compilation slower
-    #[cfg(not(no_global_oom_handling))]
     fn extend_trusted(&mut self, iterator: impl iter::TrustedLen<Item = T>) {
         let (low, high) = iterator.size_hint();
         if let Some(additional) = high {
@@ -3883,7 +3949,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// v.splice(1..1, new);
     /// assert_eq!(v, [1, 2, 3, 4, 5]);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[stable(feature = "vec_splice", since = "1.21.0")]
     pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, I::IntoIter, A>
@@ -3983,7 +4049,7 @@ impl<T, A: Allocator> Vec<T, A> {
 /// append the entire slice at once.
 ///
 /// [`copy_from_slice`]: slice::copy_from_slice
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "extend_ref", since = "1.2.0")]
 impl<'a, T: Copy + 'a, A: Allocator> Extend<&'a T> for Vec<T, A> {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
@@ -4001,6 +4067,7 @@ impl<'a, T: Copy + 'a, A: Allocator> Extend<&'a T> for Vec<T, A> {
     }
 
     #[inline]
+    #[cfg(not(no_global_oom_handling))]
     unsafe fn extend_one_unchecked(&mut self, &item: &'a T) {
         // SAFETY: Our preconditions ensure the space has been reserved, and `extend_reserve` is implemented correctly.
         unsafe {
@@ -4039,7 +4106,8 @@ impl<T: Ord, A: Allocator> Ord for Vec<T, A> {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<#[may_dangle] T, A: Allocator> Drop for Vec<T, A> {
-    fn drop(&mut self) {
+    fn drop(&mut self)
+    {
         unsafe {
             // use drop for [T]
             // use a raw slice to refer to the elements of the vector as weakest necessary type;
@@ -4096,7 +4164,6 @@ impl<T, A: Allocator> AsMut<[T]> for Vec<T, A> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Clone> From<&[T]> for Vec<T> {
     /// Allocates a `Vec<T>` and fills it by cloning `s`'s items.
@@ -4107,11 +4174,11 @@ impl<T: Clone> From<&[T]> for Vec<T> {
     /// assert_eq!(Vec::from(&[1, 2, 3][..]), vec![1, 2, 3]);
     /// ```
     fn from(s: &[T]) -> Vec<T> {
-        s.to_vec()
+        let v = s.to_vec();
+        unsafe { core::ptr::read(&v as *const std::vec::Vec<T> as *const Vec<T>) }
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "vec_from_mut", since = "1.19.0")]
 impl<T: Clone> From<&mut [T]> for Vec<T> {
     /// Allocates a `Vec<T>` and fills it by cloning `s`'s items.
@@ -4122,11 +4189,10 @@ impl<T: Clone> From<&mut [T]> for Vec<T> {
     /// assert_eq!(Vec::from(&mut [1, 2, 3][..]), vec![1, 2, 3]);
     /// ```
     fn from(s: &mut [T]) -> Vec<T> {
-        s.to_vec()
+        unsafe { core::mem::transmute_copy::<<[T] as crate::borrow::ToOwned>::Owned, Vec<T>>(&s.to_vec()) }
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "vec_from_array_ref", since = "1.74.0")]
 impl<T: Clone, const N: usize> From<&[T; N]> for Vec<T> {
     /// Allocates a `Vec<T>` and fills it by cloning `s`'s items.
@@ -4141,7 +4207,6 @@ impl<T: Clone, const N: usize> From<&[T; N]> for Vec<T> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "vec_from_array_ref", since = "1.74.0")]
 impl<T: Clone, const N: usize> From<&mut [T; N]> for Vec<T> {
     /// Allocates a `Vec<T>` and fills it by cloning `s`'s items.
@@ -4156,7 +4221,6 @@ impl<T: Clone, const N: usize> From<&mut [T; N]> for Vec<T> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "vec_from_array", since = "1.44.0")]
 impl<T, const N: usize> From<[T; N]> for Vec<T> {
     /// Allocates a `Vec<T>` and moves `s`'s items into it.
@@ -4167,7 +4231,8 @@ impl<T, const N: usize> From<[T; N]> for Vec<T> {
     /// assert_eq!(Vec::from([1, 2, 3]), vec![1, 2, 3]);
     /// ```
     fn from(s: [T; N]) -> Vec<T> {
-        <[T]>::into_vec(Box::new(s))
+        let v = <[T]>::into_vec(Box::new(s));
+        unsafe { core::ptr::read(&v as *const std::vec::Vec<T> as *const Vec<T>) }
     }
 }
 
@@ -4196,6 +4261,7 @@ where
 }
 
 // note: test pulls in std, which causes errors here
+
 #[stable(feature = "vec_from_box", since = "1.18.0")]
 impl<T, A: Allocator> From<Box<[T], A>> for Vec<T, A> {
     /// Converts a boxed slice into a vector by transferring ownership of
@@ -4208,13 +4274,15 @@ impl<T, A: Allocator> From<Box<[T], A>> for Vec<T, A> {
     /// assert_eq!(Vec::from(b), vec![1, 2, 3]);
     /// ```
     fn from(s: Box<[T], A>) -> Self {
-        s.into_vec()
+        let v = s.into_vec();
+        unsafe { core::mem::transmute_copy::<std::vec::Vec<T, A>, Self>(&core::mem::ManuallyDrop::new(v)) }
     }
 }
 
 // note: test pulls in std, which causes errors here
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "box_from_vec", since = "1.20.0")]
+#[cfg(not(no_global_oom_handling))]
 impl<T, A: Allocator> From<Vec<T, A>> for Box<[T], A> {
     /// Converts a vector into a boxed slice.
     ///
@@ -4241,7 +4309,6 @@ impl<T, A: Allocator> From<Vec<T, A>> for Box<[T], A> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
 #[stable(feature = "rust1", since = "1.0.0")]
 impl From<&str> for Vec<u8> {
     /// Allocates a `Vec<u8>` and fills it with a UTF-8 string.
@@ -4311,434 +4378,43 @@ mod verify {
 
     use crate::vec::Vec;
 
-    // Helper: create a Vec<T> with symbolic length for verification.
-    // Creates from a fixed-size array then truncates to a symbolic length,
-    // giving a Vec with 0..=MAX_LEN initialized elements and capacity MAX_LEN.
-    fn any_vec<T: kani::Arbitrary, const MAX_LEN: usize>() -> Vec<T> {
-        let arr: [T; MAX_LEN] = kani::Arbitrary::any_array();
-        let mut v = Vec::from(arr);
-        let new_len: usize = kani::any();
-        kani::assume(new_len <= v.len());
-        v.truncate(new_len);
-        v
+    // Size chosen for testing the empty vector (0), middle element removal (1)
+    // and last element removal (2) cases while keeping verification tractable
+    const ARRAY_LEN: usize = 3;
+
+    #[kani::proof]
+    pub fn verify_swap_remove() {
+        // Creating a vector directly from a fixed length arbitrary array
+        let mut arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut vect = Vec::from(&arr);
+
+        // Recording the original length and a copy of the vector for validation
+        let original_len = vect.len();
+        let original_vec = vect.clone();
+
+        // Generating a nondeterministic index which is guaranteed to be within bounds
+        let index: usize = kani::any_where(|x| *x < original_len);
+
+        let removed = vect.swap_remove(index);
+
+        // Verifying that the length of the vector decreases by one after the operation is performed
+        assert!(vect.len() == original_len - 1, "Length should decrease by 1");
+
+        // Verifying that the removed element matches the original element at the index
+        assert!(removed == original_vec[index], "Removed element should match original");
+
+        // Verifying that the removed index now contains the element originally at the vector's last index if applicable
+        if index < original_len - 1 {
+            assert!(
+                vect[index] == original_vec[original_len - 1],
+                "Index should contain last element"
+            );
+        }
+
+        // Check that all other unaffected elements remain unchanged
+        let k = kani::any_where(|&x: &usize| x < original_len - 1);
+        if k != index {
+            assert!(vect[k] == arr[k]);
+        }
     }
-
-    // Helper: create a Vec<T> with at least `min_len` elements.
-    fn any_vec_with_min_len<T: kani::Arbitrary, const MAX_LEN: usize>(min_len: usize) -> Vec<T> {
-        let arr: [T; MAX_LEN] = kani::Arbitrary::any_array();
-        let mut v = Vec::from(arr);
-        let new_len: usize = kani::any();
-        kani::assume(new_len >= min_len && new_len <= v.len());
-        v.truncate(new_len);
-        v
-    }
-
-    /// Macro for generating Vec harnesses across representative types.
-    macro_rules! check_vec_with_ty {
-        ($module:ident, $ty:ty, $max:expr) => {
-            mod $module {
-                use super::*;
-                const MAX_LEN: usize = $max;
-
-                // --- from_raw_parts ---
-                #[kani::proof]
-                fn check_from_raw_parts() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let cap = v.capacity();
-                    let ptr = v.as_mut_ptr();
-                    core::mem::forget(v);
-                    let reconstructed = unsafe { Vec::from_raw_parts(ptr, len, cap) };
-                    assert!(reconstructed.len() == len);
-                    assert!(reconstructed.capacity() == cap);
-                }
-
-                // --- into_raw_parts_with_alloc ---
-                #[kani::proof]
-                fn check_into_raw_parts_with_alloc() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let cap = v.capacity();
-                    let (ptr, l, c, alloc) = v.into_raw_parts_with_alloc();
-                    assert!(l == len);
-                    assert!(c == cap);
-                    // Reconstruct to avoid leak
-                    let _ = unsafe { Vec::from_raw_parts_in(ptr, l, c, alloc) };
-                }
-
-                // --- into_boxed_slice ---
-                #[kani::proof]
-
-                fn check_into_boxed_slice() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let boxed = v.into_boxed_slice();
-                    assert!(boxed.len() == len);
-                }
-
-                // --- truncate ---
-                #[kani::proof]
-
-                fn check_truncate() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let new_len: usize = kani::any();
-                    v.truncate(new_len);
-                    if new_len < orig_len {
-                        assert!(v.len() == new_len);
-                    } else {
-                        assert!(v.len() == orig_len);
-                    }
-                }
-
-                // --- set_len ---
-                #[kani::proof]
-                fn check_set_len() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let cap = v.capacity();
-                    let new_len: usize = kani::any();
-                    kani::assume(new_len <= cap);
-                    // SAFETY: All elements up to capacity are initialized since
-                    // Vec::from(arr) initializes all MAX_LEN elements and truncate
-                    // only reduces len, not capacity.
-                    unsafe { v.set_len(new_len) };
-                    assert!(v.len() == new_len);
-                }
-
-                // --- swap_remove ---
-                #[kani::proof]
-                fn check_swap_remove() {
-                    let mut v: Vec<$ty> = any_vec_with_min_len::<$ty, MAX_LEN>(1);
-                    let orig_len = v.len();
-                    let index: usize = kani::any();
-                    kani::assume(index < orig_len);
-                    let _ = v.swap_remove(index);
-                    assert!(v.len() == orig_len - 1);
-                }
-
-                // --- insert ---
-                #[kani::proof]
-
-                fn check_insert() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let index: usize = kani::any();
-                    kani::assume(index <= orig_len);
-                    let elem: $ty = kani::any();
-                    v.insert(index, elem);
-                    assert!(v.len() == orig_len + 1);
-                }
-
-                // --- remove ---
-                #[kani::proof]
-
-                fn check_remove() {
-                    let mut v: Vec<$ty> = any_vec_with_min_len::<$ty, MAX_LEN>(1);
-                    let orig_len = v.len();
-                    let index: usize = kani::any();
-                    kani::assume(index < orig_len);
-                    let _ = v.remove(index);
-                    assert!(v.len() == orig_len - 1);
-                }
-
-                // --- retain_mut ---
-                #[kani::proof]
-
-                fn check_retain_mut() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    v.retain_mut(|_| kani::any());
-                    assert!(v.len() <= orig_len);
-                }
-
-                // --- dedup_by ---
-                #[kani::proof]
-
-                fn check_dedup_by() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    v.dedup_by(|_, _| kani::any());
-                    assert!(v.len() <= orig_len);
-                }
-
-                // --- push ---
-                #[kani::proof]
-                fn check_push() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let elem: $ty = kani::any();
-                    v.push(elem);
-                    assert!(v.len() == orig_len + 1);
-                }
-
-                // --- push_within_capacity ---
-                #[kani::proof]
-                fn check_push_within_capacity() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let orig_cap = v.capacity();
-                    let elem: $ty = kani::any();
-                    let result = v.push_within_capacity(elem);
-                    if orig_len < orig_cap {
-                        assert!(result.is_ok());
-                        assert!(v.len() == orig_len + 1);
-                    } else {
-                        assert!(result.is_err());
-                        assert!(v.len() == orig_len);
-                    }
-                }
-
-                // --- pop ---
-                #[kani::proof]
-                fn check_pop() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let result = v.pop();
-                    if orig_len > 0 {
-                        assert!(result.is_some());
-                        assert!(v.len() == orig_len - 1);
-                    } else {
-                        assert!(result.is_none());
-                    }
-                }
-
-                // --- append ---
-                #[kani::proof]
-
-                fn check_append() {
-                    let mut v1: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let mut v2: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len1 = v1.len();
-                    let len2 = v2.len();
-                    v1.append(&mut v2);
-                    assert!(v1.len() == len1 + len2);
-                    assert!(v2.len() == 0);
-                }
-
-                // --- append_elements (private unsafe, called by append) ---
-                // Verified transitively through check_append above.
-                // Also verify directly:
-                #[kani::proof]
-
-                fn check_append_elements() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let other: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let other_len = other.len();
-                    let other_slice: &[$ty] = &other;
-                    // append_elements is private, but append calls it.
-                    // Verify through append with a second vec.
-                    let mut v2 = other;
-                    v.append(&mut v2);
-                    assert!(v.len() == orig_len + other_len);
-                }
-
-                // --- drain ---
-                #[kani::proof]
-
-                fn check_drain() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let start: usize = kani::any();
-                    let end: usize = kani::any();
-                    kani::assume(start <= end);
-                    kani::assume(end <= len);
-                    let drained: Vec<$ty> = v.drain(start..end).collect();
-                    assert!(drained.len() == end - start);
-                    assert!(v.len() == len - (end - start));
-                }
-
-                // --- clear ---
-                #[kani::proof]
-                fn check_clear() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    v.clear();
-                    assert!(v.len() == 0);
-                }
-
-                // --- split_off ---
-                #[kani::proof]
-
-                fn check_split_off() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let at: usize = kani::any();
-                    kani::assume(at <= len);
-                    let right = v.split_off(at);
-                    assert!(v.len() == at);
-                    assert!(right.len() == len - at);
-                }
-
-                // --- leak ---
-                #[kani::proof]
-                fn check_leak() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let leaked = v.leak();
-                    assert!(leaked.len() == len);
-                }
-
-                // --- spare_capacity_mut ---
-                #[kani::proof]
-                fn check_spare_capacity_mut() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let cap = v.capacity();
-                    let spare = v.spare_capacity_mut();
-                    assert!(spare.len() == cap - len);
-                }
-
-                // --- split_at_spare_mut ---
-                #[kani::proof]
-                fn check_split_at_spare_mut() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let cap = v.capacity();
-                    let (init, spare) = v.split_at_spare_mut();
-                    assert!(init.len() == len);
-                    assert!(spare.len() == cap - len);
-                }
-
-                // --- split_at_spare_mut_with_len (private unsafe) ---
-                // Verified transitively through split_at_spare_mut above.
-
-                // --- extend_from_within ---
-                #[kani::proof]
-
-                fn check_extend_from_within() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let start: usize = kani::any();
-                    let end: usize = kani::any();
-                    kani::assume(start <= end);
-                    kani::assume(end <= len);
-                    v.extend_from_within(start..end);
-                    assert!(v.len() == len + (end - start));
-                }
-
-                // --- into_flattened ---
-                #[kani::proof]
-
-                fn check_into_flattened() {
-                    let arr: [[$ty; 1]; MAX_LEN] = kani::Arbitrary::any_array();
-                    let v: Vec<[$ty; 1]> = Vec::from(arr);
-                    let len = v.len();
-                    let flat = v.into_flattened();
-                    assert!(flat.len() == len);
-                }
-
-                // --- extend_with (private, called by resize) ---
-                #[kani::proof]
-
-                fn check_extend_with() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let new_len: usize = kani::any();
-                    kani::assume(new_len >= orig_len);
-                    kani::assume(new_len <= MAX_LEN + MAX_LEN);
-                    let value: $ty = kani::any();
-                    v.resize(new_len, value);
-                    assert!(v.len() == new_len);
-                }
-
-                // --- spec_extend_from_within (private trait) ---
-                // Verified transitively through extend_from_within above.
-
-                // --- deref ---
-                #[kani::proof]
-                fn check_deref() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let slice: &[$ty] = &v;
-                    assert!(slice.len() == len);
-                }
-
-                // --- deref_mut ---
-                #[kani::proof]
-                fn check_deref_mut() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let slice: &mut [$ty] = &mut v;
-                    assert!(slice.len() == len);
-                }
-
-                // --- into_iter ---
-                #[kani::proof]
-                fn check_into_iter() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let iter = v.into_iter();
-                    assert!(iter.len() == len);
-                }
-
-                // --- extend_desugared (private) ---
-                // This is the default extend impl. Verify through Extend trait:
-                #[kani::proof]
-
-                fn check_extend_desugared() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let extra: [$ty; 1] = kani::Arbitrary::any_array();
-                    v.extend(extra.iter().copied());
-                    assert!(v.len() == orig_len + 1);
-                }
-
-                // --- extend_trusted (private) ---
-                // Called when extending with a TrustedLen iterator.
-                // Vec::from(arr) uses this path. Also verify through extend:
-                #[kani::proof]
-
-                fn check_extend_trusted() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let extra: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let extra_len = extra.len();
-                    v.extend(extra);
-                    assert!(v.len() == orig_len + extra_len);
-                }
-
-                // --- extract_if ---
-                #[kani::proof]
-
-                fn check_extract_if() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let extracted: Vec<$ty> = v.extract_if(.., |_| kani::any()).collect();
-                    assert!(v.len() + extracted.len() == orig_len);
-                }
-
-                // --- drop ---
-                #[kani::proof]
-
-                fn check_drop() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    drop(v);
-                }
-
-                // --- try_from ---
-                #[kani::proof]
-                fn check_try_from() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let result: Result<[$ty; MAX_LEN], _> = v.try_into();
-                    if len == MAX_LEN {
-                        assert!(result.is_ok());
-                    } else {
-                        assert!(result.is_err());
-                    }
-                }
-            }
-        };
-    }
-
-    // Representative types covering: ZST (size 0), small aligned (size 1),
-    // validity-constrained (size 4), compound with padding (size 5+).
-    // The unsafe pointer operations depend only on size_of::<T>() and
-    // align_of::<T>(), so these cover all relevant layout categories.
-    // MAX_LEN=3 allows CBMC to fully unwind all loops without explicit
-    // unwind bounds, while covering empty/single/multiple element cases.
-    check_vec_with_ty!(verify_vec_u8, u8, 3);
-    check_vec_with_ty!(verify_vec_unit, (), 3);
-    check_vec_with_ty!(verify_vec_char, char, 3);
-    check_vec_with_ty!(verify_vec_tup, (char, u8), 3);
 }
