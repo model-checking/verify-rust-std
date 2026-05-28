@@ -201,6 +201,9 @@ use core::pin::{Pin, PinCoerceUnsized};
 use core::ptr::{self, NonNull, Unique};
 use core::task::{Context, Poll};
 
+#[cfg(kani)]
+use {crate::vec::Vec, core::kani};
+
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
 use crate::alloc::{AllocError, Allocator, Global, Layout};
@@ -941,6 +944,13 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let ptr = (&*self) as *const mem::MaybeUninit<T> as *const T;
+            kani::mem::can_dereference(ptr)
+        })
+    )]
     pub unsafe fn assume_init(self) -> Box<T, A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut T, alloc) }
@@ -1008,6 +1018,13 @@ impl<T, A: Allocator> Box<[mem::MaybeUninit<T>], A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let ptr = (&*self) as *const [mem::MaybeUninit<T>] as *const [T];
+            kani::mem::can_dereference(ptr)
+        })
+    )]
     pub unsafe fn assume_init(self) -> Box<[T], A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut [T], alloc) }
@@ -1060,6 +1077,18 @@ impl<T: ?Sized> Box<T> {
     #[stable(feature = "box_raw", since = "1.4.0")]
     #[inline]
     #[must_use = "call `drop(Box::from_raw(ptr))` if you intend to drop the `Box`"]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let align = kani::mem::checked_align_of_raw(raw);
+            let size = kani::mem::checked_size_of_raw(raw);
+
+            !raw.is_null()
+                && align.is_some()
+                && size.map_or(false, |size| size <= isize::MAX as usize)
+                && kani::mem::can_dereference(raw)
+        })
+    )]
     pub unsafe fn from_raw(raw: *mut T) -> Self {
         unsafe { Self::from_raw_in(raw, Global) }
     }
@@ -1114,6 +1143,25 @@ impl<T: ?Sized> Box<T> {
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
     #[must_use = "call `drop(Box::from_non_null(ptr))` if you intend to drop the `Box`"]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let raw = ptr.as_ptr();
+            let align = kani::mem::checked_align_of_raw(raw);
+            let size = kani::mem::checked_size_of_raw(raw);
+
+            align.is_some()
+                && size.map_or(false, |size| size <= isize::MAX as usize)
+                && kani::mem::can_dereference(raw)
+        })
+    )]
+    #[cfg_attr(
+        kani,
+        kani::ensures(|result: &Self| {
+            let raw = ptr.as_ptr();
+            (&**result) as *const T == raw
+        })
+    )]
     pub unsafe fn from_non_null(ptr: NonNull<T>) -> Self {
         unsafe { Self::from_raw(ptr.as_ptr()) }
     }
@@ -1287,6 +1335,19 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// [memory layout]: self#memory-layout
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let align = kani::mem::checked_align_of_raw(raw);
+            let size = kani::mem::checked_size_of_raw(raw);
+
+            !raw.is_null()
+                && align.is_some()
+                && size.map_or(false, |size| size <= isize::MAX as usize)
+                && kani::mem::can_dereference(raw)
+        })
+    )]
+    #[cfg_attr(kani, kani::ensures(|result: &Self| (&**result) as *const T == raw))]
     pub unsafe fn from_raw_in(raw: *mut T, alloc: A) -> Self {
         Box(unsafe { Unique::new_unchecked(raw) }, alloc)
     }
@@ -1340,6 +1401,19 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            let ptr = raw.as_ptr();
+            let align = kani::mem::checked_align_of_raw(ptr);
+            let size = kani::mem::checked_size_of_raw(ptr);
+
+            align.is_some()
+                && size.map_or(false, |size| size <= isize::MAX as usize)
+                && kani::mem::can_dereference(ptr)
+        })
+    )]
+    #[cfg_attr(kani, kani::ensures(|result: &Self| (&**result) as *const T == raw.as_ptr()))]
     pub unsafe fn from_non_null_in(raw: NonNull<T>, alloc: A) -> Self {
         // SAFETY: guaranteed by the caller.
         unsafe { Box::from_raw_in(raw.as_ptr(), alloc) }
@@ -2159,4 +2233,1742 @@ impl<E: Error> Error for Box<E> {
     fn provide<'b>(&'b self, request: &mut error::Request<'b>) {
         Error::provide(&**self, request);
     }
+}
+
+// ==============================================================
+// Challenge 29: Verify safety of Boxed functions harnesses
+// ==============================================================
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod kani_box_harness_helpers {
+    use super::*;
+
+    pub(super) fn verifier_nondet_vec<T>() -> Vec<T> {
+        let cap: usize = kani::any();
+        let elem_layout = Layout::new::<T>();
+        kani::assume(elem_layout.repeat(cap).is_ok());
+        let mut v = Vec::<T>::with_capacity(cap);
+        unsafe {
+            let sz: usize = kani::any();
+            kani::assume(sz <= cap);
+            v.set_len(sz);
+            ptr::write_bytes(
+                v.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * sz,
+            );
+        }
+        v
+    }
+
+    pub(super) fn box_slice_layout_ok<T>(len: usize) -> bool {
+        Layout::array::<T>(len).is_ok()
+    }
+
+    pub(super) fn nondet_box_slice<T>(vec: &Vec<T>) -> &[T] {
+        let len = vec.len();
+        kani::assume(box_slice_layout_ok::<T>(len));
+        vec.as_slice()
+    }
+
+    pub(super) fn verifier_nondet_vec_box<T>() -> Vec<T> {
+        let vec = verifier_nondet_vec();
+        kani::assume(box_slice_layout_ok::<T>(vec.len()));
+        vec
+    }
+
+    pub(super) fn verifier_nondet_box_uninit_slice<T>() -> Box<[mem::MaybeUninit<T>], Global> {
+        let len = kani::any_where(|l: &usize| box_slice_layout_ok::<T>(*l));
+        let mut boxed = Box::<[T]>::new_uninit_slice(len);
+        unsafe {
+            ptr::write_bytes(
+                boxed.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * len,
+            );
+        }
+        boxed
+    }
+}
+
+// === UNSAFE FUNCTIONS ===
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::any::Any;
+    use core::marker::PhantomPinned;
+
+    use super::kani_box_harness_helpers::*;
+    use super::*;
+
+    // Kani limitation: proof_for_contract is not reliable for this
+    // MaybeUninit-based generic impl in boxed.rs, so these harnesses use
+    // #[kani::proof] and exercise the caller-side safety requirement directly.
+    //
+    // Kani cannot express the full generic "value is initialized" predicate
+    // for arbitrary `T`. The harness models the Safety contract by explicitly
+    // writing a valid `T` into the boxed MaybeUninit slot before calling
+    // `assume_init`.
+    macro_rules! gen_assume_init_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic initialized value of the target type.
+                let value: $ty = kani::any::<$ty>();
+
+                // Keep a copy so the initialized result can be compared after conversion.
+                let expected = value.clone();
+
+                // Allocate boxed storage for an uninitialized value of the same type.
+                let mut uninit: Box<mem::MaybeUninit<$ty>, Global> =
+                    Box::<$ty, Global>::new_uninit_in(Global);
+
+                // Write a valid `$ty` into the boxed `MaybeUninit` slot.
+                (*uninit).write(value);
+
+                // Convert the boxed `MaybeUninit` into a boxed initialized value.
+                let init: Box<$ty, Global> = unsafe { uninit.assume_init() };
+
+                // Check that the recovered value matches the one written into the slot.
+                assert_eq!(&*init, &expected);
+            }
+        };
+    }
+
+    gen_assume_init_harness!(harness_box_assume_init_i8, i8);
+    gen_assume_init_harness!(harness_box_assume_init_i16, i16);
+    gen_assume_init_harness!(harness_box_assume_init_i32, i32);
+    gen_assume_init_harness!(harness_box_assume_init_i64, i64);
+    gen_assume_init_harness!(harness_box_assume_init_i128, i128);
+    gen_assume_init_harness!(harness_box_assume_init_u8, u8);
+    gen_assume_init_harness!(harness_box_assume_init_u16, u16);
+    gen_assume_init_harness!(harness_box_assume_init_u32, u32);
+    gen_assume_init_harness!(harness_box_assume_init_u64, u64);
+    gen_assume_init_harness!(harness_box_assume_init_u128, u128);
+    gen_assume_init_harness!(harness_box_assume_init_unit, ());
+    gen_assume_init_harness!(harness_box_assume_init_array, [u8; 4]);
+    gen_assume_init_harness!(harness_box_assume_init_bool, bool);
+
+    // Kani limitation: proof_for_contract is not reliable for this
+    // MaybeUninit-based slice impl in boxed.rs, so these harnesses use
+    // #[kani::proof] and exercise the caller-side safety requirement directly.
+    //
+    // For byte-valid element types, the harness can model the caller-side
+    // safety requirement with an unbounded byte-level witness: it constructs a
+    // boxed `[MaybeUninit<T>]` slice using Box's own uninitialized slice API,
+    // fills the backing bytes nondeterministically, and then converts it to
+    // `Box<[T]>`.
+    macro_rules! gen_assume_init_slice_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Build a symbolic boxed slice of `MaybeUninit` elements.
+                let uninit: Box<[mem::MaybeUninit<$elem>], Global> =
+                    verifier_nondet_box_uninit_slice::<$elem>();
+
+                // Record the original data pointer before the conversion.
+                let expected_data = (&*uninit).as_ptr() as *const $elem;
+
+                // Record the original slice length before the conversion.
+                let expected_len = uninit.len();
+
+                // Convert the boxed `MaybeUninit` slice into a boxed initialized slice.
+                let result: Box<[$elem], Global> = unsafe { uninit.assume_init() };
+
+                // Check that the conversion preserves the backing data pointer.
+                assert_eq!((&*result).as_ptr(), expected_data);
+
+                // Check that the conversion preserves the slice length.
+                assert_eq!(result.len(), expected_len);
+            }
+        };
+    }
+
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_i8, i8);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_i16, i16);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_i32, i32);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_i64, i64);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_i128, i128);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_u8, u8);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_u16, u16);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_u32, u32);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_u64, u64);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_u128, u128);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_unit, ());
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_array, [u8; 4]);
+
+    macro_rules! gen_from_raw_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<$ty>::from_raw)]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build a boxed value whose allocation will become the raw witness.
+                let boxed: Box<$ty> = Box::new(value);
+
+                // Consume the box and extract the raw pointer expected by `from_raw`.
+                let ptr: *mut $ty = Box::into_raw(boxed);
+
+                // Rebuild ownership from the raw pointer.
+                let _recovered: Box<$ty> = unsafe { Box::from_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_from_raw_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[$elem]>::from_raw)]
+            pub fn $name() {
+                // Build a symbolic boxed slice of the target element type.
+                let boxed: Box<[$elem]> = verifier_nondet_vec_box::<$elem>().into_boxed_slice();
+
+                // Consume the boxed slice and extract the raw fat pointer.
+                let ptr: *mut [$elem] = Box::into_raw(boxed);
+
+                // Rebuild ownership from the raw slice pointer.
+                let _recovered: Box<[$elem]> = unsafe { Box::from_raw(ptr) };
+            }
+        };
+    }
+
+    gen_from_raw_sized_harness!(harness_box_from_raw_i8, i8);
+    gen_from_raw_sized_harness!(harness_box_from_raw_i16, i16);
+    gen_from_raw_sized_harness!(harness_box_from_raw_i32, i32);
+    gen_from_raw_sized_harness!(harness_box_from_raw_i64, i64);
+    gen_from_raw_sized_harness!(harness_box_from_raw_i128, i128);
+    gen_from_raw_sized_harness!(harness_box_from_raw_u8, u8);
+    gen_from_raw_sized_harness!(harness_box_from_raw_u16, u16);
+    gen_from_raw_sized_harness!(harness_box_from_raw_u32, u32);
+    gen_from_raw_sized_harness!(harness_box_from_raw_u64, u64);
+    gen_from_raw_sized_harness!(harness_box_from_raw_u128, u128);
+    gen_from_raw_sized_harness!(harness_box_from_raw_bool, bool);
+    gen_from_raw_sized_harness!(harness_box_from_raw_unit, ());
+    gen_from_raw_sized_harness!(harness_box_from_raw_array, [u8; 4]);
+
+    gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u8, u8);
+    gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u16, u16);
+    gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u32, u32);
+    gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u64, u64);
+    gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u128, u128);
+
+    macro_rules! gen_from_non_null_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<$ty>::from_non_null)]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build a boxed value whose allocation will become the non-null witness.
+                let boxed: Box<$ty> = Box::new(value);
+
+                // Consume the box and extract the non-null pointer expected by `from_non_null`.
+                let ptr: NonNull<$ty> = Box::into_non_null(boxed);
+
+                // Rebuild ownership from the non-null pointer.
+                let _recovered: Box<$ty> = unsafe { Box::from_non_null(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_from_non_null_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[$elem]>::from_non_null)]
+            pub fn $name() {
+                // Build a symbolic boxed slice of the target element type.
+                let boxed: Box<[$elem]> = verifier_nondet_vec_box::<$elem>().into_boxed_slice();
+
+                // Consume the boxed slice and extract the non-null fat pointer.
+                let ptr: NonNull<[$elem]> = Box::into_non_null(boxed);
+
+                // Rebuild ownership from the non-null slice pointer.
+                let _recovered: Box<[$elem]> = unsafe { Box::from_non_null(ptr) };
+            }
+        };
+    }
+
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_i8, i8);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_i16, i16);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_i32, i32);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_i64, i64);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_i128, i128);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_u8, u8);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_u16, u16);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_u32, u32);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_u64, u64);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_u128, u128);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_bool, bool);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_unit, ());
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_array, [u8; 4]);
+
+    gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u8, u8);
+    gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u16, u16);
+    gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u32, u32);
+    gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u64, u64);
+    gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u128, u128);
+
+    // These harnesses allocate raw memory directly instead of using higher-level
+    // Box constructors. `proof_for_contract` requires a single top-level call to
+    // `Box::from_raw_in`, while helpers such as `Box::new_in`,
+    // `Box::new_uninit_slice_in`, and `Vec::into_boxed_slice` eventually route
+    // through `Box::from_raw_in` during setup.
+
+    macro_rules! gen_from_raw_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<$ty, Global>::from_raw_in)]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build a raw pointer that satisfies the contract without using
+                // `Box::new_in`, which would internally call `Box::from_raw_in`.
+                let ptr: *mut $ty = if mem::size_of::<$ty>() == 0 {
+                    // ZST boxes use a non-null dangling pointer and never allocate.
+                    mem::forget(value);
+                    NonNull::<$ty>::dangling().as_ptr()
+                } else {
+                    let layout = Layout::new::<$ty>();
+                    // Allocate backing memory with the same allocator passed to
+                    // the function under test, then initialize it with a valid `$ty`.
+                    let ptr = match Global.allocate(layout) {
+                        Ok(memory) => memory.cast::<$ty>().as_ptr(),
+                        Err(_) => handle_alloc_error(layout),
+                    };
+                    unsafe { ptr.write(value) };
+                    ptr
+                };
+
+                // Use the same allocator witness that was used to produce the raw pointer.
+                let alloc = Global;
+
+                // Rebuild ownership from the raw pointer and allocator pair.
+                let _recovered: Box<$ty, Global> = unsafe { Box::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_from_raw_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[$elem], Global>::from_raw_in)]
+            pub fn $name() {
+                // Keep the slice length symbolic so this remains an unbound
+                // unsized harness, while still ruling out impossible layouts.
+                let len: usize = kani::any_where(|len: &usize| box_slice_layout_ok::<$elem>(*len));
+
+                let data: *mut $elem = if len == 0 {
+                    // Empty slices use a non-null dangling data pointer.
+                    NonNull::<$elem>::dangling().as_ptr()
+                } else {
+                    let layout = Layout::array::<$elem>(len).unwrap();
+                    // Allocate raw backing storage for `len` elements with the
+                    // allocator that will later be given to `from_raw_in`.
+                    let ptr = match Global.allocate(layout) {
+                        Ok(memory) => memory.cast::<$elem>().as_ptr(),
+                        Err(_) => handle_alloc_error(layout),
+                    };
+                    unsafe {
+                        // Fill the allocation with unconstrained bytes before
+                        // packaging it as a raw slice pointer.
+                        ptr::write_bytes(
+                            ptr.cast::<u8>(),
+                            kani::any::<u8>(),
+                            mem::size_of::<$elem>() * len,
+                        );
+                    }
+                    ptr
+                };
+
+                // Rebuild the fat pointer expected by `Box<[T]>::from_raw_in`
+                // from the data pointer plus symbolic slice length.
+                let ptr: *mut [$elem] = ptr::slice_from_raw_parts_mut(data, len);
+
+                // Use the same allocator witness that was used to produce the backing storage.
+                let alloc = Global;
+
+                // Rebuild ownership from the raw slice pointer and allocator pair.
+                let _recovered: Box<[$elem], Global> = unsafe { Box::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_i8, i8);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_i16, i16);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_i32, i32);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_i64, i64);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_i128, i128);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_u8, u8);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_u16, u16);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_u32, u32);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_u64, u64);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_u128, u128);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_bool, bool);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_unit, ());
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_array, [u8; 4]);
+
+    gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u8, u8);
+    gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u16, u16);
+    gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u32, u32);
+    gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u64, u64);
+    gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u128, u128);
+
+    macro_rules! gen_from_non_null_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<$ty, Global>::from_non_null_in)]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build the boxed value whose allocation will become the non-null witness.
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+
+                // Consume the box and extract the non-null pointer together with its allocator.
+                let (ptr, alloc): (NonNull<$ty>, Global) = Box::into_non_null_with_allocator(boxed);
+
+                // Rebuild ownership from the non-null pointer and allocator pair.
+                let _recovered: Box<$ty, Global> = unsafe { Box::from_non_null_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_from_non_null_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[$elem], Global>::from_non_null_in)]
+            pub fn $name() {
+                // Build a symbolic boxed slice of the target element type.
+                let boxed: Box<[$elem], Global> =
+                    verifier_nondet_vec_box::<$elem>().into_boxed_slice();
+
+                // Consume the boxed slice and extract the non-null fat pointer together with its allocator.
+                let (ptr, alloc): (NonNull<[$elem]>, Global) =
+                    Box::into_non_null_with_allocator(boxed);
+
+                // Rebuild ownership from the non-null slice pointer and allocator pair.
+                let _recovered: Box<[$elem], Global> = unsafe { Box::from_non_null_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_i8, i8);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_i16, i16);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_i32, i32);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_i64, i64);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_i128, i128);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_u8, u8);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_u16, u16);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_u32, u32);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_u64, u64);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_u128, u128);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_bool, bool);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_unit, ());
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_array, [u8; 4]);
+
+    gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u8, u8);
+    gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u16, u16);
+    gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u32, u32);
+    gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u64, u64);
+    gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u128, u128);
+
+    // === SAFE FUNCTIONS ===
+
+    macro_rules! gen_box_new_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic input value of the target element type.
+                let value: $ty = kani::any();
+
+                // Call the safe constructor with the global allocator.
+                let _boxed: Box<$ty, Global> = Box::<$ty, Global>::new_in(value, Global);
+            }
+        };
+    }
+
+    macro_rules! gen_box_new_in_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector payload for the boxed value.
+                let vec: Vec<$elem> = verifier_nondet_vec::<$elem>();
+
+                // Call the safe constructor with the global allocator.
+                let _boxed: Box<Vec<$elem>, Global> =
+                    Box::<Vec<$elem>, Global>::new_in(vec, Global);
+            }
+        };
+    }
+
+    gen_box_new_in_harness!(harness_box_new_in_i8, i8);
+    gen_box_new_in_harness!(harness_box_new_in_i16, i16);
+    gen_box_new_in_harness!(harness_box_new_in_i32, i32);
+    gen_box_new_in_harness!(harness_box_new_in_i64, i64);
+    gen_box_new_in_harness!(harness_box_new_in_i128, i128);
+    gen_box_new_in_harness!(harness_box_new_in_u8, u8);
+    gen_box_new_in_harness!(harness_box_new_in_u16, u16);
+    gen_box_new_in_harness!(harness_box_new_in_u32, u32);
+    gen_box_new_in_harness!(harness_box_new_in_u64, u64);
+    gen_box_new_in_harness!(harness_box_new_in_u128, u128);
+    gen_box_new_in_harness!(harness_box_new_in_unit, ());
+    gen_box_new_in_harness!(harness_box_new_in_array, [u8; 4]);
+    gen_box_new_in_harness!(harness_box_new_in_bool, bool);
+
+    gen_box_new_in_vec_harness!(harness_box_new_in_vec_u8, u8);
+    gen_box_new_in_vec_harness!(harness_box_new_in_vec_u16, u16);
+    gen_box_new_in_vec_harness!(harness_box_new_in_vec_u32, u32);
+    gen_box_new_in_vec_harness!(harness_box_new_in_vec_u64, u64);
+    gen_box_new_in_vec_harness!(harness_box_new_in_vec_u128, u128);
+
+    macro_rules! gen_box_try_new_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic input value of the target element type.
+                let value: $ty = kani::any();
+
+                // Call the fallible safe constructor with the global allocator.
+                let _result = Box::<$ty, Global>::try_new_in(value, Global);
+            }
+        };
+    }
+
+    macro_rules! gen_box_try_new_in_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector payload for the boxed value.
+                let vec: Vec<$elem> = verifier_nondet_vec::<$elem>();
+
+                // Call the fallible safe constructor with the global allocator.
+                let _result = Box::<Vec<$elem>, Global>::try_new_in(vec, Global);
+            }
+        };
+    }
+
+    gen_box_try_new_in_harness!(harness_box_try_new_in_i8, i8);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_i16, i16);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_i32, i32);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_i64, i64);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_i128, i128);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_u8, u8);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_u16, u16);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_u32, u32);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_u64, u64);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_u128, u128);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_unit, ());
+    gen_box_try_new_in_harness!(harness_box_try_new_in_array, [u8; 4]);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_bool, bool);
+
+    gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u8, u8);
+    gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u16, u16);
+    gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u32, u32);
+    gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u64, u64);
+    gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u128, u128);
+
+    macro_rules! gen_box_try_new_uninit_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Call the fallible uninitialized constructor with the global allocator.
+                let _result = Box::<$ty, Global>::try_new_uninit_in(Global);
+            }
+        };
+    }
+
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_i8, i8);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_i16, i16);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_i32, i32);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_i64, i64);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_i128, i128);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_u8, u8);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_u16, u16);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_u32, u32);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_u64, u64);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_u128, u128);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_unit, ());
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_array, [u8; 4]);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_bool, bool);
+
+    macro_rules! gen_box_try_new_zeroed_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Call the fallible zeroed constructor with the global allocator.
+                let _result = Box::<$ty, Global>::try_new_zeroed_in(Global);
+            }
+        };
+    }
+
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_i8, i8);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_i16, i16);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_i32, i32);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_i64, i64);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_i128, i128);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_u8, u8);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_u16, u16);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_u32, u32);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_u64, u64);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_u128, u128);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_unit, ());
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_array, [u8; 4]);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_bool, bool);
+
+    macro_rules! gen_box_into_boxed_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic input value of the target element type.
+                let value: $ty = kani::any();
+
+                // Build the boxed scalar value that will be reinterpreted as a slice.
+                let boxed: Box<$ty, Global> = Box::<$ty, Global>::new_in(value, Global);
+
+                // Convert the boxed scalar into a boxed single-element slice.
+                let _slice: Box<[$ty], Global> = Box::<$ty, Global>::into_boxed_slice(boxed);
+            }
+        };
+    }
+
+    macro_rules! gen_box_into_boxed_slice_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector payload for the boxed value.
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+
+                // Build the boxed vector value that will be reinterpreted as a slice.
+                let boxed: Box<Vec<$elem>, Global> =
+                    Box::<Vec<$elem>, Global>::new_in(value, Global);
+
+                // Convert the boxed vector into a boxed single-element slice.
+                let _slice: Box<[Vec<$elem>], Global> =
+                    Box::<Vec<$elem>, Global>::into_boxed_slice(boxed);
+            }
+        };
+    }
+
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_i8, i8);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_i16, i16);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_i32, i32);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_i64, i64);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_i128, i128);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_u8, u8);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_u16, u16);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_u32, u32);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_u64, u64);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_u128, u128);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_unit, ());
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_array, [u8; 4]);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_bool, bool);
+
+    gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u8, u8);
+    gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u16, u16);
+    gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u32, u32);
+    gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u64, u64);
+    gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u128, u128);
+
+    macro_rules! gen_box_new_uninit_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic slice length that stays within the box slice layout limits.
+                let len: usize = kani::any_where(|l: &usize| box_slice_layout_ok::<$ty>(*l));
+
+                // Construct an uninitialized boxed slice for that symbolic length.
+                let _boxed: Box<[mem::MaybeUninit<$ty>]> = Box::<[$ty]>::new_uninit_slice(len);
+            }
+        };
+    }
+
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_i8, i8);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_i16, i16);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_i32, i32);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_i64, i64);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_i128, i128);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_u8, u8);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_u16, u16);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_u32, u32);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_u64, u64);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_u128, u128);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_unit, ());
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_bool, bool);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_array, [u8; 4]);
+
+    macro_rules! gen_box_new_zeroed_slice_harness {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic slice length that stays within the box slice layout limits.
+                let len: usize = kani::any_where(|l: &usize| box_slice_layout_ok::<$elem_ty>(*l));
+
+                // Construct a zeroed boxed slice for that symbolic length.
+                let _boxed: Box<[mem::MaybeUninit<$elem_ty>]> =
+                    Box::<[$elem_ty]>::new_zeroed_slice(len);
+            }
+        };
+    }
+
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_i8, i8);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_i16, i16);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_i32, i32);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_i64, i64);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_i128, i128);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_u8, u8);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_u16, u16);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_u32, u32);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_u64, u64);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_u128, u128);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_unit, ());
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_bool, bool);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_array, [u8; 4]);
+
+    macro_rules! gen_box_try_new_uninit_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic slice length for the fallible constructor call.
+                let len: usize = kani::any();
+
+                // Call the fallible uninitialized slice constructor with that length.
+                let _result: Result<Box<[mem::MaybeUninit<$ty>]>, AllocError> =
+                    Box::<[$ty]>::try_new_uninit_slice(len);
+            }
+        };
+    }
+
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_i8, i8);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_i16, i16);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_i32, i32);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_i64, i64);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_i128, i128);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_u8, u8);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_u16, u16);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_u32, u32);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_u64, u64);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_u128, u128);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_unit, ());
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_bool, bool);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_array, [u8; 4]);
+
+    macro_rules! gen_box_try_new_zeroed_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic slice length for the fallible constructor call.
+                let len: usize = kani::any();
+
+                // Call the fallible zeroed slice constructor with that length.
+                let _result: Result<Box<[mem::MaybeUninit<$ty>]>, AllocError> =
+                    Box::<[$ty]>::try_new_zeroed_slice(len);
+            }
+        };
+    }
+
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_i8, i8);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_i16, i16);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_i32, i32);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_i64, i64);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_i128, i128);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_u8, u8);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_u16, u16);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_u32, u32);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_u64, u64);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_u128, u128);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_unit, ());
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_bool, bool);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_array, [u8; 4]);
+
+    // `Box<[T]>::into_array::<N>` branches only on `self.len() == N`.
+    //
+    // The harness builds `self` from a nondeterministic `Vec<T>`, so the slice
+    // length is symbolic. With `N` fixed to 100, Kani explores:
+    // - `vec.len() == 100`: `into_array` calls `Box::into_raw(self)`, casts the
+    //   slice pointer to `*mut [T; 100]`, rebuilds it with `Box::from_raw`, and
+    //   returns `Some(Box<[T; 100]>)`.
+    // - `vec.len() != 100`: the length check fails, so `into_array` returns
+    //   `None` without reinterpreting the slice pointer as an array.
+    macro_rules! gen_box_into_array_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector that determines the slice length at runtime.
+                let vec: Vec<$ty> = verifier_nondet_vec_box::<$ty>();
+
+                // Turn the vector into the boxed slice consumed by `into_array`.
+                let boxed: Box<[$ty]> = vec.into_boxed_slice();
+
+                // Fix the target array length used by the conversion attempt.
+                const N: usize = 100;
+
+                // Attempt the safe conversion from a boxed slice into a boxed array.
+                let _: Option<Box<[$ty; N]>> = boxed.into_array::<N>();
+            }
+        };
+    }
+
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_i8, i8);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_i16, i16);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_i32, i32);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_i64, i64);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_i128, i128);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u8, u8);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u16, u16);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u32, u32);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u64, u64);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u128, u128);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_unit, ());
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_array, [u8; 4]);
+
+    macro_rules! gen_box_new_uninit_slice_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic slice length that stays within the box slice layout limits.
+                let len: usize = kani::any_where(|l: &usize| box_slice_layout_ok::<$ty>(*l));
+
+                // Construct an allocator-aware uninitialized boxed slice with the global allocator.
+                let _boxed: Box<[mem::MaybeUninit<$ty>], Global> =
+                    Box::<[$ty], Global>::new_uninit_slice_in(len, Global);
+            }
+        };
+    }
+
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_i8, i8);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_i16, i16);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_i32, i32);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_i64, i64);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_i128, i128);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_u8, u8);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_u16, u16);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_u32, u32);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_u64, u64);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_u128, u128);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_unit, ());
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_bool, bool);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_array, [u8; 4]);
+
+    macro_rules! gen_box_new_zeroed_slice_in_harness {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Name the element type once so the layout helper and the target call stay aligned.
+                type T = $elem_ty;
+
+                // Create a symbolic slice length that stays within the box slice layout limits.
+                let len: usize = kani::any_where(|l: &usize| box_slice_layout_ok::<T>(*l));
+
+                // Construct an allocator-aware zeroed boxed slice with the global allocator.
+                let _boxed: Box<[mem::MaybeUninit<T>], Global> =
+                    Box::<[T], Global>::new_zeroed_slice_in(len, Global);
+            }
+        };
+    }
+
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_i8, i8);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_i16, i16);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_i32, i32);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_i64, i64);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_i128, i128);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_u8, u8);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_u16, u16);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_u32, u32);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_u64, u64);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_u128, u128);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_unit, ());
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_bool, bool);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_array, [u8; 4]);
+
+    macro_rules! gen_box_try_new_uninit_slice_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic slice length for the target call.
+                let len: usize = kani::any();
+
+                // Call the allocator-aware fallible uninitialized slice constructor.
+                let _result: Result<Box<[mem::MaybeUninit<$ty>], Global>, AllocError> =
+                    Box::<[$ty], Global>::try_new_uninit_slice_in(len, Global);
+            }
+        };
+    }
+
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_i8, i8);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_i16, i16);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_i32, i32);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_i64, i64);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_i128, i128);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_u8, u8);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_u16, u16);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_u32, u32);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_u64, u64);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_u128, u128);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_unit, ());
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_bool, bool);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_array, [u8; 4]);
+
+    macro_rules! gen_box_try_new_zeroed_slice_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic slice length for the target call.
+                let len: usize = kani::any();
+
+                // Call the safe constructor with the global allocator and keep
+                // the result typed as the exact return shape of the function.
+                let _result: Result<Box<[mem::MaybeUninit<$ty>], Global>, AllocError> =
+                    Box::<[$ty], Global>::try_new_zeroed_slice_in(len, Global);
+            }
+        };
+    }
+
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_i8, i8);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_i16, i16);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_i32, i32);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_i64, i64);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_i128, i128);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_u8, u8);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_u16, u16);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_u32, u32);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_u64, u64);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_u128, u128);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_unit, ());
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_bool, bool);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_array, [u8; 4]);
+
+    macro_rules! gen_box_write_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic initialized value of the target type.
+                let value: $ty = kani::any();
+
+                // Allocate boxed storage for an uninitialized value of the same type.
+                let boxed: Box<mem::MaybeUninit<$ty>, Global> =
+                    Box::<$ty, Global>::new_uninit_in(Global);
+
+                // Write the initialized value into the boxed `MaybeUninit` slot.
+                let _written: Box<$ty, Global> = Box::write(boxed, value);
+            }
+        };
+    }
+
+    macro_rules! gen_box_write_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector payload that owns heap-backed contents.
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+
+                // Allocate boxed storage for an uninitialized vector value.
+                let boxed: Box<mem::MaybeUninit<Vec<$elem>>, Global> =
+                    Box::<Vec<$elem>, Global>::new_uninit_in(Global);
+
+                // Write the initialized vector into the boxed `MaybeUninit` slot.
+                let _written: Box<Vec<$elem>, Global> = Box::write(boxed, value);
+            }
+        };
+    }
+
+    gen_box_write_harness!(harness_box_write_i8, i8);
+    gen_box_write_harness!(harness_box_write_i16, i16);
+    gen_box_write_harness!(harness_box_write_i32, i32);
+    gen_box_write_harness!(harness_box_write_i64, i64);
+    gen_box_write_harness!(harness_box_write_i128, i128);
+    gen_box_write_harness!(harness_box_write_u8, u8);
+    gen_box_write_harness!(harness_box_write_u16, u16);
+    gen_box_write_harness!(harness_box_write_u32, u32);
+    gen_box_write_harness!(harness_box_write_u64, u64);
+    gen_box_write_harness!(harness_box_write_u128, u128);
+    gen_box_write_harness!(harness_box_write_unit, ());
+    gen_box_write_harness!(harness_box_write_bool, bool);
+    gen_box_write_harness!(harness_box_write_array, [u8; 4]);
+
+    gen_box_write_vec_harness!(harness_box_write_vec_u8, u8);
+    gen_box_write_vec_harness!(harness_box_write_vec_u16, u16);
+    gen_box_write_vec_harness!(harness_box_write_vec_u32, u32);
+    gen_box_write_vec_harness!(harness_box_write_vec_u64, u64);
+    gen_box_write_vec_harness!(harness_box_write_vec_u128, u128);
+
+    macro_rules! gen_box_into_non_null_sized_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic concrete value that can be coerced into `dyn Any`.
+                let value: i32 = kani::any();
+
+                // Build the concrete boxed value that will be erased behind the trait object.
+                let boxed_i32: Box<i32> = Box::new(value);
+
+                // Erase the concrete type behind a boxed `dyn Any`.
+                let boxed: Box<dyn Any> = boxed_i32;
+
+                // Consume the box and extract the non-null trait-object pointer.
+                let ptr: NonNull<dyn Any> = Box::<dyn Any>::into_non_null(boxed);
+
+                // Rebuild ownership from the non-null trait-object pointer.
+                let _recovered: Box<dyn Any> = unsafe { Box::<dyn Any>::from_non_null(ptr) };
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build the boxed value whose allocation will become the non-null witness.
+                let boxed: Box<$ty> = Box::new(value);
+
+                // Consume the box and extract the non-null pointer.
+                let ptr: NonNull<$ty> = Box::<$ty>::into_non_null(boxed);
+
+                // Rebuild ownership from the non-null pointer.
+                let _recovered: Box<$ty> = unsafe { Box::<$ty>::from_non_null(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_box_into_non_null_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector whose length determines the boxed slice metadata.
+                let vec: Vec<$elem> = verifier_nondet_vec_box::<$elem>();
+
+                // Convert the vector into the boxed slice consumed by `into_non_null`.
+                let boxed: Box<[$elem]> = vec.into_boxed_slice();
+
+                // Consume the boxed slice and extract the non-null fat pointer.
+                let ptr: NonNull<[$elem]> = Box::<[$elem]>::into_non_null(boxed);
+
+                // Rebuild ownership from the non-null slice pointer.
+                let _recovered: Box<[$elem]> = unsafe { Box::<[$elem]>::from_non_null(ptr) };
+            }
+        };
+    }
+
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_i8, i8);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_i16, i16);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_i32, i32);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_i64, i64);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_i128, i128);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_u8, u8);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_u16, u16);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_u32, u32);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_u64, u64);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_u128, u128);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_unit, ());
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_bool, bool);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_array, [u8; 4]);
+    gen_box_into_non_null_sized_harness!(harness_box_into_non_null_dyn_any, dyn Any);
+
+    gen_box_into_non_null_unsized_harness!(harness_box_into_non_null_vec_u8, u8);
+    gen_box_into_non_null_unsized_harness!(harness_box_into_non_null_vec_u16, u16);
+    gen_box_into_non_null_unsized_harness!(harness_box_into_non_null_vec_u32, u32);
+    gen_box_into_non_null_unsized_harness!(harness_box_into_non_null_vec_u64, u64);
+    gen_box_into_non_null_unsized_harness!(harness_box_into_non_null_vec_u128, u128);
+
+    macro_rules! gen_box_into_raw_with_allocator_sized_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic concrete value that can be coerced into `dyn Any`.
+                let value: i32 = kani::any();
+
+                // Build the concrete boxed value that will be erased behind the trait object.
+                let boxed_i32: Box<i32, Global> = Box::new_in(value, Global);
+
+                // Erase the concrete type behind a boxed `dyn Any`.
+                let boxed: Box<dyn Any, Global> = boxed_i32;
+
+                // Consume the box and extract the raw trait-object pointer together with its allocator.
+                let (ptr, alloc): (*mut dyn Any, Global) =
+                    Box::<dyn Any, Global>::into_raw_with_allocator(boxed);
+
+                // Rebuild ownership from the raw pointer and allocator pair.
+                let _recovered: Box<dyn Any, Global> =
+                    unsafe { Box::<dyn Any, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build the boxed value whose allocation will become the raw-pointer witness.
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+
+                // Consume the box and extract the raw pointer together with its allocator.
+                let (ptr, alloc): (*mut $ty, Global) =
+                    Box::<$ty, Global>::into_raw_with_allocator(boxed);
+
+                // Rebuild ownership from the raw pointer and allocator pair.
+                let _recovered: Box<$ty, Global> =
+                    unsafe { Box::<$ty, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_box_into_raw_with_allocator_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector whose length determines the boxed slice metadata.
+                let vec: Vec<$elem> = verifier_nondet_vec_box::<$elem>();
+
+                // Convert the vector into the boxed slice consumed by `into_raw_with_allocator`.
+                let boxed: Box<[$elem], Global> = vec.into_boxed_slice();
+
+                // Consume the boxed slice and extract the raw fat pointer together with its allocator.
+                let (ptr, alloc): (*mut [$elem], Global) =
+                    Box::<[$elem], Global>::into_raw_with_allocator(boxed);
+
+                // Rebuild ownership from the raw slice pointer and allocator pair.
+                let _recovered: Box<[$elem], Global> =
+                    unsafe { Box::<[$elem], Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_i8, i8);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_i16, i16);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_i32, i32);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_i64, i64);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_i128, i128);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_u8, u8);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_u16, u16);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_u32, u32);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_u64, u64);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_u128, u128);
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_unit, ());
+    gen_box_into_raw_with_allocator_sized_harness!(harness_box_into_raw_with_allocator_bool, bool);
+    gen_box_into_raw_with_allocator_sized_harness!(
+        harness_box_into_raw_with_allocator_array,
+        [u8; 4]
+    );
+    gen_box_into_raw_with_allocator_sized_harness!(
+        harness_box_into_raw_with_allocator_dyn_any,
+        dyn Any
+    );
+
+    gen_box_into_raw_with_allocator_unsized_harness!(
+        harness_box_into_raw_with_allocator_vec_u8,
+        u8
+    );
+    gen_box_into_raw_with_allocator_unsized_harness!(
+        harness_box_into_raw_with_allocator_vec_u16,
+        u16
+    );
+    gen_box_into_raw_with_allocator_unsized_harness!(
+        harness_box_into_raw_with_allocator_vec_u32,
+        u32
+    );
+    gen_box_into_raw_with_allocator_unsized_harness!(
+        harness_box_into_raw_with_allocator_vec_u64,
+        u64
+    );
+    gen_box_into_raw_with_allocator_unsized_harness!(
+        harness_box_into_raw_with_allocator_vec_u128,
+        u128
+    );
+
+    macro_rules! gen_box_into_non_null_with_allocator_sized_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic concrete value that can be coerced into `dyn Any`.
+                let value: i32 = kani::any();
+
+                // Build the concrete boxed value that will be erased behind the trait object.
+                let boxed_i32: Box<i32, Global> = Box::new_in(value, Global);
+
+                // Erase the concrete type behind a boxed `dyn Any`.
+                let boxed: Box<dyn Any, Global> = boxed_i32;
+
+                // Consume the box and extract the non-null trait-object pointer together with its allocator.
+                let (ptr, alloc): (NonNull<dyn Any>, Global) =
+                    Box::<dyn Any, Global>::into_non_null_with_allocator(boxed);
+
+                // Rebuild ownership from the non-null pointer and allocator pair.
+                let _recovered: Box<dyn Any, Global> =
+                    unsafe { Box::<dyn Any, Global>::from_non_null_in(ptr, alloc) };
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build the boxed value whose allocation will become the non-null witness.
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+
+                // Consume the box and extract the non-null pointer together with its allocator.
+                let (ptr, alloc): (NonNull<$ty>, Global) =
+                    Box::<$ty, Global>::into_non_null_with_allocator(boxed);
+
+                // Rebuild ownership from the non-null pointer and allocator pair.
+                let _recovered: Box<$ty, Global> =
+                    unsafe { Box::<$ty, Global>::from_non_null_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_box_into_non_null_with_allocator_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector whose length determines the boxed slice metadata.
+                let vec: Vec<$elem> = verifier_nondet_vec_box::<$elem>();
+
+                // Convert the vector into the boxed slice consumed by `into_non_null_with_allocator`.
+                let boxed: Box<[$elem], Global> = vec.into_boxed_slice();
+
+                // Consume the boxed slice and extract the non-null fat pointer together with its allocator.
+                let (ptr, alloc): (NonNull<[$elem]>, Global) =
+                    Box::<[$elem], Global>::into_non_null_with_allocator(boxed);
+
+                // Rebuild ownership from the non-null slice pointer and allocator pair.
+                let _recovered: Box<[$elem], Global> =
+                    unsafe { Box::<[$elem], Global>::from_non_null_in(ptr, alloc) };
+            }
+        };
+    }
+
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_i8,
+        i8
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_i16,
+        i16
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_i32,
+        i32
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_i64,
+        i64
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_i128,
+        i128
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_u8,
+        u8
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_u16,
+        u16
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_u32,
+        u32
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_u64,
+        u64
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_u128,
+        u128
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_unit,
+        ()
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_bool,
+        bool
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_array,
+        [u8; 4]
+    );
+    gen_box_into_non_null_with_allocator_sized_harness!(
+        harness_box_into_non_null_with_allocator_dyn_any,
+        dyn Any
+    );
+
+    gen_box_into_non_null_with_allocator_unsized_harness!(
+        harness_box_into_non_null_with_allocator_vec_u8,
+        u8
+    );
+    gen_box_into_non_null_with_allocator_unsized_harness!(
+        harness_box_into_non_null_with_allocator_vec_u16,
+        u16
+    );
+    gen_box_into_non_null_with_allocator_unsized_harness!(
+        harness_box_into_non_null_with_allocator_vec_u32,
+        u32
+    );
+    gen_box_into_non_null_with_allocator_unsized_harness!(
+        harness_box_into_non_null_with_allocator_vec_u64,
+        u64
+    );
+    gen_box_into_non_null_with_allocator_unsized_harness!(
+        harness_box_into_non_null_with_allocator_vec_u128,
+        u128
+    );
+
+    macro_rules! gen_box_into_unique_sized_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic concrete value that can be coerced into `dyn Any`.
+                let value: i32 = kani::any();
+
+                // Build the concrete boxed value that will be erased behind the trait object.
+                let boxed_i32: Box<i32, Global> = Box::new_in(value, Global);
+
+                // Erase the concrete type behind a boxed `dyn Any`.
+                let boxed: Box<dyn Any, Global> = boxed_i32;
+
+                // Consume the box and extract the unique pointer together with its allocator.
+                let (ptr, alloc): (Unique<dyn Any>, Global) =
+                    Box::<dyn Any, Global>::into_unique(boxed);
+
+                // Recover the raw pointer from the unique wrapper.
+                let raw: *mut dyn Any = ptr.as_ptr();
+
+                // Rebuild ownership from the raw pointer and allocator pair.
+                let _recovered: Box<dyn Any, Global> =
+                    unsafe { Box::<dyn Any, Global>::from_raw_in(raw, alloc) };
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build the boxed value whose allocation will become the unique-pointer witness.
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+
+                // Consume the box and extract the unique pointer together with its allocator.
+                let (ptr, alloc): (Unique<$ty>, Global) = Box::<$ty, Global>::into_unique(boxed);
+
+                // Recover the raw pointer from the unique wrapper.
+                let raw: *mut $ty = ptr.as_ptr();
+
+                // Rebuild ownership from the raw pointer and allocator pair.
+                let _recovered: Box<$ty, Global> =
+                    unsafe { Box::<$ty, Global>::from_raw_in(raw, alloc) };
+            }
+        };
+    }
+
+    macro_rules! gen_box_into_unique_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector whose length determines the boxed slice metadata.
+                let vec: Vec<$elem> = verifier_nondet_vec_box::<$elem>();
+
+                // Convert the vector into the boxed slice consumed by `into_unique`.
+                let boxed: Box<[$elem], Global> = vec.into_boxed_slice();
+
+                // Consume the boxed slice and extract the unique fat pointer together with its allocator.
+                let (ptr, alloc): (Unique<[$elem]>, Global) =
+                    Box::<[$elem], Global>::into_unique(boxed);
+
+                // Recover the raw slice pointer from the unique wrapper.
+                let raw: *mut [$elem] = ptr.as_ptr();
+
+                // Rebuild ownership from the raw slice pointer and allocator pair.
+                let _recovered: Box<[$elem], Global> =
+                    unsafe { Box::<[$elem], Global>::from_raw_in(raw, alloc) };
+            }
+        };
+    }
+
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_i8, i8);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_i16, i16);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_i32, i32);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_i64, i64);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_i128, i128);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_u8, u8);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_u16, u16);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_u32, u32);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_u64, u64);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_u128, u128);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_unit, ());
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_bool, bool);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_array, [u8; 4]);
+    gen_box_into_unique_sized_harness!(harness_box_into_unique_dyn_any, dyn Any);
+
+    gen_box_into_unique_unsized_harness!(harness_box_into_unique_vec_u8, u8);
+    gen_box_into_unique_unsized_harness!(harness_box_into_unique_vec_u16, u16);
+    gen_box_into_unique_unsized_harness!(harness_box_into_unique_vec_u32, u32);
+    gen_box_into_unique_unsized_harness!(harness_box_into_unique_vec_u64, u64);
+    gen_box_into_unique_unsized_harness!(harness_box_into_unique_vec_u128, u128);
+
+    macro_rules! gen_box_leak_sized_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic concrete value that can be coerced into `dyn Any`.
+                let value: i32 = kani::any();
+
+                // Build the concrete boxed value that will be erased behind the trait object.
+                let boxed_i32: Box<i32> = Box::new(value);
+
+                // Erase the concrete type behind a boxed `dyn Any`.
+                let boxed: Box<dyn Any> = boxed_i32;
+
+                // Leak the box and obtain a mutable trait-object reference to its contents.
+                let leaked: &mut dyn Any = Box::<dyn Any>::leak(boxed);
+
+                // Recover the raw trait-object pointer from the leaked reference.
+                let ptr: *mut dyn Any = leaked;
+
+                // Rebuild the box so the harness itself does not leave a permanent leak behind.
+                let _recovered: Box<dyn Any> = unsafe { Box::<dyn Any>::from_raw(ptr) };
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build the boxed value that will be consumed by `leak`.
+                let boxed: Box<$ty> = Box::new(value);
+
+                // Leak the box and obtain a mutable reference to its contents.
+                let leaked: &mut $ty = Box::<$ty>::leak(boxed);
+
+                // Recover the raw pointer from the leaked mutable reference.
+                let ptr: *mut $ty = leaked;
+
+                // Rebuild the box so the harness itself does not leave a permanent leak behind.
+                let _recovered: Box<$ty> = unsafe { Box::<$ty>::from_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_box_leak_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector whose length determines the boxed slice metadata.
+                let vec: Vec<$elem> = verifier_nondet_vec_box::<$elem>();
+
+                // Convert the vector into the boxed slice consumed by `leak`.
+                let boxed: Box<[$elem]> = vec.into_boxed_slice();
+
+                // Leak the box and obtain a mutable slice reference to its contents.
+                let leaked: &mut [$elem] = Box::<[$elem]>::leak(boxed);
+
+                // Recover the raw slice pointer from the leaked mutable reference.
+                let ptr: *mut [$elem] = leaked;
+
+                // Rebuild the box so the harness itself does not leave a permanent leak behind.
+                let _recovered: Box<[$elem]> = unsafe { Box::<[$elem]>::from_raw(ptr) };
+            }
+        };
+    }
+
+    gen_box_leak_sized_harness!(harness_box_leak_i8, i8);
+    gen_box_leak_sized_harness!(harness_box_leak_i16, i16);
+    gen_box_leak_sized_harness!(harness_box_leak_i32, i32);
+    gen_box_leak_sized_harness!(harness_box_leak_i64, i64);
+    gen_box_leak_sized_harness!(harness_box_leak_i128, i128);
+    gen_box_leak_sized_harness!(harness_box_leak_u8, u8);
+    gen_box_leak_sized_harness!(harness_box_leak_u16, u16);
+    gen_box_leak_sized_harness!(harness_box_leak_u32, u32);
+    gen_box_leak_sized_harness!(harness_box_leak_u64, u64);
+    gen_box_leak_sized_harness!(harness_box_leak_u128, u128);
+    gen_box_leak_sized_harness!(harness_box_leak_unit, ());
+    gen_box_leak_sized_harness!(harness_box_leak_bool, bool);
+    gen_box_leak_sized_harness!(harness_box_leak_array, [u8; 4]);
+    gen_box_leak_sized_harness!(harness_box_leak_dyn_any, dyn Any);
+
+    gen_box_leak_unsized_harness!(harness_box_leak_vec_u8, u8);
+    gen_box_leak_unsized_harness!(harness_box_leak_vec_u16, u16);
+    gen_box_leak_unsized_harness!(harness_box_leak_vec_u32, u32);
+    gen_box_leak_unsized_harness!(harness_box_leak_vec_u64, u64);
+    gen_box_leak_unsized_harness!(harness_box_leak_vec_u128, u128);
+
+    struct NotUnpinSentinel(u8, PhantomPinned);
+
+    macro_rules! gen_box_into_pin_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic concrete value that can be coerced into `dyn Any`.
+                let value: i32 = kani::any();
+
+                // Build the concrete boxed value that will be erased behind the trait object.
+                let boxed_i32: Box<i32, Global> = Box::new_in(value, Global);
+
+                // Erase the concrete type behind a boxed `dyn Any`.
+                let boxed: Box<dyn Any, Global> = boxed_i32;
+
+                // Convert the box into a pinned box without moving its contents.
+                let _pinned: Pin<Box<dyn Any, Global>> = Box::<dyn Any, Global>::into_pin(boxed);
+            }
+        };
+        ($name:ident, NotUnpinSentinel) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic `!Unpin` value to exercise the safety note in `into_pin`.
+                let value = NotUnpinSentinel(kani::any(), PhantomPinned);
+
+                // Build the boxed value that will be pinned in place.
+                let boxed: Box<NotUnpinSentinel, Global> = Box::new_in(value, Global);
+
+                // Convert the box into a pinned box without moving its contents.
+                let _pinned: Pin<Box<NotUnpinSentinel, Global>> =
+                    Box::<NotUnpinSentinel, Global>::into_pin(boxed);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build the boxed value that will be pinned in place.
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+
+                // Convert the box into a pinned box without moving its contents.
+                let _pinned: Pin<Box<$ty, Global>> = Box::<$ty, Global>::into_pin(boxed);
+            }
+        };
+    }
+
+    macro_rules! gen_box_into_pin_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector whose length determines the boxed slice metadata.
+                let vec: Vec<$elem> = verifier_nondet_vec_box::<$elem>();
+
+                // Convert the vector into the boxed slice consumed by `into_pin`.
+                let boxed: Box<[$elem], Global> = vec.into_boxed_slice();
+
+                // Convert the box into a pinned box without moving its contents.
+                let _pinned: Pin<Box<[$elem], Global>> = Box::<[$elem], Global>::into_pin(boxed);
+            }
+        };
+    }
+
+    gen_box_into_pin_harness!(harness_box_into_pin_i8, i8);
+    gen_box_into_pin_harness!(harness_box_into_pin_i16, i16);
+    gen_box_into_pin_harness!(harness_box_into_pin_i32, i32);
+    gen_box_into_pin_harness!(harness_box_into_pin_i64, i64);
+    gen_box_into_pin_harness!(harness_box_into_pin_i128, i128);
+    gen_box_into_pin_harness!(harness_box_into_pin_u8, u8);
+    gen_box_into_pin_harness!(harness_box_into_pin_u16, u16);
+    gen_box_into_pin_harness!(harness_box_into_pin_u32, u32);
+    gen_box_into_pin_harness!(harness_box_into_pin_u64, u64);
+    gen_box_into_pin_harness!(harness_box_into_pin_u128, u128);
+    gen_box_into_pin_harness!(harness_box_into_pin_unit, ());
+    gen_box_into_pin_harness!(harness_box_into_pin_bool, bool);
+    gen_box_into_pin_harness!(harness_box_into_pin_array, [u8; 4]);
+    gen_box_into_pin_harness!(harness_box_into_pin_dyn_any, dyn Any);
+    gen_box_into_pin_harness!(harness_box_into_pin_not_unpin, NotUnpinSentinel);
+
+    gen_box_into_pin_unsized_harness!(harness_box_into_pin_vec_u8, u8);
+    gen_box_into_pin_unsized_harness!(harness_box_into_pin_vec_u16, u16);
+    gen_box_into_pin_unsized_harness!(harness_box_into_pin_vec_u32, u32);
+    gen_box_into_pin_unsized_harness!(harness_box_into_pin_vec_u64, u64);
+    gen_box_into_pin_unsized_harness!(harness_box_into_pin_vec_u128, u128);
+
+    // `Drop for Box<T, A>` has one explicit control-flow split:
+    // - `layout.size() != 0`: after the compiler has already dropped `T`, the
+    //   destructor computes the layout of the pointee and calls
+    //   `self.1.deallocate(...)`.
+    // - `layout.size() == 0`: the destructor skips deallocation entirely.
+    //
+    // The harnesses cover that branch in three representative families:
+    // - sized values: `()` covers the zero-sized path, while the other scalar
+    //   types cover the deallocation path;
+    // - trait objects: `dyn Any` exercises the `T: ?Sized` object case;
+    // - slices: `[$elem]` exercises the `T: ?Sized` slice case, and `[$elem]`
+    //   with `$elem = ()` covers a zero-sized unsized pointee.
+    //
+    // Each harness simply constructs a `Box` and then calls `drop(boxed)`,
+    // which is the actual safe surface that triggers `<Box<T, A> as Drop>::drop`.
+    macro_rules! gen_box_drop_harness {
+        ($name:ident, dyn Any) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic concrete value that can be coerced into `dyn Any`.
+                let value: i32 = kani::any();
+
+                // Build the concrete boxed value that will be erased behind the trait object.
+                let boxed_i32: Box<i32, Global> = Box::new_in(value, Global);
+
+                // Erase the concrete type behind a boxed `dyn Any`.
+                let boxed: Box<dyn Any, Global> = boxed_i32;
+
+                // Trigger `<Box<dyn Any, Global> as Drop>::drop` through the safe surface.
+                drop(boxed);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic value of the target type.
+                let value: $ty = kani::any();
+
+                // Build the boxed value whose destructor will be exercised.
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+
+                // Trigger `<Box<$ty, Global> as Drop>::drop` through the safe surface.
+                drop(boxed);
+            }
+        };
+    }
+
+    macro_rules! gen_box_drop_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector whose length determines the boxed slice metadata.
+                let vec: Vec<$elem> = verifier_nondet_vec_box::<$elem>();
+
+                // Convert the vector into the boxed slice whose destructor will be exercised.
+                let boxed: Box<[$elem], Global> = vec.into_boxed_slice();
+
+                // Trigger `<Box<[$elem], Global> as Drop>::drop` through the safe surface.
+                drop(boxed);
+            }
+        };
+    }
+
+    gen_box_drop_harness!(harness_box_drop_i8, i8);
+    gen_box_drop_harness!(harness_box_drop_i16, i16);
+    gen_box_drop_harness!(harness_box_drop_i32, i32);
+    gen_box_drop_harness!(harness_box_drop_i64, i64);
+    gen_box_drop_harness!(harness_box_drop_i128, i128);
+    gen_box_drop_harness!(harness_box_drop_u8, u8);
+    gen_box_drop_harness!(harness_box_drop_u16, u16);
+    gen_box_drop_harness!(harness_box_drop_u32, u32);
+    gen_box_drop_harness!(harness_box_drop_u64, u64);
+    gen_box_drop_harness!(harness_box_drop_u128, u128);
+    gen_box_drop_harness!(harness_box_drop_unit, ());
+    gen_box_drop_harness!(harness_box_drop_bool, bool);
+    gen_box_drop_harness!(harness_box_drop_array, [u8; 4]);
+    gen_box_drop_harness!(harness_box_drop_dyn_any, dyn Any);
+
+    gen_box_drop_unsized_harness!(harness_box_drop_vec_u8, u8);
+    gen_box_drop_unsized_harness!(harness_box_drop_vec_u16, u16);
+    gen_box_drop_unsized_harness!(harness_box_drop_vec_u32, u32);
+    gen_box_drop_unsized_harness!(harness_box_drop_vec_u64, u64);
+    gen_box_drop_unsized_harness!(harness_box_drop_vec_u128, u128);
+    gen_box_drop_unsized_harness!(harness_box_drop_vec_unit, ());
+
+    macro_rules! gen_box_default_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Construct a boxed value through the `Default for Box<T>` implementation.
+                let _boxed: Box<$ty> = Box::<$ty>::default();
+            }
+        };
+    }
+
+    gen_box_default_harness!(harness_box_default_i8, i8);
+    gen_box_default_harness!(harness_box_default_i16, i16);
+    gen_box_default_harness!(harness_box_default_i32, i32);
+    gen_box_default_harness!(harness_box_default_i64, i64);
+    gen_box_default_harness!(harness_box_default_i128, i128);
+    gen_box_default_harness!(harness_box_default_u8, u8);
+    gen_box_default_harness!(harness_box_default_u16, u16);
+    gen_box_default_harness!(harness_box_default_u32, u32);
+    gen_box_default_harness!(harness_box_default_u64, u64);
+    gen_box_default_harness!(harness_box_default_u128, u128);
+    gen_box_default_harness!(harness_box_default_unit, ());
+    gen_box_default_harness!(harness_box_default_array, [u8; 4]);
+    gen_box_default_harness!(harness_box_default_bool, bool);
+    gen_box_default_harness!(harness_box_default_vec_u8, Vec<u8>);
+    gen_box_default_harness!(harness_box_default_vec_u16, Vec<u16>);
+    gen_box_default_harness!(harness_box_default_vec_u32, Vec<u32>);
+    gen_box_default_harness!(harness_box_default_vec_u64, Vec<u64>);
+    gen_box_default_harness!(harness_box_default_vec_u128, Vec<u128>);
+
+    macro_rules! gen_box_str_default_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Construct the boxed string through the dedicated `Default for Box<str>` implementation.
+                let _boxed: Box<$ty> = Box::<$ty>::default();
+            }
+        };
+    }
+
+    gen_box_str_default_harness!(harness_box_default_str, str);
+
+    macro_rules! gen_box_clone_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic value of the target cloneable type.
+                let value: $ty = kani::any();
+
+                // Build the original boxed value whose clone path will be exercised.
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+
+                // Clone the box through `<Box<T, A> as Clone>::clone`.
+                let _clone: Box<$ty, Global> = Clone::clone(&boxed);
+            }
+        };
+    }
+
+    macro_rules! gen_box_clone_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector payload whose own `Clone` implementation will be exercised.
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+
+                // Build the original boxed vector whose clone path will be exercised.
+                let boxed: Box<Vec<$elem>, Global> = Box::new_in(value, Global);
+
+                // Clone the box through `<Box<T, A> as Clone>::clone`.
+                let _clone: Box<Vec<$elem>, Global> = Clone::clone(&boxed);
+            }
+        };
+    }
+
+    gen_box_clone_harness!(harness_box_clone_i8, i8);
+    gen_box_clone_harness!(harness_box_clone_i16, i16);
+    gen_box_clone_harness!(harness_box_clone_i32, i32);
+    gen_box_clone_harness!(harness_box_clone_i64, i64);
+    gen_box_clone_harness!(harness_box_clone_i128, i128);
+    gen_box_clone_harness!(harness_box_clone_u8, u8);
+    gen_box_clone_harness!(harness_box_clone_u16, u16);
+    gen_box_clone_harness!(harness_box_clone_u32, u32);
+    gen_box_clone_harness!(harness_box_clone_u64, u64);
+    gen_box_clone_harness!(harness_box_clone_u128, u128);
+    gen_box_clone_harness!(harness_box_clone_unit, ());
+    gen_box_clone_harness!(harness_box_clone_array, [u8; 4]);
+    gen_box_clone_harness!(harness_box_clone_bool, bool);
+
+    gen_box_clone_vec_harness!(harness_box_clone_vec_u8, u8);
+    gen_box_clone_vec_harness!(harness_box_clone_vec_u16, u16);
+    gen_box_clone_vec_harness!(harness_box_clone_vec_u32, u32);
+    gen_box_clone_vec_harness!(harness_box_clone_vec_u64, u64);
+    gen_box_clone_vec_harness!(harness_box_clone_vec_u128, u128);
+
+    macro_rules! gen_box_str_clone_harness {
+        ($name:ident, $value:expr) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Build the original boxed string whose clone path will be exercised.
+                let boxed: Box<str> = Box::<str>::from($value);
+
+                // Clone the boxed string through `<Box<str> as Clone>::clone`.
+                let _clone: Box<str> = Clone::clone(&boxed);
+            }
+        };
+    }
+
+    gen_box_str_clone_harness!(harness_box_clone_str_empty, "");
+    gen_box_str_clone_harness!(harness_box_clone_str_nonempty, "test");
 }
