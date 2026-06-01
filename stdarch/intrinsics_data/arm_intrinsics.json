@@ -51174,6 +51174,12 @@
       "svfloat16x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svfloat16_t"
     },
@@ -51188,6 +51194,12 @@
       "svfloat32x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svfloat32_t"
     },
@@ -51202,6 +51214,12 @@
       "svfloat64x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svfloat64_t"
     },
@@ -51216,6 +51234,12 @@
       "svint16x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svint16_t"
     },
@@ -51230,6 +51254,12 @@
       "svint32x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svint32_t"
     },
@@ -51244,6 +51274,12 @@
       "svint64x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svint64_t"
     },
@@ -51258,6 +51294,12 @@
       "svint8x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svint8_t"
     },
@@ -51272,6 +51314,12 @@
       "svuint16x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svuint16_t"
     },
@@ -51286,6 +51334,12 @@
       "svuint32x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svuint32_t"
     },
@@ -51300,6 +51354,12 @@
       "svuint64x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svuint64_t"
     },
@@ -51314,6 +51374,12 @@
       "svuint8x2_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "return_type": {
       "value": "svuint8_t"
     },
@@ -51328,6 +51394,12 @@
       "svfloat16x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svfloat16_t"
     },
@@ -51342,6 +51414,12 @@
       "svfloat32x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svfloat32_t"
     },
@@ -51356,6 +51434,12 @@
       "svfloat64x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svfloat64_t"
     },
@@ -51370,6 +51454,12 @@
       "svint16x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svint16_t"
     },
@@ -51384,6 +51474,12 @@
       "svint32x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svint32_t"
     },
@@ -51398,6 +51494,12 @@
       "svint64x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svint64_t"
     },
@@ -51412,6 +51514,12 @@
       "svint8x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svint8_t"
     },
@@ -51426,6 +51534,12 @@
       "svuint16x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svuint16_t"
     },
@@ -51440,6 +51554,12 @@
       "svuint32x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svuint32_t"
     },
@@ -51454,6 +51574,12 @@
       "svuint64x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svuint64_t"
     },
@@ -51468,6 +51594,12 @@
       "svuint8x3_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 2
+      }
+    },
     "return_type": {
       "value": "svuint8_t"
     },
@@ -51482,6 +51614,12 @@
       "svfloat16x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svfloat16_t"
     },
@@ -51496,6 +51634,12 @@
       "svfloat32x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svfloat32_t"
     },
@@ -51510,6 +51654,12 @@
       "svfloat64x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svfloat64_t"
     },
@@ -51524,6 +51674,12 @@
       "svint16x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svint16_t"
     },
@@ -51538,6 +51694,12 @@
       "svint32x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svint32_t"
     },
@@ -51552,6 +51714,12 @@
       "svint64x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svint64_t"
     },
@@ -51566,6 +51734,12 @@
       "svint8x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svint8_t"
     },
@@ -51580,6 +51754,12 @@
       "svuint16x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svuint16_t"
     },
@@ -51594,6 +51774,12 @@
       "svuint32x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svuint32_t"
     },
@@ -51608,6 +51794,12 @@
       "svuint64x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svuint64_t"
     },
@@ -51622,6 +51814,12 @@
       "svuint8x4_t tuple",
       "uint64_t imm_index"
     ],
+    "Arguments_Preparation": {
+      "imm_index": {
+        "minimum": 0,
+        "maximum": 3
+      }
+    },
     "return_type": {
       "value": "svuint8_t"
     },
