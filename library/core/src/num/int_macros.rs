@@ -1736,7 +1736,10 @@ macro_rules! int_impl {
             let mut base = self;
             let mut acc: Self = 1;
 
-            #[safety::loop_invariant(true)]
+            // `self == 0` covers the primitive's own harness (e.g. `0.checked_pow(n)`, where
+            // `acc` can reach 0); in the NonZero call path `self` is never 0, so it is dead
+            // but harmless there. The right disjunct (`acc != 0 && base != 0`) is the inductive core.
+            #[safety::loop_invariant(self == 0 || (acc != 0 && base != 0))]
             loop {
                 if (exp & 1) == 1 {
                     acc = try_opt!(acc.checked_mul(base));

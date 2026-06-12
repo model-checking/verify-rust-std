@@ -797,6 +797,7 @@ macro_rules! nonzero_integer {
                         without modifying the original"]
             #[inline(always)]
             #[ensures(|result| result.get() > 0)]
+            #[ensures(|result| result.get() == old(self).get().count_ones())]
             pub const fn count_ones(self) -> NonZero<u32> {
                 // SAFETY:
                 // `self` is non-zero, which means it has at least one bit set, which means
@@ -829,7 +830,7 @@ macro_rules! nonzero_integer {
                         without modifying the original"]
             #[inline(always)]
             #[ensures(|result| result.get() != 0)]
-            #[ensures(|result| result.rotate_right(n).get() == old(self).get())]
+            #[ensures(|result| result.get() == old(self).get().rotate_left(n))]
             pub const fn rotate_left(self, n: u32) -> Self {
                 let result = self.get().rotate_left(n);
                 // SAFETY: Rotating bits preserves the property int > 0.
@@ -862,7 +863,7 @@ macro_rules! nonzero_integer {
                         without modifying the original"]
             #[inline(always)]
             #[ensures(|result| result.get() != 0)]
-            #[ensures(|result| result.rotate_left(n).get() == old(self).get())]
+            #[ensures(|result| result.get() == old(self).get().rotate_right(n))]
             pub const fn rotate_right(self, n: u32) -> Self {
                 let result = self.get().rotate_right(n);
                 // SAFETY: Rotating bits preserves the property int > 0.
@@ -890,6 +891,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() == old(self).get().swap_bytes())]
             pub const fn swap_bytes(self) -> Self {
                 let result = self.get().swap_bytes();
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -918,6 +920,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() == old(self).get().reverse_bits())]
             pub const fn reverse_bits(self) -> Self {
                 let result = self.get().reverse_bits();
                 // SAFETY: Reversing bits preserves the property int > 0.
@@ -951,6 +954,7 @@ macro_rules! nonzero_integer {
             #[unstable(feature = "nonzero_bitwise", issue = "128281")]
             #[must_use]
             #[inline(always)]
+            #[ensures(|result| result.get() == $Int::from_be(x.get()))]
             pub const fn from_be(x: Self) -> Self {
                 let result = $Int::from_be(x.get());
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -984,6 +988,7 @@ macro_rules! nonzero_integer {
             #[unstable(feature = "nonzero_bitwise", issue = "128281")]
             #[must_use]
             #[inline(always)]
+            #[ensures(|result| result.get() == $Int::from_le(x.get()))]
             pub const fn from_le(x: Self) -> Self {
                 let result = $Int::from_le(x.get());
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -1017,6 +1022,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() == old(self).get().to_be())]
             pub const fn to_be(self) -> Self {
                 let result = self.get().to_be();
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -1050,6 +1056,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() == old(self).get().to_le())]
             pub const fn to_le(self) -> Self {
                 let result = self.get().to_le();
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -1087,6 +1094,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
+            #[ensures(|result| match result { Some(v) => old(self).get().checked_mul(other.get()) == Some(v.get()), None => old(self).get().checked_mul(other.get()).is_none() })]
             pub const fn checked_mul(self, other: Self) -> Option<Self> {
                 if let Some(result) = self.get().checked_mul(other.get()) {
                     // SAFETY:
@@ -1126,6 +1134,7 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
+            #[ensures(|result| result.get() == old(self).get().saturating_mul(other.get()))]
             pub const fn saturating_mul(self, other: Self) -> Self {
                 // SAFETY:
                 // - `saturating_mul` returns `u*::MAX`/`i*::MAX`/`i*::MIN` on overflow/underflow,
@@ -1511,6 +1520,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| match result { Some(v) => old(self).get().checked_add(other) == Some(v.get()), None => old(self).get().checked_add(other).is_none() })]
         pub const fn checked_add(self, other: $Int) -> Option<Self> {
             if let Some(result) = self.get().checked_add(other) {
                 // SAFETY:
@@ -1550,6 +1560,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| result.get() == old(self).get().saturating_add(other))]
         pub const fn saturating_add(self, other: $Int) -> Self {
             // SAFETY:
             // - `saturating_add` returns `u*::MAX` on overflow, which is non-zero
@@ -1628,6 +1639,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| match result { Some(v) => old(self).get().checked_next_power_of_two() == Some(v.get()), None => old(self).get().checked_next_power_of_two().is_none() })]
         pub const fn checked_next_power_of_two(self) -> Option<Self> {
             if let Some(nz) = self.get().checked_next_power_of_two() {
                 // SAFETY: The next power of two is positive
@@ -1725,6 +1737,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[doc(alias = "average_floor")]
         #[doc(alias = "average")]
         #[inline]
+        #[ensures(|result| result.get() == old(self).get().midpoint(rhs.get()))]
         pub const fn midpoint(self, rhs: Self) -> Self {
             // SAFETY: The only way to get `0` with midpoint is to have two opposite or
             // near opposite numbers: (-5, 5), (0, 1), (0, 0) which is impossible because
@@ -1786,6 +1799,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| result.get() == old(self).get().isqrt())]
         pub const fn isqrt(self) -> Self {
             let result = self.get().isqrt();
 
@@ -1885,6 +1899,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| result.get() == old(self).get().abs())]
         pub const fn abs(self) -> Self {
             // SAFETY: This cannot overflow to zero.
             unsafe { Self::new_unchecked(self.get().abs()) }
@@ -1916,6 +1931,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| match result { Some(v) => old(self).get() != $Int::MIN && v.get() == old(self).get().abs(), None => old(self).get() == $Int::MIN })]
         pub const fn checked_abs(self) -> Option<Self> {
             if let Some(nz) = self.get().checked_abs() {
                 // SAFETY: absolute value of nonzero cannot yield zero values.
@@ -1951,6 +1967,8 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &(Self, bool)| result.1 == (old(self).get() == $Int::MIN))]
+        #[ensures(|result: &(Self, bool)| result.0.get() == old(self).get().wrapping_abs())]
         pub const fn overflowing_abs(self) -> (Self, bool) {
             let (nz, flag) = self.get().overflowing_abs();
             (
@@ -1988,6 +2006,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| result.get() == old(self).get().saturating_abs())]
         pub const fn saturating_abs(self) -> Self {
             // SAFETY: absolute value of nonzero cannot yield zero values.
             unsafe { Self::new_unchecked(self.get().saturating_abs()) }
@@ -2020,6 +2039,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| result.get() == old(self).get().wrapping_abs())]
         pub const fn wrapping_abs(self) -> Self {
             // SAFETY: absolute value of nonzero cannot yield zero values.
             unsafe { Self::new_unchecked(self.get().wrapping_abs()) }
@@ -2052,6 +2072,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result| result.get() == old(self).get().unsigned_abs())]
         pub const fn unsigned_abs(self) -> NonZero<$Uint> {
             // SAFETY: absolute value of nonzero cannot yield zero values.
             unsafe { NonZero::new_unchecked(self.get().unsigned_abs()) }
@@ -2131,6 +2152,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[inline]
         #[stable(feature = "nonzero_negation_ops", since = "1.71.0")]
         #[rustc_const_stable(feature = "nonzero_negation_ops", since = "1.71.0")]
+        #[ensures(|result| match result { Some(v) => old(self).get() != $Int::MIN && v.get() == old(self).get().wrapping_neg(), None => old(self).get() == $Int::MIN })]
         pub const fn checked_neg(self) -> Option<Self> {
             if let Some(result) = self.get().checked_neg() {
                 // SAFETY: negation of nonzero cannot yield zero values.
@@ -2163,6 +2185,8 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[inline]
         #[stable(feature = "nonzero_negation_ops", since = "1.71.0")]
         #[rustc_const_stable(feature = "nonzero_negation_ops", since = "1.71.0")]
+        #[ensures(|result: &(Self, bool)| result.1 == (old(self).get() == $Int::MIN))]
+        #[ensures(|result: &(Self, bool)| result.0.get() == old(self).get().wrapping_neg())]
         pub const fn overflowing_neg(self) -> (Self, bool) {
             let (result, overflow) = self.get().overflowing_neg();
             // SAFETY: negation of nonzero cannot yield zero values.
@@ -2228,6 +2252,7 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[inline]
         #[stable(feature = "nonzero_negation_ops", since = "1.71.0")]
         #[rustc_const_stable(feature = "nonzero_negation_ops", since = "1.71.0")]
+        #[ensures(|result| result.get() == old(self).get().wrapping_neg())]
         pub const fn wrapping_neg(self) -> Self {
             let result = self.get().wrapping_neg();
             // SAFETY: negation of nonzero cannot yield zero values.
@@ -3025,4 +3050,1928 @@ mod verify {
     nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
     nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
     nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
+
+    // ------------------------------------------------------------------------
+    // Challenge 12 Part 2: contract-level harnesses.
+    //
+    // Each harness below is a `#[kani::proof_for_contract]` that verifies the
+    // method's `#[requires]`/`#[ensures]` *specification* over all symbolic
+    // inputs of the type -- not merely the absence of UB. The contract is the
+    // specification; the harness only needs to exercise the method symbolically.
+    // ------------------------------------------------------------------------
+
+    // Harness for a unary `self` method whose contract performs the checking.
+    macro_rules! nonzero_check_unary_contract {
+        ($t:ty, $nz:ty, $m:ident, $h:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::$m)]
+            pub fn $h() {
+                let x: $nz = kani::any();
+                let _ = x.$m();
+            }
+        };
+    }
+
+    // Harness for a `self` method taking a single `u32` argument.
+    macro_rules! nonzero_check_u32_arg_contract {
+        ($t:ty, $nz:ty, $m:ident, $h:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::$m)]
+            pub fn $h() {
+                let x: $nz = kani::any();
+                let n: u32 = kani::any();
+                let _ = x.$m(n);
+            }
+        };
+    }
+
+    // `count_ones` -- contract (result > 0) already present in `nonzero_integer!`.
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        count_ones,
+        nonzero_check_count_ones_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        count_ones,
+        nonzero_check_count_ones_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        count_ones,
+        nonzero_check_count_ones_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        count_ones,
+        nonzero_check_count_ones_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        count_ones,
+        nonzero_check_count_ones_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        count_ones,
+        nonzero_check_count_ones_isize
+    );
+    nonzero_check_unary_contract!(
+        u8,
+        core::num::NonZeroU8,
+        count_ones,
+        nonzero_check_count_ones_u8
+    );
+    nonzero_check_unary_contract!(
+        u16,
+        core::num::NonZeroU16,
+        count_ones,
+        nonzero_check_count_ones_u16
+    );
+    nonzero_check_unary_contract!(
+        u32,
+        core::num::NonZeroU32,
+        count_ones,
+        nonzero_check_count_ones_u32
+    );
+    nonzero_check_unary_contract!(
+        u64,
+        core::num::NonZeroU64,
+        count_ones,
+        nonzero_check_count_ones_u64
+    );
+    nonzero_check_unary_contract!(
+        u128,
+        core::num::NonZeroU128,
+        count_ones,
+        nonzero_check_count_ones_u128
+    );
+    nonzero_check_unary_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        count_ones,
+        nonzero_check_count_ones_usize
+    );
+
+    // `rotate_left`: direct value contract, not the round-trip form (undo via the contracted inverse), which is costlier in CBMC.
+    nonzero_check_u32_arg_contract!(
+        i8,
+        core::num::NonZeroI8,
+        rotate_left,
+        nonzero_check_rotate_left_i8
+    );
+    nonzero_check_u32_arg_contract!(
+        i16,
+        core::num::NonZeroI16,
+        rotate_left,
+        nonzero_check_rotate_left_i16
+    );
+    nonzero_check_u32_arg_contract!(
+        i32,
+        core::num::NonZeroI32,
+        rotate_left,
+        nonzero_check_rotate_left_i32
+    );
+    nonzero_check_u32_arg_contract!(
+        i64,
+        core::num::NonZeroI64,
+        rotate_left,
+        nonzero_check_rotate_left_i64
+    );
+    nonzero_check_u32_arg_contract!(
+        i128,
+        core::num::NonZeroI128,
+        rotate_left,
+        nonzero_check_rotate_left_i128
+    );
+    nonzero_check_u32_arg_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        rotate_left,
+        nonzero_check_rotate_left_isize
+    );
+    nonzero_check_u32_arg_contract!(
+        u8,
+        core::num::NonZeroU8,
+        rotate_left,
+        nonzero_check_rotate_left_u8
+    );
+    nonzero_check_u32_arg_contract!(
+        u16,
+        core::num::NonZeroU16,
+        rotate_left,
+        nonzero_check_rotate_left_u16
+    );
+    nonzero_check_u32_arg_contract!(
+        u32,
+        core::num::NonZeroU32,
+        rotate_left,
+        nonzero_check_rotate_left_u32
+    );
+    nonzero_check_u32_arg_contract!(
+        u64,
+        core::num::NonZeroU64,
+        rotate_left,
+        nonzero_check_rotate_left_u64
+    );
+    nonzero_check_u32_arg_contract!(
+        u128,
+        core::num::NonZeroU128,
+        rotate_left,
+        nonzero_check_rotate_left_u128
+    );
+    nonzero_check_u32_arg_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        rotate_left,
+        nonzero_check_rotate_left_usize
+    );
+
+    // `rotate_right`: direct value contract, not the round-trip form (undo via the contracted inverse), which is costlier in CBMC.
+    nonzero_check_u32_arg_contract!(
+        i8,
+        core::num::NonZeroI8,
+        rotate_right,
+        nonzero_check_rotate_right_i8
+    );
+    nonzero_check_u32_arg_contract!(
+        i16,
+        core::num::NonZeroI16,
+        rotate_right,
+        nonzero_check_rotate_right_i16
+    );
+    nonzero_check_u32_arg_contract!(
+        i32,
+        core::num::NonZeroI32,
+        rotate_right,
+        nonzero_check_rotate_right_i32
+    );
+    nonzero_check_u32_arg_contract!(
+        i64,
+        core::num::NonZeroI64,
+        rotate_right,
+        nonzero_check_rotate_right_i64
+    );
+    nonzero_check_u32_arg_contract!(
+        i128,
+        core::num::NonZeroI128,
+        rotate_right,
+        nonzero_check_rotate_right_i128
+    );
+    nonzero_check_u32_arg_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        rotate_right,
+        nonzero_check_rotate_right_isize
+    );
+    nonzero_check_u32_arg_contract!(
+        u8,
+        core::num::NonZeroU8,
+        rotate_right,
+        nonzero_check_rotate_right_u8
+    );
+    nonzero_check_u32_arg_contract!(
+        u16,
+        core::num::NonZeroU16,
+        rotate_right,
+        nonzero_check_rotate_right_u16
+    );
+    nonzero_check_u32_arg_contract!(
+        u32,
+        core::num::NonZeroU32,
+        rotate_right,
+        nonzero_check_rotate_right_u32
+    );
+    nonzero_check_u32_arg_contract!(
+        u64,
+        core::num::NonZeroU64,
+        rotate_right,
+        nonzero_check_rotate_right_u64
+    );
+    nonzero_check_u32_arg_contract!(
+        u128,
+        core::num::NonZeroU128,
+        rotate_right,
+        nonzero_check_rotate_right_u128
+    );
+    nonzero_check_u32_arg_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        rotate_right,
+        nonzero_check_rotate_right_usize
+    );
+
+    // `swap_bytes` -- contract added in this change: result.get() == old(self).get().swap_bytes().
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        swap_bytes,
+        nonzero_check_swap_bytes_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        swap_bytes,
+        nonzero_check_swap_bytes_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        swap_bytes,
+        nonzero_check_swap_bytes_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        swap_bytes,
+        nonzero_check_swap_bytes_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        swap_bytes,
+        nonzero_check_swap_bytes_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        swap_bytes,
+        nonzero_check_swap_bytes_isize
+    );
+    nonzero_check_unary_contract!(
+        u8,
+        core::num::NonZeroU8,
+        swap_bytes,
+        nonzero_check_swap_bytes_u8
+    );
+    nonzero_check_unary_contract!(
+        u16,
+        core::num::NonZeroU16,
+        swap_bytes,
+        nonzero_check_swap_bytes_u16
+    );
+    nonzero_check_unary_contract!(
+        u32,
+        core::num::NonZeroU32,
+        swap_bytes,
+        nonzero_check_swap_bytes_u32
+    );
+    nonzero_check_unary_contract!(
+        u64,
+        core::num::NonZeroU64,
+        swap_bytes,
+        nonzero_check_swap_bytes_u64
+    );
+    nonzero_check_unary_contract!(
+        u128,
+        core::num::NonZeroU128,
+        swap_bytes,
+        nonzero_check_swap_bytes_u128
+    );
+    nonzero_check_unary_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        swap_bytes,
+        nonzero_check_swap_bytes_usize
+    );
+
+    // Harness for an associated fn taking a single `Self` argument (from_be / from_le).
+    macro_rules! nonzero_check_static_self_contract {
+        ($t:ty, $nz:ty, $m:ident, $h:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::$m)]
+            pub fn $h() {
+                let x: $nz = kani::any();
+                let _ = <$nz>::$m(x);
+            }
+        };
+    }
+
+    // `reverse_bits` -- contract: result.get() == old(self).get().reverse_bits().
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        reverse_bits,
+        nonzero_check_reverse_bits_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        reverse_bits,
+        nonzero_check_reverse_bits_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        reverse_bits,
+        nonzero_check_reverse_bits_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        reverse_bits,
+        nonzero_check_reverse_bits_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        reverse_bits,
+        nonzero_check_reverse_bits_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        reverse_bits,
+        nonzero_check_reverse_bits_isize
+    );
+    nonzero_check_unary_contract!(
+        u8,
+        core::num::NonZeroU8,
+        reverse_bits,
+        nonzero_check_reverse_bits_u8
+    );
+    nonzero_check_unary_contract!(
+        u16,
+        core::num::NonZeroU16,
+        reverse_bits,
+        nonzero_check_reverse_bits_u16
+    );
+    nonzero_check_unary_contract!(
+        u32,
+        core::num::NonZeroU32,
+        reverse_bits,
+        nonzero_check_reverse_bits_u32
+    );
+    nonzero_check_unary_contract!(
+        u64,
+        core::num::NonZeroU64,
+        reverse_bits,
+        nonzero_check_reverse_bits_u64
+    );
+    nonzero_check_unary_contract!(
+        u128,
+        core::num::NonZeroU128,
+        reverse_bits,
+        nonzero_check_reverse_bits_u128
+    );
+    nonzero_check_unary_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        reverse_bits,
+        nonzero_check_reverse_bits_usize
+    );
+
+    // `to_be` -- contract: result.get() == old(self).get().to_be().
+    nonzero_check_unary_contract!(i8, core::num::NonZeroI8, to_be, nonzero_check_to_be_i8);
+    nonzero_check_unary_contract!(i16, core::num::NonZeroI16, to_be, nonzero_check_to_be_i16);
+    nonzero_check_unary_contract!(i32, core::num::NonZeroI32, to_be, nonzero_check_to_be_i32);
+    nonzero_check_unary_contract!(i64, core::num::NonZeroI64, to_be, nonzero_check_to_be_i64);
+    nonzero_check_unary_contract!(i128, core::num::NonZeroI128, to_be, nonzero_check_to_be_i128);
+    nonzero_check_unary_contract!(isize, core::num::NonZeroIsize, to_be, nonzero_check_to_be_isize);
+    nonzero_check_unary_contract!(u8, core::num::NonZeroU8, to_be, nonzero_check_to_be_u8);
+    nonzero_check_unary_contract!(u16, core::num::NonZeroU16, to_be, nonzero_check_to_be_u16);
+    nonzero_check_unary_contract!(u32, core::num::NonZeroU32, to_be, nonzero_check_to_be_u32);
+    nonzero_check_unary_contract!(u64, core::num::NonZeroU64, to_be, nonzero_check_to_be_u64);
+    nonzero_check_unary_contract!(u128, core::num::NonZeroU128, to_be, nonzero_check_to_be_u128);
+    nonzero_check_unary_contract!(usize, core::num::NonZeroUsize, to_be, nonzero_check_to_be_usize);
+
+    // `to_le` -- contract: result.get() == old(self).get().to_le().
+    nonzero_check_unary_contract!(i8, core::num::NonZeroI8, to_le, nonzero_check_to_le_i8);
+    nonzero_check_unary_contract!(i16, core::num::NonZeroI16, to_le, nonzero_check_to_le_i16);
+    nonzero_check_unary_contract!(i32, core::num::NonZeroI32, to_le, nonzero_check_to_le_i32);
+    nonzero_check_unary_contract!(i64, core::num::NonZeroI64, to_le, nonzero_check_to_le_i64);
+    nonzero_check_unary_contract!(i128, core::num::NonZeroI128, to_le, nonzero_check_to_le_i128);
+    nonzero_check_unary_contract!(isize, core::num::NonZeroIsize, to_le, nonzero_check_to_le_isize);
+    nonzero_check_unary_contract!(u8, core::num::NonZeroU8, to_le, nonzero_check_to_le_u8);
+    nonzero_check_unary_contract!(u16, core::num::NonZeroU16, to_le, nonzero_check_to_le_u16);
+    nonzero_check_unary_contract!(u32, core::num::NonZeroU32, to_le, nonzero_check_to_le_u32);
+    nonzero_check_unary_contract!(u64, core::num::NonZeroU64, to_le, nonzero_check_to_le_u64);
+    nonzero_check_unary_contract!(u128, core::num::NonZeroU128, to_le, nonzero_check_to_le_u128);
+    nonzero_check_unary_contract!(usize, core::num::NonZeroUsize, to_le, nonzero_check_to_le_usize);
+
+    // `from_be` -- contract: result.get() == <Int>::from_be(x.get()).
+    nonzero_check_static_self_contract!(
+        i8,
+        core::num::NonZeroI8,
+        from_be,
+        nonzero_check_from_be_i8
+    );
+    nonzero_check_static_self_contract!(
+        i16,
+        core::num::NonZeroI16,
+        from_be,
+        nonzero_check_from_be_i16
+    );
+    nonzero_check_static_self_contract!(
+        i32,
+        core::num::NonZeroI32,
+        from_be,
+        nonzero_check_from_be_i32
+    );
+    nonzero_check_static_self_contract!(
+        i64,
+        core::num::NonZeroI64,
+        from_be,
+        nonzero_check_from_be_i64
+    );
+    nonzero_check_static_self_contract!(
+        i128,
+        core::num::NonZeroI128,
+        from_be,
+        nonzero_check_from_be_i128
+    );
+    nonzero_check_static_self_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        from_be,
+        nonzero_check_from_be_isize
+    );
+    nonzero_check_static_self_contract!(
+        u8,
+        core::num::NonZeroU8,
+        from_be,
+        nonzero_check_from_be_u8
+    );
+    nonzero_check_static_self_contract!(
+        u16,
+        core::num::NonZeroU16,
+        from_be,
+        nonzero_check_from_be_u16
+    );
+    nonzero_check_static_self_contract!(
+        u32,
+        core::num::NonZeroU32,
+        from_be,
+        nonzero_check_from_be_u32
+    );
+    nonzero_check_static_self_contract!(
+        u64,
+        core::num::NonZeroU64,
+        from_be,
+        nonzero_check_from_be_u64
+    );
+    nonzero_check_static_self_contract!(
+        u128,
+        core::num::NonZeroU128,
+        from_be,
+        nonzero_check_from_be_u128
+    );
+    nonzero_check_static_self_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        from_be,
+        nonzero_check_from_be_usize
+    );
+
+    // `from_le` -- contract: result.get() == <Int>::from_le(x.get()).
+    nonzero_check_static_self_contract!(
+        i8,
+        core::num::NonZeroI8,
+        from_le,
+        nonzero_check_from_le_i8
+    );
+    nonzero_check_static_self_contract!(
+        i16,
+        core::num::NonZeroI16,
+        from_le,
+        nonzero_check_from_le_i16
+    );
+    nonzero_check_static_self_contract!(
+        i32,
+        core::num::NonZeroI32,
+        from_le,
+        nonzero_check_from_le_i32
+    );
+    nonzero_check_static_self_contract!(
+        i64,
+        core::num::NonZeroI64,
+        from_le,
+        nonzero_check_from_le_i64
+    );
+    nonzero_check_static_self_contract!(
+        i128,
+        core::num::NonZeroI128,
+        from_le,
+        nonzero_check_from_le_i128
+    );
+    nonzero_check_static_self_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        from_le,
+        nonzero_check_from_le_isize
+    );
+    nonzero_check_static_self_contract!(
+        u8,
+        core::num::NonZeroU8,
+        from_le,
+        nonzero_check_from_le_u8
+    );
+    nonzero_check_static_self_contract!(
+        u16,
+        core::num::NonZeroU16,
+        from_le,
+        nonzero_check_from_le_u16
+    );
+    nonzero_check_static_self_contract!(
+        u32,
+        core::num::NonZeroU32,
+        from_le,
+        nonzero_check_from_le_u32
+    );
+    nonzero_check_static_self_contract!(
+        u64,
+        core::num::NonZeroU64,
+        from_le,
+        nonzero_check_from_le_u64
+    );
+    nonzero_check_static_self_contract!(
+        u128,
+        core::num::NonZeroU128,
+        from_le,
+        nonzero_check_from_le_u128
+    );
+    nonzero_check_static_self_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        from_le,
+        nonzero_check_from_le_usize
+    );
+
+    // --- Task 3: abs-family + neg-family (signed-only; contracts are primitive-equality
+    //     / short-circuited Option, so no mutual recursion). 6 signed types each. ---
+    // `abs` is SAFE and total except at `MIN`, where it overflows and panics. Per
+    // the project rule a safe fn carries no real `#[requires]`; we verify it with a
+    // paired harness (cf. `clamp` / `clamp_panic`): a `proof_for_contract` value
+    // harness scoped via `kani::assume` to the non-`MIN` domain where `#[ensures]`
+    // holds, plus a `should_panic` harness proving the `MIN` input panics.
+    macro_rules! nonzero_check_abs {
+        ($t:ty, $nz:ty, $h_val:ident, $h_panic:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::abs)]
+            pub fn $h_val() {
+                let x: $nz = kani::any();
+                kani::assume(x.get() != <$t>::MIN);
+                let _ = x.abs();
+            }
+
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $h_panic() {
+                let x: $nz = kani::any();
+                kani::assume(x.get() == <$t>::MIN);
+                let _ = x.abs();
+            }
+        };
+    }
+    nonzero_check_abs!(
+        i8,
+        core::num::NonZeroI8,
+        nonzero_check_abs_i8,
+        nonzero_check_abs_min_panics_i8
+    );
+    nonzero_check_abs!(
+        i16,
+        core::num::NonZeroI16,
+        nonzero_check_abs_i16,
+        nonzero_check_abs_min_panics_i16
+    );
+    nonzero_check_abs!(
+        i32,
+        core::num::NonZeroI32,
+        nonzero_check_abs_i32,
+        nonzero_check_abs_min_panics_i32
+    );
+    nonzero_check_abs!(
+        i64,
+        core::num::NonZeroI64,
+        nonzero_check_abs_i64,
+        nonzero_check_abs_min_panics_i64
+    );
+    nonzero_check_abs!(
+        i128,
+        core::num::NonZeroI128,
+        nonzero_check_abs_i128,
+        nonzero_check_abs_min_panics_i128
+    );
+    nonzero_check_abs!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_abs_isize,
+        nonzero_check_abs_min_panics_isize
+    );
+
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        checked_abs,
+        nonzero_check_checked_abs_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        checked_abs,
+        nonzero_check_checked_abs_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        checked_abs,
+        nonzero_check_checked_abs_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        checked_abs,
+        nonzero_check_checked_abs_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        checked_abs,
+        nonzero_check_checked_abs_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        checked_abs,
+        nonzero_check_checked_abs_isize
+    );
+
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        overflowing_abs,
+        nonzero_check_overflowing_abs_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        overflowing_abs,
+        nonzero_check_overflowing_abs_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        overflowing_abs,
+        nonzero_check_overflowing_abs_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        overflowing_abs,
+        nonzero_check_overflowing_abs_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        overflowing_abs,
+        nonzero_check_overflowing_abs_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        overflowing_abs,
+        nonzero_check_overflowing_abs_isize
+    );
+
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        saturating_abs,
+        nonzero_check_saturating_abs_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        saturating_abs,
+        nonzero_check_saturating_abs_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        saturating_abs,
+        nonzero_check_saturating_abs_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        saturating_abs,
+        nonzero_check_saturating_abs_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        saturating_abs,
+        nonzero_check_saturating_abs_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        saturating_abs,
+        nonzero_check_saturating_abs_isize
+    );
+
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        wrapping_abs,
+        nonzero_check_wrapping_abs_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        wrapping_abs,
+        nonzero_check_wrapping_abs_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        wrapping_abs,
+        nonzero_check_wrapping_abs_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        wrapping_abs,
+        nonzero_check_wrapping_abs_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        wrapping_abs,
+        nonzero_check_wrapping_abs_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        wrapping_abs,
+        nonzero_check_wrapping_abs_isize
+    );
+
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        unsigned_abs,
+        nonzero_check_unsigned_abs_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        unsigned_abs,
+        nonzero_check_unsigned_abs_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        unsigned_abs,
+        nonzero_check_unsigned_abs_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        unsigned_abs,
+        nonzero_check_unsigned_abs_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        unsigned_abs,
+        nonzero_check_unsigned_abs_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        unsigned_abs,
+        nonzero_check_unsigned_abs_isize
+    );
+
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        checked_neg,
+        nonzero_check_checked_neg_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        checked_neg,
+        nonzero_check_checked_neg_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        checked_neg,
+        nonzero_check_checked_neg_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        checked_neg,
+        nonzero_check_checked_neg_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        checked_neg,
+        nonzero_check_checked_neg_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        checked_neg,
+        nonzero_check_checked_neg_isize
+    );
+
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        overflowing_neg,
+        nonzero_check_overflowing_neg_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        overflowing_neg,
+        nonzero_check_overflowing_neg_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        overflowing_neg,
+        nonzero_check_overflowing_neg_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        overflowing_neg,
+        nonzero_check_overflowing_neg_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        overflowing_neg,
+        nonzero_check_overflowing_neg_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        overflowing_neg,
+        nonzero_check_overflowing_neg_isize
+    );
+
+    nonzero_check_unary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        wrapping_neg,
+        nonzero_check_wrapping_neg_i8
+    );
+    nonzero_check_unary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        wrapping_neg,
+        nonzero_check_wrapping_neg_i16
+    );
+    nonzero_check_unary_contract!(
+        i32,
+        core::num::NonZeroI32,
+        wrapping_neg,
+        nonzero_check_wrapping_neg_i32
+    );
+    nonzero_check_unary_contract!(
+        i64,
+        core::num::NonZeroI64,
+        wrapping_neg,
+        nonzero_check_wrapping_neg_i64
+    );
+    nonzero_check_unary_contract!(
+        i128,
+        core::num::NonZeroI128,
+        wrapping_neg,
+        nonzero_check_wrapping_neg_i128
+    );
+    nonzero_check_unary_contract!(
+        isize,
+        core::num::NonZeroIsize,
+        wrapping_neg,
+        nonzero_check_wrapping_neg_isize
+    );
+
+    // --- Task 4: arithmetic (Option/value semantics; primitive-tied, no recursion) ---
+    macro_rules! nonzero_check_binary_contract {
+        ($t:ty, $nz:ty, $m:ident, $h:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::$m)]
+            pub fn $h() {
+                let x: $nz = kani::any();
+                let y: $nz = kani::any();
+                let _ = x.$m(y);
+            }
+        };
+    }
+    macro_rules! nonzero_check_int_arg_contract {
+        ($t:ty, $nz:ty, $m:ident, $h:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::$m)]
+            pub fn $h() {
+                let x: $nz = kani::any();
+                let y: $t = kani::any();
+                let _ = x.$m(y);
+            }
+        };
+    }
+
+    // checked_mul / saturating_mul -- small types full-range; big types via NARROW bounded
+    // windows. Symbolic 64/128-bit multiply is intractable for CBMC at full range; narrow
+    // windows (~20 values/operand) keep it tractable while exercising both the no-overflow
+    // (Some/exact) and overflow (None/saturate) paths. Mirrors upstream's unchecked_mul intervals.
+    nonzero_check_binary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        checked_mul,
+        nonzero_check_checked_mul_i8
+    );
+    nonzero_check_binary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        checked_mul,
+        nonzero_check_checked_mul_i16
+    );
+    nonzero_check_binary_contract!(
+        u8,
+        core::num::NonZeroU8,
+        checked_mul,
+        nonzero_check_checked_mul_u8
+    );
+    nonzero_check_binary_contract!(
+        u16,
+        core::num::NonZeroU16,
+        checked_mul,
+        nonzero_check_checked_mul_u16
+    );
+    nonzero_check_binary_contract!(
+        i8,
+        core::num::NonZeroI8,
+        saturating_mul,
+        nonzero_check_saturating_mul_i8
+    );
+    nonzero_check_binary_contract!(
+        i16,
+        core::num::NonZeroI16,
+        saturating_mul,
+        nonzero_check_saturating_mul_i16
+    );
+    nonzero_check_binary_contract!(
+        u8,
+        core::num::NonZeroU8,
+        saturating_mul,
+        nonzero_check_saturating_mul_u8
+    );
+    nonzero_check_binary_contract!(
+        u16,
+        core::num::NonZeroU16,
+        saturating_mul,
+        nonzero_check_saturating_mul_u16
+    );
+
+    macro_rules! nonzero_check_binary_bounded {
+        ($t:ty, $nz:ty, $m:ident, $h:ident, $min:expr, $max:expr) => {
+            #[kani::proof_for_contract(NonZero::<$t>::$m)]
+            pub fn $h() {
+                let x = kani::any::<$t>();
+                let y = kani::any::<$t>();
+                // `!= 0` guards the `new(..).unwrap()` below (some windows include 0, e.g. signed `-20..=20`).
+                kani::assume(x != 0 && x >= $min && x <= $max);
+                kani::assume(y != 0 && y >= $min && y <= $max);
+                let _ = <$nz>::new(x).unwrap().$m(<$nz>::new(y).unwrap());
+            }
+        };
+    }
+
+    // big unsigned: lo (no overflow -> Some/exact) + hi (overflow -> None/saturate)
+    nonzero_check_binary_bounded!(
+        u32,
+        core::num::NonZeroU32,
+        checked_mul,
+        nonzero_check_checked_mul_u32_lo,
+        1,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        u32,
+        core::num::NonZeroU32,
+        checked_mul,
+        nonzero_check_checked_mul_u32_hi,
+        u32::MAX - 20,
+        u32::MAX
+    );
+    nonzero_check_binary_bounded!(
+        u64,
+        core::num::NonZeroU64,
+        checked_mul,
+        nonzero_check_checked_mul_u64_lo,
+        1,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        u64,
+        core::num::NonZeroU64,
+        checked_mul,
+        nonzero_check_checked_mul_u64_hi,
+        u64::MAX - 20,
+        u64::MAX
+    );
+    nonzero_check_binary_bounded!(
+        u128,
+        core::num::NonZeroU128,
+        checked_mul,
+        nonzero_check_checked_mul_u128_lo,
+        1,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        u128,
+        core::num::NonZeroU128,
+        checked_mul,
+        nonzero_check_checked_mul_u128_hi,
+        u128::MAX - 20,
+        u128::MAX
+    );
+    nonzero_check_binary_bounded!(
+        usize,
+        core::num::NonZeroUsize,
+        checked_mul,
+        nonzero_check_checked_mul_usize_lo,
+        1,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        usize,
+        core::num::NonZeroUsize,
+        checked_mul,
+        nonzero_check_checked_mul_usize_hi,
+        usize::MAX - 20,
+        usize::MAX
+    );
+    nonzero_check_binary_bounded!(
+        u32,
+        core::num::NonZeroU32,
+        saturating_mul,
+        nonzero_check_saturating_mul_u32_lo,
+        1,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        u32,
+        core::num::NonZeroU32,
+        saturating_mul,
+        nonzero_check_saturating_mul_u32_hi,
+        u32::MAX - 20,
+        u32::MAX
+    );
+    nonzero_check_binary_bounded!(
+        u64,
+        core::num::NonZeroU64,
+        saturating_mul,
+        nonzero_check_saturating_mul_u64_lo,
+        1,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        u64,
+        core::num::NonZeroU64,
+        saturating_mul,
+        nonzero_check_saturating_mul_u64_hi,
+        u64::MAX - 20,
+        u64::MAX
+    );
+    nonzero_check_binary_bounded!(
+        u128,
+        core::num::NonZeroU128,
+        saturating_mul,
+        nonzero_check_saturating_mul_u128_lo,
+        1,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        u128,
+        core::num::NonZeroU128,
+        saturating_mul,
+        nonzero_check_saturating_mul_u128_hi,
+        u128::MAX - 20,
+        u128::MAX
+    );
+    nonzero_check_binary_bounded!(
+        usize,
+        core::num::NonZeroUsize,
+        saturating_mul,
+        nonzero_check_saturating_mul_usize_lo,
+        1,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        usize,
+        core::num::NonZeroUsize,
+        saturating_mul,
+        nonzero_check_saturating_mul_usize_hi,
+        usize::MAX - 20,
+        usize::MAX
+    );
+
+    // big signed: lo (no overflow) + hi (positive overflow) + neg (MIN-side overflow)
+    nonzero_check_binary_bounded!(
+        i32,
+        core::num::NonZeroI32,
+        checked_mul,
+        nonzero_check_checked_mul_i32_lo,
+        -20,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        i32,
+        core::num::NonZeroI32,
+        checked_mul,
+        nonzero_check_checked_mul_i32_hi,
+        i32::MAX - 20,
+        i32::MAX
+    );
+    nonzero_check_binary_bounded!(
+        i32,
+        core::num::NonZeroI32,
+        checked_mul,
+        nonzero_check_checked_mul_i32_neg,
+        i32::MIN,
+        i32::MIN + 20
+    );
+    nonzero_check_binary_bounded!(
+        i64,
+        core::num::NonZeroI64,
+        checked_mul,
+        nonzero_check_checked_mul_i64_lo,
+        -20,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        i64,
+        core::num::NonZeroI64,
+        checked_mul,
+        nonzero_check_checked_mul_i64_hi,
+        i64::MAX - 20,
+        i64::MAX
+    );
+    nonzero_check_binary_bounded!(
+        i64,
+        core::num::NonZeroI64,
+        checked_mul,
+        nonzero_check_checked_mul_i64_neg,
+        i64::MIN,
+        i64::MIN + 20
+    );
+    nonzero_check_binary_bounded!(
+        i128,
+        core::num::NonZeroI128,
+        checked_mul,
+        nonzero_check_checked_mul_i128_lo,
+        -20,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        i128,
+        core::num::NonZeroI128,
+        checked_mul,
+        nonzero_check_checked_mul_i128_hi,
+        i128::MAX - 20,
+        i128::MAX
+    );
+    nonzero_check_binary_bounded!(
+        i128,
+        core::num::NonZeroI128,
+        checked_mul,
+        nonzero_check_checked_mul_i128_neg,
+        i128::MIN,
+        i128::MIN + 20
+    );
+    nonzero_check_binary_bounded!(
+        isize,
+        core::num::NonZeroIsize,
+        checked_mul,
+        nonzero_check_checked_mul_isize_lo,
+        -20,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        isize,
+        core::num::NonZeroIsize,
+        checked_mul,
+        nonzero_check_checked_mul_isize_hi,
+        isize::MAX - 20,
+        isize::MAX
+    );
+    nonzero_check_binary_bounded!(
+        isize,
+        core::num::NonZeroIsize,
+        checked_mul,
+        nonzero_check_checked_mul_isize_neg,
+        isize::MIN,
+        isize::MIN + 20
+    );
+    nonzero_check_binary_bounded!(
+        i32,
+        core::num::NonZeroI32,
+        saturating_mul,
+        nonzero_check_saturating_mul_i32_lo,
+        -20,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        i32,
+        core::num::NonZeroI32,
+        saturating_mul,
+        nonzero_check_saturating_mul_i32_hi,
+        i32::MAX - 20,
+        i32::MAX
+    );
+    nonzero_check_binary_bounded!(
+        i32,
+        core::num::NonZeroI32,
+        saturating_mul,
+        nonzero_check_saturating_mul_i32_neg,
+        i32::MIN,
+        i32::MIN + 20
+    );
+    nonzero_check_binary_bounded!(
+        i64,
+        core::num::NonZeroI64,
+        saturating_mul,
+        nonzero_check_saturating_mul_i64_lo,
+        -20,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        i64,
+        core::num::NonZeroI64,
+        saturating_mul,
+        nonzero_check_saturating_mul_i64_hi,
+        i64::MAX - 20,
+        i64::MAX
+    );
+    nonzero_check_binary_bounded!(
+        i64,
+        core::num::NonZeroI64,
+        saturating_mul,
+        nonzero_check_saturating_mul_i64_neg,
+        i64::MIN,
+        i64::MIN + 20
+    );
+    nonzero_check_binary_bounded!(
+        i128,
+        core::num::NonZeroI128,
+        saturating_mul,
+        nonzero_check_saturating_mul_i128_lo,
+        -20,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        i128,
+        core::num::NonZeroI128,
+        saturating_mul,
+        nonzero_check_saturating_mul_i128_hi,
+        i128::MAX - 20,
+        i128::MAX
+    );
+    nonzero_check_binary_bounded!(
+        i128,
+        core::num::NonZeroI128,
+        saturating_mul,
+        nonzero_check_saturating_mul_i128_neg,
+        i128::MIN,
+        i128::MIN + 20
+    );
+    nonzero_check_binary_bounded!(
+        isize,
+        core::num::NonZeroIsize,
+        saturating_mul,
+        nonzero_check_saturating_mul_isize_lo,
+        -20,
+        20
+    );
+    nonzero_check_binary_bounded!(
+        isize,
+        core::num::NonZeroIsize,
+        saturating_mul,
+        nonzero_check_saturating_mul_isize_hi,
+        isize::MAX - 20,
+        isize::MAX
+    );
+    nonzero_check_binary_bounded!(
+        isize,
+        core::num::NonZeroIsize,
+        saturating_mul,
+        nonzero_check_saturating_mul_isize_neg,
+        isize::MIN,
+        isize::MIN + 20
+    );
+
+    // checked_add / saturating_add -- unsigned only
+    nonzero_check_int_arg_contract!(
+        u8,
+        core::num::NonZeroU8,
+        checked_add,
+        nonzero_check_checked_add_u8
+    );
+    nonzero_check_int_arg_contract!(
+        u16,
+        core::num::NonZeroU16,
+        checked_add,
+        nonzero_check_checked_add_u16
+    );
+    nonzero_check_int_arg_contract!(
+        u32,
+        core::num::NonZeroU32,
+        checked_add,
+        nonzero_check_checked_add_u32
+    );
+    nonzero_check_int_arg_contract!(
+        u64,
+        core::num::NonZeroU64,
+        checked_add,
+        nonzero_check_checked_add_u64
+    );
+    nonzero_check_int_arg_contract!(
+        u128,
+        core::num::NonZeroU128,
+        checked_add,
+        nonzero_check_checked_add_u128
+    );
+    nonzero_check_int_arg_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        checked_add,
+        nonzero_check_checked_add_usize
+    );
+
+    nonzero_check_int_arg_contract!(
+        u8,
+        core::num::NonZeroU8,
+        saturating_add,
+        nonzero_check_saturating_add_u8
+    );
+    nonzero_check_int_arg_contract!(
+        u16,
+        core::num::NonZeroU16,
+        saturating_add,
+        nonzero_check_saturating_add_u16
+    );
+    nonzero_check_int_arg_contract!(
+        u32,
+        core::num::NonZeroU32,
+        saturating_add,
+        nonzero_check_saturating_add_u32
+    );
+    nonzero_check_int_arg_contract!(
+        u64,
+        core::num::NonZeroU64,
+        saturating_add,
+        nonzero_check_saturating_add_u64
+    );
+    nonzero_check_int_arg_contract!(
+        u128,
+        core::num::NonZeroU128,
+        saturating_add,
+        nonzero_check_saturating_add_u128
+    );
+    nonzero_check_int_arg_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        saturating_add,
+        nonzero_check_saturating_add_usize
+    );
+
+    // checked_next_power_of_two -- unsigned only, unary
+    nonzero_check_unary_contract!(
+        u8,
+        core::num::NonZeroU8,
+        checked_next_power_of_two,
+        nonzero_check_cnpot_u8
+    );
+    nonzero_check_unary_contract!(
+        u16,
+        core::num::NonZeroU16,
+        checked_next_power_of_two,
+        nonzero_check_cnpot_u16
+    );
+    nonzero_check_unary_contract!(
+        u32,
+        core::num::NonZeroU32,
+        checked_next_power_of_two,
+        nonzero_check_cnpot_u32
+    );
+    nonzero_check_unary_contract!(
+        u64,
+        core::num::NonZeroU64,
+        checked_next_power_of_two,
+        nonzero_check_cnpot_u64
+    );
+    nonzero_check_unary_contract!(
+        u128,
+        core::num::NonZeroU128,
+        checked_next_power_of_two,
+        nonzero_check_cnpot_u128
+    );
+    nonzero_check_unary_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        checked_next_power_of_two,
+        nonzero_check_cnpot_usize
+    );
+
+    // midpoint -- unsigned only, binary
+    nonzero_check_binary_contract!(u8, core::num::NonZeroU8, midpoint, nonzero_check_midpoint_u8);
+    nonzero_check_binary_contract!(
+        u16,
+        core::num::NonZeroU16,
+        midpoint,
+        nonzero_check_midpoint_u16
+    );
+    nonzero_check_binary_contract!(
+        u32,
+        core::num::NonZeroU32,
+        midpoint,
+        nonzero_check_midpoint_u32
+    );
+    nonzero_check_binary_contract!(
+        u64,
+        core::num::NonZeroU64,
+        midpoint,
+        nonzero_check_midpoint_u64
+    );
+    nonzero_check_binary_contract!(
+        u128,
+        core::num::NonZeroU128,
+        midpoint,
+        nonzero_check_midpoint_u128
+    );
+    nonzero_check_binary_contract!(
+        usize,
+        core::num::NonZeroUsize,
+        midpoint,
+        nonzero_check_midpoint_usize
+    );
+
+    // isqrt -- unsigned only, unary, TOTAL (no overflow path). Small types full-range; big
+    // types bounded: isqrt's internal candidate-square is intractable at full 64/128-bit, so
+    // bound the input to keep candidates small. (Challenge 12 is bounded-OK.)
+    nonzero_check_unary_contract!(u8, core::num::NonZeroU8, isqrt, nonzero_check_isqrt_u8);
+    nonzero_check_unary_contract!(u16, core::num::NonZeroU16, isqrt, nonzero_check_isqrt_u16);
+    macro_rules! nonzero_check_unary_bounded {
+        ($t:ty, $nz:ty, $m:ident, $h:ident, $max:expr) => {
+            #[kani::proof_for_contract(NonZero::<$t>::$m)]
+            pub fn $h() {
+                let x = kani::any::<$t>();
+                // `!= 0` guards the `new(x).unwrap()` below (the isqrt window `[0, max]` includes 0).
+                kani::assume(x != 0 && x <= $max);
+                let _ = <$nz>::new(x).unwrap().$m();
+            }
+        };
+    }
+    nonzero_check_unary_bounded!(u32, core::num::NonZeroU32, isqrt, nonzero_check_isqrt_u32, 65535);
+    nonzero_check_unary_bounded!(u64, core::num::NonZeroU64, isqrt, nonzero_check_isqrt_u64, 65535);
+    nonzero_check_unary_bounded!(
+        u128,
+        core::num::NonZeroU128,
+        isqrt,
+        nonzero_check_isqrt_u128,
+        65535
+    );
+    nonzero_check_unary_bounded!(
+        usize,
+        core::num::NonZeroUsize,
+        isqrt,
+        nonzero_check_isqrt_usize,
+        65535
+    );
+
+    // --- Task 6: operator-trait fallbacks. BitOr (x3) and Neg are trait impls, so the
+    //     `#[safety]` proc-macro cannot annotate them with contracts (it parses ItemFn,
+    //     not ImplItemFn). We verify them with `#[kani::proof]` + a functional assert, plus an
+    //     explicit `!= 0` assert that makes visible the nonzero safety invariant `new_unchecked`
+    //     relies on (also enforced implicitly by `new_unchecked`'s precondition check). ---
+    macro_rules! nonzero_check_bitor_nz_nz {
+        ($t:ty, $nz:ty, $h:ident) => {
+            #[kani::proof]
+            pub fn $h() {
+                let x: $nz = kani::any();
+                let y: $nz = kani::any();
+                assert!((x | y).get() == (x.get() | y.get()));
+                assert!((x | y).get() != 0);
+            }
+        };
+    }
+    macro_rules! nonzero_check_bitor_nz_prim {
+        ($t:ty, $nz:ty, $h:ident) => {
+            #[kani::proof]
+            pub fn $h() {
+                let x: $nz = kani::any();
+                let y: $t = kani::any();
+                assert!((x | y).get() == (x.get() | y));
+                assert!((x | y).get() != 0);
+            }
+        };
+    }
+    macro_rules! nonzero_check_bitor_prim_nz {
+        ($t:ty, $nz:ty, $h:ident) => {
+            #[kani::proof]
+            pub fn $h() {
+                let x: $t = kani::any();
+                let y: $nz = kani::any();
+                assert!((x | y).get() == (x | y.get()));
+                assert!((x | y).get() != 0);
+            }
+        };
+    }
+    macro_rules! nonzero_check_neg {
+        ($t:ty, $nz:ty, $h:ident) => {
+            #[kani::proof]
+            pub fn $h() {
+                let x: $nz = kani::any();
+                kani::assume(x.get() != <$t>::MIN);
+                assert!((-x).get() == -(x.get()));
+                assert!((-x).get() != 0);
+            }
+        };
+    }
+
+    // BitOr for NonZero (NonZero | NonZero) -- all 12 types
+    nonzero_check_bitor_nz_nz!(i8, core::num::NonZeroI8, nonzero_check_bitor_nznz_i8);
+    nonzero_check_bitor_nz_nz!(i16, core::num::NonZeroI16, nonzero_check_bitor_nznz_i16);
+    nonzero_check_bitor_nz_nz!(i32, core::num::NonZeroI32, nonzero_check_bitor_nznz_i32);
+    nonzero_check_bitor_nz_nz!(i64, core::num::NonZeroI64, nonzero_check_bitor_nznz_i64);
+    nonzero_check_bitor_nz_nz!(i128, core::num::NonZeroI128, nonzero_check_bitor_nznz_i128);
+    nonzero_check_bitor_nz_nz!(isize, core::num::NonZeroIsize, nonzero_check_bitor_nznz_isize);
+    nonzero_check_bitor_nz_nz!(u8, core::num::NonZeroU8, nonzero_check_bitor_nznz_u8);
+    nonzero_check_bitor_nz_nz!(u16, core::num::NonZeroU16, nonzero_check_bitor_nznz_u16);
+    nonzero_check_bitor_nz_nz!(u32, core::num::NonZeroU32, nonzero_check_bitor_nznz_u32);
+    nonzero_check_bitor_nz_nz!(u64, core::num::NonZeroU64, nonzero_check_bitor_nznz_u64);
+    nonzero_check_bitor_nz_nz!(u128, core::num::NonZeroU128, nonzero_check_bitor_nznz_u128);
+    nonzero_check_bitor_nz_nz!(usize, core::num::NonZeroUsize, nonzero_check_bitor_nznz_usize);
+
+    // BitOr<T> for NonZero (NonZero | primitive) -- all 12 types
+    nonzero_check_bitor_nz_prim!(i8, core::num::NonZeroI8, nonzero_check_bitor_nzprim_i8);
+    nonzero_check_bitor_nz_prim!(i16, core::num::NonZeroI16, nonzero_check_bitor_nzprim_i16);
+    nonzero_check_bitor_nz_prim!(i32, core::num::NonZeroI32, nonzero_check_bitor_nzprim_i32);
+    nonzero_check_bitor_nz_prim!(i64, core::num::NonZeroI64, nonzero_check_bitor_nzprim_i64);
+    nonzero_check_bitor_nz_prim!(i128, core::num::NonZeroI128, nonzero_check_bitor_nzprim_i128);
+    nonzero_check_bitor_nz_prim!(isize, core::num::NonZeroIsize, nonzero_check_bitor_nzprim_isize);
+    nonzero_check_bitor_nz_prim!(u8, core::num::NonZeroU8, nonzero_check_bitor_nzprim_u8);
+    nonzero_check_bitor_nz_prim!(u16, core::num::NonZeroU16, nonzero_check_bitor_nzprim_u16);
+    nonzero_check_bitor_nz_prim!(u32, core::num::NonZeroU32, nonzero_check_bitor_nzprim_u32);
+    nonzero_check_bitor_nz_prim!(u64, core::num::NonZeroU64, nonzero_check_bitor_nzprim_u64);
+    nonzero_check_bitor_nz_prim!(u128, core::num::NonZeroU128, nonzero_check_bitor_nzprim_u128);
+    nonzero_check_bitor_nz_prim!(usize, core::num::NonZeroUsize, nonzero_check_bitor_nzprim_usize);
+
+    // BitOr<NonZero<T>> for T (primitive | NonZero) -- all 12 types
+    nonzero_check_bitor_prim_nz!(i8, core::num::NonZeroI8, nonzero_check_bitor_primnz_i8);
+    nonzero_check_bitor_prim_nz!(i16, core::num::NonZeroI16, nonzero_check_bitor_primnz_i16);
+    nonzero_check_bitor_prim_nz!(i32, core::num::NonZeroI32, nonzero_check_bitor_primnz_i32);
+    nonzero_check_bitor_prim_nz!(i64, core::num::NonZeroI64, nonzero_check_bitor_primnz_i64);
+    nonzero_check_bitor_prim_nz!(i128, core::num::NonZeroI128, nonzero_check_bitor_primnz_i128);
+    nonzero_check_bitor_prim_nz!(isize, core::num::NonZeroIsize, nonzero_check_bitor_primnz_isize);
+    nonzero_check_bitor_prim_nz!(u8, core::num::NonZeroU8, nonzero_check_bitor_primnz_u8);
+    nonzero_check_bitor_prim_nz!(u16, core::num::NonZeroU16, nonzero_check_bitor_primnz_u16);
+    nonzero_check_bitor_prim_nz!(u32, core::num::NonZeroU32, nonzero_check_bitor_primnz_u32);
+    nonzero_check_bitor_prim_nz!(u64, core::num::NonZeroU64, nonzero_check_bitor_primnz_u64);
+    nonzero_check_bitor_prim_nz!(u128, core::num::NonZeroU128, nonzero_check_bitor_primnz_u128);
+    nonzero_check_bitor_prim_nz!(usize, core::num::NonZeroUsize, nonzero_check_bitor_primnz_usize);
+
+    // Neg for NonZero -- signed only
+    nonzero_check_neg!(i8, core::num::NonZeroI8, nonzero_check_neg_i8);
+    nonzero_check_neg!(i16, core::num::NonZeroI16, nonzero_check_neg_i16);
+    nonzero_check_neg!(i32, core::num::NonZeroI32, nonzero_check_neg_i32);
+    nonzero_check_neg!(i64, core::num::NonZeroI64, nonzero_check_neg_i64);
+    nonzero_check_neg!(i128, core::num::NonZeroI128, nonzero_check_neg_i128);
+    nonzero_check_neg!(isize, core::num::NonZeroIsize, nonzero_check_neg_isize);
+
+    // --- Task 5: pow (checked_pow, saturating_pow) -- all 12, SAFETY level. Part 2 requires
+    //     safety (the unsafe `new_unchecked` is sound because the result is nonzero), not value
+    //     correctness. The primitive checked_pow loop carries a strengthened invariant
+    //     (int_macros/uint_macros: acc/base stay nonzero), so the loop is abstracted under
+    //     -Z loop-contracts and full-range base+exponent verify safety with no unwinding. ---
+    macro_rules! nonzero_check_pow_safety {
+        ($t:ty, $nz:ty, $m:ident, $h:ident) => {
+            #[kani::proof]
+            pub fn $h() {
+                // Safety (Part 2): no explicit assert needed -- Kani verifies the absence of
+                // UB, which includes the `assert_unsafe_precondition!` inside `new_unchecked`,
+                // i.e. that the unsafe block is sound (result nonzero) for all base/exponent.
+                let x: $nz = kani::any();
+                let e: u32 = kani::any();
+                let _ = x.$m(e);
+            }
+        };
+    }
+    nonzero_check_pow_safety!(i8, core::num::NonZeroI8, checked_pow, nonzero_check_checked_pow_i8);
+    nonzero_check_pow_safety!(
+        i16,
+        core::num::NonZeroI16,
+        checked_pow,
+        nonzero_check_checked_pow_i16
+    );
+    nonzero_check_pow_safety!(
+        i32,
+        core::num::NonZeroI32,
+        checked_pow,
+        nonzero_check_checked_pow_i32
+    );
+    nonzero_check_pow_safety!(
+        i64,
+        core::num::NonZeroI64,
+        checked_pow,
+        nonzero_check_checked_pow_i64
+    );
+    nonzero_check_pow_safety!(
+        i128,
+        core::num::NonZeroI128,
+        checked_pow,
+        nonzero_check_checked_pow_i128
+    );
+    nonzero_check_pow_safety!(
+        isize,
+        core::num::NonZeroIsize,
+        checked_pow,
+        nonzero_check_checked_pow_isize
+    );
+    nonzero_check_pow_safety!(u8, core::num::NonZeroU8, checked_pow, nonzero_check_checked_pow_u8);
+    nonzero_check_pow_safety!(
+        u16,
+        core::num::NonZeroU16,
+        checked_pow,
+        nonzero_check_checked_pow_u16
+    );
+    nonzero_check_pow_safety!(
+        u32,
+        core::num::NonZeroU32,
+        checked_pow,
+        nonzero_check_checked_pow_u32
+    );
+    nonzero_check_pow_safety!(
+        u64,
+        core::num::NonZeroU64,
+        checked_pow,
+        nonzero_check_checked_pow_u64
+    );
+    nonzero_check_pow_safety!(
+        u128,
+        core::num::NonZeroU128,
+        checked_pow,
+        nonzero_check_checked_pow_u128
+    );
+    nonzero_check_pow_safety!(
+        usize,
+        core::num::NonZeroUsize,
+        checked_pow,
+        nonzero_check_checked_pow_usize
+    );
+    nonzero_check_pow_safety!(
+        i8,
+        core::num::NonZeroI8,
+        saturating_pow,
+        nonzero_check_saturating_pow_i8
+    );
+    nonzero_check_pow_safety!(
+        i16,
+        core::num::NonZeroI16,
+        saturating_pow,
+        nonzero_check_saturating_pow_i16
+    );
+    nonzero_check_pow_safety!(
+        i32,
+        core::num::NonZeroI32,
+        saturating_pow,
+        nonzero_check_saturating_pow_i32
+    );
+    nonzero_check_pow_safety!(
+        i64,
+        core::num::NonZeroI64,
+        saturating_pow,
+        nonzero_check_saturating_pow_i64
+    );
+    nonzero_check_pow_safety!(
+        i128,
+        core::num::NonZeroI128,
+        saturating_pow,
+        nonzero_check_saturating_pow_i128
+    );
+    nonzero_check_pow_safety!(
+        isize,
+        core::num::NonZeroIsize,
+        saturating_pow,
+        nonzero_check_saturating_pow_isize
+    );
+    nonzero_check_pow_safety!(
+        u8,
+        core::num::NonZeroU8,
+        saturating_pow,
+        nonzero_check_saturating_pow_u8
+    );
+    nonzero_check_pow_safety!(
+        u16,
+        core::num::NonZeroU16,
+        saturating_pow,
+        nonzero_check_saturating_pow_u16
+    );
+    nonzero_check_pow_safety!(
+        u32,
+        core::num::NonZeroU32,
+        saturating_pow,
+        nonzero_check_saturating_pow_u32
+    );
+    nonzero_check_pow_safety!(
+        u64,
+        core::num::NonZeroU64,
+        saturating_pow,
+        nonzero_check_saturating_pow_u64
+    );
+    nonzero_check_pow_safety!(
+        u128,
+        core::num::NonZeroU128,
+        saturating_pow,
+        nonzero_check_saturating_pow_u128
+    );
+    nonzero_check_pow_safety!(
+        usize,
+        core::num::NonZeroUsize,
+        saturating_pow,
+        nonzero_check_saturating_pow_usize
+    );
+
+    // --- Part 1: `new` (safety + correctness: created iff nonzero, value preserved) ---
+    macro_rules! nonzero_check_new {
+        ($t:ty, $nz:ty, $h:ident) => {
+            #[kani::proof]
+            pub fn $h() {
+                let x: $t = kani::any();
+                let r = <$nz>::new(x);
+                // Part 1 correctness: a NonZero is created iff the input is nonzero (2a),
+                // and the stored value equals the input (2b). Verified as a per-type proof
+                // rather than a contract on `new`: a contract on this widely-called fn
+                // instruments every call site and regresses unrelated 128-bit harnesses.
+                assert!(r.is_some() == (x != 0));
+                if let Some(v) = r {
+                    assert!(v.get() == x);
+                }
+            }
+        };
+    }
+    nonzero_check_new!(i8, core::num::NonZeroI8, nonzero_check_new_i8);
+    nonzero_check_new!(i16, core::num::NonZeroI16, nonzero_check_new_i16);
+    nonzero_check_new!(i32, core::num::NonZeroI32, nonzero_check_new_i32);
+    nonzero_check_new!(i64, core::num::NonZeroI64, nonzero_check_new_i64);
+    nonzero_check_new!(i128, core::num::NonZeroI128, nonzero_check_new_i128);
+    nonzero_check_new!(isize, core::num::NonZeroIsize, nonzero_check_new_isize);
+    nonzero_check_new!(u8, core::num::NonZeroU8, nonzero_check_new_u8);
+    nonzero_check_new!(u16, core::num::NonZeroU16, nonzero_check_new_u16);
+    nonzero_check_new!(u32, core::num::NonZeroU32, nonzero_check_new_u32);
+    nonzero_check_new!(u64, core::num::NonZeroU64, nonzero_check_new_u64);
+    nonzero_check_new!(u128, core::num::NonZeroU128, nonzero_check_new_u128);
+    nonzero_check_new!(usize, core::num::NonZeroUsize, nonzero_check_new_usize);
+
+    // --- Part 2: `from_mut` (safety of the unsafe pointer reinterpretation) ---
+    macro_rules! nonzero_check_from_mut {
+        ($t:ty, $nz:ty, $h:ident) => {
+            #[kani::proof]
+            pub fn $h() {
+                // Safety (Part 2): Kani verifies the unsafe pointer reinterpretation in
+                // `from_mut` produces no UB for any (possibly zero) referenced value.
+                let mut x: $t = kani::any();
+                let orig = x;
+                let r = <$nz>::from_mut(&mut x);
+                // Functional: `Some` iff the referent is non-zero, and it preserves the value.
+                assert!(r.is_some() == (orig != 0));
+                if let Some(nz) = r {
+                    assert!(nz.get() == orig);
+                }
+            }
+        };
+    }
+    nonzero_check_from_mut!(i8, core::num::NonZeroI8, nonzero_check_from_mut_i8);
+    nonzero_check_from_mut!(i16, core::num::NonZeroI16, nonzero_check_from_mut_i16);
+    nonzero_check_from_mut!(i32, core::num::NonZeroI32, nonzero_check_from_mut_i32);
+    nonzero_check_from_mut!(i64, core::num::NonZeroI64, nonzero_check_from_mut_i64);
+    nonzero_check_from_mut!(i128, core::num::NonZeroI128, nonzero_check_from_mut_i128);
+    nonzero_check_from_mut!(isize, core::num::NonZeroIsize, nonzero_check_from_mut_isize);
+    nonzero_check_from_mut!(u8, core::num::NonZeroU8, nonzero_check_from_mut_u8);
+    nonzero_check_from_mut!(u16, core::num::NonZeroU16, nonzero_check_from_mut_u16);
+    nonzero_check_from_mut!(u32, core::num::NonZeroU32, nonzero_check_from_mut_u32);
+    nonzero_check_from_mut!(u64, core::num::NonZeroU64, nonzero_check_from_mut_u64);
+    nonzero_check_from_mut!(u128, core::num::NonZeroU128, nonzero_check_from_mut_u128);
+    nonzero_check_from_mut!(usize, core::num::NonZeroUsize, nonzero_check_from_mut_usize);
+
+    // M1: boundary windows -- operands near sqrt(MAX) so products straddle the overflow
+    // threshold, directly exercising the Some->None (checked) / exact->saturate (saturating)
+    // transition for the big unsigned primitives. (Small + signed types: the transition is
+    // covered type-uniformly by the full-range u8/u16/i8/i16 harnesses -- the wrapper logic
+    // is shared across widths.)
+    nonzero_check_binary_bounded!(
+        u32,
+        core::num::NonZeroU32,
+        checked_mul,
+        nonzero_check_checked_mul_u32_bd,
+        (1u32 << 16) - 10,
+        (1u32 << 16) + 10
+    );
+    nonzero_check_binary_bounded!(
+        u64,
+        core::num::NonZeroU64,
+        checked_mul,
+        nonzero_check_checked_mul_u64_bd,
+        (1u64 << 32) - 10,
+        (1u64 << 32) + 10
+    );
+    nonzero_check_binary_bounded!(
+        u128,
+        core::num::NonZeroU128,
+        checked_mul,
+        nonzero_check_checked_mul_u128_bd,
+        (1u128 << 64) - 10,
+        (1u128 << 64) + 10
+    );
+    nonzero_check_binary_bounded!(
+        usize,
+        core::num::NonZeroUsize,
+        checked_mul,
+        nonzero_check_checked_mul_usize_bd,
+        (1usize << 32) - 10,
+        (1usize << 32) + 10
+    );
+    nonzero_check_binary_bounded!(
+        u32,
+        core::num::NonZeroU32,
+        saturating_mul,
+        nonzero_check_saturating_mul_u32_bd,
+        (1u32 << 16) - 10,
+        (1u32 << 16) + 10
+    );
+    nonzero_check_binary_bounded!(
+        u64,
+        core::num::NonZeroU64,
+        saturating_mul,
+        nonzero_check_saturating_mul_u64_bd,
+        (1u64 << 32) - 10,
+        (1u64 << 32) + 10
+    );
+    nonzero_check_binary_bounded!(
+        u128,
+        core::num::NonZeroU128,
+        saturating_mul,
+        nonzero_check_saturating_mul_u128_bd,
+        (1u128 << 64) - 10,
+        (1u128 << 64) + 10
+    );
+    nonzero_check_binary_bounded!(
+        usize,
+        core::num::NonZeroUsize,
+        saturating_mul,
+        nonzero_check_saturating_mul_usize_bd,
+        (1usize << 32) - 10,
+        (1usize << 32) + 10
+    );
 }
