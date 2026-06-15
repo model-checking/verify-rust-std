@@ -75,6 +75,9 @@
 #![no_core]
 #![rustc_coherence_is_core]
 #![rustc_preserve_ub_checks]
+// Verification-only (Kani): the flt2dec dragon_verify_stub harness stacks many
+// #[kani::stub] attributes whose macro expansion exceeds the default limit.
+#![cfg_attr(kani, recursion_limit = "1024")]
 //
 // Lints:
 #![deny(rust_2021_incompatible_or_patterns)]

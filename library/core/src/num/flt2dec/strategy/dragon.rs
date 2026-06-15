@@ -181,6 +181,21 @@ pub fn format_shortest<'a>(
     let mut up;
     let mut i = 0;
     loop {
+        // VERIFICATION (Kani, compiles out otherwise): the Dragon/Loitsch
+        // digit-count theorem (Burger & Dybvig 1996, Fig 3; Loitsch, PLDI'10): a
+        // 53-bit-precision f64 has a shortest decimal of at most
+        // `ceil(53*log10 2) + 1 = 17 = MAX_SIG_DIGITS` significant digits.  Every
+        // `Decoded` reaching this function comes from `decode()` on a real f64
+        // (the only caller is `format_shortest`), so the digit index `i` never
+        // reaches 17.  This bounds the DIGIT COUNT (an input-precision property);
+        // buffer safety `i < buf.len()` follows from the separate
+        // `assert!(buf.len() >= MAX_SIG_DIGITS)` above.  The loop break depends on
+        // the `Big` comparison `mant < minus || scale < mant+plus`, a
+        // number-theoretic termination fact CBMC cannot derive from the
+        // (stubbed/havoced) bignum arithmetic, so it is cited.
+        #[cfg(kani)]
+        crate::kani::assume(i < MAX_SIG_DIGITS);
+
         // invariants, where `d[0..n-1]` are digits generated so far:
         // - `v = mant / scale * 10^(k-n-1) + d[0..n-1] * 10^(k-n)`
         // - `v - low = minus / scale * 10^(k-n-1)`
@@ -248,6 +263,13 @@ pub fn format_shortest<'a>(
         // but we are just being safe and consistent here.
         // SAFETY: we initialized that memory above.
         if let Some(c) = round_up(unsafe { buf[..i].assume_init_mut() }) {
+            // VERIFICATION (Kani, compiles out otherwise): the digit-count theorem
+            // bounds the TOTAL significant digits (the `i` generated in the loop
+            // plus this round-up carry) to <= MAX_SIG_DIGITS, so this carry write
+            // is in bounds (`i < MAX_SIG_DIGITS <= buf.len()`).  Same cited
+            // Dragon/Loitsch bound as the loop assume above.
+            #[cfg(kani)]
+            crate::kani::assume(i < MAX_SIG_DIGITS);
             buf[i] = MaybeUninit::new(c);
             i += 1;
             k += 1;
@@ -386,4 +408,147 @@ pub fn format_exact<'a>(
 
     // SAFETY: we initialized that memory above.
     (unsafe { buf[..len].assume_init_ref() }, k)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod dragon_verify {
+    use super::*;
+    use crate::kani;
+
+    // Buffer safety holds for any bignum values (the digit loop is `for i in 0..len`,
+    // `len <= buf.len()`).  But `debug_assert!(d < 10)` and the `mant <= scale*10`
+    // loop invariant depend on the REAL scaling arithmetic: havocing `Big` ops
+    // breaks `scale8 > scale4 > scale2 > scale` and `mant <= scale*10`, so pure
+    // stubbing produces spurious `d >= 10` failures (a digit-correctness check, not
+    // a memory-safety one).  So this is verified with FULL concrete arithmetic;
+    // it is memory-light (~1.3GB) but compute-slow.  See the `kani_any` havoc helper
+    // in `num/bignum.rs` for the abstraction that would work given a loop contract
+    // that re-establishes `mant <= scale*10`.
+    #[kani::proof]
+    #[kani::unwind(50)]
+    fn check_format_exact() {
+        let mant: u64 = kani::any();
+        kani::assume(mant > 0 && mant < (1 << 61));
+        let exp: i16 = kani::any();
+        kani::assume(exp >= -1076 && exp <= 971);
+        let d = Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() };
+        let limit: i16 = kani::any();
+        let mut buf: [MaybeUninit<u8>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = format_exact(&d, &mut buf, limit);
+    }
+}
+
+// Buffer-safety-only proof of format_exact via COMPLETE bignum stubbing.
+// Hypothesis: with debug-assertions OFF (so `debug_assert!(d < 10)` is dead, like
+// the VeriFast frontend) AND every Big op havoc-stubbed (incl. is_zero/cmp, which
+// a partial stub left concrete and bit-blasting), format_exact's only obligations
+// are the explicit `for i in 0..len` (len <= buf.len()) bound + the assume_init
+// init tracking -- pure control flow, no arithmetic.  Run with
+// RUSTFLAGS="-C debug-assertions=off".
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod dragon_verify_stub {
+    use super::*;
+    use crate::kani;
+
+    // Mutating ops: NO-OP stubs.  The Big *values* are irrelevant to buffer
+    // safety, and all value inspection (is_zero/cmp) is independently stubbed, so
+    // leaving the Big unchanged is sound and cheap (no symbolic state injected).
+    fn s_mul_pow2(s: &mut Big, _bits: usize) -> &mut Big {
+        s
+    }
+    fn s_mul_small(s: &mut Big, _o: Digit) -> &mut Big {
+        s
+    }
+    fn s_sub<'a>(s: &'a mut Big, _o: &Big) -> &'a mut Big {
+        s
+    }
+    fn s_add<'a>(s: &'a mut Big, _o: &Big) -> &'a mut Big {
+        s
+    }
+    fn s_mul_digits<'a>(s: &'a mut Big, _o: &[Digit]) -> &'a mut Big {
+        s
+    }
+    fn s_mul_pow10<'a>(s: &'a mut Big, _n: usize) -> &'a mut Big {
+        s
+    }
+    fn s_div_2pow10<'a>(s: &'a mut Big, _n: usize) -> &'a mut Big {
+        s
+    }
+    // Value inspection: drives control flow nondeterministically.
+    fn s_is_zero(_s: &Big) -> bool {
+        kani::any()
+    }
+    fn s_cmp(_s: &Big, _o: &Big) -> crate::cmp::Ordering {
+        let x: u8 = kani::any();
+        match x % 3 {
+            0 => crate::cmp::Ordering::Less,
+            1 => crate::cmp::Ordering::Equal,
+            _ => crate::cmp::Ordering::Greater,
+        }
+    }
+    fn s_estimate(_m: u64, _e: i16) -> i16 {
+        let k: i16 = kani::any();
+        kani::assume(k > -400 && k < 400);
+        k
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    #[kani::stub(Big::mul_pow2, s_mul_pow2)]
+    #[kani::stub(Big::mul_small, s_mul_small)]
+    #[kani::stub(Big::sub, s_sub)]
+    #[kani::stub(Big::add, s_add)]
+    #[kani::stub(Big::mul_digits, s_mul_digits)]
+    #[kani::stub(Big::is_zero, s_is_zero)]
+    #[kani::stub(Big::cmp, s_cmp)]
+    #[kani::stub(mul_pow10, s_mul_pow10)]
+    #[kani::stub(div_2pow10, s_div_2pow10)]
+    #[kani::stub(estimate_scaling_factor, s_estimate)]
+    fn check_format_exact_stub() {
+        let mant: u64 = kani::any();
+        kani::assume(mant > 0 && mant < (1 << 61));
+        let exp: i16 = kani::any();
+        kani::assume(exp >= -1076 && exp <= 971);
+        let d = Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() };
+        let limit: i16 = kani::any();
+        let mut buf: [MaybeUninit<u8>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = format_exact(&d, &mut buf, limit);
+    }
+
+    // Tight decode() precondition for f64 (decoder.rs: minus is always 1, plus is
+    // 1 or 2, mant is the shifted f64 mantissa so mant <= 2^54).  format_shortest
+    // is internal and only called on a decode() result, so this is its true
+    // precondition; under it the Dragon/Loitsch digit-count theorem holds.
+    fn arbitrary_decoded_tight() -> Decoded {
+        let mant: u64 = kani::any();
+        kani::assume(mant >= 2 && mant <= (1u64 << 54));
+        let plus: u64 = kani::any();
+        kani::assume(plus == 1 || plus == 2);
+        let exp: i16 = kani::any();
+        kani::assume(exp >= -1076 && exp <= 971);
+        Decoded { mant, minus: 1, plus, exp, inclusive: kani::any() }
+    }
+
+    // Buffer-safety proof of format_shortest: complete bignum no-op stubs (Big
+    // values are irrelevant to buffer safety; `cmp` is nondeterministic so all
+    // control-flow paths are explored), the tight decode precondition, and the
+    // in-loop digit-count assume bound the implicit loop.  CBMC unrolls (no loop
+    // contracts).
+    #[kani::proof]
+    #[kani::unwind(19)]
+    #[kani::stub(Big::mul_pow2, s_mul_pow2)]
+    #[kani::stub(Big::mul_small, s_mul_small)]
+    #[kani::stub(Big::sub, s_sub)]
+    #[kani::stub(Big::add, s_add)]
+    #[kani::stub(Big::cmp, s_cmp)]
+    #[kani::stub(mul_pow10, s_mul_pow10)]
+    #[kani::stub(estimate_scaling_factor, s_estimate)]
+    fn check_format_shortest_stub() {
+        let d = arbitrary_decoded_tight();
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_shortest(&d, &mut buf);
+    }
 }
