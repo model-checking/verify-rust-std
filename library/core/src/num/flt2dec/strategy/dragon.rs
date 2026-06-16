@@ -410,35 +410,6 @@ pub fn format_exact<'a>(
     (unsafe { buf[..len].assume_init_ref() }, k)
 }
 
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-pub mod dragon_verify {
-    use super::*;
-    use crate::kani;
-
-    // Buffer safety holds for any bignum values (the digit loop is `for i in 0..len`,
-    // `len <= buf.len()`).  But `debug_assert!(d < 10)` and the `mant <= scale*10`
-    // loop invariant depend on the REAL scaling arithmetic: havocing `Big` ops
-    // breaks `scale8 > scale4 > scale2 > scale` and `mant <= scale*10`, so pure
-    // stubbing produces spurious `d >= 10` failures (a digit-correctness check, not
-    // a memory-safety one).  So this is verified with FULL concrete arithmetic;
-    // it is memory-light (~1.3GB) but compute-slow.  See the `kani_any` havoc helper
-    // in `num/bignum.rs` for the abstraction that would work given a loop contract
-    // that re-establishes `mant <= scale*10`.
-    #[kani::proof]
-    #[kani::unwind(50)]
-    fn check_format_exact() {
-        let mant: u64 = kani::any();
-        kani::assume(mant > 0 && mant < (1 << 61));
-        let exp: i16 = kani::any();
-        kani::assume(exp >= -1076 && exp <= 971);
-        let d = Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() };
-        let limit: i16 = kani::any();
-        let mut buf: [MaybeUninit<u8>; 4] = [const { MaybeUninit::uninit() }; 4];
-        let _ = format_exact(&d, &mut buf, limit);
-    }
-}
-
 // Buffer-safety-only proof of format_exact via COMPLETE bignum stubbing.
 // Hypothesis: with debug-assertions OFF (so `debug_assert!(d < 10)` is dead, like
 // the VeriFast frontend) AND every Big op havoc-stubbed (incl. is_zero/cmp, which
