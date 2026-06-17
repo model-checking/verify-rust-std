@@ -374,3 +374,54 @@ impl<F: FnMut() -> A, A> ExactSizeIterator for Take<crate::iter::RepeatWith<F>> 
         self.n
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|i: &usize| *i <= orig.len());
+            let first = kani::any_where(|i: &usize| *i <= last);
+            &orig[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|v| *v != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    // On a `TrustedRandomAccess` source, `SpecTake::spec_fold` / `spec_for_each`
+    // drive a `0..end` loop calling `__iterator_get_unchecked(i)` where
+    // `end = self.n.min(self.iter.size())`; this proves those unchecked indexes
+    // stay in bounds. `MAX_LEN` is bounded because the methods iterate.
+    macro_rules! check_spec_take {
+        ($fold_harness:ident, $each_harness:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            #[kani::unwind(6)]
+            fn $fold_harness() {
+                const MAX_LEN: usize = 5;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let n = kani::any_where(|n: &usize| *n <= MAX_LEN);
+                let it = Take::new(any_slice(&array).iter(), n);
+                let _ = it.spec_fold(0usize, |acc, _| acc.wrapping_add(1));
+            }
+
+            #[kani::proof]
+            #[kani::unwind(6)]
+            fn $each_harness() {
+                const MAX_LEN: usize = 5;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let n = kani::any_where(|n: &usize| *n <= MAX_LEN);
+                let it = Take::new(any_slice(&array).iter(), n);
+                it.spec_for_each(|_| {});
+            }
+        };
+    }
+    check_spec_take!(check_take_spec_fold_unit, check_take_spec_for_each_unit, ());
+    check_spec_take!(check_take_spec_fold_u8, check_take_spec_for_each_u8, u8);
+    check_spec_take!(check_take_spec_fold_char, check_take_spec_for_each_char, char);
+    check_spec_take!(check_take_spec_fold_tup, check_take_spec_for_each_tup, (char, u8));
+}

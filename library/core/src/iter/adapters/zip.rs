@@ -740,10 +740,10 @@ mod verify {
 
     // Safe `Zip` methods on `TrustedRandomAccess` sources drive the same
     // `get_unchecked`-based machinery as `__iterator_get_unchecked`; these prove
-    // `next` / `next_back` keep their internal indexes in bounds. Bounded
-    // `MAX_LEN` because the methods iterate.
+    // `next` / `nth` / `next_back` / `fold` / `spec_fold` keep their internal
+    // indexes in bounds. Bounded `MAX_LEN` because the methods iterate.
     macro_rules! check_zip_safe {
-        ($a:ty, $b:ty, $next:ident, $back:ident) => {
+        ($a:ty, $b:ty, $next:ident, $nth:ident, $back:ident, $fold:ident, $spec:ident) => {
             #[kani::proof]
             fn $next() {
                 const MAX_LEN: usize = 16;
@@ -753,6 +753,16 @@ mod verify {
                 let _ = crate::iter::Iterator::next(&mut it);
             }
             #[kani::proof]
+            #[kani::unwind(6)]
+            fn $nth() {
+                const MAX_LEN: usize = 5;
+                let array_a: [$a; MAX_LEN] = kani::any();
+                let array_b: [$b; MAX_LEN] = kani::any();
+                let mut it = any_zip_iter::<$a, $b>(&array_a, &array_b);
+                let n = kani::any_where(|x: &usize| *x <= MAX_LEN);
+                let _ = crate::iter::Iterator::nth(&mut it, n);
+            }
+            #[kani::proof]
             fn $back() {
                 const MAX_LEN: usize = 16;
                 let array_a: [$a; MAX_LEN] = kani::any();
@@ -760,10 +770,40 @@ mod verify {
                 let mut it = any_zip_iter::<$a, $b>(&array_a, &array_b);
                 let _ = crate::iter::DoubleEndedIterator::next_back(&mut it);
             }
+            #[kani::proof]
+            #[kani::unwind(6)]
+            fn $fold() {
+                const MAX_LEN: usize = 5;
+                let array_a: [$a; MAX_LEN] = kani::any();
+                let array_b: [$b; MAX_LEN] = kani::any();
+                let it = any_zip_iter::<$a, $b>(&array_a, &array_b);
+                let _ = crate::iter::Iterator::fold(it, 0usize, |acc, _| acc.wrapping_add(1));
+            }
+            #[kani::proof]
+            #[kani::unwind(6)]
+            fn $spec() {
+                const MAX_LEN: usize = 5;
+                let array_a: [$a; MAX_LEN] = kani::any();
+                let array_b: [$b; MAX_LEN] = kani::any();
+                let it = any_zip_iter::<$a, $b>(&array_a, &array_b);
+                let _ = SpecFold::spec_fold(it, 0usize, |acc, _| acc.wrapping_add(1));
+            }
         };
     }
-    check_zip_safe!((), (), check_zip_next_unit, check_zip_next_back_unit);
-    check_zip_safe!(u8, u8, check_zip_next_u8, check_zip_next_back_u8);
-    check_zip_safe!(char, u8, check_zip_next_char_u8, check_zip_next_back_char_u8);
-    check_zip_safe!((char, u8), (u32, i16), check_zip_next_tup, check_zip_next_back_tup);
+    check_zip_safe!(
+        (), (), check_zip_next_unit, check_zip_nth_unit, check_zip_next_back_unit,
+        check_zip_fold_unit, check_zip_spec_fold_unit
+    );
+    check_zip_safe!(
+        u8, u8, check_zip_next_u8, check_zip_nth_u8, check_zip_next_back_u8,
+        check_zip_fold_u8, check_zip_spec_fold_u8
+    );
+    check_zip_safe!(
+        char, u8, check_zip_next_char_u8, check_zip_nth_char_u8, check_zip_next_back_char_u8,
+        check_zip_fold_char_u8, check_zip_spec_fold_char_u8
+    );
+    check_zip_safe!(
+        (char, u8), (u32, i16), check_zip_next_tup, check_zip_nth_tup, check_zip_next_back_tup,
+        check_zip_fold_tup, check_zip_spec_fold_tup
+    );
 }

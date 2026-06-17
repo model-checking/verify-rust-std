@@ -313,4 +313,26 @@ mod verify {
     check_next_back_remainder!(check_array_chunks_next_back_remainder_u8, u8, 2, 8);
     check_next_back_remainder!(check_array_chunks_next_back_remainder_char, char, 3, 9);
     check_next_back_remainder!(check_array_chunks_next_back_remainder_tup, (char, u8), 2, 8);
+
+    // `fold` on a `TrustedRandomAccessNoCoerce` source builds each chunk with
+    // `array::from_fn` calling `__iterator_get_unchecked(i + local)` under an
+    // `inner_len - i >= N` guard; this proves those indexes stay in bounds.
+    macro_rules! check_fold {
+        ($harness:ident, $elem_ty:ty, $n:expr, $max_len:expr, $unwind:literal) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            fn $harness() {
+                const N: usize = $n;
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let it: ArrayChunks<_, N> = ArrayChunks::new(any_slice(&array).iter());
+                // Disambiguate from the in-scope internal `SpecFold::fold`.
+                let _ = crate::iter::Iterator::fold(it, 0usize, |acc, _chunk| acc.wrapping_add(1));
+            }
+        };
+    }
+    check_fold!(check_array_chunks_fold_unit, (), 2, 4, 5);
+    check_fold!(check_array_chunks_fold_u8, u8, 2, 4, 5);
+    check_fold!(check_array_chunks_fold_char, char, 3, 6, 7);
+    check_fold!(check_array_chunks_fold_tup, (char, u8), 2, 4, 5);
 }

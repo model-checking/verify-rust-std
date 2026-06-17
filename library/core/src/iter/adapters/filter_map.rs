@@ -211,3 +211,53 @@ unsafe impl<I: InPlaceIterable, F> InPlaceIterable for FilterMap<I, F> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|i: &usize| *i <= orig.len());
+            let first = kani::any_where(|i: &usize| *i <= last);
+            &orig[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|v| *v != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    // Maps `&T -> Option<usize>` nondeterministically to exercise both the
+    // "element kept" and "element filtered" paths of the chunk-fill loop.
+    fn maybe_map<T>(_: &T) -> Option<usize> {
+        kani::any::<bool>().then_some(0)
+    }
+
+    // `next_chunk` fills a `MaybeUninit<[B; N]>` via a `Guard`-protected loop
+    // that byte-copies each mapped value's payload and bumps `initialized` only
+    // when the map yields `Some`; this proves the copies, the `array_assume_init`,
+    // and the partial-fill `IntoIter` range all stay in bounds.
+    macro_rules! check_next_chunk {
+        ($harness:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            #[kani::unwind(6)]
+            fn $harness() {
+                const MAX_LEN: usize = 5;
+                const N: usize = 3;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = FilterMap::new(
+                    any_slice(&array).iter(),
+                    maybe_map::<$elem_ty> as fn(&$elem_ty) -> Option<usize>,
+                );
+                let _ = it.next_chunk::<N>();
+            }
+        };
+    }
+    check_next_chunk!(check_filter_map_next_chunk_unit, ());
+    check_next_chunk!(check_filter_map_next_chunk_u8, u8);
+    check_next_chunk!(check_filter_map_next_chunk_char, char);
+    check_next_chunk!(check_filter_map_next_chunk_tup, (char, u8));
+}
