@@ -5816,4 +5816,157 @@ mod verify {
     check_split_at_mut_checked!(check_split_at_mut_checked_u8, u8);
     check_split_at_mut_checked!(check_split_at_mut_checked_u64, u64);
     check_split_at_mut_checked!(check_split_at_mut_checked_char, char);
+
+    // ---- as_chunks / as_chunks_mut / as_rchunks (O(1), no loop) ----
+    // Split into a slice of `[T; N]` plus a remainder via split_at_unchecked +
+    // as_chunks_unchecked; pure pointer/length arithmetic, no loops -> no unwind.
+
+    macro_rules! check_as_chunks_fam {
+        ($h:ident, $ty:ty, $n:literal, $m:ident) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let _ = s.$m::<$n>();
+            }
+        };
+    }
+    check_as_chunks_fam!(check_as_chunks_u8_2, u8, 2, as_chunks);
+    check_as_chunks_fam!(check_as_chunks_char_3, char, 3, as_chunks);
+    check_as_chunks_fam!(check_as_rchunks_u8_2, u8, 2, as_rchunks);
+    check_as_chunks_fam!(check_as_rchunks_char_3, char, 3, as_rchunks);
+
+    #[kani::proof]
+    fn check_as_chunks_mut_u8_2() {
+        const ARR_SIZE: usize = 64;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let _ = s.as_chunks_mut::<2>();
+    }
+    #[kani::proof]
+    fn check_as_chunks_mut_char_3() {
+        const ARR_SIZE: usize = 64;
+        let mut arr: [char; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let _ = s.as_chunks_mut::<3>();
+    }
+
+    // ---- as_flattened / as_flattened_mut (receiver is `[[T; N]]`) ----
+    macro_rules! check_as_flattened {
+        ($h:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let arr: [[$ty; $n]; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let _ = s.as_flattened();
+            }
+        };
+    }
+    check_as_flattened!(check_as_flattened_u8_2, u8, 2);
+    check_as_flattened!(check_as_flattened_char_3, char, 3);
+
+    macro_rules! check_as_flattened_mut {
+        ($h:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [[$ty; $n]; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array_mut(&mut arr);
+                let _ = s.as_flattened_mut();
+            }
+        };
+    }
+    check_as_flattened_mut!(check_as_flattened_mut_u8_2, u8, 2);
+    check_as_flattened_mut!(check_as_flattened_mut_char_3, char, 3);
+
+    // ---- as_simd / as_simd_mut (delegate to the already-verified align_to) ----
+    // Plain proof replays align_to's body (no contract assertion at the call site),
+    // so the real transmute is verified. T must be a SimdElement; LANES supported.
+
+    macro_rules! check_as_simd {
+        ($h:ident, $ty:ty, $lanes:literal) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let _ = s.as_simd::<$lanes>();
+            }
+        };
+    }
+    check_as_simd!(check_as_simd_u8_4, u8, 4);
+    check_as_simd!(check_as_simd_u32_8, u32, 8);
+
+    macro_rules! check_as_simd_mut {
+        ($h:ident, $ty:ty, $lanes:literal) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array_mut(&mut arr);
+                let _ = s.as_simd_mut::<$lanes>();
+            }
+        };
+    }
+    check_as_simd_mut!(check_as_simd_mut_u8_4, u8, 4);
+    check_as_simd_mut!(check_as_simd_mut_u32_8, u32, 8);
+
+    // ---- binary_search_by (loop count is logarithmic in len) ----
+    // A nondeterministic (possibly inconsistent) comparator still must keep every
+    // probe index in bounds. `size` halves each iteration, so unwind = log2(len)+2.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_binary_search_by_u8() {
+        const ARR_SIZE: usize = 32;
+        let arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let _ = s.binary_search_by(|_probe: &u8| match kani::any::<u8>() % 3 {
+            0 => crate::cmp::Ordering::Less,
+            1 => crate::cmp::Ordering::Equal,
+            _ => crate::cmp::Ordering::Greater,
+        });
+    }
+
+    // ---- get_disjoint_mut / get_disjoint_check_valid (loops bounded by const N) ----
+    // get_disjoint_mut validates (bounds + pairwise-disjoint) then calls the unchecked
+    // path; fully symbolic indices exercise both the Ok and Err branches with no UB.
+    // Loops are `0..N` and the O(N^2) overlap check, both const-N bounded -> no unwind.
+
+    #[kani::proof]
+    fn check_get_disjoint_mut_2_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let i0: usize = kani::any();
+        let i1: usize = kani::any();
+        let _ = s.get_disjoint_mut([i0, i1]);
+    }
+    #[kani::proof]
+    fn check_get_disjoint_mut_3_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let i0: usize = kani::any();
+        let i1: usize = kani::any();
+        let i2: usize = kani::any();
+        let _ = s.get_disjoint_mut([i0, i1, i2]);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_check_valid_2() {
+        let len: usize = kani::any();
+        let i0: usize = kani::any();
+        let i1: usize = kani::any();
+        let _ = get_disjoint_check_valid::<usize, 2>(&[i0, i1], len);
+    }
+    #[kani::proof]
+    fn check_get_disjoint_check_valid_3() {
+        let len: usize = kani::any();
+        let i0: usize = kani::any();
+        let i1: usize = kani::any();
+        let i2: usize = kani::any();
+        let _ = get_disjoint_check_valid::<usize, 3>(&[i0, i1, i2], len);
+    }
 }
