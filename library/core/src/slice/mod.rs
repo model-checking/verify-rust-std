@@ -5969,4 +5969,95 @@ mod verify {
         let i2: usize = kani::any();
         let _ = get_disjoint_check_valid::<usize, 3>(&[i0, i1, i2], len);
     }
+
+    // ---- Heavy linear-loop safe abstractions (small backing + tuned unwind) ----
+    // These iterate over the slice length, so they need an explicit `#[kani::unwind]`
+    // (per the challenge-16 lesson) and a deliberately small backing array to keep
+    // the symbolic-length unrolling tractable.
+
+    // rotate_left/right: proven over representative CONCRETE (length, amount)
+    // configurations with symbolic element values. A *symbolic* rotation amount is
+    // intractable here: `ptr_rotate` performs symbolic-size memcpys at a symbolic
+    // split point (and explores its block-swap/juggling paths), exceeding the 6GB
+    // CBMC budget on this machine even at length 3. With concrete (len, amount) the
+    // function takes a single concrete path whose bounds safety verifies cheaply;
+    // the spread of lengths/amounts exercises the early-return, buffer, and
+    // block-swap branches. (Disclosed bound: rotate coverage is per-config, not
+    // symbolic-length, unlike the rest of this challenge.)
+    macro_rules! check_rotate_cfg {
+        ($lh:ident, $rh:ident, $len:literal, $amt:literal, $uw:literal) => {
+            #[kani::proof]
+            #[kani::unwind($uw)]
+            fn $lh() {
+                let mut arr: [u8; $len] = kani::any();
+                arr.rotate_left($amt);
+            }
+            #[kani::proof]
+            #[kani::unwind($uw)]
+            fn $rh() {
+                let mut arr: [u8; $len] = kani::any();
+                arr.rotate_right($amt);
+            }
+        };
+    }
+    check_rotate_cfg!(check_rotate_left_2_1, check_rotate_right_2_1, 2, 1, 4);
+    check_rotate_cfg!(check_rotate_left_3_1, check_rotate_right_3_1, 3, 1, 5);
+    check_rotate_cfg!(check_rotate_left_3_2, check_rotate_right_3_2, 3, 2, 5);
+    check_rotate_cfg!(check_rotate_left_4_2, check_rotate_right_4_2, 4, 2, 6);
+    check_rotate_cfg!(check_rotate_left_5_2, check_rotate_right_5_2, 5, 2, 7);
+    check_rotate_cfg!(check_rotate_left_8_3, check_rotate_right_8_3, 8, 3, 10);
+
+    // src and dst come from SEPARATE backing arrays (disjoint, as copy_from_slice
+    // requires) with a shared symbolic length so the equal-length precondition holds.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_copy_from_slice_u8() {
+        const ARR_SIZE: usize = 8;
+        let mut dst_arr: [u8; ARR_SIZE] = kani::any();
+        let src_arr: [u8; ARR_SIZE] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= ARR_SIZE);
+        let dst = &mut dst_arr[..len];
+        let src = &src_arr[..len];
+        dst.copy_from_slice(src);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_copy_within_u8() {
+        const ARR_SIZE: usize = 8;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let start: usize = kani::any();
+        let end: usize = kani::any();
+        let dest: usize = kani::any();
+        kani::assume(start <= end && end <= s.len());
+        let count = end - start;
+        kani::assume(dest <= s.len() - count);
+        s.copy_within(start..end, dest);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_swap_with_slice_u8() {
+        const ARR_SIZE: usize = 8;
+        let mut a_arr: [u8; ARR_SIZE] = kani::any();
+        let mut b_arr: [u8; ARR_SIZE] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= ARR_SIZE);
+        let a = &mut a_arr[..len];
+        let b = &mut b_arr[..len];
+        a.swap_with_slice(b);
+    }
+
+    // Heaviest: the dedup loop runs `next_read` from 1 to len with two &mut creations
+    // and a swap per iteration. Nondeterministic `same_bucket` exercises all branches.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn check_partition_dedup_by_u8() {
+        const ARR_SIZE: usize = 5;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let _ = s.partition_dedup_by(|_a, _b| kani::any());
+    }
 }
