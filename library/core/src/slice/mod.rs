@@ -5731,4 +5731,89 @@ mod verify {
         kani::assume(i0 != i1 && i0 != i2 && i1 != i2);
         let _ = unsafe { slice.get_disjoint_unchecked_mut([i0, i1, i2]) };
     }
+
+    // ---- Safe chunk accessors (first/last/split_first/split_last _chunk) ----
+    // Safe abstractions: prove the internal unsafe (a bounded `cast_array` ptr cast
+    // guarded by a `len < N` / `split_at_checked(N)` check) is UB-free for a slice of
+    // any (symbolic) length. O(1), no loop -> no `#[kani::unwind]`. The symbolic
+    // length exercises both the `None` (too short) and `Some` (cast) branches.
+
+    macro_rules! check_chunk_accessor {
+        ($harness:ident, $ty:ty, $n:literal, $method:ident) => {
+            #[kani::proof]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let _ = slice.$method::<$n>();
+            }
+        };
+    }
+    macro_rules! check_chunk_accessor_mut {
+        ($harness:ident, $ty:ty, $n:literal, $method:ident) => {
+            #[kani::proof]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let _ = slice.$method::<$n>();
+            }
+        };
+    }
+
+    check_chunk_accessor!(check_first_chunk_u8_0, u8, 0, first_chunk);
+    check_chunk_accessor!(check_first_chunk_u8_2, u8, 2, first_chunk);
+    check_chunk_accessor!(check_first_chunk_char_3, char, 3, first_chunk);
+    check_chunk_accessor!(check_split_first_chunk_u8_2, u8, 2, split_first_chunk);
+    check_chunk_accessor!(check_split_first_chunk_char_3, char, 3, split_first_chunk);
+    check_chunk_accessor!(check_split_last_chunk_u8_2, u8, 2, split_last_chunk);
+    check_chunk_accessor!(check_split_last_chunk_char_3, char, 3, split_last_chunk);
+    check_chunk_accessor!(check_last_chunk_u8_0, u8, 0, last_chunk);
+    check_chunk_accessor!(check_last_chunk_u8_2, u8, 2, last_chunk);
+    check_chunk_accessor!(check_last_chunk_char_3, char, 3, last_chunk);
+
+    check_chunk_accessor_mut!(check_first_chunk_mut_u8_2, u8, 2, first_chunk_mut);
+    check_chunk_accessor_mut!(check_first_chunk_mut_char_3, char, 3, first_chunk_mut);
+    check_chunk_accessor_mut!(check_split_first_chunk_mut_u8_2, u8, 2, split_first_chunk_mut);
+    check_chunk_accessor_mut!(check_split_first_chunk_mut_char_3, char, 3, split_first_chunk_mut);
+    check_chunk_accessor_mut!(check_split_last_chunk_mut_u8_2, u8, 2, split_last_chunk_mut);
+    check_chunk_accessor_mut!(check_split_last_chunk_mut_char_3, char, 3, split_last_chunk_mut);
+    check_chunk_accessor_mut!(check_last_chunk_mut_u8_2, u8, 2, last_chunk_mut);
+    check_chunk_accessor_mut!(check_last_chunk_mut_char_3, char, 3, last_chunk_mut);
+
+    // ---- split_at_checked / split_at_mut_checked ----
+    // Safe wrappers over split_at_unchecked guarded by `mid <= len`; symbolic `mid`
+    // exercises both the `Some` and `None` branches. O(1), no loop.
+
+    macro_rules! check_split_at_checked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let mid: usize = kani::any();
+                let _ = slice.split_at_checked(mid);
+            }
+        };
+    }
+    check_split_at_checked!(check_split_at_checked_u8, u8);
+    check_split_at_checked!(check_split_at_checked_u64, u64);
+    check_split_at_checked!(check_split_at_checked_char, char);
+
+    macro_rules! check_split_at_mut_checked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let mid: usize = kani::any();
+                let _ = slice.split_at_mut_checked(mid);
+            }
+        };
+    }
+    check_split_at_mut_checked!(check_split_at_mut_checked_u8, u8);
+    check_split_at_mut_checked!(check_split_at_mut_checked_u64, u64);
+    check_split_at_mut_checked!(check_split_at_mut_checked_char, char);
 }
