@@ -274,3 +274,43 @@ unsafe impl<I: InPlaceIterable + Iterator, const N: usize> InPlaceIterable for A
         }
     };
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|i: &usize| *i <= orig.len());
+            let first = kani::any_where(|i: &usize| *i <= last);
+            &orig[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|v| *v != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    // `next_back_remainder` pulls the final `len % N` elements off the back via
+    // `rev().take(rem).next_chunk()`, then reverses them in place, relying on
+    // `unwrap_err_unchecked` (sound because `rem < N`).
+    macro_rules! check_next_back_remainder {
+        ($harness:ident, $elem_ty:ty, $n:expr, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const N: usize = $n;
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it: ArrayChunks<_, N> = ArrayChunks::new(any_slice(&array).iter());
+                it.next_back_remainder();
+                let _ = &it.remainder;
+            }
+        };
+    }
+    check_next_back_remainder!(check_array_chunks_next_back_remainder_unit, (), 2, 8);
+    check_next_back_remainder!(check_array_chunks_next_back_remainder_u8, u8, 2, 8);
+    check_next_back_remainder!(check_array_chunks_next_back_remainder_char, char, 3, 9);
+    check_next_back_remainder!(check_array_chunks_next_back_remainder_tup, (char, u8), 2, 8);
+}

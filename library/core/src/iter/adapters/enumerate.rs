@@ -321,3 +321,67 @@ impl<I: Default> Default for Enumerate<I> {
         Enumerate::new(Default::default())
     }
 }
+
+/// Verification harnesses for `Enumerate`'s `unsafe`/contract-bearing methods
+/// (verify-rust-std challenge #16).
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    /// An arbitrary-length sub-slice of `orig_slice` (mirrors
+    /// `slice::iter::verify::any_slice`).  This is what makes the proof
+    /// *unbounded*: the backing array is a fixed Kani constant, but the slice
+    /// handed to the iterator has a symbolic length, so the proof covers every
+    /// shorter configuration at once.
+    fn any_slice<T>(orig_slice: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            // SAFETY: `ptr` is non-null and aligned; length 0 makes the slice trivially valid.
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    /// Wrap an arbitrary sub-slice in `Enumerate<slice::Iter<'_, T>>`.  We build
+    /// the inner `slice::Iter` via `(&[T]).iter()` because `slice::Iter::new` is
+    /// `pub(super)` to the `slice` module and unreachable from here.
+    fn any_enumerate_iter<'a, T>(orig_slice: &'a [T]) -> Enumerate<crate::slice::Iter<'a, T>> {
+        Enumerate::new(any_slice(orig_slice).iter())
+    }
+
+    /// One `proof_for_contract` harness per concrete element type; the contract
+    /// itself stays generic.  `slice::Iter<T>` is `TrustedRandomAccessNoCoerce`
+    /// for every `T`, satisfying the method's `Self: TrustedRandomAccessNoCoerce`.
+    // NOTE: `__iterator_get_unchecked` is a trait method on the *generic* impl
+    // `impl<I> Iterator for Enumerate<I>`, and Kani cannot attach a
+    // `proof_for_contract` to a generic trait method (kani#1997).  So instead of
+    // the contract machinery we use a plain `#[kani::proof]` that establishes the
+    // method's precondition by construction (`idx < self.iter.size_hint().0`) and
+    // lets Kani prove the body introduces no UB -- the same safety property the
+    // contract expresses.
+    macro_rules! check_enumerate_get_unchecked {
+        ($harness:ident, $elem_ty:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut enumerate = any_enumerate_iter::<$elem_ty>(&array);
+                // The method's precondition: `idx < self.iter.size_hint().0`.
+                let idx = kani::any_where(|i: &usize| *i < enumerate.iter.size_hint().0);
+                let _ = unsafe { enumerate.__iterator_get_unchecked(idx) };
+            }
+        };
+    }
+
+    // Representative element types: ZST, byte, 4-byte-align niche type, composite.
+    check_enumerate_get_unchecked!(check_enumerate_get_unchecked_unit, (), isize::MAX as usize);
+    check_enumerate_get_unchecked!(check_enumerate_get_unchecked_u8, u8, u32::MAX as usize);
+    check_enumerate_get_unchecked!(check_enumerate_get_unchecked_char, char, 50);
+    check_enumerate_get_unchecked!(check_enumerate_get_unchecked_tup, (char, u8), 50);
+}

@@ -589,3 +589,46 @@ spec_int_ranges_r!(u8 u16 u32 usize);
 spec_int_ranges!(u8 u16 usize);
 #[cfg(target_pointer_width = "16")]
 spec_int_ranges_r!(u8 u16 usize);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|i: &usize| *i <= orig.len());
+            let first = kani::any_where(|i: &usize| *i <= last);
+            &orig[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|v| *v != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    // `original_step` reconstructs the configured step as `step_minus_one + 1`
+    // via `unchecked_add` and `NonZero::new_unchecked`. The type invariant
+    // (`step_minus_one < usize::MAX`) makes both operations sound; a valid
+    // `StepBy` is established by construction (`StepBy::new` requires `step != 0`).
+    macro_rules! check_original_step {
+        ($harness:ident, $elem_ty:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let step = kani::any_where(|s: &usize| *s != 0);
+                let it = StepBy::new(any_slice(&array).iter(), step);
+                let result = it.original_step();
+                kani::assert(result.get() == step, "original_step round-trips the configured step");
+            }
+        };
+    }
+    // `original_step` ignores the wrapped iterator, so a small backing array
+    // suffices; the proof is over the symbolic `step`, not the slice length.
+    check_original_step!(check_step_by_original_step_unit, (), 16);
+    check_original_step!(check_step_by_original_step_u8, u8, 16);
+    check_original_step!(check_step_by_original_step_char, char, 16);
+    check_original_step!(check_step_by_original_step_tup, (char, u8), 16);
+}
