@@ -945,6 +945,8 @@ impl<T> [T] {
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
     #[track_caller]
+    #[requires(a < self.len() && b < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -2040,6 +2042,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(mid <= self.len())]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2094,6 +2097,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(mid <= self.len())]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -5508,4 +5512,65 @@ mod verify {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
     }
+
+    // ---- Challenge 17: O(1) unsafe split/swap fns ----
+    // These are bounds-geometry proofs (no element-value dependence and no loop),
+    // so they need no `#[kani::unwind]`; the symbolic-length sub-slice over a fixed
+    // backing array is the accepted "unbounded" encoding.
+
+    macro_rules! check_split_at_unchecked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::split_at_unchecked)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let mid: usize = kani::any();
+                let _ = unsafe { slice.split_at_unchecked(mid) };
+            }
+        };
+    }
+    check_split_at_unchecked!(check_split_at_unchecked_unit, ());
+    check_split_at_unchecked!(check_split_at_unchecked_u8, u8);
+    check_split_at_unchecked!(check_split_at_unchecked_u64, u64);
+    check_split_at_unchecked!(check_split_at_unchecked_char, char);
+
+    macro_rules! check_split_at_mut_unchecked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::split_at_mut_unchecked)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let mid: usize = kani::any();
+                let _ = unsafe { slice.split_at_mut_unchecked(mid) };
+            }
+        };
+    }
+    check_split_at_mut_unchecked!(check_split_at_mut_unchecked_unit, ());
+    check_split_at_mut_unchecked!(check_split_at_mut_unchecked_u8, u8);
+    check_split_at_mut_unchecked!(check_split_at_mut_unchecked_u64, u64);
+    check_split_at_mut_unchecked!(check_split_at_mut_unchecked_char, char);
+
+    macro_rules! check_swap_unchecked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::swap_unchecked)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let a: usize = kani::any();
+                let b: usize = kani::any();
+                unsafe { slice.swap_unchecked(a, b) };
+            }
+        };
+    }
+    // NOTE: no ZST (`()`) instantiation for `swap_unchecked`: `kani::modifies(self)`
+    // over a zero-size slice region trips a CBMC contracts-library limitation
+    // (`car_set_insert`). Swapping ZSTs moves zero bytes, so it is trivially safe;
+    // the non-ZST instantiations below exercise the actual `ptr::swap` memory writes.
+    check_swap_unchecked!(check_swap_unchecked_u8, u8);
+    check_swap_unchecked!(check_swap_unchecked_u16, u16);
+    check_swap_unchecked!(check_swap_unchecked_u64, u64);
+    check_swap_unchecked!(check_swap_unchecked_char, char);
 }
