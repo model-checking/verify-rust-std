@@ -252,8 +252,10 @@ mod verify {
                 const MAX_LEN: usize = 6;
                 const N: usize = 4;
                 let array: [$elem_ty; MAX_LEN] = kani::any();
-                let mut it =
-                    Filter::new(any_slice(&array).iter(), maybe_keep::<$elem_ty> as fn(&&$elem_ty) -> bool);
+                let mut it = Filter::new(
+                    any_slice(&array).iter(),
+                    maybe_keep::<$elem_ty> as fn(&&$elem_ty) -> bool,
+                );
                 let _ = it.next_chunk_dropless::<N>();
             }
         };

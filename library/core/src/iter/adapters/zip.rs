@@ -791,19 +791,39 @@ mod verify {
         };
     }
     check_zip_safe!(
-        (), (), check_zip_next_unit, check_zip_nth_unit, check_zip_next_back_unit,
-        check_zip_fold_unit, check_zip_spec_fold_unit
+        (),
+        (),
+        check_zip_next_unit,
+        check_zip_nth_unit,
+        check_zip_next_back_unit,
+        check_zip_fold_unit,
+        check_zip_spec_fold_unit
     );
     check_zip_safe!(
-        u8, u8, check_zip_next_u8, check_zip_nth_u8, check_zip_next_back_u8,
-        check_zip_fold_u8, check_zip_spec_fold_u8
+        u8,
+        u8,
+        check_zip_next_u8,
+        check_zip_nth_u8,
+        check_zip_next_back_u8,
+        check_zip_fold_u8,
+        check_zip_spec_fold_u8
     );
     check_zip_safe!(
-        char, u8, check_zip_next_char_u8, check_zip_nth_char_u8, check_zip_next_back_char_u8,
-        check_zip_fold_char_u8, check_zip_spec_fold_char_u8
+        char,
+        u8,
+        check_zip_next_char_u8,
+        check_zip_nth_char_u8,
+        check_zip_next_back_char_u8,
+        check_zip_fold_char_u8,
+        check_zip_spec_fold_char_u8
     );
     check_zip_safe!(
-        (char, u8), (u32, i16), check_zip_next_tup, check_zip_nth_tup, check_zip_next_back_tup,
-        check_zip_fold_tup, check_zip_spec_fold_tup
+        (char, u8),
+        (u32, i16),
+        check_zip_next_tup,
+        check_zip_nth_tup,
+        check_zip_next_back_tup,
+        check_zip_fold_tup,
+        check_zip_spec_fold_tup
     );
 }
