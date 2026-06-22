@@ -98,15 +98,6 @@ jobs:
       # - core_arch::x86::__m128d::as_f64x2 is just one example of hundreds of
       #   core_arch::x86:: functions that are known to verify successfully.
       - name: Run Kani Verification
-        env:
-          # The flt2dec memory-safety harnesses (challenge #28) stub the bignum/Fp
-          # arithmetic, which makes the std `debug_assert!` digit-correctness checks
-          # (e.g. `d < 10`, `mant < scale`) unprovable. Those asserts are not
-          # memory-safety properties and are dead in release and in the verify-std
-          # job (which runs with `--prove-safety-only`, i.e. debug-assertions off).
-          # Disabling them here keeps autoharness consistent with verify-std; this is
-          # monotonic (it only removes checks, so no harness can newly fail).
-          RUSTFLAGS: "-C debug-assertions=off"
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
