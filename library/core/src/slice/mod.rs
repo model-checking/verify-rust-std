@@ -5639,14 +5639,24 @@ mod verify {
         };
     }
     check_get_unchecked_mut!(
-        check_get_unchecked_mut_usize_unit, check_get_unchecked_mut_range_unit, ()
-    );
-    check_get_unchecked_mut!(check_get_unchecked_mut_usize_u8, check_get_unchecked_mut_range_u8, u8);
-    check_get_unchecked_mut!(
-        check_get_unchecked_mut_usize_u64, check_get_unchecked_mut_range_u64, u64
+        check_get_unchecked_mut_usize_unit,
+        check_get_unchecked_mut_range_unit,
+        ()
     );
     check_get_unchecked_mut!(
-        check_get_unchecked_mut_usize_char, check_get_unchecked_mut_range_char, char
+        check_get_unchecked_mut_usize_u8,
+        check_get_unchecked_mut_range_u8,
+        u8
+    );
+    check_get_unchecked_mut!(
+        check_get_unchecked_mut_usize_u64,
+        check_get_unchecked_mut_range_u64,
+        u64
+    );
+    check_get_unchecked_mut!(
+        check_get_unchecked_mut_usize_char,
+        check_get_unchecked_mut_range_char,
+        char
     );
 
     // ---- as_chunks_unchecked / as_chunks_unchecked_mut ----
