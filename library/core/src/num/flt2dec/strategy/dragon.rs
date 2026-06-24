@@ -358,24 +358,7 @@ pub fn format_exact<'a>(
                 return (unsafe { buf[..len].assume_init_ref() }, k);
             }
 
-            let mut d = 0;
-            if mant >= scale8 {
-                mant.sub(&scale8);
-                d += 8;
-            }
-            if mant >= scale4 {
-                mant.sub(&scale4);
-                d += 4;
-            }
-            if mant >= scale2 {
-                mant.sub(&scale2);
-                d += 2;
-            }
-            if mant >= scale {
-                mant.sub(&scale);
-                d += 1;
-            }
-            debug_assert!(mant < scale);
+            let (d, _) = div_rem_upto_16(&mut mant, &scale, &scale2, &scale4, &scale8);
             debug_assert!(d < 10);
             buf[i] = MaybeUninit::new(b'0' + d);
             mant.mul_small(10);
@@ -410,13 +393,17 @@ pub fn format_exact<'a>(
     (unsafe { buf[..len].assume_init_ref() }, k)
 }
 
-// Buffer-safety-only proof of format_exact via COMPLETE bignum stubbing.
-// Hypothesis: with debug-assertions OFF (so `debug_assert!(d < 10)` is dead, like
-// the VeriFast frontend) AND every Big op havoc-stubbed (incl. is_zero/cmp, which
-// a partial stub left concrete and bit-blasting), format_exact's only obligations
-// are the explicit `for i in 0..len` (len <= buf.len()) bound + the assume_init
-// init tracking -- pure control flow, no arithmetic.  Run with
-// RUSTFLAGS="-C debug-assertions=off".
+// Buffer-safety-only proof of format_shortest / format_exact via COMPLETE bignum
+// stubbing.  Every `Big` op is havoc-stubbed (incl. is_zero/cmp) so the proof is
+// value-independent: the only remaining obligations are the digit-loop bound
+// (`for i in 0..len`, `len <= buf.len()`; the shortest loop is bounded by the
+// cited digit-count assume) plus assume_init initialization tracking -- pure
+// control flow, no arithmetic.  Runs under the default verify-std configuration
+// with debug-assertions ON: the value-dependent `debug_assert!(d < 10)` and the
+// `debug_assert!(*x < *scale)` inside `div_rem_upto_16` are discharged by stubbing
+// `div_rem_upto_16` with its value contract (`s_div_rem`), NOT by disabling
+// debug-assertions.  `div_rem_upto_16` has no unsafe and no buffer access, so this
+// abstraction loses no memory-safety coverage.
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 pub mod dragon_verify_stub {
@@ -464,6 +451,26 @@ pub mod dragon_verify_stub {
         kani::assume(k > -400 && k < 400);
         k
     }
+    // Constrained stub for the 8-4-2-1 digit extraction.  The real function returns
+    // the single decimal digit `floor(x / scale)` (always `< 10` for valid Dragon
+    // inputs, where `x < 10 * scale`) and leaves `x` as the remainder `< scale`.
+    // Under the no-op bignum stubs the four `>=` tests would all fire (no-op `sub`
+    // never shrinks `x`), yielding `d` up to 15 and tripping the live
+    // `debug_assert!(d < 10)` (and the internal `debug_assert!(*x < *scale)`).
+    // `div_rem_upto_16` contains NO unsafe and NO buffer access, so abstracting it
+    // by its value contract (`d < 10`, `x` left as a havoced remainder) discharges
+    // those value-only assertions while losing no memory-safety coverage.
+    fn s_div_rem<'a>(
+        x: &'a mut Big,
+        _scale: &Big,
+        _scale2: &Big,
+        _scale4: &Big,
+        _scale8: &Big,
+    ) -> (u8, &'a mut Big) {
+        let d: u8 = kani::any();
+        kani::assume(d < 10);
+        (d, x)
+    }
 
     #[kani::proof]
     #[kani::unwind(6)]
@@ -477,6 +484,7 @@ pub mod dragon_verify_stub {
     #[kani::stub(mul_pow10, s_mul_pow10)]
     #[kani::stub(div_2pow10, s_div_2pow10)]
     #[kani::stub(estimate_scaling_factor, s_estimate)]
+    #[kani::stub(div_rem_upto_16, s_div_rem)]
     fn check_format_exact_stub() {
         let mant: u64 = kani::any();
         kani::assume(mant > 0 && mant < (1 << 61));
@@ -516,6 +524,7 @@ pub mod dragon_verify_stub {
     #[kani::stub(Big::cmp, s_cmp)]
     #[kani::stub(mul_pow10, s_mul_pow10)]
     #[kani::stub(estimate_scaling_factor, s_estimate)]
+    #[kani::stub(div_rem_upto_16, s_div_rem)]
     fn check_format_shortest_stub() {
         let d = arbitrary_decoded_tight();
         let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
