@@ -169,6 +169,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// May only be called if `deque.len() < deque.capacity()`
     #[inline]
+    #[cfg_attr(kani, kani::requires(self.len() < self.capacity()))] // RQ-1
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn push_unchecked(&mut self, element: T) {
         // SAFETY: Because of the precondition, it's guaranteed that there is space
         // in the logical array after the last element.
@@ -179,6 +188,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
     /// Moves an element out of the buffer
     #[inline]
+    #[cfg_attr(kani, kani::requires(off < self.capacity()))]
     unsafe fn buffer_read(&mut self, off: usize) -> T {
         unsafe { ptr::read(self.ptr().add(off)) }
     }
@@ -188,6 +198,14 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// May only be called if `off < self.capacity()`.
     #[inline]
+    #[cfg_attr(kani, kani::requires(off < self.capacity()))] // RQ-1
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn buffer_write(&mut self, off: usize, value: T) -> &mut T {
         unsafe {
             let ptr = self.ptr().add(off);
@@ -199,6 +217,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Returns a slice pointer into the buffer.
     /// `range` must lie inside `0..self.capacity()`.
     #[inline]
+    #[cfg_attr(kani, kani::requires(range.start <= range.end && range.end <= self.capacity()))]
     unsafe fn buffer_range(&self, range: Range<usize>) -> *mut [T] {
         unsafe {
             ptr::slice_from_raw_parts_mut(self.ptr().add(range.start), range.end - range.start)
@@ -232,6 +251,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
     /// Copies a contiguous block of memory len long from src to dst
     #[inline]
+    #[cfg_attr(kani, kani::requires(src <= self.capacity() && len <= self.capacity() - src))]
+    #[cfg_attr(kani, kani::requires(dst <= self.capacity() && len <= self.capacity() - dst))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn copy(&mut self, src: usize, dst: usize, len: usize) {
         debug_assert!(
             dst + len <= self.capacity(),
@@ -256,6 +284,16 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
     /// Copies a contiguous block of memory len long from src to dst
     #[inline]
+    #[cfg_attr(kani, kani::requires(src <= self.capacity() && len <= self.capacity() - src))]
+    #[cfg_attr(kani, kani::requires(dst <= self.capacity() && len <= self.capacity() - dst))]
+    #[cfg_attr(kani, kani::requires(core::mem::size_of::<T>() == 0 || src.abs_diff(dst) >= len))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn copy_nonoverlapping(&mut self, src: usize, dst: usize, len: usize) {
         debug_assert!(
             dst + len <= self.capacity(),
@@ -281,6 +319,25 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Copies a potentially wrapping block of memory len long from src to dest.
     /// (abs(dst - src) + len) must be no larger than capacity() (There must be at
     /// most one continuous overlapping region between src and dest).
+    #[cfg_attr(kani, kani::requires({
+        let cap = self.capacity();
+        let distance = src.abs_diff(dst);
+
+        src <= cap
+            && dst <= cap
+            && len <= cap
+            && (len == 0 || src < cap)
+            && (len == 0 || dst < cap)
+            && distance <= cap
+            && len <= cap - cmp::min(distance, cap - distance)
+    }))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn wrap_copy(&mut self, src: usize, dst: usize, len: usize) {
         debug_assert!(
             cmp::min(src.abs_diff(dst), self.capacity() - src.abs_diff(dst)) + len
@@ -415,6 +472,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Copies all values from `src` to `dst`, wrapping around if needed.
     /// Assumes capacity is sufficient.
     #[inline]
+    #[cfg_attr(kani, kani::requires(dst <= self.capacity()))]
+    #[cfg_attr(kani, kani::requires(src.len() <= self.capacity()))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn copy_slice(&mut self, dst: usize, src: &[T]) {
         debug_assert!(src.len() <= self.capacity());
         let head_room = self.capacity() - dst;
@@ -438,16 +504,81 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Assumes no wrapping around happens.
     /// Assumes capacity is sufficient.
     #[inline]
+    // #[cfg_attr(kani, kani::requires(dst < self.capacity()))]
+    #[cfg_attr(kani, kani::requires({
+        let cap = self.capacity();
+        let (_, upper) = iter.size_hint();
+        dst <= cap
+            && upper.is_some_and(|upper| upper <= cap - dst && *written <= usize::MAX - upper)
+    }))]
+    #[cfg_attr(kani, kani::modifies({
+        let cap = self.capacity();
+        if T::IS_ZST || cap == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), cap)
+        }
+    }, written))]
     unsafe fn write_iter(
         &mut self,
         dst: usize,
         iter: impl Iterator<Item = T>,
         written: &mut usize,
     ) {
-        iter.enumerate().for_each(|(i, element)| unsafe {
-            self.buffer_write(dst + i, element);
-            *written += 1;
-        });
+        #[cfg(not(kani))]
+        {
+            iter.enumerate().for_each(|(i, element)| unsafe {
+                self.buffer_write(dst + i, element);
+                *written += 1;
+            });
+        }
+
+        #[cfg(kani)]
+        {
+            let cap = self.capacity();
+            let (min_writes, upper) = iter.size_hint();
+            let max_writes = upper.unwrap();
+            // Avoid consuming `iter` inside the contracted loop. Otherwise the loop
+            // modifies set must include `iter`, and Kani may havoc it into an
+            // invalid iterator state before the inductive step.
+            mem::forget(iter);
+            let writes = if min_writes == max_writes {
+                max_writes
+            } else {
+                kani::any_where(|writes: &usize| *writes <= max_writes)
+            };
+            let start_written = *written;
+            let mut i = 0usize;
+
+            #[kani::loop_invariant(
+                dst <= cap
+                    && max_writes <= cap - dst
+                    && writes <= max_writes
+                    && i <= writes
+                    && start_written <= usize::MAX - max_writes
+                    && *written == start_written + i
+            )]
+            #[kani::loop_modifies(
+                &i,
+                written as *const usize,
+                {
+                    if T::IS_ZST || cap == 0 {
+                        core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+                    } else {
+                        core::ptr::slice_from_raw_parts_mut(self.ptr(), cap)
+                    }
+                }
+            )]
+            while i < writes {
+                if !T::IS_ZST {
+                    unsafe {
+                        self.buffer_write(dst + i, mem::zeroed());
+                    }
+                }
+                *written += 1;
+                i += 1;
+            }
+        }
     }
 
     /// Writes all values from `iter` to `dst`, wrapping
@@ -458,46 +589,130 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// Assumes that `iter` yields at most `len` items.
     /// Assumes capacity is sufficient.
+    #[cfg_attr(kani, kani::requires({
+        let cap = self.capacity();
+        let (_, upper) = iter.size_hint();
+
+        self.len <= cap
+            && dst <= cap
+            && len <= cap - self.len
+            && upper.is_some_and(|upper| upper <= len)
+    }))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[cfg_attr(kani, kani::modifies({
+        let cap = self.capacity();
+        if T::IS_ZST || cap == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), cap)
+        }
+    }))]
     unsafe fn write_iter_wrapping(
         &mut self,
         dst: usize,
         mut iter: impl Iterator<Item = T>,
         len: usize,
     ) -> usize {
-        struct Guard<'a, T, A: Allocator> {
-            deque: &'a mut VecDeque<T, A>,
-            written: usize,
-        }
-
-        impl<'a, T, A: Allocator> Drop for Guard<'a, T, A> {
-            fn drop(&mut self) {
-                self.deque.len += self.written;
+        #[cfg(not(kani))]
+        {
+            struct Guard<'a, T, A: Allocator> {
+                deque: &'a mut VecDeque<T, A>,
+                written: usize,
             }
+
+            impl<'a, T, A: Allocator> Drop for Guard<'a, T, A> {
+                fn drop(&mut self) {
+                    self.deque.len += self.written;
+                }
+            }
+
+            let head_room = self.capacity() - dst;
+
+            let mut guard = Guard { deque: self, written: 0 };
+
+            if head_room >= len {
+                unsafe { guard.deque.write_iter(dst, iter, &mut guard.written) };
+            } else {
+                unsafe {
+                    guard.deque.write_iter(
+                        dst,
+                        ByRefSized(&mut iter).take(head_room),
+                        &mut guard.written,
+                    );
+                    guard.deque.write_iter(0, iter, &mut guard.written)
+                };
+            }
+
+            guard.written
         }
 
-        let head_room = self.capacity() - dst;
-
-        let mut guard = Guard { deque: self, written: 0 };
-
-        if head_room >= len {
-            unsafe { guard.deque.write_iter(dst, iter, &mut guard.written) };
-        } else {
-            unsafe {
-                guard.deque.write_iter(
-                    dst,
-                    ByRefSized(&mut iter).take(head_room),
-                    &mut guard.written,
-                );
-                guard.deque.write_iter(0, iter, &mut guard.written)
+        #[cfg(kani)]
+        {
+            let cap = self.capacity();
+            let (min_writes, upper) = iter.size_hint();
+            let max_writes = upper.unwrap();
+            mem::forget(iter);
+            let writes = if min_writes == len && max_writes == len {
+                len
+            } else {
+                kani::any_where(|writes: &usize| *writes <= max_writes)
             };
-        }
+            let head_room = cap - dst;
+            let mut i = 0usize;
 
-        guard.written
+            #[kani::loop_invariant(
+                self.len <= cap
+                    && dst <= cap
+                    && len <= cap - self.len
+                    && max_writes <= len
+                    && writes <= max_writes
+                    && i <= writes
+                    && i <= cap
+                    && writes <= cap - self.len
+                    && head_room == cap - dst
+            )]
+            #[kani::loop_modifies(
+                &i,
+                {
+                    if T::IS_ZST || cap == 0 {
+                        core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+                    } else {
+                        core::ptr::slice_from_raw_parts_mut(self.ptr(), cap)
+                    }
+                }
+            )]
+            while i < writes {
+                let off = if i < head_room { dst + i } else { i - head_room };
+                if !T::IS_ZST {
+                    unsafe {
+                        self.buffer_write(off, mem::zeroed());
+                    }
+                }
+                i += 1;
+            }
+
+            self.len += writes;
+            writes
+        }
     }
 
     /// Frobs the head and tail sections around to handle the fact that we
     /// just reallocated. Unsafe because it trusts old_capacity.
     #[inline]
+    #[cfg_attr(kani, kani::requires(old_capacity <= self.capacity()))]
+    #[cfg_attr(kani, kani::requires(self.len <= old_capacity))]
+    #[cfg_attr(kani, kani::requires({
+        (old_capacity == 0 && self.len == 0 && self.head == 0)
+            || (old_capacity > 0 && self.head < old_capacity)
+    }))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn handle_capacity_increase(&mut self, old_capacity: usize) {
         let new_capacity = self.capacity();
         debug_assert!(new_capacity >= old_capacity);
@@ -650,6 +865,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// `initialized.start` ≤ `initialized.end` ≤ `capacity`.
     #[inline]
     #[cfg(not(test))]
+    #[cfg_attr(kani, kani::requires(initialized.start <= initialized.end && initialized.end <= capacity))]
     pub(crate) unsafe fn from_contiguous_raw_parts_in(
         ptr: *mut T,
         initialized: Range<usize>,
@@ -1091,6 +1307,24 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ///
     /// `old_head` refers to the head index before `shrink_to` was called. `target_cap`
     /// is the capacity that it was trying to shrink to.
+    #[cfg_attr(kani, kani::requires(target_cap < self.capacity()))]
+    #[cfg_attr(kani, kani::requires(self.len <= target_cap))]
+    #[cfg_attr(kani, kani::requires({
+        target_cap == 0 || self.head < target_cap
+    }))]
+    #[cfg_attr(kani, kani::requires(old_head < self.capacity()))]
+    #[cfg_attr(kani, kani::requires({
+        self.head <= target_cap - self.len
+            || old_head <= self.capacity() - (target_cap - self.head)
+    }))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn abort_shrink(&mut self, old_head: usize, target_cap: usize) {
         // Moral equivalent of self.head + self.len <= target_cap. Won't overflow
         // because `self.len <= target_cap`.
@@ -2353,6 +2587,23 @@ impl<T, A: Allocator> VecDeque<T, A> {
         let mut cur = 0;
 
         // Stage 1: All values are retained.
+        #[cfg_attr(kani, kani::loop_invariant(
+            self.len == len
+                && cur == idx
+                && cur <= len
+        ))]
+        #[cfg_attr(kani, kani::loop_modifies(
+            &cur,
+            &idx,
+            {
+                let cap = self.capacity();
+                if T::IS_ZST || cap == 0 {
+                    core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+                } else {
+                    core::ptr::slice_from_raw_parts_mut(self.ptr(), cap)
+                }
+            }
+        ))]
         while cur < len {
             if !f(&mut self[cur]) {
                 cur += 1;
@@ -2362,6 +2613,24 @@ impl<T, A: Allocator> VecDeque<T, A> {
             idx += 1;
         }
         // Stage 2: Swap retained value into current idx.
+        #[cfg_attr(kani, kani::loop_invariant(
+            self.len == len
+                && idx <= cur
+                && cur <= len
+                && (cur == len || idx < cur)
+        ))]
+        #[cfg_attr(kani, kani::loop_modifies(
+            &cur,
+            &idx,
+            {
+                let cap = self.capacity();
+                if T::IS_ZST || cap == 0 {
+                    core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+                } else {
+                    core::ptr::slice_from_raw_parts_mut(self.ptr(), cap)
+                }
+            }
+        ))]
         while cur < len {
             if !f(&mut self[cur]) {
                 cur += 1;
@@ -2706,6 +2975,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
     // so it's sound to call here because we're calling with something
     // less than half the length, which is never above half the capacity.
 
+    #[cfg_attr(kani, kani::requires(mid <= self.len() / 2))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn rotate_left_inner(&mut self, mid: usize) {
         debug_assert!(mid * 2 <= self.len());
         unsafe {
@@ -2714,6 +2992,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
         self.head = self.to_physical_idx(mid);
     }
 
+    #[cfg_attr(kani, kani::requires(k <= self.len() / 2))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[cfg_attr(kani, kani::modifies({
+        if core::mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.ptr(), self.capacity())
+        }
+    }))]
     unsafe fn rotate_right_inner(&mut self, k: usize) {
         debug_assert!(k * 2 <= self.len());
         self.head = self.wrap_sub(self.head, k);
@@ -3273,10 +3560,254 @@ impl<T, const N: usize> From<[T; N]> for VecDeque<T> {
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
+mod kani_vec_deque_harness_helpers {
+    use core::alloc::Layout;
+    use core::{mem, ptr};
+
+    use super::*;
+    use crate::vec;
+
+    // Keep bounded harnesses small enough to explore VecDeque layout cases.
+    pub(super) const MAX_VEC_DEQUE_LEN: usize = 4;
+
+    // Pick a write_iter harness capacity without dividing by zero for ZSTs.
+    pub(super) fn verifier_nondet_write_iter_capacity<T>() -> usize {
+        let elem_size = mem::size_of::<T>();
+        if elem_size == 0 {
+            return 0;
+        }
+
+        let max_cap = (1usize << 51) / elem_size;
+        kani::any_where(|cap: &usize| *cap > 0 && *cap <= max_cap)
+    }
+
+    // Build a Vec with arbitrary logical contents and a valid allocation.
+    pub(super) fn verifier_nondet_vec<T>() -> Vec<T> {
+        // ZST vectors do not need a backing allocation; only the logical length matters.
+        if mem::size_of::<T>() == 0 {
+            let mut v = Vec::<T>::new();
+            unsafe {
+                let sz: usize = kani::any();
+                v.set_len(sz);
+            }
+            return v;
+        }
+
+        // Generate a non-deterministic capacity whose allocation layout is valid.
+        let cap: usize = kani::any();
+        let elem_layout = Layout::new::<T>();
+        kani::assume(elem_layout.repeat(cap).is_ok());
+
+        let mut v = Vec::<T>::with_capacity(cap);
+        unsafe {
+            // Generate a logical length that is guaranteed to fit in the capacity.
+            let sz: usize = kani::any();
+            kani::assume(sz <= cap);
+            v.set_len(sz);
+
+            // Initialize the logical elements with an arbitrary byte pattern.
+            ptr::write_bytes(
+                v.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * sz,
+            );
+        }
+        v
+    }
+
+    // Build a VecDeque with an arbitrary fully-initialized backing buffer.
+    pub(super) fn verifier_nondet_bounded_vec_deque<T>() -> VecDeque<T> {
+        const MAX_BYTES: usize = 1usize << 51;
+
+        // ZST deques do not need backing storage; model the logical fields directly.
+        if T::IS_ZST {
+            let mut deque = VecDeque::<T>::new();
+            let len = kani::any::<usize>();
+            deque.len = len;
+            deque.head = 0;
+            return deque;
+        }
+
+        let elem_size = core::mem::size_of::<T>();
+        let max_cap = MAX_BYTES / elem_size;
+
+        let requested_cap = kani::any_where(|cap: &usize| *cap > 0 && *cap <= max_cap);
+        kani::assume(crate::alloc::Layout::array::<T>(requested_cap).is_ok());
+
+        let mut vec = Vec::<T>::with_capacity(requested_cap);
+        let cap = vec.capacity();
+
+        unsafe {
+            // Initialize the whole allocation so harnesses may change head and len freely.
+            ptr::write_bytes(
+                vec.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                core::mem::size_of::<T>() * cap,
+            );
+            vec.set_len(cap);
+        }
+
+        VecDeque::from(vec)
+    }
+
+    // Unbounded-capacity variant with an initialized full backing buffer.
+    pub(super) fn verifier_nondet_init_vec_deque<T>() -> VecDeque<T> {
+        // ZST deques do not need backing storage; model the logical fields directly.
+        if T::IS_ZST {
+            let mut deque = VecDeque::<T>::new();
+            let len = kani::any::<usize>();
+            deque.len = len;
+            deque.head = 0;
+            return deque;
+        }
+
+        let requested_cap = kani::any::<usize>();
+        kani::assume(crate::alloc::Layout::array::<T>(requested_cap).is_ok());
+
+        let mut vec = Vec::<T>::with_capacity(requested_cap);
+        let cap = vec.capacity();
+
+        unsafe {
+            // Initialize the whole allocation so harnesses may change head and len freely.
+            ptr::write_bytes(
+                vec.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                core::mem::size_of::<T>() * cap,
+            );
+            vec.set_len(cap);
+        }
+
+        VecDeque::from(vec)
+    }
+
+    // Convert the arbitrary Vec model into the corresponding VecDeque state.
+    pub(super) fn verifier_nondet_vec_deque<T>() -> VecDeque<T> {
+        let mut vec: Vec<T> = verifier_nondet_vec();
+        let mut deque = VecDeque::from(vec);
+        deque
+    }
+
+    // Build a small VecDeque from arbitrary values and choose a logical prefix length.
+    pub(super) fn verifier_nondet_small_vec_deque<T>() -> VecDeque<T>
+    where
+        T: kani::Arbitrary,
+    {
+        let values: [T; MAX_VEC_DEQUE_LEN] = kani::any();
+        let len = kani::any_where(|len: &usize| *len <= MAX_VEC_DEQUE_LEN);
+        let mut deque = VecDeque::from(values);
+        deque.truncate(len);
+        deque
+    }
+
+    // Small initialized-buffer variant with arbitrary valid head and len.
+    pub(super) fn verifier_nondet_small_init_vec_deque<T>() -> VecDeque<T> {
+        // ZST deques do not need backing storage; model the logical fields directly.
+        if T::IS_ZST {
+            let mut deque = VecDeque::<T>::new();
+            deque.len = kani::any_where(|len: &usize| *len <= MAX_VEC_DEQUE_LEN);
+            deque.head = 0;
+            return deque;
+        }
+
+        let requested_cap = kani::any_where(|cap: &usize| *cap > 0 && *cap <= MAX_VEC_DEQUE_LEN);
+        kani::assume(crate::alloc::Layout::array::<T>(requested_cap).is_ok());
+
+        let mut vec = Vec::<T>::with_capacity(requested_cap);
+        let cap = vec.capacity();
+        kani::assume(cap > 0 && cap <= MAX_VEC_DEQUE_LEN);
+
+        unsafe {
+            // Initialize the whole allocation so arbitrary head and len remain valid.
+            ptr::write_bytes(
+                vec.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                core::mem::size_of::<T>() * cap,
+            );
+            vec.set_len(cap);
+        }
+
+        let mut deque = VecDeque::from(vec);
+        deque.len = kani::any_where(|len: &usize| *len <= cap);
+        deque.head = kani::any_where(|head: &usize| *head < cap);
+        deque
+    }
+
+    // Build a small Vec from arbitrary values and choose a logical prefix length.
+    pub(super) fn verifier_nondet_bounded_vec<T>() -> Vec<T>
+    where
+        T: kani::Arbitrary,
+    {
+        let values: [T; MAX_VEC_DEQUE_LEN] = kani::any();
+        let len = kani::any_where(|len: &usize| *len <= MAX_VEC_DEQUE_LEN);
+        let mut vec = Vec::from(values);
+        vec.truncate(len);
+        vec
+    }
+
+    // Constrain states so that `reserve(additional)` cannot fail with `CapacityOverflow`.
+    pub(super) fn assume_reserve_no_capacity_overflow<T>(
+        len: usize,
+        cap: usize,
+        additional: usize,
+    ) {
+        // Keep the symbolic Vec state within the core Vec invariant.
+        kani::assume(len <= cap);
+
+        // Compute the currently available spare capacity.
+        let spare = cap - len;
+
+        // Return when `reserve` can finish without growing the allocation.
+        if additional <= spare {
+            return;
+        }
+
+        // Read the element size once to mirror RawVec growth decisions.
+        let elem_size = mem::size_of::<T>();
+
+        // Reject ZST states that would require growing past `usize::MAX` logical capacity.
+        if elem_size == 0 {
+            kani::assume(false);
+            return;
+        }
+
+        // Require the post-reserve length to fit in `usize`.
+        let Some(required_cap) = len.checked_add(additional) else {
+            kani::assume(false);
+            return;
+        };
+
+        // Require RawVec doubling to stay within `usize`.
+        let Some(doubled_cap) = cap.checked_mul(2) else {
+            kani::assume(false);
+            return;
+        };
+
+        // Match RawVec::min_non_zero_cap for small non-empty allocations.
+        let min_cap = if elem_size == 1 {
+            8
+        } else if elem_size <= 1024 {
+            4
+        } else {
+            1
+        };
+
+        // Match RawVec::grow_amortized capacity selection.
+        let new_cap = core::cmp::max(core::cmp::max(doubled_cap, required_cap), min_cap);
+
+        // Keep only states whose selected allocation layout is representable.
+        kani::assume(Layout::array::<T>(new_cap).is_ok());
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
     use core::kani;
 
+    use super::kani_vec_deque_harness_helpers::*;
+    use crate::alloc::Global;
     use crate::collections::VecDeque;
+    use crate::vec::Vec;
 
     #[kani::proof]
     fn check_vecdeque_swap() {
@@ -3303,10 +3834,1672 @@ mod verify {
         assert_eq!(deque[i], elem_j_before);
         assert_eq!(deque[j], elem_i_before);
 
-        // Ensure other elements remain unchanged
+        // Only indices outside the two swapped positions should be unchanged.
         let k = kani::any_where(|&x: &usize| x < len);
         if k != i && k != j {
             assert!(deque[k] == arr[k]);
         }
     }
+
+    // === UNSAFE FUNCTIONS ===
+
+    // Harnesses for `VecDeque::push_unchecked`
+    macro_rules! gen_vec_deque_push_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::push_unchecked)]
+            fn $name() {
+                let mut deque = verifier_nondet_bounded_vec_deque::<$ty>();
+                let element: $ty = kani::any();
+                unsafe { deque.push_unchecked(element) };
+            }
+        };
+    }
+
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_u8, u8);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_u16, u16);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_u32, u32);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_u64, u64);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_u128, u128);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_usize, usize);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i8, i8);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i16, i16);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i32, i32);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i64, i64);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i128, i128);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_isize, isize);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_array, [u8; 4]);
+    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_unit, ());
+
+    // Harnesses for `VecDeque::buffer_read`
+    macro_rules! gen_vec_deque_buffer_read_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::buffer_read)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let off = kani::any::<usize>();
+                unsafe { deque.buffer_read(off) };
+            }
+        };
+    }
+
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_u8, u8);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_u16, u16);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_u32, u32);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_u64, u64);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_u128, u128);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_usize, usize);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i8, i8);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i16, i16);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i32, i32);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i64, i64);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i128, i128);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_isize, isize);
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_unit, ());
+    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::buffer_write`
+    macro_rules! gen_vec_deque_buffer_write_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::buffer_write)]
+            fn $name() {
+                let mut deque = verifier_nondet_bounded_vec_deque::<$ty>();
+                let value: $ty = kani::any();
+                let off = kani::any::<usize>();
+                unsafe { deque.buffer_write(off, value) };
+            }
+        };
+    }
+
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_u8, u8);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_u16, u16);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_u32, u32);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_u64, u64);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_u128, u128);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_usize, usize);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i8, i8);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i16, i16);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i32, i32);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i64, i64);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i128, i128);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_isize, isize);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_array, [u8; 4]);
+    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_unit, ());
+
+    // Harnesses for `VecDeque::buffer_range`
+    macro_rules! gen_vec_deque_buffer_range_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::buffer_range)]
+            pub fn $name() {
+                let deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let start: usize = kani::any::<usize>();
+                let end: usize = kani::any::<usize>();
+                let range = start..end;
+                unsafe { deque.buffer_range(range) };
+                core::mem::forget(deque);
+            }
+        };
+    }
+
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_u8, u8);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_u16, u16);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_u32, u32);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_u64, u64);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_u128, u128);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_usize, usize);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i8, i8);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i16, i16);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i32, i32);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i64, i64);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i128, i128);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_isize, isize);
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_unit, ());
+    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::copy`
+    macro_rules! gen_vec_deque_copy_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::copy)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let src = kani::any::<usize>();
+                let len = kani::any::<usize>();
+                let dst = kani::any::<usize>();
+                unsafe { deque.copy(src, dst, len) };
+            }
+        };
+    }
+
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_u8, u8);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_u16, u16);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_u32, u32);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_u64, u64);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_u128, u128);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_usize, usize);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_i8, i8);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_i16, i16);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_i32, i32);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_i64, i64);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_i128, i128);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_isize, isize);
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_unit, ());
+    gen_vec_deque_copy_harness!(harness_vec_deque_copy_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::copy_nonoverlapping`
+    macro_rules! gen_vec_deque_copy_nonoverlapping_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::copy_nonoverlapping)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let src = kani::any::<usize>();
+                let len = kani::any::<usize>();
+                let dst = kani::any::<usize>();
+                unsafe { deque.copy_nonoverlapping(src, dst, len) };
+            }
+        };
+    }
+
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_u8, u8);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_u16, u16);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_u32, u32);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_u64, u64);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_u128, u128);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_usize, usize);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i8, i8);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i16, i16);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i32, i32);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i64, i64);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i128, i128);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_isize, isize);
+    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_unit, ());
+    gen_vec_deque_copy_nonoverlapping_harness!(
+        harness_vec_deque_copy_nonoverlapping_array,
+        [u8; 4]
+    );
+
+    // Harnesses for `VecDeque::wrap_copy`
+    macro_rules! gen_vec_deque_wrap_copy_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::wrap_copy)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let src = kani::any::<usize>();
+                let len = kani::any::<usize>();
+                let dst = kani::any::<usize>();
+                unsafe { deque.wrap_copy(src, dst, len) };
+            }
+        };
+    }
+
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u8, u8);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u16, u16);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u32, u32);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u64, u64);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u128, u128);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_usize, usize);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i8, i8);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i16, i16);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i32, i32);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i64, i64);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i128, i128);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_isize, isize);
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_unit, ());
+    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::copy_slice`
+    macro_rules! gen_vec_deque_copy_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::copy_slice)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let src_vec = verifier_nondet_bounded_vec::<$ty>();
+                let src = src_vec.as_slice();
+                let dst = kani::any::<usize>();
+                unsafe { deque.copy_slice(dst, src) };
+            }
+        };
+    }
+
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_u8, u8);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_u16, u16);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_u32, u32);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_u64, u64);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_u128, u128);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_usize, usize);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i8, i8);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i16, i16);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i32, i32);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i64, i64);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i128, i128);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_isize, isize);
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_unit, ());
+    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::write_iter`
+    macro_rules! gen_vec_deque_write_iter_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::write_iter)]
+            pub fn $name() {
+                let cap = verifier_nondet_write_iter_capacity::<$ty>();
+                let mut deque: VecDeque<$ty> = VecDeque::with_capacity(cap);
+
+                let dst = kani::any::<usize>();
+                let iter = core::iter::once(kani::any::<$ty>());
+
+                let mut written: usize = 0;
+
+                unsafe { deque.write_iter(dst, iter, &mut written) };
+            }
+        };
+    }
+
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_u8, u8);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_u16, u16);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_u32, u32);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_u64, u64);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_u128, u128);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_usize, usize);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i8, i8);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i16, i16);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i32, i32);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i64, i64);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i128, i128);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_isize, isize);
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_unit, ());
+    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::write_iter_wrapping`
+    macro_rules! gen_vec_deque_write_iter_wrapping_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::write_iter_wrapping)]
+            pub fn $name() {
+                let cap = verifier_nondet_write_iter_capacity::<$ty>();
+                let mut deque: VecDeque<$ty> = VecDeque::with_capacity(cap);
+                let dst = kani::any::<usize>();
+                let iter = core::iter::once(kani::any::<$ty>());
+                let len: usize = kani::any();
+
+                unsafe { deque.write_iter_wrapping(dst, iter, len) };
+            }
+        };
+    }
+
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_u8, u8);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_u16, u16);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_u32, u32);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_u64, u64);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_u128, u128);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_usize, usize);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i8, i8);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i16, i16);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i32, i32);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i64, i64);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i128, i128);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_isize, isize);
+    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_unit, ());
+    gen_vec_deque_write_iter_wrapping_harness!(
+        harness_vec_deque_write_iter_wrapping_array,
+        [u8; 4]
+    );
+
+    // Harnesses for `VecDeque::handle_capacity_increase` for the A case (non-wrapped).
+    macro_rules! gen_vec_deque_handle_capacity_increase_a_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::handle_capacity_increase)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let old_cap = kani::any::<usize>();
+
+                // The helper builds a deque with head at zero. Together with the
+                // function contract (`len <= old_cap`), this selects the A branch:
+                // the old logical range is already contiguous under old_cap.
+                unsafe { deque.handle_capacity_increase(old_cap) };
+            }
+        };
+    }
+
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_u8,
+        u8
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_u16,
+        u16
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_u32,
+        u32
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_u64,
+        u64
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_u128,
+        u128
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_usize,
+        usize
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_i8,
+        i8
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_i16,
+        i16
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_i32,
+        i32
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_i64,
+        i64
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_i128,
+        i128
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_isize,
+        isize
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_unit,
+        ()
+    );
+    gen_vec_deque_handle_capacity_increase_a_harness!(
+        harness_vec_deque_handle_capacity_increase_a_array,
+        [u8; 4]
+    );
+
+    // Harnesses for `VecDeque::handle_capacity_increase` for the B case (wrapped).
+    macro_rules! gen_vec_deque_handle_capacity_increase_b_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::handle_capacity_increase)]
+            // #[kani::proof]
+            pub fn $name() {
+                // The current capacity models the post-growth capacity.
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let new_cap = deque.capacity();
+
+                // Pick a valid pre-growth capacity so `new_cap - old_cap` is defined.
+                let old_cap = kani::any_where(|&x: &usize| x < new_cap);
+
+                // The old logical length must fit in the old allocation.
+                let len = kani::any_where(|&x: &usize| x <= old_cap);
+
+                // A wrapped deque has a head inside the old allocation.
+                let head = kani::any_where(|&x: &usize| x < old_cap);
+
+                // Exclude A: the logical range wraps around old_cap.
+                kani::assume(head > old_cap - len);
+
+                deque.head = head;
+                deque.len = len;
+
+                let head_len = old_cap - head;
+                let tail_len = len - head_len;
+
+                // B moves the smaller tail section when it is shorter than the head.
+                kani::assume(head_len > tail_len);
+
+                // B also requires enough newly-added spare capacity to hold the tail.
+                kani::assume(new_cap - old_cap >= tail_len);
+
+                // Match the pointer-level non-overlap check used by copy_nonoverlapping.
+                let elem_size = core::mem::size_of::<$ty>();
+                let Some(copy_size) = elem_size.checked_mul(tail_len) else {
+                    kani::assume(false);
+                    return;
+                };
+
+                let src_ptr = deque.ptr();
+                let dst_ptr = unsafe { deque.ptr().add(old_cap) };
+
+                kani::assume(src_ptr.addr().abs_diff(dst_ptr.addr()) >= copy_size);
+
+                unsafe { deque.handle_capacity_increase(old_cap) };
+            }
+        };
+    }
+
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_u8,
+        u8
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_u16,
+        u16
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_u32,
+        u32
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_u64,
+        u64
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_u128,
+        u128
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_usize,
+        usize
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_i8,
+        i8
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_i16,
+        i16
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_i32,
+        i32
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_i64,
+        i64
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_i128,
+        i128
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_isize,
+        isize
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_unit,
+        ()
+    );
+    gen_vec_deque_handle_capacity_increase_b_harness!(
+        harness_vec_deque_handle_capacity_increase_b_array,
+        [u8; 4]
+    );
+
+    // Harnesses for `VecDeque::handle_capacity_increase` for the C case
+    // (wrapped, or not enough spare capacity to move the tail).
+    macro_rules! gen_vec_deque_handle_capacity_increase_c_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::handle_capacity_increase)]
+            // #[kani::proof]
+            pub fn $name() {
+                // The current capacity models the post-growth capacity.
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let new_cap = deque.capacity();
+
+                // Pick a valid pre-growth capacity so `new_cap - old_cap` is defined.
+                let old_cap = kani::any::<usize>();
+                kani::assume(old_cap < new_cap);
+
+                let len = kani::any::<usize>();
+                // The old logical length must fit in the old allocation.
+                kani::assume(len <= old_cap);
+
+                let head = kani::any::<usize>();
+                // A wrapped deque has a head inside the old allocation.
+                kani::assume(head < old_cap);
+
+                // Exclude A: the logical range wraps around old_cap.
+                kani::assume(head > old_cap - len);
+
+                deque.head = head;
+                deque.len = len;
+
+                let head_len = old_cap - head;
+                let tail_len = len - head_len;
+
+                // C is the remaining wrapped case after excluding B.
+                kani::assume(!(head_len > tail_len && new_cap - old_cap >= tail_len));
+
+                unsafe { deque.handle_capacity_increase(old_cap) };
+            }
+        };
+    }
+
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_u8,
+        u8
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_u16,
+        u16
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_u32,
+        u32
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_u64,
+        u64
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_u128,
+        u128
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_usize,
+        usize
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_i8,
+        i8
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_i16,
+        i16
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_i32,
+        i32
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_i64,
+        i64
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_i128,
+        i128
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_isize,
+        isize
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_unit,
+        ()
+    );
+    gen_vec_deque_handle_capacity_increase_c_harness!(
+        harness_vec_deque_handle_capacity_increase_c_array,
+        [u8; 4]
+    );
+
+    // Harnesses for `VecDeque::from_contiguous_raw_parts_in`
+    macro_rules! gen_vec_deque_from_contiguous_raw_parts_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::from_contiguous_raw_parts_in)]
+            pub fn $name() {
+                let mut vec: Vec<$ty> = verifier_nondet_vec();
+                let ptr = vec.as_mut_ptr();
+                let cap = vec.capacity();
+                core::mem::forget(vec);
+                let start = kani::any::<usize>();
+                let end = kani::any::<usize>();
+                unsafe {
+                    let deque =
+                        VecDeque::<$ty>::from_contiguous_raw_parts_in(ptr, start..end, cap, Global);
+                    core::mem::forget(deque);
+                }
+            }
+        };
+    }
+
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_u8,
+        u8
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_u16,
+        u16
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_u32,
+        u32
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_u64,
+        u64
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_u128,
+        u128
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_usize,
+        usize
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_i8,
+        i8
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_i16,
+        i16
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_i32,
+        i32
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_i64,
+        i64
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_i128,
+        i128
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_isize,
+        isize
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_unit,
+        ()
+    );
+    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
+        harness_vec_deque_from_contiguous_raw_parts_in_array,
+        [u8; 4]
+    );
+
+    // Harnesses for `VecDeque::abort_shrink` for the A case
+    // (the logical range is contiguous under target_cap).
+    macro_rules! gen_vec_deque_abort_shrink_a_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::abort_shrink)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let cap = deque.capacity();
+                let target_cap = kani::any::<usize>();
+                let len = kani::any_where(|&x: &usize| x <= target_cap);
+                let head = kani::any::<usize>();
+                let old_head = kani::any::<usize>();
+
+                // A: the logical range fits before target_cap without wrapping.
+                kani::assume(head <= target_cap - len);
+
+                deque.head = head;
+                deque.len = len;
+
+                unsafe { deque.abort_shrink(old_head, target_cap) };
+            }
+        };
+    }
+
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_u8, u8);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_u16, u16);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_u32, u32);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_u64, u64);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_u128, u128);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_usize, usize);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i8, i8);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i16, i16);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i32, i32);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i64, i64);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i128, i128);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_isize, isize);
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_unit, ());
+    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::abort_shrink` for the B case
+    // (wrapped under target_cap, and the tail is the cheaper section to move).
+    macro_rules! gen_vec_deque_abort_shrink_b_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::abort_shrink)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let cap = deque.capacity();
+                let target_cap = kani::any_where(|&x: &usize| x < cap);
+                let len = kani::any_where(|&x: &usize| x <= target_cap);
+                let head = kani::any_where(|&x: &usize| x < target_cap);
+                let old_head = kani::any::<usize>();
+
+                // Exclude A: the logical range wraps around target_cap.
+                kani::assume(head > target_cap - len);
+
+                deque.head = head;
+                deque.len = len;
+
+                let head_len = target_cap - head;
+                let tail_len = len - head_len;
+
+                // B moves the tail when it is no larger than both alternatives.
+                kani::assume(tail_len <= core::cmp::min(head_len, cap - target_cap));
+
+                unsafe { deque.abort_shrink(old_head, target_cap) };
+            }
+        };
+    }
+
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_u8, u8);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_u16, u16);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_u32, u32);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_u64, u64);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_u128, u128);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_usize, usize);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i8, i8);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i16, i16);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i32, i32);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i64, i64);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i128, i128);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_isize, isize);
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_unit, ());
+    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::abort_shrink` for the C case
+    // (wrapped under target_cap, and the head is the section that must be moved).
+    macro_rules! gen_vec_deque_abort_shrink_c_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::abort_shrink)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let cap = deque.capacity();
+                let target_cap = kani::any_where(|&x: &usize| x < cap);
+                let len = kani::any_where(|&x: &usize| x <= target_cap);
+                let head = kani::any_where(|&x: &usize| x < target_cap);
+                let old_head = kani::any::<usize>();
+
+                // Exclude A: the logical range wraps around target_cap.
+                kani::assume(head > target_cap - len);
+
+                deque.head = head;
+                deque.len = len;
+
+                let head_len = target_cap - head;
+                let tail_len = len - head_len;
+
+                // C is the remaining wrapped case after excluding B.
+                kani::assume(!(tail_len <= core::cmp::min(head_len, cap - target_cap)));
+
+                unsafe { deque.abort_shrink(old_head, target_cap) };
+            }
+        };
+    }
+
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_u8, u8);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_u16, u16);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_u32, u32);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_u64, u64);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_u128, u128);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_usize, usize);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i8, i8);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i16, i16);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i32, i32);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i64, i64);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i128, i128);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_isize, isize);
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_unit, ());
+    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_array, [u8; 4]);
+
+    // === SAFE FUNCTIONS ===
+
+    // Harnesses for `VecDeque::get`
+    macro_rules! gen_vec_deque_get_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let index = kani::any::<usize>();
+                deque.get(index);
+            }
+        };
+    }
+
+    gen_vec_deque_get_harness!(harness_vec_deque_get_u8, u8);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_u16, u16);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_u32, u32);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_u64, u64);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_u128, u128);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_usize, usize);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_i8, i8);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_i16, i16);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_i32, i32);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_i64, i64);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_i128, i128);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_isize, isize);
+    gen_vec_deque_get_harness!(harness_vec_deque_get_unit, ());
+    gen_vec_deque_get_harness!(harness_vec_deque_get_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::get_mut`
+    macro_rules! gen_vec_deque_get_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let index = kani::any::<usize>();
+                deque.get_mut(index);
+            }
+        };
+    }
+
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_u8, u8);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_u16, u16);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_u32, u32);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_u64, u64);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_u128, u128);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_usize, usize);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i8, i8);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i16, i16);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i32, i32);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i64, i64);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i128, i128);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_isize, isize);
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_unit, ());
+    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::swap`
+    macro_rules! gen_vec_deque_swap_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let len = deque.len();
+                let i = kani::any_where(|&x: &usize| x < len);
+                let j = kani::any_where(|&x: &usize| x < len);
+                deque.swap(i, j);
+            }
+        };
+    }
+
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_u8, u8);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_u16, u16);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_u32, u32);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_u64, u64);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_u128, u128);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_usize, usize);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_i8, i8);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_i16, i16);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_i32, i32);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_i64, i64);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_i128, i128);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_isize, isize);
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_unit, ());
+    gen_vec_deque_swap_harness!(harness_vec_deque_swap_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::reserve_exact`
+    macro_rules! gen_vec_deque_reserve_exact_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let additional = kani::any::<usize>();
+                assume_reserve_no_capacity_overflow::<$ty>(
+                    deque.len(),
+                    deque.capacity(),
+                    additional,
+                );
+                deque.reserve_exact(additional);
+            }
+        };
+    }
+
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_u8, u8);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_u16, u16);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_u32, u32);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_u64, u64);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_u128, u128);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_usize, usize);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i8, i8);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i16, i16);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i32, i32);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i64, i64);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i128, i128);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_isize, isize);
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_unit, ());
+    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::reserve`
+    macro_rules! gen_vec_deque_reserve_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let additional = kani::any::<usize>();
+                assume_reserve_no_capacity_overflow::<$ty>(
+                    deque.len(),
+                    deque.capacity(),
+                    additional,
+                );
+                deque.reserve(additional);
+            }
+        };
+    }
+
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_u8, u8);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_u16, u16);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_u32, u32);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_u64, u64);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_u128, u128);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_usize, usize);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i8, i8);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i16, i16);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i32, i32);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i64, i64);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i128, i128);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_isize, isize);
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_unit, ());
+    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::try_reserve_exact`
+    macro_rules! gen_vec_deque_try_reserve_exact_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let additional = kani::any::<usize>();
+                assume_reserve_no_capacity_overflow::<$ty>(
+                    deque.len(),
+                    deque.capacity(),
+                    additional,
+                );
+                deque.try_reserve_exact(additional);
+            }
+        };
+    }
+
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_u8, u8);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_u16, u16);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_u32, u32);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_u64, u64);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_u128, u128);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_usize, usize);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i8, i8);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i16, i16);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i32, i32);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i64, i64);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i128, i128);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_isize, isize);
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_unit, ());
+    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::try_reserve`
+    macro_rules! gen_vec_deque_try_reserve_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let additional = kani::any::<usize>();
+                assume_reserve_no_capacity_overflow::<$ty>(
+                    deque.len(),
+                    deque.capacity(),
+                    additional,
+                );
+                deque.try_reserve(additional);
+            }
+        };
+    }
+
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_u8, u8);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_u16, u16);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_u32, u32);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_u64, u64);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_u128, u128);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_usize, usize);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i8, i8);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i16, i16);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i32, i32);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i64, i64);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i128, i128);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_isize, isize);
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_unit, ());
+    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::shrink_to`
+    macro_rules! gen_vec_deque_shrink_to_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let cap = deque.capacity();
+
+                let min_capacity = kani::any::<usize>();
+                let len = kani::any_where(|&x: &usize| x <= cap);
+                let head = kani::any_where(|&x: &usize| x < cap);
+
+                deque.len = len;
+                deque.head = head;
+
+                let target_cap = core::cmp::max(min_capacity, len);
+
+                deque.shrink_to(min_capacity);
+            }
+        };
+    }
+
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_u8, u8);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_u16, u16);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_u32, u32);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_u64, u64);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_u128, u128);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_usize, usize);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i8, i8);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i16, i16);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i32, i32);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i64, i64);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i128, i128);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_isize, isize);
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_unit, ());
+    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::truncate`
+    macro_rules! gen_vec_deque_truncate_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_init_vec_deque();
+                let cap = deque.capacity();
+
+                let deq_len = kani::any_where(|&x: &usize| x <= cap);
+                let head = kani::any_where(|&x: &usize| x < cap);
+
+                deque.head = head;
+                deque.len = deq_len;
+
+                let len = kani::any::<usize>();
+
+                deque.truncate(len);
+            }
+        };
+    }
+
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_u8, u8);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_u16, u16);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_u32, u32);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_u64, u64);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_u128, u128);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_usize, usize);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i8, i8);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i16, i16);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i32, i32);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i64, i64);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i128, i128);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_isize, isize);
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_unit, ());
+    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::as_slices`
+    macro_rules! gen_vec_deque_as_slices_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let _ = deque.as_slices();
+            }
+        };
+    }
+
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_u8, u8);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_u16, u16);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_u32, u32);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_u64, u64);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_u128, u128);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_usize, usize);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i8, i8);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i16, i16);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i32, i32);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i64, i64);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i128, i128);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_isize, isize);
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_unit, ());
+    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::as_mut_slices`
+    macro_rules! gen_vec_deque_as_mut_slices_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let _ = deque.as_mut_slices();
+            }
+        };
+    }
+
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_u8, u8);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_u16, u16);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_u32, u32);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_u64, u64);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_u128, u128);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_usize, usize);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i8, i8);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i16, i16);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i32, i32);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i64, i64);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i128, i128);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_isize, isize);
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_unit, ());
+    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::range`
+    macro_rules! gen_vec_deque_range_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let end = kani::any_where(|&x: &usize| x <= deque.len());
+                let start = kani::any_where(|&x: &usize| x <= end);
+                let _ = deque.range(start..end);
+            }
+        };
+    }
+
+    gen_vec_deque_range_harness!(harness_vec_deque_range_u8, u8);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_u16, u16);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_u32, u32);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_u64, u64);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_u128, u128);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_usize, usize);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_i8, i8);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_i16, i16);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_i32, i32);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_i64, i64);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_i128, i128);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_isize, isize);
+    gen_vec_deque_range_harness!(harness_vec_deque_range_unit, ());
+    gen_vec_deque_range_harness!(harness_vec_deque_range_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::range_mut`
+    macro_rules! gen_vec_deque_range_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let end = kani::any_where(|&x: &usize| x <= deque.len());
+                let start = kani::any_where(|&x: &usize| x <= end);
+                let _ = deque.range_mut(start..end);
+            }
+        };
+    }
+
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_u8, u8);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_u16, u16);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_u32, u32);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_u64, u64);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_u128, u128);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_usize, usize);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i8, i8);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i16, i16);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i32, i32);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i64, i64);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i128, i128);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_isize, isize);
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_unit, ());
+    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::drain`
+    macro_rules! gen_vec_deque_drain_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let end = kani::any_where(|&x: &usize| x <= deque.len());
+                let start = kani::any_where(|&x: &usize| x <= end);
+                let _ = deque.drain(start..end);
+            }
+        };
+    }
+
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_u8, u8);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_u16, u16);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_u32, u32);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_u64, u64);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_u128, u128);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_usize, usize);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_i8, i8);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_i16, i16);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_i32, i32);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_i64, i64);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_i128, i128);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_isize, isize);
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_unit, ());
+    gen_vec_deque_drain_harness!(harness_vec_deque_drain_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::pop_front`
+    macro_rules! gen_vec_deque_pop_front_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let _ = deque.pop_front();
+            }
+        };
+    }
+
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_u8, u8);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_u16, u16);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_u32, u32);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_u64, u64);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_u128, u128);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_usize, usize);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i8, i8);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i16, i16);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i32, i32);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i64, i64);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i128, i128);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_isize, isize);
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_unit, ());
+    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::pop_back`
+    macro_rules! gen_vec_deque_pop_back_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let _ = deque.pop_back();
+            }
+        };
+    }
+
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_u8, u8);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_u16, u16);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_u32, u32);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_u64, u64);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_u128, u128);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_usize, usize);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i8, i8);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i16, i16);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i32, i32);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i64, i64);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i128, i128);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_isize, isize);
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_unit, ());
+    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::push_front`
+    macro_rules! gen_vec_deque_push_front_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let value = kani::any::<$ty>();
+                assume_reserve_no_capacity_overflow::<$ty>(deque.len(), deque.capacity(), 1);
+                let _ = deque.push_front(value);
+            }
+        };
+    }
+
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_u8, u8);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_u16, u16);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_u32, u32);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_u64, u64);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_u128, u128);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_usize, usize);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i8, i8);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i16, i16);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i32, i32);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i64, i64);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i128, i128);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_isize, isize);
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_unit, ());
+    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::push_back`
+    macro_rules! gen_vec_deque_push_back_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let value = kani::any::<$ty>();
+                assume_reserve_no_capacity_overflow::<$ty>(deque.len(), deque.capacity(), 1);
+                let _ = deque.push_back(value);
+            }
+        };
+    }
+
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_u8, u8);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_u16, u16);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_u32, u32);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_u64, u64);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_u128, u128);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_usize, usize);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i8, i8);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i16, i16);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i32, i32);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i64, i64);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i128, i128);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_isize, isize);
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_unit, ());
+    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::insert`
+    macro_rules! gen_vec_deque_insert_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let index = kani::any_where(|&x: &usize| x <= deque.len());
+                let value = kani::any::<$ty>();
+                assume_reserve_no_capacity_overflow::<$ty>(deque.len(), deque.capacity(), 1);
+                let _ = deque.insert(index, value);
+            }
+        };
+    }
+
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_u8, u8);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_u16, u16);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_u32, u32);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_u64, u64);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_u128, u128);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_usize, usize);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_i8, i8);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_i16, i16);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_i32, i32);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_i64, i64);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_i128, i128);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_isize, isize);
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_unit, ());
+    gen_vec_deque_insert_harness!(harness_vec_deque_insert_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::remove`
+    macro_rules! gen_vec_deque_remove_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let index = kani::any::<usize>();
+                let _ = deque.remove(index);
+            }
+        };
+    }
+
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_u8, u8);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_u16, u16);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_u32, u32);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_u64, u64);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_u128, u128);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_usize, usize);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_i8, i8);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_i16, i16);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_i32, i32);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_i64, i64);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_i128, i128);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_isize, isize);
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_unit, ());
+    gen_vec_deque_remove_harness!(harness_vec_deque_remove_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::split_off`
+    macro_rules! gen_vec_deque_split_off_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let at = kani::any_where(|&x: &usize| x <= deque.len());
+                let _ = deque.split_off(at);
+            }
+        };
+    }
+
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_u8, u8);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_u16, u16);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_u32, u32);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_u64, u64);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_u128, u128);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_usize, usize);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i8, i8);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i16, i16);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i32, i32);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i64, i64);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i128, i128);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_isize, isize);
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_unit, ());
+    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::append`
+    macro_rules! gen_vec_deque_append_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let mut other: VecDeque<$ty> = verifier_nondet_vec_deque();
+                assume_reserve_no_capacity_overflow::<$ty>(
+                    deque.len(),
+                    deque.capacity(),
+                    other.len(),
+                );
+                let _ = deque.append(&mut other);
+            }
+        };
+    }
+
+    gen_vec_deque_append_harness!(harness_vec_deque_append_u8, u8);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_u16, u16);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_u32, u32);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_u64, u64);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_u128, u128);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_usize, usize);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_i8, i8);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_i16, i16);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_i32, i32);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_i64, i64);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_i128, i128);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_isize, isize);
+    gen_vec_deque_append_harness!(harness_vec_deque_append_unit, ());
+    gen_vec_deque_append_harness!(harness_vec_deque_append_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::retain_mut`
+    macro_rules! gen_vec_deque_retain_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // let mut deque: VecDeque<$ty> = verifier_nondet_small_init_vec_deque();
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                // let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+
+                deque.retain_mut(|_| kani::any::<bool>());
+            }
+        };
+    }
+
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_u8, u8);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_u16, u16);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_u32, u32);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_u64, u64);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_u128, u128);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_usize, usize);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i8, i8);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i16, i16);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i32, i32);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i64, i64);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i128, i128);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_isize, isize);
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_unit, ());
+    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::grow`
+    macro_rules! gen_vec_deque_grow_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                // `grow` is only reached from insertion paths when the deque is full.
+                kani::assume(deque.len() == deque.capacity());
+                assume_reserve_no_capacity_overflow::<$ty>(deque.len(), deque.capacity(), 1);
+                let _ = deque.grow();
+            }
+        };
+    }
+
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_u8, u8);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_u16, u16);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_u32, u32);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_u64, u64);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_u128, u128);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_usize, usize);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_i8, i8);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_i16, i16);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_i32, i32);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_i64, i64);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_i128, i128);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_isize, isize);
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_unit, ());
+    gen_vec_deque_grow_harness!(harness_vec_deque_grow_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::resize_with`
+    macro_rules! gen_vec_deque_resize_with_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_small_init_vec_deque();
+                // let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let new_len = kani::any_where(|len: &usize| *len <= MAX_VEC_DEQUE_LEN);
+                // let new_len = kani::any::<usize>();
+                if new_len > deque.len() {
+                    // Only the growth branch may reserve additional capacity.
+                    assume_reserve_no_capacity_overflow::<$ty>(
+                        deque.len(),
+                        deque.capacity(),
+                        new_len - deque.len(),
+                    );
+                }
+                deque.resize_with(new_len, || kani::any::<$ty>());
+            }
+        };
+    }
+
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_u8, u8);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_u16, u16);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_u32, u32);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_u64, u64);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_u128, u128);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_usize, usize);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i8, i8);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i16, i16);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i32, i32);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i64, i64);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i128, i128);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_isize, isize);
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_unit, ());
+    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::make_contiguous`
+    macro_rules! gen_vec_deque_make_contiguous_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_small_init_vec_deque();
+                let _ = deque.make_contiguous();
+            }
+        };
+    }
+
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u8, u8);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u16, u16);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u32, u32);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u64, u64);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u128, u128);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_usize, usize);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i8, i8);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i16, i16);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i32, i32);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i64, i64);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i128, i128);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_isize, isize);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_unit, ());
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::rotate_left_inner`
+    macro_rules! gen_vec_deque_rotate_left_inner_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::rotate_left_inner)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let mid = kani::any::<usize>();
+                let _ = unsafe { deque.rotate_left_inner(mid) };
+            }
+        };
+    }
+
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_u8, u8);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_u16, u16);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_u32, u32);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_u64, u64);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_u128, u128);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_usize, usize);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i8, i8);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i16, i16);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i32, i32);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i64, i64);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i128, i128);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_isize, isize);
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_unit, ());
+    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::rotate_right_inner`
+    macro_rules! gen_vec_deque_rotate_right_inner_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(VecDeque::<$ty>::rotate_right_inner)]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let k = kani::any::<usize>();
+                let _ = unsafe { deque.rotate_right_inner(k) };
+            }
+        };
+    }
+
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_u8, u8);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_u16, u16);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_u32, u32);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_u64, u64);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_u128, u128);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_usize, usize);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i8, i8);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i16, i16);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i32, i32);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i64, i64);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i128, i128);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_isize, isize);
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_unit, ());
+    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::rotate_left`
+    macro_rules! gen_vec_deque_rotate_left_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let n = kani::any::<usize>();
+                // Public rotate panics for n > len; this harness targets normal execution.
+                kani::assume(n <= deque.len());
+                let _ = deque.rotate_left(n);
+            }
+        };
+    }
+
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_u8, u8);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_u16, u16);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_u32, u32);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_u64, u64);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_u128, u128);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_usize, usize);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i8, i8);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i16, i16);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i32, i32);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i64, i64);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i128, i128);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_isize, isize);
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_unit, ());
+    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_array, [u8; 4]);
+
+    // Harnesses for `VecDeque::rotate_right`
+    macro_rules! gen_vec_deque_rotate_right_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
+                let n = kani::any::<usize>();
+                // Public rotate panics for n > len; this harness targets normal execution.
+                kani::assume(n <= deque.len());
+                let _ = deque.rotate_right(n);
+            }
+        };
+    }
+
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_u8, u8);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_u16, u16);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_u32, u32);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_u64, u64);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_u128, u128);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_usize, usize);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i8, i8);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i16, i16);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i32, i32);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i64, i64);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i128, i128);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_isize, isize);
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_unit, ());
+    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_array, [u8; 4]);
 }

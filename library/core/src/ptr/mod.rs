@@ -1418,11 +1418,16 @@ pub const unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize) {
             // SAFETY: Same preconditions as this function
             unsafe { swap_nonoverlapping_const(x, y, count) }
         } else {
-            // Going though a slice here helps codegen know the size fits in `isize`
-            let slice = slice_from_raw_parts_mut(x, count);
-            // SAFETY: This is all readable from the pointer, meaning it's one
-            // allocation, and thus cannot be more than isize::MAX bytes.
-            let bytes = unsafe { mem::size_of_val_raw::<[T]>(slice) };
+            #[cfg(not(kani))]
+            let bytes = {
+                // Going though a slice here helps codegen know the size fits in `isize`
+                let slice = slice_from_raw_parts_mut(x, count);
+                // SAFETY: This is all readable from the pointer, meaning it's one
+                // allocation, and thus cannot be more than isize::MAX bytes.
+                unsafe { mem::size_of_val_raw::<[T]>(slice) }
+            };
+            #[cfg(kani)]
+            let bytes = size_of::<T>().checked_mul(count).unwrap_or(0);
             if let Some(bytes) = NonZero::new(bytes) {
                 // SAFETY: These are the same ranges, just expressed in a different
                 // type, so they're still non-overlapping.
@@ -1435,26 +1440,62 @@ pub const unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize) {
 /// Same behavior and safety conditions as [`swap_nonoverlapping`]
 #[inline]
 const unsafe fn swap_nonoverlapping_const<T>(x: *mut T, y: *mut T, count: usize) {
-    let mut i = 0;
-    while i < count {
-        // SAFETY: By precondition, `i` is in-bounds because it's below `n`
-        let x = unsafe { x.add(i) };
-        // SAFETY: By precondition, `i` is in-bounds because it's below `n`
-        // and it's distinct from `x` since the ranges are non-overlapping
-        let y = unsafe { y.add(i) };
+    #[cfg(not(kani))]
+    {
+        let mut i = 0;
+        while i < count {
+            // SAFETY: By precondition, `i` is in-bounds because it's below `n`
+            let x = unsafe { x.add(i) };
+            // SAFETY: By precondition, `i` is in-bounds because it's below `n`
+            // and it's distinct from `x` since the ranges are non-overlapping
+            let y = unsafe { y.add(i) };
 
-        // SAFETY: we're only ever given pointers that are valid to read/write,
-        // including being aligned, and nothing here panics so it's drop-safe.
-        unsafe {
-            // Note that it's critical that these use `copy_nonoverlapping`,
-            // rather than `read`/`write`, to avoid #134713 if T has padding.
-            let mut temp = MaybeUninit::<T>::uninit();
-            copy_nonoverlapping(x, temp.as_mut_ptr(), 1);
-            copy_nonoverlapping(y, x, 1);
-            copy_nonoverlapping(temp.as_ptr(), y, 1);
+            // SAFETY: we're only ever given pointers that are valid to read/write,
+            // including being aligned, and nothing here panics so it's drop-safe.
+            unsafe {
+                // Note that it's critical that these use `copy_nonoverlapping`,
+                // rather than `read`/`write`, to avoid #134713 if T has padding.
+                let mut temp = MaybeUninit::<T>::uninit();
+                copy_nonoverlapping(x, temp.as_mut_ptr(), 1);
+                copy_nonoverlapping(y, x, 1);
+                copy_nonoverlapping(temp.as_ptr(), y, 1);
+            }
+
+            i += 1;
         }
+    }
 
-        i += 1;
+    #[cfg(kani)]
+    {
+        let mut i = 0;
+        let mut temp = MaybeUninit::<T>::uninit();
+
+        #[kani::loop_invariant(i <= count)]
+        #[kani::loop_modifies(
+            &i,
+            &temp,
+            slice_from_raw_parts(x as *const T, count),
+            slice_from_raw_parts(y as *const T, count)
+        )]
+        while i < count {
+            // SAFETY: By precondition, `i` is in-bounds because it's below `n`
+            let x = unsafe { x.add(i) };
+            // SAFETY: By precondition, `i` is in-bounds because it's below `n`
+            // and it's distinct from `x` since the ranges are non-overlapping
+            let y = unsafe { y.add(i) };
+
+            // SAFETY: we're only ever given pointers that are valid to read/write,
+            // including being aligned, and nothing here panics so it's drop-safe.
+            unsafe {
+                // Note that it's critical that these use `copy_nonoverlapping`,
+                // rather than `read`/`write`, to avoid #134713 if T has padding.
+                copy_nonoverlapping(x, temp.as_mut_ptr(), 1);
+                copy_nonoverlapping(y, x, 1);
+                copy_nonoverlapping(temp.as_ptr(), y, 1);
+            }
+
+            i += 1;
+        }
     }
 }
 
@@ -1477,9 +1518,33 @@ unsafe fn swap_nonoverlapping_bytes(x: *mut u8, y: *mut u8, bytes: NonZero<usize
         chunks: NonZero<usize>,
     ) {
         let chunks = chunks.get();
-        for i in 0..chunks {
-            // SAFETY: i is in [0, chunks) so the adds and dereferences are in-bounds.
-            unsafe { swap_chunk(&mut *x.add(i), &mut *y.add(i)) };
+        #[cfg(not(kani))]
+        {
+            for i in 0..chunks {
+                // SAFETY: i is in [0, chunks) so the adds and dereferences are in-bounds.
+                unsafe { swap_chunk(&mut *x.add(i), &mut *y.add(i)) };
+            }
+        }
+
+        #[cfg(kani)]
+        {
+            let mut i = 0;
+
+            #[kani::loop_invariant(
+                i <= chunks
+                    && N > 0
+                    && chunks > 0
+            )]
+            #[kani::loop_modifies(
+                &i,
+                slice_from_raw_parts(x as *const MaybeUninit<[u8; N]>, chunks),
+                slice_from_raw_parts(y as *const MaybeUninit<[u8; N]>, chunks)
+            )]
+            while i < chunks {
+                // SAFETY: i is in [0, chunks) so the adds and dereferences are in-bounds.
+                unsafe { swap_chunk(&mut *x.add(i), &mut *y.add(i)) };
+                i += 1;
+            }
         }
     }
 
