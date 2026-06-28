@@ -3860,13 +3860,11 @@ mod verify {
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_u32, u32);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_u64, u64);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_u128, u128);
-    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_usize, usize);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i8, i8);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i16, i16);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i32, i32);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i64, i64);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_i128, i128);
-    gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_isize, isize);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_array, [u8; 4]);
     gen_vec_deque_push_unchecked_harness!(harness_vec_deque_push_unchecked_unit, ());
 
@@ -3887,13 +3885,11 @@ mod verify {
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_u32, u32);
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_u64, u64);
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_u128, u128);
-    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_usize, usize);
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i8, i8);
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i16, i16);
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i32, i32);
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i64, i64);
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_i128, i128);
-    gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_isize, isize);
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_unit, ());
     gen_vec_deque_buffer_read_harness!(harness_vec_deque_buffer_read_array, [u8; 4]);
 
@@ -3915,13 +3911,11 @@ mod verify {
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_u32, u32);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_u64, u64);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_u128, u128);
-    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_usize, usize);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i8, i8);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i16, i16);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i32, i32);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i64, i64);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_i128, i128);
-    gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_isize, isize);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_array, [u8; 4]);
     gen_vec_deque_buffer_write_harness!(harness_vec_deque_buffer_write_unit, ());
 
@@ -3945,13 +3939,11 @@ mod verify {
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_u32, u32);
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_u64, u64);
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_u128, u128);
-    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_usize, usize);
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i8, i8);
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i16, i16);
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i32, i32);
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i64, i64);
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_i128, i128);
-    gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_isize, isize);
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_unit, ());
     gen_vec_deque_buffer_range_harness!(harness_vec_deque_buffer_range_array, [u8; 4]);
 
@@ -3974,13 +3966,11 @@ mod verify {
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_u32, u32);
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_u64, u64);
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_u128, u128);
-    gen_vec_deque_copy_harness!(harness_vec_deque_copy_usize, usize);
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_i8, i8);
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_i16, i16);
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_i32, i32);
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_i64, i64);
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_i128, i128);
-    gen_vec_deque_copy_harness!(harness_vec_deque_copy_isize, isize);
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_unit, ());
     gen_vec_deque_copy_harness!(harness_vec_deque_copy_array, [u8; 4]);
 
@@ -4003,13 +3993,11 @@ mod verify {
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_u32, u32);
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_u64, u64);
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_u128, u128);
-    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_usize, usize);
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i8, i8);
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i16, i16);
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i32, i32);
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i64, i64);
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_i128, i128);
-    gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_isize, isize);
     gen_vec_deque_copy_nonoverlapping_harness!(harness_vec_deque_copy_nonoverlapping_unit, ());
     gen_vec_deque_copy_nonoverlapping_harness!(
         harness_vec_deque_copy_nonoverlapping_array,
@@ -4035,13 +4023,11 @@ mod verify {
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u32, u32);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u64, u64);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u128, u128);
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_usize, usize);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i8, i8);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i16, i16);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i32, i32);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i64, i64);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i128, i128);
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_isize, isize);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_unit, ());
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_array, [u8; 4]);
 
@@ -4064,13 +4050,11 @@ mod verify {
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_u32, u32);
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_u64, u64);
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_u128, u128);
-    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_usize, usize);
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i8, i8);
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i16, i16);
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i32, i32);
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i64, i64);
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_i128, i128);
-    gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_isize, isize);
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_unit, ());
     gen_vec_deque_copy_slice_harness!(harness_vec_deque_copy_slice_array, [u8; 4]);
 
@@ -4097,13 +4081,11 @@ mod verify {
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_u32, u32);
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_u64, u64);
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_u128, u128);
-    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_usize, usize);
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i8, i8);
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i16, i16);
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i32, i32);
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i64, i64);
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_i128, i128);
-    gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_isize, isize);
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_unit, ());
     gen_vec_deque_write_iter_harness!(harness_vec_deque_write_iter_array, [u8; 4]);
 
@@ -4128,13 +4110,11 @@ mod verify {
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_u32, u32);
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_u64, u64);
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_u128, u128);
-    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_usize, usize);
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i8, i8);
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i16, i16);
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i32, i32);
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i64, i64);
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_i128, i128);
-    gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_isize, isize);
     gen_vec_deque_write_iter_wrapping_harness!(harness_vec_deque_write_iter_wrapping_unit, ());
     gen_vec_deque_write_iter_wrapping_harness!(
         harness_vec_deque_write_iter_wrapping_array,
@@ -4178,10 +4158,6 @@ mod verify {
         u128
     );
     gen_vec_deque_handle_capacity_increase_a_harness!(
-        harness_vec_deque_handle_capacity_increase_a_usize,
-        usize
-    );
-    gen_vec_deque_handle_capacity_increase_a_harness!(
         harness_vec_deque_handle_capacity_increase_a_i8,
         i8
     );
@@ -4200,10 +4176,6 @@ mod verify {
     gen_vec_deque_handle_capacity_increase_a_harness!(
         harness_vec_deque_handle_capacity_increase_a_i128,
         i128
-    );
-    gen_vec_deque_handle_capacity_increase_a_harness!(
-        harness_vec_deque_handle_capacity_increase_a_isize,
-        isize
     );
     gen_vec_deque_handle_capacity_increase_a_harness!(
         harness_vec_deque_handle_capacity_increase_a_unit,
@@ -4286,10 +4258,6 @@ mod verify {
         u128
     );
     gen_vec_deque_handle_capacity_increase_b_harness!(
-        harness_vec_deque_handle_capacity_increase_b_usize,
-        usize
-    );
-    gen_vec_deque_handle_capacity_increase_b_harness!(
         harness_vec_deque_handle_capacity_increase_b_i8,
         i8
     );
@@ -4308,10 +4276,6 @@ mod verify {
     gen_vec_deque_handle_capacity_increase_b_harness!(
         harness_vec_deque_handle_capacity_increase_b_i128,
         i128
-    );
-    gen_vec_deque_handle_capacity_increase_b_harness!(
-        harness_vec_deque_handle_capacity_increase_b_isize,
-        isize
     );
     gen_vec_deque_handle_capacity_increase_b_harness!(
         harness_vec_deque_handle_capacity_increase_b_unit,
@@ -4383,10 +4347,6 @@ mod verify {
         u128
     );
     gen_vec_deque_handle_capacity_increase_c_harness!(
-        harness_vec_deque_handle_capacity_increase_c_usize,
-        usize
-    );
-    gen_vec_deque_handle_capacity_increase_c_harness!(
         harness_vec_deque_handle_capacity_increase_c_i8,
         i8
     );
@@ -4405,10 +4365,6 @@ mod verify {
     gen_vec_deque_handle_capacity_increase_c_harness!(
         harness_vec_deque_handle_capacity_increase_c_i128,
         i128
-    );
-    gen_vec_deque_handle_capacity_increase_c_harness!(
-        harness_vec_deque_handle_capacity_increase_c_isize,
-        isize
     );
     gen_vec_deque_handle_capacity_increase_c_harness!(
         harness_vec_deque_handle_capacity_increase_c_unit,
@@ -4460,10 +4416,6 @@ mod verify {
         u128
     );
     gen_vec_deque_from_contiguous_raw_parts_in_harness!(
-        harness_vec_deque_from_contiguous_raw_parts_in_usize,
-        usize
-    );
-    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
         harness_vec_deque_from_contiguous_raw_parts_in_i8,
         i8
     );
@@ -4482,10 +4434,6 @@ mod verify {
     gen_vec_deque_from_contiguous_raw_parts_in_harness!(
         harness_vec_deque_from_contiguous_raw_parts_in_i128,
         i128
-    );
-    gen_vec_deque_from_contiguous_raw_parts_in_harness!(
-        harness_vec_deque_from_contiguous_raw_parts_in_isize,
-        isize
     );
     gen_vec_deque_from_contiguous_raw_parts_in_harness!(
         harness_vec_deque_from_contiguous_raw_parts_in_unit,
@@ -4525,13 +4473,11 @@ mod verify {
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_u32, u32);
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_u64, u64);
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_u128, u128);
-    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_usize, usize);
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i8, i8);
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i16, i16);
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i32, i32);
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i64, i64);
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_i128, i128);
-    gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_isize, isize);
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_unit, ());
     gen_vec_deque_abort_shrink_a_harness!(harness_vec_deque_abort_shrink_a_array, [u8; 4]);
 
@@ -4570,13 +4516,11 @@ mod verify {
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_u32, u32);
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_u64, u64);
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_u128, u128);
-    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_usize, usize);
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i8, i8);
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i16, i16);
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i32, i32);
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i64, i64);
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_i128, i128);
-    gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_isize, isize);
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_unit, ());
     gen_vec_deque_abort_shrink_b_harness!(harness_vec_deque_abort_shrink_b_array, [u8; 4]);
 
@@ -4615,13 +4559,11 @@ mod verify {
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_u32, u32);
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_u64, u64);
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_u128, u128);
-    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_usize, usize);
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i8, i8);
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i16, i16);
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i32, i32);
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i64, i64);
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_i128, i128);
-    gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_isize, isize);
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_unit, ());
     gen_vec_deque_abort_shrink_c_harness!(harness_vec_deque_abort_shrink_c_array, [u8; 4]);
 
@@ -4644,13 +4586,11 @@ mod verify {
     gen_vec_deque_get_harness!(harness_vec_deque_get_u32, u32);
     gen_vec_deque_get_harness!(harness_vec_deque_get_u64, u64);
     gen_vec_deque_get_harness!(harness_vec_deque_get_u128, u128);
-    gen_vec_deque_get_harness!(harness_vec_deque_get_usize, usize);
     gen_vec_deque_get_harness!(harness_vec_deque_get_i8, i8);
     gen_vec_deque_get_harness!(harness_vec_deque_get_i16, i16);
     gen_vec_deque_get_harness!(harness_vec_deque_get_i32, i32);
     gen_vec_deque_get_harness!(harness_vec_deque_get_i64, i64);
     gen_vec_deque_get_harness!(harness_vec_deque_get_i128, i128);
-    gen_vec_deque_get_harness!(harness_vec_deque_get_isize, isize);
     gen_vec_deque_get_harness!(harness_vec_deque_get_unit, ());
     gen_vec_deque_get_harness!(harness_vec_deque_get_array, [u8; 4]);
 
@@ -4671,13 +4611,11 @@ mod verify {
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_u32, u32);
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_u64, u64);
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_u128, u128);
-    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_usize, usize);
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i8, i8);
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i16, i16);
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i32, i32);
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i64, i64);
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_i128, i128);
-    gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_isize, isize);
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_unit, ());
     gen_vec_deque_get_mut_harness!(harness_vec_deque_get_mut_array, [u8; 4]);
 
@@ -4700,13 +4638,11 @@ mod verify {
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_u32, u32);
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_u64, u64);
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_u128, u128);
-    gen_vec_deque_swap_harness!(harness_vec_deque_swap_usize, usize);
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_i8, i8);
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_i16, i16);
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_i32, i32);
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_i64, i64);
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_i128, i128);
-    gen_vec_deque_swap_harness!(harness_vec_deque_swap_isize, isize);
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_unit, ());
     gen_vec_deque_swap_harness!(harness_vec_deque_swap_array, [u8; 4]);
 
@@ -4732,13 +4668,11 @@ mod verify {
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_u32, u32);
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_u64, u64);
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_u128, u128);
-    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_usize, usize);
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i8, i8);
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i16, i16);
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i32, i32);
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i64, i64);
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_i128, i128);
-    gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_isize, isize);
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_unit, ());
     gen_vec_deque_reserve_exact_harness!(harness_vec_deque_reserve_exact_array, [u8; 4]);
 
@@ -4764,13 +4698,11 @@ mod verify {
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_u32, u32);
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_u64, u64);
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_u128, u128);
-    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_usize, usize);
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i8, i8);
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i16, i16);
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i32, i32);
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i64, i64);
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_i128, i128);
-    gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_isize, isize);
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_unit, ());
     gen_vec_deque_reserve_harness!(harness_vec_deque_reserve_array, [u8; 4]);
 
@@ -4796,13 +4728,11 @@ mod verify {
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_u32, u32);
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_u64, u64);
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_u128, u128);
-    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_usize, usize);
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i8, i8);
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i16, i16);
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i32, i32);
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i64, i64);
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_i128, i128);
-    gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_isize, isize);
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_unit, ());
     gen_vec_deque_try_reserve_exact_harness!(harness_vec_deque_try_reserve_exact_array, [u8; 4]);
 
@@ -4828,13 +4758,11 @@ mod verify {
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_u32, u32);
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_u64, u64);
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_u128, u128);
-    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_usize, usize);
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i8, i8);
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i16, i16);
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i32, i32);
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i64, i64);
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_i128, i128);
-    gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_isize, isize);
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_unit, ());
     gen_vec_deque_try_reserve_harness!(harness_vec_deque_try_reserve_array, [u8; 4]);
 
@@ -4865,13 +4793,11 @@ mod verify {
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_u32, u32);
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_u64, u64);
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_u128, u128);
-    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_usize, usize);
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i8, i8);
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i16, i16);
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i32, i32);
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i64, i64);
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_i128, i128);
-    gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_isize, isize);
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_unit, ());
     gen_vec_deque_shrink_to_harness!(harness_vec_deque_shrink_to_array, [u8; 4]);
 
@@ -4901,13 +4827,11 @@ mod verify {
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_u32, u32);
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_u64, u64);
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_u128, u128);
-    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_usize, usize);
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i8, i8);
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i16, i16);
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i32, i32);
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i64, i64);
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_i128, i128);
-    gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_isize, isize);
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_unit, ());
     gen_vec_deque_truncate_harness!(harness_vec_deque_truncate_array, [u8; 4]);
 
@@ -4927,13 +4851,11 @@ mod verify {
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_u32, u32);
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_u64, u64);
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_u128, u128);
-    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_usize, usize);
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i8, i8);
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i16, i16);
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i32, i32);
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i64, i64);
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_i128, i128);
-    gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_isize, isize);
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_unit, ());
     gen_vec_deque_as_slices_harness!(harness_vec_deque_as_slices_array, [u8; 4]);
 
@@ -4953,13 +4875,11 @@ mod verify {
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_u32, u32);
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_u64, u64);
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_u128, u128);
-    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_usize, usize);
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i8, i8);
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i16, i16);
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i32, i32);
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i64, i64);
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_i128, i128);
-    gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_isize, isize);
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_unit, ());
     gen_vec_deque_as_mut_slices_harness!(harness_vec_deque_as_mut_slices_array, [u8; 4]);
 
@@ -4981,13 +4901,11 @@ mod verify {
     gen_vec_deque_range_harness!(harness_vec_deque_range_u32, u32);
     gen_vec_deque_range_harness!(harness_vec_deque_range_u64, u64);
     gen_vec_deque_range_harness!(harness_vec_deque_range_u128, u128);
-    gen_vec_deque_range_harness!(harness_vec_deque_range_usize, usize);
     gen_vec_deque_range_harness!(harness_vec_deque_range_i8, i8);
     gen_vec_deque_range_harness!(harness_vec_deque_range_i16, i16);
     gen_vec_deque_range_harness!(harness_vec_deque_range_i32, i32);
     gen_vec_deque_range_harness!(harness_vec_deque_range_i64, i64);
     gen_vec_deque_range_harness!(harness_vec_deque_range_i128, i128);
-    gen_vec_deque_range_harness!(harness_vec_deque_range_isize, isize);
     gen_vec_deque_range_harness!(harness_vec_deque_range_unit, ());
     gen_vec_deque_range_harness!(harness_vec_deque_range_array, [u8; 4]);
 
@@ -5009,13 +4927,11 @@ mod verify {
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_u32, u32);
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_u64, u64);
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_u128, u128);
-    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_usize, usize);
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i8, i8);
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i16, i16);
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i32, i32);
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i64, i64);
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_i128, i128);
-    gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_isize, isize);
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_unit, ());
     gen_vec_deque_range_mut_harness!(harness_vec_deque_range_mut_array, [u8; 4]);
 
@@ -5037,13 +4953,11 @@ mod verify {
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_u32, u32);
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_u64, u64);
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_u128, u128);
-    gen_vec_deque_drain_harness!(harness_vec_deque_drain_usize, usize);
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_i8, i8);
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_i16, i16);
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_i32, i32);
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_i64, i64);
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_i128, i128);
-    gen_vec_deque_drain_harness!(harness_vec_deque_drain_isize, isize);
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_unit, ());
     gen_vec_deque_drain_harness!(harness_vec_deque_drain_array, [u8; 4]);
 
@@ -5063,13 +4977,11 @@ mod verify {
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_u32, u32);
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_u64, u64);
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_u128, u128);
-    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_usize, usize);
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i8, i8);
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i16, i16);
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i32, i32);
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i64, i64);
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_i128, i128);
-    gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_isize, isize);
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_unit, ());
     gen_vec_deque_pop_front_harness!(harness_vec_deque_pop_front_array, [u8; 4]);
 
@@ -5089,13 +5001,11 @@ mod verify {
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_u32, u32);
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_u64, u64);
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_u128, u128);
-    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_usize, usize);
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i8, i8);
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i16, i16);
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i32, i32);
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i64, i64);
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_i128, i128);
-    gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_isize, isize);
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_unit, ());
     gen_vec_deque_pop_back_harness!(harness_vec_deque_pop_back_array, [u8; 4]);
 
@@ -5117,13 +5027,11 @@ mod verify {
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_u32, u32);
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_u64, u64);
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_u128, u128);
-    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_usize, usize);
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i8, i8);
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i16, i16);
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i32, i32);
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i64, i64);
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_i128, i128);
-    gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_isize, isize);
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_unit, ());
     gen_vec_deque_push_front_harness!(harness_vec_deque_push_front_array, [u8; 4]);
 
@@ -5145,13 +5053,11 @@ mod verify {
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_u32, u32);
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_u64, u64);
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_u128, u128);
-    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_usize, usize);
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i8, i8);
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i16, i16);
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i32, i32);
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i64, i64);
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_i128, i128);
-    gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_isize, isize);
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_unit, ());
     gen_vec_deque_push_back_harness!(harness_vec_deque_push_back_array, [u8; 4]);
 
@@ -5174,13 +5080,11 @@ mod verify {
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_u32, u32);
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_u64, u64);
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_u128, u128);
-    gen_vec_deque_insert_harness!(harness_vec_deque_insert_usize, usize);
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_i8, i8);
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_i16, i16);
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_i32, i32);
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_i64, i64);
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_i128, i128);
-    gen_vec_deque_insert_harness!(harness_vec_deque_insert_isize, isize);
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_unit, ());
     gen_vec_deque_insert_harness!(harness_vec_deque_insert_array, [u8; 4]);
 
@@ -5201,13 +5105,11 @@ mod verify {
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_u32, u32);
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_u64, u64);
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_u128, u128);
-    gen_vec_deque_remove_harness!(harness_vec_deque_remove_usize, usize);
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_i8, i8);
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_i16, i16);
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_i32, i32);
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_i64, i64);
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_i128, i128);
-    gen_vec_deque_remove_harness!(harness_vec_deque_remove_isize, isize);
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_unit, ());
     gen_vec_deque_remove_harness!(harness_vec_deque_remove_array, [u8; 4]);
 
@@ -5228,13 +5130,11 @@ mod verify {
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_u32, u32);
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_u64, u64);
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_u128, u128);
-    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_usize, usize);
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i8, i8);
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i16, i16);
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i32, i32);
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i64, i64);
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_i128, i128);
-    gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_isize, isize);
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_unit, ());
     gen_vec_deque_split_off_harness!(harness_vec_deque_split_off_array, [u8; 4]);
 
@@ -5260,13 +5160,11 @@ mod verify {
     gen_vec_deque_append_harness!(harness_vec_deque_append_u32, u32);
     gen_vec_deque_append_harness!(harness_vec_deque_append_u64, u64);
     gen_vec_deque_append_harness!(harness_vec_deque_append_u128, u128);
-    gen_vec_deque_append_harness!(harness_vec_deque_append_usize, usize);
     gen_vec_deque_append_harness!(harness_vec_deque_append_i8, i8);
     gen_vec_deque_append_harness!(harness_vec_deque_append_i16, i16);
     gen_vec_deque_append_harness!(harness_vec_deque_append_i32, i32);
     gen_vec_deque_append_harness!(harness_vec_deque_append_i64, i64);
     gen_vec_deque_append_harness!(harness_vec_deque_append_i128, i128);
-    gen_vec_deque_append_harness!(harness_vec_deque_append_isize, isize);
     gen_vec_deque_append_harness!(harness_vec_deque_append_unit, ());
     gen_vec_deque_append_harness!(harness_vec_deque_append_array, [u8; 4]);
 
@@ -5289,13 +5187,11 @@ mod verify {
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_u32, u32);
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_u64, u64);
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_u128, u128);
-    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_usize, usize);
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i8, i8);
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i16, i16);
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i32, i32);
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i64, i64);
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_i128, i128);
-    gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_isize, isize);
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_unit, ());
     gen_vec_deque_retain_mut_harness!(harness_vec_deque_retain_mut_array, [u8; 4]);
 
@@ -5318,13 +5214,11 @@ mod verify {
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_u32, u32);
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_u64, u64);
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_u128, u128);
-    gen_vec_deque_grow_harness!(harness_vec_deque_grow_usize, usize);
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_i8, i8);
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_i16, i16);
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_i32, i32);
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_i64, i64);
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_i128, i128);
-    gen_vec_deque_grow_harness!(harness_vec_deque_grow_isize, isize);
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_unit, ());
     gen_vec_deque_grow_harness!(harness_vec_deque_grow_array, [u8; 4]);
 
@@ -5334,9 +5228,7 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let mut deque: VecDeque<$ty> = verifier_nondet_small_init_vec_deque();
-                // let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
                 let new_len = kani::any_where(|len: &usize| *len <= MAX_VEC_DEQUE_LEN);
-                // let new_len = kani::any::<usize>();
                 if new_len > deque.len() {
                     // Only the growth branch may reserve additional capacity.
                     assume_reserve_no_capacity_overflow::<$ty>(
@@ -5355,13 +5247,11 @@ mod verify {
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_u32, u32);
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_u64, u64);
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_u128, u128);
-    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_usize, usize);
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i8, i8);
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i16, i16);
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i32, i32);
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i64, i64);
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_i128, i128);
-    gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_isize, isize);
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_unit, ());
     gen_vec_deque_resize_with_harness!(harness_vec_deque_resize_with_array, [u8; 4]);
 
@@ -5380,14 +5270,10 @@ mod verify {
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u16, u16);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u32, u32);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u64, u64);
-    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u128, u128);
-    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_usize, usize);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i8, i8);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i16, i16);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i32, i32);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i64, i64);
-    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i128, i128);
-    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_isize, isize);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_unit, ());
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_array, [u8; 4]);
 
@@ -5408,13 +5294,11 @@ mod verify {
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_u32, u32);
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_u64, u64);
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_u128, u128);
-    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_usize, usize);
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i8, i8);
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i16, i16);
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i32, i32);
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i64, i64);
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_i128, i128);
-    gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_isize, isize);
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_unit, ());
     gen_vec_deque_rotate_left_inner_harness!(harness_vec_deque_rotate_left_inner_array, [u8; 4]);
 
@@ -5435,13 +5319,11 @@ mod verify {
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_u32, u32);
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_u64, u64);
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_u128, u128);
-    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_usize, usize);
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i8, i8);
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i16, i16);
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i32, i32);
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i64, i64);
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_i128, i128);
-    gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_isize, isize);
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_unit, ());
     gen_vec_deque_rotate_right_inner_harness!(harness_vec_deque_rotate_right_inner_array, [u8; 4]);
 
@@ -5464,13 +5346,11 @@ mod verify {
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_u32, u32);
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_u64, u64);
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_u128, u128);
-    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_usize, usize);
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i8, i8);
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i16, i16);
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i32, i32);
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i64, i64);
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_i128, i128);
-    gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_isize, isize);
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_unit, ());
     gen_vec_deque_rotate_left_harness!(harness_vec_deque_rotate_left_array, [u8; 4]);
 
@@ -5493,13 +5373,11 @@ mod verify {
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_u32, u32);
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_u64, u64);
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_u128, u128);
-    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_usize, usize);
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i8, i8);
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i16, i16);
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i32, i32);
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i64, i64);
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_i128, i128);
-    gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_isize, isize);
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_unit, ());
     gen_vec_deque_rotate_right_harness!(harness_vec_deque_rotate_right_array, [u8; 4]);
 }
