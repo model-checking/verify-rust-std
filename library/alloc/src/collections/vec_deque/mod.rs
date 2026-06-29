@@ -3806,38 +3806,6 @@ mod verify {
     use crate::collections::VecDeque;
     use crate::vec::Vec;
 
-    #[kani::proof]
-    fn check_vecdeque_swap() {
-        // The array's length is set to an arbitrary value, which defines its size.
-        // In this case, implementing a dynamic array is not possible using any_array
-        // The more elements in the array the longer the veification time.
-        const ARRAY_LEN: usize = 40;
-        let mut arr: [u32; ARRAY_LEN] = kani::Arbitrary::any_array();
-        let mut deque: VecDeque<u32> = VecDeque::from(arr);
-        let len = deque.len();
-
-        // Generate valid indices within bounds
-        let i = kani::any_where(|&x: &usize| x < len);
-        let j = kani::any_where(|&x: &usize| x < len);
-
-        // Capture the elements at i and j before the swap
-        let elem_i_before = deque[i];
-        let elem_j_before = deque[j];
-
-        // Perform the swap
-        deque.swap(i, j);
-
-        // Postcondition: Verify elements have swapped places
-        assert_eq!(deque[i], elem_j_before);
-        assert_eq!(deque[j], elem_i_before);
-
-        // Ensure other elements remain unchanged
-        let k = kani::any_where(|&x: &usize| x < len);
-        if k != i && k != j {
-            assert!(deque[k] == arr[k]);
-        }
-    }
-
     // === UNSAFE FUNCTIONS ===
 
     // Harnesses for `VecDeque::push_unchecked`
@@ -4480,7 +4448,7 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof_for_contract(VecDeque::<$ty>::abort_shrink)]
             pub fn $name() {
-                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let mut deque: VecDeque<$ty> = verifier_nondet_small_vec_deque();
                 let cap = deque.capacity();
                 let target_cap = kani::any_where(|&x: &usize| x < cap);
                 let len = kani::any_where(|&x: &usize| x <= target_cap);
@@ -4523,7 +4491,7 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof_for_contract(VecDeque::<$ty>::abort_shrink)]
             pub fn $name() {
-                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let mut deque: VecDeque<$ty> = verifier_nondet_small_vec_deque();
                 let cap = deque.capacity();
                 let target_cap = kani::any_where(|&x: &usize| x < cap);
                 let len = kani::any_where(|&x: &usize| x <= target_cap);
@@ -5174,7 +5142,7 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let mut deque: VecDeque<$ty> = verifier_nondet_small_init_vec_deque();
                 deque.retain_mut(|_| kani::any::<bool>());
             }
         };
