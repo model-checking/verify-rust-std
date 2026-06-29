@@ -188,11 +188,7 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
 
         #[kani::loop_invariant(
             !T::IS_ZST
-                // && left.checked_add(right) == Some(len)
                 && len > 0
-                // && len.checked_mul(size_of::<T>()).is_some_and(|bytes| bytes <= isize::MAX as usize)
-                // && kani::mem::can_dereference(ptr::slice_from_raw_parts(x as *const T, len))
-                // && kani::mem::can_write(ptr::slice_from_raw_parts_mut(x, len))
                 && left > 0
                 && right > 0
                 && left < len

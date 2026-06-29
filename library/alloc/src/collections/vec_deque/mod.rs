@@ -3710,11 +3710,8 @@ mod kani_vec_deque_harness_helpers {
         }
 
         let requested_cap = kani::any_where(|cap: &usize| *cap > 0 && *cap <= MAX_VEC_DEQUE_LEN);
-        kani::assume(crate::alloc::Layout::array::<T>(requested_cap).is_ok());
-
         let mut vec = Vec::<T>::with_capacity(requested_cap);
         let cap = vec.capacity();
-        kani::assume(cap > 0 && cap <= MAX_VEC_DEQUE_LEN);
 
         unsafe {
             // Initialize the whole allocation so arbitrary head and len remain valid.
@@ -3834,7 +3831,7 @@ mod verify {
         assert_eq!(deque[i], elem_j_before);
         assert_eq!(deque[j], elem_i_before);
 
-        // Only indices outside the two swapped positions should be unchanged.
+        // Ensure other elements remain unchanged
         let k = kani::any_where(|&x: &usize| x < len);
         if k != i && k != j {
             assert!(deque[k] == arr[k]);
@@ -4065,12 +4062,9 @@ mod verify {
             pub fn $name() {
                 let cap = verifier_nondet_write_iter_capacity::<$ty>();
                 let mut deque: VecDeque<$ty> = VecDeque::with_capacity(cap);
-
                 let dst = kani::any::<usize>();
                 let iter = core::iter::once(kani::any::<$ty>());
-
                 let mut written: usize = 0;
-
                 unsafe { deque.write_iter(dst, iter, &mut written) };
             }
         };
@@ -4099,7 +4093,6 @@ mod verify {
                 let dst = kani::any::<usize>();
                 let iter = core::iter::once(kani::any::<$ty>());
                 let len: usize = kani::any();
-
                 unsafe { deque.write_iter_wrapping(dst, iter, len) };
             }
         };
@@ -4774,15 +4767,19 @@ mod verify {
                 let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
                 let cap = deque.capacity();
 
+                // Generate arbitrary inputs while keeping internal fields in bounds.
                 let min_capacity = kani::any::<usize>();
                 let len = kani::any_where(|&x: &usize| x <= cap);
                 let head = kani::any_where(|&x: &usize| x < cap);
 
+                // Set a valid internal state for the deque model.
                 deque.len = len;
                 deque.head = head;
 
+                // Compute the effective lower bound that shrink_to should respect.
                 let target_cap = core::cmp::max(min_capacity, len);
 
+                // Perform the shrink operation under arbitrary valid inputs.
                 deque.shrink_to(min_capacity);
             }
         };
@@ -4809,14 +4806,18 @@ mod verify {
                 let mut deque: VecDeque<$ty> = verifier_nondet_init_vec_deque();
                 let cap = deque.capacity();
 
+                // Generate valid internal indices constrained by the current capacity.
                 let deq_len = kani::any_where(|&x: &usize| x <= cap);
                 let head = kani::any_where(|&x: &usize| x < cap);
 
+                // Set up a valid deque state before calling truncate.
                 deque.head = head;
                 deque.len = deq_len;
 
+                // Pick an arbitrary truncation length.
                 let len = kani::any::<usize>();
 
+                // Perform truncation from an arbitrary but valid initial state.
                 deque.truncate(len);
             }
         };
@@ -5173,10 +5174,7 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // let mut deque: VecDeque<$ty> = verifier_nondet_small_init_vec_deque();
                 let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
-                // let mut deque: VecDeque<$ty> = verifier_nondet_vec_deque();
-
                 deque.retain_mut(|_| kani::any::<bool>());
             }
         };
@@ -5270,10 +5268,12 @@ mod verify {
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u16, u16);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u32, u32);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u64, u64);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_u128, u128);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i8, i8);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i16, i16);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i32, i32);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i64, i64);
+    gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_i128, i128);
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_unit, ());
     gen_vec_deque_make_contiguous_harness!(harness_vec_deque_make_contiguous_array, [u8; 4]);
 
