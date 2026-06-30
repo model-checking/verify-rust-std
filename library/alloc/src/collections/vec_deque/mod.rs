@@ -3974,7 +3974,7 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof_for_contract(VecDeque::<$ty>::wrap_copy)]
             pub fn $name() {
-                let mut deque: VecDeque<$ty> = verifier_nondet_bounded_vec_deque();
+                let mut deque: VecDeque<$ty> = verifier_nondet_small_init_vec_deque();
                 let src = kani::any::<usize>();
                 let len = kani::any::<usize>();
                 let dst = kani::any::<usize>();
