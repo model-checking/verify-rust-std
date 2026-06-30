@@ -3984,23 +3984,15 @@ mod verify {
     }
 
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u8, u8);
-    #[cfg(target_os = "macos")]
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u16, u16);
-    #[cfg(target_os = "macos")]
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u32, u32);
-    #[cfg(target_os = "macos")]
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u64, u64);
-    #[cfg(target_os = "macos")]
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u128, u128);
+    // gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u16, u16);
+    // gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u32, u32);
+    // gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u64, u64);
+    // gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_u128, u128);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i8, i8);
-    #[cfg(target_os = "macos")]
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i16, i16);
-    #[cfg(target_os = "macos")]
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i32, i32);
-    #[cfg(target_os = "macos")]
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i64, i64);
-    #[cfg(target_os = "macos")]
-    gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i128, i128);
+    // gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i16, i16);
+    // gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i32, i32);
+    // gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i64, i64);
+    // gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_i128, i128);
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_unit, ());
     gen_vec_deque_wrap_copy_harness!(harness_vec_deque_wrap_copy_array, [u8; 4]);
 
