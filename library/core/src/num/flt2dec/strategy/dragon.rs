@@ -252,11 +252,6 @@ pub fn format_shortest<'a>(
         plus.mul_small(10);
     }
 
-    // Kani-only: carry the same digit bound to the `assume_init_*` and possible
-    // `round_up` call sites. This does not change production code.
-    #[cfg(kani)]
-    kani::assume(i <= MAX_SIG_DIGITS);
-
     // rounding up happens when
     // i) only the rounding-up condition was triggered, or
     // ii) both conditions were triggered and tie breaking prefers rounding up.
@@ -427,7 +422,6 @@ pub fn format_exact<'a>(
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
-    use crate::kani;
 
     // Buffer-safety-only stubs. These harnesses check that Dragon writes only
     // initialized decimal bytes and returns initialized slices. They deliberately
@@ -447,18 +441,8 @@ mod verify {
         b
     }
 
-    // Stub for `Big::mul_digits`; used by `mul_pow10`'s power-of-five path.
-    fn stub_mul_digits<'a>(b: &'a mut Big, _other: &[Digit]) -> &'a mut Big {
-        b
-    }
-
     // Stub for `Big::add`; later comparisons are modeled separately.
     fn stub_add<'a>(b: &'a mut Big, _other: &Big) -> &'a mut Big {
-        b
-    }
-
-    // Stub for `Big::sub`; digit extraction supplies the observed quotient.
-    fn stub_sub<'a>(b: &'a mut Big, _other: &Big) -> &'a mut Big {
         b
     }
 
@@ -538,9 +522,7 @@ mod verify {
     // paths while stubbing expensive Big arithmetic.
     #[kani::stub(Big::mul_pow2, stub_mul_pow2)]
     #[kani::stub(Big::mul_small, stub_mul_small)]
-    #[kani::stub(Big::mul_digits, stub_mul_digits)]
     #[kani::stub(Big::add, stub_add)]
-    #[kani::stub(Big::sub, stub_sub)]
     #[kani::stub(Big::is_zero, stub_is_zero)]
     #[kani::stub(Big::cmp, stub_cmp)]
     #[kani::stub(estimate_scaling_factor, stub_estimate_scaling_factor)]
@@ -562,7 +544,6 @@ mod verify {
     #[kani::stub(Big::mul_pow2, stub_mul_pow2)]
     #[kani::stub(Big::mul_small, stub_mul_small)]
     #[kani::stub(Big::add, stub_add)]
-    #[kani::stub(Big::sub, stub_sub)]
     #[kani::stub(Big::cmp, stub_cmp)]
     #[kani::stub(estimate_scaling_factor, stub_estimate_scaling_factor)]
     #[kani::stub(mul_pow10, stub_mul_pow10)]
