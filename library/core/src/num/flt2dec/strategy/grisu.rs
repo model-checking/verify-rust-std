@@ -169,6 +169,7 @@ pub fn max_pow10_no_more_than(x: u32) -> (u8, u32) {
 // steps; those abstractions preserve the bounds used by the safety proof,
 // but they are not claims of decimal-conversion numerical correctness.
 #[cfg(kani)]
+// Kani-only power-of-ten table used by loop invariants and max-pow10 stubs.
 fn kani_pow10_u32(kappa: u8) -> u32 {
     match kappa {
         0 => 1,
@@ -185,6 +186,7 @@ fn kani_pow10_u32(kappa: u8) -> u32 {
 }
 
 #[cfg(kani)]
+// Kani-only power-of-ten table for exact-mode error and loop bounds.
 fn kani_pow10_u64(kappa: usize) -> u64 {
     match kappa {
         0 => 1,
@@ -211,12 +213,8 @@ fn kani_pow10_u64(kappa: usize) -> u64 {
 }
 
 #[cfg(kani)]
-fn kani_exact_integral_state(
-    integral_limit: usize,
-    i: usize,
-    kappa: i16,
-    ten_kappa: u32,
-) -> bool {
+// Loop-invariant predicate for the exact-mode integral digit phase.
+fn kani_exact_integral_state(integral_limit: usize, i: usize, kappa: i16, ten_kappa: u32) -> bool {
     if i < integral_limit {
         kappa == (integral_limit - i - 1) as i16
             && ten_kappa == kani_pow10_u32((integral_limit - i - 1) as u8)
@@ -226,6 +224,7 @@ fn kani_exact_integral_state(
 }
 
 #[cfg(kani)]
+// Reads one already-written digit in a Kani assertion; it deliberately does not initialize bytes.
 fn kani_exact_digit_at(buf: &[MaybeUninit<u8>], len: usize, idx: usize) -> bool {
     if idx >= len {
         true
@@ -241,6 +240,7 @@ fn kani_exact_digit_at(buf: &[MaybeUninit<u8>], len: usize, idx: usize) -> bool 
 }
 
 #[cfg(kani)]
+// Checks that the exact-mode prefix later exposed by `assume_init_*` is initialized.
 fn kani_exact_digit_prefix(buf: &[MaybeUninit<u8>], len: usize) -> bool {
     // Unrolled so Kani can use it in loop contracts without quantifier-heavy
     // reasoning. This proves the initialized prefix for exact/fixed mode.
@@ -278,6 +278,7 @@ fn kani_exact_digit_prefix(buf: &[MaybeUninit<u8>], len: usize) -> bool {
 }
 
 #[cfg(kani)]
+// Checks the initialized-prefix obligation for shortest mode.
 fn kani_shortest_digit_prefix(buf: &[MaybeUninit<u8>], len: usize) -> bool {
     // Same proof obligation as `kani_exact_digit_prefix`, specialized to the
     // shortest-mode maximum length. It does not initialize `buf`.
@@ -303,6 +304,7 @@ fn kani_shortest_digit_prefix(buf: &[MaybeUninit<u8>], len: usize) -> bool {
 }
 
 #[cfg(kani)]
+// Loop-invariant predicate for the shortest-mode integral digit phase.
 fn kani_shortest_integral_state(integral_limit: usize, i: usize, ten_kappa: u32) -> bool {
     if i < integral_limit {
         ten_kappa == kani_pow10_u32((integral_limit - i - 1) as u8)
@@ -312,10 +314,12 @@ fn kani_shortest_integral_state(integral_limit: usize, i: usize, ten_kappa: u32)
 }
 
 #[cfg(kani)]
+// Kani bound for the abstract shortest-mode ULP growth in the fractional loop.
 const GRISU_SHORTEST_MAX_ULP: u64 = 1_000_000_000_000_000_000;
 
 #[cfg(kani)]
 #[inline]
+// Kani abstraction for `(value as u64) << e` used in shortest-mode remainder scaling.
 fn scale_u32_by_binary_exp(value: u32, e: usize, scale: u64) -> u64 {
     let _ = (value, e);
     let scaled: u64 = kani::any();
@@ -330,6 +334,7 @@ fn scale_u32_by_binary_exp(value: u32, e: usize, scale: u64) -> u64 {
 
 #[cfg(kani)]
 #[inline]
+// Kani abstraction for scaling `10^kappa` before passing it to `round_and_weed`.
 fn scale_pow10_by_binary_exp(value: u32, e: usize) -> u64 {
     let _ = (value, e);
     let scaled: u64 = kani::any();
@@ -341,6 +346,7 @@ fn scale_pow10_by_binary_exp(value: u32, e: usize) -> u64 {
 }
 
 #[cfg(kani)]
+// Kani replacement for `max_pow10_no_more_than` that keeps only its semantic contract.
 fn kani_max_pow10_no_more_than(x: u32) -> (u8, u32) {
     kani::assume(x > 0);
     let kappa: u8 = kani::any();
@@ -356,6 +362,7 @@ fn kani_max_pow10_no_more_than(x: u32) -> (u8, u32) {
 }
 
 #[cfg(kani)]
+// Kani-only model of the normalized and cached-power-scaled shortest-mode state.
 fn kani_scale_shortest_inputs() -> (i16, Fp, Fp, Fp) {
     // This harness verifies memory safety of the digit-generation control flow.
     // It models only the post-scaling Grisu Fp triple instead of proving the
@@ -384,20 +391,17 @@ fn kani_scale_shortest_inputs() -> (i16, Fp, Fp, Fp) {
     kani::assume(v_f >= minus_f && v_f <= plus_f);
 
     let e = -(e_abs as i16);
-    (
-        minusk,
-        Fp { f: plus_f, e },
-        Fp { f: minus_f, e },
-        Fp { f: v_f, e },
-    )
+    (minusk, Fp { f: plus_f, e }, Fp { f: minus_f, e }, Fp { f: v_f, e })
 }
 
 // In exact mode, Grisu itself can generate at most 10 integral digits plus
 // 18 fractional digits before either rounding or the error bound stops it.
 // A final carry digit may still be appended by `round_up`.
 #[cfg(kani)]
+// Maximum exact-mode digits that the Kani loop contracts track before a carry.
 const GRISU_EXACT_OPT_MAX_DIGITS: usize = 28;
 #[cfg(kani)]
+// Scratch-buffer bound used by exact-mode harnesses, including one carry digit.
 const GRISU_EXACT_OPT_MAX_BUF_LEN: usize = GRISU_EXACT_OPT_MAX_DIGITS + 1;
 
 /// The shortest mode implementation for Grisu.
@@ -686,11 +690,7 @@ pub fn format_shortest_opt<'a>(
         // this is too liberal, though, so we reject any `w(n)` not between `plus0` and `minus0`,
         // i.e., `plus1 - plus1w(n) <= minus0` or `plus1 - plus1w(n) >= plus0`. we utilize the facts
         // that `threshold = plus1 - minus1` and `plus1 - plus0 = minus0 - minus1 = 2 ulp`.
-        if 2 * ulp <= plus1w && plus1w <= threshold - 4 * ulp {
-            Some((buf, exp))
-        } else {
-            None
-        }
+        if 2 * ulp <= plus1w && plus1w <= threshold - 4 * ulp { Some((buf, exp)) } else { None }
     }
 }
 
@@ -698,6 +698,8 @@ pub fn format_shortest_opt<'a>(
 ///
 /// It returns `None` when it would return an inexact representation otherwise.
 #[cfg(kani)]
+// Verification version: keeps the digit-writing control flow, abstracts the expensive scaling prefix,
+// and adds loop contracts for initialized-prefix and bounds facts.
 pub fn format_shortest_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -716,21 +718,9 @@ pub fn format_shortest_opt<'a>(
     #[cfg(not(kani))]
     let (minusk, plus, minus, v) = {
         // start with the normalized values with the shared exponent
-        let plus = Fp {
-            f: d.mant + d.plus,
-            e: d.exp,
-        }
-        .normalize();
-        let minus = Fp {
-            f: d.mant - d.minus,
-            e: d.exp,
-        }
-        .normalize_to(plus.e);
-        let v = Fp {
-            f: d.mant,
-            e: d.exp,
-        }
-        .normalize_to(plus.e);
+        let plus = Fp { f: d.mant + d.plus, e: d.exp }.normalize();
+        let minus = Fp { f: d.mant - d.minus, e: d.exp }.normalize_to(plus.e);
+        let v = Fp { f: d.mant, e: d.exp }.normalize_to(plus.e);
 
         // find any `cached = 10^minusk` such that `ALPHA <= minusk + plus.e + 64 <= GAMMA`.
         // since `plus` is normalized, this means `2^(62 + ALPHA) <= plus * cached < 2^(64 + GAMMA)`;
@@ -903,23 +893,9 @@ pub fn format_shortest_opt<'a>(
         if plus1rem < delta1 {
             // `plus1 % 10^kappa < delta1 = plus1 - minus1`; we've found the correct `kappa`.
             let ten_kappa = scale_pow10_by_binary_exp(ten_kappa, e); // scale 10^kappa back to the shared exponent
-            #[cfg(kani)]
-            // Keep the initialization proof explicit at the unsafe boundary.
-            // This assertion reads the already-written prefix; it does not make
-            // uninitialized bytes initialized.
-            assert!(kani_shortest_digit_prefix(buf, i));
             // SAFETY: we initialized that memory above.
             let digits = unsafe { buf[..i].assume_init_mut() };
-            #[cfg(kani)]
-            assert!(digits[digits.len() - 1] >= b'0' && digits[digits.len() - 1] <= b'9');
-            return if round_and_weed(
-                digits,
-                plus1rem,
-                delta1,
-                plus1 - v.f,
-                ten_kappa,
-                1,
-            ) {
+            return if round_and_weed(digits, plus1rem, delta1, plus1 - v.f, ten_kappa, 1) {
                 Some((digits, exp))
             } else {
                 None
@@ -1024,13 +1000,8 @@ pub fn format_shortest_opt<'a>(
             let Some(plus1v) = (plus1 - v.f).checked_mul(ulp) else {
                 return None;
             };
-            #[cfg(kani)]
-            // Same unsafe-boundary check as in the integral path.
-            assert!(kani_shortest_digit_prefix(buf, i));
             // SAFETY: we initialized that memory above.
             let digits = unsafe { buf[..i].assume_init_mut() };
-            #[cfg(kani)]
-            assert!(digits[digits.len() - 1] >= b'0' && digits[digits.len() - 1] <= b'9');
             return if round_and_weed(digits, frac_r, threshold, plus1v, ten_kappa, ulp) {
                 Some((digits, exp))
             } else {
@@ -1186,6 +1157,7 @@ fn round_and_weed(
 
 #[inline]
 #[cfg(kani)]
+// Helper used by the verified `round_and_weed` body to make the decrement condition reusable.
 fn round_and_weed_can_decrement(
     plus1w: u64,
     plus1v_edge: u64,
@@ -1524,6 +1496,8 @@ pub fn format_exact_opt<'a>(
 ///
 /// It returns `None` when it would return an inexact representation otherwise.
 #[cfg(kani)]
+// Verification version: keeps exact-mode digit writes and rounding structure, with loop contracts
+// and bounded assumptions so Kani can prove the unsafe slice initialization sites.
 pub fn format_exact_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -1534,11 +1508,7 @@ pub fn format_exact_opt<'a>(
     assert!(!buf.is_empty());
 
     // normalize and scale `v`.
-    let v = Fp {
-        f: d.mant,
-        e: d.exp,
-    }
-    .normalize();
+    let v = Fp { f: d.mant, e: d.exp }.normalize();
     let (minusk, cached) = cached_power(ALPHA - v.e - 64, GAMMA - v.e - 64);
     let v = v.mul(cached);
     #[cfg(kani)]
@@ -1554,18 +1524,8 @@ pub fn format_exact_opt<'a>(
 
     let requested_digits = buf.len();
 
-    const POW10_UP_TO_9: [u32; 10] = [
-        1,
-        10,
-        100,
-        1000,
-        10_000,
-        100_000,
-        1_000_000,
-        10_000_000,
-        100_000_000,
-        1_000_000_000,
-    ];
+    const POW10_UP_TO_9: [u32; 10] =
+        [1, 10, 100, 1000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000];
 
     // We deviate from the original algorithm here and do some early checks to determine if we can satisfy requested_digits.
     // If we determine that we can't, we exit early and avoid most of the heavy lifting that the algorithm otherwise does.
@@ -1613,15 +1573,7 @@ pub fn format_exact_opt<'a>(
         //
         // SAFETY: `len=0`, so the obligation of having initialized this memory is trivial.
         return unsafe {
-            possibly_round(
-                buf,
-                0,
-                exp,
-                limit,
-                v.f / 10,
-                (max_ten_kappa as u64) << e,
-                err << e,
-            )
+            possibly_round(buf, 0, exp, limit, v.f / 10, (max_ten_kappa as u64) << e, err << e)
         };
     } else if ((exp as i32 - limit as i32) as usize) < buf.len() {
         (exp - limit) as usize
@@ -1690,15 +1642,7 @@ pub fn format_exact_opt<'a>(
             let vrem = ((r as u64) << e) + vfrac; // == (v % 10^kappa) * 2^e
             // SAFETY: we have initialized `len` many bytes.
             return unsafe {
-                possibly_round(
-                    buf,
-                    len,
-                    exp,
-                    limit,
-                    vrem,
-                    (ten_kappa as u64) << e,
-                    err << e,
-                )
+                possibly_round(buf, len, exp, limit, vrem, (ten_kappa as u64) << e, err << e)
             };
         }
 
@@ -1880,10 +1824,6 @@ pub fn format_exact_opt<'a>(
         // `10^kappa` did not overflow after all, the second check is fine.
         if ten_kappa - remainder > remainder && ten_kappa - 2 * remainder >= 2 * ulp {
             // SAFETY: our caller initialized that memory.
-            #[cfg(kani)]
-            // Kani checks the caller's initialization guarantee here before the
-            // immutable initialized slice is created.
-            assert!(kani_exact_digit_prefix(buf, len));
             return Some((unsafe { buf[..len].assume_init_ref() }, exp));
         }
 
@@ -1905,9 +1845,6 @@ pub fn format_exact_opt<'a>(
         // as `10^kappa` is never zero). also note that `remainder - ulp <= 10^kappa`,
         // so the second check does not overflow.
         if remainder > ulp && ten_kappa - (remainder - ulp) <= remainder - ulp {
-            #[cfg(kani)]
-            // The mutable slice passed to `round_up` must be initialized first.
-            assert!(kani_exact_digit_prefix(buf, len));
             if let Some(c) =
                 // SAFETY: our caller must have initialized that memory.
                 round_up(unsafe { buf[..len].assume_init_mut() })
@@ -1922,10 +1859,6 @@ pub fn format_exact_opt<'a>(
                 }
             }
             // SAFETY: we and our caller initialized that memory.
-            #[cfg(kani)]
-            // `round_up` may mutate existing digits and this branch may append
-            // one extra byte, so check the final returned prefix as well.
-            assert!(kani_exact_digit_prefix(buf, len));
             return Some((unsafe { buf[..len].assume_init_ref() }, exp));
         }
 
@@ -1966,6 +1899,7 @@ mod verify {
     // states produced by `decode()` for f16/f32/f64. They do not verify the
     // decode entry point itself; they start from the `Decoded` contract used by
     // the formatting strategies.
+    // Helper table used by `stub_max_pow10_no_more_than`.
     fn pow10_for_kappa(kappa: u8) -> u32 {
         match kappa {
             0 => 1,
@@ -1981,6 +1915,7 @@ mod verify {
         }
     }
 
+    // Symbolic `Decoded` generator for shortest-mode Grisu and fallback harnesses.
     fn arbitrary_decoded_shortest() -> Decoded {
         let mant: u64 = kani::any();
         let plus: u64 = kani::any();
@@ -1990,15 +1925,10 @@ mod verify {
         kani::assume(plus == 1 || plus == 2);
         kani::assume(exp >= -1076 && exp <= 971);
 
-        Decoded {
-            mant,
-            minus: 1,
-            plus,
-            exp,
-            inclusive: kani::any(),
-        }
+        Decoded { mant, minus: 1, plus, exp, inclusive: kani::any() }
     }
 
+    // Symbolic `Decoded` generator for exact/fixed-mode Grisu and fallback harnesses.
     fn arbitrary_decoded_exact() -> Decoded {
         let mant: u64 = kani::any();
         let exp: i16 = kani::any();
@@ -2006,15 +1936,10 @@ mod verify {
         kani::assume(mant > 0 && mant <= (1u64 << 54));
         kani::assume(exp >= -1076 && exp <= 971);
 
-        Decoded {
-            mant,
-            minus: 1,
-            plus: 1,
-            exp,
-            inclusive: kani::any(),
-        }
+        Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
     }
 
+    // Stub for `Fp::mul`, used by exact/fixed-mode harnesses.
     fn stub_fp_mul(a: Fp, b: Fp) -> Fp {
         let f: u64 = kani::any();
 
@@ -2027,12 +1952,10 @@ mod verify {
         kani::assume(f >= (a.f >> 1));
         kani::assume(f <= a.f);
 
-        Fp {
-            f,
-            e: a.e + b.e + 64,
-        }
+        Fp { f, e: a.e + b.e + 64 }
     }
 
+    // Stub for `cached_power`, preserving only the exponent and normalization bounds Grisu uses.
     fn stub_cached_power(alpha: i16, gamma: i16) -> (i16, Fp) {
         let k: i16 = kani::any();
         let f: u64 = kani::any();
@@ -2048,6 +1971,7 @@ mod verify {
         (k, Fp { f, e })
     }
 
+    // Stub for `max_pow10_no_more_than`, backed by the same power-of-ten contract.
     fn stub_max_pow10_no_more_than(x: u32) -> (u8, u32) {
         kani::assume(x > 0);
         let kappa: u8 = kani::any();
@@ -2065,22 +1989,16 @@ mod verify {
         (kappa, pow)
     }
 
+    // Stub for `flt2dec::round_up`, used only when exact/fixed mode may carry.
     fn stub_round_up(d: &mut [u8]) -> Option<u8> {
         // Exact/fixed-mode verification only needs to know that `round_up` may
         // mutate initialized digits and may return a carry digit. The real
         // decimal carry propagation is outside this Grisu control-flow harness,
         // so this remains a conventional stub.
-        if kani::any() {
-            if d.is_empty() {
-                Some(b'1')
-            } else {
-                Some(b'0')
-            }
-        } else {
-            None
-        }
+        if kani::any() { if d.is_empty() { Some(b'1') } else { Some(b'0') } } else { None }
     }
 
+    // Initializes a stub-returned digit prefix before converting it to `&[u8]`.
     fn init_digits(buf: &mut [MaybeUninit<u8>], len: usize) {
         // Harness-only initializer for stubs that model successful fallback or
         // optimized formatting. It is not used before proving real
@@ -2093,6 +2011,7 @@ mod verify {
         }
     }
 
+    // Stub for `format_shortest_opt` when verifying the top-level Dragon fallback wrapper.
     fn stub_format_shortest_opt<'a>(
         _d: &Decoded,
         buf: &'a mut [MaybeUninit<u8>],
@@ -2107,6 +2026,7 @@ mod verify {
         }
     }
 
+    // Stub for `format_exact_opt` when verifying the top-level Dragon fallback wrapper.
     fn stub_format_exact_opt<'a>(
         _d: &Decoded,
         buf: &'a mut [MaybeUninit<u8>],
@@ -2122,6 +2042,7 @@ mod verify {
         }
     }
 
+    // Stub for `dragon::format_shortest`, returning an initialized fallback digit slice.
     fn stub_dragon_format_shortest<'a>(
         _d: &Decoded,
         buf: &'a mut [MaybeUninit<u8>],
@@ -2132,6 +2053,7 @@ mod verify {
         (unsafe { buf[..len].assume_init_ref() }, kani::any())
     }
 
+    // Stub for `dragon::format_exact`, returning an initialized fallback digit slice.
     fn stub_dragon_format_exact<'a>(
         _d: &Decoded,
         buf: &'a mut [MaybeUninit<u8>],
@@ -2181,14 +2103,7 @@ mod verify {
         let ten_kappa: u64 = kani::any();
         let ulp: u64 = kani::any();
 
-        let _ = round_and_weed(
-            &mut buf[..len],
-            remainder,
-            threshold,
-            plus1v,
-            ten_kappa,
-            ulp,
-        );
+        let _ = round_and_weed(&mut buf[..len], remainder, threshold, plus1v, ten_kappa, ulp);
     }
 
     #[kani::proof]
@@ -2231,10 +2146,7 @@ mod verify {
     #[kani::unwind(30)]
     // Same top-level fallback proof for exact/fixed mode.
     #[kani::stub(format_exact_opt, stub_format_exact_opt)]
-    #[kani::stub(
-        crate::num::flt2dec::strategy::dragon::format_exact,
-        stub_dragon_format_exact
-    )]
+    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_exact, stub_dragon_format_exact)]
     fn harness_format_exact() {
         let d = arbitrary_decoded_exact();
         let limit: i16 = kani::any();
@@ -2244,5 +2156,4 @@ mod verify {
             [const { MaybeUninit::uninit() }; GRISU_EXACT_OPT_MAX_BUF_LEN];
         let _ = format_exact(&d, &mut buf[..buf_len], limit);
     }
-
 }

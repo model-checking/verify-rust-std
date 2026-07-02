@@ -124,9 +124,9 @@ functions.
 
 pub use self::decoder::{DecodableFloat, Decoded, FullDecoded, decode};
 use super::fmt::{Formatted, Part};
-use crate::mem::MaybeUninit;
 #[cfg(kani)]
 use crate::kani;
+use crate::mem::MaybeUninit;
 
 pub mod decoder;
 pub mod estimator;
@@ -678,7 +678,14 @@ where
 mod verify_helpers {
     use super::*;
 
+    // Finite backing length for symbolic digit/scratch slices. Shortest mode
+    // only requires `MAX_SIG_DIGITS`, but 100 also exercises formatter padding
+    // and split-position branches while keeping Kani's slice search tractable.
     pub(super) const ARRAY_LEN: usize = 100;
+
+    // Exact/fixed mode can need hundreds of scratch digits for f64. 1024 is
+    // above the current `estimate_max_buf_len` worst case for f16/f32/f64, with
+    // margin, without asking Kani to reason about arbitrary-length buffers.
     pub(super) const EXACT_BUF_LEN: usize = 1024;
 
     // Generate one symbolic ASCII digit.
@@ -747,9 +754,8 @@ mod verify_helpers {
     ) -> &'a [u8] {
         kani::assume(min_len > 0 && min_len <= max_len);
         // Pick a symbolic returned digit length that fits in the supplied scratch buffer.
-        let len: usize = kani::any_where(|len| {
-            *len >= min_len && *len <= max_len && *len <= buf.len()
-        });
+        let len: usize =
+            kani::any_where(|len| *len >= min_len && *len <= max_len && *len <= buf.len());
         let prefix = &mut buf[..len];
         // Initialize the selected prefix and view it as initialized bytes.
         unsafe {
@@ -864,8 +870,7 @@ mod verify {
                 };
                 // Allocate a symbolic-length scratch buffer satisfying the formatter precondition.
                 let mut buf_arr = [const { MaybeUninit::uninit() }; ARRAY_LEN];
-                let buf =
-                    any_uninit_byte_buf_with_len(&mut buf_arr, MAX_SIG_DIGITS, ARRAY_LEN);
+                let buf = any_uninit_byte_buf_with_len(&mut buf_arr, MAX_SIG_DIGITS, ARRAY_LEN);
                 // Allocate the four `Part` slots required by `to_shortest_str`.
                 let mut parts = uninit_parts::<4>();
                 let sign = match kani::any() {
@@ -912,8 +917,7 @@ mod verify {
                     false => Sign::MinusPlus,
                 };
                 let mut buf_arr = [const { MaybeUninit::uninit() }; ARRAY_LEN];
-                let buf =
-                    any_uninit_byte_buf_with_len(&mut buf_arr, MAX_SIG_DIGITS, ARRAY_LEN);
+                let buf = any_uninit_byte_buf_with_len(&mut buf_arr, MAX_SIG_DIGITS, ARRAY_LEN);
                 let mut parts = uninit_parts::<6>();
 
                 let _ = to_shortest_exp_str(

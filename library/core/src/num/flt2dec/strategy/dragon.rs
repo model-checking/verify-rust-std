@@ -437,30 +437,37 @@ mod verify {
     // (`cmp`, `is_zero`, and digit extraction) are stubbed independently.
     // This over-approximates control flow while keeping ownership and buffer
     // mutation visible to Kani.
+    // Stub for `Big::mul_pow2`; keeps the mutable receiver available.
     fn stub_mul_pow2(b: &mut Big, _bits: usize) -> &mut Big {
         b
     }
 
+    // Stub for `Big::mul_small`; value growth is abstracted away.
     fn stub_mul_small(b: &mut Big, _other: Digit) -> &mut Big {
         b
     }
 
+    // Stub for `Big::mul_digits`; used by `mul_pow10`'s power-of-five path.
     fn stub_mul_digits<'a>(b: &'a mut Big, _other: &[Digit]) -> &'a mut Big {
         b
     }
 
+    // Stub for `Big::add`; later comparisons are modeled separately.
     fn stub_add<'a>(b: &'a mut Big, _other: &Big) -> &'a mut Big {
         b
     }
 
+    // Stub for `Big::sub`; digit extraction supplies the observed quotient.
     fn stub_sub<'a>(b: &'a mut Big, _other: &Big) -> &'a mut Big {
         b
     }
 
+    // Stub for `Big::is_zero`; lets Kani explore both termination choices.
     fn stub_is_zero(_b: &Big) -> bool {
         kani::any()
     }
 
+    // Stub for `Big::cmp`; over-approximates Big ordering branches.
     fn stub_cmp(_a: &Big, _b: &Big) -> crate::cmp::Ordering {
         let choice: u8 = kani::any();
         match choice % 3 {
@@ -470,6 +477,7 @@ mod verify {
         }
     }
 
+    // Stub for `estimate_scaling_factor`; keeps the decimal exponent in a practical range.
     fn stub_estimate_scaling_factor(_mant: u64, _exp: i16) -> i16 {
         let k: i16 = kani::any();
         // Cover normal f16/f32/f64 decimal exponent ranges with slack, while
@@ -478,14 +486,17 @@ mod verify {
         k
     }
 
+    // Stub for Dragon's local `mul_pow10` helper.
     fn stub_mul_pow10(b: &mut Big, _n: usize) -> &mut Big {
         b
     }
 
+    // Stub for Dragon's local `div_2pow10` helper.
     fn stub_div_2pow10(b: &mut Big, _n: usize) -> &mut Big {
         b
     }
 
+    // Stub for `div_rem_upto_16`, the single modeled digit-extraction boundary.
     fn stub_div_rem_upto_16<'a>(
         x: &'a mut Big,
         _scale: &Big,
@@ -500,20 +511,16 @@ mod verify {
         (digit, x)
     }
 
+    // Symbolic `Decoded` generator for exact/fixed-mode Dragon.
     fn arbitrary_decoded_exact() -> Decoded {
         let mant: u64 = kani::any();
         kani::assume(mant > 0 && mant < (1 << 61));
         let exp: i16 = kani::any();
         kani::assume(exp >= -1076 && exp <= 971);
-        Decoded {
-            mant,
-            minus: 1,
-            plus: 1,
-            exp,
-            inclusive: kani::any(),
-        }
+        Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
     }
 
+    // Symbolic `Decoded` generator for shortest-mode Dragon.
     fn arbitrary_decoded_shortest() -> Decoded {
         let mant: u64 = kani::any();
         kani::assume(mant >= 2 && mant <= (1u64 << 54));
@@ -521,13 +528,7 @@ mod verify {
         kani::assume(plus == 1 || plus == 2);
         let exp: i16 = kani::any();
         kani::assume(exp >= -1076 && exp <= 971);
-        Decoded {
-            mant,
-            minus: 1,
-            plus,
-            exp,
-            inclusive: kani::any(),
-        }
+        Decoded { mant, minus: 1, plus, exp, inclusive: kani::any() }
     }
 
     #[kani::proof]
