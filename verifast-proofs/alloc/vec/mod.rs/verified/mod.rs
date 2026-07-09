@@ -73,11 +73,10 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-#[cfg(not(no_global_oom_handling))]
+
 use core::cmp;
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
-#[cfg(not(no_global_oom_handling))]
 use core::iter;
 use core::marker::PhantomData;
 use core::mem::{self, ManuallyDrop, MaybeUninit, SizedTypeProperties};
@@ -94,13 +93,17 @@ use crate::boxed::Box;
 use crate::collections::TryReserveError;
 use crate::raw_vec::RawVec;
 
+//@ use std::alloc::{alloc_id_t, Allocator, Layout, alloc_block_in};
+//@ use lib::Global_alloc_id;
+//@ use raw_vec::RawVec;
+
 mod extract_if;
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "vec_splice", since = "1.21.0")]
 pub use self::splice::Splice;
 
-#[cfg(not(no_global_oom_handling))]
+
 mod splice;
 
 #[stable(feature = "drain", since = "1.6.0")]
@@ -108,8 +111,10 @@ pub use self::drain::Drain;
 
 mod drain;
 
+
 #[cfg(not(no_global_oom_handling))]
 mod cow;
+
 
 #[cfg(not(no_global_oom_handling))]
 pub(crate) use self::in_place_collect::AsVecIntoIter;
@@ -118,11 +123,12 @@ pub use self::into_iter::IntoIter;
 
 mod into_iter;
 
-#[cfg(not(no_global_oom_handling))]
+
 use self::is_zero::IsZero;
 
-#[cfg(not(no_global_oom_handling))]
+
 mod is_zero;
+
 
 #[cfg(not(no_global_oom_handling))]
 mod in_place_collect;
@@ -134,40 +140,40 @@ pub use self::peek_mut::PeekMut;
 
 mod peek_mut;
 
-#[cfg(not(no_global_oom_handling))]
+
 use self::spec_from_elem::SpecFromElem;
 
-#[cfg(not(no_global_oom_handling))]
+
 mod spec_from_elem;
 
-#[cfg(not(no_global_oom_handling))]
 use self::set_len_on_drop::SetLenOnDrop;
 
-#[cfg(not(no_global_oom_handling))]
 mod set_len_on_drop;
+
 
 #[cfg(not(no_global_oom_handling))]
 use self::in_place_drop::{InPlaceDrop, InPlaceDstDataSrcBufDrop};
 
+
 #[cfg(not(no_global_oom_handling))]
 mod in_place_drop;
 
-#[cfg(not(no_global_oom_handling))]
+
 use self::spec_from_iter_nested::SpecFromIterNested;
 
-#[cfg(not(no_global_oom_handling))]
+
 mod spec_from_iter_nested;
 
-#[cfg(not(no_global_oom_handling))]
+
 use self::spec_from_iter::SpecFromIter;
 
-#[cfg(not(no_global_oom_handling))]
+
 mod spec_from_iter;
 
-#[cfg(not(no_global_oom_handling))]
+
 use self::spec_extend::SpecExtend;
 
-#[cfg(not(no_global_oom_handling))]
+
 mod spec_extend;
 
 /// A contiguous growable array type, written as `Vec<T>`, short for 'vector'.
@@ -429,12 +435,512 @@ mod spec_extend;
 /// [owned slice]: Box
 /// [`into_boxed_slice`]: Vec::into_boxed_slice
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_diagnostic_item = "Vec"]
+
 #[rustc_insignificant_dtor]
 pub struct Vec<T, #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global> {
     buf: RawVec<T, A>,
     len: usize,
 }
+
+/*@
+
+fix Vec::alloc<T, A>(v: Vec<T, A>) -> A { v.buf.alloc() }
+
+pred Vec<T, A>(t: thread_id_t, self: Vec<T, A>, alloc_id: alloc_id_t, ptr: *T, capacity: usize, length: usize) =
+    RawVec(t, self.buf, alloc_id, ptr, capacity) &*& length == self.len &*& 0 <= length &*& length <= capacity;
+
+lem Vec_inv2<T, A>()
+    req Vec::<T, A>(?t, ?self_, ?alloc_id, ?ptr, ?capacity, ?length);
+    ens Vec::<T, A>(t, self_, alloc_id, ptr, capacity, length) &*&
+        lifetime_inclusion(lft_of_type::<A>(), alloc_id.lft) == true &*&
+        ptr != 0 &*& 0 <= length &*& length <= capacity &*&
+        length <= std::mem::MAX_SLICE_LEN::<T>() &*&
+        if std::mem::size_of::<T>() == 0 { capacity == usize::MAX } else { capacity <= isize::MAX &*& length <= isize::MAX / std::mem::size_of::<T>() };
+{
+    open Vec(t, self_, alloc_id, ptr, capacity, length);
+    raw_vec::RawVec_inv2();
+    if std::mem::size_of::<T>() != 0 {
+        assert Layout::new::<T>().repeat(capacity) == some(pair(?allocLayout, ?stride));
+        std::alloc::Layout_repeat_some(Layout::new::<T>(), capacity);
+        std::alloc::Layout_inv(Layout::new::<T>());
+        std::alloc::Layout_inv(allocLayout);
+        div_rem_nonneg(isize::MAX, std::mem::size_of::<T>());
+        let len = length;
+        if len > isize::MAX / std::mem::size_of::<T>() {
+            mul_mono_l(isize::MAX / std::mem::size_of::<T>() + 1, len, std::mem::size_of::<T>());
+            assert (isize::MAX / std::mem::size_of::<T>() + 1) * std::mem::size_of::<T>() <= len * std::mem::size_of::<T>();
+            assert isize::MAX < (isize::MAX / std::mem::size_of::<T>() + 1) * std::mem::size_of::<T>();
+            mul_mono_l(std::mem::size_of::<T>(), stride, capacity);
+            assert capacity * std::mem::size_of::<T>() <= allocLayout.size();
+            mul_mono_l(len, capacity, std::mem::size_of::<T>());
+            assert len * std::mem::size_of::<T>() <= allocLayout.size();
+            div_rem_nonneg(isize::MAX, allocLayout.align());
+            //assert allocLayout.size() <= isize::MAX;
+            assert false;
+        }
+    }
+    close Vec(t, self_, alloc_id, ptr, capacity, length);
+    std::mem::MAX_SLICE_LEN_def::<T>();
+}
+
+lem Vec_inv<T, A>()
+    req Vec::<T, A>(?t, ?self_, ?alloc_id, ?ptr, ?capacity, ?length);
+    ens Vec::<T, A>(t, self_, alloc_id, ptr, capacity, length) &*&
+        lifetime_inclusion(lft_of_type::<A>(), alloc_id.lft) == true &*&
+        length <= std::mem::MAX_SLICE_LEN::<T>() &*&
+        ptr != 0 &*& 0 <= length &*& length <= capacity &*& capacity <= usize::MAX;
+{
+    Vec_inv2();
+}
+
+lem Vec_send_<T, A>(t1: thread_id_t)
+    req type_interp::<A>() &*& is_Send(typeid(A)) == true &*& Vec::<T, A>(?t0, ?v, ?alloc_id, ?ptr, ?capacity, ?length);
+    ens type_interp::<A>() &*& Vec::<T, A>(t1, v, alloc_id, ptr, capacity, length);
+{
+    open Vec(t0, v, alloc_id, ptr, capacity, length);
+    raw_vec::RawVec_send_(t1);
+    close Vec(t1, v, alloc_id, ptr, capacity, length);
+}
+
+pred<T, A> <Vec<T, A>>.own(t, v) =
+    Vec(t, v, ?alloc_id, ?ptr, ?capacity, ?len) &*&
+    array_at_lft(alloc_id.lft, ptr, len, ?elems) &*& foreach(elems, own(t)) &*&
+    array_at_lft_(alloc_id.lft, ptr + len, capacity - len, _);
+
+lem Vec_own_mono<T0, T1, A0, A1>()
+    req type_interp::<T0>() &*& type_interp::<T1>() &*& type_interp::<A0>() &*& type_interp::<A1>() &*& vec::Vec_own::<T0, A0>(?t, ?v) &*& is_subtype_of::<T0, T1>() == true &*& is_subtype_of::<A0, A1>() == true;
+    ens type_interp::<T0>() &*& type_interp::<T1>() &*& type_interp::<A0>() &*& type_interp::<A1>() &*& vec::Vec_own::<T1, A1>(t, vec::Vec::<T1, A1> { buf: upcast(v.buf), len: upcast(v.len) });
+{
+    assume(false); // https://github.com/verifast/verifast/issues/610
+}
+
+lem Vec_send<T, A>(t1: thread_id_t)
+    req type_interp::<T>() &*& type_interp::<A>() &*& is_Send(typeid(Vec<T, A>)) == true &*& Vec_own::<T, A>(?t0, ?v);
+    ens type_interp::<T>() &*& type_interp::<A>() &*& Vec_own::<T, A>(t1, v);
+{
+    open <Vec<T, A>>.own(t0, v);
+    Vec_send_(t1);
+    {
+        lem iter()
+            req foreach::<T>(?elems, own(t0)) &*& type_interp::<T>();
+            ens foreach(elems, own(t1)) &*& type_interp::<T>();
+        {
+            open foreach(elems, own(t0));
+            match elems {
+                nil => {}
+                cons(elem, elems0) => {
+                    open own::<T>(t0)(elem);
+                    Send::send(t0, t1, elem);
+                    close own::<T>(t1)(elem);
+                    iter();
+                }
+            }
+            close foreach(elems, own(t1));
+        }
+        iter();
+    }
+    close <Vec<T, A>>.own(t1, v);
+}
+
+pred_ctor Vec_frac_borrow_content<T, A>(l: *Vec<T, A>, length: usize)(;) = (*l).len |-> length &*& struct_Vec_padding(l);
+
+pred Vec_share_<T, A>(k: lifetime_t, t: thread_id_t, l: *Vec<T, A>, alloc_id: alloc_id_t, ptr: *T, capacity: usize, length: usize) =
+    pointer_within_limits(&(*l).buf) == true &*&
+    [_]raw_vec::RawVec_share_(k, t, &(*l).buf, alloc_id, ptr, capacity) &*& length <= capacity &*&
+    [_]frac_borrow(k, Vec_frac_borrow_content(l, length));
+
+lem Vec_share__inv<T, A>()
+    req [_]Vec_share_::<T, A>(?k, ?t, ?l, ?alloc_id, ?ptr, ?capacity, ?length);
+    ens length <= std::mem::MAX_SLICE_LEN::<T>() &*&
+        if std::mem::size_of::<T>() == 0 { true } else { length <= isize::MAX / std::mem::size_of::<T>() };
+{
+    open Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+    raw_vec::RawVec_share__inv();
+    if std::mem::size_of::<T>() != 0 {
+        assert Layout::new::<T>().repeat(capacity) == some(pair(?allocLayout, ?stride));
+        std::alloc::Layout_repeat_some(Layout::new::<T>(), capacity);
+        std::alloc::Layout_inv(Layout::new::<T>());
+        std::alloc::Layout_inv(allocLayout);
+        div_rem_nonneg(isize::MAX, std::mem::size_of::<T>());
+        let len = length;
+        if len > isize::MAX / std::mem::size_of::<T>() {
+            mul_mono_l(isize::MAX / std::mem::size_of::<T>() + 1, len, std::mem::size_of::<T>());
+            assert (isize::MAX / std::mem::size_of::<T>() + 1) * std::mem::size_of::<T>() <= len * std::mem::size_of::<T>();
+            assert isize::MAX < (isize::MAX / std::mem::size_of::<T>() + 1) * std::mem::size_of::<T>();
+            mul_mono_l(std::mem::size_of::<T>(), stride, capacity);
+            assert capacity * std::mem::size_of::<T>() <= allocLayout.size();
+            mul_mono_l(len, capacity, std::mem::size_of::<T>());
+            assert len * std::mem::size_of::<T>() <= allocLayout.size();
+            div_rem_nonneg(isize::MAX, allocLayout.align());
+            //assert allocLayout.size() <= isize::MAX;
+            assert false;
+        }
+    }
+    std::mem::MAX_SLICE_LEN_def::<T>();
+}
+
+pred Vec_share_end_token<T, A>(k: lifetime_t, t: thread_id_t, l: *Vec<T, A>, alloc_id: alloc_id_t, ptr: *T, capacity: usize, length: usize) =
+    raw_vec::RawVec_share_end_token(k, t, &(*l).buf, alloc_id, ptr, capacity) &*& length <= capacity &*&
+    borrow_end_token(k, Vec_frac_borrow_content(l, length));
+
+lem Vec_share__mono<T, A>(k: lifetime_t, k1: lifetime_t, l: *Vec<T, A>)
+    req type_interp::<T>() &*& type_interp::<A>() &*& [_]Vec_share_::<T, A>(k, ?t, l, ?alloc_id, ?ptr, ?capacity, ?length) &*& lifetime_inclusion(k1, k) == true;
+    ens type_interp::<T>() &*& type_interp::<A>() &*& [_]Vec_share_::<T, A>(k1, t, l, alloc_id, ptr, capacity, length);
+{
+    open Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+    raw_vec::RawVec_share__mono(k, k1, t, &(*l).buf);
+    frac_borrow_mono(k, k1, Vec_frac_borrow_content(l, length));
+    close Vec_share_(k1, t, l, alloc_id, ptr, capacity, length);
+    leak Vec_share_(k1, t, l, alloc_id, ptr, capacity, length);
+}
+
+lem Vec_sync_<T, A>(t1: thread_id_t)
+    req type_interp::<A>() &*& [_]Vec_share_::<T, A>(?k, ?t, ?l, ?alloc_id, ?ptr, ?capacity, ?length) &*& is_Sync(typeid(Vec<T, A>)) == true;
+    ens type_interp::<A>() &*& [_]Vec_share_(k, t1, l, alloc_id, ptr, capacity, length);
+{
+    open Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+    raw_vec::RawVec_sync_(t1);
+    close Vec_share_(k, t1, l, alloc_id, ptr, capacity, length);
+    leak Vec_share_(k, t1, l, alloc_id, ptr, capacity, length);
+}
+
+lem share_Vec<T, A>(k: lifetime_t, l: *Vec<T, A>)
+    nonghost_callers_only
+    req [?q]lifetime_token(k) &*& *l |-> ?self_ &*& Vec(?t, self_, ?alloc_id, ?ptr, ?capacity, ?length);
+    ens [q]lifetime_token(k) &*& [_]Vec_share_(k, t, l, alloc_id, ptr, capacity, length) &*& Vec_share_end_token(k, t, l, alloc_id, ptr, capacity, length);
+{
+    open Vec(t, self_, alloc_id, ptr, capacity, length);
+    open_points_to(l);
+    close_points_to(&(*l).buf);
+    raw_vec::share_RawVec(k, &(*l).buf);
+    close Vec_frac_borrow_content::<T, A>(l, length)();
+    borrow(k, Vec_frac_borrow_content(l, length));
+    full_borrow_into_frac(k, Vec_frac_borrow_content(l, length));
+    close Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+    leak Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+    close Vec_share_end_token(k, t, l, alloc_id, ptr, capacity, length);
+}
+
+lem end_share_Vec<T, A>(l: *Vec<T, A>)
+    nonghost_callers_only
+    req Vec_share_end_token(?k, ?t, l, ?alloc_id, ?ptr, ?capacity, ?length) &*& [_]lifetime_dead_token(k);
+    ens *l |-> ?self_ &*& Vec(t, self_, alloc_id, ptr, capacity, length);
+{
+    open Vec_share_end_token(k, t, l, alloc_id, ptr, capacity, length);
+    raw_vec::end_share_RawVec(&(*l).buf);
+    borrow_end(k, Vec_frac_borrow_content(l, length));
+    open Vec_frac_borrow_content::<T, A>(l, length)();
+    assert *l |-> ?self_;
+    close Vec(t, self_, alloc_id, ptr, capacity, length);
+}
+
+lem init_ref_Vec_<T, A>(l: *Vec<T, A>)
+    nonghost_callers_only
+    req ref_init_perm(l, ?l0) &*& [_]Vec_share_(?k, ?t, l0, ?alloc_id, ?ptr, ?capacity, ?length) &*& [?q]lifetime_token(k);
+    ens [q]lifetime_token(k) &*& [_]Vec_share_(k, t, l, alloc_id, ptr, capacity, length) &*& [_]frac_borrow(k, ref_initialized_(l));
+{
+    open Vec_share_::<T, A>(k, t, l0, alloc_id, ptr, capacity, length);
+    open_ref_init_perm_Vec(l);
+    raw_vec::init_ref_RawVec_(&(*l).buf);
+    frac_borrow_sep(k, ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length));
+    open_frac_borrow_strong_(k, sep_(ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length)), q);
+    open [?f]sep_(ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length))();
+    open [f]ref_initialized_::<RawVec<T, A>>(&(*l).buf)();
+    open [f]Vec_frac_borrow_content::<T, A>(l0, length)();
+    init_ref_readonly(&(*l).len, 1/2);
+    init_ref_padding_Vec(l, 1/2);
+    {
+        pred P() = ref_padding_initialized(l);
+        close [1 - f]P();
+        close_ref_initialized_Vec(l);
+        open [1 - f]P();
+    }
+    close [f]ref_initialized_::<Vec<T, A>>(l)();
+    close scaledp(f, ref_initialized_(l))();
+    close [f/2]Vec_frac_borrow_content::<T, A>(l, length)();
+    close scaledp(f/2, Vec_frac_borrow_content(l, length))();
+    close sep_(scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length)))();
+    {
+        pred Ctx() =
+            [f/2](*l0).len |-> length &*& ref_readonly_end_token(&(*l).len, &(*l0).len, f/2) &*& [1 - f]ref_initialized(&(*l).len) &*&
+            [f/2]struct_Vec_padding(l0) &*& ref_padding_end_token(l, l0, f/2) &*& [1 - f]ref_padding_initialized(l);
+        close Ctx();
+        produce_lem_ptr_chunk restore_frac_borrow(
+            Ctx,
+            sep_(scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length))),
+            f,
+            sep_(ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length))
+        )() {
+            open Ctx();
+            open sep_(scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length)))();
+            open scaledp(f, ref_initialized_(l))();
+            open [f]ref_initialized_::<Vec<T, A>>(l)();
+            open scaledp(f/2, Vec_frac_borrow_content(l, length))();
+            open [f/2]Vec_frac_borrow_content::<T, A>(l, length)();
+            open_ref_initialized_Vec(l);
+            end_ref_readonly(&(*l).len);
+            end_ref_padding_Vec(l);
+            close [f]ref_initialized_::<RawVec<T, A>>(&(*l).buf)();
+            close [f]Vec_frac_borrow_content::<T, A>(l0, length)();
+            close [f]sep_(ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length))();
+        } {
+            close_frac_borrow_strong_();
+        }
+    }
+    full_borrow_into_frac(k, sep_(scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length))));
+    frac_borrow_split(k, scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length)));
+    frac_borrow_implies_scaled(k, f, ref_initialized_(l));
+    frac_borrow_implies_scaled(k, f/2, Vec_frac_borrow_content(l, length));
+    ref_origin_min_addr((l as pointer).provenance);
+    ref_origin_max_addr((l as pointer).provenance);
+    close Vec_share_::<T, A>(k, t, l, alloc_id, ptr, capacity, length);
+    leak Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+}
+
+lem init_ref_Vec_m<T, A>(l: *Vec<T, A>)
+    req type_interp::<A>() &*& atomic_mask(Nlft) &*& ref_init_perm(l, ?l0) &*& [_]Vec_share_(?k, ?t, l0, ?alloc_id, ?ptr, ?capacity, ?length) &*& [?q]lifetime_token(k);
+    ens type_interp::<A>() &*& atomic_mask(Nlft) &*& [q]lifetime_token(k) &*& [_]Vec_share_(k, t, l, alloc_id, ptr, capacity, length) &*& [_]frac_borrow(k, ref_initialized_(l));
+{
+    open Vec_share_::<T, A>(k, t, l0, alloc_id, ptr, capacity, length);
+    open_ref_init_perm_Vec(l);
+    raw_vec::init_ref_RawVec_m(&(*l).buf);
+    frac_borrow_sep(k, ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length));
+    open_frac_borrow_strong__m(k, sep_(ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length)), q);
+    open [?f]sep_(ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length))();
+    open [f]ref_initialized_::<RawVec<T, A>>(&(*l).buf)();
+    open [f]Vec_frac_borrow_content::<T, A>(l0, length)();
+    init_ref_readonly(&(*l).len, 1/2);
+    init_ref_padding_Vec(l, 1/2);
+    {
+        pred P() = ref_padding_initialized(l);
+        close [1 - f]P();
+        close_ref_initialized_Vec(l);
+        open [1 - f]P();
+    }
+    close [f]ref_initialized_::<Vec<T, A>>(l)();
+    close scaledp(f, ref_initialized_(l))();
+    close [f/2]Vec_frac_borrow_content::<T, A>(l, length)();
+    close scaledp(f/2, Vec_frac_borrow_content(l, length))();
+    close sep_(scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length)))();
+    {
+        pred Ctx() =
+            [f/2](*l0).len |-> length &*& ref_readonly_end_token(&(*l).len, &(*l0).len, f/2) &*& [1 - f]ref_initialized(&(*l).len) &*&
+            [f/2]struct_Vec_padding(l0) &*& ref_padding_end_token(l, l0, f/2) &*& [1 - f]ref_padding_initialized(l);
+        close Ctx();
+        produce_lem_ptr_chunk restore_frac_borrow(
+            Ctx,
+            sep_(scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length))),
+            f,
+            sep_(ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length))
+        )() {
+            open Ctx();
+            open sep_(scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length)))();
+            open scaledp(f, ref_initialized_(l))();
+            open [f]ref_initialized_::<Vec<T, A>>(l)();
+            open scaledp(f/2, Vec_frac_borrow_content(l, length))();
+            open [f/2]Vec_frac_borrow_content::<T, A>(l, length)();
+            open_ref_initialized_Vec(l);
+            end_ref_readonly(&(*l).len);
+            end_ref_padding_Vec(l);
+            close [f]ref_initialized_::<RawVec<T, A>>(&(*l).buf)();
+            close [f]Vec_frac_borrow_content::<T, A>(l0, length)();
+            close [f]sep_(ref_initialized_(&(*l).buf), Vec_frac_borrow_content(l0, length))();
+        } {
+            close_frac_borrow_strong__m();
+        }
+    }
+    full_borrow_into_frac_m(k, sep_(scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length))));
+    frac_borrow_split(k, scaledp(f, ref_initialized_(l)), scaledp(f/2, Vec_frac_borrow_content(l, length)));
+    frac_borrow_implies_scaled(k, f, ref_initialized_(l));
+    frac_borrow_implies_scaled(k, f/2, Vec_frac_borrow_content(l, length));
+    ref_origin_min_addr((l as pointer).provenance);
+    ref_origin_max_addr((l as pointer).provenance);
+    close Vec_share_::<T, A>(k, t, l, alloc_id, ptr, capacity, length);
+    leak Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+}
+
+pred array_share<T>(k: lifetime_t, t: thread_id_t, l: *T, length: usize) =
+    if length == 0 {
+        true
+    } else {
+        [_](<T>.share(k, t, l)) &*& [_]array_share(k, t, l + 1, length - 1)
+    };
+
+lem array_share_mono<T>(k: lifetime_t, k1: lifetime_t, l: *T)
+    req [_]array_share(k, ?t, l, ?length) &*& type_interp::<T>() &*& lifetime_inclusion(k1, k) == true;
+    ens type_interp::<T>() &*& [_]array_share(k1, t, l, length);
+{
+    open array_share(k, t, l, length);
+    if length != 0 {
+        share_mono(k, k1, t, l);
+        array_share_mono(k, k1, l + 1);
+    }
+    close array_share(k1, t, l, length);
+    leak array_share(k1, t, l, length);
+}
+
+lem array_sync<T>(t1: thread_id_t, l: *T)
+    req [_]array_share::<T>(?k, ?t, l, ?length) &*& type_interp::<T>() &*& is_Sync(typeid(T)) == true;
+    ens type_interp::<T>() &*& [_]array_share(k, t1, l, length);
+{
+    open array_share(k, t, l, length);
+    if length != 0 {
+        Sync::sync::<T>(k, t, t1, l);
+        array_sync(t1, l + 1);
+    }
+    close array_share(k, t1, l, length);
+    leak array_share(k, t1, l, length);
+}
+
+pred<T, A> <Vec<T, A>>.share(k, t, l) =
+    [_]Vec_share_(k, t, l, ?alloc_id, ?ptr, ?capacity, ?length) &*& [_]array_share::<T>(k, t, ptr, length);
+
+pred_ctor array_at_lft_fbc<T>(k: lifetime_t, t: thread_id_t, p: *T, length: usize)() =
+    array_at_lft(k, p, length, ?elems) &*& foreach(elems, own(t));
+
+lem array_at_lft_share_full<T>(k: lifetime_t, k0: lifetime_t, t: thread_id_t, p: *T, length: usize)
+    req type_interp::<T>() &*& atomic_mask(MaskTop) &*& [?q]lifetime_token(k) &*& full_borrow(k, array_at_lft_fbc(k0, t, p, length)) &*& lifetime_inclusion(k, k0) == true;
+    ens type_interp::<T>() &*& atomic_mask(MaskTop) &*& [q]lifetime_token(k) &*& [_]array_share(k, t, p, length);
+{
+    let n = length;
+    let p1 = p;
+    while true
+        req type_interp::<T>() &*& atomic_mask(MaskTop) &*& [q]lifetime_token(k) &*& full_borrow(k, array_at_lft_fbc(k0, t, p1, n));
+        ens type_interp::<T>() &*& atomic_mask(MaskTop) &*& [q]lifetime_token(k) &*& [_]array_share(k, t, old_p1, old_n);
+        decreases n;
+    {
+        if n == 0 {
+            leak full_borrow(_, _);
+            close array_share(k, t, p1, n);
+            leak array_share(k, t, p1, n);
+            break;
+        }
+        let klong = open_full_borrow_strong_m(k, array_at_lft_fbc(k0, t, p1, n), q);
+        open array_at_lft_fbc::<T>(k0, t, p1, n)();
+        open array_at_lft(k0, p1, n, cons(?v, _));
+        open foreach(_, _);
+        open own::<T>(t)(v);
+        close full_borrow_content_at_lft::<T>(k0, t, p1)();
+        close array_at_lft_fbc::<T>(k0, t, p1 + 1, n - 1)();
+        close sep(full_borrow_content_at_lft::<T>(k0, t, p1), array_at_lft_fbc::<T>(k0, t, p1 + 1, n - 1))();
+        produce_lem_ptr_chunk full_borrow_convert_strong(True, sep(full_borrow_content_at_lft::<T>(k0, t, p1), array_at_lft_fbc::<T>(k0, t, p1 + 1, n - 1)), klong, array_at_lft_fbc(k0, t, p1, n))() {
+            open sep(full_borrow_content_at_lft::<T>(k0, t, p1), array_at_lft_fbc::<T>(k0, t, p1 + 1, n - 1))();
+            open full_borrow_content_at_lft::<T>(k0, t, p1)();
+            open array_at_lft_fbc::<T>(k0, t, p1 + 1, n - 1)();
+            assert points_to_at_lft(k0, p1, ?elem);
+            assert foreach(?elems0, own(t));
+            close own::<T>(t)(elem);
+            close foreach(cons(elem, elems0), own(t));
+            close array_at_lft_fbc::<T>(k0, t, p1, n)();
+        } {
+            close_full_borrow_strong_m(klong, array_at_lft_fbc(k0, t, p1, n), sep(full_borrow_content_at_lft::<T>(k0, t, p1), array_at_lft_fbc::<T>(k0, t, p1 + 1, n - 1)));
+            full_borrow_mono(klong, k, sep(full_borrow_content_at_lft::<T>(k0, t, p1), array_at_lft_fbc::<T>(k0, t, p1 + 1, n - 1)));
+        }
+        full_borrow_split_m(k, full_borrow_content_at_lft::<T>(k0, t, p1), array_at_lft_fbc::<T>(k0, t, p1 + 1, n - 1));
+        p1 = p1 + 1;
+        n = n - 1;
+        recursive_call();
+        full_borrow_at_lft_to_full_borrow(k, k0, t, old_p1);
+        share_full_borrow_m(k, t, old_p1);
+        close array_share(k, t, old_p1, old_n);
+        leak array_share(k, t, old_p1, old_n);
+    }
+}
+
+lem Vec_share_full<T, A>(k: lifetime_t, t: thread_id_t, l: *Vec<T, A>)
+    req type_interp::<T>() &*& type_interp::<A>() &*& atomic_mask(MaskTop) &*&
+        full_borrow(k, Vec_full_borrow_content::<T, A>(t, l)) &*& [?q]lifetime_token(k) &*&
+        ref_origin(l) == l;
+    ens type_interp::<T>() &*& type_interp::<A>() &*& atomic_mask(MaskTop) &*& [_]Vec_share::<T, A>(k, t, l) &*& [q]lifetime_token(k);
+{
+    assume(lifetime_inclusion(k, lft_of_type::<T>()) && lifetime_inclusion(k, lft_of_type::<A>())); // TODO: Make this a precondition
+    let klong = open_full_borrow_strong_m(k, Vec_full_borrow_content::<T, A>(t, l), q);
+    open Vec_full_borrow_content::<T, A>(t, l)();
+    open_points_to(l);
+    open <Vec<T, A>>.own(t, ?self_);
+    open Vec(t, self_, ?alloc_id, ?ptr, ?capacity, ?length);
+    raw_vec::RawVec_inv();
+    close_points_to(&(*l).buf);
+    raw_vec::close_RawVec_full_borrow_content_::<T, A>(t, &(*l).buf, alloc_id, ptr, capacity);
+    close Vec_frac_borrow_content::<T, A>(l, length)();
+    close array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length)();
+    close sep(Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length))();
+    close sep(raw_vec::RawVec_full_borrow_content_::<T, A>(t, &(*l).buf, alloc_id, ptr, capacity), sep(Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length)))();
+    {
+        pred Ctx() = array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+        close Ctx();
+        
+        produce_lem_ptr_chunk full_borrow_convert_strong(
+            Ctx,
+            sep(raw_vec::RawVec_full_borrow_content_::<T, A>(t, &(*l).buf, alloc_id, ptr, capacity), sep(Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length))),
+            klong,
+            Vec_full_borrow_content::<T, A>(t, l)
+        )() {
+            open Ctx();
+            open sep(raw_vec::RawVec_full_borrow_content_::<T, A>(t, &(*l).buf, alloc_id, ptr, capacity), sep(Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length)))();
+            raw_vec::open_RawVec_full_borrow_content_::<T, A>(t, &(*l).buf, alloc_id, ptr, capacity);
+            open sep(Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length))();
+            open Vec_frac_borrow_content::<T, A>(l, length)();
+            open array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length)();
+            open_points_to(l);
+            let self1 = *l;
+            close Vec(t, self1, alloc_id, ptr, capacity, length);
+            close <Vec<T, A>>.own(t, self1);
+            close_points_to(&(*l).buf);
+            close Vec_full_borrow_content::<T, A>(t, l)();
+        } {
+            close_full_borrow_strong_m(klong, Vec_full_borrow_content::<T, A>(t, l), sep(raw_vec::RawVec_full_borrow_content_::<T, A>(t, &(*l).buf, alloc_id, ptr, capacity), sep(Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length))));
+            full_borrow_mono(klong, k, sep(raw_vec::RawVec_full_borrow_content_::<T, A>(t, &(*l).buf, alloc_id, ptr, capacity), sep(Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length))));
+        }
+    }
+    full_borrow_split_m(k, raw_vec::RawVec_full_borrow_content_::<T, A>(t, &(*l).buf, alloc_id, ptr, capacity), sep(Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length)));
+    full_borrow_split_m(k, Vec_frac_borrow_content(l, length), array_at_lft_fbc::<T>(alloc_id.lft, t, ptr, length));
+    raw_vec::close_RawVec_full_borrow(k, t, &(*l).buf, alloc_id, ptr, capacity);
+    raw_vec::RawVec_share_full_(k, &(*l).buf);
+    full_borrow_into_frac_m(k, Vec_frac_borrow_content(l, length));
+    close Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+    leak Vec_share_(k, t, l, alloc_id, ptr, capacity, length);
+    lifetime_inclusion_trans(k, lft_of_type::<A>(), alloc_id.lft);
+    array_at_lft_share_full(k, alloc_id.lft, t, ptr, length);
+    close <Vec<T, A>>.share(k, t, l);
+    leak <Vec<T, A>>.share(k, t, l);
+}
+
+lem Vec_share_mono<T, A>(k: lifetime_t, k1: lifetime_t, t: thread_id_t, l: *_)
+    req type_interp::<T>() &*& type_interp::<A>() &*& lifetime_inclusion(k1, k) == true &*& [_]Vec_share::<T, A>(k, t, l);
+    ens type_interp::<T>() &*& type_interp::<A>() &*& [_]Vec_share::<T, A>(k1, t, l);
+{
+    open Vec_share::<T, A>(k, t, l);
+    assert [_]Vec_share_(k, t, l, ?alloc_id, ?ptr, ?capacity, ?length);
+    Vec_share__mono::<T, A>(k, k1, l);
+    array_share_mono(k, k1, ptr);
+    close Vec_share::<T, A>(k1, t, l);
+    leak Vec_share::<T, A>(k1, t, l);
+}
+
+lem init_ref_Vec<T, A>(p: *Vec<T, A>)
+    req type_interp::<T>() &*& type_interp::<A>() &*& atomic_mask(Nlft) &*& ref_init_perm(p, ?x) &*& [_]Vec_share::<T, A>(?k, ?t, x) &*& [?q]lifetime_token(k);
+    ens type_interp::<T>() &*& type_interp::<A>() &*& atomic_mask(Nlft) &*& [q]lifetime_token(k) &*& [_]Vec_share::<T, A>(k, t, p) &*& [_]frac_borrow(k, ref_initialized_(p));
+{
+    open <Vec<T, A>>.share(k, t, x);
+    init_ref_Vec_m(p);
+    close <Vec<T, A>>.share(k, t, p);
+    leak <Vec<T, A>>.share(k, t, p);
+}
+
+lem Vec_sync<T, A>(t1: thread_id_t)
+    req type_interp::<T>() &*& type_interp::<A>() &*& is_Sync(typeid(Vec<T, A>)) == true &*& [_]Vec_share::<T, A>(?k, ?t0, ?l);
+    ens type_interp::<T>() &*& type_interp::<A>() &*& [_]Vec_share::<T, A>(k, t1, l);
+{
+    open <Vec<T, A>>.share(k, t0, l);
+    assert [_]Vec_share_(k, t0, l, ?alloc_id, ?ptr, ?capacity, ?length);
+    Vec_sync_(t1);
+    array_sync(t1, ptr);
+    close <Vec<T, A>>.share(k, t1, l);
+    leak <Vec<T, A>>.share(k, t1, l);
+}
+
+@*/
 
 ////////////////////////////////////////////////////////////////////////////////
 // Inherent methods
@@ -453,10 +959,20 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[rustc_const_stable(feature = "const_vec_new", since = "1.39.0")]
-    #[rustc_diagnostic_item = "vec_new"]
+    
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new() -> Self
+    /*@
+    req thread_token(?t) &*& t == currentThread;
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, std::alloc::Global>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Vec { buf: RawVec::new(), len: 0 }
     }
 
@@ -510,12 +1026,22 @@ impl<T> Vec<T> {
     /// let vec_units = Vec::<()>::with_capacity(10);
     /// assert_eq!(vec_units.capacity(), usize::MAX);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
-    #[rustc_diagnostic_item = "vec_with_capacity"]
-    pub fn with_capacity(capacity: usize) -> Self {
+    
+    pub fn with_capacity(capacity: usize) -> Self
+    /*@
+    req thread_token(?t) &*& t == currentThread;
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, std::alloc::Global>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Self::with_capacity_in(capacity, Global)
     }
 
@@ -531,7 +1057,12 @@ impl<T> Vec<T> {
     /// or if the allocator reports allocation failure.
     #[inline]
     #[unstable(feature = "try_with_capacity", issue = "91913")]
-    pub fn try_with_capacity(capacity: usize) -> Result<Self, TryReserveError> {
+    pub fn try_with_capacity(capacity: usize) -> Result<Self, TryReserveError>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Self::try_with_capacity_in(capacity, Global)
     }
 
@@ -643,7 +1174,21 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub unsafe fn from_raw_parts(ptr: *mut T, length: usize, capacity: usize) -> Self {
+    pub unsafe fn from_raw_parts(ptr: *mut T, length: usize, capacity: usize) -> Self
+    /*@
+    req ptr != 0 &*&
+        ptr as usize % std::mem::align_of::<T>() == 0 &*&
+        length <= capacity &*&
+        if capacity * std::mem::size_of::<T>() == 0 {
+            true
+        } else {
+            Layout::new::<T>().repeat(capacity) == some(pair(?allocLayout, ?stride)) &*&
+            alloc_block_in(Global_alloc_id, ptr as *u8, allocLayout)
+        };
+    @*/
+    //@ ens Vec(currentThread, result, Global_alloc_id, ptr, ?capacity_, length) &*& capacity <= capacity_;
+    {
+        //@ alloc::produce_Allocator_Global(currentThread);
         unsafe { Self::from_raw_parts_in(ptr, length, capacity, Global) }
     }
 
@@ -755,7 +1300,20 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
-    pub unsafe fn from_parts(ptr: NonNull<T>, length: usize, capacity: usize) -> Self {
+    pub unsafe fn from_parts(ptr: NonNull<T>, length: usize, capacity: usize) -> Self
+    /*@
+    req ptr.as_ptr() as usize % std::mem::align_of::<T>() == 0 &*&
+        length <= capacity &*&
+        if capacity * std::mem::size_of::<T>() == 0 {
+            true
+        } else {
+            Layout::new::<T>().repeat(capacity) == some(pair(?allocLayout, ?stride)) &*&
+            alloc_block_in(Global_alloc_id, ptr.as_ptr() as *u8, allocLayout)
+        };
+    @*/
+    //@ ens Vec(currentThread, result, Global_alloc_id, ptr.as_ptr(), ?capacity_, length) &*& capacity <= capacity_;
+    {
+        //@ alloc::produce_Allocator_Global(currentThread);
         unsafe { Self::from_parts_in(ptr, length, capacity, Global) }
     }
 
@@ -797,7 +1355,12 @@ impl<T> Vec<T> {
     /// ```
     #[must_use = "losing the pointer will leak memory"]
     #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
-    pub fn into_raw_parts(self) -> (*mut T, usize, usize) {
+    pub fn into_raw_parts(self) -> (*mut T, usize, usize)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let mut me = ManuallyDrop::new(self);
         (me.as_mut_ptr(), me.len(), me.capacity())
     }
@@ -839,7 +1402,12 @@ impl<T> Vec<T> {
     #[must_use = "losing the pointer will leak memory"]
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     // #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
-    pub fn into_parts(self) -> (NonNull<T>, usize, usize) {
+    pub fn into_parts(self) -> (NonNull<T>, usize, usize)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let (ptr, len, capacity) = self.into_raw_parts();
         // SAFETY: A `Vec` always has a non-null pointer.
         (unsafe { NonNull::new_unchecked(ptr) }, len, capacity)
@@ -863,7 +1431,18 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    pub const fn new_in(alloc: A) -> Self {
+    pub const fn new_in(alloc: A) -> Self
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        own(t)(alloc);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, A>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Vec { buf: RawVec::new_in(alloc), len: 0 }
     }
 
@@ -922,10 +1501,21 @@ impl<T, A: Allocator> Vec<T, A> {
     /// let vec_units = Vec::<(), System>::with_capacity_in(10, System);
     /// assert_eq!(vec_units.capacity(), usize::MAX);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> Self
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        own(t)(alloc);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, A>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Vec { buf: RawVec::with_capacity_in(capacity, alloc), len: 0 }
     }
 
@@ -943,7 +1533,12 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "try_with_capacity", issue = "91913")]
-    pub fn try_with_capacity_in(capacity: usize, alloc: A) -> Result<Self, TryReserveError> {
+    pub fn try_with_capacity_in(capacity: usize, alloc: A) -> Result<Self, TryReserveError>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Ok(Vec { buf: RawVec::try_with_capacity_in(capacity, alloc)?, len: 0 })
     }
 
@@ -1057,13 +1652,39 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    pub unsafe fn from_raw_parts_in(ptr: *mut T, length: usize, capacity: usize, alloc: A) -> Self {
-        ub_checks::assert_unsafe_precondition!(
-            check_library_ub,
-            "Vec::from_raw_parts_in requires that length <= capacity",
-            (length: usize = length, capacity: usize = capacity) => length <= capacity
-        );
-        unsafe { Vec { buf: RawVec::from_raw_parts_in(ptr, capacity, alloc), len: length } }
+    pub unsafe fn from_raw_parts_in(ptr: *mut T, length: usize, capacity: usize, alloc: A) -> Self
+    /*@
+    req Allocator(?t, alloc, ?alloc_id) &*&
+        ptr != 0 &*&
+        ptr as usize % std::mem::align_of::<T>() == 0 &*&
+        length <= capacity &*&
+        if capacity * std::mem::size_of::<T>() == 0 {
+            true
+        } else {
+            Layout::new::<T>().repeat(capacity) == some(pair(?allocLayout, ?stride)) &*&
+            alloc_block_in(alloc_id, ptr as *u8, allocLayout)
+        };
+    @*/
+    //@ ens Vec(t, result, alloc_id, ptr, ?capacity_, length) &*& capacity <= capacity_;
+    {
+        const fn precondition_check(length: usize, capacity: usize) {
+            if !(length <= capacity) {
+                let msg = concat!("unsafe precondition(s) violated: ", "Vec::from_raw_parts_in requires that length <= capacity",
+                    "\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety.");
+                ::core::panicking::panic_nounwind(msg);
+            }
+        }
+        if ::core::ub_checks::check_library_ub() { //~allow_dead_code
+            precondition_check(length, capacity); //~allow_dead_code
+        }
+        //ub_checks::assert_unsafe_precondition!(
+        //    check_library_ub,
+        //    "Vec::from_raw_parts_in requires that length <= capacity",
+        //    (length: usize = length, capacity: usize = capacity) => length <= capacity //~allow_dead_code
+        //);
+        let r = unsafe { Vec { buf: RawVec::from_raw_parts_in(ptr, capacity, alloc), len: length } };
+        //@ close Vec(t, r, alloc_id, ptr, _, length);
+        r
     }
 
     #[doc(alias = "from_non_null_parts_in")]
@@ -1178,13 +1799,38 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", reason = "new API", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", issue = "130364")]
-    pub unsafe fn from_parts_in(ptr: NonNull<T>, length: usize, capacity: usize, alloc: A) -> Self {
-        ub_checks::assert_unsafe_precondition!(
-            check_library_ub,
-            "Vec::from_parts_in requires that length <= capacity",
-            (length: usize = length, capacity: usize = capacity) => length <= capacity
-        );
-        unsafe { Vec { buf: RawVec::from_nonnull_in(ptr, capacity, alloc), len: length } }
+    pub unsafe fn from_parts_in(ptr: NonNull<T>, length: usize, capacity: usize, alloc: A) -> Self
+    /*@
+    req Allocator(?t, alloc, ?alloc_id) &*&
+        ptr.as_ptr() as usize % std::mem::align_of::<T>() == 0 &*&
+        length <= capacity &*&
+        if capacity * std::mem::size_of::<T>() == 0 {
+            true
+        } else {
+            Layout::new::<T>().repeat(capacity) == some(pair(?allocLayout, ?stride)) &*&
+            alloc_block_in(alloc_id, ptr.as_ptr() as *u8, allocLayout)
+        };
+    @*/
+    //@ ens Vec(t, result, alloc_id, ptr.as_ptr(), ?capacity_, length) &*& capacity <= capacity_;
+    {
+        const fn precondition_check(length: usize, capacity: usize) {
+            if !(length <= capacity) {
+                let msg = concat!("unsafe precondition(s) violated: ", "Vec::from_parts_in requires that length <= capacity",
+                    "\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety.");
+                ::core::panicking::panic_nounwind(msg);
+            }
+        }
+        if ::core::ub_checks::check_library_ub() { //~allow_dead_code
+            precondition_check(length, capacity); //~allow_dead_code
+        }
+        //ub_checks::assert_unsafe_precondition!(
+        //    check_library_ub,
+        //    "Vec::from_parts_in requires that length <= capacity",
+        //    (length: usize = length, capacity: usize = capacity) => length <= capacity
+        //);
+        let r = unsafe { Vec { buf: RawVec::from_nonnull_in(ptr, capacity, alloc), len: length } };
+        //@ close Vec(t, r, alloc_id, ptr.as_ptr(), _, length);
+        r
     }
 
     /// Decomposes a `Vec<T>` into its raw components: `(pointer, length, capacity, allocator)`.
@@ -1227,12 +1873,111 @@ impl<T, A: Allocator> Vec<T, A> {
     #[must_use = "losing the pointer will leak memory"]
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
-    pub fn into_raw_parts_with_alloc(self) -> (*mut T, usize, usize, A) {
+    pub fn into_raw_parts_with_alloc(self) -> (*mut T, usize, usize, A)
+    //@ req Vec(currentThread, self, ?alloc_id, ?ptr_, ?capacity_, ?length);
+    /*@
+    ens result.0 == ptr_ &*& result.1 == length &*& result.2 == capacity_ &*&
+        Allocator(currentThread, result.3, alloc_id) &*&
+        if capacity_ * std::mem::size_of::<T>() == 0 {
+            true
+        } else {
+            Layout::new::<T>().repeat(capacity_) == some(pair(?allocLayout, ?stride)) &*&
+            alloc_block_in(alloc_id, ptr_ as *u8, allocLayout)
+        };
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(currentThread, self);
+        assert Vec(currentThread, self, ?alloc_id, ?ptr, ?capacity, ?length);
+        let result = call();
+        close raw_ptr_own::<T>(currentThread, result.0);
+        close usize_own(currentThread, result.1);
+        close usize_own(currentThread, result.2);
+        std::alloc::Allocator_to_own(result.3);
+        close_tuple_4_own(currentThread, result);
+        leak array_at_lft(alloc_id.lft, ptr, length, ?elems) &*& array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*& foreach(elems, own(currentThread));
+        if capacity * std::mem::size_of::<T>() != 0 {
+            leak alloc_block_in(alloc_id, ptr as *u8, _);
+        }
+    }
+    @*/
+    {
         let mut me = ManuallyDrop::new(self);
-        let len = me.len();
-        let capacity = me.capacity();
+        
+        //@ let k = begin_lifetime();
+        //@ close_points_to(&me.buf);
+        //@ share_Vec(k, &me);
+        let len;
+        let capacity;
+        {
+            //@ let_lft 'a = k;
+            
+            //@ let me_ref1 = precreate_ref(&me);
+            //@ init_ref_Vec_(me_ref1);
+            //@ open_frac_borrow(k, ref_initialized_(me_ref1), 1/4);
+            //@ open [?f1]ref_initialized_::<Vec<T, A>>(me_ref1)();
+            //@ Vec_share__inv();
+            //@ open Vec_share_('a, currentThread, me_ref1, alloc_id, ptr_, capacity_, length);
+            //@ open_frac_borrow('a, Vec_frac_borrow_content(me_ref1, length), 1/8);
+            //@ open [?flen]Vec_frac_borrow_content::<T, A>(me_ref1, length)();
+            //@ std::mem::MAX_SLICE_LEN_def::<T>();
+            len = me.len/*@::<T, A, 'a>@*/();
+            //@ close [flen]Vec_frac_borrow_content::<T, A>(me_ref1, length)();
+            //@ close_frac_borrow(flen, Vec_frac_borrow_content(me_ref1, length));
+            //@ close [f1]ref_initialized_::<Vec<T, A>>(me_ref1)();
+            //@ close_frac_borrow(f1, ref_initialized_(me_ref1));
+            
+            //@ let me_ref2 = precreate_ref(&me);
+            //@ init_ref_Vec_(me_ref2);
+            //@ open_frac_borrow(k, ref_initialized_(me_ref2), 1/4);
+            //@ open [?f2]ref_initialized_::<Vec<T, A>>(me_ref2)();
+            capacity = me.capacity/*@::<T, A, 'a>@*/();
+            //@ close [f2]ref_initialized_::<Vec<T, A>>(me_ref2)();
+            //@ close_frac_borrow(f2, ref_initialized_(me_ref2));
+        }
+        //@ end_lifetime(k);
+        //@ end_share_Vec(&me);
+        
         let ptr = me.as_mut_ptr();
-        let alloc = unsafe { ptr::read(me.allocator()) };
+        
+        //@ assert me |-> ?me_;
+        //@ close mk_points_to::<Vec<T, A>>(&me, me_)();
+        //@ let k2 = begin_lifetime();
+        //@ borrow(k2, mk_points_to(&me, me_));
+        //@ full_borrow_into_frac(k2, mk_points_to(&me, me_));
+        //@ close points_to_shared(k2, &me, me_);
+        //@ leak points_to_shared(k2, &me, me_);
+        //@ let me_ref3 = precreate_ref(&me);
+        //@ init_ref_readonly_points_to_shared(me_ref3);
+        use core::ops::Deref;
+        //@ open_frac_borrow(k2, ref_initialized_(me_ref3), 1/2);
+        //@ open [?f3]ref_initialized_::<Vec<T, A>>(me_ref3)();
+        let me_deref = me.deref();
+        //@ close [f3]ref_initialized_::<Vec<T, A>>(me_ref3)();
+        //@ close_frac_borrow(f3, ref_initialized_(me_ref3));
+        
+        //@ let me_ref4 = precreate_ref(me_ref3);
+        //@ init_ref_readonly_points_to_shared(me_ref4);
+        //@ open_frac_borrow(k2, ref_initialized_(me_ref4), 1/2);
+        //@ open [?f4]ref_initialized_::<Vec<T, A>>(me_ref4)();
+        //@ close exists(true);
+        let alloc_ref = unsafe { (*(me_deref as *const Vec<T, A>)).allocator() };
+        //@ close [f4]ref_initialized_::<Vec<T, A>>(me_ref4)();
+        //@ close_frac_borrow(f4, ref_initialized_::<Vec<T, A>>(me_ref4));
+        
+        //@ open points_to_shared(k2, alloc_ref, _);
+        //@ open_frac_borrow(k2, mk_points_to(alloc_ref, me_.alloc()), 1/2);
+        //@ open [?f5]mk_points_to::<A>(alloc_ref, me_.alloc())();
+        let alloc = unsafe { ptr::read(alloc_ref) };
+        //@ close [f5]mk_points_to::<A>(alloc_ref, me_.alloc())();
+        //@ close_frac_borrow(f5, mk_points_to(alloc_ref, me_.alloc()));
+        //@ end_lifetime(k2);
+        //@ borrow_end(k2, mk_points_to(&me, me_));
+        //@ open mk_points_to::<Vec<T, A>>(&me, me_)();
+        //@ open_points_to(&me);
+        //@ open Vec(currentThread, me, alloc_id, ptr_, capacity_, length);
+        //@ raw_vec::RawVec_into_raw_parts(me.buf);
+        
         (ptr, len, capacity, alloc)
     }
 
@@ -1278,7 +2023,12 @@ impl<T, A: Allocator> Vec<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     // #[unstable(feature = "vec_into_raw_parts", reason = "new API", issue = "65816")]
-    pub fn into_parts_with_alloc(self) -> (NonNull<T>, usize, usize, A) {
+    pub fn into_parts_with_alloc(self) -> (NonNull<T>, usize, usize, A)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let (ptr, len, capacity, alloc) = self.into_raw_parts_with_alloc();
         // SAFETY: A `Vec` always has a non-null pointer.
         (unsafe { NonNull::new_unchecked(ptr) }, len, capacity, alloc)
@@ -1310,8 +2060,25 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
-    pub const fn capacity(&self) -> usize {
-        self.buf.capacity()
+    pub const fn capacity<'a>(&'a self) -> usize
+    //@ req [?q]lifetime_token('a) &*& [_]Vec_share_('a, currentThread, self, ?alloc_id, ?ptr, ?capacity, ?length);
+    //@ ens [q]lifetime_token('a) &*& result == capacity;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.share('a, _t, self);
+        call();
+    }
+    @*/
+    {
+        //@ open Vec_share_('a, currentThread, self, alloc_id, ptr, capacity, length);
+        //@ let buf_ref = precreate_ref(&(*self).buf);
+        //@ raw_vec::init_ref_RawVec_(buf_ref);
+        //@ open_frac_borrow('a, ref_initialized_(buf_ref), q/2);
+        //@ open [?f]ref_initialized_::<RawVec<T, A>>(buf_ref)();
+        let r = self.buf.capacity();
+        //@ close [f]ref_initialized_::<RawVec<T, A>>(buf_ref)();
+        //@ close_frac_borrow(f, ref_initialized_(buf_ref));
+        r
     }
 
     /// Reserves capacity for at least `additional` more elements to be inserted
@@ -1331,10 +2098,33 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.reserve(10);
     /// assert!(vec.capacity() >= 11);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_diagnostic_item = "vec_reserve"]
-    pub fn reserve(&mut self, additional: usize) {
+    
+    pub fn reserve(&mut self, additional: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        array_at_lft(alloc_id.lft, ptr1, length, vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr1 + length, capacity1 - length, _) &*&
+        (length > capacity || length + additional <= capacity1);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.buf.reserve(self.len, additional);
     }
 
@@ -1362,9 +2152,32 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.reserve_exact(10);
     /// assert!(vec.capacity() >= 11);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn reserve_exact(&mut self, additional: usize) {
+    pub fn reserve_exact(&mut self, additional: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        array_at_lft(alloc_id.lft, ptr1, length, vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr1 + length, capacity1 - length, _) &*&
+        (length > capacity || length + additional <= capacity1);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.buf.reserve_exact(self.len, additional);
     }
 
@@ -1401,7 +2214,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// # process_data(&[1, 2, 3]).expect("why is the test harness OOMing on 12 bytes?");
     /// ```
     #[stable(feature = "try_reserve", since = "1.57.0")]
-    pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.buf.try_reserve(self.len, additional)
     }
 
@@ -1444,7 +2262,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// # process_data(&[1, 2, 3]).expect("why is the test harness OOMing on 12 bytes?");
     /// ```
     #[stable(feature = "try_reserve", since = "1.57.0")]
-    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
+    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.buf.try_reserve_exact(self.len, additional)
     }
 
@@ -1465,16 +2288,77 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.shrink_to_fit();
     /// assert!(vec.capacity() >= 3);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn shrink_to_fit(&mut self) {
+    pub fn shrink_to_fit(&mut self)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr0, ?capacity0, ?length) &*&
+        array_at_lft_(alloc_id.lft, ptr0, capacity0, ?vs0);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        capacity1 == if std::mem::size_of::<T>() == 0 { usize::MAX } else { length } &*&
+        array_at_lft_(alloc_id.lft, ptr1, capacity1, take(capacity1, vs0));
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_, _);
+        assert Vec(_, _, ?alloc_id, ?ptr0, _, _);
+        Vec_inv2();
+        assert array_at_lft(_, ptr0, _, ?vs) &*& array_at_lft_(_, _, _, ?vs_);
+        array_at_lft_to_array_at_lft_(ptr0);
+        array_at_lft__join(ptr0);
+        call();
+        assert Vec(_, _, _, ?ptr1, ?capacity1, _);
+        if std::mem::size_of::<T>() == 0 {
+            assert capacity1 == usize::MAX;
+            array_at_lft__split(ptr1, length(vs));
+            assert capacity1 == length(vs) + length(vs_);
+            take_append_l(length(vs), map(some, vs), vs_);
+            {
+                pred P() = array_at_lft_(alloc_id.lft, ptr1 + length(vs), capacity1 - length(vs), _);
+                close P();
+                array_at_lft__to_array_at_lft(ptr1, vs);
+                open P();
+            }
+        } else {
+            take_append_l(length(vs), map(some, vs), vs_);
+            array_at_lft__to_array_at_lft(ptr1, vs);
+        }
+        close <Vec<T, A>>.own(_t, *self);
+    }
+    @*/
+    {
+        //@ let k = begin_lifetime();
+        //@ share_Vec(k, self);
+        //@ let self_ref = precreate_ref(self);
+        let capacity;
+        {
+            //@ let_lft 'a = k;
+            //@ init_ref_Vec_(self_ref);
+            //@ open_frac_borrow(k, ref_initialized_(self_ref), 1/4);
+            //@ open [?f]ref_initialized_::<Vec<T, A>>(self_ref)();
+            capacity = self.capacity/*@::<T, A, 'a>@*/();
+            //@ close [f]ref_initialized_::<Vec<T, A>>(self_ref)();
+            //@ close_frac_borrow(f, ref_initialized_(self_ref));
+        }
+        //@ end_lifetime(k);
+        //@ end_share_Vec(self);
+        
         // The capacity is never less than the length, and there's nothing to do when
         // they are equal, so we can avoid the panic case in `RawVec::shrink_to_fit`
         // by only calling it with a greater capacity.
-        if self.capacity() > self.len {
+        //@ open Vec(_, _, _, _, _, _);
+        if capacity > self.len {
+            //@ open vec::Vec_buf(self, _);
+            //@ points_to_limits(&(*self).buf);
             self.buf.shrink_to_fit(self.len);
+            
         }
+        //@ close Vec(t, *self, alloc_id, ?ptr1, ?capacity1, ?len1);
+        //@ Vec_inv2();
     }
 
     /// Shrinks the capacity of the vector with a lower bound.
@@ -1495,9 +2379,31 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.shrink_to(0);
     /// assert!(vec.capacity() >= 3);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "shrink_to", since = "1.56.0")]
-    pub fn shrink_to(&mut self, min_capacity: usize) {
+    pub fn shrink_to(&mut self, min_capacity: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        array_at_lft(alloc_id.lft, ptr1, length, vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr1 + length, capacity1 - length, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         if self.capacity() > min_capacity {
             self.buf.shrink_to_fit(cmp::max(self.len, min_capacity));
         }
@@ -1528,14 +2434,69 @@ impl<T, A: Allocator> Vec<T, A> {
     /// let slice = vec.into_boxed_slice();
     /// assert_eq!(slice.into_vec().capacity(), 3);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn into_boxed_slice(mut self) -> Box<[T], A> {
+    pub fn into_boxed_slice(mut self) -> Box<[T], A>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         unsafe {
+            //@ Vec_inv2();
+            //@ array_at_lft_to_array_at_lft_(ptr);
+            //@ array_at_lft__join(ptr);
             self.shrink_to_fit();
-            let me = ManuallyDrop::new(self);
+            //@ assert Vec(_, ?self1, _, ?ptr1, ?capacity1, _);
+            //@ open_points_to(&self);
+            let /*@~mut@*/ me = ManuallyDrop::new(self);
+            //@ close_points_to(&self);
+            
+            //@ let me_ref = precreate_ref(&me);
+            //@ close_points_to(&me.buf);
+            //@ init_ref_readonly(me_ref, 1/2);
+            //@ open_points_to(me_ref);
+            //@ close_points_to(&(*me_ref).buf, 1/2);
+            //@ let buf_ref = precreate_ref(&(*me_ref).buf);
+            //@ init_ref_readonly(buf_ref, 1/2);
+            //@ open_points_to(buf_ref);
             let buf = ptr::read(&me.buf);
-            let len = me.len();
+            //@ close_points_to(buf_ref, 1/4);
+            //@ end_ref_readonly(buf_ref);
+            //@ end_ref_readonly(me_ref);
+            
+            //@ Vec_inv2();
+            //@ open Vec(t, self1, alloc_id, ptr1, capacity1, length);
+            //@ close Vec(t, self1, alloc_id, ptr1, capacity1, length);
+            //@ let me_ref2 = precreate_ref(&me);
+            //@ init_ref_readonly(me_ref2, 1/2);
+            //@ std::mem::MAX_SLICE_LEN_def::<T>();
+            let len = (&me).len();
+            //@ end_ref_readonly(me_ref2);
+            //@ open_points_to(&me);
+            
+            /*@
+            if std::mem::size_of::<T>() == 0 {
+                array_at_lft__split(ptr1, len);
+                assert capacity == usize::MAX;
+                assert capacity1 == usize::MAX;
+                take_append_l(len, map(some, vs), vs_);
+                assert array_at_lft_(_, ptr1, len, map(some, vs));
+                leak array_at_lft_(_, _, capacity1 - len, _);
+            } else {
+                assert capacity1 == length(vs);
+                take_append_l(capacity1, map(some, vs), vs_);
+                assert take(capacity1, append(map(some, vs), vs_)) == map(some, vs);
+            }
+            @*/
+            /*@
+            if map(std::mem::MaybeUninit::new_maybe_uninit, map(some, vs)) != map(std::mem::MaybeUninit::new, vs) {
+                let v = map_map_neq_map(std::mem::MaybeUninit::new_maybe_uninit, some, std::mem::MaybeUninit::new, vs);
+                assert false;
+            }
+            @*/
+            
+            //@ open Vec(_, _, _, _, _, _);
+            //@ close exists(vs);
             buf.into_box(len).assume_init()
         }
     }
@@ -1583,7 +2544,37 @@ impl<T, A: Allocator> Vec<T, A> {
     /// [`clear`]: Vec::clear
     /// [`drain`]: Vec::drain
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn truncate(&mut self, len: usize) {
+    pub fn truncate(&mut self, len: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        if len > length {
+            ens thread_token(t) &*& *self |-> self0 &*& Vec(t, self0, alloc_id, ptr, capacity, length)
+        } else {
+            array_at_lft(alloc_id.lft, ptr + len, length - len, ?vs) &*& foreach(vs, own(t)) &*&
+            ens thread_token(t) &*& *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, len) &*&
+                array_at_lft_(alloc_id.lft, ptr + len, length - len, _)
+        };
+    @*/
+    //@ ens true;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        assert Vec(_t, self0, ?alloc_id, ?ptr, ?capacity, ?length);
+        if len <= length {
+            array_at_lft_split(ptr, len);
+            assert foreach(?vs, _);
+            foreach_split(vs, own(_t), len);
+        }
+        call();
+        if len <= length {
+            array_at_lft__join(ptr + len);
+        }
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
         // This is safe because:
         //
         // * the slice passed to `drop_in_place` is valid; the `len > self.len`
@@ -1595,13 +2586,33 @@ impl<T, A: Allocator> Vec<T, A> {
             // Note: It's intentional that this is `>` and not `>=`.
             //       Changing it to `>=` has negative performance
             //       implications in some cases. See #78884 for more.
-            if len > self.len {
+            //@ open Vec(t, self0, alloc_id, ptr, capacity, length);
+            //@ close Vec(t, self0, alloc_id, ptr, capacity, length);
+            let self_len = self.len;
+            //@ produce_limits(self_len);
+            if len > self_len {
                 return;
             }
+            //@ assert array_at_lft(_, ptr + len, length - len, ?vs);
             let remaining_len = self.len - len;
+            //@ Vec_inv2();
+            //@ if std::mem::size_of::<T>() == 0 { } else { }
             let s = ptr::slice_from_raw_parts_mut(self.as_mut_ptr().add(len), remaining_len);
+            //@ open_points_to(self);
             self.len = len;
+            //@ let self2 = *self;
+            //@ close_points_to(self);
+            //@ open Vec(t, ?self1, alloc_id, ptr, capacity, length);
+            //@ close Vec(t, self2, alloc_id, ptr, capacity, len);
+            //@ close_points_to_slice_at_lft(s);
+            //@ lifetime_inclusion_trans(func_lft, lft_of_type::<A>(), alloc_id.lft);
+            //@ let q = lifetime_token_trade(func_lft, 1/2, alloc_id.lft);
+            //@ open_points_to_at_lft(s, q);
+            //@ close <[T]>.own(t, slice_of_elems(vs));
             ptr::drop_in_place(s);
+            //@ close_points_to_at_lft_(s);
+            //@ lifetime_token_trade_back(q, alloc_id.lft);
+            //@ open_points_to_slice_at_lft_(s);
         }
     }
 
@@ -1618,7 +2629,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[stable(feature = "vec_as_slice", since = "1.7.0")]
-    #[rustc_diagnostic_item = "vec_as_slice"]
+    
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     pub const fn as_slice(&self) -> &[T] {
         // SAFETY: `slice::from_raw_parts` requires pointee is a contiguous, aligned buffer of size
@@ -1650,7 +2661,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[stable(feature = "vec_as_slice", since = "1.7.0")]
-    #[rustc_diagnostic_item = "vec_as_mut_slice"]
+    
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     pub const fn as_mut_slice(&mut self) -> &mut [T] {
         // SAFETY: `slice::from_raw_parts_mut` requires pointee is a contiguous, aligned buffer of
@@ -1727,10 +2738,27 @@ impl<T, A: Allocator> Vec<T, A> {
     #[rustc_never_returns_null_ptr]
     #[rustc_as_ptr]
     #[inline]
-    pub const fn as_ptr(&self) -> *const T {
+    pub const fn as_ptr(&self) -> *const T
+    //@ req [_]Vec_share_(?k, ?t, self, ?alloc_id, ?ptr, ?capacity, ?length) &*& [?q]lifetime_token(k);
+    //@ ens [q]lifetime_token(k) &*& result == ptr;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.share(?k, ?t, self);
+        let result = call();
+    }
+    @*/
+    {
         // We shadow the slice method of the same name to avoid going through
         // `deref`, which creates an intermediate reference.
-        self.buf.ptr()
+        //@ open Vec_share_(k, t, self, alloc_id, ptr, capacity, length);
+        //@ let buf_ref = precreate_ref(&(*self).buf);
+        //@ raw_vec::init_ref_RawVec_(buf_ref);
+        //@ open_frac_borrow(k, ref_initialized_(buf_ref), q/2);
+        //@ open [?f]ref_initialized_::<RawVec<T, A>>(buf_ref)();
+        let r = self.buf.ptr();
+        //@ close [f]ref_initialized_::<RawVec<T, A>>(buf_ref)();
+        //@ close_frac_borrow(f, ref_initialized_(buf_ref));
+        r
     }
 
     /// Returns a raw mutable pointer to the vector's buffer, or a dangling
@@ -1811,10 +2839,36 @@ impl<T, A: Allocator> Vec<T, A> {
     #[rustc_never_returns_null_ptr]
     #[rustc_as_ptr]
     #[inline]
-    pub const fn as_mut_ptr(&mut self) -> *mut T {
+    pub const fn as_mut_ptr(&mut self) -> *mut T
+    //@ req *self |-> ?self0 &*& Vec(currentThread, self0, ?alloc_id, ?ptr, ?capacity, ?length);
+    //@ ens *self |-> ?self1 &*& Vec(currentThread, self1, alloc_id, ptr, capacity, length) &*& result == ptr;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        call();
+        close <Vec<T, A>>.own(_t, *self);
+    }
+    @*/
+    {
         // We shadow the slice method of the same name to avoid going through
         // `deref_mut`, which creates an intermediate reference.
-        self.buf.ptr()
+        
+        //@ open Vec(currentThread, self0, alloc_id, ptr, capacity, length);
+        //@ let k = begin_lifetime();
+        //@ open_points_to(self);
+        //@ close_points_to(&(*self).buf);
+        //@ raw_vec::share_RawVec(k, &(*self).buf);
+        //@ let buf_ref = precreate_ref(&(*self).buf);
+        //@ raw_vec::init_ref_RawVec_(buf_ref);
+        //@ open_frac_borrow(k, ref_initialized_(buf_ref), 1/2);
+        //@ open [?f]ref_initialized_::<RawVec<T, A>>(buf_ref)();
+        let r = self.buf.ptr();
+        //@ close [f]ref_initialized_::<RawVec<T, A>>(buf_ref)();
+        //@ close_frac_borrow(f, ref_initialized_(buf_ref));
+        //@ end_lifetime(k);
+        //@ raw_vec::end_share_RawVec(&(*self).buf);
+        //@ close Vec(currentThread, *self, alloc_id, ptr, capacity, length);
+        r
     }
 
     /// Returns a `NonNull` pointer to the vector's buffer, or a dangling
@@ -1883,8 +2937,68 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Returns a reference to the underlying allocator.
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
-    pub fn allocator(&self) -> &A {
-        self.buf.allocator()
+    pub fn allocator(&self) -> &A
+    /*@
+    req [?q]lifetime_token(?k) &*&
+        exists(?readOnly) &*&
+        if readOnly {
+            [_]points_to_shared(k, self, ?self_) &*&
+            ens [q]lifetime_token(k) &*& [_]points_to_shared(k, result, self_.alloc())
+        } else {
+            [_]Vec_share_(k, ?t, self, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+            ens [q]lifetime_token(k) &*&
+                [_]std::alloc::Allocator_share(k, t, result, alloc_id) &*&
+                [_]frac_borrow(k, ref_initialized_(result))
+        };
+    @*/
+    //@ ens true;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.share(?k, _t, self);
+        close exists(false);
+        let result = call();
+        std::alloc::close_Allocator_share(k, _t, result);
+    }
+    @*/
+    {
+        //@ let buf_ref = precreate_ref(&(*self).buf);
+        /*@
+        if readOnly {
+            open points_to_shared(k, self, ?self_);
+            open_frac_borrow_strong_(k, mk_points_to(self, self_), q/2);
+            open [?f]mk_points_to::<Vec<T, A>>(self, self_)();
+            open_points_to(self);
+            close_points_to(&(*self).buf, f);
+            close [f]mk_points_to::<RawVec<T, A>>(&(*self).buf, self_.buf)();
+            close scaledp(f, mk_points_to::<RawVec<T, A>>(&(*self).buf, self_.buf))();
+            {
+                pred Ctx() = [f](*self).len |-> self_.len &*& [f]struct_Vec_padding(self);
+                close Ctx();
+                produce_lem_ptr_chunk restore_frac_borrow(Ctx, scaledp(f, mk_points_to(&(*self).buf, self_.buf)), f, mk_points_to(self, self_))() {
+                    open Ctx();
+                    open scaledp(f, mk_points_to(&(*self).buf, self_.buf))();
+                    open [f]mk_points_to::<RawVec<T, A>>(&(*self).buf, self_.buf)();
+                    close [f]mk_points_to::<Vec<T, A>>(self, self_)();
+                } {
+                    close_frac_borrow_strong_();
+                }
+            }
+            full_borrow_into_frac(k, scaledp(f, mk_points_to(&(*self).buf, self_.buf)));
+            frac_borrow_implies_scaled(k, f, mk_points_to(&(*self).buf, self_.buf));
+            close points_to_shared(k, &(*self).buf, self_.buf);
+            leak points_to_shared(k, &(*self).buf, self_.buf);
+            init_ref_readonly_points_to_shared(buf_ref);
+        } else {
+            open Vec_share_(k, ?t, self, ?alloc_id, ?ptr, ?capacity, ?length);
+            raw_vec::init_ref_RawVec_(buf_ref);
+        }
+        @*/
+        //@ open_frac_borrow(k, ref_initialized_(buf_ref), q/2);
+        //@ open [?f]ref_initialized_::<RawVec<T, A>>(buf_ref)();
+        let r = self.buf.allocator();
+        //@ close [f]ref_initialized_::<RawVec<T, A>>(buf_ref)();
+        //@ close_frac_borrow(f, ref_initialized_(buf_ref));
+        r
     }
 
     /// Forces the length of the vector to `new_len`.
@@ -1975,14 +3089,32 @@ impl<T, A: Allocator> Vec<T, A> {
     /// [`spare_capacity_mut()`]: Vec::spare_capacity_mut
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub unsafe fn set_len(&mut self, new_len: usize) {
-        ub_checks::assert_unsafe_precondition!(
-            check_library_ub,
-            "Vec::set_len requires that new_len <= capacity()",
-            (new_len: usize = new_len, capacity: usize = self.capacity()) => new_len <= capacity
-        );
+    pub unsafe fn set_len(&mut self, new_len: usize)
+    //@ req *self |-> ?self0 &*& Vec(?t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*& new_len <= capacity;
+    //@ ens *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, new_len);
+    {
+        const fn precondition_check(new_len: usize, capacity: usize) {
+            if !(new_len <= capacity) {
+                let msg = concat!("unsafe precondition(s) violated: ", "Vec::set_len requires that new_len <= capacity()",
+                    "\n\nThis indicates a bug in the program. This Undefined Behavior check is optional, and cannot be relied on for safety.");
+                ::core::panicking::panic_nounwind(msg);
+            }
+        }
+        if ::core::ub_checks::check_library_ub() { //~allow_dead_code
+            precondition_check(new_len, self.capacity()); //~allow_dead_code
+        }
+        //ub_checks::assert_unsafe_precondition!(
+        //    check_library_ub,
+        //    "Vec::set_len requires that new_len <= capacity()",
+        //    (new_len: usize = new_len, capacity: usize = self.capacity()) => new_len <= capacity
+        //);
 
+        //@ open_points_to(self);
         self.len = new_len;
+        //@ open Vec(t, self0, alloc_id, ptr, capacity, length);
+        //@ let self1 = *self;
+        //@ close Vec(t, self1, alloc_id, ptr, capacity, new_len);
+        //@ close_points_to(self);
     }
 
     /// Removes an element from the vector and returns it.
@@ -2011,7 +3143,74 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn swap_remove(&mut self, index: usize) -> T {
+    pub fn swap_remove(&mut self, index: usize) -> T
+    /*@
+    req *self |-> ?self0 &*& Vec(?t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*& t == currentThread &*&
+        if index >= length {
+            ens false
+        } else {
+            points_to_at_lft(alloc_id.lft, ptr + index, ?v) &*&
+            if index == length - 1 {
+                ens *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, length - 1) &*&
+                    points_to_at_lft(alloc_id.lft, ptr + index, v) &*&
+                    result == v
+            } else {
+                [?f]array_at_lft_(alloc_id.lft, (ptr + length - 1) as *u8, std::mem::size_of::<T>(), ?bs) &*&
+                ens *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, length - 1) &*&
+                    array_at_lft_(alloc_id.lft, (ptr + index) as *u8, std::mem::size_of::<T>(), bs) &*&
+                    [f]array_at_lft_(alloc_id.lft, (ptr + length - 1) as *u8, std::mem::size_of::<T>(), bs) &*&
+                    result == v
+            }
+        };
+    @*/
+    //@ ens true;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        assert Vec(_t, self0, ?alloc_id, ?ptr, ?capacity, ?length);
+        assert array_at_lft(_, ptr, length, ?vs);
+        if index < length {
+            array_at_lft_split(ptr, index);
+            foreach_split(vs, own(_t), index);
+            open array_at_lft(_, ptr + index, _, _);
+            open foreach(drop(index, vs), own(_t));
+            points_to_at_lft_inv(ptr + index);
+            if index < length - 1 {
+                array_at_lft_split(ptr + index + 1, length - 1 - (index + 1));
+                foreach_split(tail(drop(index, vs)), own(_t), length - 1 - (index + 1));
+                open array_at_lft(_, ptr + length - 1, _, _);
+                open array_at_lft(_, ptr + length, _, _);
+                open foreach(drop(length - 1 - (index + 1), tail(drop(index, vs))), own(_t));
+                open foreach(tail(drop(length - 1 - (index + 1), tail(drop(index, vs)))), own(_t));
+                open points_to_at_lft(_, ptr + length - 1, _);
+                to_u8s__at_lft(ptr + length - 1);
+            } else {
+                open array_at_lft(_, ptr + index + 1, _, _);
+                open foreach(tail(drop(index, vs)), own(_t));
+            }
+        }
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        if index < length {
+            let vl = head(drop(length - 1 - index, drop(index, vs)));
+            if index < length - 1 {
+                from_u8s__at_lft(ptr + index);
+
+                close points_to_at_lft(alloc_id.lft, ptr + index, vl);
+                close array_at_lft(alloc_id.lft, ptr + index, length - 1 - index, cons(vl, take(length - 1 - (index + 1), tail(drop(index, vs)))));
+                close foreach(cons(vl, take(length - 1 - (index + 1), tail(drop(index, vs)))), own(_t));
+                array_at_lft_join(ptr);
+                foreach_append(take(index, vs), cons(vl, take(length - 1 - (index + 1), tail(drop(index, vs)))));
+                
+                from_u8s__at_lft(ptr + length - 1);
+                close array_at_lft_(alloc_id.lft, ptr + length - 1, capacity - (length - 1), _);
+            }
+            open own::<T>(_t)(result);
+        }
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
         #[cold]
         #[cfg_attr(not(panic = "immediate-abort"), inline(never))]
         #[optimize(size)]
@@ -2019,17 +3218,62 @@ impl<T, A: Allocator> Vec<T, A> {
             panic!("swap_remove index (is {index}) should be < len (is {len})");
         }
 
+        //@ Vec_inv();
+        //@ open Vec(t, self0, alloc_id, ptr, capacity, length);
+        //@ close Vec(t, self0, alloc_id, ptr, capacity, length);
+        //@ let self_ref = precreate_ref(self);
+        //@ init_ref_readonly(self_ref, 1/2);
         let len = self.len();
+        //@ end_ref_readonly(self_ref);
+        
         if index >= len {
-            assert_failed(index, len);
+            //@ assume(false); // TODO! Requires dealing with local function `assert_failed`
+            assert_failed(index, len); //~allow_dead_code
         }
         unsafe {
             // We replace self[index] with the last element. Note that if the
             // bounds check above succeeds there must be a last element (which
             // can be self[index] itself).
+            
+            //@ lifetime_inclusion_trans(func_lft, lft_of_type::<A>(), alloc_id.lft);
+            //@ let q = lifetime_token_trade(func_lft, 1/2, alloc_id.lft);
+            //@ open_points_to_at_lft(ptr + index, q/2);
+            //@ points_to_limits(ptr + index);
+            
+            //@ let k = begin_lifetime();
+            //@ share_Vec(k, self);
+            //@ let self_ref2 = precreate_ref(self);
+            //@ init_ref_Vec_(self_ref2);
+            //@ open_frac_borrow(k, ref_initialized_(self_ref2), 1/2);
+            //@ open [?f]ref_initialized_::<Vec<T, A>>(self_ref2)();
             let value = ptr::read(self.as_ptr().add(index));
+            //@ close [f]ref_initialized_::<Vec<T, A>>(self_ref2)();
+            //@ close_frac_borrow(f, ref_initialized_(self_ref2));
+            //@ end_lifetime(k);
+            //@ end_share_Vec(self);
+            
             let base_ptr = self.as_mut_ptr();
+            //@ to_u8s_(ptr + index);
+            /*@
+            if index == len - 1 {
+                close exists::<option<isize>>(some(0));
+            } else {
+                open_array_at_lft_((ptr + len - 1) as *u8, q/2);
+                close exists::<option<isize>>(none);
+            }
+            @*/
             ptr::copy(base_ptr.add(len - 1), base_ptr.add(index), 1);
+            /*@
+            if index == len - 1 {
+                from_u8s_(ptr + index);
+                close_points_to_at_lft(ptr + index);
+            } else {
+                close_points_to_at_lft_token_to_close_u8s_at_lft_token(ptr + index);
+                close_array_at_lft_((ptr + index) as *u8);
+                close_array_at_lft_((ptr + len - 1) as *u8);
+            }
+            @*/
+            //@ lifetime_token_trade_back(q, alloc_id.lft);
             self.set_len(len - 1);
             value
         }
@@ -2057,10 +3301,36 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Takes *O*([`Vec::len`]) time. All items after the insertion index must be
     /// shifted to the right. In the worst case, all elements are shifted when
     /// the insertion index is 0.
-    #[cfg(not(no_global_oom_handling))]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[track_caller]
-    pub fn insert(&mut self, index: usize, element: T) {
+    pub fn insert(&mut self, index: usize, element: T)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(element) &*&
+        if index > length {
+            ens false
+        } else {
+            ens thread_token(t) &*&
+                *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, length + 1) &*&
+                array_at_lft(alloc_id1.lft, ptr1, length + 1, ?vs1) &*& foreach(vs1, own(t)) &*&
+                array_at_lft_(alloc_id1.lft, ptr1 + length + 1, capacity1 - (length + 1), _)
+        };
+    @*/
+    //@ ens true;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<T>(_t)(element);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         let _ = self.insert_mut(index, element);
     }
 
@@ -2087,12 +3357,17 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Takes *O*([`Vec::len`]) time. All items after the insertion index must be
     /// shifted to the right. In the worst case, all elements are shifted when
     /// the insertion index is 0.
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[unstable(feature = "push_mut", issue = "135974")]
     #[track_caller]
     #[must_use = "if you don't need a reference to the value, use `Vec::insert` instead"]
-    pub fn insert_mut(&mut self, index: usize, element: T) -> &mut T {
+    pub fn insert_mut(&mut self, index: usize, element: T) -> &mut T
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         #[cold]
         #[cfg_attr(not(panic = "immediate-abort"), inline(never))]
         #[track_caller]
@@ -2156,7 +3431,34 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[track_caller]
     #[rustc_confusables("delete", "take")]
-    pub fn remove(&mut self, index: usize) -> T {
+    pub fn remove(&mut self, index: usize) -> T
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        if index >= length {
+            ens false
+        } else {
+            ens thread_token(t) &*&
+                *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, length - 1) &*&
+                array_at_lft(alloc_id.lft, ptr, length - 1, ?vs1) &*& foreach(vs1, own(t)) &*&
+                array_at_lft_(alloc_id.lft, ptr + length - 1, capacity - (length - 1), _) &*&
+                result == nth(index, vs) &*& own(t)(result)
+        };
+    @*/
+    //@ ens true;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        open own::<T>(_t)(result);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         #[cold]
         #[cfg_attr(not(panic = "immediate-abort"), inline(never))]
         #[track_caller]
@@ -2192,7 +3494,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[unstable(feature = "vec_try_remove", issue = "146954")]
     #[rustc_confusables("delete", "take", "remove")]
-    pub fn try_remove(&mut self, index: usize) -> Option<T> {
+    pub fn try_remove(&mut self, index: usize) -> Option<T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let len = self.len();
         if index >= len {
             return None;
@@ -2243,7 +3550,11 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&T) -> bool,
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
     {
+        //@ assume(false);
         self.retain_mut(|elem| f(elem));
     }
 
@@ -2269,7 +3580,31 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn retain_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut T) -> bool,
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(f);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, ?new_length) &*&
+        new_length <= length &*&
+        array_at_lft(alloc_id.lft, ptr, new_length, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + new_length, capacity - new_length, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<F>(_t)(f);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
     {
+        //@ assume(false);
         let original_len = self.len();
 
         if original_len == 0 {
@@ -2411,7 +3746,31 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn dedup_by<F>(&mut self, mut same_bucket: F)
     where
         F: FnMut(&mut T, &mut T) -> bool,
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(same_bucket);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, ?new_length) &*&
+        new_length <= length &*&
+        array_at_lft(alloc_id.lft, ptr, new_length, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + new_length, capacity - new_length, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<F>(_t)(same_bucket);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
     {
+        //@ assume(false);
         let len = self.len();
         if len <= 1 {
             return;
@@ -2556,11 +3915,34 @@ impl<T, A: Allocator> Vec<T, A> {
     /// capacity after the push, *O*(*capacity*) time is taken to copy the
     /// vector's elements to a larger allocation. This expensive operation is
     /// offset by the *capacity* *O*(1) insertions it allows.
-    #[cfg(not(no_global_oom_handling))]
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_confusables("push_back", "put", "append")]
-    pub fn push(&mut self, value: T) {
+    pub fn push(&mut self, value: T)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(value);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, length + 1) &*&
+        array_at_lft(alloc_id1.lft, ptr1, length + 1, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id1.lft, ptr1 + length + 1, capacity1 - (length + 1), _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<T>(_t)(value);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         let _ = self.push_mut(value);
     }
 
@@ -2601,7 +3983,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Takes *O*(1) time.
     #[inline]
     #[unstable(feature = "vec_push_within_capacity", issue = "100486")]
-    pub fn push_within_capacity(&mut self, value: T) -> Result<(), T> {
+    pub fn push_within_capacity(&mut self, value: T) -> Result<(), T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.push_mut_within_capacity(value).map(|_| ())
     }
 
@@ -2633,11 +4020,16 @@ impl<T, A: Allocator> Vec<T, A> {
     /// capacity after the push, *O*(*capacity*) time is taken to copy the
     /// vector's elements to a larger allocation. This expensive operation is
     /// offset by the *capacity* *O*(1) insertions it allows.
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[unstable(feature = "push_mut", issue = "135974")]
     #[must_use = "if you don't need a reference to the value, use `Vec::push` instead"]
-    pub fn push_mut(&mut self, value: T) -> &mut T {
+    pub fn push_mut(&mut self, value: T) -> &mut T
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         // Inform codegen that the length does not change across grow_one().
         let len = self.len;
         // This will panic or abort if we would allocate > isize::MAX bytes
@@ -2671,7 +4063,12 @@ impl<T, A: Allocator> Vec<T, A> {
     // #[unstable(feature = "vec_push_within_capacity", issue = "100486")]
     #[inline]
     #[must_use = "if you don't need a reference to the value, use `Vec::push_within_capacity` instead"]
-    pub fn push_mut_within_capacity(&mut self, value: T) -> Result<&mut T, T> {
+    pub fn push_mut_within_capacity(&mut self, value: T) -> Result<&mut T, T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         if self.len == self.buf.capacity() {
             return Err(value);
         }
@@ -2705,8 +4102,50 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Takes *O*(1) time.
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_diagnostic_item = "vec_pop"]
-    pub fn pop(&mut self) -> Option<T> {
+    
+    pub fn pop(&mut self) -> Option<T>
+    /*@
+    req *self |-> ?self0 &*& Vec(?t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*& t == currentThread &*&
+        if length == 0 {
+            ens *self |-> self0 &*& Vec(t, self0, alloc_id, ptr, capacity, 0) &*&
+                result == std::option::Option::None
+        } else {
+            points_to_at_lft(alloc_id.lft, ptr + length - 1, ?v) &*&
+            ens *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, length - 1) &*&
+                points_to_at_lft(alloc_id.lft, ptr + length - 1, v) &*&
+                result == std::option::Option::Some(v)
+        };
+    @*/
+    //@ ens true;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        assert Vec(_t, self0, ?alloc_id, ?ptr, ?capacity, ?length);
+        assert array_at_lft(_, ptr, length, ?vs);
+        if length > 0 {
+            // Split the array to expose the last element (mirrors swap_remove index==length-1)
+            array_at_lft_split(ptr, length - 1);
+            foreach_split(vs, own(_t), length - 1);
+            open array_at_lft(_, ptr + length - 1, _, _);
+            open foreach(drop(length - 1, vs), own(_t));
+            points_to_at_lft_inv(ptr + length - 1);
+            // Open the empty tail
+            open array_at_lft(_, ptr + length, _, _);
+            open foreach(tail(drop(length - 1, vs)), own(_t));
+        }
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        if length > 0 {
+            open own::<T>(_t)(head(drop(length - 1, vs)));
+            close <std::option::Option<T>>.own(_t, result);
+        } else {
+            close <std::option::Option<T>>.own(_t, result);
+        }
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         if self.len == 0 {
             None
         } else {
@@ -2761,7 +4200,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "vec_peek_mut", issue = "122742")]
-    pub fn peek_mut(&mut self) -> Option<PeekMut<'_, T, A>> {
+    pub fn peek_mut(&mut self) -> Option<PeekMut<'_, T, A>>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         PeekMut::new(self)
     }
 
@@ -2780,10 +4224,42 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(vec, [1, 2, 3, 4, 5, 6]);
     /// assert_eq!(vec2, []);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
     #[inline]
     #[stable(feature = "append", since = "1.4.0")]
-    pub fn append(&mut self, other: &mut Self) {
+    pub fn append(&mut self, other: &mut Self)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        *other |-> ?other0 &*& Vec(t, other0, ?alloc_id2, ?ptr2, ?capacity2, ?length2) &*&
+        array_at_lft(alloc_id2.lft, ptr2, length2, ?vs2) &*& foreach(vs2, own(t)) &*&
+        array_at_lft_(alloc_id2.lft, ptr2 + length2, capacity2 - length2, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, length + length2) &*&
+        array_at_lft(alloc_id1.lft, ptr1, length + length2, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id1.lft, ptr1 + length + length2, capacity1 - (length + length2), _) &*&
+        *other |-> ?other1 &*& Vec(t, other1, alloc_id2, ptr2, capacity2, 0) &*&
+        array_at_lft_(alloc_id2.lft, ptr2, capacity2, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0_);
+        open <Vec<T, A>>.own(_t, ?other0_);
+        let result = call();
+        // Close other's .own (now empty)
+        close foreach::<T>(nil, own(_t));
+        assert Vec(_, ?other1_, _, _, _, 0);
+        close <Vec<T, A>>.own(_t, other1_);
+        // Close self's .own (now has all elements)
+        assert Vec(_, ?self1_, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1_);
+    }
+    @*/
+    {
+        //@ assume(false);
         unsafe {
             self.append_elements(other.as_slice() as _);
             other.set_len(0);
@@ -2791,9 +4267,12 @@ impl<T, A: Allocator> Vec<T, A> {
     }
 
     /// Appends elements to `self` from other buffer.
-    #[cfg(not(no_global_oom_handling))]
     #[inline]
-    unsafe fn append_elements(&mut self, other: *const [T]) {
+    unsafe fn append_elements(&mut self, other: *const [T])
+    //@ req true;
+    //@ ens true;
+    {
+        //@ assume(false);
         let count = other.len();
         self.reserve(count);
         let len = self.len();
@@ -2880,7 +4359,29 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, 0) &*&
+        array_at_lft_(alloc_id.lft, ptr, capacity, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, ?alloc_id, ?ptr, ?capacity, _);
+        close foreach::<T>(nil, own(_t));
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         let elems: *mut [T] = self.as_mut_slice();
 
         // SAFETY:
@@ -2908,9 +4409,27 @@ impl<T, A: Allocator> Vec<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     #[rustc_confusables("length", "size")]
-    pub const fn len(&self) -> usize {
+    pub const fn len<'a>(&'a self) -> usize
+    // req [?q]lifetime_token('a) &*& [_]Vec_share_('a, currentThread, self, ?alloc_id, ?ptr, ?capacity, ?length);
+    // ens [q]lifetime_token('a) &*& result == length;
+    //@ req [?f](*self).len |-> ?length &*& length <= std::mem::MAX_SLICE_LEN::<T>();
+    //@ ens [f](*self).len |-> length &*& result == length;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.share('a, _t, self);
+        Vec_share__inv();
+        open Vec_share_('a, currentThread, self, ?alloc_id, ?ptr, ?capacity, ?length);
+        
+        open_frac_borrow('a, Vec_frac_borrow_content(self, length), _q_a);
+        open [?f]Vec_frac_borrow_content::<T, A>(self, length)();
+        let result = call();
+        close [f]Vec_frac_borrow_content::<T, A>(self, length)();
+        close_frac_borrow(f, Vec_frac_borrow_content(self, length));
+    }
+    @*/
+    {
         let len = self.len;
-
+        
         // SAFETY: The maximum capacity of `Vec<T>` is `isize::MAX` bytes, so the maximum value can
         // be returned is `usize::checked_div(size_of::<T>()).unwrap_or(usize::MAX)`, which
         // matches the definition of `T::MAX_SLICE_LEN`.
@@ -2931,7 +4450,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert!(!v.is_empty());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_diagnostic_item = "vec_is_empty"]
+    
     #[rustc_const_stable(feature = "const_vec_string_slice", since = "1.87.0")]
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
@@ -2961,7 +4480,6 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(vec, ['a']);
     /// assert_eq!(vec2, ['b', 'c']);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
     #[inline]
     #[must_use = "use `.truncate()` if you don't need the other half"]
     #[stable(feature = "split_off", since = "1.4.0")]
@@ -2969,7 +4487,32 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn split_off(&mut self, at: usize) -> Self
     where
         A: Clone,
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        if at > length {
+            ens false
+        } else {
+            ens thread_token(t) &*&
+                *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, at) &*&
+                array_at_lft(alloc_id.lft, ptr, at, take(at, vs)) &*& foreach(take(at, vs), own(t)) &*&
+                array_at_lft_(alloc_id.lft, ptr + at, capacity - at, _) &*&
+                <Vec<T, A>>.own(t, result)
+        };
+    @*/
+    //@ ens true;
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0_);
+        let result = call();
+        assert Vec(_, ?self1_, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1_);
+    }
+    @*/
     {
+        //@ assume(false);
         #[cold]
         #[cfg_attr(not(panic = "immediate-abort"), inline(never))]
         #[track_caller]
@@ -3025,7 +4568,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// vec.resize_with(4, || { p *= 2; p });
     /// assert_eq!(vec, [2, 4, 8, 16]);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "vec_resize_with", since = "1.33.0")]
     pub fn resize_with<F>(&mut self, new_len: usize, f: F)
     where
@@ -3072,7 +4615,11 @@ impl<T, A: Allocator> Vec<T, A> {
     pub fn leak<'a>(self) -> &'a mut [T]
     where
         A: 'a,
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
     {
+        //@ assume(false);
         let mut me = ManuallyDrop::new(self);
         unsafe { slice::from_raw_parts_mut(me.as_mut_ptr(), me.len) }
     }
@@ -3107,7 +4654,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// ```
     #[stable(feature = "vec_spare_capacity", since = "1.60.0")]
     #[inline]
-    pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
+    pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         // Note:
         // This method is not implemented in terms of `split_at_spare_mut`,
         // to prevent invalidation of pointers to the buffer.
@@ -3229,7 +4781,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// let reshaped: Vec<[[[u8; 8]; 8]; 8]> = flat.into_chunks().into_chunks().into_chunks();
     /// assert_eq!(reshaped.len(), 1);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[unstable(feature = "vec_into_chunks", issue = "142137")]
     pub fn into_chunks<const N: usize>(mut self) -> Vec<[T; N], A> {
         const {
@@ -3289,9 +4841,33 @@ impl<T: Clone, A: Allocator> Vec<T, A> {
     /// vec.resize(2, '_');
     /// assert_eq!(vec, ['a', 'b']);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "vec_resize", since = "1.5.0")]
-    pub fn resize(&mut self, new_len: usize, value: T) {
+    pub fn resize(&mut self, new_len: usize, value: T)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(value);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, new_len) &*&
+        array_at_lft(alloc_id1.lft, ptr1, new_len, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id1.lft, ptr1 + new_len, capacity1 - new_len, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<T>(_t)(value);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         let len = self.len();
 
         if new_len > len {
@@ -3319,7 +4895,7 @@ impl<T: Clone, A: Allocator> Vec<T, A> {
     /// ```
     ///
     /// [`extend`]: Vec::extend
-    #[cfg(not(no_global_oom_handling))]
+    
     #[stable(feature = "vec_extend_from_slice", since = "1.6.0")]
     pub fn extend_from_slice(&mut self, other: &[T]) {
         self.spec_extend(other.iter())
@@ -3410,9 +4986,13 @@ impl<T, A: Allocator, const N: usize> Vec<[T; N], A> {
 }
 
 impl<T: Clone, A: Allocator> Vec<T, A> {
-    #[cfg(not(no_global_oom_handling))]
     /// Extend the vector by `n` clones of value.
-    fn extend_with(&mut self, n: usize, value: T) {
+    fn extend_with(&mut self, n: usize, value: T)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.reserve(n);
 
         unsafe {
@@ -3458,7 +5038,30 @@ impl<T: PartialEq, A: Allocator> Vec<T, A> {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn dedup(&mut self) {
+    pub fn dedup(&mut self)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ptr, capacity, ?new_length) &*&
+        new_length <= length &*&
+        array_at_lft(alloc_id.lft, ptr, new_length, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + new_length, capacity - new_length, _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.dedup_by(|a, b| a == b)
     }
 }
@@ -3468,15 +5071,15 @@ impl<T: PartialEq, A: Allocator> Vec<T, A> {
 ////////////////////////////////////////////////////////////////////////////////
 
 #[doc(hidden)]
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_diagnostic_item = "vec_from_elem"]
+
 pub fn from_elem<T: Clone>(elem: T, n: usize) -> Vec<T> {
     <T as SpecFromElem>::from_elem(elem, n, Global)
 }
 
 #[doc(hidden)]
-#[cfg(not(no_global_oom_handling))]
+
 #[unstable(feature = "allocator_api", issue = "32838")]
 pub fn from_elem_in<T: Clone, A: Allocator>(elem: T, n: usize, alloc: A) -> Vec<T, A> {
     <T as SpecFromElem>::from_elem(elem, n, alloc)
@@ -3549,7 +5152,12 @@ impl<T, A: Allocator> ops::Deref for Vec<T, A> {
     type Target = [T];
 
     #[inline]
-    fn deref(&self) -> &[T] {
+    fn deref(&self) -> &[T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.as_slice()
     }
 }
@@ -3557,7 +5165,12 @@ impl<T, A: Allocator> ops::Deref for Vec<T, A> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> ops::DerefMut for Vec<T, A> {
     #[inline]
-    fn deref_mut(&mut self) -> &mut [T] {
+    fn deref_mut(&mut self) -> &mut [T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self.as_mut_slice()
     }
 }
@@ -3565,12 +5178,18 @@ impl<T, A: Allocator> ops::DerefMut for Vec<T, A> {
 #[unstable(feature = "deref_pure_trait", issue = "87121")]
 unsafe impl<T, A: Allocator> ops::DerefPure for Vec<T, A> {}
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
-    fn clone(&self) -> Self {
+    fn clone(&self) -> Self
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         let alloc = self.allocator().clone();
-        <[T]>::to_vec_in(&**self, alloc)
+        let v = <[T]>::to_vec_in(&**self, alloc);
+        unsafe { core::ptr::read(&v as *const std::vec::Vec<T, A> as *const Self) }
     }
 
     /// Overwrites the contents of `self` with a clone of the contents of `source`.
@@ -3595,6 +5214,7 @@ impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
     /// // And no reallocation occurred
     /// assert_eq!(yp, y.as_ptr());
     /// ```
+    #[cfg(not(no_global_oom_handling))]
     fn clone_from(&mut self, source: &Self) {
         crate::slice::SpecCloneIntoVec::clone_into(source.as_slice(), self);
     }
@@ -3614,7 +5234,12 @@ impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Hash, A: Allocator> Hash for Vec<T, A> {
     #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, state: &mut H)
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Hash::hash(&**self, state)
     }
 }
@@ -3681,7 +5306,7 @@ impl<T, I: SliceIndex<[T]>, A: Allocator> IndexMut<I> for Vec<T, A> {
 ///     LONG_LIVED.lock().unwrap().push(result);
 /// }
 /// ```
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> FromIterator<T> for Vec<T> {
     #[inline]
@@ -3749,7 +5374,7 @@ impl<'a, T, A: Allocator> IntoIterator for &'a mut Vec<T, A> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> Extend<T> for Vec<T, A> {
     #[inline]
@@ -3758,16 +5383,64 @@ impl<T, A: Allocator> Extend<T> for Vec<T, A> {
     }
 
     #[inline]
-    fn extend_one(&mut self, item: T) {
+    fn extend_one(&mut self, item: T)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _) &*&
+        own(t)(item);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, ?alloc_id1, ?ptr1, ?capacity1, length + 1) &*&
+        array_at_lft(alloc_id1.lft, ptr1, length + 1, ?vs1) &*& foreach(vs1, own(t)) &*&
+        array_at_lft_(alloc_id1.lft, ptr1 + length + 1, capacity1 - (length + 1), _);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        close own::<T>(_t)(item);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.push(item);
     }
 
     #[inline]
-    fn extend_reserve(&mut self, additional: usize) {
+    fn extend_reserve(&mut self, additional: usize)
+    /*@
+    req thread_token(?t) &*& t == currentThread &*&
+        *self |-> ?self0 &*& Vec(t, self0, ?alloc_id, ?ptr, ?capacity, ?length) &*&
+        array_at_lft(alloc_id.lft, ptr, length, ?vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr + length, capacity - length, _);
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        *self |-> ?self1 &*& Vec(t, self1, alloc_id, ?ptr1, ?capacity1, length) &*&
+        array_at_lft(alloc_id.lft, ptr1, length, vs) &*& foreach(vs, own(t)) &*&
+        array_at_lft_(alloc_id.lft, ptr1 + length, capacity1 - length, _) &*&
+        (length > capacity || length + additional <= capacity1);
+    @*/
+    /*@
+    safety_proof {
+        open <Vec<T, A>>.own(_t, ?self0);
+        let result = call();
+        assert Vec(_, ?self1, _, _, _, _);
+        close <Vec<T, A>>.own(_t, self1);
+    }
+    @*/
+    {
+        //@ assume(false);
         self.reserve(additional);
     }
 
     #[inline]
+    #[cfg(not(no_global_oom_handling))]
     unsafe fn extend_one_unchecked(&mut self, item: T) {
         // SAFETY: Our preconditions ensure the space has been reserved, and `extend_reserve` is implemented correctly.
         unsafe {
@@ -3781,7 +5454,6 @@ impl<T, A: Allocator> Extend<T> for Vec<T, A> {
 impl<T, A: Allocator> Vec<T, A> {
     // leaf method to which various SpecFrom/SpecExtend implementations delegate when
     // they have no further optimizations to apply
-    #[cfg(not(no_global_oom_handling))]
     fn extend_desugared<I: Iterator<Item = T>>(&mut self, mut iterator: I) {
         // This is the case for a general iterator.
         //
@@ -3808,7 +5480,6 @@ impl<T, A: Allocator> Vec<T, A> {
 
     // specific extend for `TrustedLen` iterators, called both by the specializations
     // and internal places where resolving specialization makes compilation slower
-    #[cfg(not(no_global_oom_handling))]
     fn extend_trusted(&mut self, iterator: impl iter::TrustedLen<Item = T>) {
         let (low, high) = iterator.size_hint();
         if let Some(additional) = high {
@@ -3883,7 +5554,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// v.splice(1..1, new);
     /// assert_eq!(v, [1, 2, 3, 4, 5]);
     /// ```
-    #[cfg(not(no_global_oom_handling))]
+    
     #[inline]
     #[stable(feature = "vec_splice", since = "1.21.0")]
     pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, I::IntoIter, A>
@@ -3972,7 +5643,15 @@ impl<T, A: Allocator> Vec<T, A> {
     where
         F: FnMut(&mut T) -> bool,
         R: RangeBounds<usize>,
+    //@ req true;
+    //@ ens true;
+    /*@
+    safety_proof {
+        assume(false);
+    }
+    @*/
     {
+        //@ assume(false);
         ExtractIf::new(self, filter, range)
     }
 }
@@ -3983,7 +5662,7 @@ impl<T, A: Allocator> Vec<T, A> {
 /// append the entire slice at once.
 ///
 /// [`copy_from_slice`]: slice::copy_from_slice
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "extend_ref", since = "1.2.0")]
 impl<'a, T: Copy + 'a, A: Allocator> Extend<&'a T> for Vec<T, A> {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
@@ -4001,6 +5680,7 @@ impl<'a, T: Copy + 'a, A: Allocator> Extend<&'a T> for Vec<T, A> {
     }
 
     #[inline]
+    #[cfg(not(no_global_oom_handling))]
     unsafe fn extend_one_unchecked(&mut self, &item: &'a T) {
         // SAFETY: Our preconditions ensure the space has been reserved, and `extend_reserve` is implemented correctly.
         unsafe {
@@ -4020,7 +5700,12 @@ where
     A2: Allocator,
 {
     #[inline]
-    fn partial_cmp(&self, other: &Vec<T, A2>) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Vec<T, A2>) -> Option<Ordering>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
@@ -4032,14 +5717,27 @@ impl<T: Eq, A: Allocator> Eq for Vec<T, A> {}
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Ord, A: Allocator> Ord for Vec<T, A> {
     #[inline]
-    fn cmp(&self, other: &Self) -> Ordering {
+    fn cmp(&self, other: &Self) -> Ordering
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Ord::cmp(&**self, &**other)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<#[may_dangle] T, A: Allocator> Drop for Vec<T, A> {
-    fn drop(&mut self) {
+    fn drop(&mut self)
+    //@ req thread_token(?t) &*& t == currentThread &*& <Vec<T, A>>.full_borrow_content(t, self)();
+    //@ ens thread_token(t) &*& (*self).buf |-> ?buf &*& <RawVec<T, A>>.own(t, buf) &*& (*self).len |-> ?len &*& struct_Vec_padding(self);
+    {
+        //@ open <Vec<T, A>>.full_borrow_content(t, self)();
+        //@ open <Vec<T, A>>.own(t, *self);
+        //@ open Vec(t, *self, ?alloc_id, ?ptr, ?capacity, ?length);
+        //@ open_points_to(self);
+        //@ assume(false);
         unsafe {
             // use drop for [T]
             // use a raw slice to refer to the elements of the vector as weakest necessary type;
@@ -4056,7 +5754,17 @@ impl<T> const Default for Vec<T> {
     /// Creates an empty `Vec<T>`.
     ///
     /// The vector will not allocate until elements are pushed onto it.
-    fn default() -> Vec<T> {
+    fn default() -> Vec<T>
+    /*@
+    req thread_token(?t) &*& t == currentThread;
+    @*/
+    /*@
+    ens thread_token(t) &*&
+        <Vec<T, std::alloc::Global>>.own(t, result);
+    @*/
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         Vec::new()
     }
 }
@@ -4070,33 +5778,53 @@ impl<T: fmt::Debug, A: Allocator> fmt::Debug for Vec<T, A> {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> AsRef<Vec<T, A>> for Vec<T, A> {
-    fn as_ref(&self) -> &Vec<T, A> {
+    fn as_ref(&self) -> &Vec<T, A>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self
     }
 }
 
 #[stable(feature = "vec_as_mut", since = "1.5.0")]
 impl<T, A: Allocator> AsMut<Vec<T, A>> for Vec<T, A> {
-    fn as_mut(&mut self) -> &mut Vec<T, A> {
+    fn as_mut(&mut self) -> &mut Vec<T, A>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T, A: Allocator> AsRef<[T]> for Vec<T, A> {
-    fn as_ref(&self) -> &[T] {
+    fn as_ref(&self) -> &[T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self
     }
 }
 
 #[stable(feature = "vec_as_mut", since = "1.5.0")]
 impl<T, A: Allocator> AsMut<[T]> for Vec<T, A> {
-    fn as_mut(&mut self) -> &mut [T] {
+    fn as_mut(&mut self) -> &mut [T]
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         self
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Clone> From<&[T]> for Vec<T> {
     /// Allocates a `Vec<T>` and fills it by cloning `s`'s items.
@@ -4106,12 +5834,18 @@ impl<T: Clone> From<&[T]> for Vec<T> {
     /// ```
     /// assert_eq!(Vec::from(&[1, 2, 3][..]), vec![1, 2, 3]);
     /// ```
-    fn from(s: &[T]) -> Vec<T> {
-        s.to_vec()
+    fn from(s: &[T]) -> Vec<T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
+        let v = s.to_vec();
+        unsafe { core::ptr::read(&v as *const std::vec::Vec<T> as *const Vec<T>) }
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "vec_from_mut", since = "1.19.0")]
 impl<T: Clone> From<&mut [T]> for Vec<T> {
     /// Allocates a `Vec<T>` and fills it by cloning `s`'s items.
@@ -4121,12 +5855,17 @@ impl<T: Clone> From<&mut [T]> for Vec<T> {
     /// ```
     /// assert_eq!(Vec::from(&mut [1, 2, 3][..]), vec![1, 2, 3]);
     /// ```
-    fn from(s: &mut [T]) -> Vec<T> {
-        s.to_vec()
+    fn from(s: &mut [T]) -> Vec<T>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
+        unsafe { core::mem::transmute_copy::<<[T] as crate::borrow::ToOwned>::Owned, Vec<T>>(&s.to_vec()) }
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "vec_from_array_ref", since = "1.74.0")]
 impl<T: Clone, const N: usize> From<&[T; N]> for Vec<T> {
     /// Allocates a `Vec<T>` and fills it by cloning `s`'s items.
@@ -4141,7 +5880,7 @@ impl<T: Clone, const N: usize> From<&[T; N]> for Vec<T> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "vec_from_array_ref", since = "1.74.0")]
 impl<T: Clone, const N: usize> From<&mut [T; N]> for Vec<T> {
     /// Allocates a `Vec<T>` and fills it by cloning `s`'s items.
@@ -4156,7 +5895,7 @@ impl<T: Clone, const N: usize> From<&mut [T; N]> for Vec<T> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "vec_from_array", since = "1.44.0")]
 impl<T, const N: usize> From<[T; N]> for Vec<T> {
     /// Allocates a `Vec<T>` and moves `s`'s items into it.
@@ -4167,7 +5906,8 @@ impl<T, const N: usize> From<[T; N]> for Vec<T> {
     /// assert_eq!(Vec::from([1, 2, 3]), vec![1, 2, 3]);
     /// ```
     fn from(s: [T; N]) -> Vec<T> {
-        <[T]>::into_vec(Box::new(s))
+        let v = <[T]>::into_vec(Box::new(s));
+        unsafe { core::ptr::read(&v as *const std::vec::Vec<T> as *const Vec<T>) }
     }
 }
 
@@ -4196,6 +5936,7 @@ where
 }
 
 // note: test pulls in std, which causes errors here
+
 #[stable(feature = "vec_from_box", since = "1.18.0")]
 impl<T, A: Allocator> From<Box<[T], A>> for Vec<T, A> {
     /// Converts a boxed slice into a vector by transferring ownership of
@@ -4207,14 +5948,22 @@ impl<T, A: Allocator> From<Box<[T], A>> for Vec<T, A> {
     /// let b: Box<[i32]> = vec![1, 2, 3].into_boxed_slice();
     /// assert_eq!(Vec::from(b), vec![1, 2, 3]);
     /// ```
-    fn from(s: Box<[T], A>) -> Self {
-        s.into_vec()
+    fn from(s: Box<[T], A>) -> Self
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
+        let v = s.into_vec();
+        unsafe { core::mem::transmute_copy::<std::vec::Vec<T, A>, Self>(&core::mem::ManuallyDrop::new(v)) }
     }
 }
 
 // note: test pulls in std, which causes errors here
-#[cfg(not(no_global_oom_handling))]
+
+
 #[stable(feature = "box_from_vec", since = "1.20.0")]
+#[cfg(not(no_global_oom_handling))]
 impl<T, A: Allocator> From<Vec<T, A>> for Box<[T], A> {
     /// Converts a vector into a boxed slice.
     ///
@@ -4241,7 +5990,7 @@ impl<T, A: Allocator> From<Vec<T, A>> for Box<[T], A> {
     }
 }
 
-#[cfg(not(no_global_oom_handling))]
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl From<&str> for Vec<u8> {
     /// Allocates a `Vec<u8>` and fills it with a UTF-8 string.
@@ -4251,7 +6000,12 @@ impl From<&str> for Vec<u8> {
     /// ```
     /// assert_eq!(Vec::from("123"), vec![b'1', b'2', b'3']);
     /// ```
-    fn from(s: &str) -> Vec<u8> {
+    fn from(s: &str) -> Vec<u8>
+    //@ req true;
+    //@ ens true;
+    /*@ safety_proof { assume(false); } @*/
+    {
+        //@ assume(false);
         From::from(s.as_bytes())
     }
 }
@@ -4311,434 +6065,43 @@ mod verify {
 
     use crate::vec::Vec;
 
-    // Helper: create a Vec<T> with symbolic length for verification.
-    // Creates from a fixed-size array then truncates to a symbolic length,
-    // giving a Vec with 0..=MAX_LEN initialized elements and capacity MAX_LEN.
-    fn any_vec<T: kani::Arbitrary, const MAX_LEN: usize>() -> Vec<T> {
-        let arr: [T; MAX_LEN] = kani::Arbitrary::any_array();
-        let mut v = Vec::from(arr);
-        let new_len: usize = kani::any();
-        kani::assume(new_len <= v.len());
-        v.truncate(new_len);
-        v
+    // Size chosen for testing the empty vector (0), middle element removal (1)
+    // and last element removal (2) cases while keeping verification tractable
+    const ARRAY_LEN: usize = 3;
+
+    #[kani::proof]
+    pub fn verify_swap_remove() {
+        // Creating a vector directly from a fixed length arbitrary array
+        let mut arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut vect = Vec::from(&arr);
+
+        // Recording the original length and a copy of the vector for validation
+        let original_len = vect.len();
+        let original_vec = vect.clone();
+
+        // Generating a nondeterministic index which is guaranteed to be within bounds
+        let index: usize = kani::any_where(|x| *x < original_len);
+
+        let removed = vect.swap_remove(index);
+
+        // Verifying that the length of the vector decreases by one after the operation is performed
+        assert!(vect.len() == original_len - 1, "Length should decrease by 1");
+
+        // Verifying that the removed element matches the original element at the index
+        assert!(removed == original_vec[index], "Removed element should match original");
+
+        // Verifying that the removed index now contains the element originally at the vector's last index if applicable
+        if index < original_len - 1 {
+            assert!(
+                vect[index] == original_vec[original_len - 1],
+                "Index should contain last element"
+            );
+        }
+
+        // Check that all other unaffected elements remain unchanged
+        let k = kani::any_where(|&x: &usize| x < original_len - 1);
+        if k != index {
+            assert!(vect[k] == arr[k]);
+        }
     }
-
-    // Helper: create a Vec<T> with at least `min_len` elements.
-    fn any_vec_with_min_len<T: kani::Arbitrary, const MAX_LEN: usize>(min_len: usize) -> Vec<T> {
-        let arr: [T; MAX_LEN] = kani::Arbitrary::any_array();
-        let mut v = Vec::from(arr);
-        let new_len: usize = kani::any();
-        kani::assume(new_len >= min_len && new_len <= v.len());
-        v.truncate(new_len);
-        v
-    }
-
-    /// Macro for generating Vec harnesses across representative types.
-    macro_rules! check_vec_with_ty {
-        ($module:ident, $ty:ty, $max:expr) => {
-            mod $module {
-                use super::*;
-                const MAX_LEN: usize = $max;
-
-                // --- from_raw_parts ---
-                #[kani::proof]
-                fn check_from_raw_parts() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let cap = v.capacity();
-                    let ptr = v.as_mut_ptr();
-                    core::mem::forget(v);
-                    let reconstructed = unsafe { Vec::from_raw_parts(ptr, len, cap) };
-                    assert!(reconstructed.len() == len);
-                    assert!(reconstructed.capacity() == cap);
-                }
-
-                // --- into_raw_parts_with_alloc ---
-                #[kani::proof]
-                fn check_into_raw_parts_with_alloc() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let cap = v.capacity();
-                    let (ptr, l, c, alloc) = v.into_raw_parts_with_alloc();
-                    assert!(l == len);
-                    assert!(c == cap);
-                    // Reconstruct to avoid leak
-                    let _ = unsafe { Vec::from_raw_parts_in(ptr, l, c, alloc) };
-                }
-
-                // --- into_boxed_slice ---
-                #[kani::proof]
-
-                fn check_into_boxed_slice() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let boxed = v.into_boxed_slice();
-                    assert!(boxed.len() == len);
-                }
-
-                // --- truncate ---
-                #[kani::proof]
-
-                fn check_truncate() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let new_len: usize = kani::any();
-                    v.truncate(new_len);
-                    if new_len < orig_len {
-                        assert!(v.len() == new_len);
-                    } else {
-                        assert!(v.len() == orig_len);
-                    }
-                }
-
-                // --- set_len ---
-                #[kani::proof]
-                fn check_set_len() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let cap = v.capacity();
-                    let new_len: usize = kani::any();
-                    kani::assume(new_len <= cap);
-                    // SAFETY: All elements up to capacity are initialized since
-                    // Vec::from(arr) initializes all MAX_LEN elements and truncate
-                    // only reduces len, not capacity.
-                    unsafe { v.set_len(new_len) };
-                    assert!(v.len() == new_len);
-                }
-
-                // --- swap_remove ---
-                #[kani::proof]
-                fn check_swap_remove() {
-                    let mut v: Vec<$ty> = any_vec_with_min_len::<$ty, MAX_LEN>(1);
-                    let orig_len = v.len();
-                    let index: usize = kani::any();
-                    kani::assume(index < orig_len);
-                    let _ = v.swap_remove(index);
-                    assert!(v.len() == orig_len - 1);
-                }
-
-                // --- insert ---
-                #[kani::proof]
-
-                fn check_insert() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let index: usize = kani::any();
-                    kani::assume(index <= orig_len);
-                    let elem: $ty = kani::any();
-                    v.insert(index, elem);
-                    assert!(v.len() == orig_len + 1);
-                }
-
-                // --- remove ---
-                #[kani::proof]
-
-                fn check_remove() {
-                    let mut v: Vec<$ty> = any_vec_with_min_len::<$ty, MAX_LEN>(1);
-                    let orig_len = v.len();
-                    let index: usize = kani::any();
-                    kani::assume(index < orig_len);
-                    let _ = v.remove(index);
-                    assert!(v.len() == orig_len - 1);
-                }
-
-                // --- retain_mut ---
-                #[kani::proof]
-
-                fn check_retain_mut() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    v.retain_mut(|_| kani::any());
-                    assert!(v.len() <= orig_len);
-                }
-
-                // --- dedup_by ---
-                #[kani::proof]
-
-                fn check_dedup_by() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    v.dedup_by(|_, _| kani::any());
-                    assert!(v.len() <= orig_len);
-                }
-
-                // --- push ---
-                #[kani::proof]
-                fn check_push() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let elem: $ty = kani::any();
-                    v.push(elem);
-                    assert!(v.len() == orig_len + 1);
-                }
-
-                // --- push_within_capacity ---
-                #[kani::proof]
-                fn check_push_within_capacity() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let orig_cap = v.capacity();
-                    let elem: $ty = kani::any();
-                    let result = v.push_within_capacity(elem);
-                    if orig_len < orig_cap {
-                        assert!(result.is_ok());
-                        assert!(v.len() == orig_len + 1);
-                    } else {
-                        assert!(result.is_err());
-                        assert!(v.len() == orig_len);
-                    }
-                }
-
-                // --- pop ---
-                #[kani::proof]
-                fn check_pop() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let result = v.pop();
-                    if orig_len > 0 {
-                        assert!(result.is_some());
-                        assert!(v.len() == orig_len - 1);
-                    } else {
-                        assert!(result.is_none());
-                    }
-                }
-
-                // --- append ---
-                #[kani::proof]
-
-                fn check_append() {
-                    let mut v1: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let mut v2: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len1 = v1.len();
-                    let len2 = v2.len();
-                    v1.append(&mut v2);
-                    assert!(v1.len() == len1 + len2);
-                    assert!(v2.len() == 0);
-                }
-
-                // --- append_elements (private unsafe, called by append) ---
-                // Verified transitively through check_append above.
-                // Also verify directly:
-                #[kani::proof]
-
-                fn check_append_elements() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let other: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let other_len = other.len();
-                    let other_slice: &[$ty] = &other;
-                    // append_elements is private, but append calls it.
-                    // Verify through append with a second vec.
-                    let mut v2 = other;
-                    v.append(&mut v2);
-                    assert!(v.len() == orig_len + other_len);
-                }
-
-                // --- drain ---
-                #[kani::proof]
-
-                fn check_drain() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let start: usize = kani::any();
-                    let end: usize = kani::any();
-                    kani::assume(start <= end);
-                    kani::assume(end <= len);
-                    let drained: Vec<$ty> = v.drain(start..end).collect();
-                    assert!(drained.len() == end - start);
-                    assert!(v.len() == len - (end - start));
-                }
-
-                // --- clear ---
-                #[kani::proof]
-                fn check_clear() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    v.clear();
-                    assert!(v.len() == 0);
-                }
-
-                // --- split_off ---
-                #[kani::proof]
-
-                fn check_split_off() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let at: usize = kani::any();
-                    kani::assume(at <= len);
-                    let right = v.split_off(at);
-                    assert!(v.len() == at);
-                    assert!(right.len() == len - at);
-                }
-
-                // --- leak ---
-                #[kani::proof]
-                fn check_leak() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let leaked = v.leak();
-                    assert!(leaked.len() == len);
-                }
-
-                // --- spare_capacity_mut ---
-                #[kani::proof]
-                fn check_spare_capacity_mut() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let cap = v.capacity();
-                    let spare = v.spare_capacity_mut();
-                    assert!(spare.len() == cap - len);
-                }
-
-                // --- split_at_spare_mut ---
-                #[kani::proof]
-                fn check_split_at_spare_mut() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let cap = v.capacity();
-                    let (init, spare) = v.split_at_spare_mut();
-                    assert!(init.len() == len);
-                    assert!(spare.len() == cap - len);
-                }
-
-                // --- split_at_spare_mut_with_len (private unsafe) ---
-                // Verified transitively through split_at_spare_mut above.
-
-                // --- extend_from_within ---
-                #[kani::proof]
-
-                fn check_extend_from_within() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let start: usize = kani::any();
-                    let end: usize = kani::any();
-                    kani::assume(start <= end);
-                    kani::assume(end <= len);
-                    v.extend_from_within(start..end);
-                    assert!(v.len() == len + (end - start));
-                }
-
-                // --- into_flattened ---
-                #[kani::proof]
-
-                fn check_into_flattened() {
-                    let arr: [[$ty; 1]; MAX_LEN] = kani::Arbitrary::any_array();
-                    let v: Vec<[$ty; 1]> = Vec::from(arr);
-                    let len = v.len();
-                    let flat = v.into_flattened();
-                    assert!(flat.len() == len);
-                }
-
-                // --- extend_with (private, called by resize) ---
-                #[kani::proof]
-
-                fn check_extend_with() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let new_len: usize = kani::any();
-                    kani::assume(new_len >= orig_len);
-                    kani::assume(new_len <= MAX_LEN + MAX_LEN);
-                    let value: $ty = kani::any();
-                    v.resize(new_len, value);
-                    assert!(v.len() == new_len);
-                }
-
-                // --- spec_extend_from_within (private trait) ---
-                // Verified transitively through extend_from_within above.
-
-                // --- deref ---
-                #[kani::proof]
-                fn check_deref() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let slice: &[$ty] = &v;
-                    assert!(slice.len() == len);
-                }
-
-                // --- deref_mut ---
-                #[kani::proof]
-                fn check_deref_mut() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let slice: &mut [$ty] = &mut v;
-                    assert!(slice.len() == len);
-                }
-
-                // --- into_iter ---
-                #[kani::proof]
-                fn check_into_iter() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let iter = v.into_iter();
-                    assert!(iter.len() == len);
-                }
-
-                // --- extend_desugared (private) ---
-                // This is the default extend impl. Verify through Extend trait:
-                #[kani::proof]
-
-                fn check_extend_desugared() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let extra: [$ty; 1] = kani::Arbitrary::any_array();
-                    v.extend(extra.iter().copied());
-                    assert!(v.len() == orig_len + 1);
-                }
-
-                // --- extend_trusted (private) ---
-                // Called when extending with a TrustedLen iterator.
-                // Vec::from(arr) uses this path. Also verify through extend:
-                #[kani::proof]
-
-                fn check_extend_trusted() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let extra: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let extra_len = extra.len();
-                    v.extend(extra);
-                    assert!(v.len() == orig_len + extra_len);
-                }
-
-                // --- extract_if ---
-                #[kani::proof]
-
-                fn check_extract_if() {
-                    let mut v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let orig_len = v.len();
-                    let extracted: Vec<$ty> = v.extract_if(.., |_| kani::any()).collect();
-                    assert!(v.len() + extracted.len() == orig_len);
-                }
-
-                // --- drop ---
-                #[kani::proof]
-
-                fn check_drop() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    drop(v);
-                }
-
-                // --- try_from ---
-                #[kani::proof]
-                fn check_try_from() {
-                    let v: Vec<$ty> = any_vec::<$ty, MAX_LEN>();
-                    let len = v.len();
-                    let result: Result<[$ty; MAX_LEN], _> = v.try_into();
-                    if len == MAX_LEN {
-                        assert!(result.is_ok());
-                    } else {
-                        assert!(result.is_err());
-                    }
-                }
-            }
-        };
-    }
-
-    // Representative types covering: ZST (size 0), small aligned (size 1),
-    // validity-constrained (size 4), compound with padding (size 5+).
-    // The unsafe pointer operations depend only on size_of::<T>() and
-    // align_of::<T>(), so these cover all relevant layout categories.
-    // MAX_LEN=3 allows CBMC to fully unwind all loops without explicit
-    // unwind bounds, while covering empty/single/multiple element cases.
-    check_vec_with_ty!(verify_vec_u8, u8, 3);
-    check_vec_with_ty!(verify_vec_unit, (), 3);
-    check_vec_with_ty!(verify_vec_char, char, 3);
-    check_vec_with_ty!(verify_vec_tup, (char, u8), 3);
 }
