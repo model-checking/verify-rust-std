@@ -1,0 +1,1 @@
+&mut vec_mod::into_iter::IntoIter<<<I as core::iter::SourceIter>::Source as vec_mod::in_place_collect::AsVecIntoIter>::Item>

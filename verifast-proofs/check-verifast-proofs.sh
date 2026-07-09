@@ -17,4 +17,17 @@ cd alloc
       bash verify.sh
     cd ..
   cd ..
+  cd vec
+    cd mod.rs
+      bash verify.sh
+    cd ..
+  cd ..
+cd ..
+
+cd core
+  cd slice
+    cd mod.rs
+      bash verify.sh
+    cd ..
+  cd ..
 cd ..
