@@ -52,7 +52,7 @@ constants through their `Unevaluated` variants. What does not exist, in
 practice, is a path by which a tool can obtain a monomorphised MIR body that
 still contains those unevaluated forms. The access routes that deliver
 monomorphised MIR to consumers run constant evaluation as part of the same
-flow, and constants are lowered to `ConstValue` before becoming accesible
+flow, and constants are lowered to `ConstValue` before becoming accessible
 again.
 
 Evidence that this matters to tool authors:
@@ -103,7 +103,7 @@ constant evaluation is reached on the mono path through three sites in
 
 By the time a downstream tool sees the resulting MIR,
 `ConstantKind::Unevaluated` and `ty::ConstKind::Unevaluated` have been
-consumed and replaced with thier evaluated representations.
+consumed and replaced with their evaluated representations.
 
 The design space admits several candidate approaches:
 
@@ -141,7 +141,7 @@ monomorphisation path, evaluation is what surfaces cross-item
 reachability via allocation provenance. Approach 1 therefore cannot
 stand alone for any program that uses pointer-bearing constants. To
 make it cover those cases, the constant types themselves would have to grow
-a high level representation for refernces (for example, extending `ValTree` to
+a high level representation for references (for example, extending `ValTree` to
 carry `Function`, `Static`, and `VTable` references as named branches), at
 which point it converges with Approach 2's lift. Approaches 2 and 3 execute
 constant evaluation fully and so retain the allocation information; their
