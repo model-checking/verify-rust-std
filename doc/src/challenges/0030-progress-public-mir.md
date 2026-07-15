@@ -17,7 +17,7 @@ Progress the [`rustc_public`](https://github.com/rust-lang/project-stable-mir)
 standard library can consume post-analysis MIR without falling back to
 `rustc_internal` APIs. This challenge is infrastructure-focused: it does not
 verify a specific standard library module, but rather removes a class of
-fragility that affects tools in this repository that operates on Public MIR
+fragility that affects tools in this repository that operate on Public MIR
 (Kani, KMIR, and any future consumer of Public MIR).
 
 ## Motivation
@@ -44,13 +44,13 @@ verification tools used or targeted by this repository:
   conversation in the workgroup.
 - Stable MIR JSON (the serialisation layer used by KMIR) has had to carry
   fixes to issues such as [94](https://github.com/rust-lang/project-stable-mir/issues/94)
-  that were simply misuse of internel vs. public APIs.
+  that were simply misuse of internal vs. public APIs.
 
 Internal APIs may change on any nightly, reducing the effectiveness of a
-stablised interface. Furthermore, tools that require calls an
+stabilised interface. Furthermore, tools that require calls an
 internal API instead of a public one run the risk of accessing an _incorrect_
 API for their purpose. This is both easy to do and hard to detect. This
-creates friction for verification tooling built on Public MIR and effictively
+creates friction for verification tooling built on Public MIR and effectively
 narrows the verification techniques available by creating unnecessary hurdles
 that are antipatterns to the goals of Public MIR (discouraging adoption).
 
@@ -63,7 +63,7 @@ of problem push tool authors back into `rustc_internal`:
   direct in-source signal, but are not entirely informative. These are often
   linked to experimental or planned features in Public MIR and not
   representative of the gaps downstream users are running into currently.
-  However, these places will be considered and closed opportunitistically.
+  However, these places will be considered and closed opportunistically.
 
    The higher-signal picture of where `rustc_public` falls short for
    verification tools is the workarounds tool authors have had to produce to
@@ -100,7 +100,7 @@ of problem push tool authors back into `rustc_internal`:
 
 The challenge is a time-boxed effort to close these gaps upstream, and to
 demonstrate the result by removing the corresponding internal-API usage from
-verification tools that (current or future) that can contribute to
+verification tools (current or future) that can contribute to
 verification of Rust `std` library.
 
 ### Assumptions
