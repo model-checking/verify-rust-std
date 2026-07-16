@@ -36,3 +36,14 @@ pub fn compare_ignore_zoneid(a: &SocketAddr, b: &SocketAddr) -> bool {
         _ => a == b,
     }
 }
+
+#[test]
+fn hostname_smoketest() {
+    // Just a smoke test to ensure it can be called.
+    let name = crate::net::hostname();
+    if cfg!(any(all(windows, not(target_vendor = "win7")), unix)) {
+        // At least on Windows and Unix, this should succeed.
+        // The `win7` Windows targets do not support it yet though.
+        name.unwrap();
+    }
+}
