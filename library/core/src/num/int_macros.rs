@@ -1480,6 +1480,7 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[requires(rhs < self.leading_zeros() || rhs < self.leading_ones())]
         pub const unsafe fn unchecked_shl_exact(self, rhs: u32) -> $SelfT {
             assert_unsafe_precondition!(
                 check_library_ub,
@@ -1659,6 +1660,7 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[requires(rhs <= self.trailing_zeros() && rhs < <$SelfT>::BITS)]
         pub const unsafe fn unchecked_shr_exact(self, rhs: u32) -> $SelfT {
             assert_unsafe_precondition!(
                 check_library_ub,
