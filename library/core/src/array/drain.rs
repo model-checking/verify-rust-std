@@ -1,17 +1,11 @@
-<<<<<<< HEAD
 use safety::requires;
 
 use crate::iter::{TrustedLen, UncheckedIterator};
 #[cfg(kani)]
 use crate::kani;
-use crate::mem::ManuallyDrop;
-use crate::ptr::drop_in_place;
-use crate::slice;
-=======
 use crate::marker::{Destruct, PhantomData};
 use crate::mem::{ManuallyDrop, SizedTypeProperties, conjure_zst};
 use crate::ptr::{NonNull, drop_in_place, from_raw_parts_mut, null_mut};
->>>>>>> subtree/library
 
 impl<'l, 'f, T, U, const N: usize, F: FnMut(T) -> U> Drain<'l, 'f, T, N, F> {
     /// This function returns a function that lets you index the given array in const.
@@ -102,48 +96,6 @@ where
 #[unstable(feature = "array_try_map", issue = "79711")]
 impl<T: [const] Destruct, const N: usize, F> const Drop for Drain<'_, '_, T, N, F> {
     fn drop(&mut self) {
-<<<<<<< HEAD
-        // SAFETY: By the type invariant, we're allowed to drop all these.
-        unsafe { drop_in_place(self.0.as_mut_slice()) }
-    }
-}
-
-impl<T> Iterator for Drain<'_, T> {
-    type Item = T;
-
-    #[inline]
-    fn next(&mut self) -> Option<T> {
-        let p: *const T = self.0.next()?;
-        // SAFETY: The iterator was already advanced, so we won't drop this later.
-        Some(unsafe { p.read() })
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = self.len();
-        (n, Some(n))
-    }
-}
-
-impl<T> ExactSizeIterator for Drain<'_, T> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
-// SAFETY: This is a 1:1 wrapper for a slice iterator, which is also `TrustedLen`.
-unsafe impl<T> TrustedLen for Drain<'_, T> {}
-
-impl<T> UncheckedIterator for Drain<'_, T> {
-    #[requires(self.0.len() > 0)]
-    unsafe fn next_unchecked(&mut self) -> T {
-        // SAFETY: `Drain` is 1:1 with the inner iterator, so if the caller promised
-        // that there's an element left, the inner iterator has one too.
-        let p: *const T = unsafe { self.0.next_unchecked() };
-        // SAFETY: The iterator was already advanced, so we won't drop this later.
-        unsafe { p.read() }
-=======
         if !T::IS_ZST {
             // SAFETY: we cant read more than N elements
             let slice = unsafe {
@@ -157,6 +109,5 @@ impl<T> UncheckedIterator for Drain<'_, T> {
             // SAFETY: By the type invariant, we're allowed to drop all these. (we own it, after all)
             unsafe { drop_in_place(slice) }
         }
->>>>>>> subtree/library
     }
 }

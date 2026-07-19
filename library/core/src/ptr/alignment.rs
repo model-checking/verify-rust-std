@@ -1,13 +1,10 @@
 #![allow(clippy::enum_clike_unportable_variant)]
 
-<<<<<<< HEAD
 use safety::{ensures, invariant, requires};
 
 #[cfg(kani)]
 use crate::kani;
-=======
 use crate::marker::MetaSized;
->>>>>>> subtree/library
 use crate::num::NonZero;
 #[cfg(kani)]
 use crate::ub_checks::Invariant;
@@ -22,19 +19,15 @@ use crate::{cmp, fmt, hash, mem, num};
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
-<<<<<<< HEAD
 // uses .0 instead of .as_usize() to permit proving as_usize so that its proof does not itself use
 // as_usize
 #[invariant((self.0 as usize).is_power_of_two())]
-pub struct Alignment(AlignmentEnum);
-=======
 pub struct Alignment {
     // This field is never used directly (nor is the enum),
     // as it's just there to convey the validity invariant.
     // (Hopefully it'll eventually be a pattern type instead.)
     _inner_repr_trick: AlignmentEnum,
 }
->>>>>>> subtree/library
 
 // Alignment is `repr(usize)`, but via extra steps.
 const _: () = assert!(size_of::<Alignment>() == size_of::<usize>());

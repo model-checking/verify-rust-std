@@ -53,13 +53,6 @@ macro_rules! impl_from_bool {
     ($($int:ty)*) => {$(
         #[stable(feature = "from_bool", since = "1.28.0")]
         #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-<<<<<<< HEAD
-        impl const From<$Small> for $Large {
-            // Rustdocs on the impl block show a "[+] show undocumented items" toggle.
-            // Rustdocs on functions do not.
-            #[doc = $doc]
-            #[cfg_attr(flux, flux::spec(fn(small:$Small) -> $Large[cast(small)]))]
-=======
         impl const From<bool> for $int {
             /// Converts from [`bool`] to
             #[doc = concat!("[`", stringify!($int), "`]")]
@@ -72,8 +65,8 @@ macro_rules! impl_from_bool {
             ///
             #[doc = concat!("assert_eq!(", stringify!($int), "::from(true), 1);")]
             /// ```
->>>>>>> subtree/library
             #[inline(always)]
+            #[cfg_attr(flux, flux::spec(fn(b:bool) -> Self[cast(b)]))]
             fn from(b: bool) -> Self {
                 b as Self
             }

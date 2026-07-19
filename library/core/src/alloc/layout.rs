@@ -272,14 +272,11 @@ impl Layout {
     /// [extern type]: ../../unstable-book/language-features/extern-types.html
     #[unstable(feature = "layout_for_ptr", issue = "69835")]
     #[must_use]
-<<<<<<< HEAD
+    #[inline]
     // TODO: we should try to capture the above constraints on T in a `requires` clause, and the
     // metadata helpers from https://github.com/model-checking/verify-rust-std/pull/37 may be able
     // to accomplish this.
     #[ensures(|result| result.align().is_power_of_two())]
-=======
-    #[inline]
->>>>>>> subtree/library
     pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
         // SAFETY: we pass along the prerequisites of these functions to the caller
         let (size, alignment) = unsafe { (mem::size_of_val_raw(t), Alignment::of_val_raw(t)) };
@@ -297,12 +294,8 @@ impl Layout {
     #[rustc_const_stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
     #[must_use]
     #[inline]
-<<<<<<< HEAD
     #[ensures(|result| result.is_aligned())]
-    pub const fn dangling(&self) -> NonNull<u8> {
-=======
     pub const fn dangling_ptr(&self) -> NonNull<u8> {
->>>>>>> subtree/library
         NonNull::without_provenance(self.align.as_nonzero())
     }
 
@@ -369,16 +362,9 @@ impl Layout {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[must_use = "this returns the padding needed, without modifying the `Layout`"]
     #[inline]
-<<<<<<< HEAD
-    #[ensures(|result| *result <= align)]
-    pub const fn padding_needed_for(&self, align: usize) -> usize {
-        // FIXME: Can we just change the type on this to `Alignment`?
-        let Some(align) = Alignment::new(align) else { return usize::MAX };
-        let len_rounded_up = self.size_rounded_up_to_custom_align(align);
-=======
+    #[ensures(|result| *result <= alignment)]
     pub const fn padding_needed_for(&self, alignment: Alignment) -> usize {
         let len_rounded_up = self.size_rounded_up_to_custom_alignment(alignment);
->>>>>>> subtree/library
         // SAFETY: Cannot overflow because the rounded-up value is never less
         unsafe { unchecked_sub(len_rounded_up, self.size) }
     }

@@ -53,19 +53,15 @@
     issue = "none"
 )]
 
-<<<<<<< HEAD
 use safety::{ensures, requires};
 
 use crate::ffi::va_list::{VaArgSafe, VaListImpl};
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{ConstParamTy, Destruct, DiscriminantKind, PointeeSized, Tuple};
-#[cfg(kani)]
-use crate::ub_checks;
-=======
 use crate::ffi::va_list::{VaArgSafe, VaList};
 use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
->>>>>>> subtree/library
+#[cfg(kani)]
+use crate::ub_checks;
 use crate::{mem, ptr};
 
 mod bounds;
@@ -3590,8 +3586,9 @@ pub fn va_copy<'f>(src: &VaList<'f>) -> VaList<'f> {
 ///
 #[rustc_intrinsic]
 #[rustc_nounwind]
-<<<<<<< HEAD
-pub unsafe fn va_end(ap: &mut VaListImpl<'_>);
+pub unsafe fn va_end(ap: &mut VaList<'_>) {
+    /* deliberately does nothing */
+}
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -4273,8 +4270,4 @@ mod verify {
     fn supported_status(status: AllocationStatus) -> bool {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
-=======
-pub unsafe fn va_end(ap: &mut VaList<'_>) {
-    /* deliberately does nothing */
->>>>>>> subtree/library
 }

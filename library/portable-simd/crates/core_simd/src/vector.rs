@@ -107,11 +107,8 @@ use crate::kani;
 // avoided, as it will likely become illegal on `#[repr(simd)]` structs in the future. It also
 // causes rustc to emit illegal LLVM IR in some cases.
 #[repr(simd, packed)]
-<<<<<<< HEAD
-#[cfg_attr(kani, derive(kani::Arbitrary))]
-=======
 #[rustc_simd_monomorphize_lane_limit = "64"]
->>>>>>> subtree/library
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub struct Simd<T, const N: usize>([T; N])
 where
     T: SimdElement;

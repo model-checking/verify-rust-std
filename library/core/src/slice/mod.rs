@@ -11,12 +11,9 @@ use safety::{ensures, requires};
 use crate::clone::TrivialClone;
 use crate::cmp::Ordering::{self, Equal, Greater, Less};
 use crate::intrinsics::{exact_div, unchecked_sub};
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-=======
 use crate::marker::Destruct;
->>>>>>> subtree/library
 use crate::mem::{self, MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{OneSidedRange, OneSidedRangeBound, Range, RangeBounds, RangeInclusive};

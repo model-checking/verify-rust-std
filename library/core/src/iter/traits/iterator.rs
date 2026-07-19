@@ -1742,13 +1742,9 @@ pub const trait Iterator {
     /// assert_eq!(iter.next(), None);
     /// ```
     #[inline]
-<<<<<<< HEAD
-    #[unstable(feature = "iter_map_windows", reason = "recently added", issue = "87155")]
-    #[requires(N > 0)]
-=======
     #[unstable(feature = "iter_map_windows", issue = "87155")]
     #[rustc_non_const_trait_method]
->>>>>>> subtree/library
+    #[requires(N > 0)]
     fn map_windows<F, R, const N: usize>(self, f: F) -> MapWindows<Self, F, N>
     where
         Self: Sized,
