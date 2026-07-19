@@ -19,9 +19,9 @@ use crate::{cmp, fmt, hash, mem, num};
 #[unstable(feature = "ptr_alignment_type", issue = "102070")]
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
-// uses .0 instead of .as_usize() to permit proving as_usize so that its proof does not itself use
-// as_usize
-#[invariant((self.0 as usize).is_power_of_two())]
+// uses the field directly instead of .as_usize() to permit proving as_usize so that its proof
+// does not itself use as_usize
+#[invariant((self._inner_repr_trick as usize).is_power_of_two())]
 pub struct Alignment {
     // This field is never used directly (nor is the enum),
     // as it's just there to convey the validity invariant.
@@ -490,7 +490,7 @@ mod verify {
 
     impl kani::Arbitrary for Alignment {
         fn any() -> Self {
-            let obj = Self { 0: kani::any() };
+            let obj = Self { _inner_repr_trick: kani::any() };
             kani::assume(obj.is_safe());
             obj
         }

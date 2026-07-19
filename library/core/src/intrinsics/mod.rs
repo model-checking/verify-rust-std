@@ -55,10 +55,9 @@
 
 use safety::{ensures, requires};
 
-use crate::ffi::va_list::{VaArgSafe, VaListImpl};
+use crate::ffi::va_list::{VaArgSafe, VaList};
 #[cfg(kani)]
 use crate::kani;
-use crate::ffi::va_list::{VaArgSafe, VaList};
 use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
 #[cfg(kani)]
 use crate::ub_checks;

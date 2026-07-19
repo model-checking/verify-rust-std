@@ -362,7 +362,7 @@ impl Layout {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[must_use = "this returns the padding needed, without modifying the `Layout`"]
     #[inline]
-    #[ensures(|result| *result <= alignment)]
+    #[ensures(|result| *result <= alignment.as_usize())]
     pub const fn padding_needed_for(&self, alignment: Alignment) -> usize {
         let len_rounded_up = self.size_rounded_up_to_custom_alignment(alignment);
         // SAFETY: Cannot overflow because the rounded-up value is never less
@@ -412,7 +412,7 @@ impl Layout {
     #[ensures(|result| result.size() >= self.size())]
     #[ensures(|result| result.align() == self.align())]
     #[ensures(|result| result.size() % result.align() == 0)]
-    #[ensures(|result| self.size() + self.padding_needed_for(self.align()) == result.size())]
+    #[ensures(|result| self.size() + self.padding_needed_for(self.alignment()) == result.size())]
     pub const fn pad_to_align(&self) -> Layout {
         // This cannot overflow. Quoting from the invariant of Layout:
         // > `size`, when rounded up to the nearest multiple of `align`,
@@ -744,11 +744,11 @@ mod verify {
         }
     }
 
-    // pub const fn dangling(&self) -> NonNull<u8>
-    #[kani::proof_for_contract(Layout::dangling)]
+    // pub const fn dangling_ptr(&self) -> NonNull<u8>
+    #[kani::proof_for_contract(Layout::dangling_ptr)]
     pub fn check_dangling() {
         let layout = kani::any::<Layout>();
-        let _ = layout.dangling();
+        let _ = layout.dangling_ptr();
     }
 
     // pub fn align_to(&self, align: usize) -> Result<Self, LayoutError>
@@ -759,12 +759,12 @@ mod verify {
         let _ = layout.align_to(a2);
     }
 
-    // pub const fn padding_needed_for(&self, align: usize) -> usize
+    // pub const fn padding_needed_for(&self, alignment: Alignment) -> usize
     #[kani::proof_for_contract(Layout::padding_needed_for)]
     pub fn check_padding_needed_for() {
         let layout = kani::any::<Layout>();
-        let a2 = kani::any::<usize>();
-        if (a2.is_power_of_two() && a2 <= layout.align()) {
+        let a2 = kani::any::<Alignment>();
+        if (a2.as_usize() <= layout.align()) {
             let _ = layout.padding_needed_for(a2);
         }
     }
