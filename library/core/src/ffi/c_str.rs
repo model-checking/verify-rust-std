@@ -998,9 +998,13 @@ mod verify {
 
     // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
     #[kani::proof]
-    #[kani::unwind(17)]
+    #[kani::unwind(9)]
     fn check_from_bytes_with_nul() {
-        const MAX_SIZE: usize = 16;
+        // FIXME(kani): reduced from 16 to 8 because CBMC 6.10 (as pinned by the current Kani
+        // version) needs ~10 GB for MAX_SIZE == 16, which exhausts the memory of the
+        // macos-latest CI runners and makes the harness exceed the 10-minute autoharness
+        // timeout there.
+        const MAX_SIZE: usize = 8;
         let string: [u8; MAX_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array(&string);
 
