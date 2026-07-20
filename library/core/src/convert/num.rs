@@ -85,6 +85,7 @@ macro_rules! impl_from {
         #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
         impl const From<$small> for $large {
             #[doc = concat!("Converts from [`", stringify!($small), "`] to [`", stringify!($large), "`] losslessly.")]
+            #[cfg_attr(flux, flux::spec(fn(small: $small) -> $large[cast(small)]))]
             #[inline(always)]
             fn from(small: $small) -> Self {
                 debug_assert!(<$large>::MIN as i128 <= <$small>::MIN as i128);
