@@ -198,7 +198,9 @@ impl Alignment {
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
     #[ensures(|result| result.get().is_power_of_two())]
-    #[ensures(|result| result.get() == self.as_usize())]
+    // uses the field directly instead of self.as_usize(): as_usize's body calls as_nonzero, so
+    // referencing it here would make the contract instrumentation infinitely recursive
+    #[ensures(|result| result.get() == self._inner_repr_trick as usize)]
     pub const fn as_nonzero(self) -> NonZero<usize> {
         // This transmutes directly to avoid the UbCheck in `NonZero::new_unchecked`
         // since there's no way for the user to trip that check anyway -- the
