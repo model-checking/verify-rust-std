@@ -124,6 +124,8 @@ functions.
 
 pub use self::decoder::{DecodableFloat, Decoded, FullDecoded, decode};
 use super::fmt::{Formatted, Part};
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 
 pub mod decoder;
@@ -665,4 +667,354 @@ where
             }
         }
     }
+}
+
+// =========================================================================
+// Challenge 28: Verify float to decimal conversion module harnesses
+// =========================================================================
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_helpers {
+    use super::*;
+
+    // Finite backing length for symbolic digit/scratch slices. Shortest mode
+    // only requires `MAX_SIG_DIGITS`, but 100 also exercises formatter padding
+    // and split-position branches while keeping Kani's slice search tractable.
+    pub(super) const ARRAY_LEN: usize = 100;
+
+    // Exact/fixed mode can need hundreds of scratch digits for f64. 1024 is
+    // above the current `estimate_max_buf_len` worst case for f16/f32/f64, with
+    // margin, without asking Kani to reason about arbitrary-length buffers.
+    pub(super) const EXACT_BUF_LEN: usize = 1024;
+
+    // Generate one symbolic ASCII digit.
+    fn any_digit() -> u8 {
+        // Restrict the symbolic byte to the inclusive range `b'0'..=b'9'`.
+        kani::any_where(|byte| *byte >= b'0' && *byte <= b'9')
+    }
+
+    // Generate one symbolic non-zero ASCII digit.
+    fn any_nonzero_digit() -> u8 {
+        // Restrict the symbolic byte to the inclusive range `b'1'..=b'9'`.
+        kani::any_where(|byte| *byte >= b'1' && *byte <= b'9')
+    }
+
+    // Create a bounded digit array without per-element assumptions.
+    pub(super) fn any_digit_array<const N: usize>() -> [u8; N] {
+        // Fill the whole array with one symbolic digit.
+        let mut arr = [any_digit(); N];
+        // Make the first array byte non-zero so prefix slices can satisfy formatter preconditions.
+        arr[0] = any_nonzero_digit();
+        arr
+    }
+
+    // Creates a symbolic-length digit slice backed by a caller-owned bounded array.
+    // The first digit is non-zero, matching the formatter precondition.
+    pub(super) fn any_digit_slice_with_len<'a, const N: usize>(
+        arr: &'a [u8; N],
+        min_len: usize,
+        max_len: usize,
+    ) -> &'a [u8] {
+        // Pick a symbolic subslice from the bounded array.
+        let slice = kani::slice::any_slice_of_array(arr);
+        // Keep only lengths in the caller-provided range.
+        kani::assume(min_len > 0 && min_len <= max_len);
+        kani::assume(slice.len() >= min_len && slice.len() <= max_len);
+        // Match the formatter preconditions for digit buffers.
+        kani::assume(slice[0] > b'0' && slice[0] <= b'9');
+        slice
+    }
+
+    // Create a non-empty symbolic digit slice with no caller-specific upper bound.
+    pub(super) fn any_digit_slice<'a, const N: usize>(arr: &'a [u8; N]) -> &'a [u8] {
+        // Delegate to the ranged helper with the full bounded array length.
+        any_digit_slice_with_len(arr, 1, N)
+    }
+
+    // Create a symbolic-length scratch byte buffer for formatter entry points.
+    pub(super) fn any_uninit_byte_buf_with_len<'a, const N: usize>(
+        arr: &'a mut [MaybeUninit<u8>; N],
+        min_len: usize,
+        max_len: usize,
+    ) -> &'a mut [MaybeUninit<u8>] {
+        // Pick a symbolic mutable subslice from the bounded scratch array.
+        let slice = kani::slice::any_slice_of_array_mut(arr);
+        // Keep only lengths in the caller-provided range.
+        kani::assume(min_len <= max_len);
+        kani::assume(slice.len() >= min_len && slice.len() <= max_len);
+        slice
+    }
+
+    // Fill the prefix of a scratch buffer with symbolic digits and return it as initialized bytes.
+    pub(super) fn init_digit_prefix<'a>(
+        buf: &'a mut [MaybeUninit<u8>],
+        min_len: usize,
+        max_len: usize,
+    ) -> &'a [u8] {
+        kani::assume(min_len > 0 && min_len <= max_len);
+        // Pick a symbolic returned digit length that fits in the supplied scratch buffer.
+        let len: usize =
+            kani::any_where(|len| *len >= min_len && *len <= max_len && *len <= buf.len());
+        let prefix = &mut buf[..len];
+        // Initialize the selected prefix and view it as initialized bytes.
+        unsafe {
+            // Fill the selected prefix with one valid symbolic digit.
+            crate::ptr::write_bytes(prefix.as_mut_ptr().cast::<u8>(), any_digit(), len);
+        }
+        prefix[0].write(any_nonzero_digit());
+        unsafe {
+            // SAFETY: every byte in `prefix` was initialized above.
+            prefix.assume_init_ref()
+        }
+    }
+
+    // Create an uninitialized `Part` buffer with the size required by a formatter.
+    pub(super) fn uninit_parts<'a, const N: usize>() -> [MaybeUninit<Part<'a>>; N] {
+        // Leave all slots uninitialized because the formatter initializes only the returned prefix.
+        [const { MaybeUninit::uninit() }; N]
+    }
+
+    // Return symbolic shortest-format digits for formatter entry points.
+    pub(super) fn format_symbolic_shortest<'a>(
+        _: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> (&'a [u8], i16) {
+        let digits = init_digit_prefix(buf, 1, buf.len());
+        (digits, kani::any())
+    }
+
+    // Return symbolic exact-format digits for formatter entry points.
+    pub(super) fn format_symbolic_exact<'a>(
+        _: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _: i16,
+    ) -> (&'a [u8], i16) {
+        let digits = init_digit_prefix(buf, 1, buf.len());
+        (digits, kani::any())
+    }
+
+    // Return symbolic fixed-format digits, including the restricted-to-zero case.
+    pub(super) fn format_symbolic_fixed<'a>(
+        _: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        limit: i16,
+    ) -> (&'a [u8], i16) {
+        if kani::any() {
+            // SAFETY: an empty initialized slice contains no initialized bytes to witness.
+            (unsafe { buf[..0].assume_init_ref() }, limit)
+        } else {
+            let digits = init_digit_prefix(buf, 1, buf.len());
+            let exp = kani::any_where(|exp| *exp > limit);
+            (digits, exp)
+        }
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::verify_helpers::*;
+    use super::*;
+
+    // Covers `digits_to_dec_str` with fully symbolic exponent and fractional padding.
+    #[kani::proof]
+    pub fn harness_digits_to_dec_str() {
+        // Generate a non-empty symbolic digit buffer.
+        let digit_arr = any_digit_array::<ARRAY_LEN>();
+        let buf = any_digit_slice(&digit_arr);
+        // Leave the decimal point position fully symbolic.
+        let exp: i16 = kani::any();
+        // Leave fractional padding fully symbolic.
+        let frac_digits: usize = kani::any();
+        // Allocate the four `Part` slots required by `digits_to_dec_str`.
+        let mut parts = uninit_parts::<4>();
+
+        // Invoke the formatter with symbolic inputs.
+        let _ = digits_to_dec_str(buf, exp, frac_digits, &mut parts);
+    }
+
+    // Covers `digits_to_exp_str` with fully symbolic exponent, precision, and marker case.
+    #[kani::proof]
+    pub fn harness_digits_to_exp_str() {
+        // Generate a non-empty symbolic digit buffer.
+        let digit_arr = any_digit_array::<ARRAY_LEN>();
+        let buf = any_digit_slice(&digit_arr);
+        // Leave the printed exponent fully symbolic.
+        let exp: i16 = kani::any();
+        // Leave significant digit padding fully symbolic.
+        let min_ndigits: usize = kani::any();
+        // Allocate the six `Part` slots required by `digits_to_exp_str`.
+        let mut parts = uninit_parts::<6>();
+        // Select either lower-case or upper-case exponent output.
+        let upper = kani::any();
+
+        // Invoke the formatter with symbolic inputs.
+        let _ = digits_to_exp_str(buf, exp, min_ndigits, upper, &mut parts);
+    }
+
+    // Generates a `to_shortest_str` proof harness for one floating-point type.
+    macro_rules! proof_for_to_shortest_str {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $harness() {
+                // Select one decoded value class: infinite, NaN, or finite.
+                let class: u8 = kani::any_where(|class| *class < 3);
+                let v: $ty = match class {
+                    0 => match kani::any() {
+                        true => <$ty>::INFINITY,
+                        false => <$ty>::NEG_INFINITY,
+                    },
+                    1 => <$ty>::NAN,
+                    _ => kani::any_where(|v: &$ty| v.is_finite()),
+                };
+                // Allocate a symbolic-length scratch buffer satisfying the formatter precondition.
+                let mut buf_arr = [const { MaybeUninit::uninit() }; ARRAY_LEN];
+                let buf = any_uninit_byte_buf_with_len(&mut buf_arr, MAX_SIG_DIGITS, ARRAY_LEN);
+                // Allocate the four `Part` slots required by `to_shortest_str`.
+                let mut parts = uninit_parts::<4>();
+                let sign = match kani::any() {
+                    true => Sign::Minus,
+                    false => Sign::MinusPlus,
+                };
+
+                let _ = to_shortest_str(
+                    format_symbolic_shortest,
+                    v,
+                    sign,
+                    kani::any(),
+                    buf,
+                    &mut parts,
+                );
+            }
+        };
+    }
+
+    #[cfg(target_has_reliable_f16)]
+    proof_for_to_shortest_str!(harness_to_shortest_str_f16, f16);
+    proof_for_to_shortest_str!(harness_to_shortest_str_f32, f32);
+    proof_for_to_shortest_str!(harness_to_shortest_str_f64, f64);
+
+    // Generates a `to_shortest_exp_str` proof harness for one floating-point type.
+    macro_rules! proof_for_to_shortest_exp_str {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $harness() {
+                // Select one decoded value class: infinite, NaN, or finite.
+                let class: u8 = kani::any_where(|class| *class < 3);
+                let v: $ty = match class {
+                    0 => match kani::any() {
+                        true => <$ty>::INFINITY,
+                        false => <$ty>::NEG_INFINITY,
+                    },
+                    1 => <$ty>::NAN,
+                    _ => kani::any_where(|v: &$ty| v.is_finite()),
+                };
+                let dec_bounds: (i16, i16) =
+                    kani::any_where(|bounds: &(i16, i16)| bounds.0 <= bounds.1);
+                let sign = match kani::any() {
+                    true => Sign::Minus,
+                    false => Sign::MinusPlus,
+                };
+                let mut buf_arr = [const { MaybeUninit::uninit() }; ARRAY_LEN];
+                let buf = any_uninit_byte_buf_with_len(&mut buf_arr, MAX_SIG_DIGITS, ARRAY_LEN);
+                let mut parts = uninit_parts::<6>();
+
+                let _ = to_shortest_exp_str(
+                    format_symbolic_shortest,
+                    v,
+                    sign,
+                    dec_bounds,
+                    kani::any(),
+                    buf,
+                    &mut parts,
+                );
+            }
+        };
+    }
+
+    #[cfg(target_has_reliable_f16)]
+    proof_for_to_shortest_exp_str!(harness_to_shortest_exp_str_f16, f16);
+    proof_for_to_shortest_exp_str!(harness_to_shortest_exp_str_f32, f32);
+    proof_for_to_shortest_exp_str!(harness_to_shortest_exp_str_f64, f64);
+
+    // Generates a `to_exact_exp_str` proof harness for one floating-point type.
+    macro_rules! proof_for_to_exact_exp_str {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $harness() {
+                // Select one decoded value class: infinite, NaN, or finite.
+                let class: u8 = kani::any_where(|class| *class < 3);
+                let v: $ty = match class {
+                    0 => match kani::any() {
+                        true => <$ty>::INFINITY,
+                        false => <$ty>::NEG_INFINITY,
+                    },
+                    1 => <$ty>::NAN,
+                    _ => kani::any_where(|v: &$ty| v.is_finite()),
+                };
+                let ndigits: usize = kani::any_where(|ndigits| *ndigits > 0);
+                let sign = match kani::any() {
+                    true => Sign::Minus,
+                    false => Sign::MinusPlus,
+                };
+                let mut buf_arr = [const { MaybeUninit::uninit() }; EXACT_BUF_LEN];
+                let mut parts = uninit_parts::<6>();
+
+                let _ = to_exact_exp_str(
+                    format_symbolic_exact,
+                    v,
+                    sign,
+                    ndigits,
+                    kani::any(),
+                    &mut buf_arr,
+                    &mut parts,
+                );
+            }
+        };
+    }
+
+    #[cfg(target_has_reliable_f16)]
+    proof_for_to_exact_exp_str!(harness_to_exact_exp_str_f16, f16);
+    proof_for_to_exact_exp_str!(harness_to_exact_exp_str_f32, f32);
+    proof_for_to_exact_exp_str!(harness_to_exact_exp_str_f64, f64);
+
+    // Generates a `to_exact_fixed_str` proof harness for one floating-point type.
+    macro_rules! proof_for_to_exact_fixed_str {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $harness() {
+                // Select one decoded value class: infinite, NaN, or finite.
+                let class: u8 = kani::any_where(|class| *class < 3);
+                let v: $ty = match class {
+                    0 => match kani::any() {
+                        true => <$ty>::INFINITY,
+                        false => <$ty>::NEG_INFINITY,
+                    },
+                    1 => <$ty>::NAN,
+                    _ => kani::any_where(|v: &$ty| v.is_finite()),
+                };
+                let sign = match kani::any() {
+                    true => Sign::Minus,
+                    false => Sign::MinusPlus,
+                };
+                let mut buf_arr = [const { MaybeUninit::uninit() }; EXACT_BUF_LEN];
+                let mut parts = uninit_parts::<4>();
+
+                let _ = to_exact_fixed_str(
+                    format_symbolic_fixed,
+                    v,
+                    sign,
+                    kani::any(),
+                    &mut buf_arr,
+                    &mut parts,
+                );
+            }
+        };
+    }
+
+    #[cfg(target_has_reliable_f16)]
+    proof_for_to_exact_fixed_str!(harness_to_exact_fixed_str_f16, f16);
+    proof_for_to_exact_fixed_str!(harness_to_exact_fixed_str_f32, f32);
+    proof_for_to_exact_fixed_str!(harness_to_exact_fixed_str_f64, f64);
 }
