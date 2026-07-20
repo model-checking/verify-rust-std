@@ -158,6 +158,8 @@ unsafe impl<T: Sync + PointeeSized> Send for &T {}
 // and we know that the supertraits are always implemented if the subtrait is just by looking at
 // the builtin impls.
 #[rustc_coinductive]
+#[cfg_attr(flux, flux::assoc(fn size_of() -> int))]
+#[cfg_attr(flux, flux::assoc(fn align_of() -> int))]
 pub trait Sized: MetaSized {
     // Empty.
 }
