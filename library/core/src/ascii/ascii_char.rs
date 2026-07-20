@@ -1230,8 +1230,11 @@ impl fmt::Debug for AsciiChar {
                 const HEX_DIGITS: [AsciiChar; 16] = *b"0123456789abcdef".as_ascii().unwrap();
 
                 let byte = self.to_u8();
-                let hi = HEX_DIGITS[usize::from(byte >> 4)];
-                let lo = HEX_DIGITS[usize::from(byte & 0xf)];
+                // FIXME(flux): written as `as usize` casts instead of `usize::from(...)` because
+                // current Flux (67d714e90ce7) does not propagate the value refinement through the
+                // `From<u8> for usize` impl, failing to prove these array accesses in bounds.
+                let hi = HEX_DIGITS[(byte >> 4) as usize];
+                let lo = HEX_DIGITS[(byte & 0xf) as usize];
                 ([Apostrophe, Backslash, AsciiChar::SmallX, hi, lo, Apostrophe], 6)
             }
             _ => ([Apostrophe, *self, Apostrophe, Null, Null, Null], 3),
