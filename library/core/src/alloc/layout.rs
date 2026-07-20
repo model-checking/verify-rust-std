@@ -461,19 +461,21 @@ impl Layout {
     #[stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
     #[rustc_const_stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
     #[inline]
-    // for Kani (v0.54.0), the below modulo operation is too costly to prove (running into the
-    // 6-hours timeout on GitHub); we use a weaker postcondition instead
+    // Since rust-lang/rust#148769, the result does not include padding after the trailing
+    // element, i.e., on success the resulting size is (n - 1) * stride + self.size() for n > 0
+    // (and 0 for n == 0), where stride is the returned offset.
+    // for Kani (v0.54.0), multiplication by a symbolic n is too costly to prove (running into
+    // the 6-hours timeout on GitHub); we use weaker postconditions instead
     #[cfg_attr(not(kani),
-        ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() % n == 0))]
+        ensures(|result| result.is_err() || n == 0 ||
+            result.as_ref().unwrap().0.size() ==
+                (n - 1) * result.as_ref().unwrap().1 + self.size()))]
     #[cfg_attr(kani,
         ensures(|result| result.is_err() || n == 0 || result.as_ref().unwrap().0.size() >= self.size()))]
-    // for Kani (v0.54.0), the below multiplication is too costly to prove (running into the
-    // 6-hours timeout on GitHub); we use a weaker postcondition instead
     #[cfg_attr(not(kani),
-        ensures(|result| result.is_err() ||
-            result.as_ref().unwrap().0.size() == n * result.as_ref().unwrap().1))]
+        ensures(|result| result.is_err() || n != 0 || result.as_ref().unwrap().0.size() == 0))]
     #[cfg_attr(kani,
-        ensures(|result| result.is_err() || n == 0 ||
+        ensures(|result| result.is_err() || n <= 1 ||
             result.as_ref().unwrap().0.size() >= result.as_ref().unwrap().1))]
     pub const fn repeat(&self, n: usize) -> Result<(Self, usize), LayoutError> {
         // FIXME(const-hack): the following could be way shorter with `?`
