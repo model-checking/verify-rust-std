@@ -1,3 +1,5 @@
+#[cfg(kani)]
+use core::kani;
 use core::ptr;
 
 use super::{IsZero, Vec};
@@ -71,5 +73,47 @@ impl SpecFromElem for () {
             v.set_len(n);
         }
         v
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::alloc::Global;
+
+    // Harness for `SpecFromElem::from_elem` for `i8`
+    #[kani::proof]
+    pub fn harness_from_elem_for_i8() {
+        // Create a non-deterministic element to repeat
+        let elem: i8 = kani::any();
+        // Choose a non-deterministic output length
+        let n: usize = kani::any();
+        // Require the requested allocation layout to be representable
+        kani::assume(core::alloc::Layout::array::<i8>(n).is_ok());
+        // Build a Vec by repeating the selected element
+        let _ = <i8 as SpecFromElem>::from_elem(elem, n, Global);
+    }
+
+    // Harness for `SpecFromElem::from_elem` for `u8`
+    #[kani::proof]
+    pub fn harness_from_elem_for_u8() {
+        // Create a non-deterministic element to repeat
+        let elem: u8 = kani::any();
+        // Choose a non-deterministic output length
+        let n: usize = kani::any();
+        // Require the requested allocation layout to be representable
+        kani::assume(core::alloc::Layout::array::<u8>(n).is_ok());
+        // Build a Vec by repeating the selected element
+        let _ = <u8 as SpecFromElem>::from_elem(elem, n, Global);
+    }
+
+    // Harness for `SpecFromElem::from_elem` for `()`
+    #[kani::proof]
+    pub fn harness_from_elem_for_unit() {
+        // Choose a non-deterministic output length for the zero-sized element type
+        let n: usize = kani::any();
+        // Build a Vec by repeating the unit element
+        let _ = <() as SpecFromElem>::from_elem((), n, Global);
     }
 }

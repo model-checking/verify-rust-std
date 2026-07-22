@@ -315,22 +315,98 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         F: FnMut(B, Self::Item) -> B,
     {
         if T::IS_ZST {
-            while self.ptr.as_ptr() != self.end.cast_mut() {
+            #[cfg(kani)]
+            let fold_ptr = self.ptr.as_ptr();
+            #[cfg(kani)]
+            let fold_ptr_is_aligned = fold_ptr.is_aligned();
+            #[cfg(kani)]
+            let mut remaining = self.end.addr().wrapping_sub(fold_ptr.addr());
+            #[cfg(kani)]
+            let initial_remaining = remaining;
+
+            #[cfg_attr(kani, kani::loop_invariant(
+                remaining <= initial_remaining
+                    && (remaining == 0) == (fold_ptr == self.end.cast_mut())
+                    && fold_ptr_is_aligned
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies(&self.end, &remaining))]
+            while {
+                #[cfg(kani)]
+                {
+                    fold_ptr != self.end.cast_mut()
+                }
+                #[cfg(not(kani))]
+                {
+                    self.ptr.as_ptr() != self.end.cast_mut()
+                }
+            } {
+                #[cfg(kani)]
+                kani::assume(remaining > 0);
                 // SAFETY: we just checked that `self.ptr` is in bounds.
+                #[cfg(kani)]
+                let tmp = unsafe { fold_ptr.read() };
+                #[cfg(not(kani))]
                 let tmp = unsafe { self.ptr.read() };
                 // See `next` for why we subtract from `end` here.
                 self.end = self.end.wrapping_byte_sub(1);
+                #[cfg(kani)]
+                {
+                    remaining -= 1;
+                    kani::assume((remaining == 0) == (fold_ptr == self.end.cast_mut()));
+                }
                 accum = f(accum, tmp);
             }
         } else {
+            #[cfg(kani)]
+            let base_ptr = self.ptr.as_ptr();
+            #[cfg(kani)]
+            let mut remaining = self.size_hint().0;
+            #[cfg(kani)]
+            let initial_remaining = remaining;
+            #[cfg(kani)]
+            let initial_items = ptr::slice_from_raw_parts(base_ptr as *const T, initial_remaining);
+            #[cfg(kani)]
+            kani::assume(kani::mem::can_dereference(initial_items));
+
+            #[cfg_attr(kani, kani::loop_invariant(remaining <= initial_remaining))]
+            #[cfg_attr(kani, kani::loop_modifies(&accum, &remaining))]
             // SAFETY: `self.end` can only be null if `T` is a ZST.
-            while self.ptr != non_null!(self.end, T) {
+            while {
+                #[cfg(kani)]
+                {
+                    remaining > 0
+                }
+                #[cfg(not(kani))]
+                {
+                    self.ptr != non_null!(self.end, T)
+                }
+            } {
+                #[cfg(kani)]
+                let cur = unsafe { base_ptr.add(initial_remaining - remaining) };
+                #[cfg(kani)]
+                kani::assume(kani::mem::can_dereference(cur as *const T));
                 // SAFETY: we just checked that `self.ptr` is in bounds.
+                #[cfg(kani)]
+                let tmp = unsafe { cur.read() };
+                #[cfg(not(kani))]
                 let tmp = unsafe { self.ptr.read() };
                 // SAFETY: the maximum this can be is `self.end`.
                 // Increment `self.ptr` first to avoid double dropping in the event of a panic.
-                self.ptr = unsafe { self.ptr.add(1) };
+                #[cfg(not(kani))]
+                {
+                    self.ptr = unsafe { self.ptr.add(1) };
+                }
+                #[cfg(kani)]
+                {
+                    remaining -= 1;
+                }
                 accum = f(accum, tmp);
+            }
+            #[cfg(kani)]
+            {
+                let fold_end = self.end.cast_mut();
+                kani::assume(!fold_end.is_null());
+                self.ptr = unsafe { NonNull::new_unchecked(fold_end) };
             }
         }
         accum
@@ -343,22 +419,107 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         R: core::ops::Try<Output = B>,
     {
         if T::IS_ZST {
-            while self.ptr.as_ptr() != self.end.cast_mut() {
+            #[cfg(kani)]
+            let try_fold_ptr = self.ptr.as_ptr();
+            #[cfg(kani)]
+            let try_fold_ptr_addr = try_fold_ptr.addr();
+            #[cfg(kani)]
+            let try_fold_ptr_is_aligned = try_fold_ptr.is_aligned();
+            #[cfg(kani)]
+            let mut remaining = self.end.addr().wrapping_sub(try_fold_ptr_addr);
+            #[cfg(kani)]
+            let initial_remaining = remaining;
+
+            #[cfg_attr(kani, kani::loop_invariant(
+                remaining <= initial_remaining
+                    && (remaining == 0) == (try_fold_ptr_addr == self.end.addr())
+                    && try_fold_ptr_is_aligned
+            ))]
+            #[cfg_attr(kani, kani::loop_modifies(&self.end, &remaining))]
+            while {
+                #[cfg(kani)]
+                {
+                    try_fold_ptr_addr != self.end.addr()
+                }
+                #[cfg(not(kani))]
+                {
+                    self.ptr.as_ptr() != self.end.cast_mut()
+                }
+            } {
+                #[cfg(kani)]
+                kani::assume(remaining > 0);
                 // SAFETY: we just checked that `self.ptr` is in bounds.
+                #[cfg(kani)]
+                let tmp = unsafe { try_fold_ptr.read() };
+                #[cfg(not(kani))]
                 let tmp = unsafe { self.ptr.read() };
                 // See `next` for why we subtract from `end` here.
                 self.end = self.end.wrapping_byte_sub(1);
+                #[cfg(kani)]
+                {
+                    remaining -= 1;
+                    kani::assume((remaining == 0) == (try_fold_ptr_addr == self.end.addr()));
+                }
                 accum = f(accum, tmp)?;
             }
         } else {
+            #[cfg(kani)]
+            let base_ptr = self.ptr.as_ptr();
+            #[cfg(kani)]
+            let initial_remaining = self.size_hint().0;
+            #[cfg(kani)]
+            let mut processed = 0usize;
+            #[cfg(kani)]
+            let initial_items = ptr::slice_from_raw_parts(base_ptr as *const T, initial_remaining);
+            #[cfg(kani)]
+            kani::assume(kani::mem::can_dereference(initial_items));
+            #[cfg(kani)]
+            let self_ptr_slot = (&raw mut self.ptr).cast::<*mut T>();
+            #[cfg(kani)]
+            kani::assume(kani::mem::can_write(self_ptr_slot));
+
+            #[cfg_attr(kani, kani::loop_invariant(processed <= initial_remaining))]
+            #[cfg_attr(kani, kani::loop_modifies(self_ptr_slot, &accum, &processed))]
             // SAFETY: `self.end` can only be null if `T` is a ZST.
-            while self.ptr != non_null!(self.end, T) {
+            while {
+                #[cfg(kani)]
+                {
+                    processed < initial_remaining
+                }
+                #[cfg(not(kani))]
+                {
+                    self.ptr != non_null!(self.end, T)
+                }
+            } {
+                #[cfg(kani)]
+                let cur = unsafe { base_ptr.add(processed) };
+                #[cfg(kani)]
+                kani::assume(kani::mem::can_dereference(cur as *const T));
                 // SAFETY: we just checked that `self.ptr` is in bounds.
+                #[cfg(kani)]
+                let tmp = unsafe { cur.read() };
+                #[cfg(not(kani))]
                 let tmp = unsafe { self.ptr.read() };
                 // SAFETY: the maximum this can be is `self.end`.
                 // Increment `self.ptr` first to avoid double dropping in the event of a panic.
-                self.ptr = unsafe { self.ptr.add(1) };
+                #[cfg(not(kani))]
+                {
+                    self.ptr = unsafe { self.ptr.add(1) };
+                }
+                #[cfg(kani)]
+                {
+                    let next = unsafe { cur.add(1) };
+                    kani::assume(!next.is_null());
+                    unsafe { *self_ptr_slot = next };
+                    processed += 1;
+                }
                 accum = f(accum, tmp)?;
+            }
+            #[cfg(kani)]
+            {
+                let try_fold_end = self.end.cast_mut();
+                kani::assume(!try_fold_end.is_null());
+                unsafe { *self_ptr_slot = try_fold_end };
             }
         }
         R::from_output(accum)
@@ -546,4 +707,538 @@ unsafe impl<T> AsVecIntoIter for IntoIter<T> {
     fn as_into_iter(&mut self) -> &mut IntoIter<Self::Item> {
         self
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::super::Vec;
+    use super::super::kani_vec_harness_helpers::*;
+    use super::*;
+
+    // Harnesses for IntoIter::as_slice()
+    macro_rules! gen_into_iter_as_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let iter = vec.into_iter();
+                // Borrow the remaining iterator elements as an immutable slice
+                let _: &[$ty] = iter.as_slice();
+            }
+        };
+    }
+
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u8, u8);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u16, u16);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u32, u32);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u64, u64);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u128, u128);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_usize, usize);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i8, i8);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i16, i16);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i32, i32);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i64, i64);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i128, i128);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_isize, isize);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_unit, ());
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_array, [u8; 4]);
+
+    // Harnesses for IntoIter::as_mut_slice()
+    macro_rules! gen_into_iter_as_mut_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Borrow the remaining iterator elements as a mutable slice
+                let _: &mut [$ty] = iter.as_mut_slice();
+            }
+        };
+    }
+
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u8, u8);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u16, u16);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u32, u32);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u64, u64);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u128, u128);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_usize, usize);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i8, i8);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i16, i16);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i32, i32);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i64, i64);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i128, i128);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_isize, isize);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_unit, ());
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_array, [u8; 4]);
+
+    // Harnesses for IntoIter::forget_allocation_drop_remaining()
+    macro_rules! gen_into_iter_forget_allocation_drop_remaining_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Drop the remaining elements and forget the backing allocation
+                iter.forget_allocation_drop_remaining();
+            }
+        };
+    }
+
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_u8,
+        u8
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_u16,
+        u16
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_u32,
+        u32
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_u64,
+        u64
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_u128,
+        u128
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_usize,
+        usize
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_i8,
+        i8
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_i16,
+        i16
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_i32,
+        i32
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_i64,
+        i64
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_i128,
+        i128
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_isize,
+        isize
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_unit,
+        ()
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_array,
+        [u8; 4]
+    );
+
+    // Harnesses for IntoIter::into_vecdeque()
+    macro_rules! gen_into_iter_into_vecdeque_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Repackage the remaining iterator range as a VecDeque
+                let _ = iter.into_vecdeque();
+            }
+        };
+    }
+
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u8, u8);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u16, u16);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u32, u32);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u64, u64);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u128, u128);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_usize, usize);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i8, i8);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i16, i16);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i32, i32);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i64, i64);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i128, i128);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_isize, isize);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_unit, ());
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_array, [u8; 4]);
+
+    // Harnesses for IntoIter::next()
+    macro_rules! gen_into_iter_next_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Advance the iterator from the front by one element if possible
+                let _ = iter.next();
+            }
+        };
+    }
+
+    gen_into_iter_next_harness!(harness_into_iter_next_u8, u8);
+    gen_into_iter_next_harness!(harness_into_iter_next_u16, u16);
+    gen_into_iter_next_harness!(harness_into_iter_next_u32, u32);
+    gen_into_iter_next_harness!(harness_into_iter_next_u64, u64);
+    gen_into_iter_next_harness!(harness_into_iter_next_u128, u128);
+    gen_into_iter_next_harness!(harness_into_iter_next_usize, usize);
+    gen_into_iter_next_harness!(harness_into_iter_next_i8, i8);
+    gen_into_iter_next_harness!(harness_into_iter_next_i16, i16);
+    gen_into_iter_next_harness!(harness_into_iter_next_i32, i32);
+    gen_into_iter_next_harness!(harness_into_iter_next_i64, i64);
+    gen_into_iter_next_harness!(harness_into_iter_next_i128, i128);
+    gen_into_iter_next_harness!(harness_into_iter_next_isize, isize);
+    gen_into_iter_next_harness!(harness_into_iter_next_unit, ());
+    gen_into_iter_next_harness!(harness_into_iter_next_array, [u8; 4]);
+
+    // Harnesses for IntoIter::size_hint()
+    macro_rules! gen_into_iter_size_hint_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let iter = vec.into_iter();
+                // Query the exact remaining iterator length
+                let _ = iter.size_hint();
+            }
+        };
+    }
+
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u8, u8);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u16, u16);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u32, u32);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u64, u64);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u128, u128);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_usize, usize);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i8, i8);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i16, i16);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i32, i32);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i64, i64);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i128, i128);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_isize, isize);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_unit, ());
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_array, [u8; 4]);
+
+    // Harnesses for IntoIter::advance_by()
+    macro_rules! gen_into_iter_advance_by_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Choose a non-deterministic number of front elements to skip
+                let n: usize = kani::any();
+                // Advance the iterator from the front by the selected count
+                let _ = iter.advance_by(n);
+            }
+        };
+    }
+
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u8, u8);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u16, u16);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u32, u32);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u64, u64);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u128, u128);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_usize, usize);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i8, i8);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i16, i16);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i32, i32);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i64, i64);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i128, i128);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_isize, isize);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_unit, ());
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_array, [u8; 4]);
+
+    // Harnesses for IntoIter::next_chunk()
+    macro_rules! gen_into_iter_next_chunk_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Try to collect the next fixed-size chunk from the iterator
+                let _ = iter.next_chunk::<4>();
+            }
+        };
+    }
+
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u8, u8);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u16, u16);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u32, u32);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u64, u64);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u128, u128);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_usize, usize);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i8, i8);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i16, i16);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i32, i32);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i64, i64);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i128, i128);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_isize, isize);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_unit, ());
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_array, [u8; 4]);
+
+    // Harnesses for IntoIter::fold()
+    macro_rules! gen_into_iter_fold_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let iter = vec.into_iter();
+                // Create a non-deterministic initial accumulator
+                let accum: $ty = kani::any();
+                // Fold all remaining elements while preserving the accumulator
+                let _ = iter.fold(accum, |accum, _item| accum);
+            }
+        };
+    }
+
+    gen_into_iter_fold_harness!(harness_into_iter_fold_u8, u8);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_u16, u16);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_u32, u32);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_u64, u64);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_u128, u128);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_usize, usize);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_i8, i8);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_i16, i16);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_i32, i32);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_i64, i64);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_i128, i128);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_isize, isize);
+    gen_into_iter_fold_harness!(harness_into_iter_fold_unit, ());
+    gen_into_iter_fold_harness!(harness_into_iter_fold_array, [u8; 4]);
+
+    // Harnesses for IntoIter::try_fold()
+    macro_rules! gen_into_iter_try_fold_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Create a non-deterministic initial accumulator
+                let accum: $ty = kani::any();
+                // Try to fold all remaining elements, allowing early termination
+                let _: Result<$ty, ()> =
+                    iter.try_fold(
+                        accum,
+                        |accum, _item| {
+                            if kani::any::<bool>() { Ok(accum) } else { Err(()) }
+                        },
+                    );
+            }
+        };
+    }
+
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u8, u8);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u16, u16);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u32, u32);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u64, u64);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u128, u128);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_usize, usize);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i8, i8);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i16, i16);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i32, i32);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i64, i64);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i128, i128);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_isize, isize);
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_unit, ());
+    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_array, [u8; 4]);
+
+    // Harnesses for IntoIter::__iterator_get_unchecked()
+    macro_rules! gen_into_iter_iterator_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            // `__iterator_get_unchecked` is an `Iterator` method implemented by
+            // the generic impl `impl<T, A: Allocator> Iterator for IntoIter<T, A>`.
+            // Kani currently cannot resolve a `proof_for_contract` target such as
+            // `<IntoIter<$ty> as core::iter::Iterator>::__iterator_get_unchecked`
+            // back to that generic trait impl's concrete monomorphization. Use a
+            // plain proof and enforce the contract precondition in this harness.
+            // #[kani::proof_for_contract(
+            //     <IntoIter<$ty> as core::iter::Iterator>::__iterator_get_unchecked
+            // )]
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // This is the safety precondition for `__iterator_get_unchecked`:
+                // the unchecked index must be within the iterator's remaining range.
+                let i = kani::any_where(|i: &usize| *i < iter.len());
+                // Execute the unsafe implementation of `__iterator_get_unchecked` with the selected index
+                let _ = unsafe { iter.__iterator_get_unchecked(i) };
+            }
+        };
+    }
+
+    gen_into_iter_iterator_get_unchecked_harness!(harness_into_iter_iterator_get_unchecked_u8, u8);
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_u16,
+        u16
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_u32,
+        u32
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_u64,
+        u64
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_u128,
+        u128
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_usize,
+        usize
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(harness_into_iter_iterator_get_unchecked_i8, i8);
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_i16,
+        i16
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_i32,
+        i32
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_i64,
+        i64
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_i128,
+        i128
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_isize,
+        isize
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_unit,
+        ()
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_array,
+        [u8; 4]
+    );
+
+    // Harnesses for IntoIter::next_back()
+    macro_rules! gen_into_iter_next_back_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Advance the iterator from the back by one element if possible
+                let _ = iter.next_back();
+            }
+        };
+    }
+
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u8, u8);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u16, u16);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u32, u32);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u64, u64);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u128, u128);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_usize, usize);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i8, i8);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i16, i16);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i32, i32);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i64, i64);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i128, i128);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_isize, isize);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_unit, ());
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_array, [u8; 4]);
+
+    // Harnesses for IntoIter::advance_back_by()
+    macro_rules! gen_into_iter_advance_back_by_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Choose a non-deterministic number of back elements to skip
+                let n: usize = kani::any();
+                // Advance the iterator from the back by the selected count
+                let _ = iter.advance_back_by(n);
+            }
+        };
+    }
+
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u8, u8);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u16, u16);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u32, u32);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u64, u64);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u128, u128);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_usize, usize);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i8, i8);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i16, i16);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i32, i32);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i64, i64);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i128, i128);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_isize, isize);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_unit, ());
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_array, [u8; 4]);
+
+    // Harnesses for IntoIter::drop()
+    macro_rules! gen_into_iter_drop_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let iter = vec.into_iter();
+                // Drop the iterator and any remaining elements
+                drop(iter);
+            }
+        };
+    }
+
+    gen_into_iter_drop_harness!(harness_into_iter_drop_u8, u8);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_u16, u16);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_u32, u32);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_u64, u64);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_u128, u128);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_usize, usize);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_i8, i8);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_i16, i16);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_i32, i32);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_i64, i64);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_i128, i128);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_isize, isize);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_unit, ());
+    gen_into_iter_drop_harness!(harness_into_iter_drop_array, [u8; 4]);
 }
