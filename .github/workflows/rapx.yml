@@ -1,0 +1,49 @@
+name: RAPx
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  RAPX_VERSION: "0.7.30"
+  TOOLCHAIN: "nightly-2025-11-25"
+
+jobs:
+  verify-slice:
+    name: Verify core::slice with RAPx
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Rust toolchain
+        run: |
+          rustup toolchain install $TOOLCHAIN --profile minimal
+          rustup component add rustc-dev rust-src llvm-tools-preview --toolchain $TOOLCHAIN
+
+      - name: Install RAPx
+        run: |
+          cargo +$TOOLCHAIN install rapx --version $RAPX_VERSION
+
+      - name: Run RAPx verification
+        run: |
+          export RUSTUP_TOOLCHAIN=$(rustup show active-toolchain | cut -d ' ' -f 1)
+          export RAPX_SYSROOT=$(rustc --print sysroot)
+          export LD_LIBRARY_PATH="$RAPX_SYSROOT/lib"
+          export RUSTFLAGS="--cfg=rapx -Zcrate-attr=feature(register_tool) -Zcrate-attr=register_tool(rapx)"
+          export __CARGO_TESTS_ONLY_SRC_ROOT="$(pwd)/library"
+          cd library/core
+          cargo +$RUSTUP_TOOLCHAIN rapx verify --module slice --mode targeted 2>&1 | tee /tmp/rapx-output.txt
+
+      - name: Assert no UNSOUND results
+        run: |
+          if grep -q 'result: UNSOUND' /tmp/rapx-output.txt; then
+            echo "UNSOUND results found!"
+            grep 'result: UNSOUND' /tmp/rapx-output.txt
+            exit 1
+          fi
+          echo "All results are SOUND"

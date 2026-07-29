@@ -121,6 +121,13 @@ use crate::{array, ptr, ub_checks};
 #[must_use]
 #[rustc_diagnostic_item = "slice_from_raw_parts"]
 #[track_caller]
+#[cfg_attr(rapx, rapx::requires(NonNull(data)))]
+#[cfg_attr(rapx, rapx::requires(ValidPtr(data, T, len)))]
+#[cfg_attr(rapx, rapx::requires(Init(data, T, len)))]
+#[cfg_attr(rapx, rapx::requires(Alive(data)))]
+#[cfg_attr(rapx, rapx::requires(Alias(data)))]
+#[cfg_attr(rapx, rapx::requires(Align(data, T)))]
+#[cfg_attr(rapx, rapx::requires(ValidNum(size_of(T) * len <= isize::MAX)))]
 pub const unsafe fn from_raw_parts<'a, T>(data: *const T, len: usize) -> &'a [T] {
     // SAFETY: the caller must uphold the safety contract for `from_raw_parts`.
     unsafe {
@@ -176,6 +183,13 @@ pub const unsafe fn from_raw_parts<'a, T>(data: *const T, len: usize) -> &'a [T]
 #[must_use]
 #[rustc_diagnostic_item = "slice_from_raw_parts_mut"]
 #[track_caller]
+#[cfg_attr(rapx, rapx::requires(NonNull(data)))]
+#[cfg_attr(rapx, rapx::requires(ValidPtr(data, T, len)))]
+#[cfg_attr(rapx, rapx::requires(Init(data, T, len)))]
+#[cfg_attr(rapx, rapx::requires(Alive(data)))]
+#[cfg_attr(rapx, rapx::requires(Alias(data)))]
+#[cfg_attr(rapx, rapx::requires(Align(data, T)))]
+#[cfg_attr(rapx, rapx::requires(ValidNum(size_of(T) * len <= isize::MAX)))]
 pub const unsafe fn from_raw_parts_mut<'a, T>(data: *mut T, len: usize) -> &'a mut [T] {
     // SAFETY: the caller must uphold the safety contract for `from_raw_parts_mut`.
     unsafe {
