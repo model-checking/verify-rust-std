@@ -187,6 +187,7 @@ pub enum Utf8Pattern<'a> {
 
 /// Result of calling [`Searcher::next()`] or [`ReverseSearcher::next_back()`].
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum SearchStep {
     /// Expresses that a match of the pattern has been found at
     /// `haystack[a..b]`.
