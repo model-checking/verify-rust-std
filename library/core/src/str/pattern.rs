@@ -500,27 +500,45 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
         let slice = unsafe { self.haystack.get_unchecked(old_finger..self.finger_back) };
         let mut iter = slice.chars();
         let old_len = iter.iter.len();
-        let step = if let Some(ch) = iter.next() {
-            // add byte offset of current character
-            // without re-encoding as utf-8
-            self.finger += old_len - iter.iter.len();
-            if ch == self.needle {
-                SearchStep::Match(old_finger, self.finger)
+        #[cfg(not(kani))]
+        {
+            if let Some(ch) = iter.next() {
+                // add byte offset of current character
+                // without re-encoding as utf-8
+                self.finger += old_len - iter.iter.len();
+                if ch == self.needle {
+                    SearchStep::Match(old_finger, self.finger)
+                } else {
+                    SearchStep::Reject(old_finger, self.finger)
+                }
             } else {
-                SearchStep::Reject(old_finger, self.finger)
+                SearchStep::Done
             }
-        } else {
-            SearchStep::Done
-        };
+        }
 
         #[cfg(kani)]
-        kani_pattern_harness_helpers::assume_valid_utf8_forward_boundary(
-            self.haystack,
-            old_finger,
-            self.finger_back,
-            self.finger,
-        );
-        step
+        {
+            let step = if let Some(ch) = iter.next() {
+                // add byte offset of current character
+                // without re-encoding as utf-8
+                self.finger += old_len - iter.iter.len();
+                if ch == self.needle {
+                    SearchStep::Match(old_finger, self.finger)
+                } else {
+                    SearchStep::Reject(old_finger, self.finger)
+                }
+            } else {
+                SearchStep::Done
+            };
+
+            kani_pattern_harness_helpers::assume_valid_utf8_forward_boundary(
+                self.haystack,
+                old_finger,
+                self.finger_back,
+                self.finger,
+            );
+            step
+        }
     }
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
@@ -721,28 +739,46 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
         let slice = unsafe { self.haystack.get_unchecked(self.finger..old_finger) };
         let mut iter = slice.chars();
         let old_len = iter.iter.len();
-        let step = if let Some(ch) = iter.next_back() {
-            // subtract byte offset of current character
-            // without re-encoding as utf-8
-            self.finger_back -= old_len - iter.iter.len();
-            if ch == self.needle {
-                SearchStep::Match(self.finger_back, old_finger)
+        #[cfg(not(kani))]
+        {
+            if let Some(ch) = iter.next_back() {
+                // subtract byte offset of current character
+                // without re-encoding as utf-8
+                self.finger_back -= old_len - iter.iter.len();
+                if ch == self.needle {
+                    SearchStep::Match(self.finger_back, old_finger)
+                } else {
+                    SearchStep::Reject(self.finger_back, old_finger)
+                }
             } else {
-                SearchStep::Reject(self.finger_back, old_finger)
+                SearchStep::Done
             }
-        } else {
-            SearchStep::Done
-        };
+        }
 
         #[cfg(kani)]
-        kani_pattern_harness_helpers::assume_valid_utf8_reverse_boundary(
-            self.haystack,
-            self.finger,
-            old_finger,
-            self.finger_back,
-            step,
-        );
-        step
+        {
+            let step = if let Some(ch) = iter.next_back() {
+                // subtract byte offset of current character
+                // without re-encoding as utf-8
+                self.finger_back -= old_len - iter.iter.len();
+                if ch == self.needle {
+                    SearchStep::Match(self.finger_back, old_finger)
+                } else {
+                    SearchStep::Reject(self.finger_back, old_finger)
+                }
+            } else {
+                SearchStep::Done
+            };
+
+            kani_pattern_harness_helpers::assume_valid_utf8_reverse_boundary(
+                self.haystack,
+                self.finger,
+                old_finger,
+                self.finger_back,
+                step,
+            );
+            step
+        }
     }
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
@@ -1602,45 +1638,14 @@ unsafe impl<'a, F> Searcher<'a> for CharPredicateSearcher<'a, F>
 where
     F: FnMut(char) -> bool,
 {
-    #[inline]
-    fn haystack(&self) -> &'a str {
-        self.0.haystack()
-    }
-
-    #[inline]
-    fn next(&mut self) -> SearchStep {
-        self.0.next()
-    }
-
-    #[inline]
-    fn next_match(&mut self) -> Option<(usize, usize)> {
-        self.0.next_match()
-    }
-
-    #[inline]
-    fn next_reject(&mut self) -> Option<(usize, usize)> {
-        self.0.next_reject()
-    }
+    searcher_methods!(forward);
 }
 
 unsafe impl<'a, F> ReverseSearcher<'a> for CharPredicateSearcher<'a, F>
 where
     F: FnMut(char) -> bool,
 {
-    #[inline]
-    fn next_back(&mut self) -> SearchStep {
-        self.0.next_back()
-    }
-
-    #[inline]
-    fn next_match_back(&mut self) -> Option<(usize, usize)> {
-        self.0.next_match_back()
-    }
-
-    #[inline]
-    fn next_reject_back(&mut self) -> Option<(usize, usize)> {
-        self.0.next_reject_back()
-    }
+    searcher_methods!(reverse);
 }
 
 impl<'a, F> DoubleEndedSearcher<'a> for CharPredicateSearcher<'a, F> where F: FnMut(char) -> bool {}
