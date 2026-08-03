@@ -41,6 +41,8 @@
 #[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
 use safety::{loop_invariant, requires};
 
+#[cfg(kani)]
+use crate::char::MAX_LEN_UTF8;
 use crate::cmp::Ordering;
 use crate::convert::TryInto as _;
 #[cfg(kani)]
