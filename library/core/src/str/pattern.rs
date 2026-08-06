@@ -2010,6 +2010,13 @@ impl TwoWaySearcher {
                 let new_pos: usize = kani::any();
                 kani::assume(new_pos >= old_pos);
                 kani::assume(new_pos <= haystack_len);
+                // Early-rejecting strategies (RejectAndMatch) return after a
+                // single internal step, which may leave the cursor anywhere.
+                // Non-early-rejecting strategies (MatchOnly) only reject on
+                // exhaustion, which always leaves the cursor at haystack_len.
+                if !S::use_early_reject() {
+                    kani::assume(new_pos == haystack_len);
+                }
                 self.position = new_pos;
                 return S::rejecting(old_pos, new_pos);
             }
@@ -2123,6 +2130,12 @@ impl TwoWaySearcher {
                 let new_end: usize = kani::any();
                 kani::assume(new_end <= old_end);
                 kani::assume(new_end <= haystack_len);
+                // Symmetric to next(): non-early-rejecting strategies
+                // (MatchOnly) only reject on exhaustion, which always leaves
+                // the reverse cursor at 0.
+                if !S::use_early_reject() {
+                    kani::assume(new_end == 0);
+                }
                 self.end = new_end;
                 return S::rejecting(new_end, old_end);
             }
@@ -3199,17 +3212,30 @@ pub mod verify_str_searcher {
     //
     // Type Invariant C:
     //   EmptyNeedle: position <= haystack.len(), end <= haystack.len(),
-    //                position <= end, both on char boundaries
+    //                both on char boundaries
     //   TwoWay: needle.len() >= 1, position <= haystack.len(),
-    //           end <= haystack.len()
+    //           end <= haystack.len(), both on char boundaries
     //   StrSearcher: delegates to variant invariant
     //
-    // Verification Criteria:
-    //   1. C holds after creation (harnesses 1 and 8)
-    //   2. C ensures safety (all harnesses assert is_char_boundary)
-    //   3. C preserved after each operation (all harnesses)
-    //   4. Unbounded: #[cfg(kani)] abstractions use symbolic values
-    //   5. No UB: all safe Rust, Kani checks memory safety automatically
+    //   Note: position <= end is deliberately NOT part of C. The forward and
+    //   backward cursors are independent (next() and next_back() each own a
+    //   cursor), and interleaved calls can legitimately move position past
+    //   end. Safety never relies on the cursors being ordered.
+    //
+    // Proof structure (inductive over call sequences):
+    //   1. Base case: the creation harnesses show a searcher built by
+    //      StrSearcher::new() from any valid UTF-8 haystack satisfies C.
+    //   2. Inductive step: the method harnesses construct a searcher in an
+    //      ARBITRARY state satisfying C (not just the freshly-created
+    //      state), call the method once, and assert that C still holds and
+    //      that all returned indices are valid UTF-8 char boundaries.
+    //   Together these establish that C holds across any sequence of calls
+    //   and that C ensures the Searcher/ReverseSearcher safety contract.
+    //
+    // Inputs are symbolic: haystacks (and needles for TwoWay) are
+    // arbitrary-content, arbitrary-length byte buffers constrained only to
+    // be valid UTF-8, so all 1-4 byte character widths are covered.
+    // kani::cover checks guard against vacuous passes.
     //
     // Per challenge assumptions:
     //   - All haystacks are valid UTF-8 strings
@@ -3220,18 +3246,30 @@ pub mod verify_str_searcher {
     // Type Invariants
     //=========================================================================
 
-    /// Type invariant for EmptyNeedle variant
+    /// Type invariant for EmptyNeedle variant.
+    ///
+    /// `position <= end` is deliberately not required: the two cursors are
+    /// independent, and interleaved forward/backward iteration can move
+    /// `position` past `end`. Safety only needs each cursor to stay in
+    /// bounds and on a char boundary.
     fn type_invariant_empty_needle(en: &EmptyNeedle, haystack: &str) -> bool {
         en.position <= haystack.len()
             && en.end <= haystack.len()
-            && en.position <= en.end
             && haystack.is_char_boundary(en.position)
             && haystack.is_char_boundary(en.end)
     }
 
-    /// Type invariant for TwoWaySearcher variant
-    fn type_invariant_two_way(tw: &TwoWaySearcher, haystack_len: usize) -> bool {
-        tw.position <= haystack_len && tw.end <= haystack_len
+    /// Type invariant for TwoWaySearcher variant.
+    ///
+    /// Both cursors are in bounds and on char boundaries. Boundary-ness is
+    /// required because next()/next_back() report the previous cursor value
+    /// as a Reject endpoint, and the Searcher contract requires all
+    /// returned endpoints to be char boundaries.
+    fn type_invariant_two_way(tw: &TwoWaySearcher, haystack: &str) -> bool {
+        tw.position <= haystack.len()
+            && tw.end <= haystack.len()
+            && haystack.is_char_boundary(tw.position)
+            && haystack.is_char_boundary(tw.end)
     }
 
     /// Composite type invariant for StrSearcher
@@ -3239,7 +3277,7 @@ pub mod verify_str_searcher {
         match s.searcher {
             StrSearcherImpl::Empty(ref en) => type_invariant_empty_needle(en, s.haystack),
             StrSearcherImpl::TwoWay(ref tw) => {
-                s.needle.len() >= 1 && type_invariant_two_way(tw, s.haystack.len())
+                s.needle.len() >= 1 && type_invariant_two_way(tw, s.haystack)
             }
         }
     }
@@ -3248,15 +3286,76 @@ pub mod verify_str_searcher {
     // Test Data Helpers
     //=========================================================================
 
-    /// Generate a haystack covering structural cases for StrSearcher.
-    /// Includes multi-byte UTF-8 to test boundary correction.
-    fn test_haystack_ch21() -> &'static str {
-        let choice: u8 = kani::any();
-        match choice % 4 {
-            0 => "",
-            1 => "x",
-            2 => "xy",
-            _ => "\u{00e9}", // 2-byte UTF-8: 0xC3 0xA9
+    /// Number of symbolic bytes for haystack generation. Large enough to
+    /// contain a 4-byte UTF-8 character plus a neighbor, so every character
+    /// width is exercised.
+    const HAYSTACK_BYTES: usize = 5;
+
+    /// Number of symbolic bytes for needle generation.
+    const NEEDLE_BYTES: usize = 3;
+
+    /// Interpret an arbitrary-length prefix of `buf` as a symbolic string:
+    /// arbitrary content, arbitrary length in 0..=buf.len(), constrained
+    /// only to be valid UTF-8.
+    fn symbolic_str(buf: &[u8]) -> &str {
+        let len: usize = kani::any();
+        kani::assume(len <= buf.len());
+        match crate::str::from_utf8(&buf[..len]) {
+            Ok(s) => s,
+            Err(_) => {
+                kani::assume(false);
+                ""
+            }
+        }
+    }
+
+    /// Construct an EmptyNeedle StrSearcher in an arbitrary state satisfying
+    /// the type invariant C (not just the freshly-created state), for the
+    /// inductive-step harnesses.
+    fn any_empty_searcher<'a>(haystack: &'a str) -> StrSearcher<'a, 'static> {
+        let position: usize = kani::any();
+        let end: usize = kani::any();
+        kani::assume(position <= haystack.len());
+        kani::assume(end <= haystack.len());
+        kani::assume(haystack.is_char_boundary(position));
+        kani::assume(haystack.is_char_boundary(end));
+        StrSearcher {
+            haystack,
+            needle: "",
+            searcher: StrSearcherImpl::Empty(EmptyNeedle {
+                position,
+                end,
+                is_match_fw: kani::any(),
+                is_match_bw: kani::any(),
+                is_finished: kani::any(),
+            }),
+        }
+    }
+
+    /// Construct a TwoWay StrSearcher in an arbitrary state satisfying the
+    /// type invariant C. The algorithm-internal fields (critical
+    /// factorization, period, byteset, memory) are left completely
+    /// unconstrained: safety must not depend on them.
+    fn any_twoway_searcher<'a, 'b>(haystack: &'a str, needle: &'b str) -> StrSearcher<'a, 'b> {
+        let position: usize = kani::any();
+        let end: usize = kani::any();
+        kani::assume(position <= haystack.len());
+        kani::assume(end <= haystack.len());
+        kani::assume(haystack.is_char_boundary(position));
+        kani::assume(haystack.is_char_boundary(end));
+        StrSearcher {
+            haystack,
+            needle,
+            searcher: StrSearcherImpl::TwoWay(TwoWaySearcher {
+                crit_pos: kani::any(),
+                crit_pos_back: kani::any(),
+                period: kani::any(),
+                byteset: kani::any(),
+                position,
+                end,
+                memory: kani::any(),
+                memory_back: kani::any(),
+            }),
         }
     }
 
@@ -3288,11 +3387,12 @@ pub mod verify_str_searcher {
     // EmptyNeedle Harnesses (Group A)
     //=========================================================================
 
-    /// Harness 1: Verify StrSearcher creation with empty needle establishes
-    /// the type invariant.
+    /// Harness 1 (base case): a searcher created by StrSearcher::new() with
+    /// an empty needle from any valid UTF-8 haystack satisfies C.
     #[kani::proof]
     fn verify_str_searcher_empty_creation() {
-        let haystack = test_haystack_ch21();
+        let buf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&buf);
         let searcher = StrSearcher::new(haystack, "");
 
         assert!(type_invariant_str_searcher(&searcher));
@@ -3306,107 +3406,112 @@ pub mod verify_str_searcher {
             }
             _ => panic!("Expected EmptyNeedle variant for empty needle"),
         }
+        kani::cover(haystack.len() == HAYSTACK_BYTES, "full-length haystack is reachable");
     }
 
-    /// Harness 2: Verify StrSearcher::next() with EmptyNeedle preserves
-    /// invariant and returns valid boundaries.
+    /// Harness 2 (inductive step): from ANY state satisfying C, next()
+    /// preserves C and returns valid UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_empty_next() {
-        let haystack = test_haystack_ch21();
-        let mut searcher = StrSearcher::new(haystack, "");
+        let buf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&buf);
+        let mut searcher = any_empty_searcher(haystack);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next();
         assert_valid_boundaries(haystack, &result);
-
-        // After next(), the EmptyNeedle variant should still maintain
-        // that position and end are on char boundaries
-        match searcher.searcher {
-            StrSearcherImpl::Empty(ref en) => {
-                assert!(en.position <= haystack.len());
-                assert!(haystack.is_char_boundary(en.position));
-            }
-            _ => panic!("Expected EmptyNeedle variant"),
-        }
+        assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(matches!(result, SearchStep::Match(..)), "Match case is reachable");
+        kani::cover(matches!(result, SearchStep::Reject(..)), "Reject case is reachable");
+        kani::cover(matches!(result, SearchStep::Done), "Done case is reachable");
     }
 
-    /// Harness 3: Verify StrSearcher::next_back() with EmptyNeedle.
+    /// Harness 3 (inductive step): from ANY state satisfying C, next_back()
+    /// preserves C and returns valid UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_empty_next_back() {
-        let haystack = test_haystack_ch21();
-        let mut searcher = StrSearcher::new(haystack, "");
+        let buf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&buf);
+        let mut searcher = any_empty_searcher(haystack);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_back();
         assert_valid_boundaries(haystack, &result);
-
-        match searcher.searcher {
-            StrSearcherImpl::Empty(ref en) => {
-                assert!(en.end <= haystack.len());
-                assert!(haystack.is_char_boundary(en.end));
-            }
-            _ => panic!("Expected EmptyNeedle variant"),
-        }
+        assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(matches!(result, SearchStep::Match(..)), "Match case is reachable");
+        kani::cover(matches!(result, SearchStep::Reject(..)), "Reject case is reachable");
+        kani::cover(matches!(result, SearchStep::Done), "Done case is reachable");
     }
 
-    /// Harness 4: Verify StrSearcher::next_match() with EmptyNeedle.
+    /// Harness 4 (inductive step): from ANY state satisfying C, next_match()
+    /// preserves C and returns valid zero-width match indices.
     #[kani::proof]
     fn verify_str_searcher_empty_next_match() {
-        let haystack = test_haystack_ch21();
-        let mut searcher = StrSearcher::new(haystack, "");
+        let buf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&buf);
+        let mut searcher = any_empty_searcher(haystack);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_match();
         assert_valid_match(haystack, result);
-
-        // For empty needle, next_match always returns Some((pos, pos)) immediately
-        // because next() returns Match(pos, pos) on first call when is_match_fw=true
-        if !haystack.is_empty() || result.is_some() {
-            if let Some((a, b)) = result {
-                assert!(a == b); // empty needle matches have zero width
-            }
+        if let Some((a, b)) = result {
+            assert!(a == b); // empty needle matches have zero width
         }
+        assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(result.is_some(), "Some case is reachable");
+        kani::cover(result.is_none(), "None case is reachable");
     }
 
-    /// Harness 5: Verify StrSearcher::next_match_back() with EmptyNeedle.
+    /// Harness 5 (inductive step): from ANY state satisfying C,
+    /// next_match_back() preserves C and returns valid zero-width match
+    /// indices.
     #[kani::proof]
     fn verify_str_searcher_empty_next_match_back() {
-        let haystack = test_haystack_ch21();
-        let mut searcher = StrSearcher::new(haystack, "");
+        let buf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&buf);
+        let mut searcher = any_empty_searcher(haystack);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_match_back();
         assert_valid_match(haystack, result);
-
         if let Some((a, b)) = result {
             assert!(a == b); // empty needle matches have zero width
         }
+        assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(result.is_some(), "Some case is reachable");
+        kani::cover(result.is_none(), "None case is reachable");
     }
 
-    /// Harness 6: Verify StrSearcher::next_reject() with EmptyNeedle.
-    /// Uses nondeterministic abstraction for unbounded verification.
+    /// Harness 6 (inductive step): from ANY state satisfying C,
+    /// next_reject() preserves C and returns valid UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_empty_next_reject() {
-        let haystack = test_haystack_ch21();
-        let mut searcher = StrSearcher::new(haystack, "");
+        let buf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&buf);
+        let mut searcher = any_empty_searcher(haystack);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_reject();
-        // Key safety property: returned indices are on UTF-8 boundaries
         assert_valid_match(haystack, result);
+        assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(result.is_some(), "Some case is reachable");
+        kani::cover(result.is_none(), "None case is reachable");
     }
 
-    /// Harness 7: Verify StrSearcher::next_reject_back() with EmptyNeedle.
-    /// Uses nondeterministic abstraction for unbounded verification.
+    /// Harness 7 (inductive step): from ANY state satisfying C,
+    /// next_reject_back() preserves C and returns valid UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_empty_next_reject_back() {
-        let haystack = test_haystack_ch21();
-        let mut searcher = StrSearcher::new(haystack, "");
+        let buf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&buf);
+        let mut searcher = any_empty_searcher(haystack);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_reject_back();
-        // Key safety property: returned indices are on UTF-8 boundaries
         assert_valid_match(haystack, result);
+        assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(result.is_some(), "Some case is reachable");
+        kani::cover(result.is_none(), "None case is reachable");
     }
 
     //=========================================================================
@@ -3414,20 +3519,19 @@ pub mod verify_str_searcher {
     //
     // TwoWaySearcher internals (new, next, next_back) are abstracted under
     // #[cfg(kani)] to return nondeterministic results satisfying bounds.
-    // This lets us verify the StrSearcher wrapper's UTF-8 boundary correction.
+    // This lets us verify the StrSearcher wrapper's UTF-8 boundary
+    // correction from any state satisfying C.
     //=========================================================================
 
-    /// Harness 8: Verify StrSearcher creation with non-empty needle.
+    /// Harness 8 (base case): a searcher created by StrSearcher::new() with
+    /// any non-empty needle from any valid UTF-8 haystack satisfies C.
     #[kani::proof]
     fn verify_str_searcher_twoway_creation() {
-        let haystack = test_haystack_ch21();
-        // Test with different needle lengths to cover short/long period
-        let needle_choice: u8 = kani::any();
-        let needle: &str = match needle_choice % 3 {
-            0 => "a",
-            1 => "ab",
-            _ => "aa",
-        };
+        let hbuf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&hbuf);
+        let nbuf: [u8; NEEDLE_BYTES] = kani::any();
+        let needle = symbolic_str(&nbuf);
+        kani::assume(!needle.is_empty());
         let searcher = StrSearcher::new(haystack, needle);
 
         assert!(type_invariant_str_searcher(&searcher));
@@ -3438,124 +3542,135 @@ pub mod verify_str_searcher {
             }
             _ => panic!("Expected TwoWay variant for non-empty needle"),
         }
+        kani::cover(
+            haystack.len() == HAYSTACK_BYTES && needle.len() == NEEDLE_BYTES,
+            "full-length haystack and needle are reachable",
+        );
     }
 
-    /// Harness 9: Verify StrSearcher::next() with TwoWay variant.
-    /// The UTF-8 boundary correction loop (while !is_char_boundary(b) { b += 1 })
-    /// is the key safety mechanism we verify here.
+    /// Harness 9 (inductive step): from ANY state satisfying C, next()
+    /// preserves C and returns valid UTF-8 boundaries. The UTF-8 boundary
+    /// correction of Reject endpoints is the key safety mechanism verified.
     #[kani::proof]
     fn verify_str_searcher_twoway_next() {
-        let haystack = test_haystack_ch21();
-        let needle_choice: u8 = kani::any();
-        let needle: &str = match needle_choice % 3 {
-            0 => "a",
-            1 => "ab",
-            _ => "aa",
-        };
-        let mut searcher = StrSearcher::new(haystack, needle);
+        let hbuf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&hbuf);
+        let nbuf: [u8; NEEDLE_BYTES] = kani::any();
+        let needle = symbolic_str(&nbuf);
+        kani::assume(!needle.is_empty());
+        let mut searcher = any_twoway_searcher(haystack, needle);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next();
         assert_valid_boundaries(haystack, &result);
         assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(matches!(result, SearchStep::Match(..)), "Match case is reachable");
+        kani::cover(matches!(result, SearchStep::Reject(..)), "Reject case is reachable");
+        kani::cover(matches!(result, SearchStep::Done), "Done case is reachable");
     }
 
-    /// Harness 10: Verify StrSearcher::next_match() with TwoWay variant.
+    /// Harness 10 (inductive step): from ANY state satisfying C,
+    /// next_match() preserves C and returns needle-width matches on valid
+    /// UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_twoway_next_match() {
-        let haystack = test_haystack_ch21();
-        let needle_choice: u8 = kani::any();
-        let needle: &str = match needle_choice % 3 {
-            0 => "a",
-            1 => "ab",
-            _ => "aa",
-        };
-        let mut searcher = StrSearcher::new(haystack, needle);
+        let hbuf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&hbuf);
+        let nbuf: [u8; NEEDLE_BYTES] = kani::any();
+        let needle = symbolic_str(&nbuf);
+        kani::assume(!needle.is_empty());
+        let mut searcher = any_twoway_searcher(haystack, needle);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_match();
         assert_valid_match(haystack, result);
-
         if let Some((a, b)) = result {
             // Match width should equal needle length
             assert!(b - a == needle.len());
         }
         assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(result.is_some(), "Some case is reachable");
+        kani::cover(result.is_none(), "None case is reachable");
     }
 
-    /// Harness 11: Verify StrSearcher::next_back() with TwoWay variant.
+    /// Harness 11 (inductive step): from ANY state satisfying C, next_back()
+    /// preserves C and returns valid UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_twoway_next_back() {
-        let haystack = test_haystack_ch21();
-        let needle_choice: u8 = kani::any();
-        let needle: &str = match needle_choice % 3 {
-            0 => "a",
-            1 => "ab",
-            _ => "aa",
-        };
-        let mut searcher = StrSearcher::new(haystack, needle);
+        let hbuf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&hbuf);
+        let nbuf: [u8; NEEDLE_BYTES] = kani::any();
+        let needle = symbolic_str(&nbuf);
+        kani::assume(!needle.is_empty());
+        let mut searcher = any_twoway_searcher(haystack, needle);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_back();
         assert_valid_boundaries(haystack, &result);
         assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(matches!(result, SearchStep::Match(..)), "Match case is reachable");
+        kani::cover(matches!(result, SearchStep::Reject(..)), "Reject case is reachable");
+        kani::cover(matches!(result, SearchStep::Done), "Done case is reachable");
     }
 
-    /// Harness 12: Verify StrSearcher::next_match_back() with TwoWay variant.
+    /// Harness 12 (inductive step): from ANY state satisfying C,
+    /// next_match_back() preserves C and returns needle-width matches on
+    /// valid UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_twoway_next_match_back() {
-        let haystack = test_haystack_ch21();
-        let needle_choice: u8 = kani::any();
-        let needle: &str = match needle_choice % 3 {
-            0 => "a",
-            1 => "ab",
-            _ => "aa",
-        };
-        let mut searcher = StrSearcher::new(haystack, needle);
+        let hbuf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&hbuf);
+        let nbuf: [u8; NEEDLE_BYTES] = kani::any();
+        let needle = symbolic_str(&nbuf);
+        kani::assume(!needle.is_empty());
+        let mut searcher = any_twoway_searcher(haystack, needle);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_match_back();
         assert_valid_match(haystack, result);
-
         if let Some((a, b)) = result {
             assert!(b - a == needle.len());
         }
         assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(result.is_some(), "Some case is reachable");
+        kani::cover(result.is_none(), "None case is reachable");
     }
 
-    /// Harness 13: Verify StrSearcher::next_reject() with TwoWay variant.
+    /// Harness 13 (inductive step): from ANY state satisfying C,
+    /// next_reject() preserves C and returns valid UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_twoway_next_reject() {
-        let haystack = test_haystack_ch21();
-        let needle_choice: u8 = kani::any();
-        let needle: &str = match needle_choice % 3 {
-            0 => "a",
-            1 => "ab",
-            _ => "aa",
-        };
-        let mut searcher = StrSearcher::new(haystack, needle);
+        let hbuf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&hbuf);
+        let nbuf: [u8; NEEDLE_BYTES] = kani::any();
+        let needle = symbolic_str(&nbuf);
+        kani::assume(!needle.is_empty());
+        let mut searcher = any_twoway_searcher(haystack, needle);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_reject();
         assert_valid_match(haystack, result);
         assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(result.is_some(), "Some case is reachable");
+        kani::cover(result.is_none(), "None case is reachable");
     }
 
-    /// Harness 14: Verify StrSearcher::next_reject_back() with TwoWay variant.
+    /// Harness 14 (inductive step): from ANY state satisfying C,
+    /// next_reject_back() preserves C and returns valid UTF-8 boundaries.
     #[kani::proof]
     fn verify_str_searcher_twoway_next_reject_back() {
-        let haystack = test_haystack_ch21();
-        let needle_choice: u8 = kani::any();
-        let needle: &str = match needle_choice % 3 {
-            0 => "a",
-            1 => "ab",
-            _ => "aa",
-        };
-        let mut searcher = StrSearcher::new(haystack, needle);
+        let hbuf: [u8; HAYSTACK_BYTES] = kani::any();
+        let haystack = symbolic_str(&hbuf);
+        let nbuf: [u8; NEEDLE_BYTES] = kani::any();
+        let needle = symbolic_str(&nbuf);
+        kani::assume(!needle.is_empty());
+        let mut searcher = any_twoway_searcher(haystack, needle);
         assert!(type_invariant_str_searcher(&searcher));
 
         let result = searcher.next_reject_back();
         assert_valid_match(haystack, result);
         assert!(type_invariant_str_searcher(&searcher));
+        kani::cover(result.is_some(), "Some case is reachable");
+        kani::cover(result.is_none(), "None case is reachable");
     }
 }
