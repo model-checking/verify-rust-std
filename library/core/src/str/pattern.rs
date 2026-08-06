@@ -1852,12 +1852,20 @@ impl TwoWaySearcher {
         {
             let needle_len = needle.len();
             // needle_len >= 1 is guaranteed by StrSearcher::new() calling us only for non-empty needles
+            //
+            // The bounds below are deliberately weaker than what the real
+            // constructor produces, so the abstraction over-approximates it:
+            // - crit_pos: maximal_suffix returns an index < needle_len
+            // - crit_pos_back: needle_len - reverse_maximal_suffix(..) in the
+            //   short-period case, which can equal needle_len
+            // - period: max(crit_pos, needle_len - crit_pos) + 1 in the
+            //   long-period case, which can equal needle_len + 1
             let crit_pos: usize = kani::any();
-            kani::assume(crit_pos < needle_len);
+            kani::assume(crit_pos <= needle_len);
             let crit_pos_back: usize = kani::any();
-            kani::assume(crit_pos_back < needle_len);
+            kani::assume(crit_pos_back <= needle_len);
             let period: usize = kani::any();
-            kani::assume(period >= 1 && period <= needle_len);
+            kani::assume(period >= 1 && period <= needle_len + 1);
             let is_long: bool = kani::any();
             TwoWaySearcher {
                 crit_pos,
@@ -1940,6 +1948,21 @@ impl TwoWaySearcher {
         }
     }
 
+    // Safe byte-level UTF-8 char boundary check, mirroring str::is_char_boundary
+    // without materializing a &str from raw bytes. Used by the Kani abstractions
+    // of next()/next_back() so they stay free of unsafe code.
+    #[cfg(kani)]
+    fn is_char_boundary(haystack: &[u8], index: usize) -> bool {
+        if index == haystack.len() {
+            true
+        } else {
+            match haystack.get(index) {
+                Some(&b) => b.is_utf8_char_boundary(),
+                None => false,
+            }
+        }
+    }
+
     #[inline]
     fn byteset_create(bytes: &[u8]) -> u64 {
         bytes.iter().fold(0, |a, &b| (1 << (b & 0x3f)) | a)
@@ -1970,9 +1993,6 @@ impl TwoWaySearcher {
             let old_pos = self.position;
             let haystack_len = haystack.len();
             let needle_len = needle.len();
-            // Access haystack as &str for is_char_boundary checks.
-            // SAFETY: haystack bytes came from a valid &str in StrSearcher.
-            let hs = unsafe { crate::str::from_utf8_unchecked(haystack) };
             if kani::any() {
                 // Match case: found needle at some valid position.
                 // Match positions are always on char boundaries since both
@@ -1981,8 +2001,8 @@ impl TwoWaySearcher {
                 kani::assume(match_pos >= old_pos);
                 kani::assume(needle_len <= haystack_len);
                 kani::assume(match_pos <= haystack_len - needle_len);
-                kani::assume(hs.is_char_boundary(match_pos));
-                kani::assume(hs.is_char_boundary(match_pos + needle_len));
+                kani::assume(Self::is_char_boundary(haystack, match_pos));
+                kani::assume(Self::is_char_boundary(haystack, match_pos + needle_len));
                 self.position = match_pos + needle_len;
                 return S::matching(match_pos, match_pos + needle_len);
             } else {
@@ -2087,7 +2107,6 @@ impl TwoWaySearcher {
             let old_end = self.end;
             let haystack_len = haystack.len();
             let needle_len = needle.len();
-            let hs = unsafe { crate::str::from_utf8_unchecked(haystack) };
             if kani::any() {
                 // Match case: found needle ending at some valid position.
                 // Match positions are always on char boundaries.
@@ -2095,8 +2114,8 @@ impl TwoWaySearcher {
                 kani::assume(needle_len <= haystack_len);
                 kani::assume(match_pos <= haystack_len - needle_len);
                 kani::assume(match_pos + needle_len <= old_end);
-                kani::assume(hs.is_char_boundary(match_pos));
-                kani::assume(hs.is_char_boundary(match_pos + needle_len));
+                kani::assume(Self::is_char_boundary(haystack, match_pos));
+                kani::assume(Self::is_char_boundary(haystack, match_pos + needle_len));
                 self.end = match_pos;
                 return S::matching(match_pos, match_pos + needle_len);
             } else {
