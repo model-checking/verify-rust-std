@@ -3,6 +3,8 @@ use crate::iter::adapters::SourceIter;
 use crate::iter::{
     ByRefSized, FusedIterator, InPlaceIterable, TrustedFused, TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, NeverShortCircuit, Try};
 
@@ -230,6 +232,15 @@ where
         let inner_len = self.iter.size();
         let mut i = 0;
         // Use a while loop because (0..len).step_by(N) doesn't optimize well.
+        #[cfg_attr(
+            kani,
+            kani::loop_invariant(
+                N != 0
+                    && self.iter.size() == inner_len
+                    && i <= inner_len
+                    && i % N == 0
+            )
+        )]
         while inner_len - i >= N {
             let chunk = crate::array::from_fn(|local| {
                 // SAFETY: The method consumes the iterator and the loop condition ensures that
@@ -273,4 +284,84 @@ unsafe impl<I: InPlaceIterable + Iterator, const N: usize> InPlaceIterable for A
             _ => None,
         }
     };
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `next_back_remainder` for ArrayChunks
+    macro_rules! generate_next_back_remainder_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Generate an unbounded symbolic length and payload.
+                let end: usize = kani::any();
+                let value: $ty = kani::any();
+
+                // Construct a valid unbounded exact-size, double-ended iterator.
+                let source = (0..end).map(move |position| (position, value));
+
+                // The safe constructor establishes N != 0.
+                let mut chunks = ArrayChunks::<_, 4>::new(source);
+
+                // Exercise the main path, including unwrap_err_unchecked.
+                chunks.next_back_remainder();
+
+                // Exercise the existing-remainder early-return path.
+                chunks.next_back_remainder();
+            }
+        };
+    }
+
+    generate_next_back_remainder_harness!(harness_next_back_remainder_i8, i8);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_i16, i16);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_i32, i32);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_i64, i64);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_i128, i128);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_u8, u8);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_u16, u16);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_u32, u32);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_u64, u64);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_u128, u128);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_array, [u8; 4]);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_bool, bool);
+    generate_next_back_remainder_harness!(harness_next_back_remainder_unit, ());
+
+    // Harnesses for `fold` for ArrayChunks
+    macro_rules! generate_array_chunks_fold_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Generate an unbounded symbolic length, payload, and accumulator.
+                let end: usize = kani::any();
+                let value: $ty = kani::any();
+                let init: $ty = kani::any();
+
+                // Map preserves random access while attaching the symbolic payload.
+                let source = (0..end).map(move |position| (position, value));
+
+                // The safe constructor establishes the N != 0 invariant.
+                let chunks = ArrayChunks::<_, 4>::new(source);
+
+                // Directly call the specialized safe function under test.
+                let _ = SpecFold::fold(chunks, init, |accum, _chunk| accum);
+            }
+        };
+    }
+
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_i8, i8);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_i16, i16);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_i32, i32);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_i64, i64);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_i128, i128);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_u8, u8);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_u16, u16);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_u32, u32);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_u64, u64);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_u128, u128);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_array, [u8; 4]);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_bool, bool);
+    generate_array_chunks_fold_harness!(harness_array_chunks_fold_unit, ());
 }

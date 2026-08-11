@@ -1,6 +1,8 @@
 use crate::cmp;
 use crate::iter::adapters::SourceIter;
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, TrustedRandomAccess};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, Try};
 
@@ -299,6 +301,7 @@ impl<I: Iterator + TrustedRandomAccess> SpecTake for Take<I> {
     {
         let mut acc = init;
         let end = self.n.min(self.iter.size());
+        #[cfg_attr(kani, kani::loop_invariant(end <= self.iter.size()))]
         for i in 0..end {
             // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end
             let val = unsafe { self.iter.__iterator_get_unchecked(i) };
@@ -310,6 +313,7 @@ impl<I: Iterator + TrustedRandomAccess> SpecTake for Take<I> {
     #[inline]
     fn spec_for_each<F: FnMut(Self::Item)>(mut self, mut f: F) {
         let end = self.n.min(self.iter.size());
+        #[cfg_attr(kani, kani::loop_invariant(end <= self.iter.size()))]
         for i in 0..end {
             // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end
             let val = unsafe { self.iter.__iterator_get_unchecked(i) };
@@ -373,4 +377,82 @@ impl<F: FnMut() -> A, A> ExactSizeIterator for Take<crate::iter::RepeatWith<F>> 
     fn len(&self) -> usize {
         self.n
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `spec_fold` for Take.
+    macro_rules! generate_take_spec_fold_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                // Symbolize the logical iterator length without an explicit bound.
+                let len: usize = kani::any();
+
+                // Symbolize the take count independently of the iterator length.
+                let n: usize = kani::any();
+
+                // Map retains TrustedRandomAccess while generalizing the item type.
+                let value: $ty = kani::any();
+                let source = (0..len).map(move |_| value);
+                let taken = Take::new(source, n);
+
+                // Call the specialized safe function under test.
+                SpecTake::spec_fold(taken, (), |(), _item| ());
+            }
+        };
+    }
+
+    generate_take_spec_fold_harness!(harness_take_spec_fold_i8, i8);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_i16, i16);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_i32, i32);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_i64, i64);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_i128, i128);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_u8, u8);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_u16, u16);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_u32, u32);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_u64, u64);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_u128, u128);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_bool, bool);
+    generate_take_spec_fold_harness!(harness_take_spec_fold_unit, ());
+    generate_take_spec_fold_harness!(harness_take_spec_fold_array, [u8; 4]);
+
+    // Harnesses for `spec_for_each` for Take.
+    macro_rules! generate_take_spec_for_each_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                // Symbolize the logical iterator length without an explicit bound.
+                let len: usize = kani::any();
+
+                // Symbolize the take count independently of the iterator length.
+                let n: usize = kani::any();
+
+                // Map retains TrustedRandomAccess while generalizing the item type.
+                let value: $ty = kani::any();
+                let source = (0..len).map(move |_| value);
+                let taken = Take::new(source, n);
+
+                // Call the specialized safe function under test.
+                SpecTake::spec_for_each(taken, |_item| ());
+            }
+        };
+    }
+
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_i8, i8);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_i16, i16);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_i32, i32);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_i64, i64);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_i128, i128);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_u8, u8);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_u16, u16);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_u32, u32);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_u64, u64);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_u128, u128);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_bool, bool);
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_unit, ());
+    generate_take_spec_for_each_harness!(harness_take_spec_for_each_array, [u8; 4]);
 }
