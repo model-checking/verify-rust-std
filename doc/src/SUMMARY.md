@@ -12,6 +12,7 @@
   - [VeriFast](./tools/verifast.md)
   - [Flux](./tools/flux.md)
   - [KMIR](./tools/kmir.md)
+  - [RAPx](./tools/rapx.md)
 
 ---
 
