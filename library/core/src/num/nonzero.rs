@@ -402,6 +402,21 @@ where
     #[rustc_const_stable(feature = "const_nonzero_int_methods", since = "1.47.0")]
     #[must_use]
     #[inline]
+    // Challenge 12 Part 1 contract. Clause 1 is the same-size transmute obligation the
+    // challenge allows in place of proving the transmute itself; clauses 2-3 are the
+    // created-iff-nonzero and value-preservation properties. Comparisons use `raw_eq`
+    // (one verifier operation) rather than byte-slice inspection, so instrumented call
+    // sites stay cheap.
+    #[ensures(|result: &Option<Self>| {
+        let size_ok = core::mem::size_of::<T>() == core::mem::size_of::<Option<Self>>();
+        let input_is_zero = unsafe { core::intrinsics::raw_eq(&n, &core::mem::zeroed::<T>()) };
+        let some_iff_nonzero = result.is_some() != input_is_zero;
+        let value_preserved = match result {
+            Some(r) => unsafe { core::intrinsics::raw_eq(&r.get(), &n) },
+            None => true,
+        };
+        size_ok && some_iff_nonzero && value_preserved
+    })]
     pub const fn new(n: T) -> Option<Self> {
         // SAFETY: Memory layout optimization guarantees that `Option<NonZero<T>>` has
         //         the same layout and size as `T`, with `0` representing `None`.
@@ -4890,14 +4905,13 @@ mod verify {
     // --- Part 1: `new` (safety + correctness: created iff nonzero, value preserved) ---
     macro_rules! nonzero_check_new {
         ($t:ty, $nz:ty, $h:ident) => {
-            #[kani::proof]
+            #[kani::proof_for_contract(NonZero::<$t>::new)]
             pub fn $h() {
                 let x: $t = kani::any();
                 let r = <$nz>::new(x);
                 // Part 1 correctness: a NonZero is created iff the input is nonzero (2a),
-                // and the stored value equals the input (2b). Verified as a per-type proof
-                // rather than a contract on `new`: a contract on this widely-called fn
-                // instruments every call site and regresses unrelated 128-bit harnesses.
+                // and the stored value equals the input (2b) -- asserted here and also
+                // carried by `new`'s `#[ensures]` contract, which this harness checks.
                 assert!(r.is_some() == (x != 0));
                 if let Some(v) = r {
                     assert!(v.get() == x);
