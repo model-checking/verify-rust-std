@@ -638,6 +638,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[requires(index.kani_in_bounds(self.len()))]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -683,6 +684,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[requires(index.kani_in_bounds(self.len()))]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -4781,6 +4783,7 @@ impl<T> [T] {
     #[stable(feature = "get_many_mut", since = "1.86.0")]
     #[inline]
     #[track_caller]
+    #[requires(get_disjoint_check_valid(&indices, self.len()).is_ok())]
     pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
         &mut self,
         indices: [I; N],
@@ -5577,86 +5580,198 @@ mod verify {
     check_swap_unchecked!(check_swap_unchecked_char, char);
 
     // ---- get_unchecked / get_unchecked_mut ----
-    // These are generic over the `SliceIndex` type `I`, and the safety precondition
-    // is index-type-specific (`idx < len` for `usize`; `start <= end <= len` for a
-    // range). It therefore cannot be written as a single fn-level `#[requires]` over
-    // the generic `I` (a contract closure only borrows its args, so it cannot consume
-    // `index` to call a checked accessor, and there is no generic in-bounds predicate
-    // on `SliceIndex`). We prove no-UB at the two concrete index shapes with the
-    // documented caller obligation established by `kani::assume` -- the same approach
-    // challenge 16 used for non-contractable generic unsafe methods. O(1): no loop,
-    // so no `#[kani::unwind]`.
+    // These are generic over the `SliceIndex` type `I`. Kani does not support
+    // contracts on trait functions (model-checking/kani#1997), so the
+    // `SliceIndex` impls cannot carry them. Instead, the kani-only trait
+    // predicate `SliceIndex::kani_in_bounds` (implemented by every
+    // `SliceIndex<[T]>` impl with that impl's documented in-bounds
+    // precondition) gives the generic inherent wrappers
+    // `<[T]>::get_unchecked{,_mut}` a real fn-level `#[requires]` contract.
+    // Each `proof_for_contract` harness verifies the wrapper through the real
+    // body of one concrete index-type impl; together they cover every
+    // `SliceIndex<[T]>` impl. O(1): no loop, so no `#[kani::unwind]`.
+    // `RangeInclusive` inputs come from `any_range_inclusive`, which also
+    // exhausts the range by iteration on a nondet branch, so the `exhausted`
+    // arm of its `kani_in_bounds` predicate is exercised too.
 
-    macro_rules! check_get_unchecked {
-        ($usize_h:ident, $range_h:ident, $ty:ty) => {
-            #[kani::proof]
-            fn $usize_h() {
+    use crate::ops::{Bound, IndexRange};
+
+    fn any_range_inclusive() -> crate::ops::RangeInclusive<usize> {
+        let mut range = kani::any::<usize>()..=kani::any::<usize>();
+        let exhaust: bool = kani::any();
+        if exhaust {
+            let _ = range.next();
+        }
+        range
+    }
+
+    fn any_bound() -> Bound<usize> {
+        let selector: u8 = kani::any();
+        match selector % 3 {
+            0 => Bound::Included(kani::any()),
+            1 => Bound::Excluded(kani::any()),
+            2..=u8::MAX => Bound::Unbounded,
+        }
+    }
+
+    macro_rules! check_get_unchecked_contract {
+        ($h:ident, $h_mut:ident, $ity:ty, $ty:ty, $mk:expr) => {
+            #[kani::proof_for_contract(<[$ty]>::get_unchecked::<$ity>)]
+            fn $h() {
                 const ARR_SIZE: usize = 100;
                 let arr: [$ty; ARR_SIZE] = kani::any();
                 let slice = kani::slice::any_slice_of_array(&arr);
-                let idx: usize = kani::any();
-                kani::assume(idx < slice.len());
-                let _ = unsafe { slice.get_unchecked(idx) };
+                let index: $ity = $mk;
+                let _ = unsafe { slice.get_unchecked(index) };
             }
-            #[kani::proof]
-            fn $range_h() {
-                const ARR_SIZE: usize = 100;
-                let arr: [$ty; ARR_SIZE] = kani::any();
-                let slice = kani::slice::any_slice_of_array(&arr);
-                let start: usize = kani::any();
-                let end: usize = kani::any();
-                kani::assume(start <= end && end <= slice.len());
-                let _ = unsafe { slice.get_unchecked(start..end) };
-            }
-        };
-    }
-    check_get_unchecked!(check_get_unchecked_usize_unit, check_get_unchecked_range_unit, ());
-    check_get_unchecked!(check_get_unchecked_usize_u8, check_get_unchecked_range_u8, u8);
-    check_get_unchecked!(check_get_unchecked_usize_u64, check_get_unchecked_range_u64, u64);
-    check_get_unchecked!(check_get_unchecked_usize_char, check_get_unchecked_range_char, char);
-
-    macro_rules! check_get_unchecked_mut {
-        ($usize_h:ident, $range_h:ident, $ty:ty) => {
-            #[kani::proof]
-            fn $usize_h() {
+            #[kani::proof_for_contract(<[$ty]>::get_unchecked_mut::<$ity>)]
+            fn $h_mut() {
                 const ARR_SIZE: usize = 100;
                 let mut arr: [$ty; ARR_SIZE] = kani::any();
                 let slice = kani::slice::any_slice_of_array_mut(&mut arr);
-                let idx: usize = kani::any();
-                kani::assume(idx < slice.len());
-                let _ = unsafe { slice.get_unchecked_mut(idx) };
-            }
-            #[kani::proof]
-            fn $range_h() {
-                const ARR_SIZE: usize = 100;
-                let mut arr: [$ty; ARR_SIZE] = kani::any();
-                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
-                let start: usize = kani::any();
-                let end: usize = kani::any();
-                kani::assume(start <= end && end <= slice.len());
-                let _ = unsafe { slice.get_unchecked_mut(start..end) };
+                let index: $ity = $mk;
+                let _ = unsafe { slice.get_unchecked_mut(index) };
             }
         };
     }
-    check_get_unchecked_mut!(
+    check_get_unchecked_contract!(
+        check_get_unchecked_usize_unit,
         check_get_unchecked_mut_usize_unit,
-        check_get_unchecked_mut_range_unit,
-        ()
+        usize,
+        (),
+        kani::any()
     );
-    check_get_unchecked_mut!(
+    check_get_unchecked_contract!(
+        check_get_unchecked_usize_u8,
         check_get_unchecked_mut_usize_u8,
-        check_get_unchecked_mut_range_u8,
-        u8
+        usize,
+        u8,
+        kani::any()
     );
-    check_get_unchecked_mut!(
+    check_get_unchecked_contract!(
+        check_get_unchecked_usize_u64,
         check_get_unchecked_mut_usize_u64,
-        check_get_unchecked_mut_range_u64,
-        u64
+        usize,
+        u64,
+        kani::any()
     );
-    check_get_unchecked_mut!(
+    check_get_unchecked_contract!(
+        check_get_unchecked_usize_char,
         check_get_unchecked_mut_usize_char,
+        usize,
+        char,
+        kani::any()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_index_range_u8,
+        check_get_unchecked_mut_index_range_u8,
+        IndexRange,
+        u8,
+        {
+            let start: usize = kani::any();
+            let end: usize = kani::any();
+            kani::assume(start <= end);
+            // SAFETY: `start <= end` is the constructor's documented precondition.
+            unsafe { IndexRange::new_unchecked(start, end) }
+        }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_unit,
+        check_get_unchecked_mut_range_unit,
+        crate::ops::Range<usize>,
+        (),
+        kani::any::<usize>()..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_u8,
+        check_get_unchecked_mut_range_u8,
+        crate::ops::Range<usize>,
+        u8,
+        kani::any::<usize>()..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_u64,
+        check_get_unchecked_mut_range_u64,
+        crate::ops::Range<usize>,
+        u64,
+        kani::any::<usize>()..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_char,
         check_get_unchecked_mut_range_char,
-        char
+        crate::ops::Range<usize>,
+        char,
+        kani::any::<usize>()..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_new_range_u8,
+        check_get_unchecked_mut_new_range_u8,
+        crate::range::Range<usize>,
+        u8,
+        crate::range::Range { start: kani::any(), end: kani::any() }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_to_u8,
+        check_get_unchecked_mut_range_to_u8,
+        crate::ops::RangeTo<usize>,
+        u8,
+        ..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_from_u8,
+        check_get_unchecked_mut_range_from_u8,
+        crate::ops::RangeFrom<usize>,
+        u8,
+        kani::any::<usize>()..
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_new_range_from_u8,
+        check_get_unchecked_mut_new_range_from_u8,
+        crate::range::RangeFrom<usize>,
+        u8,
+        crate::range::RangeFrom { start: kani::any() }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_full_u8,
+        check_get_unchecked_mut_range_full_u8,
+        crate::ops::RangeFull,
+        u8,
+        ..
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_inclusive_u8,
+        check_get_unchecked_mut_range_inclusive_u8,
+        crate::ops::RangeInclusive<usize>,
+        u8,
+        any_range_inclusive()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_new_range_inclusive_u8,
+        check_get_unchecked_mut_new_range_inclusive_u8,
+        crate::range::RangeInclusive<usize>,
+        u8,
+        crate::range::RangeInclusive { start: kani::any(), last: kani::any() }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_to_inclusive_u8,
+        check_get_unchecked_mut_range_to_inclusive_u8,
+        crate::ops::RangeToInclusive<usize>,
+        u8,
+        ..=kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_new_range_to_inclusive_u8,
+        check_get_unchecked_mut_new_range_to_inclusive_u8,
+        crate::range::RangeToInclusive<usize>,
+        u8,
+        crate::range::RangeToInclusive { last: kani::any() }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_bound_pair_u8,
+        check_get_unchecked_mut_bound_pair_u8,
+        (Bound<usize>, Bound<usize>),
+        u8,
+        (any_bound(), any_bound())
     );
 
     // ---- as_chunks_unchecked / as_chunks_unchecked_mut ----
@@ -5698,48 +5813,96 @@ mod verify {
     check_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_char_3, char, 3);
 
     // ---- get_disjoint_unchecked_mut ----
-    // Generic over the index type `I` and const `N`, with a two-part precondition:
-    // every index in bounds AND the indices pairwise disjoint. As with get_unchecked
-    // (index-type-specific, non-contractable over generic `I`), we prove no-UB at
-    // concrete `I = usize` and small `N` with the obligation set by `kani::assume`
-    // (each `idx < len`; pairwise distinct). The body loops `0..N` with concrete `N`,
-    // so the loop bound is concrete and needs no `#[kani::unwind]`.
+    // Generic over the index type `I` and const `N`, with a two-part safety
+    // precondition: every index in bounds AND the indices pairwise disjoint.
+    // `get_disjoint_check_valid` (the checker the safe `get_disjoint_mut`
+    // gates on) is exactly that predicate over the `GetDisjointMutIndex`
+    // methods, so it is the fn-level `#[requires]` contract, and these
+    // harnesses verify it per concrete `I` and `N`: element indices (`usize`)
+    // plus all four `GetDisjointMutIndex` range impls (`ops` and `core::range`
+    // flavors of `Range` and `RangeInclusive`; `RangeInclusive` inputs include
+    // iteration-exhausted values via `any_range_inclusive`). The body loops
+    // `0..N` with concrete `N`, so the loop bound is concrete and needs no
+    // `#[kani::unwind]`.
 
-    #[kani::proof]
+    #[kani::proof_for_contract(<[u8]>::get_disjoint_unchecked_mut::<usize, 2>)]
     fn check_get_disjoint_unchecked_mut_2_u8() {
         const ARR_SIZE: usize = 100;
         let mut arr: [u8; ARR_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array_mut(&mut arr);
-        let i0: usize = kani::any();
-        let i1: usize = kani::any();
-        kani::assume(i0 < slice.len() && i1 < slice.len());
-        kani::assume(i0 != i1);
-        let _ = unsafe { slice.get_disjoint_unchecked_mut([i0, i1]) };
+        let indices: [usize; 2] = kani::any();
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(<[u64]>::get_disjoint_unchecked_mut::<usize, 2>)]
     fn check_get_disjoint_unchecked_mut_2_u64() {
         const ARR_SIZE: usize = 100;
         let mut arr: [u64; ARR_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array_mut(&mut arr);
-        let i0: usize = kani::any();
-        let i1: usize = kani::any();
-        kani::assume(i0 < slice.len() && i1 < slice.len());
-        kani::assume(i0 != i1);
-        let _ = unsafe { slice.get_disjoint_unchecked_mut([i0, i1]) };
+        let indices: [usize; 2] = kani::any();
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(<[u8]>::get_disjoint_unchecked_mut::<usize, 3>)]
     fn check_get_disjoint_unchecked_mut_3_u8() {
         const ARR_SIZE: usize = 100;
         let mut arr: [u8; ARR_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array_mut(&mut arr);
-        let i0: usize = kani::any();
-        let i1: usize = kani::any();
-        let i2: usize = kani::any();
-        kani::assume(i0 < slice.len() && i1 < slice.len() && i2 < slice.len());
-        kani::assume(i0 != i1 && i0 != i2 && i1 != i2);
-        let _ = unsafe { slice.get_disjoint_unchecked_mut([i0, i1, i2]) };
+        let indices: [usize; 3] = kani::any();
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(
+        <[u8]>::get_disjoint_unchecked_mut::<crate::ops::Range<usize>, 2>
+    )]
+    fn check_get_disjoint_unchecked_mut_2_range_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices = [
+            kani::any::<usize>()..kani::any::<usize>(),
+            kani::any::<usize>()..kani::any::<usize>(),
+        ];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(
+        <[u8]>::get_disjoint_unchecked_mut::<crate::ops::RangeInclusive<usize>, 2>
+    )]
+    fn check_get_disjoint_unchecked_mut_2_range_inclusive_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices = [any_range_inclusive(), any_range_inclusive()];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(
+        <[u8]>::get_disjoint_unchecked_mut::<crate::range::Range<usize>, 2>
+    )]
+    fn check_get_disjoint_unchecked_mut_2_new_range_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices = [
+            crate::range::Range { start: kani::any(), end: kani::any() },
+            crate::range::Range { start: kani::any(), end: kani::any() },
+        ];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(
+        <[u8]>::get_disjoint_unchecked_mut::<crate::range::RangeInclusive<usize>, 2>
+    )]
+    fn check_get_disjoint_unchecked_mut_2_new_range_inclusive_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices = [
+            crate::range::RangeInclusive { start: kani::any(), last: kani::any() },
+            crate::range::RangeInclusive { start: kani::any(), last: kani::any() },
+        ];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
     }
 
     // ---- Safe chunk accessors (first/last/split_first/split_last _chunk) ----
