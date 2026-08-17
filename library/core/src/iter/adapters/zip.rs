@@ -28,7 +28,11 @@ impl<A: Iterator, B: Iterator> Zip<A, B> {
         ZipImpl::new(a, b)
     }
     fn super_nth(&mut self, mut n: usize) -> Option<(A::Item, B::Item)> {
-        #[cfg_attr(kani, kani::loop_invariant(true))]
+        // Loop-contract invariant for the TrustedRandomAccess configuration:
+        // Zip's index never exceeds its cached len. The loop's safety does not
+        // otherwise depend on the invariant: `next()` is a safe call and `n -= 1`
+        // runs only when `n != 0` (guarded by the early return).
+        #[cfg_attr(kani, kani::loop_invariant(self.index <= self.len))]
         while let Some(x) = Iterator::next(self) {
             if n == 0 {
                 return Some(x);
@@ -109,6 +113,11 @@ where
     }
 
     #[inline]
+    // Contract note: Kani's `proof_for_contract` cannot target trait-impl
+    // methods, so this `#[requires]` is not checked as a contract; it is
+    // normative documentation of the precondition. Verification happens in the
+    // `verify::check_*` harness below, which `kani::assume`s this same
+    // expression before the call. Keep the two in sync when editing either.
     #[requires(idx < self.size_hint().0)]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item
@@ -271,6 +280,9 @@ where
     }
 
     #[inline]
+    // Contract note: documentation-only (verified via the mirrored `assume` in
+    // `mod verify` — see the note on the first `#[requires]` in this file). The
+    // subtraction form avoids overflow in `self.index + idx`.
     #[requires(
         self.index <= self.a.size()
             && idx < self.a.size() - self.index
@@ -297,10 +309,10 @@ where
         // Safety of get_unchecked(i) is established by the pre-loop state:
         // len = min(a.size(), b.size()) - index, and get_unchecked adds index
         // back, so the actual index is always < both sizes.
-        // The Kani loop invariant below is intentionally vacuous (`true`) and
-        // is used only to enable loop-contract mode, not to encode these
-        // bounds or size properties directly.
-        #[cfg_attr(kani, kani::loop_invariant(true))]
+        // Loop-contract invariant: the iteration index never exceeds `len`,
+        // the bound the safety argument above relies on. `kani::index` is
+        // Kani's handle for the current iteration count of this `for` loop.
+        #[cfg_attr(kani, kani::loop_invariant(kani::index <= len))]
         for i in 0..len {
             // SAFETY: since Self: TrustedRandomAccessNoCoerce we can trust the size-hint to
             // calculate the length and then use that to do unchecked iteration.
@@ -350,7 +362,11 @@ where
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let delta = cmp::min(n, self.len - self.index);
         let end = self.index + delta;
-        #[cfg_attr(kani, kani::loop_invariant(true))]
+        // Loop-contract invariant: `self.index` (the only location this loop
+        // writes) never exceeds `end`. Combined with the loop guard this gives
+        // the bound the SAFETY comments below rely on:
+        // end = self.index + min(n, self.len - self.index) <= self.len.
+        #[cfg_attr(kani, kani::loop_invariant(self.index <= end))]
         while self.index < end {
             let i = self.index;
             // since get_unchecked executes code which can panic we increment the counters beforehand
@@ -748,8 +764,8 @@ mod verify {
     // --- Safe abstractions ---
 
     // next (TRA specialized — uses __iterator_get_unchecked internally)
-    // Single call on large array: next() makes one get_unchecked call per invocation,
-    // so a single call at arbitrary slice length suffices for unbounded verification.
+    // next() makes a single get_unchecked call per invocation with no length-dependent
+    // loop, so this harness covers the access over slices up to MAX_LEN.
     #[kani::proof]
     fn check_zip_next_u8() {
         const MAX_LEN: usize = 5000;
@@ -762,10 +778,11 @@ mod verify {
     }
 
     // nth (TRA specialized — uses __iterator_get_unchecked for side effects)
-    // Loop invariants on nth's while loop and super_nth's while-let loop
-    // enable unbounded verification. For slice::Iter, MAY_HAVE_SIDE_EFFECT
-    // is false so nth's loop body is just index increment; super_nth runs
-    // at most once when called from nth.
+    // nth's while loop and super_nth's while-let loop carry vacuous Kani loop
+    // invariants to enable loop-contract mode; this harness covers slices up to
+    // MAX_LEN. For slice::Iter, MAY_HAVE_SIDE_EFFECT is false, so nth's loop body
+    // is just an index increment and super_nth runs at most once when called from
+    // nth (its next()-driven loop does not iterate in this configuration).
     #[kani::proof]
     fn check_zip_nth_u8() {
         const MAX_LEN: usize = 5000;
@@ -792,7 +809,8 @@ mod verify {
     }
 
     // fold (TRANC specialized — uses get_unchecked in a loop)
-    // Loop invariant on source code enables unbounded verification.
+    // The source-level loop invariant abstracts the get_unchecked loop; this
+    // harness covers slices up to MAX_LEN.
     #[kani::proof]
     fn check_zip_fold_u8() {
         const MAX_LEN: usize = 5000;

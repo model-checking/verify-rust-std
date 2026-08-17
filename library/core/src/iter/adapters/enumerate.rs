@@ -164,6 +164,11 @@ where
 
     #[rustc_inherit_overflow_checks]
     #[inline]
+    // Contract note: Kani's `proof_for_contract` cannot target trait-impl
+    // methods, so this `#[requires]` is not checked as a contract; it is
+    // normative documentation of the precondition. Verification happens in the
+    // `verify::check_*` harness below, which `kani::assume`s this same
+    // expression before the call. Keep the two in sync when editing either.
     #[requires(idx < self.iter.size_hint().0)]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item

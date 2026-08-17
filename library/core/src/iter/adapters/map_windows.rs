@@ -317,12 +317,10 @@ mod verify {
     // and drop (via Drop for Buffer when MapWindows is dropped).
     // Two calls suffice: first next() initializes the buffer (N pushes),
     // second next() exercises the ring buffer wrap in push. The unsafe
-    // operations per call are bounded by N (constant), not slice length,
-    // so this is unbounded over arbitrary slice lengths.
-    // Bounded: MapWindows uses MaybeUninit ring buffer with raw pointer ops
-    // that exceed CBMC's symbolic capacity at very large scales. The unsafe
-    // operations are bounded by N (constant), not slice length. Slice length
-    // is still symbolic within the array.
+    // operations per call are bounded by N (constant), not slice length.
+    // The harness itself is bounded: MapWindows's MaybeUninit ring buffer with
+    // raw pointer ops exceeds CBMC's symbolic capacity at large scales, so the
+    // slice length is symbolic only within the fixed-size array.
     #[kani::proof]
     fn check_map_windows_n2_u8() {
         const MAX_LEN: usize = 5000;

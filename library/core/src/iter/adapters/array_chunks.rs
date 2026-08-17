@@ -321,10 +321,11 @@ mod verify {
         Iterator::fold(chunks, (), |(), _| ());
     }
 
-    // Note: n2_unit, n3_u8, and n2_char fold harnesses removed — the
-    // source-code loop invariant (#[kani::loop_invariant(i <= inner_len)])
-    // enables unbounded verification for n2_u8 but from_fn's internal
-    // MaybeUninit loop conflicts with the outer loop contract for other
-    // types and chunk sizes. The loop safety logic (i + local < inner_len)
-    // is identical for all N and T, so n2_u8 suffices.
+    // Note: only the N=2 u8 fold harness is kept, and it is bounded (unwind 9).
+    // The TRANC fold path's `from_fn` MaybeUninit loop conflicts with
+    // loop-contract mode for other element types and chunk sizes, so no
+    // source-level loop invariant is applied here — the safety argument above
+    // stands in its place. The loop safety logic (i + local < inner_len) is
+    // identical for all N and T, so this single bounded harness suffices to
+    // exercise it.
 }

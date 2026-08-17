@@ -1,3 +1,5 @@
+use safety::ensures;
+
 use crate::intrinsics;
 use crate::iter::{TrustedLen, TrustedRandomAccess, from_fn};
 #[cfg(kani)]
@@ -50,6 +52,10 @@ impl<I> StepBy<I> {
     /// The `step` that was originally passed to `Iterator::step_by(step)`,
     /// aka `self.step_minus_one + 1`.
     #[inline]
+    // Postcondition: the recovered step is `step_minus_one + 1` (subtraction form keeps
+    // the contract overflow-safe). No `#[requires]`: `original_step` is a safe fn whose
+    // internal `unsafe` rests on the StepBy type invariant, not a caller obligation.
+    #[ensures(|result| result.get() - 1 == old(self).step_minus_one)]
     fn original_step(&self) -> NonZero<usize> {
         // SAFETY: By type invariant, `step_minus_one` cannot be `MAX`, which
         // means the addition cannot overflow and the result cannot be zero.
@@ -648,5 +654,18 @@ mod verify {
         kani::assume(step >= 1);
         let sb = StepBy::new(slice.iter(), step);
         let _ = sb.size_hint();
+    }
+
+    // Direct contract proof for `original_step`. This is the one inherent method in the
+    // challenge, so (unlike the trait-impl `get_unchecked`/`next_unchecked` methods) a
+    // `#[kani::proof_for_contract]` can resolve it. The receiver is havoced over the StepBy
+    // type invariant (`step_minus_one < usize::MAX`, i.e. `is_safe()`), under which the
+    // internal `unchecked_add` + `new_unchecked` are UB-free; the `#[ensures]` pins the
+    // recovered value to `step_minus_one + 1`.
+    #[kani::proof_for_contract(StepBy::<Range<u8>>::original_step)]
+    fn check_step_by_original_step_contract() {
+        let sb = StepBy { iter: 0u8..0u8, step_minus_one: kani::any(), first_take: kani::any() };
+        kani::assume(sb.step_minus_one < usize::MAX);
+        let _ = sb.original_step();
     }
 }

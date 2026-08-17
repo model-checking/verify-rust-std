@@ -301,11 +301,13 @@ impl<I: Iterator + TrustedRandomAccess> SpecTake for Take<I> {
     {
         let mut acc = init;
         let end = self.n.min(self.iter.size());
-        // __iterator_get_unchecked is a read-only operation for TrustedRandomAccess
-        // iterators, so iter.size() is preserved across iterations.
-        // The Kani loop invariant below is intentionally vacuous (`true`) and
-        // is used only to enable loop-contract mode.
-        #[cfg_attr(kani, kani::loop_invariant(true))]
+        // Loop-contract invariant: the iteration index never exceeds `end`,
+        // which is the bound the SAFETY comment below relies on
+        // (`end <= self.iter.size()`, and `__iterator_get_unchecked` is
+        // read-only for TrustedRandomAccess iterators, so `size()` is
+        // preserved across iterations). `kani::index` is Kani's handle for
+        // the current iteration count of the `for` loop that follows.
+        #[cfg_attr(kani, kani::loop_invariant(kani::index <= end))]
         for i in 0..end {
             // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end
             let val = unsafe { self.iter.__iterator_get_unchecked(i) };
@@ -317,7 +319,13 @@ impl<I: Iterator + TrustedRandomAccess> SpecTake for Take<I> {
     #[inline]
     fn spec_for_each<F: FnMut(Self::Item)>(mut self, mut f: F) {
         let end = self.n.min(self.iter.size());
-        #[cfg_attr(kani, kani::loop_invariant(true))]
+        // Loop-contract invariant: the iteration index never exceeds `end`,
+        // which is the bound the SAFETY comment below relies on
+        // (`end <= self.iter.size()`, and `__iterator_get_unchecked` is
+        // read-only for TrustedRandomAccess iterators, so `size()` is
+        // preserved across iterations). `kani::index` is Kani's handle for
+        // the current iteration count of the `for` loop that follows.
+        #[cfg_attr(kani, kani::loop_invariant(kani::index <= end))]
         for i in 0..end {
             // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end
             let val = unsafe { self.iter.__iterator_get_unchecked(i) };
@@ -389,8 +397,8 @@ mod verify {
     use super::*;
 
     // spec_fold (TRA specialized — uses __iterator_get_unchecked in a loop)
-    // Loop invariant on source code enables unbounded verification via
-    // loop contracts instead of finite unrolling.
+    // The source-level loop invariant abstracts the get_unchecked loop via loop
+    // contracts instead of finite unrolling; this harness covers slices up to MAX_LEN.
     #[kani::proof]
     fn check_take_spec_fold_u8() {
         const MAX_LEN: usize = 5000;
@@ -399,7 +407,7 @@ mod verify {
         let n: usize = kani::any();
         let take = Take::new(slice.iter(), n);
         // Exercises TRA spec_fold path — proves absence of UB in
-        // __iterator_get_unchecked loop for arbitrary slice length and take count.
+        // __iterator_get_unchecked loop over slices up to MAX_LEN with arbitrary take count.
         take.fold((), |(), _| ());
     }
 
