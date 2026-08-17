@@ -2813,6 +2813,8 @@ mod verify {
     }
 
     // Use for NonZero what already worked well for general numeric types (see num/mod.rs)
+    // (Same bounded-allowance note as the checked/saturating windows below: safety is
+    // value-uniform; the windows bound only the functional check.)
     macro_rules! check_mul_unchecked_intervals {
         ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident, $min:expr, $max:expr) => {
             #[kani::proof_for_contract(NonZero::<$t>::unchecked_mul)]
@@ -4122,6 +4124,13 @@ mod verify {
         nonzero_check_saturating_mul_u16
     );
 
+    // Bounded windows (intentional, per Challenge 12's bounded allowance): the functional
+    // equality in the `#[ensures]` is checked on these windows only. The SAFETY obligation
+    // is value-uniform and holds for all inputs: the wrapper is
+    // `if let Some(v) = primitive_checked_op { new_unchecked(v) }`, and nonzero * nonzero
+    // (or nonzero + nonzero for the add family) cannot produce `Some(0)`, so `new_unchecked`'s
+    // precondition is met independently of the operand values. Widening the windows is a
+    // completeness improvement, not a soundness need.
     macro_rules! nonzero_check_binary_bounded {
         ($t:ty, $nz:ty, $m:ident, $h:ident, $min:expr, $max:expr) => {
             #[kani::proof_for_contract(NonZero::<$t>::$m)]
@@ -4611,6 +4620,10 @@ mod verify {
     // bound the input to keep candidates small. (Challenge 12 is bounded-OK.)
     nonzero_check_unary_contract!(u8, core::num::NonZeroU8, isqrt, nonzero_check_isqrt_u8);
     nonzero_check_unary_contract!(u16, core::num::NonZeroU16, isqrt, nonzero_check_isqrt_u16);
+    // Bounded window (intentional, per Challenge 12's bounded allowance): `isqrt` is total,
+    // so the window truncates only the functional-equality check, not safety. Safety is
+    // value-uniform: for any nonzero input the integer square root is >= 1, so the
+    // `new_unchecked` in the wrapper cannot receive 0.
     macro_rules! nonzero_check_unary_bounded {
         ($t:ty, $nz:ty, $m:ident, $h:ident, $max:expr) => {
             #[kani::proof_for_contract(NonZero::<$t>::$m)]
@@ -4742,12 +4755,42 @@ mod verify {
     nonzero_check_bitor_prim_nz!(usize, core::num::NonZeroUsize, nonzero_check_bitor_primnz_usize);
 
     // Neg for NonZero -- signed only; value harness (MIN excluded) + MIN panic harness.
-    nonzero_check_neg!(i8, core::num::NonZeroI8, nonzero_check_neg_i8, nonzero_check_neg_min_panics_i8);
-    nonzero_check_neg!(i16, core::num::NonZeroI16, nonzero_check_neg_i16, nonzero_check_neg_min_panics_i16);
-    nonzero_check_neg!(i32, core::num::NonZeroI32, nonzero_check_neg_i32, nonzero_check_neg_min_panics_i32);
-    nonzero_check_neg!(i64, core::num::NonZeroI64, nonzero_check_neg_i64, nonzero_check_neg_min_panics_i64);
-    nonzero_check_neg!(i128, core::num::NonZeroI128, nonzero_check_neg_i128, nonzero_check_neg_min_panics_i128);
-    nonzero_check_neg!(isize, core::num::NonZeroIsize, nonzero_check_neg_isize, nonzero_check_neg_min_panics_isize);
+    nonzero_check_neg!(
+        i8,
+        core::num::NonZeroI8,
+        nonzero_check_neg_i8,
+        nonzero_check_neg_min_panics_i8
+    );
+    nonzero_check_neg!(
+        i16,
+        core::num::NonZeroI16,
+        nonzero_check_neg_i16,
+        nonzero_check_neg_min_panics_i16
+    );
+    nonzero_check_neg!(
+        i32,
+        core::num::NonZeroI32,
+        nonzero_check_neg_i32,
+        nonzero_check_neg_min_panics_i32
+    );
+    nonzero_check_neg!(
+        i64,
+        core::num::NonZeroI64,
+        nonzero_check_neg_i64,
+        nonzero_check_neg_min_panics_i64
+    );
+    nonzero_check_neg!(
+        i128,
+        core::num::NonZeroI128,
+        nonzero_check_neg_i128,
+        nonzero_check_neg_min_panics_i128
+    );
+    nonzero_check_neg!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_neg_isize,
+        nonzero_check_neg_min_panics_isize
+    );
 
     // --- Task 5: pow (checked_pow, saturating_pow) -- all 12, SAFETY level. Part 2 requires
     //     safety (the unsafe `new_unchecked` is sound because the result is nonzero), not value
