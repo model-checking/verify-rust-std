@@ -4663,13 +4663,23 @@ mod verify {
         };
     }
     macro_rules! nonzero_check_neg {
-        ($t:ty, $nz:ty, $h:ident) => {
+        ($t:ty, $nz:ty, $h:ident, $h_panic:ident) => {
             #[kani::proof]
             pub fn $h() {
                 let x: $nz = kani::any();
                 kani::assume(x.get() != <$t>::MIN);
                 assert!((-x).get() == -(x.get()));
                 assert!((-x).get() != 0);
+            }
+
+            // At MIN the primitive negation overflows and panics; mirror the
+            // `nonzero_check_abs` pattern so the MIN input is covered too.
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $h_panic() {
+                let x: $nz = kani::any();
+                kani::assume(x.get() == <$t>::MIN);
+                let _ = -x;
             }
         };
     }
@@ -4716,13 +4726,13 @@ mod verify {
     nonzero_check_bitor_prim_nz!(u128, core::num::NonZeroU128, nonzero_check_bitor_primnz_u128);
     nonzero_check_bitor_prim_nz!(usize, core::num::NonZeroUsize, nonzero_check_bitor_primnz_usize);
 
-    // Neg for NonZero -- signed only
-    nonzero_check_neg!(i8, core::num::NonZeroI8, nonzero_check_neg_i8);
-    nonzero_check_neg!(i16, core::num::NonZeroI16, nonzero_check_neg_i16);
-    nonzero_check_neg!(i32, core::num::NonZeroI32, nonzero_check_neg_i32);
-    nonzero_check_neg!(i64, core::num::NonZeroI64, nonzero_check_neg_i64);
-    nonzero_check_neg!(i128, core::num::NonZeroI128, nonzero_check_neg_i128);
-    nonzero_check_neg!(isize, core::num::NonZeroIsize, nonzero_check_neg_isize);
+    // Neg for NonZero -- signed only; value harness (MIN excluded) + MIN panic harness.
+    nonzero_check_neg!(i8, core::num::NonZeroI8, nonzero_check_neg_i8, nonzero_check_neg_min_panics_i8);
+    nonzero_check_neg!(i16, core::num::NonZeroI16, nonzero_check_neg_i16, nonzero_check_neg_min_panics_i16);
+    nonzero_check_neg!(i32, core::num::NonZeroI32, nonzero_check_neg_i32, nonzero_check_neg_min_panics_i32);
+    nonzero_check_neg!(i64, core::num::NonZeroI64, nonzero_check_neg_i64, nonzero_check_neg_min_panics_i64);
+    nonzero_check_neg!(i128, core::num::NonZeroI128, nonzero_check_neg_i128, nonzero_check_neg_min_panics_i128);
+    nonzero_check_neg!(isize, core::num::NonZeroIsize, nonzero_check_neg_isize, nonzero_check_neg_min_panics_isize);
 
     // --- Task 5: pow (checked_pow, saturating_pow) -- all 12, SAFETY level. Part 2 requires
     //     safety (the unsafe `new_unchecked` is sound because the result is nonzero), not value
