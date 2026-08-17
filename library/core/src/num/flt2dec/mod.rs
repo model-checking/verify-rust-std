@@ -673,12 +673,25 @@ pub mod flt2dec_verify {
     use super::*;
     use crate::kani;
 
-    // A small fixed digit-buffer length keeps the proofs tractable.  The
-    // `assume_init` safety obligations in these functions depend only on control
-    // flow driven by `buf.len()`, `exp`, and the digit-count arguments; every
-    // branch (and therefore every distinct set of initialized `parts`) is still
-    // reachable at this length, so a fixed length loses no path coverage.
+    // Upper bound on the (symbolic) digit-buffer length used by the proofs of
+    // `digits_to_dec_str` / `digits_to_exp_str`.  Their `assume_init` safety
+    // obligations depend only on control flow driven by `buf.len()`, `exp`, and
+    // the digit-count arguments, and every length-dependent branch is a
+    // comparison against a small value (`buf.len() == 1` in `digits_to_exp_str`,
+    // `exp < buf.len()` and `frac_digits > buf.len() - exp` in
+    // `digits_to_dec_str`), so a symbolic length in `1..=4` reaches every branch
+    // and therefore every distinct set of initialized `parts`; a longer buffer
+    // only adds digits to a `Part::Copy` slice.
     const PROOF_BUFLEN: usize = 4;
+
+    // A digit buffer of symbolic length `1..=PROOF_BUFLEN` whose first digit is
+    // nonzero, as the callees require.
+    fn any_digits(buf: &[u8; PROOF_BUFLEN]) -> &[u8] {
+        kani::assume(buf[0] > b'0');
+        let n: usize = kani::any();
+        kani::assume(n >= 1 && n <= PROOF_BUFLEN);
+        &buf[..n]
+    }
 
     // `digits_to_dec_str` writes 2, 3, or 4 `parts` depending on `exp` and
     // `frac_digits`, then `assume_init_ref`s exactly the prefix it wrote.  Kani
@@ -686,24 +699,23 @@ pub mod flt2dec_verify {
     #[kani::proof]
     fn check_digits_to_dec_str() {
         let buf: [u8; PROOF_BUFLEN] = kani::any();
-        kani::assume(buf[0] > b'0');
         let exp: i16 = kani::any();
         let frac_digits: usize = kani::any();
         let mut parts: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
-        let _ = digits_to_dec_str(&buf, exp, frac_digits, &mut parts);
+        let _ = digits_to_dec_str(any_digits(&buf), exp, frac_digits, &mut parts);
     }
 
     // `digits_to_exp_str` writes a variable prefix of up to 6 `parts` and
-    // `assume_init_ref`s `parts[..n + 2]` for the `n` it actually wrote.
+    // `assume_init_ref`s `parts[..n + 2]` for the `n` it actually wrote; the
+    // `buf.len() == 1` case takes its own (3-part) path.
     #[kani::proof]
     fn check_digits_to_exp_str() {
         let buf: [u8; PROOF_BUFLEN] = kani::any();
-        kani::assume(buf[0] > b'0');
         let exp: i16 = kani::any();
         let min_ndigits: usize = kani::any();
         let upper: bool = kani::any();
         let mut parts: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
-        let _ = digits_to_exp_str(&buf, exp, min_ndigits, upper, &mut parts);
+        let _ = digits_to_exp_str(any_digits(&buf), exp, min_ndigits, upper, &mut parts);
     }
 
     // An arbitrary sign-formatting option.

@@ -5,8 +5,6 @@
 //! [^1]: Florian Loitsch. 2010. Printing floating-point numbers quickly and
 //!   accurately with integers. SIGPLAN Not. 45, 6 (June 2010), 233-243.
 
-#[cfg(kani)]
-use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::num::diy_float::Fp;
 use crate::num::flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
@@ -203,20 +201,6 @@ pub fn format_shortest_opt<'a>(
     let v = v.mul(cached);
     debug_assert_eq!(plus.e, minus.e);
     debug_assert_eq!(plus.e, v.e);
-    // VERIFICATION (Kani, compiles out otherwise): the real `Fp::mul` (replaced by
-    // a cost-reducing havoc stub during verification) produces a scaled triple
-    // satisfying the algorithm's documented invariants: the ordering
-    // `minus <= v <= plus` (the safe/unsafe-region picture below) and the
-    // normalized-mantissa bound `2^62 <= f < 2^64 - 2^4` (comments above + line
-    // ~234).  Every real f64 input yields such a triple, so assuming them re-
-    // establishes for the stub exactly what the real multiply guarantees.
-    #[cfg(kani)]
-    {
-        crate::kani::assume(plus.f >= (1u64 << 62) && plus.f <= u64::MAX - 16);
-        crate::kani::assume(minus.f >= (1u64 << 62) && minus.f <= plus.f);
-        crate::kani::assume(v.f >= minus.f && v.f <= plus.f);
-        crate::kani::assume(plus.e == minus.e && plus.e == v.e);
-    }
 
     //         +- actual range of minus
     //   | <---|---------------------- unsafe region --------------------------> |
@@ -271,11 +255,6 @@ pub fn format_shortest_opt<'a>(
     // render integral parts, while checking for the accuracy at each step.
     let mut ten_kappa = max_ten_kappa; // 10^kappa
     let mut remainder = plus1int; // digits yet to be rendered
-    // The loop breaks at `i > max_kappa`, and `max_pow10_no_more_than` bounds
-    // `max_kappa <= 9`, so `i` stays within the `>= MAX_SIG_DIGITS` buffer.
-    // (loop-contract abstraction removed for Kani: it havocs ten_kappa/remainder
-    // without their relationship; CBMC instead UNROLLS this concretely-bounded
-    // loop -- it runs <= max_kappa+1 <= 10 times via the `if i > max_kappa break`.)
     loop {
         // we always have at least one digit to render, as `plus1 >= 10^kappa`
         // invariants:
@@ -323,27 +302,7 @@ pub fn format_shortest_opt<'a>(
     let mut remainder = plus1frac;
     let mut threshold = delta1frac;
     let mut ulp = 1;
-    // Best-effort buffer-index bound.  Proving this inductively in general needs
-    // the Grisu digit-count theorem (<= MAX_SIG_DIGITS significant digits); this
-    // attempt measures how far a plain index bound gets under Kani.
-    // (loop-contract abstraction removed for Kani: CBMC UNROLLS this loop; the
-    // in-body digit-count assume below bounds the index, and the real
-    // remainder/threshold/ulp values flow through iterations un-havoced.)
     loop {
-        // VERIFICATION (Kani, compiles out otherwise): the Grisu/Loitsch
-        // digit-count theorem (Loitsch, PLDI'10; Errol, POPL'16 Thm 5) states a
-        // 53-bit-precision f64 has a shortest decimal of at most
-        // `ceil(53*log10 2) + 1 = 17 = MAX_SIG_DIGITS` significant digits.  Every
-        // `Decoded` reaching this function comes from `decode()` on a real f64
-        // (the only caller is `format_shortest`), so the running digit index `i`
-        // never reaches 17.  This bounds the DIGIT COUNT, an input-precision
-        // property; buffer safety `i < buf.len()` then follows from the separate
-        // `assert!(buf.len() >= MAX_SIG_DIGITS)` above -- it does NOT assume the
-        // buffer length.  CBMC cannot derive this number-theoretic loop-
-        // termination fact from the unwound `u64` arithmetic, so it is cited.
-        #[cfg(kani)]
-        crate::kani::assume(i < MAX_SIG_DIGITS);
-
         // the next digit should be significant as we've tested that before breaking out
         // invariants, where `m = max_kappa + 1` (# of digits in the integral part):
         // - `remainder < 2^e`
@@ -822,6 +781,22 @@ pub mod grisu_verify {
     use super::*;
     use crate::kani;
 
+    // Scope of the proofs in this module.  `format_exact_opt` is called
+    // directly, unstubbed, against a 1-byte buffer: `len` is then concrete, so
+    // CBMC prunes the unreachable digit iterations and the proof closes in
+    // seconds.  With a symbolic `len` (any longer buffer) the unrolled digit
+    // loops keep every `possibly_round` instance live and the formula exceeds
+    // the 2^12 addressed objects the repository runs CBMC with
+    // (`--object-bits 12`); `format_shortest_opt`, whose digit loops are bounded
+    // only by the arithmetic (up to 17 digits, unwind 20), produces a program of
+    // ~4.7M SSA steps and ~120k verification conditions whose bit-blasting runs
+    // out of memory, and the value-dependent `debug_assert!`s of its weeding
+    // step (`round_and_weed`, a nested function that cannot be stubbed) turn the
+    // proof into a numerical-correctness obligation over the 64x64-bit `Fp`
+    // products.  Those two functions are therefore covered here through the
+    // wrapper proofs below (both callees modelled as opaque), and a direct proof
+    // needs loop contracts on the digit loops.
+    //
     // An arbitrary `Decoded` satisfying every precondition the `grisu` entry
     // points assert.  `mant + plus < 2^61` (and the `checked_add`/`checked_sub`
     // assumptions) keep the scaled `Fp` arithmetic inside `u64`.
@@ -836,8 +811,39 @@ pub mod grisu_verify {
         kani::assume(mant.checked_sub(minus).is_some());
         kani::assume(mant + plus < (1 << 61));
         let exp: i16 = kani::any();
-        kani::assume(exp >= -1076 && exp <= 971);
+        // `[-1076, 970]` is the exponent range of `decode()`; 971 is unreachable.
+        kani::assume(exp >= -1076 && exp <= 970);
         Decoded { mant, minus, plus, exp, inclusive: kani::any() }
+    }
+
+    // An arbitrary input for the exact-mode proofs: the full documented
+    // precondition of `format_exact_opt` (`0 < mant < 2^61`), with `exp`
+    // bounded to the decoder image so `cached_power` stays in its table domain.
+    fn arbitrary_decoded_exact() -> Decoded {
+        let mant: u64 = kani::any();
+        kani::assume(mant > 0 && mant < (1 << 61));
+        let exp: i16 = kani::any();
+        kani::assume(exp >= -1076 && exp <= 970);
+        Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
+    }
+
+    // Direct proof of `format_exact_opt`: NO stubs, NO in-body assumes, over the
+    // function's full documented precondition, an arbitrary `limit`, and a
+    // 1-byte buffer.  Every buffer access in `format_exact_opt` is bounded
+    // structurally (`len` is clamped to `buf.len()` on every path, each digit
+    // write is gated by an `i == len` return, and `possibly_round`'s carry write
+    // is guarded by `len < buf.len()`); this proof exercises the `len` clamp,
+    // the `exp <= limit` early path (`possibly_round` with `len == 0`), the
+    // first digit of both the integral and the fractional loop, and the real
+    // `cached_power` / `Fp::mul` / `possibly_round` arithmetic, so the
+    // value-dependent `debug_assert!`s are discharged from the real values.
+    #[kani::proof]
+    #[kani::unwind(20)]
+    fn check_format_exact_opt_buf1() {
+        let d = arbitrary_decoded_exact();
+        let limit: i16 = kani::any();
+        let mut buf: [MaybeUninit<u8>; 1] = [const { MaybeUninit::uninit() }; 1];
+        let _ = format_exact_opt(&d, &mut buf, limit);
     }
 
     // Wholesale havoc stub for the dragon fallback (modelled as an opaque op that
@@ -871,6 +877,10 @@ pub mod grisu_verify {
             // SAFETY: we just initialized element 0.
             Some((unsafe { buf[..1].assume_init_ref() }, kani::any()))
         } else {
+            // The real function writes digits before it gives up; model that
+            // dirtying so the wrapper's reuse of `buf` on the `None` path is
+            // exercised against a modified buffer.
+            buf[0] = MaybeUninit::new(kani::any());
             None
         }
     }
@@ -879,11 +889,7 @@ pub mod grisu_verify {
     #[kani::stub(format_exact_opt, stub_format_exact_opt)]
     #[kani::stub(crate::num::flt2dec::strategy::dragon::format_exact, stub_dragon_format_exact)]
     fn check_format_exact() {
-        let mant: u64 = kani::any();
-        kani::assume(mant > 0 && mant < (1 << 61));
-        let exp: i16 = kani::any();
-        kani::assume(exp >= -1076 && exp <= 971);
-        let d = Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() };
+        let d = arbitrary_decoded_exact();
         let limit: i16 = kani::any();
         let mut buf: [MaybeUninit<u8>; 4] = [const { MaybeUninit::uninit() }; 4];
         let _ = format_exact(&d, &mut buf, limit);
@@ -912,6 +918,10 @@ pub mod grisu_verify {
             // SAFETY: we just initialized element 0.
             Some((unsafe { buf[..1].assume_init_ref() }, kani::any()))
         } else {
+            // The real function writes digits before it gives up; model that
+            // dirtying so the wrapper's reuse of `buf` on the `None` path is
+            // exercised against a modified buffer.
+            buf[0] = MaybeUninit::new(kani::any());
             None
         }
     }

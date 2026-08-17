@@ -108,24 +108,6 @@ macro_rules! define_bignum {
                 $name { size: sz, base }
             }
 
-            /// A nondeterministic but structurally valid bignum, for use as a
-            /// sound over-approximating stub of the expensive arithmetic methods
-            /// during Kani verification.  Upholds the representation invariant
-            /// (`size in [1, n]`, `base[size..] == 0`) so callers that read the
-            /// digits never observe an inconsistent state.
-            #[cfg(kani)]
-            pub fn kani_any() -> $name {
-                let size: usize = crate::kani::any();
-                crate::kani::assume(size >= 1 && size <= $n);
-                let mut base = [0; $n];
-                let mut i = 0;
-                while i < size {
-                    base[i] = crate::kani::any();
-                    i += 1;
-                }
-                $name { size, base }
-            }
-
             /// Returns the internal digits as a slice `[a, b, c, ...]` such that the numeric
             /// value is `a + b * 2^W + c * 2^(2W) + ...` where `W` is the number of bits in
             /// the digit type.
