@@ -334,4 +334,27 @@ mod verify {
     check_get_unchecked!(check_skip_get_unchecked_u8, u8, u32::MAX as usize);
     check_get_unchecked!(check_skip_get_unchecked_char, char, 50);
     check_get_unchecked!(check_skip_get_unchecked_tup, (char, u8), 50);
+
+    fn bump(x: &u8) -> u8 {
+        x.wrapping_add(1)
+    }
+
+    // `Map<slice::Iter, fn>` has `MAY_HAVE_SIDE_EFFECT = true` (map.rs pins
+    // the constant to `true` for every `Map`), so `__iterator_get_unchecked`
+    // compiles in the `idx == 0` prefix-dropping branch that the plain
+    // `slice::Iter` harnesses compile out.  `idx` stays symbolic, so the
+    // proof covers the branch both taken (`idx == 0`, dropping the `self.n`
+    // skipped items) and not taken.  The prefix loop runs `self.n` times, so
+    // this harness is bounded by `MAX_LEN`.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_skip_get_unchecked_side_effect() {
+        const MAX_LEN: usize = 5;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = any_slice(&array);
+        let n = kani::any_where(|offset: &usize| *offset <= slice.len());
+        let mut it = Skip::new(slice.iter().map(bump as fn(&u8) -> u8), n);
+        let idx = kani::any_where(|i: &usize| *i < it.iter.size_hint().0 - it.n);
+        let _ = unsafe { it.__iterator_get_unchecked(idx) };
+    }
 }

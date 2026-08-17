@@ -366,4 +366,27 @@ mod verify {
     check_buffer!(verify_map_windows_u8, u8, 3);
     check_buffer!(verify_map_windows_char, char, 2);
     check_buffer!(verify_map_windows_tup, (char, u8), 2);
+
+    // A drop-requiring element type: `needs_drop::<DropToken>()` is true, so
+    // `push`'s `drop_in_place` and the `Buffer` `Drop` impl execute real drop
+    // glue instead of compiling to no-ops, and the destructor reads the
+    // payload, so the dropped element must be an in-bounds, live slot.  Kani
+    // models a panic as a verification failure and has no unwinding, so the
+    // panic-during-drop path itself is not expressible in a passing harness;
+    // the coverage this type adds is the non-trivial drop-glue code path.
+    struct DropToken(u8);
+
+    impl Drop for DropToken {
+        fn drop(&mut self) {
+            let _ = crate::hint::black_box(self.0);
+        }
+    }
+
+    impl kani::Arbitrary for DropToken {
+        fn any() -> Self {
+            DropToken(kani::any())
+        }
+    }
+
+    check_buffer!(verify_map_windows_drop, DropToken, 2);
 }

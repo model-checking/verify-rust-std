@@ -323,12 +323,15 @@ mod verify {
     // `array_assume_init`s the full array or returns a `0..len` `IntoIter`; this
     // proves the `copy_nonoverlapping` lengths and the init range stay in bounds.
     // `N` is a trait generic, so it is pinned via the result type annotation.
+    // The `MAX_LEN` menu mirrors `check_get_unchecked` above: the `u8`/ZST
+    // harnesses raise the bound very high (there is no per-iteration loop, only
+    // a bulk copy, so the cost stays flat), the wider types use a moderate one.
     macro_rules! check_spec_next_chunk {
-        ($harness:ident, $elem_ty:ty, $n:expr) => {
+        ($harness:ident, $elem_ty:ty, $n:expr, $max_len:expr) => {
             #[kani::proof]
             fn $harness() {
                 const N: usize = $n;
-                const MAX_LEN: usize = 16;
+                const MAX_LEN: usize = $max_len;
                 let array: [$elem_ty; MAX_LEN] = kani::any();
                 let mut it = any_slice(&array).iter();
                 let _result: Result<[$elem_ty; N], crate::array::IntoIter<$elem_ty, N>> =
@@ -336,8 +339,8 @@ mod verify {
             }
         };
     }
-    check_spec_next_chunk!(check_copied_spec_next_chunk_unit, (), 2);
-    check_spec_next_chunk!(check_copied_spec_next_chunk_u8, u8, 3);
-    check_spec_next_chunk!(check_copied_spec_next_chunk_char, char, 2);
-    check_spec_next_chunk!(check_copied_spec_next_chunk_tup, (char, u8), 2);
+    check_spec_next_chunk!(check_copied_spec_next_chunk_unit, (), 2, isize::MAX as usize);
+    check_spec_next_chunk!(check_copied_spec_next_chunk_u8, u8, 3, u32::MAX as usize);
+    check_spec_next_chunk!(check_copied_spec_next_chunk_char, char, 2, 50);
+    check_spec_next_chunk!(check_copied_spec_next_chunk_tup, (char, u8), 2, 50);
 }

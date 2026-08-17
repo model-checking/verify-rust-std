@@ -331,10 +331,12 @@ mod verify {
     use crate::kani;
 
     /// An arbitrary-length sub-slice of `orig_slice` (mirrors
-    /// `slice::iter::verify::any_slice`).  This is what makes the proof
-    /// *unbounded*: the backing array is a fixed Kani constant, but the slice
-    /// handed to the iterator has a symbolic length, so the proof covers every
-    /// shorter configuration at once.
+    /// `slice::iter::verify::any_slice`).  The slice handed to the iterator
+    /// has a symbolic length in `0..=MAX_LEN`, so one proof covers every
+    /// length up to the backing array's size at once.  The proof is still
+    /// bounded by `MAX_LEN`: the `u8`/ZST harnesses raise `MAX_LEN` to
+    /// `u32::MAX`/`isize::MAX`, far beyond practical slice lengths, while the
+    /// wider element types use smaller bounds.
     fn any_slice<T>(orig_slice: &[T]) -> &[T] {
         if kani::any() {
             let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
@@ -355,9 +357,10 @@ mod verify {
         Enumerate::new(any_slice(orig_slice).iter())
     }
 
-    /// One `proof_for_contract` harness per concrete element type; the contract
-    /// itself stays generic.  `slice::Iter<T>` is `TrustedRandomAccessNoCoerce`
-    /// for every `T`, satisfying the method's `Self: TrustedRandomAccessNoCoerce`.
+    /// One plain `#[kani::proof]` harness per concrete element type (the NOTE
+    /// below explains why this is not `proof_for_contract`).  `slice::Iter<T>`
+    /// is `TrustedRandomAccessNoCoerce` for every `T`, satisfying the method's
+    /// `Self: TrustedRandomAccessNoCoerce` bound.
     // NOTE: `__iterator_get_unchecked` is a trait method on the *generic* impl
     // `impl<I> Iterator for Enumerate<I>`, and Kani cannot attach a
     // `proof_for_contract` to a generic trait method (kani#1997).  So instead of

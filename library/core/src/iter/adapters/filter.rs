@@ -244,13 +244,31 @@ mod verify {
     // `MaybeUninit<[_; N]>` and bumps `initialized` only for kept elements,
     // breaking once `initialized == N`; this proves the `get_unchecked_mut(idx)`
     // writes and the final `array_assume_init` / `IntoIter` range stay in bounds.
+    //
+    // Boundedness: the chunk fill iterates through the generic default
+    // `Iterator::try_fold` (a while-let loop that calls a generic closure in
+    // iterator.rs), so this adapter cannot attach a loop contract to it. A
+    // fixed `MAX_LEN` is still a complete state-space cover, not a truncation:
+    // every reachable value of `initialized` is in 0..=N for every slice
+    // length, so any `MAX_LEN >= N + 2` exercises every reachable
+    // configuration (empty source, saturation before exhaustion, and
+    // exhaustion before saturation).
+    //
+    // N = 0 is excluded on purpose. The current upstream implementation has a
+    // latent N = 0 defect: the closure writes through
+    // `array.get_unchecked_mut(idx)` before it compares `initialized < N`, so
+    // `next_chunk::<0>()` on a source that yields at least one element writes
+    // out of bounds into the zero-length array. Repo rules
+    // (doc/src/general-rules.md) do not permit a local change to the runtime
+    // logic, so the fix must land upstream. An upstream report is prepared.
+    // These harnesses cover N >= 1.
     macro_rules! check_next_chunk_dropless {
-        ($harness:ident, $elem_ty:ty) => {
+        ($harness:ident, $elem_ty:ty, $n:expr) => {
             #[kani::proof]
             #[kani::unwind(7)]
             fn $harness() {
                 const MAX_LEN: usize = 6;
-                const N: usize = 4;
+                const N: usize = $n;
                 let array: [$elem_ty; MAX_LEN] = kani::any();
                 let mut it = Filter::new(
                     any_slice(&array).iter(),
@@ -260,8 +278,12 @@ mod verify {
             }
         };
     }
-    check_next_chunk_dropless!(check_filter_next_chunk_dropless_unit, ());
-    check_next_chunk_dropless!(check_filter_next_chunk_dropless_u8, u8);
-    check_next_chunk_dropless!(check_filter_next_chunk_dropless_char, char);
-    check_next_chunk_dropless!(check_filter_next_chunk_dropless_tup, (char, u8));
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_unit, (), 4);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_u8, u8, 4);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_char, char, 4);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_tup, (char, u8), 4);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_unit_n1, (), 1);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_u8_n1, u8, 1);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_char_n1, char, 1);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_tup_n1, (char, u8), 1);
 }
