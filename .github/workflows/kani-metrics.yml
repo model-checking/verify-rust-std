@@ -11,6 +11,9 @@ defaults:
 
 jobs:
   update-kani-metrics:
+    permissions:
+      contents: write
+      pull-requests: write
     if: github.repository == 'model-checking/verify-rust-std'
     runs-on: ubuntu-latest
     
