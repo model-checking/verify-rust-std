@@ -1173,6 +1173,8 @@ mod verify {
         // Buffer of MAX_SIZE >= size_of_val(c_str) bytes, so the contract's
         // `can_write` precondition is satisfiable for every generated length.
         let mut dest = [crate::mem::MaybeUninit::<u8>::uninit(); MAX_SIZE];
-        unsafe { crate::clone::CloneToUninit::clone_to_uninit(c_str, dest.as_mut_ptr().cast::<u8>()) };
+        unsafe {
+            crate::clone::CloneToUninit::clone_to_uninit(c_str, dest.as_mut_ptr().cast::<u8>())
+        };
     }
 }

@@ -588,10 +588,14 @@ unsafe impl CloneToUninit for crate::ffi::CStr {
     // `!dest.is_null()`. The body writes exactly `size_of_val(self)` bytes
     // through `dest`, which the modifies clause captures. Verified by
     // `check_clone_to_uninit_contract` in ffi/c_str.rs.
-    #[requires(crate::ub_checks::can_write(
-        crate::ptr::slice_from_raw_parts_mut(dest, crate::mem::size_of_val(self))
-    ))]
-    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts_mut(dest, crate::mem::size_of_val(self))))]
+    #[requires(crate::ub_checks::can_write(crate::ptr::slice_from_raw_parts_mut(
+        dest,
+        crate::mem::size_of_val(self)
+    )))]
+    #[cfg_attr(
+        kani,
+        kani::modifies(crate::ptr::slice_from_raw_parts_mut(dest, crate::mem::size_of_val(self)))
+    )]
     unsafe fn clone_to_uninit(&self, dest: *mut u8) {
         // SAFETY: For now, CStr is just a #[repr(transparent)] [c_char] with some invariants.
         // And we can cast [c_char] to [u8] on all supported platforms (see: to_bytes_with_nul).
