@@ -3497,10 +3497,67 @@ mod verify {
 
     // --- Power operations ---
 
+    // The primitive `checked_pow` implementations carry a trivial
+    // `#[safety::loop_invariant(true)]` (added in PR #327, consumed by the
+    // autoharness runs). Under `-Z loop-contracts` that trivial invariant makes
+    // CBMC abstract the loop by havocking `acc`, so the abstracted primitive
+    // can return `Some(0)` — spuriously violating `NonZero::new_unchecked`'s
+    // nonzero precondition inside these harnesses. Per review feedback, the
+    // shared annotation is left untouched; instead the pow harnesses stub the
+    // primitive `checked_pow` with a verbatim copy of its implementation
+    // (`uint_macros.rs`/`int_macros.rs`, `try_opt!` expanded) minus the loop
+    // contract. The copy is semantically identical — no nondeterminism, no
+    // `kani::assume` — and the harness unwind bound fully unwinds it
+    // (`exp: u32` gives at most 32 squarings), so the proofs remain exhaustive
+    // over the real `NonZero` code, including the `new_unchecked` safety
+    // condition. If the primitive implementation changes, update this copy.
+    macro_rules! stub_checked_pow {
+        ($int_type:ident, $stub:ident) => {
+            pub const fn $stub(base: $int_type, mut exp: u32) -> Option<$int_type> {
+                if exp == 0 {
+                    return Some(1);
+                }
+                let mut base = base;
+                let mut acc: $int_type = 1;
+                loop {
+                    if (exp & 1) == 1 {
+                        acc = match acc.checked_mul(base) {
+                            Some(v) => v,
+                            None => return None,
+                        };
+                        // since exp!=0, finally the exp must be 1.
+                        if exp == 1 {
+                            return Some(acc);
+                        }
+                    }
+                    exp /= 2;
+                    base = match base.checked_mul(base) {
+                        Some(v) => v,
+                        None => return None,
+                    };
+                }
+            }
+        };
+    }
+
+    stub_checked_pow!(i8, stub_checked_pow_i8);
+    stub_checked_pow!(i16, stub_checked_pow_i16);
+    stub_checked_pow!(i32, stub_checked_pow_i32);
+    stub_checked_pow!(i64, stub_checked_pow_i64);
+    stub_checked_pow!(i128, stub_checked_pow_i128);
+    stub_checked_pow!(isize, stub_checked_pow_isize);
+    stub_checked_pow!(u8, stub_checked_pow_u8);
+    stub_checked_pow!(u16, stub_checked_pow_u16);
+    stub_checked_pow!(u32, stub_checked_pow_u32);
+    stub_checked_pow!(u64, stub_checked_pow_u64);
+    stub_checked_pow!(u128, stub_checked_pow_u128);
+    stub_checked_pow!(usize, stub_checked_pow_usize);
+
     macro_rules! nonzero_check_checked_pow {
-        ($nonzero_type:ty, $harness:ident) => {
+        ($nonzero_type:ty, $int_type:ident, $stub:ident, $harness:ident) => {
             #[kani::proof]
             #[kani::unwind(34)]
+            #[kani::stub($int_type::checked_pow, $stub)]
             pub fn $harness() {
                 let x: $nonzero_type = kani::any();
                 let exp: u32 = kani::any();
@@ -3511,24 +3568,75 @@ mod verify {
         };
     }
 
-    nonzero_check_checked_pow!(core::num::NonZeroI8, nonzero_check_checked_pow_i8);
-    nonzero_check_checked_pow!(core::num::NonZeroI16, nonzero_check_checked_pow_i16);
-    nonzero_check_checked_pow!(core::num::NonZeroI32, nonzero_check_checked_pow_i32);
-    nonzero_check_checked_pow!(core::num::NonZeroI64, nonzero_check_checked_pow_i64);
-    nonzero_check_checked_pow!(core::num::NonZeroIsize, nonzero_check_checked_pow_isize);
-    nonzero_check_checked_pow!(core::num::NonZeroU8, nonzero_check_checked_pow_u8);
-    nonzero_check_checked_pow!(core::num::NonZeroU16, nonzero_check_checked_pow_u16);
-    nonzero_check_checked_pow!(core::num::NonZeroU32, nonzero_check_checked_pow_u32);
-    nonzero_check_checked_pow!(core::num::NonZeroU64, nonzero_check_checked_pow_u64);
-    nonzero_check_checked_pow!(core::num::NonZeroUsize, nonzero_check_checked_pow_usize);
+    nonzero_check_checked_pow!(
+        core::num::NonZeroI8,
+        i8,
+        stub_checked_pow_i8,
+        nonzero_check_checked_pow_i8
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroI16,
+        i16,
+        stub_checked_pow_i16,
+        nonzero_check_checked_pow_i16
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroI32,
+        i32,
+        stub_checked_pow_i32,
+        nonzero_check_checked_pow_i32
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroI64,
+        i64,
+        stub_checked_pow_i64,
+        nonzero_check_checked_pow_i64
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroIsize,
+        isize,
+        stub_checked_pow_isize,
+        nonzero_check_checked_pow_isize
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroU8,
+        u8,
+        stub_checked_pow_u8,
+        nonzero_check_checked_pow_u8
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroU16,
+        u16,
+        stub_checked_pow_u16,
+        nonzero_check_checked_pow_u16
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroU32,
+        u32,
+        stub_checked_pow_u32,
+        nonzero_check_checked_pow_u32
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroU64,
+        u64,
+        stub_checked_pow_u64,
+        nonzero_check_checked_pow_u64
+    );
+    nonzero_check_checked_pow!(
+        core::num::NonZeroUsize,
+        usize,
+        stub_checked_pow_usize,
+        nonzero_check_checked_pow_usize
+    );
 
     // 128-bit types use a bounded exponent to avoid CBMC timeout (same reason
     // as nonzero_check_saturating_pow_128): checked_pow uses binary exponentiation
     // with expensive 128-bit multiplications in CBMC's bitvector encoding.
     macro_rules! nonzero_check_checked_pow_128 {
-        ($nonzero_type:ty, $harness:ident) => {
+        ($nonzero_type:ty, $int_type:ident, $stub:ident, $harness:ident) => {
             #[kani::proof]
             #[kani::unwind(5)]
+            #[kani::stub($int_type::checked_pow, $stub)]
             pub fn $harness() {
                 let x: $nonzero_type = kani::any();
                 let exp: u32 = kani::any_where(|&e| e <= 10);
@@ -3539,13 +3647,27 @@ mod verify {
         };
     }
 
-    nonzero_check_checked_pow_128!(core::num::NonZeroI128, nonzero_check_checked_pow_i128);
-    nonzero_check_checked_pow_128!(core::num::NonZeroU128, nonzero_check_checked_pow_u128);
+    nonzero_check_checked_pow_128!(
+        core::num::NonZeroI128,
+        i128,
+        stub_checked_pow_i128,
+        nonzero_check_checked_pow_i128
+    );
+    nonzero_check_checked_pow_128!(
+        core::num::NonZeroU128,
+        u128,
+        stub_checked_pow_u128,
+        nonzero_check_checked_pow_u128
+    );
 
+    // `saturating_pow` delegates to the primitive `saturating_pow`, which calls
+    // `checked_pow` internally — so the same `checked_pow` stub applies (see the
+    // comment on `stub_checked_pow` above).
     macro_rules! nonzero_check_saturating_pow {
-        ($nonzero_type:ty, $harness:ident) => {
+        ($nonzero_type:ty, $int_type:ident, $stub:ident, $harness:ident) => {
             #[kani::proof]
             #[kani::unwind(34)]
+            #[kani::stub($int_type::checked_pow, $stub)]
             pub fn $harness() {
                 let x: $nonzero_type = kani::any();
                 let exp: u32 = kani::any();
@@ -3555,16 +3677,66 @@ mod verify {
         };
     }
 
-    nonzero_check_saturating_pow!(core::num::NonZeroI8, nonzero_check_saturating_pow_i8);
-    nonzero_check_saturating_pow!(core::num::NonZeroI16, nonzero_check_saturating_pow_i16);
-    nonzero_check_saturating_pow!(core::num::NonZeroI32, nonzero_check_saturating_pow_i32);
-    nonzero_check_saturating_pow!(core::num::NonZeroI64, nonzero_check_saturating_pow_i64);
-    nonzero_check_saturating_pow!(core::num::NonZeroIsize, nonzero_check_saturating_pow_isize);
-    nonzero_check_saturating_pow!(core::num::NonZeroU8, nonzero_check_saturating_pow_u8);
-    nonzero_check_saturating_pow!(core::num::NonZeroU16, nonzero_check_saturating_pow_u16);
-    nonzero_check_saturating_pow!(core::num::NonZeroU32, nonzero_check_saturating_pow_u32);
-    nonzero_check_saturating_pow!(core::num::NonZeroU64, nonzero_check_saturating_pow_u64);
-    nonzero_check_saturating_pow!(core::num::NonZeroUsize, nonzero_check_saturating_pow_usize);
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroI8,
+        i8,
+        stub_checked_pow_i8,
+        nonzero_check_saturating_pow_i8
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroI16,
+        i16,
+        stub_checked_pow_i16,
+        nonzero_check_saturating_pow_i16
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroI32,
+        i32,
+        stub_checked_pow_i32,
+        nonzero_check_saturating_pow_i32
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroI64,
+        i64,
+        stub_checked_pow_i64,
+        nonzero_check_saturating_pow_i64
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroIsize,
+        isize,
+        stub_checked_pow_isize,
+        nonzero_check_saturating_pow_isize
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroU8,
+        u8,
+        stub_checked_pow_u8,
+        nonzero_check_saturating_pow_u8
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroU16,
+        u16,
+        stub_checked_pow_u16,
+        nonzero_check_saturating_pow_u16
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroU32,
+        u32,
+        stub_checked_pow_u32,
+        nonzero_check_saturating_pow_u32
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroU64,
+        u64,
+        stub_checked_pow_u64,
+        nonzero_check_saturating_pow_u64
+    );
+    nonzero_check_saturating_pow!(
+        core::num::NonZeroUsize,
+        usize,
+        stub_checked_pow_usize,
+        nonzero_check_saturating_pow_usize
+    );
 
     // 128-bit types use a bounded exponent to avoid CBMC timeout: saturating_pow
     // uses binary exponentiation (O(log2(exp)) 128-bit multiplications), which is
@@ -3572,9 +3744,10 @@ mod verify {
     // sufficient to exercise both the non-saturating and saturating code paths
     // while keeping verification tractable (ceil(log2(10)) ≈ 4 loop iterations).
     macro_rules! nonzero_check_saturating_pow_128 {
-        ($nonzero_type:ty, $harness:ident) => {
+        ($nonzero_type:ty, $int_type:ident, $stub:ident, $harness:ident) => {
             #[kani::proof]
             #[kani::unwind(5)]
+            #[kani::stub($int_type::checked_pow, $stub)]
             pub fn $harness() {
                 let x: $nonzero_type = kani::any();
                 let exp: u32 = kani::any_where(|&e| e <= 10);
@@ -3584,8 +3757,18 @@ mod verify {
         };
     }
 
-    nonzero_check_saturating_pow_128!(core::num::NonZeroI128, nonzero_check_saturating_pow_i128);
-    nonzero_check_saturating_pow_128!(core::num::NonZeroU128, nonzero_check_saturating_pow_u128);
+    nonzero_check_saturating_pow_128!(
+        core::num::NonZeroI128,
+        i128,
+        stub_checked_pow_i128,
+        nonzero_check_saturating_pow_i128
+    );
+    nonzero_check_saturating_pow_128!(
+        core::num::NonZeroU128,
+        u128,
+        stub_checked_pow_u128,
+        nonzero_check_saturating_pow_u128
+    );
 
     // --- Unsigned-only operations ---
 
