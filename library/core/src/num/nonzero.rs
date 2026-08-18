@@ -3850,24 +3850,78 @@ mod verify {
     nonzero_check_isqrt!(core::num::NonZeroU8, nonzero_check_isqrt_u8);
     nonzero_check_isqrt!(core::num::NonZeroU16, nonzero_check_isqrt_u16);
     nonzero_check_isqrt!(core::num::NonZeroU32, nonzero_check_isqrt_u32);
-    nonzero_check_isqrt!(core::num::NonZeroU64, nonzero_check_isqrt_u64);
-    nonzero_check_isqrt!(core::num::NonZeroUsize, nonzero_check_isqrt_usize);
 
-    // 128-bit isqrt uses checked_mul to avoid potential CBMC overflow
-    // concerns: while isqrt(u128::MAX)^2 fits in u128 mathematically,
-    // CBMC's bitvector encoding may not prove this without help.
-    #[kani::proof]
-    pub fn nonzero_check_isqrt_u128() {
-        let x: core::num::NonZeroU128 = kani::any();
-        let result = x.isqrt();
-        assert!(result.get() != 0);
-        let r = result.get();
-        let v = x.get();
-        match r.checked_mul(r) {
-            Some(r_sq) => assert!(r_sq <= v),
-            None => panic!("isqrt result squared overflowed u128"),
-        }
+    // BOUNDED verification for u64/usize/u128 isqrt. The Karatsuba isqrt
+    // implementation performs symbolic divisions and multiplications at half
+    // the operand width, which blows past CI's 10-minute per-harness timeout
+    // in CBMC's bitvector encoding for widths >= 64 (full-range u32 already
+    // takes ~90s; each doubling is far worse). Following the interval pattern
+    // of the `carrying_mul` harnesses in `num/mod.rs`, each wide type is
+    // checked with kissat on three input windows: small ([1, 10], which covers
+    // the result-zero boundary that matters for the NonZero safety property),
+    // large ([MAX - 10, MAX]), and mid-edge ([MAX/2 - 10, MAX/2 + 10]).
+    macro_rules! nonzero_check_isqrt_intervals {
+        ($nonzero_type:ty, $int_type:ty, $($harness:ident, $min:expr, $max:expr),+) => {
+            $(
+                #[kani::proof]
+                #[kani::solver(kissat)]
+                pub fn $harness() {
+                    let x: $nonzero_type = kani::any();
+                    kani::assume(x.get() >= $min && x.get() <= $max);
+                    let result = x.isqrt();
+                    assert!(result.get() != 0);
+                    // result^2 <= x, via checked_mul so the harness itself
+                    // cannot overflow for the widest types.
+                    let r = result.get();
+                    let v = x.get();
+                    match r.checked_mul(r) {
+                        Some(r_sq) => assert!(r_sq <= v),
+                        None => panic!("isqrt result squared overflowed"),
+                    }
+                }
+            )+
+        };
     }
+
+    nonzero_check_isqrt_intervals!(
+        core::num::NonZeroU64,
+        u64,
+        nonzero_check_isqrt_u64_small,
+        1u64,
+        10u64,
+        nonzero_check_isqrt_u64_large,
+        u64::MAX - 10u64,
+        u64::MAX,
+        nonzero_check_isqrt_u64_mid_edge,
+        (u64::MAX / 2) - 10u64,
+        (u64::MAX / 2) + 10u64
+    );
+    nonzero_check_isqrt_intervals!(
+        core::num::NonZeroUsize,
+        usize,
+        nonzero_check_isqrt_usize_small,
+        1usize,
+        10usize,
+        nonzero_check_isqrt_usize_large,
+        usize::MAX - 10usize,
+        usize::MAX,
+        nonzero_check_isqrt_usize_mid_edge,
+        (usize::MAX / 2) - 10usize,
+        (usize::MAX / 2) + 10usize
+    );
+    nonzero_check_isqrt_intervals!(
+        core::num::NonZeroU128,
+        u128,
+        nonzero_check_isqrt_u128_small,
+        1u128,
+        10u128,
+        nonzero_check_isqrt_u128_large,
+        u128::MAX - 10u128,
+        u128::MAX,
+        nonzero_check_isqrt_u128_mid_edge,
+        (u128::MAX / 2) - 10u128,
+        (u128::MAX / 2) + 10u128
+    );
 
     // --- Signed-only operations: neg, abs family, checked_neg family ---
 
