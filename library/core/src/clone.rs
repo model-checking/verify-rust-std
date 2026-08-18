@@ -580,9 +580,18 @@ unsafe impl CloneToUninit for str {
 #[unstable(feature = "clone_to_uninit", issue = "126799")]
 unsafe impl CloneToUninit for crate::ffi::CStr {
     #[cfg_attr(debug_assertions, track_caller)]
-    // Safety contract: dest must be non-null, valid for size_of_val(self) writes,
-    // and properly aligned (u8 alignment is always satisfied for non-null pointers).
-    #[requires(!dest.is_null())]
+    // Safety contract: `dest` must be valid for writes of `size_of_val(self)`
+    // bytes (the whole string including its NUL terminator) and properly
+    // aligned. `can_write` checks non-null, single-allocation bounds, and
+    // alignment (trivial for u8), matching the pointer contracts in
+    // `core::ptr` (e.g. `NonNull::write_bytes`); it subsumes the previous
+    // `!dest.is_null()`. The body writes exactly `size_of_val(self)` bytes
+    // through `dest`, which the modifies clause captures. Verified by
+    // `check_clone_to_uninit_contract` in ffi/c_str.rs.
+    #[requires(crate::ub_checks::can_write(
+        crate::ptr::slice_from_raw_parts_mut(dest, crate::mem::size_of_val(self))
+    ))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts_mut(dest, crate::mem::size_of_val(self))))]
     unsafe fn clone_to_uninit(&self, dest: *mut u8) {
         // SAFETY: For now, CStr is just a #[repr(transparent)] [c_char] with some invariants.
         // And we can cast [c_char] to [u8] on all supported platforms (see: to_bytes_with_nul).

@@ -1152,4 +1152,27 @@ mod verify {
         // Verify exact byte-for-byte match with source (including NUL terminator)
         assert_eq!(cloned.to_bytes_with_nul(), c_str.to_bytes_with_nul());
     }
+
+    // Contract harness for `CloneToUninit for CStr` (Challenge 13,
+    // criterion 4): checks that the impl's `#[requires]` (dest valid for
+    // writes of `size_of_val(self)` bytes) and modifies clause rule out UB
+    // in the real body, following the pattern of the other contract
+    // harnesses in this file (`check_from_bytes_with_nul_unchecked`,
+    // `check_from_ptr`). The destination buffer is deliberately
+    // uninitialized: the contract only claims validity for writes, so the
+    // harness must not rely on `dest`'s contents. The functional
+    // (byte-for-byte) check stays in `check_clone_to_uninit` above.
+    #[kani::proof_for_contract(CStr::clone_to_uninit)]
+    #[kani::unwind(17)]
+    fn check_clone_to_uninit_contract() {
+        const MAX_SIZE: usize = 16;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        // Buffer of MAX_SIZE >= size_of_val(c_str) bytes, so the contract's
+        // `can_write` precondition is satisfiable for every generated length.
+        let mut dest = [crate::mem::MaybeUninit::<u8>::uninit(); MAX_SIZE];
+        unsafe { crate::clone::CloneToUninit::clone_to_uninit(c_str, dest.as_mut_ptr().cast::<u8>()) };
+    }
 }
