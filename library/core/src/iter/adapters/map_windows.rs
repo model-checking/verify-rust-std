@@ -333,6 +333,58 @@ mod verify {
         // Drop exercises Buffer::drop
     }
 
+    // A Clone type with real drop glue: exercises the Buffer push/drop paths that
+    // Copy-only element types skip (drop of overwritten ring slots and of the
+    // initialized tail when MapWindows is dropped).
+    #[derive(Clone)]
+    struct DropToken(u8);
+    impl Drop for DropToken {
+        fn drop(&mut self) {}
+    }
+
+    fn map_first_token(w: &[DropToken; 2]) -> u8 {
+        w[0].0
+    }
+
+    #[kani::proof]
+    fn check_map_windows_n2_droptoken() {
+        let raw: [u8; 4] = kani::any();
+        let items =
+            [DropToken(raw[0]), DropToken(raw[1]), DropToken(raw[2]), DropToken(raw[3])];
+        let mut mw =
+            MapWindows::new(items.iter().cloned(), map_first_token as fn(&[DropToken; 2]) -> u8);
+        let _ = mw.next(); // buffer init: N clones pushed
+        let _ = mw.next(); // ring wrap: overwritten slot's drop glue runs
+        // MapWindows drop runs Buffer::drop over the initialized window
+    }
+
+    // Drop glue that panics: verifies the Buffer drop path unwinds without UB
+    // when an element's destructor panics.
+    struct PanicOnDrop;
+    impl Clone for PanicOnDrop {
+        fn clone(&self) -> Self {
+            PanicOnDrop
+        }
+    }
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("drop");
+        }
+    }
+
+    fn map_unit_panic(_w: &[PanicOnDrop; 2]) -> u8 {
+        0
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_map_windows_n2_panic_on_drop() {
+        let items = [PanicOnDrop, PanicOnDrop, PanicOnDrop];
+        let mut mw =
+            MapWindows::new(items.iter().cloned(), map_unit_panic as fn(&[PanicOnDrop; 2]) -> u8);
+        let _ = mw.next();
+    }
+
     #[kani::proof]
     fn check_map_windows_n3_u8() {
         const MAX_LEN: usize = 5000;

@@ -219,6 +219,27 @@ mod verify {
         assert_eq!(result, slice[idx]);
     }
 
+    // A Clone type with real drop glue: get_unchecked on Cloned runs the element's
+    // Clone, and the returned value's Drop runs in the harness -- the drop-glue
+    // axis the Copy types (u8/char/tuple) and the ZST cannot exercise.
+    #[derive(Clone)]
+    struct DropToken(u8);
+    impl Drop for DropToken {
+        fn drop(&mut self) {}
+    }
+
+    #[kani::proof]
+    fn check_cloned_get_unchecked_droptoken() {
+        let raw: [u8; 4] = kani::any();
+        let items =
+            [DropToken(raw[0]), DropToken(raw[1]), DropToken(raw[2]), DropToken(raw[3])];
+        let mut iter = Cloned::new(items.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        let result = unsafe { iter.__iterator_get_unchecked(idx) };
+        assert_eq!(result.0, items[idx].0);
+    }
+
     // UB-coverage companion at MAX_LEN = u32::MAX. Without the functional assert
     // the array is never bit-blasted (asserted variants hit CBMC's "array too
     // large for flattening"), so the unchecked access verifies at this length;
