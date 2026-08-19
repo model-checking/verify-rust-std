@@ -206,7 +206,6 @@ use core::ptr::{self, NonNull, Unique};
 use core::task::{Context, Poll};
 
 use safety::{ensures, requires};
-
 #[cfg(kani)]
 use {crate::vec::Vec, core::kani};
 
