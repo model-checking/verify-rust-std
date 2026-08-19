@@ -491,7 +491,9 @@ mod verify {
 
     #[kani::proof]
     fn check_fuse_get_unchecked_u8() {
-        const MAX_LEN: usize = 5000;
+        // MAX_LEN = u32::MAX verifies here: no functional assert, so the array is
+        // never bit-blasted (the flattening ceiling only applies to asserted variants).
+        const MAX_LEN: usize = u32::MAX as usize;
         let array: [u8; MAX_LEN] = kani::any();
         let slice = kani::slice::any_slice_of_array(&array);
         let mut iter = Fuse::new(slice.iter());
