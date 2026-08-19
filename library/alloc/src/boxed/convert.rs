@@ -9,6 +9,8 @@ use core::pin::Pin;
 #[cfg(not(no_global_oom_handling))]
 use core::{fmt, ptr};
 
+use safety::requires;
+
 use crate::alloc::Allocator;
 #[cfg(not(no_global_oom_handling))]
 use crate::borrow::Cow;
@@ -397,7 +399,7 @@ impl<A: Allocator> Box<dyn Any, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
-    #[cfg_attr(kani, kani::requires(self.is::<T>()))]
+    #[requires(self.is::<T>())]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -457,7 +459,7 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
-    #[cfg_attr(kani, kani::requires(self.is::<T>()))]
+    #[requires(self.is::<T>())]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -517,7 +519,7 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
-    #[cfg_attr(kani, kani::requires(self.is::<T>()))]
+    #[requires(self.is::<T>())]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -866,6 +868,9 @@ mod verify {
     // happens during target-path resolution, before contract checking starts.
     // These harnesses therefore use plain `#[kani::proof]` and restate the
     // contract's key precondition explicitly with `erased.is::<T>()`.
+    // They verify the concrete function body under that precondition, but are
+    // not machine-linked to the function contract, so contract changes could
+    // drift without causing these proofs to fail.
     macro_rules! gen_downcast_unchecked_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
@@ -908,6 +913,9 @@ mod verify {
     // failure happens during target-path resolution, before contract checking
     // starts. These harnesses therefore use plain `#[kani::proof]` and
     // restate the contract's key precondition explicitly with `erased.is::<T>()`.
+    // They verify the concrete function body under that precondition, but are
+    // not machine-linked to the function contract, so contract changes could
+    // drift without causing these proofs to fail.
     macro_rules! gen_downcast_unchecked_send_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
@@ -954,6 +962,9 @@ mod verify {
     // checking starts. These harnesses therefore use plain `#[kani::proof]`
     // and restate the contract's key precondition explicitly with
     // `erased.is::<T>()`.
+    // They verify the concrete function body under that precondition, but are
+    // not machine-linked to the function contract, so contract changes could
+    // drift without causing these proofs to fail.
     macro_rules! gen_downcast_unchecked_send_sync_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]

@@ -205,6 +205,8 @@ use core::pin::{Pin, PinCoerceUnsized};
 use core::ptr::{self, NonNull, Unique};
 use core::task::{Context, Poll};
 
+use safety::{ensures, requires};
+
 #[cfg(kani)]
 use {crate::vec::Vec, core::kani};
 
@@ -1025,13 +1027,10 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let ptr = (&*self) as *const mem::MaybeUninit<T> as *const T;
-            kani::mem::can_dereference(ptr)
-        })
-    )]
+    #[requires({
+        let ptr = (&*self) as *const mem::MaybeUninit<T> as *const T;
+        kani::mem::can_dereference(ptr)
+    })]
     pub unsafe fn assume_init(self) -> Box<T, A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut T, alloc) }
@@ -1099,13 +1098,10 @@ impl<T, A: Allocator> Box<[mem::MaybeUninit<T>], A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let ptr = (&*self) as *const [mem::MaybeUninit<T>] as *const [T];
-            kani::mem::can_dereference(ptr)
-        })
-    )]
+    #[requires({
+        let ptr = (&*self) as *const [mem::MaybeUninit<T>] as *const [T];
+        kani::mem::can_dereference(ptr)
+    })]
     pub unsafe fn assume_init(self) -> Box<[T], A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut [T], alloc) }
@@ -1158,18 +1154,15 @@ impl<T: ?Sized> Box<T> {
     #[stable(feature = "box_raw", since = "1.4.0")]
     #[inline]
     #[must_use = "call `drop(Box::from_raw(ptr))` if you intend to drop the `Box`"]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let align = kani::mem::checked_align_of_raw(raw);
-            let size = kani::mem::checked_size_of_raw(raw);
+    #[requires({
+        let align = kani::mem::checked_align_of_raw(raw);
+        let size = kani::mem::checked_size_of_raw(raw);
 
-            !raw.is_null()
-                && align.is_some()
-                && size.map_or(false, |size| size <= isize::MAX as usize)
-                && kani::mem::can_dereference(raw)
-        })
-    )]
+        !raw.is_null()
+            && align.is_some()
+            && size.map_or(false, |size| size <= isize::MAX as usize)
+            && kani::mem::can_dereference(raw)
+    })]
     pub unsafe fn from_raw(raw: *mut T) -> Self {
         unsafe { Self::from_raw_in(raw, Global) }
     }
@@ -1224,25 +1217,19 @@ impl<T: ?Sized> Box<T> {
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
     #[must_use = "call `drop(Box::from_non_null(ptr))` if you intend to drop the `Box`"]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let raw = ptr.as_ptr();
-            let align = kani::mem::checked_align_of_raw(raw);
-            let size = kani::mem::checked_size_of_raw(raw);
+    #[requires({
+        let raw = ptr.as_ptr();
+        let align = kani::mem::checked_align_of_raw(raw);
+        let size = kani::mem::checked_size_of_raw(raw);
 
-            align.is_some()
-                && size.map_or(false, |size| size <= isize::MAX as usize)
-                && kani::mem::can_dereference(raw)
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| {
-            let raw = ptr.as_ptr();
-            (&**result) as *const T == raw
-        })
-    )]
+        align.is_some()
+            && size.map_or(false, |size| size <= isize::MAX as usize)
+            && kani::mem::can_dereference(raw)
+    })]
+    #[ensures(|result: &Self| {
+        let raw = ptr.as_ptr();
+        (&**result) as *const T == raw
+    })]
     pub unsafe fn from_non_null(ptr: NonNull<T>) -> Self {
         unsafe { Self::from_raw(ptr.as_ptr()) }
     }
@@ -1416,19 +1403,16 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// [memory layout]: self#memory-layout
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let align = kani::mem::checked_align_of_raw(raw);
-            let size = kani::mem::checked_size_of_raw(raw);
+    #[requires({
+        let align = kani::mem::checked_align_of_raw(raw);
+        let size = kani::mem::checked_size_of_raw(raw);
 
-            !raw.is_null()
-                && align.is_some()
-                && size.map_or(false, |size| size <= isize::MAX as usize)
-                && kani::mem::can_dereference(raw)
-        })
-    )]
-    #[cfg_attr(kani, kani::ensures(|result: &Self| (&**result) as *const T == raw))]
+        !raw.is_null()
+            && align.is_some()
+            && size.map_or(false, |size| size <= isize::MAX as usize)
+            && kani::mem::can_dereference(raw)
+    })]
+    #[ensures(|result: &Self| (&**result) as *const T == raw)]
     pub unsafe fn from_raw_in(raw: *mut T, alloc: A) -> Self {
         Box(unsafe { Unique::new_unchecked(raw) }, alloc)
     }
@@ -1482,19 +1466,16 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let ptr = raw.as_ptr();
-            let align = kani::mem::checked_align_of_raw(ptr);
-            let size = kani::mem::checked_size_of_raw(ptr);
+    #[requires({
+        let ptr = raw.as_ptr();
+        let align = kani::mem::checked_align_of_raw(ptr);
+        let size = kani::mem::checked_size_of_raw(ptr);
 
-            align.is_some()
-                && size.map_or(false, |size| size <= isize::MAX as usize)
-                && kani::mem::can_dereference(ptr)
-        })
-    )]
-    #[cfg_attr(kani, kani::ensures(|result: &Self| (&**result) as *const T == raw.as_ptr()))]
+        align.is_some()
+            && size.map_or(false, |size| size <= isize::MAX as usize)
+            && kani::mem::can_dereference(ptr)
+    })]
+    #[ensures(|result: &Self| (&**result) as *const T == raw.as_ptr())]
     pub unsafe fn from_non_null_in(raw: NonNull<T>, alloc: A) -> Self {
         // SAFETY: guaranteed by the caller.
         unsafe { Box::from_raw_in(raw.as_ptr(), alloc) }
@@ -2439,6 +2420,9 @@ mod verify {
     // Kani limitation: proof_for_contract is not reliable for this
     // MaybeUninit-based generic impl in boxed.rs, so these harnesses use
     // #[kani::proof] and exercise the caller-side safety requirement directly.
+    // These proofs verify the concrete function body under that requirement,
+    // but are not machine-linked to the function contract; a future contract
+    // change could therefore drift without causing these proofs to fail.
     //
     // Kani cannot express the full generic "value is initialized" predicate
     // for arbitrary `T`. The harness models the Safety contract by explicitly
@@ -2487,6 +2471,9 @@ mod verify {
     // Kani limitation: proof_for_contract is not reliable for this
     // MaybeUninit-based slice impl in boxed.rs, so these harnesses use
     // #[kani::proof] and exercise the caller-side safety requirement directly.
+    // These proofs verify the concrete function body under that requirement,
+    // but are not machine-linked to the function contract; a future contract
+    // change could therefore drift without causing these proofs to fail.
     //
     // For byte-valid element types, the harness can model the caller-side
     // safety requirement with an unbounded byte-level witness: it constructs a
