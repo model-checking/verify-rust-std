@@ -24,6 +24,7 @@ use crate::{intrinsics, mem};
 
 /// Basic mathematical constants.
 #[unstable(feature = "f128", issue = "116909")]
+#[rustc_diagnostic_item = "f128_consts_mod"]
 pub mod consts {
     // FIXME: replace with mathematical constants from cmath.
 
@@ -1777,6 +1778,7 @@ impl f128 {
     /// assert!(abs_difference <= f128::EPSILON);
     ///
     /// assert_eq!(f128::powi(f128::NAN, 0), 1.0);
+    /// assert_eq!(f128::powi(0.0, 0), 1.0);
     /// # }
     /// ```
     #[inline]
