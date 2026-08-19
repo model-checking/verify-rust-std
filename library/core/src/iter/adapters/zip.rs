@@ -777,6 +777,50 @@ mod verify {
         let _ = Iterator::next(&mut zip);
     }
 
+    // Direct proof of the TrustedRandomAccess `get_unchecked` over arbitrary
+    // reachable Zip state: `index` is havoced across its full valid range
+    // (`index <= len`) instead of only the states next/nth/fold pass through.
+    // The assume mirrors the `#[requires]` on `get_unchecked` (see the note
+    // there); the asserts pin the returned pair to the source slices at the
+    // internally offset position.
+    #[kani::proof]
+    fn check_zip_get_unchecked_arbitrary_state_u8() {
+        const MAX_LEN: usize = 64;
+        let arr_a: [u8; MAX_LEN] = kani::any();
+        let arr_b: [u8; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
+        let index: usize = kani::any();
+        kani::assume(index <= zip.len);
+        zip.index = index;
+        let idx: usize = kani::any();
+        kani::assume(
+            zip.index <= slice_a.len()
+                && idx < slice_a.len() - zip.index
+                && zip.index <= slice_b.len()
+                && idx < slice_b.len() - zip.index,
+        );
+        let (a, b) = unsafe { ZipImpl::get_unchecked(&mut zip, idx) };
+        assert_eq!(*a, slice_a[index + idx]);
+        assert_eq!(*b, slice_b[index + idx]);
+    }
+
+    // Side-effecting source: `Map<slice::Iter, _>` has MAY_HAVE_SIDE_EFFECT =
+    // true, exercising the specialized Zip paths that the pure slice::Iter
+    // sources skip.
+    #[kani::proof]
+    fn check_zip_next_sideeffect_source_u8() {
+        const MAX_LEN: usize = 5000;
+        let arr_a: [u8; MAX_LEN] = kani::any();
+        let arr_b: [u8; MAX_LEN] = kani::any();
+        let slice_a = kani::slice::any_slice_of_array(&arr_a);
+        let slice_b = kani::slice::any_slice_of_array(&arr_b);
+        let mut zip = Zip::new(slice_a.iter().map(|&x| x), slice_b.iter());
+        let _ = Iterator::next(&mut zip);
+        let _ = Iterator::next(&mut zip);
+    }
+
     // nth (TRA specialized — uses __iterator_get_unchecked for side effects)
     // nth's while loop and super_nth's while-let loop carry vacuous Kani loop
     // invariants to enable loop-contract mode; this harness covers slices up to

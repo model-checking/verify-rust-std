@@ -225,6 +225,10 @@ mod verify {
     // next_chunk_dropless (uses get_unchecked_mut, array_assume_init, IntoIter::new_unchecked)
     // End-to-end bounded harness: exercises full next_chunk_dropless path
     // including both Ok (Break) and Err (Continue) exit paths.
+    // N >= 1 in these harnesses: the SAFETY argument for the unchecked write
+    // (`idx < N` whenever the closure runs) requires N >= 1 -- with N = 0 the
+    // write precedes the loop's break check, so no in-bounds argument exists
+    // for index 0.
     #[kani::proof]
     #[kani::unwind(9)]
     fn check_filter_next_chunk_dropless_n2_u8() {

@@ -223,6 +223,10 @@ mod verify {
     //             IntoIter::new_unchecked)
     // End-to-end bounded harness: exercises full next_chunk path
     // including both Ok (Break) and Err (Continue) exit paths.
+    // N >= 1 in these harnesses: the SAFETY argument for the unchecked
+    // `copy_nonoverlapping` into `array` requires N >= 1 -- with N = 0 the
+    // write precedes the loop's break check, so no in-bounds argument exists
+    // for index 0.
     #[kani::proof]
     #[kani::unwind(9)]
     fn check_filter_map_next_chunk_n2_u8() {
