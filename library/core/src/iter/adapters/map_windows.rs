@@ -349,8 +349,7 @@ mod verify {
     #[kani::proof]
     fn check_map_windows_n2_droptoken() {
         let raw: [u8; 4] = kani::any();
-        let items =
-            [DropToken(raw[0]), DropToken(raw[1]), DropToken(raw[2]), DropToken(raw[3])];
+        let items = [DropToken(raw[0]), DropToken(raw[1]), DropToken(raw[2]), DropToken(raw[3])];
         let mut mw =
             MapWindows::new(items.iter().cloned(), map_first_token as fn(&[DropToken; 2]) -> u8);
         let _ = mw.next(); // buffer init: N clones pushed

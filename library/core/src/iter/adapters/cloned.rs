@@ -231,8 +231,7 @@ mod verify {
     #[kani::proof]
     fn check_cloned_get_unchecked_droptoken() {
         let raw: [u8; 4] = kani::any();
-        let items =
-            [DropToken(raw[0]), DropToken(raw[1]), DropToken(raw[2]), DropToken(raw[3])];
+        let items = [DropToken(raw[0]), DropToken(raw[1]), DropToken(raw[2]), DropToken(raw[3])];
         let mut iter = Cloned::new(items.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
