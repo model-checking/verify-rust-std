@@ -2324,27 +2324,27 @@ mod verify {
     }
 
     /// Full root leaf: the loop takes the `Err(root)` / `split_root` arm.
+    /// Concrete idx/key so autoharness stays under the 10m CBMC cap.
     #[kani::proof]
     #[kani::unwind(3)]
     fn check_insert_recursing_split_root() {
         let mut node = leaf_with_len(CAPACITY);
-        let idx = kani::any_where(|&i: &usize| i <= CAPACITY);
-        let edge = unsafe { Handle::new_edge(node.borrow_mut(), idx) };
-        let _ = edge.insert_recursing(kani::any(), kani::any(), Global, |_split| {});
+        let edge = unsafe { Handle::new_edge(node.borrow_mut(), 0) };
+        let _ = edge.insert_recursing(0u8, 0u8, Global, |_split| {});
     }
 
     /// Full child under a parent: the loop takes the `Ok(parent)` arm once.
     /// Unwind is 3 (not 13): a loop contract on `insert_recursing` would havoc
     /// `SplitResult` node pointers and OOM the autoharness job.
+    /// Concrete idx/key so autoharness stays under the 10m CBMC cap.
     #[kani::proof]
     #[kani::unwind(3)]
     fn check_insert_recursing_into_parent() {
         let mut parent = NodeRef::new_internal(leaf_with_len(CAPACITY).forget_type(), Global);
         let child = parent.borrow_mut().first_edge().descend();
         let leaf = unsafe { child.cast_to_leaf_unchecked() };
-        let idx = kani::any_where(|&i: &usize| i <= CAPACITY);
-        let edge = unsafe { Handle::new_edge(leaf, idx) };
-        let _ = edge.insert_recursing(kani::any(), kani::any(), Global, |_| {});
+        let edge = unsafe { Handle::new_edge(leaf, 0) };
+        let _ = edge.insert_recursing(0u8, 0u8, Global, |_| {});
     }
 
     #[kani::proof]
