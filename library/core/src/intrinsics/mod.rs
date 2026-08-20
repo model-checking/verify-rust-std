@@ -4158,11 +4158,11 @@ mod verify {
     // documented pointer preconditions and invoke the const-generic intrinsics
     // that replaced the older `atomic_*_{relaxed,acquire,...}` names.
 
-    fn atomic_ptr_at_offset<T>(buf: &mut [u8; 64]) -> *mut T {
-        let offset = kani::any_where(|o: &usize| *o < 64);
-        buf.as_mut_ptr().wrapping_add(offset).cast::<T>()
-    }
+    // Write proofs use a live stack object. `wrapping_add` pointers lose
+    // provenance, so CBMC's assignable check fails even when `can_write` is
+    // assumed.
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_store_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, val: T) {
         // SAFETY: `requires` guarantees `dst` is aligned and writable.
@@ -4175,6 +4175,7 @@ mod verify {
         unsafe { atomic_load::<T, ORD>(src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_xchg_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
@@ -4182,6 +4183,7 @@ mod verify {
         unsafe { atomic_xchg::<T, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_xadd_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -4192,6 +4194,7 @@ mod verify {
         unsafe { atomic_xadd::<T, U, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_xsub_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -4202,6 +4205,7 @@ mod verify {
         unsafe { atomic_xsub::<T, U, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_and_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -4212,6 +4216,7 @@ mod verify {
         unsafe { atomic_and::<T, U, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_nand_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -4222,6 +4227,7 @@ mod verify {
         unsafe { atomic_nand::<T, U, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_or_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -4232,6 +4238,7 @@ mod verify {
         unsafe { atomic_or::<T, U, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_xor_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
@@ -4242,6 +4249,7 @@ mod verify {
         unsafe { atomic_xor::<T, U, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_max_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
@@ -4249,6 +4257,7 @@ mod verify {
         unsafe { atomic_max::<T, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_min_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
@@ -4256,6 +4265,7 @@ mod verify {
         unsafe { atomic_min::<T, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_umax_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
@@ -4263,6 +4273,7 @@ mod verify {
         unsafe { atomic_umax::<T, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_umin_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
@@ -4270,6 +4281,7 @@ mod verify {
         unsafe { atomic_umin::<T, ORD>(dst, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_cxchg_wrapper<
@@ -4285,6 +4297,7 @@ mod verify {
         unsafe { atomic_cxchg::<T, ORD_SUCC, ORD_FAIL>(dst, old, src) }
     }
 
+    #[kani::modifies(dst)]
     #[requires(ub_checks::can_dereference(dst as *const T))]
     #[requires(ub_checks::can_write(dst))]
     unsafe fn atomic_cxchgweak_wrapper<
@@ -4304,10 +4317,12 @@ mod verify {
         ($name:ident, $ord:ident) => {
             #[kani::proof_for_contract(atomic_store_wrapper)]
             fn $name() {
-                let mut buf: [u8; 64] = kani::any();
-                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                let mut val: u8 = kani::any();
                 unsafe {
-                    atomic_store_wrapper::<u8, { AtomicOrdering::$ord }>(ptr, kani::any());
+                    atomic_store_wrapper::<u8, { AtomicOrdering::$ord }>(
+                        &mut val as *mut u8,
+                        kani::any(),
+                    );
                 }
             }
         };
@@ -4321,10 +4336,9 @@ mod verify {
         ($name:ident, $ord:ident) => {
             #[kani::proof_for_contract(atomic_load_wrapper)]
             fn $name() {
-                let mut buf: [u8; 64] = kani::any();
-                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                let val: u8 = kani::any();
                 unsafe {
-                    let _ = atomic_load_wrapper::<u8, { AtomicOrdering::$ord }>(ptr as *const u8);
+                    let _ = atomic_load_wrapper::<u8, { AtomicOrdering::$ord }>(&val as *const u8);
                 }
             }
         };
@@ -4338,20 +4352,22 @@ mod verify {
         ($wrapper:ident, $name:ident, $ord:ident) => {
             #[kani::proof_for_contract($wrapper)]
             fn $name() {
-                let mut buf: [u8; 64] = kani::any();
-                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                let mut val: u8 = kani::any();
                 unsafe {
-                    let _ = $wrapper::<u8, { AtomicOrdering::$ord }>(ptr, kani::any());
+                    let _ =
+                        $wrapper::<u8, { AtomicOrdering::$ord }>(&mut val as *mut u8, kani::any());
                 }
             }
         };
         ($wrapper:ident, $name:ident, $ord:ident, two_ty) => {
             #[kani::proof_for_contract($wrapper)]
             fn $name() {
-                let mut buf: [u8; 64] = kani::any();
-                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                let mut val: u8 = kani::any();
                 unsafe {
-                    let _ = $wrapper::<u8, u8, { AtomicOrdering::$ord }>(ptr, kani::any());
+                    let _ = $wrapper::<u8, u8, { AtomicOrdering::$ord }>(
+                        &mut val as *mut u8,
+                        kani::any(),
+                    );
                 }
             }
         };
@@ -4403,10 +4419,12 @@ mod verify {
         ($wrapper:ident, $name:ident, $ty:ty, $ord:ident) => {
             #[kani::proof_for_contract($wrapper)]
             fn $name() {
-                let mut buf: [u8; 64] = kani::any();
-                let ptr = atomic_ptr_at_offset::<$ty>(&mut buf);
+                let mut val: $ty = kani::any();
                 unsafe {
-                    let _ = $wrapper::<$ty, { AtomicOrdering::$ord }>(ptr, kani::any());
+                    let _ = $wrapper::<$ty, { AtomicOrdering::$ord }>(
+                        &mut val as *mut $ty,
+                        kani::any(),
+                    );
                 }
             }
         };
@@ -4440,11 +4458,10 @@ mod verify {
         ($wrapper:ident, $name:ident, $succ:ident, $fail:ident) => {
             #[kani::proof_for_contract($wrapper)]
             fn $name() {
-                let mut buf: [u8; 64] = kani::any();
-                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                let mut val: u8 = kani::any();
                 unsafe {
                     let _ = $wrapper::<u8, { AtomicOrdering::$succ }, { AtomicOrdering::$fail }>(
-                        ptr,
+                        &mut val as *mut u8,
                         kani::any(),
                         kani::any(),
                     );
