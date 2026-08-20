@@ -532,9 +532,7 @@ impl AtomicBool {
     #[rustc_const_stable(feature = "const_atomic_new", since = "1.24.0")]
     #[must_use]
     pub const fn new(v: bool) -> AtomicBool {
-        AtomicBool {
-            v: UnsafeCell::new(v as u8),
-        }
+        AtomicBool { v: UnsafeCell::new(v as u8) }
     }
 
     /// Creates a new `AtomicBool` from a pointer.
@@ -798,11 +796,7 @@ impl AtomicBool {
     #[rustc_should_not_be_called_on_const_items]
     pub fn swap(&self, val: bool, order: Ordering) -> bool {
         if EMULATE_ATOMIC_BOOL {
-            if val {
-                self.fetch_or(true, order)
-            } else {
-                self.fetch_and(false, order)
-            }
+            if val { self.fetch_or(true, order) } else { self.fetch_and(false, order) }
         } else {
             // SAFETY: data races are prevented by atomic intrinsics.
             unsafe { atomic_swap(self.v.get(), val as u8, order) != 0 }
@@ -962,11 +956,7 @@ impl AtomicBool {
                 // This sets the value to the new one and returns the old one.
                 self.swap(new, order)
             };
-            if old == current {
-                Ok(old)
-            } else {
-                Err(old)
-            }
+            if old == current { Ok(old) } else { Err(old) }
         } else {
             // SAFETY: data races are prevented by atomic intrinsics.
             match unsafe {
@@ -1521,9 +1511,7 @@ impl<T> AtomicPtr<T> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_atomic_new", since = "1.24.0")]
     pub const fn new(p: *mut T) -> AtomicPtr<T> {
-        AtomicPtr {
-            p: UnsafeCell::new(p),
-        }
+        AtomicPtr { p: UnsafeCell::new(p) }
     }
 
     /// Creates a new `AtomicPtr` from a pointer.
@@ -4181,11 +4169,7 @@ pub unsafe fn atomic_compare_exchange<T: Copy>(
             (_, Release) => panic!("there is no such thing as a release failure ordering"),
         }
     };
-    if ok {
-        Ok(val)
-    } else {
-        Err(val)
-    }
+    if ok { Ok(val) } else { Err(val) }
 }
 
 #[inline]
@@ -4253,11 +4237,7 @@ unsafe fn atomic_compare_exchange_weak<T: Copy>(
             (_, Release) => panic!("there is no such thing as a release failure ordering"),
         }
     };
-    if ok {
-        Ok(val)
-    } else {
-        Err(val)
-    }
+    if ok { Ok(val) } else { Err(val) }
 }
 
 #[inline]
