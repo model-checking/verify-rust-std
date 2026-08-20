@@ -1747,11 +1747,7 @@ pub mod verify {
         type Searcher<'a> = SpecSearcher<'a>;
 
         fn into_searcher(self, haystack: &str) -> SpecSearcher<'_> {
-            SpecSearcher {
-                haystack,
-                front: 0,
-                back: haystack.len(),
-            }
+            SpecSearcher { haystack, front: 0, back: haystack.len() }
         }
     }
 
@@ -1827,11 +1823,7 @@ pub mod verify {
         SplitInternal {
             start,
             end,
-            matcher: SpecSearcher {
-                haystack: s,
-                front: start,
-                back: end,
-            },
+            matcher: SpecSearcher { haystack: s, front: start, back: end },
             allow_trailing_empty: kani::any(),
             finished: kani::any(),
         }
@@ -1842,11 +1834,7 @@ pub mod verify {
         let back = kani::any();
         kani::assume(front <= back && back <= s.len());
         kani::assume(s.is_char_boundary(front) && s.is_char_boundary(back));
-        MatchIndicesInternal(SpecSearcher {
-            haystack: s,
-            front,
-            back,
-        })
+        MatchIndicesInternal(SpecSearcher { haystack: s, front, back })
     }
 
     fn any_matches<'a>(s: &'a str) -> MatchesInternal<'a, SpecPattern> {
@@ -1854,11 +1842,7 @@ pub mod verify {
         let back = kani::any();
         kani::assume(front <= back && back <= s.len());
         kani::assume(s.is_char_boundary(front) && s.is_char_boundary(back));
-        MatchesInternal(SpecSearcher {
-            haystack: s,
-            front,
-            back,
-        })
+        MatchesInternal(SpecSearcher { haystack: s, front, back })
     }
 
     // --- Chars ---
