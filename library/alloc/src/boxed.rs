@@ -204,6 +204,11 @@ use core::ops::{Residual, Try};
 use core::pin::{Pin, PinCoerceUnsized};
 use core::ptr::{self, NonNull, Unique};
 use core::task::{Context, Poll};
+#[cfg(kani)]
+use core::kani;
+#[cfg(kani)]
+use core::ub_checks;
+use safety::{ensures, requires};
 
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
@@ -1022,6 +1027,10 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    // SAFETY: the pointee must be a valid `T`. Under Kani this is `can_dereference`
+    // of the slot interpreted as `T` (initialized, aligned, in-bounds).
+    #[requires(ub_checks::can_dereference((&*self as *const mem::MaybeUninit<T>).cast::<T>()))]
+    #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub unsafe fn assume_init(self) -> Box<T, A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut T, alloc) }
@@ -1089,6 +1098,12 @@ impl<T, A: Allocator> Box<[mem::MaybeUninit<T>], A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    // SAFETY: every element must be a valid `T`. Casting `[MaybeUninit<T>]` to
+    // `[T]` and requiring `can_dereference` encodes that for Kani.
+    #[requires(ub_checks::can_dereference(
+        &*self as *const [mem::MaybeUninit<T>] as *const [T]
+    ))]
+    #[ensures(|result| ub_checks::can_dereference(&**result as *const [T]))]
     pub unsafe fn assume_init(self) -> Box<[T], A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut [T], alloc) }
@@ -1141,6 +1156,11 @@ impl<T: ?Sized> Box<T> {
     #[stable(feature = "box_raw", since = "1.4.0")]
     #[inline]
     #[must_use = "call `drop(Box::from_raw(ptr))` if you intend to drop the `Box`"]
+    // Memory-layout contract: non-null, aligned, in-bounds, and a valid `T`
+    // (including ZST dangling pointers). Provenance/allocator identity is a
+    // caller obligation Kani cannot fully express.
+    #[requires(!raw.is_null() && ub_checks::can_dereference(raw))]
+    #[ensures(|result| (&**result) as *const T == raw as *const T)]
     pub unsafe fn from_raw(raw: *mut T) -> Self {
         unsafe { Self::from_raw_in(raw, Global) }
     }
@@ -1195,6 +1215,8 @@ impl<T: ?Sized> Box<T> {
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
     #[must_use = "call `drop(Box::from_non_null(ptr))` if you intend to drop the `Box`"]
+    #[requires(ub_checks::can_dereference(ptr.as_ptr()))]
+    #[ensures(|result| (&**result) as *const T == ptr.as_ptr() as *const T)]
     pub unsafe fn from_non_null(ptr: NonNull<T>) -> Self {
         unsafe { Self::from_raw(ptr.as_ptr()) }
     }
@@ -1368,6 +1390,8 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// [memory layout]: self#memory-layout
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
+    #[requires(!raw.is_null() && ub_checks::can_dereference(raw))]
+    #[ensures(|result| (&**result) as *const T == raw as *const T)]
     pub unsafe fn from_raw_in(raw: *mut T, alloc: A) -> Self {
         Box(unsafe { Unique::new_unchecked(raw) }, alloc)
     }
@@ -1421,6 +1445,8 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
+    #[requires(ub_checks::can_dereference(raw.as_ptr()))]
+    #[ensures(|result| (&**result) as *const T == raw.as_ptr() as *const T)]
     pub unsafe fn from_non_null_in(raw: NonNull<T>, alloc: A) -> Self {
         // SAFETY: guaranteed by the caller.
         unsafe { Box::from_raw_in(raw.as_ptr(), alloc) }
@@ -2291,5 +2317,382 @@ unsafe impl<T: ?Sized + Allocator, A: Allocator> Allocator for Box<T, A> {
     ) -> Result<NonNull<[u8]>, AllocError> {
         // SAFETY: the safety contract must be upheld by the caller
         unsafe { (**self).shrink(ptr, old_layout, new_layout) }
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    #![allow(missing_docs)]
+
+    use core::marker::PhantomPinned;
+    use core::mem::MaybeUninit;
+    use core::pin::Pin;
+    use core::{kani, ptr};
+
+    use super::*;
+    use crate::alloc::Allocator;
+
+    const SLICE_CAP: usize = 2;
+
+    fn alloc_write<T>(value: T) -> *mut T {
+        let layout = Layout::new::<T>();
+        if layout.size() == 0 {
+            let ptr = NonNull::<T>::dangling().as_ptr();
+            unsafe { ptr::write(ptr, value) };
+            ptr
+        } else {
+            let ptr = Global.allocate(layout).expect("alloc").cast::<T>().as_ptr();
+            unsafe { ptr::write(ptr, value) };
+            ptr
+        }
+    }
+
+    // ---- required unsafe: assume_init (sized) ----
+
+    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+    pub fn check_assume_init_i32() {
+        let value: i32 = kani::any();
+        let mut slot: Box<MaybeUninit<i32>> = Box::new_uninit();
+        (*slot).write(value);
+        let boxed = unsafe { slot.assume_init() };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+    pub fn check_assume_init_zst() {
+        let mut slot: Box<MaybeUninit<()>> = Box::new_uninit();
+        (*slot).write(());
+        let boxed = unsafe { slot.assume_init() };
+        assert!(*boxed == ());
+    }
+
+    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+    pub fn check_assume_init_bool() {
+        let value: bool = kani::any();
+        let mut slot: Box<MaybeUninit<bool>> = Box::new_uninit();
+        (*slot).write(value);
+        let boxed = unsafe { slot.assume_init() };
+        assert!(*boxed == value);
+    }
+
+    // ---- required unsafe: assume_init (slice) ----
+
+    #[kani::proof_for_contract(Box::<[core::mem::MaybeUninit<T>], A>::assume_init)]
+    #[kani::unwind(4)]
+    pub fn check_assume_init_slice_u8() {
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let mut slot: Box<[MaybeUninit<u8>]> = Box::new_uninit_slice(len);
+        for i in 0..len {
+            slot[i].write(kani::any());
+        }
+        let boxed = unsafe { slot.assume_init() };
+        assert!(boxed.len() == len);
+    }
+
+    #[kani::proof_for_contract(Box::<[core::mem::MaybeUninit<T>], A>::assume_init)]
+    #[kani::unwind(4)]
+    pub fn check_assume_init_slice_i32() {
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let mut slot: Box<[MaybeUninit<i32>]> = Box::new_uninit_slice(len);
+        for i in 0..len {
+            slot[i].write(kani::any());
+        }
+        let boxed = unsafe { slot.assume_init() };
+        assert!(boxed.len() == len);
+    }
+
+    // ---- required unsafe: from_raw ----
+
+    #[kani::proof_for_contract(Box::<i32>::from_raw)]
+    pub fn check_from_raw_i32() {
+        let value: i32 = kani::any();
+        let ptr = Box::into_raw(Box::new(value));
+        let boxed = unsafe { Box::from_raw(ptr) };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof_for_contract(Box::<()>::from_raw)]
+    pub fn check_from_raw_zst() {
+        let ptr = Box::into_raw(Box::new(()));
+        let _boxed = unsafe { Box::from_raw(ptr) };
+    }
+
+    #[kani::proof_for_contract(Box::<[u8]>::from_raw)]
+    pub fn check_from_raw_slice() {
+        let data: [u8; SLICE_CAP] = kani::any();
+        let boxed: Box<[u8]> = Box::from(data);
+        let ptr = Box::into_raw(boxed);
+        let boxed = unsafe { Box::<[u8]>::from_raw(ptr) };
+        assert!(boxed.len() == SLICE_CAP);
+    }
+
+    // ---- required unsafe: from_non_null ----
+
+    #[kani::proof_for_contract(Box::<i32>::from_non_null)]
+    pub fn check_from_non_null_i32() {
+        let value: i32 = kani::any();
+        let ptr = Box::into_non_null(Box::new(value));
+        let boxed = unsafe { Box::from_non_null(ptr) };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof_for_contract(Box::<()>::from_non_null)]
+    pub fn check_from_non_null_zst() {
+        let ptr = Box::into_non_null(Box::new(()));
+        let _boxed = unsafe { Box::from_non_null(ptr) };
+    }
+
+    #[kani::proof_for_contract(Box::<[u8]>::from_non_null)]
+    pub fn check_from_non_null_slice() {
+        let data: [u8; SLICE_CAP] = kani::any();
+        let boxed: Box<[u8]> = Box::from(data);
+        let ptr = Box::into_non_null(boxed);
+        let boxed = unsafe { Box::<[u8]>::from_non_null(ptr) };
+        assert!(boxed.len() == SLICE_CAP);
+    }
+
+    // ---- required unsafe: from_raw_in ----
+    // Setup cannot go through Box::new_in / from_raw: those call from_raw_in.
+
+    #[kani::proof_for_contract(Box::<i32, Global>::from_raw_in)]
+    pub fn check_from_raw_in_i32() {
+        let value: i32 = kani::any();
+        let ptr = alloc_write(value);
+        let boxed = unsafe { Box::from_raw_in(ptr, Global) };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof_for_contract(Box::<(), Global>::from_raw_in)]
+    pub fn check_from_raw_in_zst() {
+        let ptr = alloc_write(());
+        let _boxed = unsafe { Box::from_raw_in(ptr, Global) };
+    }
+
+    // ---- required unsafe: from_non_null_in ----
+
+    #[kani::proof_for_contract(Box::<i32, Global>::from_non_null_in)]
+    pub fn check_from_non_null_in_i32() {
+        let value: i32 = kani::any();
+        let ptr = NonNull::new(alloc_write(value)).unwrap();
+        let boxed = unsafe { Box::from_non_null_in(ptr, Global) };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof_for_contract(Box::<(), Global>::from_non_null_in)]
+    pub fn check_from_non_null_in_zst() {
+        let ptr = NonNull::new(alloc_write(())).unwrap();
+        let _boxed = unsafe { Box::from_non_null_in(ptr, Global) };
+    }
+
+    // ---- safe functions with unsafe bodies ----
+
+    #[kani::proof]
+    pub fn check_new_in() {
+        let value: i32 = kani::any();
+        let boxed = Box::new_in(value, Global);
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_try_new_in() {
+        let value: u8 = kani::any();
+        let boxed = Box::try_new_in(value, Global).expect("alloc");
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_try_new_uninit_in() {
+        let value: i32 = kani::any();
+        let mut slot = Box::<i32>::try_new_uninit_in(Global).expect("alloc");
+        (*slot).write(value);
+        let boxed = unsafe { slot.assume_init() };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_try_new_zeroed_in() {
+        let slot = Box::<u32>::try_new_zeroed_in(Global).expect("alloc");
+        let boxed = unsafe { slot.assume_init() };
+        assert!(*boxed == 0);
+    }
+
+    #[kani::proof]
+    pub fn check_into_boxed_slice() {
+        let value: i32 = kani::any();
+        let slice = Box::into_boxed_slice(Box::new(value));
+        assert!(slice.len() == 1);
+        assert!(slice[0] == value);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn check_new_uninit_slice() {
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let slot: Box<[MaybeUninit<i32>]> = Box::new_uninit_slice(len);
+        assert!(slot.len() == len);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    pub fn check_new_zeroed_slice() {
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let slot: Box<[MaybeUninit<u8>]> = Box::new_zeroed_slice(len);
+        let boxed = unsafe { slot.assume_init() };
+        for i in 0..len {
+            assert!(boxed[i] == 0);
+        }
+    }
+
+    #[kani::proof]
+    pub fn check_try_new_uninit_slice() {
+        let slot = Box::<[i32]>::try_new_uninit_slice(1).expect("alloc");
+        assert!(slot.len() == 1);
+        assert!(Box::<[u64]>::try_new_uninit_slice(usize::MAX).is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_try_new_zeroed_slice() {
+        let slot = Box::<[u8]>::try_new_zeroed_slice(1).expect("alloc");
+        let boxed = unsafe { slot.assume_init() };
+        assert!(boxed[0] == 0);
+        assert!(Box::<[u64]>::try_new_zeroed_slice(usize::MAX).is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_into_array() {
+        let data: [i32; SLICE_CAP] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let boxed: Box<[i32]> = Box::from(slice);
+        let len = boxed.len();
+        match boxed.into_array::<SLICE_CAP>() {
+            Some(_arr) => assert!(len == SLICE_CAP),
+            None => assert!(len != SLICE_CAP),
+        }
+    }
+
+    #[kani::proof]
+    pub fn check_new_uninit_slice_in() {
+        let slot: Box<[MaybeUninit<i32>], _> = Box::new_uninit_slice_in(1, Global);
+        assert!(slot.len() == 1);
+    }
+
+    #[kani::proof]
+    pub fn check_new_zeroed_slice_in() {
+        let slot: Box<[MaybeUninit<u8>], _> = Box::new_zeroed_slice_in(1, Global);
+        let boxed = unsafe { slot.assume_init() };
+        assert!(boxed[0] == 0);
+    }
+
+    #[kani::proof]
+    pub fn check_try_new_uninit_slice_in() {
+        let slot = Box::<[i32]>::try_new_uninit_slice_in(0, Global).expect("zst/empty");
+        assert!(slot.is_empty());
+    }
+
+    #[kani::proof]
+    pub fn check_try_new_zeroed_slice_in() {
+        let slot = Box::<[u8]>::try_new_zeroed_slice_in(1, Global).expect("alloc");
+        assert!(slot.len() == 1);
+    }
+
+    #[kani::proof]
+    pub fn check_write() {
+        let value: i32 = kani::any();
+        let boxed = Box::write(Box::new_uninit(), value);
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_into_non_null() {
+        let value: i32 = kani::any();
+        let ptr = Box::into_non_null(Box::new(value));
+        let boxed = unsafe { Box::from_non_null(ptr) };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_into_raw_with_allocator() {
+        let value: i32 = kani::any();
+        let (ptr, alloc) = Box::into_raw_with_allocator(Box::new_in(value, Global));
+        let boxed = unsafe { Box::from_raw_in(ptr, alloc) };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_into_non_null_with_allocator() {
+        let value: bool = kani::any();
+        let (ptr, alloc) = Box::into_non_null_with_allocator(Box::new_in(value, Global));
+        let boxed = unsafe { Box::from_non_null_in(ptr, alloc) };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_into_unique() {
+        let value: i32 = kani::any();
+        let (unique, alloc) = Box::into_unique(Box::new_in(value, Global));
+        let boxed = unsafe { Box::from_raw_in(unique.as_ptr(), alloc) };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_leak() {
+        let value: i32 = kani::any();
+        let leaked: &'static mut i32 = Box::leak(Box::new(value));
+        assert!(*leaked == value);
+        unsafe { drop(Box::from_raw(leaked as *mut i32)) };
+    }
+
+    #[kani::proof]
+    pub fn check_into_pin_unpin() {
+        let value: i32 = kani::any();
+        let pinned: Pin<Box<i32>> = Box::into_pin(Box::new(value));
+        assert!(*pinned == value);
+    }
+
+    #[kani::proof]
+    pub fn check_into_pin_not_unpin() {
+        struct Pinned(i32, PhantomPinned);
+        let value: i32 = kani::any();
+        let pinned = Box::into_pin(Box::new(Pinned(value, PhantomPinned)));
+        assert!(pinned.0 == value);
+    }
+
+    #[kani::proof]
+    pub fn check_drop_sized() {
+        drop(Box::new(kani::any::<i32>()));
+    }
+
+    #[kani::proof]
+    pub fn check_drop_zst() {
+        drop(Box::new(()));
+    }
+
+    #[kani::proof]
+    pub fn check_default_sized() {
+        let boxed: Box<i32> = Box::default();
+        assert!(*boxed == 0);
+    }
+
+    #[kani::proof]
+    pub fn check_default_str() {
+        let boxed: Box<str> = Box::default();
+        assert!(boxed.is_empty());
+    }
+
+    #[kani::proof]
+    pub fn check_clone_sized() {
+        let value: i32 = kani::any();
+        let boxed = Box::new(value);
+        let cloned = boxed.clone();
+        assert!(*cloned == value);
+        assert!((&*boxed as *const i32) != (&*cloned as *const i32));
+    }
+
+    #[kani::proof]
+    pub fn check_clone_str() {
+        let boxed: Box<str> = Box::from("ab");
+        let cloned = boxed.clone();
+        assert!(&*cloned == &*boxed);
     }
 }
