@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [ main ]
   push:
+    branches: [ main ]
     paths:
-      - 'library/**'
       - '.github/workflows/kmir.yml'
       - 'kmir-proofs/**'
 
