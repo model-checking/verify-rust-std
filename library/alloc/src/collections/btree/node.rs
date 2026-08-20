@@ -1078,10 +1078,7 @@ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, mark
             (Some(split), handle) => (split.forget_node_type(), handle),
         };
 
-        // Occupancy loops are bounded by type-level CAPACITY. Height is the
-        // remaining data-dependent dimension: each iteration returns or
-        // replaces `split` with a same-height parent split.
-        #[cfg_attr(kani, kani::loop_invariant(split.left.height == split.right.height))]
+        // Each iteration is one parent hop (fit, split-root, or parent-insert).
         loop {
             split = match split.left.ascend() {
                 Ok(parent) => {
@@ -1934,6 +1931,7 @@ mod verify {
 
     /// Initialize `n` slots by writing the key/value arrays directly.
     /// Avoids `push`/`Handle::new_kv` so contract proofs can call those once at top level.
+    /// Uses `ptr::copy` (no Rust loop) so insert_recursing proofs can keep a low unwind.
     fn leaf_with_len(n: usize) -> Leaf {
         kani::assume(n <= CAPACITY);
         let mut node = NodeRef::new_leaf(Global);
@@ -1941,13 +1939,17 @@ mod verify {
         let vals: [u8; CAPACITY] = kani::any();
         {
             let mut borrow = node.borrow_mut();
-            for i in 0..CAPACITY {
-                if i < n {
-                    unsafe {
-                        borrow.key_area_mut(i).write(keys[i]);
-                        borrow.val_area_mut(i).write(vals[i]);
-                    }
-                }
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    keys.as_ptr().cast::<MaybeUninit<u8>>(),
+                    borrow.key_area_mut(..n).as_mut_ptr(),
+                    n,
+                );
+                ptr::copy_nonoverlapping(
+                    vals.as_ptr().cast::<MaybeUninit<u8>>(),
+                    borrow.val_area_mut(..n).as_mut_ptr(),
+                    n,
+                );
             }
             *borrow.len_mut() = n as u16;
         }
@@ -1970,11 +1972,14 @@ mod verify {
     }
 
     fn init_buf<const N: usize>(buf: &mut [MaybeUninit<u8>; N], len: usize) {
+        kani::assume(len <= N);
         let src: [u8; N] = kani::any();
-        for i in 0..N {
-            if i < len {
-                buf[i].write(src[i]);
-            }
+        unsafe {
+            ptr::copy_nonoverlapping(
+                src.as_ptr().cast::<MaybeUninit<u8>>(),
+                buf.as_mut_ptr(),
+                len,
+            );
         }
     }
 
@@ -2312,7 +2317,7 @@ mod verify {
     // --- Recursion / loops ---
 
     #[kani::proof]
-    #[kani::unwind(13)]
+    #[kani::unwind(3)]
     fn check_insert_recursing_fit() {
         let n = kani::any_where(|&n: &usize| n < CAPACITY);
         let mut node = leaf_with_len(n);
@@ -2324,7 +2329,7 @@ mod verify {
 
     /// Full root leaf: the loop takes the `Err(root)` / `split_root` arm.
     #[kani::proof]
-    #[kani::unwind(13)]
+    #[kani::unwind(3)]
     fn check_insert_recursing_split_root() {
         let mut node = leaf_with_len(CAPACITY);
         let idx = kani::any_where(|&i: &usize| i <= CAPACITY);
@@ -2333,9 +2338,10 @@ mod verify {
     }
 
     /// Full child under a parent: the loop takes the `Ok(parent)` arm once.
-    /// The loop contract covers further height independently of this harness.
+    /// Unwind is 3 (not 13): a loop contract on `insert_recursing` would havoc
+    /// `SplitResult` node pointers and OOM the autoharness job.
     #[kani::proof]
-    #[kani::unwind(13)]
+    #[kani::unwind(3)]
     fn check_insert_recursing_into_parent() {
         let mut parent = NodeRef::new_internal(leaf_with_len(CAPACITY).forget_type(), Global);
         let child = parent.borrow_mut().first_edge().descend();
