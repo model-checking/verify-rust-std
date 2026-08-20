@@ -2798,6 +2798,63 @@ mod verify {
         assert_eq!(val, copy);
     }
 
+    #[kani::proof]
+    fn check_ptr_copy_nonoverlapping_u8() {
+        let src: [u8; 4] = kani::any();
+        let mut dst: [u8; 4] = kani::any();
+        let count = kani::any_where(|c: &usize| *c <= 4);
+        unsafe { copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), count) }
+        if count > 0 {
+            let i = kani::any_where(|i: &usize| *i < count);
+            assert_eq!(dst[i], src[i]);
+        }
+    }
+
+    #[kani::proof]
+    fn check_ptr_copy_u8() {
+        let src: [u8; 4] = kani::any();
+        let mut dst: [u8; 4] = kani::any();
+        let count = kani::any_where(|c: &usize| *c <= 4);
+        unsafe { copy(src.as_ptr(), dst.as_mut_ptr(), count) }
+    }
+
+    #[kani::proof]
+    fn check_ptr_write_bytes_u8() {
+        let mut dst: [u8; 4] = kani::any();
+        let val: u8 = kani::any();
+        let count = kani::any_where(|c: &usize| *c <= 4);
+        unsafe { write_bytes(dst.as_mut_ptr(), val, count) }
+        if count > 0 {
+            let i = kani::any_where(|i: &usize| *i < count);
+            assert_eq!(dst[i], val);
+        }
+    }
+
+    #[kani::proof]
+    fn check_ptr_swap_u8() {
+        let mut x: u8 = kani::any();
+        let mut y: u8 = kani::any();
+        let (a, b) = (x, y);
+        unsafe { swap(&mut x, &mut y) }
+        assert_eq!(x, b);
+        assert_eq!(y, a);
+    }
+
+    #[kani::proof]
+    fn check_ptr_read_u32() {
+        let x: u32 = kani::any();
+        let y = unsafe { read(&x) };
+        assert_eq!(x, y);
+    }
+
+    #[kani::proof]
+    fn check_ptr_write_u32() {
+        let mut dst: u32 = kani::any();
+        let val: u32 = kani::any();
+        unsafe { write(&mut dst, val) }
+        assert_eq!(dst, val);
+    }
+
     fn check_align_offset<T>(p: *const T) {
         let a = kani::any::<usize>();
         unsafe { align_offset(p, a) };

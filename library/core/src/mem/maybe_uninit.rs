@@ -1,5 +1,7 @@
 use crate::any::type_name;
 use crate::clone::TrivialClone;
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::Destruct;
 use crate::mem::ManuallyDrop;
 use crate::{fmt, intrinsics, ptr, slice};
@@ -1612,5 +1614,32 @@ impl<T: TrivialClone> SpecFill<T> for [MaybeUninit<T>] {
         // that the `clone` implementation will not panic, so we can avoid
         // initialization guards and such.
         self.fill_with(|| MaybeUninit::new(unsafe { ptr::read(&value) }));
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+    use safety::ensures;
+
+    /// `MaybeUninit::zeroed` is safe; this wrapper states the integer postcondition
+    /// (`write_bytes(0, 1)` of a `u32`).
+    #[ensures(|result| *result == 0)]
+    fn zeroed_u32() -> u32 {
+        unsafe { MaybeUninit::<u32>::zeroed().assume_init() }
+    }
+
+    #[kani::proof_for_contract(zeroed_u32)]
+    fn check_zeroed_u32() {
+        let z = zeroed_u32();
+        assert_eq!(z, 0);
+    }
+
+    #[kani::proof]
+    fn check_zeroed_u8() {
+        let z = unsafe { MaybeUninit::<u8>::zeroed().assume_init() };
+        assert_eq!(z, 0);
     }
 }

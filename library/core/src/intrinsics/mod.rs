@@ -2753,10 +2753,8 @@ pub const fn contract_check_ensures<C: Fn(&Ret) -> bool + Copy, Ret>(
 #[rustc_intrinsic]
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
-// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
-// function used to have a dummy body, but no longer has since
-// https://github.com/rust-lang/rust/pull/137489 has been merged).
-// #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
+// Contracts cannot sit on this bodyless intrinsic (kani#3325); see
+// `vtable_size_wrapper` in `verify_memory.rs`.
 pub unsafe fn vtable_size(_ptr: *const ()) -> usize;
 
 /// The intrinsic will return the alignment stored in that vtable.
@@ -2769,10 +2767,8 @@ pub unsafe fn vtable_size(_ptr: *const ()) -> usize;
 #[rustc_intrinsic]
 // VTable pointers must be valid for dereferencing at least 3 `usize` (size, alignment and drop):
 // <https://github.com/rust-lang/unsafe-code-guidelines/issues/166>
-// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
-// function used to have a dummy body, but no longer has since
-// https://github.com/rust-lang/rust/pull/137489 has been merged).
-// #[requires(ub_checks::can_dereference(_ptr as *const [usize; 3]))]
+// Contracts cannot sit on this bodyless intrinsic (kani#3325); see
+// `vtable_align_wrapper` in `verify_memory.rs`.
 pub unsafe fn vtable_align(_ptr: *const ()) -> usize;
 
 /// The size of a type in bytes.
@@ -2960,7 +2956,9 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
         // them and check it. Using quantifiers would not add value as we can rely on the solver to
         // pick an uninitialized element if such an element exists.
         let elem = kani::any_where(|val: &usize| *val < count);
-        let src_data = src as *const u8;
+        // Offset both sides by `elem`. Comparing `dst[elem]` against `src[0]`
+        // is wrong when initialization differs across elements.
+        let src_data = unsafe { src.add(elem) } as *const u8;
         let dst_data = unsafe { dst.add(elem) } as *const u8;
         ub_checks::can_dereference(unsafe { src_data.add(byte) })
             == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
@@ -2981,14 +2979,8 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
 #[rustc_nounwind]
 #[rustc_intrinsic]
 // Copy is "untyped".
-// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
-// function used to have a dummy body, but no longer has)
-// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
-// #[requires(!count.overflowing_mul(size_of::<T>()).1
-//   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
-//   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
-//   && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
-// #[ensures(|_| { check_copy_untyped(src, dst, count)})]
+// Contracts cannot sit on this bodyless intrinsic (kani#3325); see
+// `copy_nonoverlapping_wrapper` in `verify_memory.rs`.
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize);
 
 /// This is an accidentally-stable alias to [`ptr::copy`]; use that instead.
@@ -3000,13 +2992,8 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
-// function used to have a dummy body, but no longer has)
-// #[requires(!count.overflowing_mul(size_of::<T>()).1
-//   && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
-//   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-// #[ensures(|_| { check_copy_untyped(src, dst, count) })]
-// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+// Contracts cannot sit on this bodyless intrinsic (kani#3325); see
+// `copy_wrapper` in `verify_memory.rs`.
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize);
 
 /// This is an accidentally-stable alias to [`ptr::write_bytes`]; use that instead.
@@ -3018,14 +3005,8 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize);
 #[rustc_const_stable(feature = "const_intrinsic_copy", since = "1.83.0")]
 #[rustc_nounwind]
 #[rustc_intrinsic]
-// TODO: we can no longer do this given https://github.com/model-checking/kani/issues/3325 (this
-// function used to have a dummy body, but no longer has)
-// #[requires(!count.overflowing_mul(size_of::<T>()).1
-//   && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
-// #[requires(ub_checks::maybe_is_aligned_and_not_null(dst as *const (), align_of::<T>(), T::IS_ZST || count == 0))]
-// #[ensures(|_|
-//     ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(dst as *const u8, count * size_of::<T>())))]
-// #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+// Contracts cannot sit on this bodyless intrinsic (kani#3325); see
+// `write_bytes_wrapper` in `verify_memory.rs`.
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize);
 
 /// Returns the minimum (IEEE 754-2008 minNum) of two `f16` values.
@@ -3497,33 +3478,7 @@ mod verify {
         });
     }
 
-    // #[kani::proof_for_contract(copy)]
-    // fn check_copy() {
-    //     run_with_arbitrary_ptrs::<char>(|src, dst| unsafe { copy(src, dst, kani::any()) });
-    // }
-
-    // #[kani::proof_for_contract(copy_nonoverlapping)]
-    // fn check_copy_nonoverlapping() {
-    //     // Note: cannot use `ArbitraryPointer` here.
-    //     // The `ArbitraryPtr` will arbitrarily initialize memory by indirectly invoking
-    //     // `copy_nonoverlapping`.
-    //     // Kani contract checking would fail due to existing restriction on calls to
-    //     // the function under verification.
-    //     let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
-    //         let base = buf.as_mut_ptr() as *mut u8;
-    //         base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
-    //     };
-    //     let mut buffer1 = [MaybeUninit::<char>::uninit(); 100];
-    //     for i in 0..100 {
-    //         if kani::any() {
-    //             buffer1[i] = MaybeUninit::new(kani::any());
-    //         }
-    //     }
-    //     let mut buffer2 = [MaybeUninit::<char>::uninit(); 100];
-    //     let src = gen_any_ptr(&mut buffer1);
-    //     let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
-    //     unsafe { copy_nonoverlapping(src, dst, kani::any()) }
-    // }
+    // Copy / copy_nonoverlapping / write_bytes proofs: see `verify_memory.rs`.
 
     //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does
     //not currently support contracts (https://github.com/model-checking/kani/issues/3345)
@@ -4116,18 +4071,6 @@ mod verify {
     gen_compound_harnesses!(arr_mod, [u8; 2]);
     gen_compound_harnesses!(struct_mod, u8_struct);
 
-    // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
-    // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
-    // which is a safe operation.
-    #[cfg(not(kani))]
-    #[kani::proof_for_contract(write_bytes)]
-    fn check_write_bytes() {
-        let mut generator = PointerGenerator::<100>::new();
-        let ArbitraryPointer { ptr, status, .. } = generator.any_alloc_status::<char>();
-        kani::assume(supported_status(status));
-        unsafe { write_bytes(ptr, kani::any(), kani::any()) };
-    }
-
     fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
         let mut generator1 = PointerGenerator::<100>::new();
         let mut generator2 = PointerGenerator::<100>::new();
@@ -4151,3 +4094,7 @@ mod verify {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_memory;

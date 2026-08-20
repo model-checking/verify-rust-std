@@ -1529,4 +1529,47 @@ mod verify {
         forget(x);
         forget(y);
     }
+
+    #[kani::proof_for_contract(swap)]
+    pub fn check_swap_exchanges_u8() {
+        let mut x: u8 = kani::any();
+        let mut y: u8 = kani::any();
+        let (a, b) = (x, y);
+        swap(&mut x, &mut y);
+        assert_eq!(x, b);
+        assert_eq!(y, a);
+    }
+
+    #[kani::proof]
+    fn check_align_of_val_u32() {
+        let x: u32 = kani::any();
+        assert_eq!(align_of_val(&x), 4);
+    }
+
+    #[kani::proof]
+    fn check_align_of_val_slice_u8() {
+        let buf: [u8; 4] = kani::any();
+        let s = kani::slice::any_slice_of_array(&buf);
+        assert_eq!(align_of_val(s), 1);
+    }
+
+    #[allow(deprecated)]
+    #[kani::proof]
+    fn check_min_align_of_val_u32() {
+        let x: u32 = kani::any();
+        assert_eq!(min_align_of_val(&x), align_of::<u32>());
+    }
+
+    #[kani::proof]
+    fn check_size_of_val_u32() {
+        let x: u32 = kani::any();
+        assert_eq!(size_of_val(&x), 4);
+    }
+
+    #[kani::proof]
+    fn check_size_of_val_slice() {
+        let buf: [u8; 4] = kani::any();
+        let s = kani::slice::any_slice_of_array(&buf);
+        assert_eq!(size_of_val(s), s.len());
+    }
 }

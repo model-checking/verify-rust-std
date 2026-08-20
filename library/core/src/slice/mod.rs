@@ -3898,6 +3898,8 @@ impl<T> [T] {
     #[stable(feature = "copy_from_slice", since = "1.9.0")]
     #[rustc_const_stable(feature = "const_copy_from_slice", since = "1.87.0")]
     #[track_caller]
+    #[requires(self.len() == src.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const fn copy_from_slice(&mut self, src: &[T])
     where
         T: Copy,
@@ -5555,5 +5557,13 @@ mod verify {
     fn check_reverse() {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
+    }
+
+    #[kani::proof_for_contract(<[u8]>::copy_from_slice)]
+    fn check_copy_from_slice_u8() {
+        let src: [u8; 4] = kani::any();
+        let mut dst: [u8; 4] = kani::any();
+        dst.copy_from_slice(&src);
+        assert_eq!(dst, src);
     }
 }

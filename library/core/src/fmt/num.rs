@@ -1,5 +1,9 @@
 //! Integer and floating-point number formatting
 
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
 use crate::fmt::NumBuffer;
 use crate::mem::MaybeUninit;
 use crate::num::fmt as numfmt;
@@ -180,6 +184,7 @@ macro_rules! impl_Display {
                 reason = "specialized method meant to only be used by `SpecToString` implementation",
                 issue = "none"
             )]
+            #[requires(buf.len() >= Self::MAX.ilog10() as usize + 1)]
             pub unsafe fn _fmt<'a>(self, buf: &'a mut [MaybeUninit::<u8>]) -> &'a str {
                 // SAFETY: `buf` will always be big enough to contain all digits.
                 let offset = unsafe { self._fmt_inner(buf) };
@@ -595,6 +600,8 @@ impl_Debug! {
 // often cares strongly about getting a smaller code size.
 #[cfg(any(target_pointer_width = "64", target_arch = "wasm32"))]
 mod imp {
+    #[cfg(kani)]
+    use crate::kani;
     use super::*;
     impl_Display!(i8, u8, i16, u16, i32, u32, i64, u64, isize, usize; as u64 into display_u64);
     impl_Exp!(i8, u8, i16, u16, i32, u32, i64, u64, isize, usize; as u64 into exp_u64);
@@ -602,6 +609,8 @@ mod imp {
 
 #[cfg(not(any(target_pointer_width = "64", target_arch = "wasm32")))]
 mod imp {
+    #[cfg(kani)]
+    use crate::kani;
     use super::*;
     impl_Display!(i8, u8, i16, u16, i32, u32, isize, usize; as u32 into display_u32);
     impl_Display!(i64, u64; as u64 into display_u64);
@@ -645,6 +654,7 @@ impl u128 {
         reason = "specialized method meant to only be used by `SpecToString` implementation",
         issue = "none"
     )]
+    #[requires(buf.len() >= U128_MAX_DEC_N)]
     pub unsafe fn _fmt<'a>(self, buf: &'a mut [MaybeUninit<u8>]) -> &'a str {
         // SAFETY: `buf` will always be big enough to contain all digits.
         let offset = unsafe { self._fmt_inner(buf) };
@@ -861,4 +871,27 @@ fn div_rem_1e16(n: u128) -> (u128, u64) {
     let quot = n.widening_mul(M_HIGH).1 >> SH_POST;
     let rem = n - quot * D;
     (quot, rem as u64)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+    use crate::mem::MaybeUninit;
+
+    /// Successor of the former `fmt::num::parse_u64_into` (removed when decimal
+    /// formatting was rewritten). `_fmt` still fills a `MaybeUninit<u8>` buffer
+    /// with ASCII digits of a `u64`.
+    #[cfg(not(feature = "optimize_for_size"))]
+    #[kani::proof_for_contract(u64::_fmt)]
+    #[kani::unwind(8)]
+    fn check_u64_fmt_parse_u64_into_successor() {
+        let n: u64 = kani::any();
+        const MAX: usize = 20;
+        let mut buf = [MaybeUninit::<u8>::uninit(); MAX];
+        let s = unsafe { n._fmt(&mut buf) };
+        assert!(s.len() <= MAX);
+        assert!(!s.is_empty());
+    }
 }
