@@ -5050,7 +5050,7 @@ unsafe impl<T: ?Sized + Allocator, A: Allocator> Allocator for Arc<T, A> {
         unsafe { (**self).shrink(ptr, old_layout, new_layout) }
     }
 }
-  
+
 // ===================================================================================
 // Challenge 27: Verify atomically reference-counted implementation harnesses
 // ===================================================================================
