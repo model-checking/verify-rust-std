@@ -26,10 +26,7 @@ where
 
     // Puts a lower limit of 1 on `len`.
     if index >= len {
-        panic!(
-            "partition_at_index index {} greater than length of slice {}",
-            index, len
-        );
+        panic!("partition_at_index index {} greater than length of slice {}", index, len);
     }
 
     if T::IS_ZST {
@@ -236,19 +233,7 @@ fn median_of_ninthers<T, F: FnMut(&T, &T) -> bool>(v: &mut [T], is_less: &mut F)
     let mut a = lo - 4 * frac - gap;
     let mut b = hi + gap;
     for i in lo..hi {
-        ninther(
-            v,
-            is_less,
-            a,
-            i - frac,
-            b,
-            a + 1,
-            i,
-            b + 1,
-            a + 2,
-            i + frac,
-            b + 2,
-        );
+        ninther(v, is_less, a, i - frac, b, a + 1, i, b + 1, a + 2, i + frac, b + 2);
         a += 3;
         b += 3;
     }

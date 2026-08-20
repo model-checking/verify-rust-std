@@ -151,10 +151,7 @@ mod private_slice_index {
 #[rustc_on_unimplemented(
     on(T = "str", label = "string indices are ranges of `usize`",),
     on(
-        all(
-            any(T = "str", T = "&str", T = "alloc::string::String"),
-            Self = "{integer}"
-        ),
+        all(any(T = "str", T = "&str", T = "alloc::string::String"), Self = "{integer}"),
         note = "you can use `.chars().nth()` or `.bytes().nth()`\n\
                 for more information, see chapter 8 in The Book: \
                 <https://doc.rust-lang.org/book/ch08-02-strings.html#indexing-into-strings>"
@@ -319,13 +316,7 @@ unsafe impl<T> const SliceIndex<[T]> for ops::IndexRange {
     fn get_mut(self, slice: &mut [T]) -> Option<&mut [T]> {
         if self.end() <= slice.len() {
             // SAFETY: `self` is checked to be valid and in bounds above.
-            unsafe {
-                Some(&mut *get_offset_len_mut_noubcheck(
-                    slice,
-                    self.start(),
-                    self.len(),
-                ))
-            }
+            unsafe { Some(&mut *get_offset_len_mut_noubcheck(slice, self.start(), self.len())) }
         } else {
             None
         }
@@ -412,11 +403,7 @@ unsafe impl<T> const SliceIndex<[T]> for ops::Range<usize> {
             && self.end <= slice.len()
         {
             // SAFETY: `self` is checked to be valid and in bounds above.
-            unsafe {
-                Some(&mut *get_offset_len_mut_noubcheck(
-                    slice, self.start, new_len,
-                ))
-            }
+            unsafe { Some(&mut *get_offset_len_mut_noubcheck(slice, self.start, new_len)) }
         } else {
             None
         }
@@ -738,20 +725,12 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeInclusive<usize> {
 
     #[inline]
     fn get(self, slice: &[T]) -> Option<&[T]> {
-        if *self.end() == usize::MAX {
-            None
-        } else {
-            self.into_slice_range().get(slice)
-        }
+        if *self.end() == usize::MAX { None } else { self.into_slice_range().get(slice) }
     }
 
     #[inline]
     fn get_mut(self, slice: &mut [T]) -> Option<&mut [T]> {
-        if *self.end() == usize::MAX {
-            None
-        } else {
-            self.into_slice_range().get_mut(slice)
-        }
+        if *self.end() == usize::MAX { None } else { self.into_slice_range().get_mut(slice) }
     }
 
     #[inline]
@@ -768,11 +747,7 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeInclusive<usize> {
 
     #[inline]
     fn index(self, slice: &[T]) -> &[T] {
-        let Self {
-            mut start,
-            mut end,
-            exhausted,
-        } = self;
+        let Self { mut start, mut end, exhausted } = self;
         let len = slice.len();
         if end < len {
             end = end + 1;
@@ -787,11 +762,7 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeInclusive<usize> {
 
     #[inline]
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
-        let Self {
-            mut start,
-            mut end,
-            exhausted,
-        } = self;
+        let Self { mut start, mut end, exhausted } = self;
         let len = slice.len();
         if end < len {
             end = end + 1;
@@ -811,11 +782,7 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeInclusive<usize> {
             return false;
         }
         let exclusive_end = self.end + 1;
-        let start = if self.exhausted {
-            exclusive_end
-        } else {
-            self.start
-        };
+        let start = if self.exhausted { exclusive_end } else { self.start };
         start <= exclusive_end && exclusive_end <= len
     }
 }
@@ -1100,11 +1067,7 @@ where
         ops::Bound::Unbounded => len,
     };
 
-    if start > end || end > len {
-        None
-    } else {
-        Some(ops::Range { start, end })
-    }
+    if start > end || end > len { None } else { Some(ops::Range { start, end }) }
 }
 
 /// Converts a pair of `ops::Bound`s into `ops::Range` without performing any

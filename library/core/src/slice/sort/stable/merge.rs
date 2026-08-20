@@ -50,11 +50,7 @@ pub fn merge<T, F: FnMut(&T, &T) -> bool>(
 
         ptr::copy_nonoverlapping(save_base, buf, save_len);
 
-        let mut merge_state = MergeState {
-            start: buf,
-            end: buf.add(save_len),
-            dst: save_base,
-        };
+        let mut merge_state = MergeState { start: buf, end: buf.add(save_len), dst: save_base };
 
         if left_is_shorter {
             merge_state.merge_up(v_mid, v_end, is_less);

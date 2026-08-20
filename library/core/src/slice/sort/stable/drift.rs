@@ -60,13 +60,8 @@ pub fn sort<T, F: FnMut(&T, &T) -> bool>(
         // with root-level desired depth to fully collapse the merge tree.
         let (next_run, desired_depth);
         if scan_idx < len {
-            next_run = create_run(
-                &mut v[scan_idx..],
-                scratch,
-                min_good_run_len,
-                eager_sort,
-                is_less,
-            );
+            next_run =
+                create_run(&mut v[scan_idx..], scratch, min_good_run_len, eager_sort, is_less);
             desired_depth = merge_tree_depth(
                 scan_idx - prev_run.len(),
                 scan_idx,

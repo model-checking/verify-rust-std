@@ -149,11 +149,7 @@ where
         // The two slices have been checked to have the same size above.
         unsafe {
             let size = size_of_val(self);
-            compare_bytes(
-                self.as_ptr() as *const u8,
-                other.as_ptr() as *const u8,
-                size,
-            ) == 0
+            compare_bytes(self.as_ptr() as *const u8, other.as_ptr() as *const u8, size) == 0
         }
     }
 }
@@ -316,11 +312,7 @@ impl<A: [const] Ord + [const] UnsignedBytewiseOrd> const SliceOrd for A {
         let diff = left.len() as isize - right.len() as isize;
         // This comparison gets optimized away (on x86_64 and ARM) because the
         // subtraction updates flags.
-        let len = if left.len() < right.len() {
-            left.len()
-        } else {
-            right.len()
-        };
+        let len = if left.len() < right.len() { left.len() } else { right.len() };
         let left = left.as_ptr().cast();
         let right = right.as_ptr().cast();
         // SAFETY: `left` and `right` are references and are thus guaranteed to
