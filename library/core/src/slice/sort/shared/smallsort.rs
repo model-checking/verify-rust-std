@@ -1018,12 +1018,7 @@ mod verify {
             sort4_stable(src.as_ptr(), dst.as_mut_ptr() as *mut i8, &mut lt_i8);
         }
         let out = unsafe {
-            [
-                dst[0].assume_init(),
-                dst[1].assume_init(),
-                dst[2].assume_init(),
-                dst[3].assume_init(),
-            ]
+            [dst[0].assume_init(), dst[1].assume_init(), dst[2].assume_init(), dst[3].assume_init()]
         };
         kani::assert(is_sorted_slice(&out), "sort4_stable output is sorted");
     }
@@ -1038,10 +1033,7 @@ mod verify {
         unsafe {
             insert_tail(arr.as_mut_ptr(), arr.as_mut_ptr().add(tail_idx), &mut lt_i8);
         }
-        kani::assert(
-            is_sorted_slice(&arr[..=tail_idx]),
-            "insert_tail keeps [begin, tail] sorted",
-        );
+        kani::assert(is_sorted_slice(&arr[..=tail_idx]), "insert_tail keeps [begin, tail] sorted");
     }
 
     #[kani::proof_for_contract(insertion_sort_shift_left)]
