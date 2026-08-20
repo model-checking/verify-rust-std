@@ -6,7 +6,7 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use safety::{ensures, requires};
+use safety::{ensures, loop_invariant, requires};
 
 use crate::clone::TrivialClone;
 use crate::cmp::Ordering::{self, Equal, Greater, Less};
@@ -156,7 +156,11 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     pub const fn first(&self) -> Option<&T> {
-        if let [first, ..] = self { Some(first) } else { None }
+        if let [first, ..] = self {
+            Some(first)
+        } else {
+            None
+        }
     }
 
     /// Returns a mutable reference to the first element of the slice, or `None` if it is empty.
@@ -179,7 +183,11 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     pub const fn first_mut(&mut self) -> Option<&mut T> {
-        if let [first, ..] = self { Some(first) } else { None }
+        if let [first, ..] = self {
+            Some(first)
+        } else {
+            None
+        }
     }
 
     /// Returns the first and all the rest of the elements of the slice, or `None` if it is empty.
@@ -199,7 +207,11 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     pub const fn split_first(&self) -> Option<(&T, &[T])> {
-        if let [first, tail @ ..] = self { Some((first, tail)) } else { None }
+        if let [first, tail @ ..] = self {
+            Some((first, tail))
+        } else {
+            None
+        }
     }
 
     /// Returns the first and all the rest of the elements of the slice, or `None` if it is empty.
@@ -221,7 +233,11 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     pub const fn split_first_mut(&mut self) -> Option<(&mut T, &mut [T])> {
-        if let [first, tail @ ..] = self { Some((first, tail)) } else { None }
+        if let [first, tail @ ..] = self {
+            Some((first, tail))
+        } else {
+            None
+        }
     }
 
     /// Returns the last and all the rest of the elements of the slice, or `None` if it is empty.
@@ -241,7 +257,11 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     pub const fn split_last(&self) -> Option<(&T, &[T])> {
-        if let [init @ .., last] = self { Some((last, init)) } else { None }
+        if let [init @ .., last] = self {
+            Some((last, init))
+        } else {
+            None
+        }
     }
 
     /// Returns the last and all the rest of the elements of the slice, or `None` if it is empty.
@@ -263,7 +283,11 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     pub const fn split_last_mut(&mut self) -> Option<(&mut T, &mut [T])> {
-        if let [init @ .., last] = self { Some((last, init)) } else { None }
+        if let [init @ .., last] = self {
+            Some((last, init))
+        } else {
+            None
+        }
     }
 
     /// Returns the last element of the slice, or `None` if it is empty.
@@ -282,7 +306,11 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     pub const fn last(&self) -> Option<&T> {
-        if let [.., last] = self { Some(last) } else { None }
+        if let [.., last] = self {
+            Some(last)
+        } else {
+            None
+        }
     }
 
     /// Returns a mutable reference to the last item in the slice, or `None` if it is empty.
@@ -305,7 +333,11 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     pub const fn last_mut(&mut self) -> Option<&mut T> {
-        if let [.., last] = self { Some(last) } else { None }
+        if let [.., last] = self {
+            Some(last)
+        } else {
+            None
+        }
     }
 
     /// Returns an array reference to the first `N` items in the slice.
@@ -388,7 +420,9 @@ impl<T> [T] {
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     pub const fn split_first_chunk<const N: usize>(&self) -> Option<(&[T; N], &[T])> {
-        let Some((first, tail)) = self.split_at_checked(N) else { return None };
+        let Some((first, tail)) = self.split_at_checked(N) else {
+            return None;
+        };
 
         // SAFETY: We explicitly check for the correct number of elements,
         //   and do not let the references outlive the slice.
@@ -420,7 +454,9 @@ impl<T> [T] {
     pub const fn split_first_chunk_mut<const N: usize>(
         &mut self,
     ) -> Option<(&mut [T; N], &mut [T])> {
-        let Some((first, tail)) = self.split_at_mut_checked(N) else { return None };
+        let Some((first, tail)) = self.split_at_mut_checked(N) else {
+            return None;
+        };
 
         // SAFETY: We explicitly check for the correct number of elements,
         //   do not let the reference outlive the slice,
@@ -448,7 +484,9 @@ impl<T> [T] {
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     pub const fn split_last_chunk<const N: usize>(&self) -> Option<(&[T], &[T; N])> {
-        let Some(index) = self.len().checked_sub(N) else { return None };
+        let Some(index) = self.len().checked_sub(N) else {
+            return None;
+        };
         let (init, last) = self.split_at(index);
 
         // SAFETY: We explicitly check for the correct number of elements,
@@ -481,7 +519,9 @@ impl<T> [T] {
     pub const fn split_last_chunk_mut<const N: usize>(
         &mut self,
     ) -> Option<(&mut [T], &mut [T; N])> {
-        let Some(index) = self.len().checked_sub(N) else { return None };
+        let Some(index) = self.len().checked_sub(N) else {
+            return None;
+        };
         let (init, last) = self.split_at_mut(index);
 
         // SAFETY: We explicitly check for the correct number of elements,
@@ -511,7 +551,9 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_last_chunk", since = "1.80.0")]
     pub const fn last_chunk<const N: usize>(&self) -> Option<&[T; N]> {
         // FIXME(const-hack): Without const traits, we need this instead of `get`.
-        let Some(index) = self.len().checked_sub(N) else { return None };
+        let Some(index) = self.len().checked_sub(N) else {
+            return None;
+        };
         let (_, last) = self.split_at(index);
 
         // SAFETY: We explicitly check for the correct number of elements,
@@ -541,7 +583,9 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
     pub const fn last_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
         // FIXME(const-hack): Without const traits, we need this instead of `get`.
-        let Some(index) = self.len().checked_sub(N) else { return None };
+        let Some(index) = self.len().checked_sub(N) else {
+            return None;
+        };
         let (_, last) = self.split_at_mut(index);
 
         // SAFETY: We explicitly check for the correct number of elements,
@@ -639,6 +683,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[requires(index.in_bounds(self.len()))]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -684,6 +729,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[requires(index.in_bounds(self.len()))]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -948,6 +994,8 @@ impl<T> [T] {
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
     #[track_caller]
+    #[requires(a < self.len() && b < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -978,6 +1026,7 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_slice_reverse", since = "1.90.0")]
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const fn reverse(&mut self) {
         let half_len = self.len() / 2;
         let Range { start, end } = self.as_mut_ptr_range();
@@ -1345,6 +1394,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(N != 0 && self.len().is_multiple_of(N))]
     pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1505,6 +1555,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(N != 0 && self.len().is_multiple_of(N))]
     pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -2043,6 +2094,13 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(mid <= self.len())]
+    #[ensures(|(left, right): &(&[T], &[T])| {
+        left.len() == mid
+            && right.len() == self.len() - mid
+            && left.as_ptr() == self.as_ptr()
+            && right.as_ptr() == self.as_ptr().wrapping_add(mid)
+    })]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2058,7 +2116,12 @@ impl<T> [T] {
         );
 
         // SAFETY: Caller has to check that `0 <= mid <= self.len()`
-        unsafe { (from_raw_parts(ptr, mid), from_raw_parts(ptr.add(mid), unchecked_sub(len, mid))) }
+        unsafe {
+            (
+                from_raw_parts(ptr, mid),
+                from_raw_parts(ptr.add(mid), unchecked_sub(len, mid)),
+            )
+        }
     }
 
     /// Divides one mutable slice into two at an index, without doing bounds checking.
@@ -2097,6 +2160,13 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(mid <= self.len())]
+    #[ensures(|(left, right): &(&mut [T], &mut [T])| {
+        left.len() == mid
+            && right.len() == old(self.len()) - mid
+            && left.as_ptr() == old(self.as_ptr())
+            && right.as_ptr() == old(self.as_ptr()).wrapping_add(mid)
+    })]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -2989,6 +3059,7 @@ impl<T> [T] {
         // returns Equal. We want the number of loop iterations to depend *only*
         // on the size of the input slice so that the CPU can reliably predict
         // the loop count.
+        #[loop_invariant(size >= 1 && base + size <= self.len())]
         while size > 1 {
             let half = size / 2;
             let mid = base + half;
@@ -3595,6 +3666,12 @@ impl<T> [T] {
         // thus `next_read > next_write - 1` is too.
         unsafe {
             // Avoid bounds checks by using raw pointers.
+            #[loop_invariant(
+                next_read <= len
+                    && next_write >= 1
+                    && next_write <= next_read
+                    && next_read >= 1
+            )]
             while next_read < len {
                 let ptr_read = ptr.add(next_read);
                 let prev_ptr_write = ptr.add(next_write - 1);
@@ -3676,6 +3753,8 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_rotate", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_slice_rotate", since = "1.92.0")]
+    #[requires(mid <= self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const fn rotate_left(&mut self, mid: usize) {
         assert!(mid <= self.len());
         let k = self.len() - mid;
@@ -3722,6 +3801,8 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_rotate", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_slice_rotate", since = "1.92.0")]
+    #[requires(k <= self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const fn rotate_right(&mut self, k: usize) {
         assert!(k <= self.len());
         let mid = self.len() - k;
@@ -3898,6 +3979,8 @@ impl<T> [T] {
     #[stable(feature = "copy_from_slice", since = "1.9.0")]
     #[rustc_const_stable(feature = "const_copy_from_slice", since = "1.87.0")]
     #[track_caller]
+    #[requires(self.len() == src.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const fn copy_from_slice(&mut self, src: &[T])
     where
         T: Copy,
@@ -3936,7 +4019,10 @@ impl<T> [T] {
     where
         T: Copy,
     {
-        let Range { start: src_start, end: src_end } = slice::range(src, ..self.len());
+        let Range {
+            start: src_start,
+            end: src_end,
+        } = slice::range(src, ..self.len());
         let count = src_end - src_start;
         assert!(dest <= self.len() - count, "dest is out of bounds");
         // SAFETY: the conditions for `ptr::copy` have all been checked above,
@@ -4000,8 +4086,13 @@ impl<T> [T] {
     #[stable(feature = "swap_with_slice", since = "1.27.0")]
     #[rustc_const_unstable(feature = "const_swap_with_slice", issue = "142204")]
     #[track_caller]
+    #[requires(self.len() == other.len())]
+    #[cfg_attr(kani, kani::modifies(self, other))]
     pub const fn swap_with_slice(&mut self, other: &mut [T]) {
-        assert!(self.len() == other.len(), "destination and source slices have different lengths");
+        assert!(
+            self.len() == other.len(),
+            "destination and source slices have different lengths"
+        );
         // SAFETY: `self` is valid for `self.len()` elements by definition, and `src` was
         // checked to have the same length. The slices cannot overlap because
         // mutable references are exclusive.
@@ -4504,7 +4595,8 @@ impl<T> [T] {
     where
         P: FnMut(&T) -> bool,
     {
-        self.binary_search_by(|x| if pred(x) { Less } else { Greater }).unwrap_or_else(|i| i)
+        self.binary_search_by(|x| if pred(x) { Less } else { Greater })
+            .unwrap_or_else(|i| i)
     }
 
     /// Removes the subslice corresponding to the given range
@@ -4658,7 +4750,9 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_split_off_first_last", issue = "138539")]
     pub const fn split_off_first<'a>(self: &mut &'a Self) -> Option<&'a T> {
         // FIXME(const-hack): Use `?` when available in const instead of `let-else`.
-        let Some((first, rem)) = self.split_first() else { return None };
+        let Some((first, rem)) = self.split_first() else {
+            return None;
+        };
         *self = rem;
         Some(first)
     }
@@ -4684,7 +4778,9 @@ impl<T> [T] {
     pub const fn split_off_first_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
         // FIXME(const-hack): Use `mem::take` and `?` when available in const.
         // Original: `mem::take(self).split_first_mut()?`
-        let Some((first, rem)) = mem::replace(self, &mut []).split_first_mut() else { return None };
+        let Some((first, rem)) = mem::replace(self, &mut []).split_first_mut() else {
+            return None;
+        };
         *self = rem;
         Some(first)
     }
@@ -4708,7 +4804,9 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_split_off_first_last", issue = "138539")]
     pub const fn split_off_last<'a>(self: &mut &'a Self) -> Option<&'a T> {
         // FIXME(const-hack): Use `?` when available in const instead of `let-else`.
-        let Some((last, rem)) = self.split_last() else { return None };
+        let Some((last, rem)) = self.split_last() else {
+            return None;
+        };
         *self = rem;
         Some(last)
     }
@@ -4734,7 +4832,9 @@ impl<T> [T] {
     pub const fn split_off_last_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
         // FIXME(const-hack): Use `mem::take` and `?` when available in const.
         // Original: `mem::take(self).split_last_mut()?`
-        let Some((last, rem)) = mem::replace(self, &mut []).split_last_mut() else { return None };
+        let Some((last, rem)) = mem::replace(self, &mut []).split_last_mut() else {
+            return None;
+        };
         *self = rem;
         Some(last)
     }
@@ -4788,6 +4888,7 @@ impl<T> [T] {
     #[stable(feature = "get_many_mut", since = "1.86.0")]
     #[inline]
     #[track_caller]
+    #[requires(get_disjoint_check_valid(&indices, self.len()).is_ok())]
     pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
         &mut self,
         indices: [I; N],
@@ -4808,7 +4909,10 @@ impl<T> [T] {
         unsafe {
             for i in 0..N {
                 let idx = indices.get_unchecked(i).clone();
-                arr_ptr.cast::<&mut I::Output>().add(i).write(&mut *slice.get_unchecked_mut(idx));
+                arr_ptr
+                    .cast::<&mut I::Output>()
+                    .add(i)
+                    .write(&mut *slice.get_unchecked_mut(idx));
             }
             arr.assume_init()
         }
@@ -4926,7 +5030,11 @@ impl<T> [T] {
 
         let offset = byte_offset / size_of::<T>();
 
-        if offset < self.len() { Some(offset) } else { None }
+        if offset < self.len() {
+            Some(offset)
+        } else {
+            None
+        }
     }
 
     /// Returns the range of indices that a subslice points to.
@@ -4981,7 +5089,11 @@ impl<T> [T] {
         let start = byte_start / size_of::<T>();
         let end = start.wrapping_add(subslice.len());
 
-        if start <= self.len() && end <= self.len() { Some(start..end) } else { None }
+        if start <= self.len() && end <= self.len() {
+            Some(start..end)
+        } else {
+            None
+        }
     }
 }
 
@@ -5221,7 +5333,10 @@ where
 {
     #[track_caller]
     default fn spec_clone_from(&mut self, src: &[T]) {
-        assert!(self.len() == src.len(), "destination and source slices have different lengths");
+        assert!(
+            self.len() == src.len(),
+            "destination and source slices have different lengths"
+        );
         // NOTE: We need to explicitly slice them to the same length
         // to make it easier for the optimizer to elide bounds checking.
         // But since it can't be relied on we also have an explicit specialization for T: Copy.
@@ -5264,7 +5379,11 @@ impl<T> const Default for &mut [T] {
     }
 }
 
-#[unstable(feature = "slice_pattern", reason = "stopgap trait for slice patterns", issue = "56345")]
+#[unstable(
+    feature = "slice_pattern",
+    reason = "stopgap trait for slice patterns",
+    issue = "56345"
+)]
 /// Patterns in slices - currently, only used by `strip_prefix` and `strip_suffix`.  At a future
 /// point, we hope to generalise `core::str::Pattern` (which at the time of writing is limited to
 /// `str`) to slices, and then this trait will be replaced or abolished.
@@ -5470,6 +5589,8 @@ unsafe impl GetDisjointMutIndex for range::RangeInclusive<usize> {
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
+    use crate::ops::Bound;
+    use crate::range;
 
     //generates proof_of_contract harness for align_to given the T (src) and U (dst) types
     macro_rules! proof_of_contract_for_align_to {
@@ -5551,9 +5672,451 @@ mod verify {
     gen_align_to_mut_harnesses!(align_to_mut_from_char, char);
     gen_align_to_mut_harnesses!(align_to_mut_from_unit, ());
 
-    #[kani::proof]
+    // Challenge 17: remaining functions. Contracts are written over generic `[T]`;
+    // each harness instantiates a layout. Looping methods use loop contracts so
+    // the argument is inductive in the length, not an unwind bound.
+    const CAP: usize = 8;
+
+    fn any_ref<T, const N: usize>(arr: &[T; N]) -> &[T] {
+        kani::slice::any_slice_of_array(arr)
+    }
+
+    fn any_mut<T, const N: usize>(arr: &mut [T; N]) -> &mut [T] {
+        kani::slice::any_slice_of_array_mut(arr)
+    }
+
+    fn any_bound() -> Bound<usize> {
+        match kani::any::<u8>() % 3 {
+            0 => Bound::Included(kani::any()),
+            1 => Bound::Excluded(kani::any()),
+            _ => Bound::Unbounded,
+        }
+    }
+
+    // --- unsafe functions: proof_for_contract ---
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_usize() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = kani::any::<usize>();
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_range() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = kani::any::<usize>()..kani::any::<usize>();
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_range_inclusive() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let start = kani::any::<usize>();
+        let end = kani::any::<usize>();
+        let _ = unsafe { slice.get_unchecked(start..=end) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_range_from() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = kani::any::<usize>()..;
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_range_to() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = ..kani::any::<usize>();
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_range_full() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let _ = unsafe { slice.get_unchecked(..) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_range_to_inclusive() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = ..=kani::any::<usize>();
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_index_range() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let start = kani::any::<usize>();
+        let end = kani::any::<usize>();
+        kani::assume(start <= end);
+        let idx = unsafe { crate::ops::IndexRange::new_unchecked(start, end) };
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_core_range() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = range::Range {
+            start: kani::any(),
+            end: kani::any(),
+        };
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_core_range_inclusive() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = range::RangeInclusive {
+            start: kani::any(),
+            last: kani::any(),
+        };
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_core_range_from() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = range::RangeFrom { start: kani::any() };
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_core_range_to_inclusive() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = range::RangeToInclusive { last: kani::any() };
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked)]
+    fn check_get_unchecked_bound_pair() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let idx = (any_bound(), any_bound());
+        let _ = unsafe { slice.get_unchecked(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked_mut)]
+    fn check_get_unchecked_mut_usize() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let idx = kani::any::<usize>();
+        let _ = unsafe { slice.get_unchecked_mut(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked_mut)]
+    fn check_get_unchecked_mut_range() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let idx = kani::any::<usize>()..kani::any::<usize>();
+        let _ = unsafe { slice.get_unchecked_mut(idx) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_unchecked_mut)]
+    fn check_get_unchecked_mut_range_inclusive() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let start = kani::any::<usize>();
+        let end = kani::any::<usize>();
+        let _ = unsafe { slice.get_unchecked_mut(start..=end) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::swap_unchecked)]
+    fn check_swap_unchecked() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let a = kani::any::<usize>();
+        let b = kani::any::<usize>();
+        unsafe { slice.swap_unchecked(a, b) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::as_chunks_unchecked)]
+    fn check_as_chunks_unchecked() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let _ = unsafe { slice.as_chunks_unchecked::<2>() };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::as_chunks_unchecked_mut)]
+    fn check_as_chunks_unchecked_mut() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let _ = unsafe { slice.as_chunks_unchecked_mut::<2>() };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::split_at_unchecked)]
+    fn check_split_at_unchecked() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let mid = kani::any::<usize>();
+        let _ = unsafe { slice.split_at_unchecked(mid) };
+    }
+
+    #[kani::proof_for_contract(<[()]>::split_at_unchecked)]
+    fn check_split_at_unchecked_zst() {
+        let arr: [(); CAP] = [(); CAP];
+        let slice = any_ref(&arr);
+        let mid = kani::any::<usize>();
+        let _ = unsafe { slice.split_at_unchecked(mid) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::split_at_mut_unchecked)]
+    fn check_split_at_mut_unchecked() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let mid = kani::any::<usize>();
+        let _ = unsafe { slice.split_at_mut_unchecked(mid) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_disjoint_unchecked_mut)]
+    fn check_get_disjoint_unchecked_mut_usize() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let indices = [kani::any::<usize>(), kani::any::<usize>()];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_disjoint_unchecked_mut)]
+    fn check_get_disjoint_unchecked_mut_range() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let indices = [
+            kani::any::<usize>()..kani::any::<usize>(),
+            kani::any::<usize>()..kani::any::<usize>(),
+        ];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_disjoint_unchecked_mut)]
+    fn check_get_disjoint_unchecked_mut_range_inclusive() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let a = kani::any::<usize>()..=kani::any::<usize>();
+        let b = kani::any::<usize>()..=kani::any::<usize>();
+        let _ = unsafe { slice.get_disjoint_unchecked_mut([a, b]) };
+    }
+
+    // --- safe abstractions ---
+
+    #[kani::proof_for_contract(<[u8]>::reverse)]
     fn check_reverse() {
-        let mut a: [u8; 100] = kani::any();
-        a.reverse();
+        let mut arr: [u8; CAP] = kani::any();
+        any_mut(&mut arr).reverse();
+    }
+
+    #[kani::proof]
+    fn check_first_chunk() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let _ = slice.first_chunk::<0>();
+        let _ = slice.first_chunk::<2>();
+        let _ = slice.first_chunk::<8>();
+    }
+
+    #[kani::proof]
+    fn check_first_chunk_mut() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let _ = slice.first_chunk_mut::<2>();
+    }
+
+    #[kani::proof]
+    fn check_split_first_chunk() {
+        let arr: [u8; CAP] = kani::any();
+        let _ = any_ref(&arr).split_first_chunk::<2>();
+    }
+
+    #[kani::proof]
+    fn check_split_first_chunk_mut() {
+        let mut arr: [u8; CAP] = kani::any();
+        let _ = any_mut(&mut arr).split_first_chunk_mut::<2>();
+    }
+
+    #[kani::proof]
+    fn check_split_last_chunk() {
+        let arr: [u8; CAP] = kani::any();
+        let _ = any_ref(&arr).split_last_chunk::<2>();
+    }
+
+    #[kani::proof]
+    fn check_split_last_chunk_mut() {
+        let mut arr: [u8; CAP] = kani::any();
+        let _ = any_mut(&mut arr).split_last_chunk_mut::<2>();
+    }
+
+    #[kani::proof]
+    fn check_last_chunk() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let _ = slice.last_chunk::<0>();
+        let _ = slice.last_chunk::<2>();
+    }
+
+    #[kani::proof]
+    fn check_last_chunk_mut() {
+        let mut arr: [u8; CAP] = kani::any();
+        let _ = any_mut(&mut arr).last_chunk_mut::<2>();
+    }
+
+    #[kani::proof]
+    fn check_as_chunks() {
+        let arr: [u8; CAP] = kani::any();
+        let _ = any_ref(&arr).as_chunks::<2>();
+    }
+
+    #[kani::proof]
+    fn check_as_chunks_mut() {
+        let mut arr: [u8; CAP] = kani::any();
+        let _ = any_mut(&mut arr).as_chunks_mut::<2>();
+    }
+
+    #[kani::proof]
+    fn check_as_rchunks() {
+        let arr: [u8; CAP] = kani::any();
+        let _ = any_ref(&arr).as_rchunks::<2>();
+    }
+
+    #[kani::proof]
+    fn check_split_at_checked() {
+        let arr: [u8; CAP] = kani::any();
+        let _ = any_ref(&arr).split_at_checked(kani::any());
+    }
+
+    #[kani::proof]
+    fn check_split_at_mut_checked() {
+        let mut arr: [u8; CAP] = kani::any();
+        let _ = any_mut(&mut arr).split_at_mut_checked(kani::any());
+    }
+
+    #[kani::proof]
+    fn check_binary_search_by() {
+        let arr: [u8; CAP] = kani::any();
+        let slice = any_ref(&arr);
+        let _ = slice.binary_search_by(|_| match kani::any::<u8>() % 3 {
+            0 => Equal,
+            1 => Less,
+            _ => Greater,
+        });
+    }
+
+    #[kani::proof]
+    fn check_partition_dedup_by() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let _ = slice.partition_dedup_by(|a, b| a == b);
+    }
+
+    #[kani::proof_for_contract(<[u8]>::rotate_left)]
+    fn check_rotate_left() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        slice.rotate_left(kani::any());
+    }
+
+    #[kani::proof_for_contract(<[u8]>::rotate_right)]
+    fn check_rotate_right() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        slice.rotate_right(kani::any());
+    }
+
+    #[kani::proof_for_contract(super::rotate::ptr_rotate)]
+    fn check_ptr_rotate() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let mid = kani::any::<usize>();
+        kani::assume(mid <= slice.len());
+        let k = slice.len() - mid;
+        let p = slice.as_mut_ptr();
+        unsafe { super::rotate::ptr_rotate(mid, p.add(mid), k) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::copy_from_slice)]
+    fn check_copy_from_slice() {
+        let mut dst: [u8; CAP] = kani::any();
+        let src: [u8; CAP] = kani::any();
+        let d = any_mut(&mut dst);
+        let s = any_ref(&src);
+        kani::assume(d.len() == s.len());
+        d.copy_from_slice(s);
+    }
+
+    #[kani::proof]
+    fn check_copy_within() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let src = kani::any::<usize>()..kani::any::<usize>();
+        let dest = kani::any::<usize>();
+        if let Some(r) = try_range(src, ..slice.len()) {
+            let count = r.end - r.start;
+            if dest <= slice.len() - count {
+                slice.copy_within(r, dest);
+            }
+        }
+    }
+
+    #[kani::proof_for_contract(<[u8]>::swap_with_slice)]
+    fn check_swap_with_slice() {
+        let mut a: [u8; CAP] = kani::any();
+        let mut b: [u8; CAP] = kani::any();
+        let left = any_mut(&mut a);
+        let right = any_mut(&mut b);
+        kani::assume(left.len() == right.len());
+        left.swap_with_slice(right);
+    }
+
+    #[kani::proof]
+    fn check_as_simd() {
+        let arr: [u8; 16] = kani::any();
+        let _ = any_ref(&arr).as_simd::<4>();
+    }
+
+    #[kani::proof]
+    fn check_as_simd_mut() {
+        let mut arr: [u8; 16] = kani::any();
+        let _ = any_mut(&mut arr).as_simd_mut::<4>();
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_mut() {
+        let mut arr: [u8; CAP] = kani::any();
+        let slice = any_mut(&mut arr);
+        let _ = slice.get_disjoint_mut([kani::any::<usize>(), kani::any::<usize>()]);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_check_valid() {
+        let indices = [
+            kani::any::<usize>(),
+            kani::any::<usize>(),
+            kani::any::<usize>(),
+        ];
+        let _ = get_disjoint_check_valid(&indices, kani::any());
+    }
+
+    #[kani::proof]
+    fn check_as_flattened() {
+        let arr: [[u8; 2]; 4] = kani::any();
+        let slice = any_ref(&arr);
+        let _ = slice.as_flattened();
+    }
+
+    #[kani::proof]
+    fn check_as_flattened_mut() {
+        let mut arr: [[u8; 2]; 4] = kani::any();
+        let slice = any_mut(&mut arr);
+        let _ = slice.as_flattened_mut();
     }
 }

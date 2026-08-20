@@ -211,7 +211,10 @@ where
             let is_first_swap_pair = gap_opt.is_none();
 
             if is_first_swap_pair {
-                gap_opt = Some(GapGuard { pos: right, value: ManuallyDrop::new(ptr::read(left)) });
+                gap_opt = Some(GapGuard {
+                    pos: right,
+                    value: ManuallyDrop::new(ptr::read(left)),
+                });
             }
 
             let gap = gap_opt.as_mut().unwrap_unchecked();
@@ -301,7 +304,10 @@ where
             num_lt: 0,
             right: v_base.add(1),
 
-            gap: GapGuardRaw { pos: v_base, value: &mut *gap_value },
+            gap: GapGuardRaw {
+                pos: v_base,
+                value: &mut *gap_value,
+            },
         };
 
         // Manual unrolling that works well on x86, Arm and with opt-level=s without murdering
@@ -323,7 +329,11 @@ where
         let end = v_base.add(len);
         loop {
             let is_done = state.right == end;
-            state.right = if is_done { state.gap.value } else { state.right };
+            state.right = if is_done {
+                state.gap.value
+            } else {
+                state.right
+            };
 
             loop_body(&mut state);
 

@@ -143,7 +143,9 @@ impl [u8] {
                   without modifying the original"]
     #[stable(feature = "inherent_ascii_escape", since = "1.60.0")]
     pub fn escape_ascii(&self) -> EscapeAscii<'_> {
-        EscapeAscii { inner: self.iter().flat_map(EscapeByte) }
+        EscapeAscii {
+            inner: self.iter().flat_map(EscapeByte),
+        }
     }
 
     /// Returns a byte slice with leading ASCII whitespace bytes removed.

@@ -151,7 +151,10 @@ mod private_slice_index {
 #[rustc_on_unimplemented(
     on(T = "str", label = "string indices are ranges of `usize`",),
     on(
-        all(any(T = "str", T = "&str", T = "alloc::string::String"), Self = "{integer}"),
+        all(
+            any(T = "str", T = "&str", T = "alloc::string::String"),
+            Self = "{integer}"
+        ),
         note = "you can use `.chars().nth()` or `.bytes().nth()`\n\
                 for more information, see chapter 8 in The Book: \
                 <https://doc.rust-lang.org/book/ch08-02-strings.html#indexing-into-strings>"
@@ -206,6 +209,18 @@ pub const unsafe trait SliceIndex<T: ?Sized>: private_slice_index::Sealed {
     #[unstable(feature = "slice_index_methods", issue = "none")]
     #[track_caller]
     fn index_mut(self, slice: &mut T) -> &mut Self::Output;
+
+    /// Borrowed form of the `get_unchecked` safety condition for Kani contracts.
+    ///
+    /// `true` iff `self` is a valid index into a `[T]` of length `len`.
+    /// Override in every `[T]` impl; the default is deliberately `false` so a
+    /// missing override cannot make `proof_for_contract` succeed vacuously.
+    #[cfg(kani)]
+    #[unstable(feature = "kani", issue = "none")]
+    fn in_bounds(&self, len: usize) -> bool {
+        let _ = len;
+        false
+    }
 }
 
 /// The methods `index` and `index_mut` panic if the index is out of bounds.
@@ -277,6 +292,11 @@ unsafe impl<T> const SliceIndex<[T]> for usize {
         // N.B., use intrinsic indexing
         &mut (*slice)[self]
     }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        *self < len
+    }
 }
 
 /// Because `IndexRange` guarantees `start <= end`, fewer checks are needed here
@@ -299,7 +319,13 @@ unsafe impl<T> const SliceIndex<[T]> for ops::IndexRange {
     fn get_mut(self, slice: &mut [T]) -> Option<&mut [T]> {
         if self.end() <= slice.len() {
             // SAFETY: `self` is checked to be valid and in bounds above.
-            unsafe { Some(&mut *get_offset_len_mut_noubcheck(slice, self.start(), self.len())) }
+            unsafe {
+                Some(&mut *get_offset_len_mut_noubcheck(
+                    slice,
+                    self.start(),
+                    self.len(),
+                ))
+            }
         } else {
             None
         }
@@ -352,6 +378,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::IndexRange {
             slice_index_fail(self.start(), self.end(), slice.len())
         }
     }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        self.end() <= len
+    }
 }
 
 /// The methods `index` and `index_mut` panic if:
@@ -381,7 +412,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::Range<usize> {
             && self.end <= slice.len()
         {
             // SAFETY: `self` is checked to be valid and in bounds above.
-            unsafe { Some(&mut *get_offset_len_mut_noubcheck(slice, self.start, new_len)) }
+            unsafe {
+                Some(&mut *get_offset_len_mut_noubcheck(
+                    slice, self.start, new_len,
+                ))
+            }
         } else {
             None
         }
@@ -456,6 +491,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::Range<usize> {
             slice_index_fail(self.start, self.end, slice.len())
         }
     }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        self.start <= self.end && self.end <= len
+    }
 }
 
 #[unstable(feature = "new_range_api", issue = "125687")]
@@ -493,6 +533,11 @@ unsafe impl<T> const SliceIndex<[T]> for range::Range<usize> {
     #[inline]
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
         ops::Range::from(self).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        self.start <= self.end && self.end <= len
     }
 }
 
@@ -532,6 +577,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeTo<usize> {
     #[inline]
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
         (0..self.end).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        self.end <= len
     }
 }
 
@@ -586,6 +636,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeFrom<usize> {
             &mut *get_offset_len_mut_noubcheck(slice, self.start, new_len)
         }
     }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        self.start <= len
+    }
 }
 
 #[unstable(feature = "new_range_api", issue = "125687")]
@@ -624,6 +679,11 @@ unsafe impl<T> const SliceIndex<[T]> for range::RangeFrom<usize> {
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
         ops::RangeFrom::from(self).index_mut(slice)
     }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        self.start <= len
+    }
 }
 
 #[stable(feature = "slice_get_slice_impls", since = "1.15.0")]
@@ -660,6 +720,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeFull {
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
         slice
     }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, _len: usize) -> bool {
+        true
+    }
 }
 
 /// The methods `index` and `index_mut` panic if:
@@ -673,12 +738,20 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeInclusive<usize> {
 
     #[inline]
     fn get(self, slice: &[T]) -> Option<&[T]> {
-        if *self.end() == usize::MAX { None } else { self.into_slice_range().get(slice) }
+        if *self.end() == usize::MAX {
+            None
+        } else {
+            self.into_slice_range().get(slice)
+        }
     }
 
     #[inline]
     fn get_mut(self, slice: &mut [T]) -> Option<&mut [T]> {
-        if *self.end() == usize::MAX { None } else { self.into_slice_range().get_mut(slice) }
+        if *self.end() == usize::MAX {
+            None
+        } else {
+            self.into_slice_range().get_mut(slice)
+        }
     }
 
     #[inline]
@@ -695,7 +768,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeInclusive<usize> {
 
     #[inline]
     fn index(self, slice: &[T]) -> &[T] {
-        let Self { mut start, mut end, exhausted } = self;
+        let Self {
+            mut start,
+            mut end,
+            exhausted,
+        } = self;
         let len = slice.len();
         if end < len {
             end = end + 1;
@@ -710,7 +787,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeInclusive<usize> {
 
     #[inline]
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
-        let Self { mut start, mut end, exhausted } = self;
+        let Self {
+            mut start,
+            mut end,
+            exhausted,
+        } = self;
         let len = slice.len();
         if end < len {
             end = end + 1;
@@ -721,6 +802,21 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeInclusive<usize> {
             }
         }
         slice_index_fail(start, end, slice.len())
+    }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        // `into_slice_range` does `end + 1`; that add is UB at `usize::MAX`.
+        if self.end == usize::MAX {
+            return false;
+        }
+        let exclusive_end = self.end + 1;
+        let start = if self.exhausted {
+            exclusive_end
+        } else {
+            self.start
+        };
+        start <= exclusive_end && exclusive_end <= len
     }
 }
 
@@ -759,6 +855,15 @@ unsafe impl<T> const SliceIndex<[T]> for range::RangeInclusive<usize> {
     #[inline]
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
         ops::RangeInclusive::from(self).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        if self.last == usize::MAX {
+            return false;
+        }
+        let exclusive_end = self.last + 1;
+        self.start <= exclusive_end && exclusive_end <= len
     }
 }
 
@@ -799,6 +904,11 @@ unsafe impl<T> const SliceIndex<[T]> for ops::RangeToInclusive<usize> {
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
         (0..=self.end).index_mut(slice)
     }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        self.end < len
+    }
 }
 
 /// The methods `index` and `index_mut` panic if the end of the range is out of bounds.
@@ -837,6 +947,11 @@ unsafe impl<T> const SliceIndex<[T]> for range::RangeToInclusive<usize> {
     #[inline]
     fn index_mut(self, slice: &mut [T]) -> &mut [T] {
         (0..=self.last).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        self.last < len
     }
 }
 
@@ -985,7 +1100,11 @@ where
         ops::Bound::Unbounded => len,
     };
 
-    if start > end || end > len { None } else { Some(ops::Range { start, end }) }
+    if start > end || end > len {
+        None
+    } else {
+        Some(ops::Range { start, end })
+    }
 }
 
 /// Converts a pair of `ops::Bound`s into `ops::Range` without performing any
@@ -1099,5 +1218,13 @@ unsafe impl<T> SliceIndex<[T]> for (ops::Bound<usize>, ops::Bound<usize>) {
     #[inline]
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         into_slice_range(slice.len(), self).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn in_bounds(&self, len: usize) -> bool {
+        match into_range(len, *self) {
+            Some(r) => r.start <= r.end && r.end <= len,
+            None => false,
+        }
     }
 }

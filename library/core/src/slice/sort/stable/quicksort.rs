@@ -197,7 +197,14 @@ impl<T> PartitionState<T> {
     /// scan buffer must be initialized.
     unsafe fn new(scan: *const T, scratch: *mut T, len: usize) -> Self {
         // SAFETY: See function safety comment.
-        unsafe { Self { scratch_base: scratch, scan, num_left: 0, scratch_rev: scratch.add(len) } }
+        unsafe {
+            Self {
+                scratch_base: scratch,
+                scan,
+                num_left: 0,
+                scratch_rev: scratch.add(len),
+            }
+        }
     }
 
     /// Depending on the value of `towards_left` this function will write a value
@@ -220,7 +227,11 @@ impl<T> PartitionState<T> {
 
             // SAFETY: now we have scratch_rev == base + len - (i + 1). This means
             // scratch_rev + num_left == base + len - 1 - num_right < base + len.
-            let dst_base = if towards_left { self.scratch_base } else { self.scratch_rev };
+            let dst_base = if towards_left {
+                self.scratch_base
+            } else {
+                self.scratch_rev
+            };
             let dst = dst_base.add(self.num_left);
             ptr::copy_nonoverlapping(self.scan, dst, 1);
 

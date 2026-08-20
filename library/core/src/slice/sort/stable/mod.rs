@@ -153,7 +153,10 @@ struct AlignedStorage<T, const N: usize> {
 
 impl<T, const N: usize> AlignedStorage<T, N> {
     fn new() -> Self {
-        Self { _align: [], storage: [const { MaybeUninit::uninit() }; N] }
+        Self {
+            _align: [],
+            storage: [const { MaybeUninit::uninit() }; N],
+        }
     }
 
     fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<T>] {

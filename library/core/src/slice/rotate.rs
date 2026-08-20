@@ -1,3 +1,7 @@
+use safety::requires;
+
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::ptr;
 
@@ -11,6 +15,17 @@ type BufType = [usize; 32];
 ///
 /// The specified range must be valid for reading and writing.
 #[inline]
+#[requires(
+    T::IS_ZST || left == 0 || right == 0 || {
+        let start = mid.wrapping_sub(left);
+        crate::ub_checks::can_dereference(ptr::slice_from_raw_parts(start, left + right))
+            && crate::ub_checks::can_write(ptr::slice_from_raw_parts_mut(start, left + right))
+    }
+)]
+#[cfg_attr(
+    kani,
+    kani::modifies(ptr::slice_from_raw_parts_mut(mid.wrapping_sub(left), left.wrapping_add(right)))
+)]
 pub(super) const unsafe fn ptr_rotate<T>(left: usize, mid: *mut T, right: usize) {
     if T::IS_ZST {
         return;
