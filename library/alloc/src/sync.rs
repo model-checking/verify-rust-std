@@ -33,6 +33,8 @@ use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use core::sync::atomic::{self, Atomic};
 use core::{borrow, fmt, hint};
 
+use safety::{ensures, requires};
+
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
 use crate::alloc::{AllocError, Allocator, Global, Layout};
@@ -59,7 +61,6 @@ const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 const INTERNAL_OVERFLOW_ERROR: &str = "Arc counter overflow";
 
 #[cfg(not(sanitize = "thread"))]
-
 macro_rules! acquire {
     ($x:expr) => {
         atomic::fence(Acquire)
@@ -70,7 +71,6 @@ macro_rules! acquire {
 // reports in Arc / Weak implementation use atomic loads for synchronization
 // instead.
 #[cfg(sanitize = "thread")]
-
 macro_rules! acquire {
     ($x:expr) => {
         $x.load(Acquire)
@@ -1350,20 +1350,14 @@ impl<T, A: Allocator> Arc<mem::MaybeUninit<T>, A> {
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[must_use = "`self` will be dropped if the result is not used"]
     #[inline]
-    #[cfg_attr(
-        // Kani 0.65 limitation: proof_for_contract cannot target this
-        // MaybeUninit-based generic impl reliably. Verified via kani::proof
-        // harnesses with explicit postcondition checks.
-        kani,
-        kani::requires({
-            let p = Arc::<mem::MaybeUninit<T>, A>::as_ptr(&self);
-            kani::mem::can_dereference(p)
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Arc<T, A>| Arc::<T, A>::strong_count(result) >= 1)
-    )]
+    // Kani 0.65 limitation: proof_for_contract cannot target this
+    // MaybeUninit-based generic impl reliably. Verified via kani::proof
+    // harnesses with explicit precondition and postcondition checks.
+    #[requires({
+        let p = Arc::<mem::MaybeUninit<T>, A>::as_ptr(&self);
+        kani::mem::can_dereference(p)
+    })]
+    #[ensures(|result: &Arc<T, A>| Arc::<T, A>::strong_count(result) >= 1)]
     pub unsafe fn assume_init(self) -> Arc<T, A> {
         let (ptr, alloc) = Arc::into_inner_with_allocator(self);
         unsafe { Arc::from_inner_in(ptr.cast(), alloc) }
@@ -1403,20 +1397,14 @@ impl<T, A: Allocator> Arc<[mem::MaybeUninit<T>], A> {
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[must_use = "`self` will be dropped if the result is not used"]
     #[inline]
-    #[cfg_attr(
-        // Kani 0.65 limitation: proof_for_contract cannot target this
-        // MaybeUninit-based generic impl reliably. Verified via kani::proof
-        // harnesses with explicit postcondition checks.
-        kani,
-        kani::requires({
-            let p = Arc::<[mem::MaybeUninit<T>], A>::as_ptr(&self);
-            kani::mem::can_dereference(p)
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Arc<[T], A>| Arc::<[T], A>::strong_count(result) >= 1)
-    )]
+    // Kani 0.65 limitation: proof_for_contract cannot target this
+    // MaybeUninit-based generic impl reliably. Verified via kani::proof
+    // harnesses with explicit precondition and postcondition checks.
+    #[requires({
+        let p = Arc::<[mem::MaybeUninit<T>], A>::as_ptr(&self);
+        kani::mem::can_dereference(p)
+    })]
+    #[ensures(|result: &Arc<[T], A>| Arc::<[T], A>::strong_count(result) >= 1)]
     pub unsafe fn assume_init(self) -> Arc<[T], A> {
         let (ptr, alloc) = Arc::into_inner_with_allocator(self);
         unsafe { Arc::from_ptr_in(ptr.as_ptr() as _, alloc) }
@@ -1487,19 +1475,16 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_raw", since = "1.17.0")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+    #[requires({
+        let offset = unsafe { data_offset(ptr) };
+        let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+        let rebuilt_ptr = unsafe { &raw const (*inner).data };
 
-            kani::mem::checked_align_of_raw(ptr).is_some()
-                && kani::mem::checked_size_of_raw(ptr).is_some()
-                && ptr == rebuilt_ptr
-                && unsafe { (*inner).strong.load(Relaxed) >= 1 }
-        })
-    )]
+        kani::mem::checked_align_of_raw(ptr).is_some()
+            && kani::mem::checked_size_of_raw(ptr).is_some()
+            && ptr == rebuilt_ptr
+            && unsafe { (*inner).strong.load(Relaxed) >= 1 }
+    })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Arc::from_raw_in(ptr, Global) }
     }
@@ -1562,18 +1547,18 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "arc_mutate_strong_count", since = "1.51.0")]
-    #[cfg_attr(kani, kani::requires(!ptr.is_null()))]
-    #[cfg_attr(kani, kani::requires(kani::mem::can_dereference(ptr)))]
-    #[cfg_attr(kani, kani::requires({
+    #[requires(!ptr.is_null())]
+    #[requires(kani::mem::can_dereference(ptr))]
+    #[requires({
         let offset = unsafe { data_offset(ptr) };
         let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
         kani::mem::can_dereference(arc_ptr)
-    }))]
-    #[cfg_attr(kani, kani::requires({
+    })]
+    #[requires({
         let offset = unsafe { data_offset(ptr) };
         let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
         kani::mem::can_dereference(arc_ptr) && unsafe { (*arc_ptr).strong.load(Relaxed) >= 1 }
-    }))]
+    })]
     #[cfg_attr(kani, kani::modifies({
         let offset = unsafe { data_offset(ptr) };
         let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
@@ -1619,27 +1604,24 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "arc_mutate_strong_count", since = "1.51.0")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
-            let inner = inner_mut as *const ArcInner<T>;
-            let rebuilt_ptr = unsafe { &raw const (*inner).data };
-            let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
-            let into_raw_roundtrip_ptr = {
-                let arc = unsafe { Arc::<T>::from_raw(ptr) };
-                Arc::<T>::into_raw(arc)
-            };
-            ptr == rebuilt_ptr
-                && ptr == into_raw_roundtrip_ptr
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
-        })
-    )]
+    #[requires({
+        let offset = unsafe { data_offset(ptr) };
+        let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
+        let inner = inner_mut as *const ArcInner<T>;
+        let rebuilt_ptr = unsafe { &raw const (*inner).data };
+        let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
+        let into_raw_roundtrip_ptr = {
+            let arc = unsafe { Arc::<T>::from_raw(ptr) };
+            Arc::<T>::into_raw(arc)
+        };
+        ptr == rebuilt_ptr
+            && ptr == into_raw_roundtrip_ptr
+            && kani::mem::checked_size_of_raw(ptr)
+                == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+            && kani::mem::checked_align_of_raw(ptr)
+                == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+            && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+    })]
     #[cfg_attr(kani, kani::modifies({
         let offset = unsafe { data_offset(ptr) };
         let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
@@ -1787,24 +1769,18 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).data };
-            ptr == rebuilt_ptr
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*inner).strong.load(Relaxed) >= 1 }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| Arc::<T, A>::as_ptr(result) == ptr)
-    )]
+    #[requires({
+        let offset = unsafe { data_offset(ptr) };
+        let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+        let rebuilt_ptr = unsafe { &raw const (*inner).data };
+        ptr == rebuilt_ptr
+            && kani::mem::checked_size_of_raw(ptr)
+                == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+            && kani::mem::checked_align_of_raw(ptr)
+                == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+            && unsafe { (*inner).strong.load(Relaxed) >= 1 }
+    })]
+    #[ensures(|result: &Self| Arc::<T, A>::as_ptr(result) == ptr)]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         unsafe {
             let offset = data_offset(ptr);
@@ -1961,30 +1937,27 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
-            let inner = inner_mut as *const ArcInner<T>;
-            let rebuilt_ptr = unsafe { &raw const (*inner).data };
-            let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
+    #[requires({
+        let offset = unsafe { data_offset(ptr) };
+        let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
+        let inner = inner_mut as *const ArcInner<T>;
+        let rebuilt_ptr = unsafe { &raw const (*inner).data };
+        let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
 
-            let into_raw_roundtrip_ptr = {
-                let arc = unsafe { Arc::<T, A>::from_raw_in(ptr, alloc.clone()) };
-                let (raw_ptr, _raw_alloc) = Arc::<T, A>::into_raw_with_allocator(arc);
-                raw_ptr
-            };
+        let into_raw_roundtrip_ptr = {
+            let arc = unsafe { Arc::<T, A>::from_raw_in(ptr, alloc.clone()) };
+            let (raw_ptr, _raw_alloc) = Arc::<T, A>::into_raw_with_allocator(arc);
+            raw_ptr
+        };
 
-            ptr == rebuilt_ptr
-                && ptr == into_raw_roundtrip_ptr
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
-        })
-    )]
+        ptr == rebuilt_ptr
+            && ptr == into_raw_roundtrip_ptr
+            && kani::mem::checked_size_of_raw(ptr)
+                == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+            && kani::mem::checked_align_of_raw(ptr)
+                == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+            && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+    })]
     #[cfg_attr(kani, kani::modifies({
         let offset = unsafe { data_offset(ptr) };
         let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
@@ -2039,24 +2012,21 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
-            let inner = inner_mut as *const ArcInner<T>;
-            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+    #[requires({
+        let offset = unsafe { data_offset(ptr) };
+        let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
+        let inner = inner_mut as *const ArcInner<T>;
+        let rebuilt_ptr = unsafe { &raw const (*inner).data };
 
-            let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
+        let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
 
-            ptr == rebuilt_ptr
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
-        })
-    )]
+        ptr == rebuilt_ptr
+            && kani::mem::checked_size_of_raw(ptr)
+                == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+            && kani::mem::checked_align_of_raw(ptr)
+                == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+            && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+    })]
     #[cfg_attr(kani, kani::modifies({
         let offset = unsafe { data_offset(ptr) };
         let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
@@ -2669,24 +2639,18 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "get_mut_unchecked", issue = "63292")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let inner = this.ptr.as_ptr();
-            let data = unsafe { &raw mut (*inner).data };
-            kani::mem::can_dereference(inner)
-                && kani::mem::can_dereference(data)
-                && kani::mem::can_write(data)
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &&mut T| {
-            let inner = old(this.ptr.as_ptr());
-            let data = unsafe { &raw const (*inner).data };
-            core::ptr::addr_eq((*result) as *const T, data)
-        })
-    )]
+    #[requires({
+        let inner = this.ptr.as_ptr();
+        let data = unsafe { &raw mut (*inner).data };
+        kani::mem::can_dereference(inner)
+            && kani::mem::can_dereference(data)
+            && kani::mem::can_write(data)
+    })]
+    #[ensures(|result: &&mut T| {
+        let inner = old(this.ptr.as_ptr());
+        let data = unsafe { &raw const (*inner).data };
+        core::ptr::addr_eq((*result) as *const T, data)
+    })]
     pub unsafe fn get_mut_unchecked(this: &mut Self) -> &mut T {
         // We are careful to *not* create a reference covering the "count" fields, as
         // this would alias with concurrent access to the reference counts (e.g. by `Weak`).
@@ -2918,7 +2882,7 @@ impl<A: Allocator> Arc<dyn Any + Send + Sync, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
-    #[cfg_attr(kani, kani::requires((*self).is::<T>()))]
+    #[requires((*self).is::<T>())]
     pub unsafe fn downcast_unchecked<T>(self) -> Arc<T, A>
     where
         T: Any + Send + Sync,
@@ -3029,52 +2993,43 @@ impl<T: ?Sized> Weak<T> {
     /// [`upgrade`]: Weak::upgrade
     #[inline]
     #[stable(feature = "weak_into_raw", since = "1.45.0")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let is_sentinel = is_dangling(ptr);
-            if is_sentinel {
-                true
-            } else {
-                let offset = unsafe { data_offset(ptr) };
-                let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-                let rebuilt_ptr = unsafe { &raw const (*inner).data };
-                let weak = unsafe { &raw const (*inner).weak };
+    #[requires({
+        let is_sentinel = is_dangling(ptr);
+        if is_sentinel {
+            true
+        } else {
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+            let weak = unsafe { &raw const (*inner).weak };
 
-                ptr == rebuilt_ptr
-                    && kani::mem::can_dereference(weak)
-                    && unsafe { (*inner).weak.load(Relaxed) > 0 }
-            }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| {
-            if old(is_dangling(ptr)) {
-                (result.ptr.as_ptr().cast::<()>()).addr() == usize::MAX
-                    && (result.as_ptr().cast::<()>()).addr() == usize::MAX
-            } else {
-                result.as_ptr() == ptr
-                    && result.ptr.as_ptr()
-                        == old({
-                            let offset = unsafe { data_offset(ptr) };
-                            unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> }
-                        })
-            }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| {
-            old(is_dangling(ptr))
-                || unsafe { (*result.ptr.as_ptr()).weak.load(Relaxed) }
+            ptr == rebuilt_ptr
+                && kani::mem::can_dereference(weak)
+                && unsafe { (*inner).weak.load(Relaxed) > 0 }
+        }
+    })]
+    #[ensures(|result: &Self| {
+        if old(is_dangling(ptr)) {
+            (result.ptr.as_ptr().cast::<()>()).addr() == usize::MAX
+                && (result.as_ptr().cast::<()>()).addr() == usize::MAX
+        } else {
+            result.as_ptr() == ptr
+                && result.ptr.as_ptr()
                     == old({
                         let offset = unsafe { data_offset(ptr) };
-                        let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-                        unsafe { (*inner).weak.load(Relaxed) }
+                        unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> }
                     })
-        })
-    )]
+        }
+    })]
+    #[ensures(|result: &Self| {
+        old(is_dangling(ptr))
+            || unsafe { (*result.ptr.as_ptr()).weak.load(Relaxed) }
+                == old({
+                    let offset = unsafe { data_offset(ptr) };
+                    let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+                    unsafe { (*inner).weak.load(Relaxed) }
+                })
+    })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Weak::from_raw_in(ptr, Global) }
     }
@@ -3246,50 +3201,41 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
     /// [`upgrade`]: Weak::upgrade
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
-            let is_sentinel = is_dangling(ptr);
-            is_sentinel || {
-                let offset = unsafe { data_offset(ptr) };
-                let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-                let rebuilt_ptr = unsafe { &raw const (*inner).data };
-                let weak = unsafe { &raw const (*inner).weak };
+    #[requires({
+        let is_sentinel = is_dangling(ptr);
+        is_sentinel || {
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).data };
+            let weak = unsafe { &raw const (*inner).weak };
 
-                ptr == rebuilt_ptr
-                    && kani::mem::can_dereference(weak)
-                    && unsafe { (*inner).weak.load(Relaxed) > 0 }
-            }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| {
-            if old(is_dangling(ptr)) {
-                (result.ptr.as_ptr().cast::<()>()).addr() == usize::MAX
-                    && (result.as_ptr().cast::<()>()).addr() == usize::MAX
-            } else {
-                result.as_ptr() == ptr
-                    && result.ptr.as_ptr()
-                        == old({
-                            let offset = unsafe { data_offset(ptr) };
-                            unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> }
-                        })
-            }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| {
-            old(is_dangling(ptr))
-                || unsafe { (*result.ptr.as_ptr()).weak.load(Relaxed) }
+            ptr == rebuilt_ptr
+                && kani::mem::can_dereference(weak)
+                && unsafe { (*inner).weak.load(Relaxed) > 0 }
+        }
+    })]
+    #[ensures(|result: &Self| {
+        if old(is_dangling(ptr)) {
+            (result.ptr.as_ptr().cast::<()>()).addr() == usize::MAX
+                && (result.as_ptr().cast::<()>()).addr() == usize::MAX
+        } else {
+            result.as_ptr() == ptr
+                && result.ptr.as_ptr()
                     == old({
                         let offset = unsafe { data_offset(ptr) };
-                        let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-                        unsafe { (*inner).weak.load(Relaxed) }
+                        unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> }
                     })
-        })
-    )]
+        }
+    })]
+    #[ensures(|result: &Self| {
+        old(is_dangling(ptr))
+            || unsafe { (*result.ptr.as_ptr()).weak.load(Relaxed) }
+                == old({
+                    let offset = unsafe { data_offset(ptr) };
+                    let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+                    unsafe { (*inner).weak.load(Relaxed) }
+                })
+    })]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         // See Weak::as_ptr for context on how the input pointer is derived.
 
@@ -4861,8 +4807,9 @@ mod verify {
 
     // Kani 0.65 limitation: proof_for_contract cannot resolve paths for
     // impl<T, A> Arc<MaybeUninit<T>, A>. These harnesses use #[kani::proof]
-    // instead; the requires clause is still checked at the call site, and the
-    // initialized value is checked explicitly below.
+    // instead because #[kani::proof] does not automatically verify the
+    // requires/ensures contracts of called functions. The supported portions
+    // of the contract are mirrored with explicit assertions below.
     //
     // Kani cannot express the full "value is initialized" predicate for
     // arbitrary `T`. This harness models the caller-side safety requirement of
@@ -4878,8 +4825,10 @@ mod verify {
                 let expected = value.clone();
                 let mut uninit: Arc<mem::MaybeUninit<$ty>, Global> = Arc::new_uninit_in(Global);
                 Arc::get_mut(&mut uninit).unwrap().write(value);
+                assert!(kani::mem::can_dereference(Arc::as_ptr(&uninit)));
                 let init: Arc<$ty, Global> = unsafe { uninit.assume_init() };
                 assert_eq!(&*init, &expected);
+                assert!(Arc::strong_count(&init) >= 1);
             }
         };
     }
@@ -4900,7 +4849,9 @@ mod verify {
 
     // Kani 0.65 limitation: proof_for_contract cannot resolve paths for
     // impl<T, A> Arc<[MaybeUninit<T>], A> (same issue as the Arc::assume_init harness).
-    // Uses #[kani::proof]; requires is checked as assertion at call site.
+    // Uses #[kani::proof] because it does not automatically verify the
+    // requires/ensures contracts of called functions. The supported portion
+    // of the requires clause is mirrored with an explicit assertion below.
     //
     // Kani cannot express the full "all elements are initialized" predicate for
     // arbitrary `T`. This harness models the caller-side safety requirement of
@@ -4924,6 +4875,7 @@ mod verify {
                 let uninit: Arc<[mem::MaybeUninit<$elem>], Global> = Arc::from(initialized);
                 let expected_data = (&*uninit).as_ptr() as *const $elem;
                 let expected_len = uninit.len();
+                assert!(kani::mem::can_dereference(Arc::as_ptr(&uninit)));
                 let result: Arc<[$elem], Global> = unsafe { uninit.assume_init() };
 
                 assert_eq!((&*result).as_ptr(), expected_data);
