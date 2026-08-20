@@ -862,3 +862,79 @@ fn div_rem_1e16(n: u128) -> (u128, u64) {
     let rem = n - quot * D;
     (quot, rem as u64)
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use safety::{ensures, requires};
+
+    use super::*;
+    use crate::kani;
+
+    // ---------------------------------------------------------------------
+    // `fmt::num::parse_u64_into` (the challenge's listed usage site) was
+    // removed when decimal formatting was rewritten; `u64::_fmt` is its
+    // successor and fills the tail of a `MaybeUninit<u8>` buffer with the
+    // ASCII digits of `self` exactly as `parse_u64_into` did. Its documented
+    // safety condition ("`buf` will always be big enough to contain all
+    // digits") is stated as `requires` on this wrapper: `_fmt` is generated
+    // by `impl_Display!` for every integer type, so annotating it directly
+    // would touch the runtime definition of all of them (the approach #643
+    // takes); the wrapper keeps the annotation surface at zero.
+    // ---------------------------------------------------------------------
+
+    /// Digits of `u64::MAX` (= 20); any `u64` fits in this many bytes.
+    const U64_MAX_DEC_N: usize = u64::MAX.ilog10() as usize + 1;
+
+    #[cfg(not(feature = "optimize_for_size"))]
+    #[requires(buf.len() >= U64_MAX_DEC_N)]
+    #[ensures(|result: &&str| !result.is_empty() && result.len() <= U64_MAX_DEC_N)]
+    #[ensures(|result: &&str| result.as_bytes().iter().all(|b| b.is_ascii_digit()))]
+    #[kani::modifies(crate::ptr::slice_from_raw_parts_mut(buf.as_mut_ptr(), buf.len()))]
+    #[allow(dead_code)]
+    fn u64_fmt_wrapper<'a>(n: u64, buf: &'a mut [MaybeUninit<u8>]) -> &'a str {
+        // SAFETY: guaranteed by the precondition (`buf` holds any `u64`'s digits).
+        unsafe { n._fmt(buf) }
+    }
+
+    // Verifies the `ensures` plus the UB checks along `_fmt_inner`'s
+    // buffer-filling walk and the final `slice_buffer_to_str` cast
+    // (`get_unchecked`, `assume_init_ref`, `from_utf8_unchecked`).
+    // Unwind: the digit loop runs at most 5 times (4 digits each), the
+    // byte-level `ensures` scan up to `U64_MAX_DEC_N` times.
+    #[cfg(not(feature = "optimize_for_size"))]
+    #[kani::proof_for_contract(u64_fmt_wrapper)]
+    #[kani::unwind(21)]
+    fn check_u64_fmt() {
+        let n: u64 = kani::any();
+        let mut buf = [MaybeUninit::<u8>::uninit(); U64_MAX_DEC_N];
+        let s = u64_fmt_wrapper(n, &mut buf);
+        kani::cover(s.len() == 1, "single digit");
+        kani::cover(s.len() > 1, "multiple digits");
+    }
+
+    // Value-level fidelity on a bounded window (full 20-digit decimal
+    // equality for arbitrary `u64` does not converge): below 100 the result
+    // is exactly the one- or two-digit decimal of `n`, pinning the lookup
+    // table path against, e.g., a swapped-pair mutant.
+    #[cfg(not(feature = "optimize_for_size"))]
+    #[kani::proof]
+    #[kani::unwind(21)]
+    fn check_u64_fmt_small_values() {
+        let n: u64 = kani::any();
+        kani::assume(n < 100);
+        let mut buf = [MaybeUninit::<u8>::uninit(); U64_MAX_DEC_N];
+        let s = unsafe { n._fmt(&mut buf) };
+        let bytes = s.as_bytes();
+        if n < 10 {
+            assert_eq!(bytes.len(), 1);
+            assert_eq!(bytes[0], b'0' + n as u8);
+        } else {
+            assert_eq!(bytes.len(), 2);
+            assert_eq!(bytes[0], b'0' + (n / 10) as u8);
+            assert_eq!(bytes[1], b'0' + (n % 10) as u8);
+        }
+        kani::cover(n < 10, "one digit");
+        kani::cover(n >= 10, "two digits");
+    }
+}
