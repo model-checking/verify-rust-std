@@ -1975,11 +1975,7 @@ mod verify {
         kani::assume(len <= N);
         let src: [u8; N] = kani::any();
         unsafe {
-            ptr::copy_nonoverlapping(
-                src.as_ptr().cast::<MaybeUninit<u8>>(),
-                buf.as_mut_ptr(),
-                len,
-            );
+            ptr::copy_nonoverlapping(src.as_ptr().cast::<MaybeUninit<u8>>(), buf.as_mut_ptr(), len);
         }
     }
 
