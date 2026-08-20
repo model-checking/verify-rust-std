@@ -242,7 +242,7 @@ The following commands may require `sudo` permissions.
 
 ```bash
 docker run --rm \
-  runtimeverificationinc/kmir:ubuntu-jammy-0.4.206 \
+  runtimeverificationinc/kmir:<LATEST-VERSION-FROM-DOCKERHUB> \
   kmir --help
 ```
 

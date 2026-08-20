@@ -11,6 +11,9 @@ on:
       - '.github/workflows/kmir.yml'
       - 'kmir-proofs/**'
 
+env:
+  KMIR_VERSION: "ubuntu-jammy-0.4.226"
+
 jobs:
   run-kmir-proofs:
     name: Run KMIR proofs
@@ -29,7 +32,7 @@ jobs:
             -w /home/kmir/workspace \
             -u $(id -u):$(id -g) \
             -v $PWD:/home/kmir/workspace \
-            runtimeverificationinc/kmir:ubuntu-jammy-latest \
+            runtimeverificationinc/kmir:${{ env.KMIR_VERSION }} \
             kmir-proofs/0011-floats-ints/run-proofs.sh
 
   run-kmir-proofs-negative:
@@ -49,5 +52,5 @@ jobs:
             -w /home/kmir/workspace \
             -u $(id -u):$(id -g) \
             -v $PWD:/home/kmir/workspace \
-            runtimeverificationinc/kmir:ubuntu-jammy-latest \
+            runtimeverificationinc/kmir:${{ env.KMIR_VERSION }} \
             kmir-proofs/0011-floats-ints/run-proofs.sh --negative
