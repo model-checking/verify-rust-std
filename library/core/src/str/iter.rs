@@ -1,6 +1,6 @@
 //! Iterators for `str` methods.
 
-use safety::requires;
+use safety::{ensures, requires};
 
 use super::pattern::{DoubleEndedSearcher, Pattern, ReverseSearcher, Searcher};
 use super::validations::{next_code_point, next_code_point_reverse};
@@ -18,6 +18,7 @@ use crate::kani;
 use crate::num::NonZero;
 use crate::ops::Try;
 use crate::slice::{self, Split as SliceSplit};
+use crate::ub_checks::Invariant;
 use crate::{char as char_mod, option};
 
 /// An iterator over the [`char`]s of a string slice.
@@ -35,11 +36,24 @@ pub struct Chars<'a> {
     pub(super) iter: slice::Iter<'a, u8>,
 }
 
+#[unstable(feature = "ub_checks", issue = "none")]
+impl Invariant for Chars<'_> {
+    /// A `Chars` iterator is safe to use when the underlying byte iterator is.
+    /// Remaining bytes are valid UTF-8 by the `str` invariant (they are always
+    /// a suffix of the original string starting on a character boundary).
+    fn is_safe(&self) -> bool {
+        self.iter.is_safe()
+    }
+}
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> Iterator for Chars<'a> {
     type Item = char;
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[requires(self.is_safe())]
+    #[ensures(|_| self.is_safe())]
     fn next(&mut self) -> Option<char> {
         // SAFETY: `str` invariant says `self.iter` is a valid UTF-8 string and
         // the resulting `ch` is a valid Unicode Scalar Value.
@@ -52,32 +66,53 @@ impl<'a> Iterator for Chars<'a> {
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[requires(self.is_safe())]
+    #[ensures(|_| self.is_safe())]
     fn advance_by(&mut self, mut remainder: usize) -> Result<(), NonZero<usize>> {
         const CHUNK_SIZE: usize = 32;
 
         if remainder >= CHUNK_SIZE {
+            // Snapshot length so the chunk-skip loop contract can mention it
+            // without relying on `self` (kani#3700).
+            let orig_len = self.iter.len();
             let mut chunks = self.iter.as_slice().as_chunks::<CHUNK_SIZE>().0.iter();
             let mut bytes_skipped: usize = 0;
 
-            while remainder > CHUNK_SIZE
-                && let Some(chunk) = chunks.next()
-            {
+            // Equivalent to `while remainder > CHUNK_SIZE && let Some(chunk) = chunks.next()`.
+            // Rewritten so a loop contract can be attached (`while let` is not supported).
+            #[safety::loop_invariant(bytes_skipped <= orig_len && bytes_skipped % CHUNK_SIZE == 0)]
+            while remainder > CHUNK_SIZE {
+                let Some(chunk) = chunks.next() else { break };
+
                 bytes_skipped += CHUNK_SIZE;
 
                 let mut start_bytes = [false; CHUNK_SIZE];
 
-                for i in 0..CHUNK_SIZE {
+                let mut i = 0;
+                #[safety::loop_invariant(i <= CHUNK_SIZE)]
+                while i < CHUNK_SIZE {
                     start_bytes[i] = !super::validations::utf8_is_cont_byte(chunk[i]);
+                    i += 1;
                 }
 
-                remainder -= start_bytes.into_iter().map(|i| i as u8).sum::<u8>() as usize;
+                // Count start bytes without `Iterator::sum` (another unbounded loop).
+                let mut start_count: u8 = 0;
+                let mut j = 0;
+                #[safety::loop_invariant(j <= CHUNK_SIZE && (start_count as usize) <= j)]
+                while j < CHUNK_SIZE {
+                    start_count += start_bytes[j] as u8;
+                    j += 1;
+                }
+                remainder -= start_count as usize;
             }
 
             // SAFETY: The amount of bytes exists since we just iterated over them,
             // so advance_by will succeed.
             unsafe { self.iter.advance_by(bytes_skipped).unwrap_unchecked() };
 
-            // skip trailing continuation bytes
+            // skip trailing continuation bytes (at most 3 for valid UTF-8)
+            #[safety::loop_invariant(self.iter.is_safe())]
             while self.iter.len() > 0 {
                 let b = self.iter.as_slice()[0];
                 if !super::validations::utf8_is_cont_byte(b) {
@@ -88,10 +123,15 @@ impl<'a> Iterator for Chars<'a> {
             }
         }
 
+        #[safety::loop_invariant(self.iter.is_safe())]
         while (remainder > 0) && (self.iter.len() > 0) {
             remainder -= 1;
             let b = self.iter.as_slice()[0];
             let slurp = super::validations::utf8_char_width(b);
+            // Challenge assumptions 3–4: remaining bytes are valid UTF-8 sitting on a
+            // character boundary, so the first character is fully present.
+            #[cfg(kani)]
+            kani::assume(slurp > 0 && slurp <= self.iter.len());
             // SAFETY: utf8 validity requires that the string must contain
             // the continuation bytes (if any)
             unsafe { self.iter.advance_by(slurp).unwrap_unchecked() };
@@ -129,6 +169,9 @@ impl fmt::Debug for Chars<'_> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> DoubleEndedIterator for Chars<'a> {
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[requires(self.is_safe())]
+    #[ensures(|_| self.is_safe())]
     fn next_back(&mut self) -> Option<char> {
         // SAFETY: `str` invariant says `self.iter` is a valid UTF-8 string and
         // the resulting `ch` is a valid Unicode Scalar Value.
@@ -160,6 +203,7 @@ impl<'a> Chars<'a> {
     #[stable(feature = "iter_to_slice", since = "1.4.0")]
     #[must_use]
     #[inline]
+    #[requires(self.is_safe())]
     pub fn as_str(&self) -> &'a str {
         // SAFETY: `Chars` is only made from a str, which guarantees the iter is valid UTF-8.
         unsafe { from_utf8_unchecked(self.iter.as_slice()) }
@@ -360,6 +404,7 @@ impl Iterator for Bytes<'_> {
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
     #[requires(idx < self.0.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> u8 {
         // SAFETY: the caller must uphold the safety contract
@@ -646,7 +691,20 @@ where
 }
 
 impl<'a, P: Pattern> SplitInternal<'a, P> {
+    /// `start`/`end` are character boundaries of `matcher.haystack()`.
+    #[cfg(kani)]
+    fn range_on_boundaries(&self) -> bool {
+        let haystack = self.matcher.haystack();
+        self.start <= self.end
+            && self.end <= haystack.len()
+            && haystack.is_char_boundary(self.start)
+            && haystack.is_char_boundary(self.end)
+    }
+
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[requires(self.range_on_boundaries())]
+    #[ensures(|_| self.range_on_boundaries())]
     fn get_end(&mut self) -> Option<&'a str> {
         if !self.finished {
             self.finished = true;
@@ -662,6 +720,9 @@ impl<'a, P: Pattern> SplitInternal<'a, P> {
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[requires(self.range_on_boundaries())]
+    #[ensures(|_| self.range_on_boundaries())]
     fn next(&mut self) -> Option<&'a str> {
         if self.finished {
             return None;
@@ -680,6 +741,9 @@ impl<'a, P: Pattern> SplitInternal<'a, P> {
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[requires(self.range_on_boundaries())]
+    #[ensures(|_| self.range_on_boundaries())]
     fn next_inclusive(&mut self) -> Option<&'a str> {
         if self.finished {
             return None;
@@ -700,6 +764,9 @@ impl<'a, P: Pattern> SplitInternal<'a, P> {
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[requires(self.range_on_boundaries())]
+    #[ensures(|_| self.range_on_boundaries())]
     fn next_back(&mut self) -> Option<&'a str>
     where
         P::Searcher<'a>: ReverseSearcher<'a>,
@@ -737,6 +804,9 @@ impl<'a, P: Pattern> SplitInternal<'a, P> {
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[requires(self.range_on_boundaries())]
+    #[ensures(|_| self.range_on_boundaries())]
     fn next_back_inclusive(&mut self) -> Option<&'a str>
     where
         P::Searcher<'a>: ReverseSearcher<'a>,
@@ -780,6 +850,7 @@ impl<'a, P: Pattern> SplitInternal<'a, P> {
     }
 
     #[inline]
+    #[requires(self.range_on_boundaries())]
     fn remainder(&self) -> Option<&'a str> {
         // `Self::get_end` doesn't change `self.start`
         if self.finished {
@@ -1064,6 +1135,7 @@ where
 
 impl<'a, P: Pattern> MatchIndicesInternal<'a, P> {
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
     fn next(&mut self) -> Option<(usize, &'a str)> {
         self.0
             .next_match()
@@ -1072,6 +1144,7 @@ impl<'a, P: Pattern> MatchIndicesInternal<'a, P> {
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
     fn next_back(&mut self) -> Option<(usize, &'a str)>
     where
         P::Searcher<'a>: ReverseSearcher<'a>,
@@ -1119,6 +1192,7 @@ where
 
 impl<'a, P: Pattern> MatchesInternal<'a, P> {
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
     fn next(&mut self) -> Option<&'a str> {
         // SAFETY: `Searcher` guarantees that `start` and `end` lie on unicode boundaries.
         self.0.next_match().map(|(a, b)| unsafe {
@@ -1128,6 +1202,7 @@ impl<'a, P: Pattern> MatchesInternal<'a, P> {
     }
 
     #[inline]
+    #[cfg_attr(kani, kani::modifies(self))]
     fn next_back(&mut self) -> Option<&'a str>
     where
         P::Searcher<'a>: ReverseSearcher<'a>,
@@ -1613,3 +1688,319 @@ macro_rules! escape_types_impls {
 }
 
 escape_types_impls!(EscapeDebug, EscapeDefault, EscapeUnicode);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    //! Challenge 22: unbounded safety proofs for `str` iterators.
+    //!
+    //! Assumptions used (from the challenge statement):
+    //! 1. `slice` module is safe and correct (`slice::Iter::advance_by`, indexing).
+    //! 2. `str::pattern` searchers return indices on UTF-8 boundaries. Encoded as
+    //!    `SpecSearcher`, a generic over-approximation of any correct `Searcher`.
+    //! 3–4. Remaining bytes of these iterators are valid UTF-8 (we construct them
+    //!    that way; `utf8_char_width` is trusted to match the encoding).
+    //!
+    //! No `#[cfg(kani)]` body swaps: the real iterator methods run. Loops in
+    //! `Chars::advance_by` are contracted. Pattern search loops are not inlined;
+    //! they are replaced by the `Searcher` contract (assumption 2).
+
+    use super::super::pattern::{
+        DoubleEndedSearcher, Pattern, ReverseSearcher, SearchStep, Searcher,
+    };
+    use super::*;
+
+    /// Large enough to enter `Chars::advance_by`'s 32-byte chunk path.
+    /// Loop contracts make the proofs independent of this allocation size.
+    const MAX_LEN: usize = 64;
+
+    /// Valid UTF-8 of symbolic length `0..=MAX_LEN`.
+    ///
+    /// One symbolic Unicode scalar (all four UTF-8 widths) followed by ASCII NUL
+    /// padding. `buf` is assumed already zeroed so this helper is loop-free.
+    fn any_str(buf: &mut [u8; MAX_LEN]) -> &str {
+        let c: char = kani::any();
+        let n = c.encode_utf8(&mut buf[..4]).len();
+        let len = kani::any_where(|l: &usize| *l <= MAX_LEN);
+        kani::assume(len == 0 || len >= n);
+        // SAFETY: `encode_utf8` writes a valid scalar; the tail is ASCII NULs.
+        unsafe { from_utf8_unchecked(&buf[..len]) }
+    }
+
+    fn any_chars<'a>(s: &'a str) -> Chars<'a> {
+        let i = kani::any_where(|i: &usize| *i <= s.len());
+        kani::assume(s.is_char_boundary(i));
+        s[i..].chars()
+    }
+
+    /// Over-approximates any correct `Searcher`: returned ranges are on
+    /// character boundaries of `haystack` and lie inside the remaining window.
+    struct SpecPattern;
+
+    struct SpecSearcher<'a> {
+        haystack: &'a str,
+        front: usize,
+        back: usize,
+    }
+
+    impl Pattern for SpecPattern {
+        type Searcher<'a> = SpecSearcher<'a>;
+
+        fn into_searcher(self, haystack: &str) -> SpecSearcher<'_> {
+            SpecSearcher {
+                haystack,
+                front: 0,
+                back: haystack.len(),
+            }
+        }
+    }
+
+    unsafe impl<'a> Searcher<'a> for SpecSearcher<'a> {
+        fn haystack(&self) -> &'a str {
+            self.haystack
+        }
+
+        fn next(&mut self) -> SearchStep {
+            match self.next_match() {
+                Some((a, b)) => SearchStep::Match(a, b),
+                None => {
+                    self.front = self.back;
+                    SearchStep::Done
+                }
+            }
+        }
+
+        fn next_match(&mut self) -> Option<(usize, usize)> {
+            if self.front > self.back {
+                return None;
+            }
+            if kani::any() {
+                None
+            } else {
+                let a: usize = kani::any();
+                let b: usize = kani::any();
+                kani::assume(self.front <= a && a <= b && b <= self.back);
+                kani::assume(self.haystack.is_char_boundary(a));
+                kani::assume(self.haystack.is_char_boundary(b));
+                self.front = b;
+                Some((a, b))
+            }
+        }
+    }
+
+    unsafe impl<'a> ReverseSearcher<'a> for SpecSearcher<'a> {
+        fn next_back(&mut self) -> SearchStep {
+            match self.next_match_back() {
+                Some((a, b)) => SearchStep::Match(a, b),
+                None => {
+                    self.back = self.front;
+                    SearchStep::Done
+                }
+            }
+        }
+
+        fn next_match_back(&mut self) -> Option<(usize, usize)> {
+            if self.front > self.back {
+                return None;
+            }
+            if kani::any() {
+                None
+            } else {
+                let a: usize = kani::any();
+                let b: usize = kani::any();
+                kani::assume(self.front <= a && a <= b && b <= self.back);
+                kani::assume(self.haystack.is_char_boundary(a));
+                kani::assume(self.haystack.is_char_boundary(b));
+                self.back = a;
+                Some((a, b))
+            }
+        }
+    }
+
+    impl<'a> DoubleEndedSearcher<'a> for SpecSearcher<'a> {}
+
+    fn any_split<'a>(s: &'a str) -> SplitInternal<'a, SpecPattern> {
+        let start = kani::any();
+        let end = kani::any();
+        kani::assume(start <= end && end <= s.len());
+        kani::assume(s.is_char_boundary(start) && s.is_char_boundary(end));
+        SplitInternal {
+            start,
+            end,
+            matcher: SpecSearcher {
+                haystack: s,
+                front: start,
+                back: end,
+            },
+            allow_trailing_empty: kani::any(),
+            finished: kani::any(),
+        }
+    }
+
+    fn any_match_indices<'a>(s: &'a str) -> MatchIndicesInternal<'a, SpecPattern> {
+        let front = kani::any();
+        let back = kani::any();
+        kani::assume(front <= back && back <= s.len());
+        kani::assume(s.is_char_boundary(front) && s.is_char_boundary(back));
+        MatchIndicesInternal(SpecSearcher {
+            haystack: s,
+            front,
+            back,
+        })
+    }
+
+    fn any_matches<'a>(s: &'a str) -> MatchesInternal<'a, SpecPattern> {
+        let front = kani::any();
+        let back = kani::any();
+        kani::assume(front <= back && back <= s.len());
+        kani::assume(s.is_char_boundary(front) && s.is_char_boundary(back));
+        MatchesInternal(SpecSearcher {
+            haystack: s,
+            front,
+            back,
+        })
+    }
+
+    // --- Chars ---
+
+    #[kani::proof]
+    pub fn check_chars_next() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut chars = any_chars(s);
+        let _ = chars.next();
+    }
+
+    #[kani::proof]
+    pub fn check_chars_advance_by() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut chars = any_chars(s);
+        let n = kani::any::<usize>();
+        let _ = chars.advance_by(n);
+    }
+
+    #[kani::proof]
+    pub fn check_chars_next_back() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut chars = any_chars(s);
+        let _ = chars.next_back();
+    }
+
+    #[kani::proof]
+    pub fn check_chars_as_str() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let chars = any_chars(s);
+        let _ = chars.as_str();
+    }
+
+    // --- SplitInternal ---
+
+    #[kani::proof_for_contract(SplitInternal::get_end)]
+    pub fn check_split_internal_get_end() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut split = any_split(s);
+        let _ = split.get_end();
+    }
+
+    #[kani::proof]
+    pub fn check_split_internal_next() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut split = any_split(s);
+        let _ = split.next();
+    }
+
+    #[kani::proof]
+    pub fn check_split_internal_next_inclusive() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut split = any_split(s);
+        let _ = split.next_inclusive();
+    }
+
+    #[kani::proof]
+    pub fn check_split_internal_next_match_back() {
+        // Challenge lists `next_match_back` on SplitInternal; the method is
+        // `next_back`, which calls `Searcher::next_match_back`.
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut split = any_split(s);
+        let _ = split.next_back();
+    }
+
+    #[kani::proof]
+    pub fn check_split_internal_next_back_inclusive() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut split = any_split(s);
+        let _ = split.next_back_inclusive();
+    }
+
+    #[kani::proof_for_contract(SplitInternal::remainder)]
+    pub fn check_split_internal_remainder() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let split = any_split(s);
+        let _ = split.remainder();
+    }
+
+    // --- MatchIndicesInternal / MatchesInternal ---
+
+    #[kani::proof]
+    pub fn check_match_indices_next() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut it = any_match_indices(s);
+        let _ = it.next();
+    }
+
+    #[kani::proof]
+    pub fn check_match_indices_next_back() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut it = any_match_indices(s);
+        let _ = it.next_back();
+    }
+
+    #[kani::proof]
+    pub fn check_matches_next() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut it = any_matches(s);
+        let _ = it.next();
+    }
+
+    #[kani::proof]
+    pub fn check_matches_next_back() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut it = any_matches(s);
+        let _ = it.next_back();
+    }
+
+    // --- SplitAsciiWhitespace ---
+
+    #[kani::proof]
+    pub fn check_split_ascii_whitespace_remainder() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let split = s.split_ascii_whitespace();
+        let _ = split.remainder();
+    }
+
+    // --- Bytes::__iterator_get_unchecked ---
+
+    #[kani::proof_for_contract(Bytes::__iterator_get_unchecked)]
+    pub fn check_bytes_iterator_get_unchecked() {
+        let mut buf = [0u8; MAX_LEN];
+        let s = any_str(&mut buf);
+        let mut bytes = s.bytes();
+        let idx = kani::any();
+        // SAFETY: the contract requires `idx < len`.
+        let _ = unsafe { bytes.__iterator_get_unchecked(idx) };
+    }
+}
