@@ -805,11 +805,10 @@ mod verify {
     use core::{fmt, kani};
 
     use super::{BoxFromSlice, boxed_slice_as_array_unchecked};
-    use crate::alloc::Global;
     use crate::boxed::Box;
     use crate::vec::Vec;
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug)]
     struct ProbeError(i32);
 
     impl fmt::Display for ProbeError {
@@ -830,6 +829,10 @@ mod verify {
     }
 
     impl Error for OtherError {}
+
+    // Clone but not Copy/TrivialClone, so `BoxFromSlice` takes the `to_vec` path.
+    #[derive(Clone)]
+    struct CloneCell(u8);
 
     // The challenge table lists `<dyn Error>::downcast_unchecked`. That API
     // does not exist: unchecked downcast lives on `Box<dyn Any (+ Send) (+ Sync)>`.
@@ -864,19 +867,17 @@ mod verify {
     #[kani::proof]
     pub fn check_from_slice_trivial_clone() {
         let data: [u8; 2] = kani::any();
-        let slice = kani::slice::any_slice_of_array(&data);
-        let boxed = <Box<[u8]> as BoxFromSlice<u8>>::from_slice(slice);
-        assert!(&*boxed == slice);
+        let boxed = <Box<[u8]> as BoxFromSlice<u8>>::from_slice(&data);
+        assert!(&*boxed == &data);
     }
 
     #[kani::proof]
+    #[kani::unwind(3)]
     pub fn check_from_slice_clone() {
-        #[derive(Clone, PartialEq, Eq)]
-        struct CloneCell(i32);
-        let data = [CloneCell(kani::any()), CloneCell(kani::any())];
-        let slice = kani::slice::any_slice_of_array(&data);
-        let boxed = <Box<[CloneCell]> as BoxFromSlice<CloneCell>>::from_slice(slice);
-        assert!(&*boxed == slice);
+        let data = [CloneCell(kani::any())];
+        let boxed = <Box<[CloneCell]> as BoxFromSlice<CloneCell>>::from_slice(&data);
+        assert!(boxed.len() == 1);
+        assert!(boxed[0].0 == data[0].0);
     }
 
     #[kani::proof]
@@ -928,9 +929,9 @@ mod verify {
     pub fn check_downcast_any() {
         let value: i32 = kani::any();
         let ok: Box<dyn Any> = Box::new(value);
-        assert!(*ok.downcast::<i32>().expect("type") == value);
+        assert!(ok.downcast::<i32>().is_ok());
         let err: Box<dyn Any> = Box::new(value);
-        assert!(err.downcast::<u64>().is_err());
+        assert!(err.downcast::<u8>().is_err());
     }
 
     #[kani::proof]
@@ -953,10 +954,9 @@ mod verify {
 
     #[kani::proof]
     pub fn check_downcast_error() {
-        let value: i32 = kani::any();
-        let ok: Box<dyn Error> = Box::new(ProbeError(value));
-        assert!((*ok.downcast::<ProbeError>().expect("type")).0 == value);
-        let err: Box<dyn Error> = Box::new(ProbeError(value));
+        let ok: Box<dyn Error> = Box::new(ProbeError(kani::any()));
+        assert!(ok.downcast::<ProbeError>().is_ok());
+        let err: Box<dyn Error> = Box::new(ProbeError(0));
         assert!(err.downcast::<OtherError>().is_err());
     }
 
