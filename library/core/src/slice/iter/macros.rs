@@ -426,7 +426,7 @@ macro_rules! iterator {
                 unsafe { self.iterator_get_unchecked(idx) }
             }
 
-            $($extra)*}
+            $($extra)*
         }
 
         #[stable(feature = "rust1", since = "1.0.0")]
