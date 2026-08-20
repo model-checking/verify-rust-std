@@ -281,11 +281,7 @@ fn small_sort_general_with_scratch<T: FreezeMarker, F: FnMut(&T, &T) -> bool>(
             // We extend this to desired_len, src is valid for desired_len elements.
             let src = v_base.add(offset);
             let dst = scratch_base.add(offset);
-            let desired_len = if offset == 0 {
-                len_div_2
-            } else {
-                len - len_div_2
-            };
+            let desired_len = if offset == 0 { len_div_2 } else { len - len_div_2 };
 
             for i in presorted_len..desired_len {
                 ptr::copy_nonoverlapping(src.add(i), dst.add(i), 1);
@@ -294,11 +290,7 @@ fn small_sort_general_with_scratch<T: FreezeMarker, F: FnMut(&T, &T) -> bool>(
         }
 
         // SAFETY: see comment in `CopyOnDrop::drop`.
-        let drop_guard = CopyOnDrop {
-            src: scratch_base,
-            dst: v_base,
-            len,
-        };
+        let drop_guard = CopyOnDrop { src: scratch_base, dst: v_base, len };
 
         // SAFETY: at this point scratch_base is fully initialized, allowing us
         // to use it as the source of our merge back into the original array.
@@ -600,11 +592,7 @@ unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, 
         // the correct insertion position, gap_guard ensures the element is moved
         // back into the array.
         let tmp = ManuallyDrop::new(tail.read());
-        let mut gap_guard = CopyOnDrop {
-            src: &*tmp,
-            dst: tail,
-            len: 1,
-        };
+        let mut gap_guard = CopyOnDrop { src: &*tmp, dst: tail, len: 1 };
 
         loop {
             // SAFETY: we move sift into the gap (which is valid), and point the
@@ -940,10 +928,11 @@ mod verify {
     //! Length is taken from `kani::slice::any_slice_of_array_mut` or from the
     //! dispatch-boundary sizes 8, 9, 13, 16, 18, 32.
 
+    use safety::{ensures, requires};
+
     use super::*;
     use crate::cell::Cell;
     use crate::kani;
-    use safety::{ensures, requires};
 
     fn is_sorted_slice<T: PartialOrd>(v: &[T]) -> bool {
         let mut i = 0;
@@ -988,10 +977,7 @@ mod verify {
 
     fn assert_sorted_perm(orig: &[i8], out: &[i8]) {
         kani::assert(is_sorted_slice(out), "output is sorted");
-        kani::assert(
-            is_permutation(orig, out),
-            "output is a permutation of the input",
-        );
+        kani::assert(is_permutation(orig, out), "output is a permutation of the input");
     }
 
     #[kani::proof_for_contract(has_efficient_in_place_swap)]
@@ -1035,12 +1021,7 @@ mod verify {
             sort4_stable(src.as_ptr(), dst.as_mut_ptr() as *mut i8, &mut lt_i8);
         }
         let out = unsafe {
-            [
-                dst[0].assume_init(),
-                dst[1].assume_init(),
-                dst[2].assume_init(),
-                dst[3].assume_init(),
-            ]
+            [dst[0].assume_init(), dst[1].assume_init(), dst[2].assume_init(), dst[3].assume_init()]
         };
         assert_sorted_perm(&src, &out);
     }
@@ -1068,10 +1049,7 @@ mod verify {
         unsafe {
             insert_tail(arr.as_mut_ptr(), arr.as_mut_ptr().add(tail_idx), &mut lt_i8);
         }
-        kani::assert(
-            is_sorted_slice(&arr[..=tail_idx]),
-            "insert_tail keeps [begin, tail] sorted",
-        );
+        kani::assert(is_sorted_slice(&arr[..=tail_idx]), "insert_tail keeps [begin, tail] sorted");
     }
 
     /// Functional contract for `StableSmallSortTypeImpl::small_sort` on `i8`.
