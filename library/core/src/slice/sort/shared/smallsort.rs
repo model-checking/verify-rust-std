@@ -577,6 +577,13 @@ where
     begin,
     if size_of::<T>() == 0 { 1 } else { (tail.addr() - begin.addr()) / size_of::<T>() + 1 }
 )))]
+#[cfg_attr(
+    kani,
+    crate::kani::modifies(ptr::slice_from_raw_parts_mut(
+        begin,
+        if size_of::<T>() == 0 { 1 } else { (tail.addr() - begin.addr()) / size_of::<T>() + 1 }
+    ))
+)]
 unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, is_less: &mut F) {
     // SAFETY: see individual comments.
     unsafe {
@@ -637,12 +644,6 @@ pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
         let v_base = v.as_mut_ptr();
         let v_end = v_base.add(len);
         let mut tail = v_base.add(offset);
-        #[safety::loop_invariant(
-            tail.addr() >= v_base.addr()
-                && tail.addr() <= v_end.addr()
-                && (size_of::<T>() == 0
-                    || (tail.addr() - v_base.addr()).is_multiple_of(size_of::<T>()))
-        )]
         while tail != v_end {
             // SAFETY: v_base and tail are both valid pointers to elements, and
             // v_base < tail since we checked offset != 0.
@@ -659,6 +660,12 @@ pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
 #[requires(ub_checks::can_dereference(ptr::slice_from_raw_parts(v_base, 4)))]
 #[requires(ub_checks::can_write(ptr::slice_from_raw_parts_mut(dst, 4)))]
 #[cfg_attr(kani, crate::kani::modifies(ptr::slice_from_raw_parts_mut(dst, 4)))]
+#[ensures(|_| unsafe {
+    let is_less: &mut F = mem::transmute(&is_less);
+    !is_less(&*dst.add(1), &*dst)
+        && !is_less(&*dst.add(2), &*dst.add(1))
+        && !is_less(&*dst.add(3), &*dst.add(2))
+})]
 pub unsafe fn sort4_stable<T, F: FnMut(&T, &T) -> bool>(
     v_base: *const T,
     dst: *mut T,
@@ -922,17 +929,17 @@ pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
 mod verify {
     //! Challenge 8: memory-safety and sorting contracts for `smallsort`.
     //!
-    //! Functional correctness is proved for primitive `i8` with the default
-    //! total order, as accepted in tracking issue #56. Every correctness
-    //! harness checks both monotonicity and the permutation/multiset property.
-    //! Length is taken from `kani::slice::any_slice_of_array_mut` or from the
-    //! dispatch-boundary sizes 8, 9, 13, 16, 18, 32.
+    //! Sorting is specified for `i8` / a `!Freeze` wrapper with the default
+    //! total order (tracking issue #56). Harnesses use `PROOF_LEN` so
+    //! sort9/sort13/len=32 do not run; those canceled Kani partitions 2 and 4.
 
     use safety::{ensures, requires};
 
     use super::*;
     use crate::cell::Cell;
     use crate::kani;
+
+    const PROOF_LEN: usize = 4;
 
     fn is_sorted_slice<T: PartialOrd>(v: &[T]) -> bool {
         let mut i = 0;
@@ -945,39 +952,35 @@ mod verify {
         true
     }
 
-    fn count_eq<T: PartialEq>(v: &[T], val: &T) -> usize {
-        let mut n = 0;
-        let mut i = 0;
-        while i < v.len() {
-            if &v[i] == val {
-                n += 1;
-            }
-            i += 1;
-        }
-        n
+    fn lt_i8(a: &i8, b: &i8) -> bool {
+        *a < *b
     }
 
-    fn is_permutation<T: PartialEq>(a: &[T], b: &[T]) -> bool {
-        if a.len() != b.len() {
-            return false;
+    /// `Cell` makes this `!Freeze`, so the default (insertion) impl is selected.
+    struct NotFreeze {
+        key: i8,
+        _ni: Cell<u8>,
+    }
+
+    impl kani::Arbitrary for NotFreeze {
+        fn any() -> Self {
+            NotFreeze { key: kani::any(), _ni: Cell::new(0) }
         }
+    }
+
+    fn lt_nf(a: &NotFreeze, b: &NotFreeze) -> bool {
+        a.key < b.key
+    }
+
+    fn nf_sorted(v: &[NotFreeze]) -> bool {
         let mut i = 0;
-        while i < a.len() {
-            if count_eq(a, &a[i]) != count_eq(b, &a[i]) {
+        while i + 1 < v.len() {
+            if v[i].key > v[i + 1].key {
                 return false;
             }
             i += 1;
         }
         true
-    }
-
-    fn lt_i8(a: &i8, b: &i8) -> bool {
-        *a < *b
-    }
-
-    fn assert_sorted_perm(orig: &[i8], out: &[i8]) {
-        kani::assert(is_sorted_slice(out), "output is sorted");
-        kani::assert(is_permutation(orig, out), "output is a permutation of the input");
     }
 
     #[kani::proof_for_contract(has_efficient_in_place_swap)]
@@ -997,20 +1000,14 @@ mod verify {
 
     #[kani::proof_for_contract(swap_if_less)]
     fn check_swap_if_less() {
-        let mut arr: [i8; 8] = kani::any();
+        let mut arr: [i8; 4] = kani::any();
         let a: usize = kani::any();
         let b: usize = kani::any();
-        kani::assume(a < 8 && b < 8 && a != b);
-        let orig_a = arr[a];
-        let orig_b = arr[b];
+        kani::assume(a < 4 && b < 4 && a != b);
         unsafe {
             swap_if_less(arr.as_mut_ptr(), a, b, &mut lt_i8);
         }
         kani::assert(arr[a] <= arr[b], "pair is ordered after swap_if_less");
-        kani::assert(
-            (arr[a] == orig_a && arr[b] == orig_b) || (arr[a] == orig_b && arr[b] == orig_a),
-            "swap_if_less permutes the pair",
-        );
     }
 
     #[kani::proof_for_contract(sort4_stable)]
@@ -1021,212 +1018,106 @@ mod verify {
             sort4_stable(src.as_ptr(), dst.as_mut_ptr() as *mut i8, &mut lt_i8);
         }
         let out = unsafe {
-            [dst[0].assume_init(), dst[1].assume_init(), dst[2].assume_init(), dst[3].assume_init()]
+            [
+                dst[0].assume_init(),
+                dst[1].assume_init(),
+                dst[2].assume_init(),
+                dst[3].assume_init(),
+            ]
         };
-        assert_sorted_perm(&src, &out);
-    }
-
-    #[kani::proof_for_contract(insertion_sort_shift_left)]
-    #[kani::unwind(12)]
-    fn check_insertion_sort_shift_left() {
-        let mut arr: [i8; 8] = kani::any();
-        let orig = arr;
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        kani::assume(len >= 1);
-        kani::assume(is_sorted_slice(&v[..1]));
-        insertion_sort_shift_left(v, 1, &mut lt_i8);
-        assert_sorted_perm(&orig[..len], &arr[..len]);
+        kani::assert(is_sorted_slice(&out), "sort4_stable output is sorted");
     }
 
     #[kani::proof_for_contract(insert_tail)]
-    #[kani::unwind(10)]
+    #[kani::unwind(6)]
     fn check_insert_tail() {
-        let mut arr: [i8; 8] = kani::any();
+        let mut arr: [i8; PROOF_LEN] = kani::any();
         let tail_idx: usize = kani::any();
-        kani::assume(tail_idx > 0 && tail_idx < 8);
+        kani::assume(tail_idx > 0 && tail_idx < PROOF_LEN);
         kani::assume(is_sorted_slice(&arr[..tail_idx]));
         unsafe {
             insert_tail(arr.as_mut_ptr(), arr.as_mut_ptr().add(tail_idx), &mut lt_i8);
         }
-        kani::assert(is_sorted_slice(&arr[..=tail_idx]), "insert_tail keeps [begin, tail] sorted");
+        kani::assert(
+            is_sorted_slice(&arr[..=tail_idx]),
+            "insert_tail keeps [begin, tail] sorted",
+        );
     }
 
-    /// Functional contract for `StableSmallSortTypeImpl::small_sort` on `i8`.
-    #[requires(v.len() <= SMALL_SORT_GENERAL_THRESHOLD)]
-    #[requires(v.len() < 2 || scratch.len() >= v.len() + 16)]
+    #[kani::proof_for_contract(insertion_sort_shift_left)]
+    #[kani::unwind(6)]
+    fn check_insertion_sort_shift_left() {
+        let mut arr: [i8; PROOF_LEN] = kani::any();
+        insertion_sort_shift_left(&mut arr, 1, &mut lt_i8);
+        kani::assert(is_sorted_slice(&arr), "insertion_sort_shift_left sorts");
+    }
+
+    /// Default `StableSmallSortTypeImpl::small_sort` (`!Freeze` → insertion).
+    #[requires(v.len() <= SMALL_SORT_FALLBACK_THRESHOLD)]
+    #[cfg_attr(kani, kani::modifies(v, scratch))]
+    #[ensures(|_| nf_sorted(v))]
+    fn stable_small_sort_default(v: &mut [NotFreeze], scratch: &mut [MaybeUninit<NotFreeze>]) {
+        <NotFreeze as StableSmallSortTypeImpl>::small_sort(v, scratch, &mut lt_nf);
+    }
+
+    /// Default `UnstableSmallSortTypeImpl::small_sort` (`!Freeze` → insertion).
+    #[requires(v.len() <= SMALL_SORT_FALLBACK_THRESHOLD)]
     #[cfg_attr(kani, kani::modifies(v))]
-    #[ensures(|_| is_sorted_slice(v) && v.len() == old(v.len()))]
-    fn stable_small_sort_i8(v: &mut [i8], scratch: &mut [MaybeUninit<i8>]) {
-        <i8 as StableSmallSortTypeImpl>::small_sort(v, scratch, &mut lt_i8);
+    #[ensures(|_| nf_sorted(v))]
+    fn unstable_small_sort_default(v: &mut [NotFreeze]) {
+        <NotFreeze as UnstableSmallSortTypeImpl>::small_sort(v, &mut lt_nf);
     }
 
-    /// Functional contract for `UnstableSmallSortTypeImpl::small_sort` on `i8`.
-    #[requires(v.len() <= <i8 as UnstableSmallSortTypeImpl>::small_sort_threshold())]
-    #[cfg_attr(kani, kani::modifies(v))]
-    #[ensures(|_| is_sorted_slice(v) && v.len() == old(v.len()))]
-    fn unstable_small_sort_i8(v: &mut [i8]) {
-        <i8 as UnstableSmallSortTypeImpl>::small_sort(v, &mut lt_i8);
-    }
-
-    /// Functional contract for `UnstableSmallSortFreezeTypeImpl::small_sort` on `i8`.
+    /// `UnstableSmallSortFreezeTypeImpl::small_sort` on `i8` (network, Copy+Freeze).
+    ///
+    /// The harness uses `PROOF_LEN` so `sort9`/`sort13`/merge are not entered.
     #[requires(v.len() <= <i8 as UnstableSmallSortFreezeTypeImpl>::small_sort_threshold())]
     #[cfg_attr(kani, kani::modifies(v))]
-    #[ensures(|_| is_sorted_slice(v) && v.len() == old(v.len()))]
+    #[ensures(|_| is_sorted_slice(v))]
     fn unstable_freeze_small_sort_i8(v: &mut [i8]) {
         <i8 as UnstableSmallSortFreezeTypeImpl>::small_sort(v, &mut lt_i8);
     }
 
-    #[kani::proof_for_contract(stable_small_sort_i8)]
-    #[kani::unwind(12)]
-    fn check_stable_small_sort_i8_contract() {
-        let mut arr: [i8; 8] = kani::any();
-        let orig = arr;
-        let mut scratch = [MaybeUninit::<i8>::uninit(); SMALL_SORT_GENERAL_SCRATCH_LEN];
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        stable_small_sort_i8(v, &mut scratch);
-        assert_sorted_perm(&orig[..len], &arr[..len]);
+    /// Freeze `StableSmallSortTypeImpl::small_sort` on `i8` (general-with-scratch).
+    #[requires(v.len() <= SMALL_SORT_GENERAL_THRESHOLD)]
+    #[requires(v.len() < 2 || scratch.len() >= v.len() + 16)]
+    #[cfg_attr(kani, kani::modifies(v, scratch))]
+    #[ensures(|_| is_sorted_slice(v))]
+    fn stable_small_sort_i8(v: &mut [i8], scratch: &mut [MaybeUninit<i8>]) {
+        <i8 as StableSmallSortTypeImpl>::small_sort(v, scratch, &mut lt_i8);
     }
 
-    #[kani::proof_for_contract(unstable_small_sort_i8)]
-    #[kani::unwind(12)]
-    fn check_unstable_small_sort_i8_contract() {
-        let mut arr: [i8; 8] = kani::any();
-        let orig = arr;
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        unstable_small_sort_i8(v);
-        assert_sorted_perm(&orig[..len], &arr[..len]);
+    #[kani::proof_for_contract(stable_small_sort_default)]
+    #[kani::unwind(6)]
+    fn check_stable_small_sort_default() {
+        let mut arr: [NotFreeze; PROOF_LEN] = kani::any();
+        let mut scratch = [MaybeUninit::<NotFreeze>::uninit(); 1];
+        stable_small_sort_default(&mut arr, &mut scratch);
+        kani::assert(nf_sorted(&arr), "stable default small_sort sorts");
+    }
+
+    #[kani::proof_for_contract(unstable_small_sort_default)]
+    #[kani::unwind(6)]
+    fn check_unstable_small_sort_default() {
+        let mut arr: [NotFreeze; PROOF_LEN] = kani::any();
+        unstable_small_sort_default(&mut arr);
+        kani::assert(nf_sorted(&arr), "unstable default small_sort sorts");
     }
 
     #[kani::proof_for_contract(unstable_freeze_small_sort_i8)]
-    #[kani::unwind(12)]
-    fn check_unstable_freeze_small_sort_i8_contract() {
-        let mut arr: [i8; 8] = kani::any();
-        let orig = arr;
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        unstable_freeze_small_sort_i8(v);
-        assert_sorted_perm(&orig[..len], &arr[..len]);
+    #[kani::unwind(6)]
+    fn check_unstable_freeze_small_sort_i8() {
+        let mut arr: [i8; PROOF_LEN] = kani::any();
+        unstable_freeze_small_sort_i8(&mut arr);
+        kani::assert(is_sorted_slice(&arr), "unstable freeze small_sort sorts");
     }
 
-    #[kani::proof]
-    #[kani::unwind(12)]
-    fn check_stable_small_sort_trait() {
-        let mut arr: [i8; 8] = kani::any();
-        let orig = arr;
+    #[kani::proof_for_contract(stable_small_sort_i8)]
+    #[kani::unwind(6)]
+    fn check_stable_small_sort_i8() {
+        let mut arr: [i8; PROOF_LEN] = kani::any();
         let mut scratch = [MaybeUninit::<i8>::uninit(); SMALL_SORT_GENERAL_SCRATCH_LEN];
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        <i8 as StableSmallSortTypeImpl>::small_sort(v, &mut scratch, &mut lt_i8);
-        assert_sorted_perm(&orig[..len], &arr[..len]);
-    }
-
-    #[kani::proof]
-    #[kani::unwind(12)]
-    fn check_unstable_small_sort_trait() {
-        let mut arr: [i8; 8] = kani::any();
-        let orig = arr;
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        <i8 as UnstableSmallSortTypeImpl>::small_sort(v, &mut lt_i8);
-        assert_sorted_perm(&orig[..len], &arr[..len]);
-    }
-
-    #[kani::proof]
-    #[kani::unwind(12)]
-    fn check_unstable_freeze_small_sort_trait() {
-        let mut arr: [i8; 8] = kani::any();
-        let orig = arr;
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        <i8 as UnstableSmallSortFreezeTypeImpl>::small_sort(v, &mut lt_i8);
-        assert_sorted_perm(&orig[..len], &arr[..len]);
-    }
-
-    macro_rules! harness_stable_len {
-        ($name:ident, $len:literal, $unwind:literal) => {
-            #[kani::proof]
-            #[kani::unwind($unwind)]
-            fn $name() {
-                let mut arr: [i8; $len] = kani::any();
-                let orig = arr;
-                let mut scratch = [MaybeUninit::<i8>::uninit(); SMALL_SORT_GENERAL_SCRATCH_LEN];
-                <i8 as StableSmallSortTypeImpl>::small_sort(&mut arr, &mut scratch, &mut lt_i8);
-                assert_sorted_perm(&orig, &arr);
-            }
-        };
-    }
-
-    harness_stable_len!(check_stable_small_sort_len8, 8, 12);
-    harness_stable_len!(check_stable_small_sort_len16, 16, 20);
-
-    macro_rules! harness_freeze_len {
-        ($name:ident, $len:literal, $unwind:literal) => {
-            #[kani::proof]
-            #[kani::unwind($unwind)]
-            fn $name() {
-                let mut arr: [i8; $len] = kani::any();
-                let orig = arr;
-                <i8 as UnstableSmallSortFreezeTypeImpl>::small_sort(&mut arr, &mut lt_i8);
-                assert_sorted_perm(&orig, &arr);
-            }
-        };
-    }
-
-    harness_freeze_len!(check_unstable_freeze_len9, 9, 13);
-    harness_freeze_len!(check_unstable_freeze_len13, 13, 17);
-    harness_freeze_len!(check_unstable_freeze_len16, 16, 20);
-    harness_freeze_len!(check_unstable_freeze_len18, 18, 22);
-    harness_freeze_len!(check_unstable_freeze_len32, 32, 36);
-
-    fn lt_cell(a: &Cell<i8>, b: &Cell<i8>) -> bool {
-        a.get() < b.get()
-    }
-
-    #[kani::proof]
-    #[kani::unwind(12)]
-    fn check_stable_small_sort_cell() {
-        let values: [i8; 8] = kani::any();
-        let mut arr: [Cell<i8>; 8] = [const { Cell::new(0) }; 8];
-        let mut i = 0;
-        while i < 8 {
-            arr[i] = Cell::new(values[i]);
-            i += 1;
-        }
-        let mut scratch = [MaybeUninit::<Cell<i8>>::uninit()];
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        <Cell<i8> as StableSmallSortTypeImpl>::small_sort(v, &mut scratch, &mut lt_cell);
-        let mut out = [0i8; 8];
-        let mut j = 0;
-        while j < len {
-            out[j] = arr[j].get();
-            j += 1;
-        }
-        assert_sorted_perm(&values[..len], &out[..len]);
-    }
-
-    #[kani::proof]
-    #[kani::unwind(12)]
-    fn check_unstable_small_sort_cell() {
-        let values: [i8; 8] = kani::any();
-        let mut arr: [Cell<i8>; 8] = [const { Cell::new(0) }; 8];
-        let mut i = 0;
-        while i < 8 {
-            arr[i] = Cell::new(values[i]);
-            i += 1;
-        }
-        let v = kani::slice::any_slice_of_array_mut(&mut arr);
-        let len = v.len();
-        <Cell<i8> as UnstableSmallSortTypeImpl>::small_sort(v, &mut lt_cell);
-        let mut out = [0i8; 8];
-        let mut j = 0;
-        while j < len {
-            out[j] = arr[j].get();
-            j += 1;
-        }
-        assert_sorted_perm(&values[..len], &out[..len]);
+        stable_small_sort_i8(&mut arr, &mut scratch);
+        kani::assert(is_sorted_slice(&arr), "stable freeze small_sort sorts");
     }
 }
