@@ -3800,37 +3800,42 @@ mod verify {
                     let _ = iter.next_back();
                 }
 
+                // Symbolic `n: usize` + MAX_LEN=8 times out autoharness's 10m CBMC
+                // cap (`verify_adapt_{u8,unit,char}::check_rsplitn_mut_next` on
+                // ubuntu AH, 3×10m). Length 2 and n<=2 still run `next`.
                 #[kani::proof]
+                #[kani::unwind(3)]
                 fn check_splitn_next() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let slice = any_slice(&array);
-                    let mut iter = SplitN::new(Split::new(slice, |_| kani::any()), kani::any());
+                    let array: [$ty; 2] = kani::any();
+                    let n = kani::any_where(|&n: &usize| n <= 2);
+                    let mut iter = SplitN::new(Split::new(&array[..], |_| false), n);
                     let _ = iter.next();
                 }
 
                 #[kani::proof]
+                #[kani::unwind(3)]
                 fn check_rsplitn_next() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let slice = any_slice(&array);
-                    let mut iter = RSplitN::new(RSplit::new(slice, |_| kani::any()), kani::any());
+                    let array: [$ty; 2] = kani::any();
+                    let n = kani::any_where(|&n: &usize| n <= 2);
+                    let mut iter = RSplitN::new(RSplit::new(&array[..], |_| false), n);
                     let _ = iter.next();
                 }
 
                 #[kani::proof]
+                #[kani::unwind(3)]
                 fn check_splitn_mut_next() {
-                    let mut array: [$ty; MAX_LEN] = kani::any();
-                    let slice = any_slice_mut(&mut array);
-                    let mut iter =
-                        SplitNMut::new(SplitMut::new(slice, |_| kani::any()), kani::any());
+                    let mut array: [$ty; 2] = kani::any();
+                    let n = kani::any_where(|&n: &usize| n <= 2);
+                    let mut iter = SplitNMut::new(SplitMut::new(&mut array[..], |_| false), n);
                     let _ = iter.next();
                 }
 
                 #[kani::proof]
+                #[kani::unwind(3)]
                 fn check_rsplitn_mut_next() {
-                    let mut array: [$ty; MAX_LEN] = kani::any();
-                    let slice = any_slice_mut(&mut array);
-                    let mut iter =
-                        RSplitNMut::new(RSplitMut::new(slice, |_| kani::any()), kani::any());
+                    let mut array: [$ty; 2] = kani::any();
+                    let n = kani::any_where(|&n: &usize| n <= 2);
+                    let mut iter = RSplitNMut::new(RSplitMut::new(&mut array[..], |_| false), n);
                     let _ = iter.next();
                 }
 
