@@ -31,11 +31,15 @@
 //   since leaf edges are empty and need no data representation. In an internal node,
 //   an edge both identifies a position and contains a pointer to a child node.
 
+#[cfg(kani)]
+use core::kani;
 use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZero;
 use core::ptr::{self, NonNull};
 use core::slice::SliceIndex;
+
+use safety::requires;
 
 use crate::alloc::{Allocator, Layout};
 use crate::boxed::Box;
@@ -72,6 +76,8 @@ impl<K, V> LeafNode<K, V> {
     /// # Safety
     ///
     /// The caller must ensure that `this` points to a (possibly uninitialized) `LeafNode`
+    #[requires(core::ub_checks::can_write(this))]
+    #[cfg_attr(kani, kani::modifies(this))]
     unsafe fn init(this: *mut Self) {
         // As a general policy, we leave fields uninitialized if they can be, as this should
         // be both slightly faster and easier to track in Valgrind.
@@ -528,6 +534,7 @@ impl<'a, K: 'a, V: 'a> NodeRef<marker::Mut<'a>, K, V, marker::Internal> {
 impl<'a, K, V, Type> NodeRef<marker::ValMut<'a>, K, V, Type> {
     /// # Safety
     /// - The node has more than `idx` initialized elements.
+    #[requires(idx < self.len())]
     unsafe fn into_key_val_mut_at(mut self, idx: usize) -> (&'a K, &'a mut V) {
         // We only create a reference to the one element we are interested in,
         // to avoid aliasing with outstanding references to other elements,
@@ -798,6 +805,7 @@ impl<Node, Type> Handle<Node, Type> {
 impl<BorrowType, K, V, NodeType> Handle<NodeRef<BorrowType, K, V, NodeType>, marker::KV> {
     /// Creates a new handle to a key-value pair in `node`.
     /// Unsafe because the caller must ensure that `idx < node.len()`.
+    #[requires(idx < node.len())]
     pub(super) unsafe fn new_kv(node: NodeRef<BorrowType, K, V, NodeType>, idx: usize) -> Self {
         debug_assert!(idx < node.len());
 
@@ -874,6 +882,7 @@ impl<K, V, NodeType, HandleType> Handle<NodeRef<marker::DormantMut, K, V, NodeTy
 impl<BorrowType, K, V, NodeType> Handle<NodeRef<BorrowType, K, V, NodeType>, marker::Edge> {
     /// Creates a new handle to an edge in `node`.
     /// Unsafe because the caller must ensure that `idx <= node.len()`.
+    #[requires(idx <= node.len())]
     pub(super) unsafe fn new_edge(node: NodeRef<BorrowType, K, V, NodeType>, idx: usize) -> Self {
         debug_assert!(idx <= node.len());
 
@@ -1069,6 +1078,10 @@ impl<'a, K: 'a, V: 'a> Handle<NodeRef<marker::Mut<'a>, K, V, marker::Leaf>, mark
             (Some(split), handle) => (split.forget_node_type(), handle),
         };
 
+        // Occupancy loops are bounded by type-level CAPACITY. Height is the
+        // remaining data-dependent dimension: each iteration returns or
+        // replaces `split` with a same-height parent split.
+        #[cfg_attr(kani, kani::loop_invariant(split.left.height == split.right.height))]
         loop {
             split = match split.left.ascend() {
                 Ok(parent) => {
@@ -1819,6 +1832,8 @@ pub(super) mod marker {
 ///
 /// # Safety
 /// The slice has more than `idx` elements.
+#[requires(idx < slice.len())]
+#[cfg_attr(kani, kani::modifies(slice))]
 unsafe fn slice_insert<T>(slice: &mut [MaybeUninit<T>], idx: usize, val: T) {
     unsafe {
         let len = slice.len();
@@ -1836,6 +1851,8 @@ unsafe fn slice_insert<T>(slice: &mut [MaybeUninit<T>], idx: usize, val: T) {
 ///
 /// # Safety
 /// The slice has more than `idx` elements.
+#[requires(idx < slice.len())]
+#[cfg_attr(kani, kani::modifies(slice))]
 unsafe fn slice_remove<T>(slice: &mut [MaybeUninit<T>], idx: usize) -> T {
     unsafe {
         let len = slice.len();
@@ -1851,6 +1868,8 @@ unsafe fn slice_remove<T>(slice: &mut [MaybeUninit<T>], idx: usize) -> T {
 ///
 /// # Safety
 /// The slice has at least `distance` elements.
+#[requires(distance <= slice.len())]
+#[cfg_attr(kani, kani::modifies(slice))]
 unsafe fn slice_shl<T>(slice: &mut [MaybeUninit<T>], distance: usize) {
     unsafe {
         let slice_ptr = slice.as_mut_ptr();
@@ -1862,6 +1881,8 @@ unsafe fn slice_shl<T>(slice: &mut [MaybeUninit<T>], distance: usize) {
 ///
 /// # Safety
 /// The slice has at least `distance` elements.
+#[requires(distance <= slice.len())]
+#[cfg_attr(kani, kani::modifies(slice))]
 unsafe fn slice_shr<T>(slice: &mut [MaybeUninit<T>], distance: usize) {
     unsafe {
         let slice_ptr = slice.as_mut_ptr();
@@ -1872,6 +1893,8 @@ unsafe fn slice_shr<T>(slice: &mut [MaybeUninit<T>], distance: usize) {
 /// Moves all values from a slice of initialized elements to a slice
 /// of uninitialized elements, leaving behind `src` as all uninitialized.
 /// Works like `dst.copy_from_slice(src)` but does not require `T` to be `Copy`.
+#[requires(src.len() == dst.len())]
+#[cfg_attr(kani, kani::modifies(dst))]
 fn move_to_slice<T>(src: &mut [MaybeUninit<T>], dst: &mut [MaybeUninit<T>]) {
     assert!(src.len() == dst.len());
     unsafe {
@@ -1881,3 +1904,504 @@ fn move_to_slice<T>(src: &mut [MaybeUninit<T>], dst: &mut [MaybeUninit<T>]) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    //! Memory-safety proofs for `btree::node` (Challenge 4 / issue #77).
+    //!
+    //! Occupancy is quantified over the full `0..=CAPACITY` space of a node.
+    //! `CAPACITY` is a type-level constant (`2 * B - 1`), not a harness bound:
+    //! a node cannot store more pairs. Tree height is the remaining unbounded
+    //! parameter and is handled by the loop contract on `insert_recursing`.
+    use core::kani;
+    use core::mem::MaybeUninit;
+
+    use super::{
+        move_to_slice, slice_insert, slice_remove, slice_shl, slice_shr, Handle, LeafNode,
+        LeftOrRight, NodeRef, CAPACITY,
+    };
+    use super::*;
+    use crate::alloc::Global;
+    use crate::boxed::Box;
+
+    type Leaf = NodeRef<marker::Owned, u8, u8, marker::Leaf>;
+    type Internal = NodeRef<marker::Owned, u8, u8, marker::Internal>;
+
+    fn any_len() -> usize {
+        kani::any_where(|&n: &usize| n <= CAPACITY)
+    }
+
+    fn any_nonempty_len() -> usize {
+        kani::any_where(|&n: &usize| n > 0 && n <= CAPACITY)
+    }
+
+    /// Fill every slot (loop over the compile-time `CAPACITY`), then restrict
+    /// `len` to `n`. Extra initialized slots past `len` are not observed.
+    fn leaf_with_len(n: usize) -> Leaf {
+        kani::assume(n <= CAPACITY);
+        let mut node = NodeRef::new_leaf(Global);
+        let keys: [u8; CAPACITY] = kani::any();
+        let vals: [u8; CAPACITY] = kani::any();
+        for i in 0..CAPACITY {
+            node.borrow_mut().push(keys[i], vals[i]);
+        }
+        *node.borrow_mut().len_mut() = n as u16;
+        node
+    }
+
+    fn any_leaf() -> Leaf {
+        leaf_with_len(any_len())
+    }
+
+    fn any_nonempty_leaf() -> Leaf {
+        leaf_with_len(any_nonempty_len())
+    }
+
+    fn parent_with_leaves(left_n: usize, right_n: usize) -> Internal {
+        let left = leaf_with_len(left_n).forget_type();
+        let mut parent = NodeRef::new_internal(left, Global);
+        parent.borrow_mut().push(kani::any(), kani::any(), leaf_with_len(right_n).forget_type());
+        parent
+    }
+
+    fn init_buf<const N: usize>(buf: &mut [MaybeUninit<u8>; N], len: usize) {
+        let src: [u8; N] = kani::any();
+        for i in 0..N {
+            if i < len {
+                buf[i].write(src[i]);
+            }
+        }
+    }
+
+    // --- Contracts on unsafe constructors and slice primitives ---
+
+    #[kani::proof_for_contract(LeafNode::init)]
+    #[kani::unwind(13)]
+    fn check_leaf_node_init() {
+        let mut leaf = Box::<LeafNode<u8, u8>, _>::new_uninit_in(Global);
+        unsafe {
+            LeafNode::init(leaf.as_mut_ptr());
+            let leaf = leaf.assume_init();
+            assert!(leaf.len == 0);
+            assert!(leaf.parent.is_none());
+        }
+    }
+
+    #[kani::proof_for_contract(Handle::new_kv)]
+    #[kani::unwind(13)]
+    fn check_handle_new_kv() {
+        let node = any_nonempty_leaf();
+        let idx = kani::any_where(|&i: &usize| i < node.len());
+        let handle = unsafe { Handle::new_kv(node.reborrow(), idx) };
+        assert!(handle.idx() == idx);
+    }
+
+    #[kani::proof_for_contract(Handle::new_edge)]
+    #[kani::unwind(13)]
+    fn check_handle_new_edge() {
+        let node = any_leaf();
+        let idx = kani::any_where(|&i: &usize| i <= node.len());
+        let handle = unsafe { Handle::new_edge(node.reborrow(), idx) };
+        assert!(handle.idx() == idx);
+    }
+
+    #[kani::proof_for_contract(NodeRef::into_key_val_mut_at)]
+    #[kani::unwind(13)]
+    fn check_into_key_val_mut_at() {
+        let mut node = any_nonempty_leaf();
+        let idx = kani::any_where(|&i: &usize| i < node.len());
+        let (k, v) = unsafe { node.borrow_valmut().into_key_val_mut_at(idx) };
+        let _ = *k;
+        *v = kani::any();
+    }
+
+    #[kani::proof_for_contract(slice_insert)]
+    #[kani::unwind(13)]
+    fn check_slice_insert() {
+        const N: usize = CAPACITY + 1;
+        let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
+        let len = kani::any_where(|&l: &usize| l > 0 && l <= N);
+        let idx = kani::any_where(|&i: &usize| i < len);
+        init_buf(&mut buf, len.saturating_sub(1));
+        unsafe {
+            slice_insert(&mut buf[..len], idx, kani::any());
+        }
+    }
+
+    #[kani::proof_for_contract(slice_remove)]
+    #[kani::unwind(13)]
+    fn check_slice_remove() {
+        const N: usize = CAPACITY + 1;
+        let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
+        let len = kani::any_where(|&l: &usize| l > 0 && l <= N);
+        let idx = kani::any_where(|&i: &usize| i < len);
+        init_buf(&mut buf, len);
+        let _ = unsafe { slice_remove(&mut buf[..len], idx) };
+    }
+
+    #[kani::proof_for_contract(slice_shl)]
+    #[kani::unwind(13)]
+    fn check_slice_shl() {
+        const N: usize = CAPACITY + 1;
+        let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
+        let len = kani::any_where(|&l: &usize| l <= N);
+        let distance = kani::any_where(|&d: &usize| d <= len);
+        init_buf(&mut buf, len);
+        unsafe {
+            slice_shl(&mut buf[..len], distance);
+        }
+    }
+
+    #[kani::proof_for_contract(slice_shr)]
+    #[kani::unwind(13)]
+    fn check_slice_shr() {
+        const N: usize = CAPACITY + 1;
+        let mut buf = [const { MaybeUninit::<u8>::uninit() }; N];
+        let len = kani::any_where(|&l: &usize| l <= N);
+        let distance = kani::any_where(|&d: &usize| d <= len);
+        init_buf(&mut buf, len);
+        unsafe {
+            slice_shr(&mut buf[..len], distance);
+        }
+    }
+
+    #[kani::proof_for_contract(move_to_slice)]
+    #[kani::unwind(13)]
+    fn check_move_to_slice() {
+        const N: usize = CAPACITY + 1;
+        let mut src = [const { MaybeUninit::<u8>::uninit() }; N];
+        let mut dst = [const { MaybeUninit::<u8>::uninit() }; N];
+        let len = kani::any_where(|&l: &usize| l <= N);
+        init_buf(&mut src, len);
+        move_to_slice(&mut src[..len], &mut dst[..len]);
+    }
+
+    // --- Safe APIs that contain unsafe, symbolic occupancy ---
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_leaf_node_new() {
+        let leaf = LeafNode::<u8, u8>::new(Global);
+        assert!(leaf.len == 0);
+        assert!(leaf.parent.is_none());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_len() {
+        let n = any_len();
+        let node = leaf_with_len(n);
+        assert!(node.len() == n);
+        assert!(node.height() == 0);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_first_last_edge() {
+        let node = any_leaf();
+        let first = node.reborrow().first_edge();
+        assert!(first.idx() == 0);
+        let last = node.reborrow().last_edge();
+        assert!(last.idx() == node.len());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_first_last_kv() {
+        let node = any_nonempty_leaf();
+        let first = node.reborrow().first_kv();
+        assert!(first.idx() == 0);
+        let last = node.reborrow().last_kv();
+        assert!(last.idx() == node.len() - 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_keys_and_into_leaf() {
+        let node = any_leaf();
+        let borrow = node.reborrow();
+        let keys = borrow.keys();
+        assert!(keys.len() == node.len());
+        if !keys.is_empty() {
+            let i = kani::any_where(|&i: &usize| i < keys.len());
+            let _ = keys[i];
+        }
+        let leaf = borrow.into_leaf();
+        assert!(usize::from(leaf.len) == node.len());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_as_leaf_mut_and_into_leaf_mut() {
+        let mut node = any_leaf();
+        {
+            let mut borrow = node.borrow_mut();
+            let leaf = borrow.as_leaf_mut();
+            let _ = leaf.len;
+        }
+        let leaf = node.borrow_mut().into_leaf_mut();
+        let _ = leaf.len;
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_as_leaf_dying() {
+        let node = any_leaf();
+        let mut dying = node.into_dying();
+        let leaf = dying.as_leaf_dying();
+        let _ = leaf.len;
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_ascend_root_leaf() {
+        let node = any_leaf();
+        assert!(node.reborrow().ascend().is_err());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_push_leaf() {
+        let n = kani::any_where(|&n: &usize| n < CAPACITY);
+        let mut node = leaf_with_len(n);
+        let val = kani::any();
+        let slot = node.borrow_mut().push(kani::any(), val);
+        assert!(node.len() == n + 1);
+        unsafe {
+            assert!(*slot == val);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_left_right_edge() {
+        let node = any_nonempty_leaf();
+        let kv = node.reborrow().first_kv();
+        let left = kv.left_edge();
+        assert!(left.idx() == 0);
+        let kv = node.reborrow().first_kv();
+        let right = kv.right_edge();
+        assert!(right.idx() == 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_left_right_kv() {
+        let node = any_nonempty_leaf();
+        let last = node.reborrow().last_edge();
+        assert!(last.left_kv().is_ok());
+        let first = node.reborrow().first_edge();
+        assert!(first.right_kv().is_ok());
+        let first = node.reborrow().first_edge();
+        assert!(first.left_kv().is_err());
+        let last = node.reborrow().last_edge();
+        assert!(last.right_kv().is_err());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_into_kv() {
+        let node = any_nonempty_leaf();
+        let idx = kani::any_where(|&i: &usize| i < node.len());
+        let handle = unsafe { Handle::new_kv(node.reborrow(), idx) };
+        let (k, v) = handle.into_kv();
+        let _ = (*k, *v);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_key_mut() {
+        let mut node = any_nonempty_leaf();
+        let idx = kani::any_where(|&i: &usize| i < node.len());
+        let mut handle = unsafe { Handle::new_kv(node.borrow_mut(), idx) };
+        *handle.key_mut() = kani::any();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_into_val_mut() {
+        let mut node = any_nonempty_leaf();
+        let idx = kani::any_where(|&i: &usize| i < node.len());
+        let handle = unsafe { Handle::new_kv(node.borrow_mut(), idx) };
+        let val = handle.into_val_mut();
+        *val = kani::any();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_into_kv_mut() {
+        let mut node = any_nonempty_leaf();
+        let idx = kani::any_where(|&i: &usize| i < node.len());
+        let handle = unsafe { Handle::new_kv(node.borrow_mut(), idx) };
+        let (k, v) = handle.into_kv_mut();
+        *k = kani::any();
+        *v = kani::any();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_into_kv_valmut() {
+        let mut node = any_nonempty_leaf();
+        let idx = kani::any_where(|&i: &usize| i < node.len());
+        let handle = unsafe { Handle::new_kv(node.borrow_valmut(), idx) };
+        let (k, v) = handle.into_kv_valmut();
+        let _ = *k;
+        *v = kani::any();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_kv_mut() {
+        let mut node = any_nonempty_leaf();
+        let idx = kani::any_where(|&i: &usize| i < node.len());
+        let mut handle = unsafe { Handle::new_kv(node.borrow_mut(), idx) };
+        let (k, v) = handle.kv_mut();
+        *k = kani::any();
+        *v = kani::any();
+    }
+
+    // --- Internal nodes ---
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_new_internal_and_as_internal_mut() {
+        let child = any_leaf().forget_type();
+        let mut internal = NodeRef::new_internal(child, Global);
+        assert!(internal.height() == 1);
+        assert!(internal.len() == 0);
+        let mut borrow = internal.borrow_mut();
+        let node = borrow.as_internal_mut();
+        let _ = node.data.len;
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_descend_and_ascend() {
+        let child_n = any_len();
+        let internal = NodeRef::new_internal(leaf_with_len(child_n).forget_type(), Global);
+        let edge = internal.reborrow().first_edge();
+        let descended = edge.descend();
+        assert!(descended.len() == child_n);
+        assert!(descended.height() == 0);
+        assert!(descended.ascend().is_ok());
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_pop_internal_level() {
+        let mut root = NodeRef::new_internal(any_leaf().forget_type(), Global).forget_type();
+        assert!(root.height() == 1);
+        root.pop_internal_level(Global);
+        assert!(root.height() == 0);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_push_internal() {
+        let mut parent = NodeRef::new_internal(any_leaf().forget_type(), Global);
+        let old = parent.len();
+        parent.borrow_mut().push(kani::any(), kani::any(), any_leaf().forget_type());
+        assert!(parent.len() == old + 1);
+    }
+
+    // --- Recursion / loops ---
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_insert_recursing_fit() {
+        let n = kani::any_where(|&n: &usize| n < CAPACITY);
+        let mut node = leaf_with_len(n);
+        let idx = kani::any_where(|&i: &usize| i <= n);
+        let edge = unsafe { Handle::new_edge(node.borrow_mut(), idx) };
+        let handle = edge.insert_recursing(kani::any(), kani::any(), Global, |_| {});
+        assert!(handle.into_node().len() == n + 1);
+    }
+
+    /// Full root leaf: the loop takes the `Err(root)` / `split_root` arm.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_insert_recursing_split_root() {
+        let mut node = leaf_with_len(CAPACITY);
+        let idx = kani::any_where(|&i: &usize| i <= CAPACITY);
+        let edge = unsafe { Handle::new_edge(node.borrow_mut(), idx) };
+        let _ = edge.insert_recursing(kani::any(), kani::any(), Global, |_split| {});
+    }
+
+    /// Full child under a parent: the loop takes the `Ok(parent)` arm once.
+    /// The loop contract covers further height independently of this harness.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_insert_recursing_into_parent() {
+        let mut parent = NodeRef::new_internal(leaf_with_len(CAPACITY).forget_type(), Global);
+        let child = parent.borrow_mut().first_edge().descend();
+        let leaf = unsafe { child.cast_to_leaf_unchecked() };
+        let idx = kani::any_where(|&i: &usize| i <= CAPACITY);
+        let edge = unsafe { Handle::new_edge(leaf, idx) };
+        let _ = edge.insert_recursing(kani::any(), kani::any(), Global, |_| {});
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_do_merge_via_merge_tracking_child_edge() {
+        let left_n = any_len();
+        let right_n = any_len();
+        kani::assume(left_n + 1 + right_n <= CAPACITY);
+        let mut parent = parent_with_leaves(left_n, right_n);
+        let ctx = parent.borrow_mut().first_kv().consider_for_balancing();
+        let track = kani::any_where(|&i: &usize| i <= left_n);
+        let edge = ctx.merge_tracking_child_edge(LeftOrRight::Left(track), Global);
+        assert!(edge.idx() == track);
+        assert!(edge.into_node().len() == left_n + 1 + right_n);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_steal_left() {
+        let left_n = kani::any_where(|&n: &usize| n >= 1 && n <= CAPACITY);
+        let right_n = kani::any_where(|&n: &usize| n < CAPACITY);
+        let track = kani::any_where(|&i: &usize| i <= right_n);
+        let mut parent = parent_with_leaves(left_n, right_n);
+        let ctx = parent.borrow_mut().first_kv().consider_for_balancing();
+        let edge = ctx.steal_left(track);
+        assert!(edge.idx() == 1 + track);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_steal_right() {
+        let left_n = kani::any_where(|&n: &usize| n < CAPACITY);
+        let right_n = kani::any_where(|&n: &usize| n >= 1 && n <= CAPACITY);
+        let track = kani::any_where(|&i: &usize| i <= left_n);
+        let mut parent = parent_with_leaves(left_n, right_n);
+        let ctx = parent.borrow_mut().first_kv().consider_for_balancing();
+        let edge = ctx.steal_right(track);
+        assert!(edge.idx() == track);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_bulk_steal_left() {
+        let count = kani::any_where(|&c: &usize| c > 0 && c <= CAPACITY);
+        let left_n = kani::any_where(|&n: &usize| n >= count && n <= CAPACITY);
+        let right_n = kani::any_where(|&n: &usize| n + count <= CAPACITY);
+        let mut parent = parent_with_leaves(left_n, right_n);
+        let mut ctx = parent.borrow_mut().first_kv().consider_for_balancing();
+        ctx.bulk_steal_left(count);
+        assert!(ctx.left_child_len() == left_n - count);
+        assert!(ctx.right_child_len() == right_n + count);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_bulk_steal_right() {
+        let count = kani::any_where(|&c: &usize| c > 0 && c <= CAPACITY);
+        let left_n = kani::any_where(|&n: &usize| n + count <= CAPACITY);
+        let right_n = kani::any_where(|&n: &usize| n >= count && n <= CAPACITY);
+        let mut parent = parent_with_leaves(left_n, right_n);
+        let mut ctx = parent.borrow_mut().first_kv().consider_for_balancing();
+        ctx.bulk_steal_right(count);
+        assert!(ctx.left_child_len() == left_n + count);
+        assert!(ctx.right_child_len() == right_n - count);
+    }
+}
