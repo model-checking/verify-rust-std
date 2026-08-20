@@ -3017,20 +3017,32 @@ impl<T> [T] {
             return Err(0);
         }
         let mut base = 0usize;
+        let mut half = 0usize;
+        let mut mid = 0usize;
+        let mut cmp = Equal;
 
         // This loop intentionally doesn't have an early exit if the comparison
         // returns Equal. We want the number of loop iterations to depend *only*
         // on the size of the input slice so that the CPU can reliably predict
         // the loop count.
-        #[loop_invariant(size >= 1 && base + size <= self.len())]
+        // Overflow-safe form of `base + size <= self.len()` (Kani havocs before assume).
+        #[loop_invariant(
+            size >= 1
+                && size <= self.len()
+                && base.wrapping_add(size) >= base
+                && base.wrapping_add(size) <= self.len()
+                && base.wrapping_add(size / 2) >= base
+                && base.wrapping_add(size / 2) < self.len()
+        )]
+        #[cfg_attr(kani, kani::loop_modifies(&size, &base, &half, &mid, &cmp))]
         while size > 1 {
-            let half = size / 2;
-            let mid = base + half;
+            half = size / 2;
+            mid = base + half;
 
             // SAFETY: the call is made safe by the following invariants:
             // - `mid >= 0`: by definition
             // - `mid < size`: `mid = size / 2 + size / 4 + size / 8 ...`
-            let cmp = f(unsafe { self.get_unchecked(mid) });
+            cmp = f(unsafe { self.get_unchecked(mid) });
 
             // Binary search interacts poorly with branch prediction, so force
             // the compiler to use conditional moves if supported by the target
@@ -3611,6 +3623,9 @@ impl<T> [T] {
         let ptr = self.as_mut_ptr();
         let mut next_read: usize = 1;
         let mut next_write: usize = 1;
+        let mut ptr_read = ptr;
+        let mut prev_ptr_write = ptr;
+        let mut ptr_write = ptr;
 
         // SAFETY: the `while` condition guarantees `next_read` and `next_write`
         // are less than `len`, thus are inside `self`. `prev_ptr_write` points to
@@ -3635,12 +3650,23 @@ impl<T> [T] {
                     && next_write <= next_read
                     && next_read >= 1
             )]
+            #[cfg_attr(
+                kani,
+                kani::loop_modifies(
+                    unsafe { slice::from_raw_parts_mut(ptr, len) },
+                    &next_read,
+                    &next_write,
+                    &ptr_read,
+                    &prev_ptr_write,
+                    &ptr_write
+                )
+            )]
             while next_read < len {
-                let ptr_read = ptr.add(next_read);
-                let prev_ptr_write = ptr.add(next_write - 1);
+                ptr_read = ptr.add(next_read);
+                prev_ptr_write = ptr.add(next_write - 1);
                 if !same_bucket(&mut *ptr_read, &mut *prev_ptr_write) {
                     if next_read != next_write {
-                        let ptr_write = prev_ptr_write.add(1);
+                        ptr_write = prev_ptr_write.add(1);
                         mem::swap(&mut *ptr_read, &mut *ptr_write);
                     }
                     next_write += 1;
