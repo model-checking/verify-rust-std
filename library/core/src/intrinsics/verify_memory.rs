@@ -480,11 +480,7 @@ fn check_write_bytes_zero_count() {
 fn check_size_of_val_sized_u32() {
     let x: u32 = kani::any();
     // Documented: always safe for Sized, including null.
-    let ptr = if kani::any() {
-        &x as *const u32
-    } else {
-        ptr::null()
-    };
+    let ptr = if kani::any() { &x as *const u32 } else { ptr::null() };
     let size = unsafe { size_of_val_sized_wrapper(ptr) };
     assert_eq!(size, 4);
     kani::cover(ptr.is_null(), "size_of_val on null Sized pointer");

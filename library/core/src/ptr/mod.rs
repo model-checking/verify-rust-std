@@ -418,7 +418,7 @@ pub use alignment::Alignment;
 
 mod metadata;
 #[unstable(feature = "ptr_metadata", issue = "81513")]
-pub use metadata::{from_raw_parts, from_raw_parts_mut, metadata, DynMetadata, Pointee, Thin};
+pub use metadata::{DynMetadata, Pointee, Thin, from_raw_parts, from_raw_parts_mut, metadata};
 
 mod non_null;
 #[stable(feature = "nonnull", since = "1.25.0")]
@@ -1857,11 +1857,7 @@ pub const unsafe fn read_unaligned<T>(src: *const T) -> T {
     // Also, since we just wrote a valid value into `tmp`, it is guaranteed
     // to be properly initialized.
     unsafe {
-        copy_nonoverlapping(
-            src as *const u8,
-            tmp.as_mut_ptr() as *mut u8,
-            size_of::<T>(),
-        );
+        copy_nonoverlapping(src as *const u8, tmp.as_mut_ptr() as *mut u8, size_of::<T>());
         tmp.assume_init()
     }
 }
@@ -2059,11 +2055,7 @@ pub const unsafe fn write_unaligned<T>(dst: *mut T, src: T) {
     // `dst` cannot overlap `src` because the caller has mutable access
     // to `dst` while `src` is owned by this function.
     unsafe {
-        copy_nonoverlapping(
-            (&raw const src) as *const u8,
-            dst as *mut u8,
-            size_of::<T>(),
-        );
+        copy_nonoverlapping((&raw const src) as *const u8, dst as *mut u8, size_of::<T>());
         // We are calling the intrinsic directly to avoid function calls in the generated code.
         intrinsics::forget(src);
     }
@@ -2423,11 +2415,7 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     let gcdpow = unsafe {
         let x = cttz_nonzero(stride);
         let y = cttz_nonzero(a);
-        if x < y {
-            x
-        } else {
-            y
-        }
+        if x < y { x } else { y }
     };
     // SAFETY: gcdpow has an upper-bound that’s at most the number of bits in a `usize`.
     let gcd = unsafe { unchecked_shl(1usize, gcdpow) };
