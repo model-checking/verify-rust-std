@@ -1620,9 +1620,10 @@ impl<T: TrivialClone> SpecFill<T> for [MaybeUninit<T>] {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
+    use safety::ensures;
+
     use super::*;
     use crate::kani;
-    use safety::ensures;
 
     /// `MaybeUninit::zeroed` is safe; this wrapper states the integer postcondition
     /// (`write_bytes(0, 1)` of a `u32`).

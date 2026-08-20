@@ -2,9 +2,9 @@
 
 use safety::requires;
 
+use crate::fmt::NumBuffer;
 #[cfg(kani)]
 use crate::kani;
-use crate::fmt::NumBuffer;
 use crate::mem::MaybeUninit;
 use crate::num::fmt as numfmt;
 use crate::{fmt, str};
@@ -600,18 +600,18 @@ impl_Debug! {
 // often cares strongly about getting a smaller code size.
 #[cfg(any(target_pointer_width = "64", target_arch = "wasm32"))]
 mod imp {
+    use super::*;
     #[cfg(kani)]
     use crate::kani;
-    use super::*;
     impl_Display!(i8, u8, i16, u16, i32, u32, i64, u64, isize, usize; as u64 into display_u64);
     impl_Exp!(i8, u8, i16, u16, i32, u32, i64, u64, isize, usize; as u64 into exp_u64);
 }
 
 #[cfg(not(any(target_pointer_width = "64", target_arch = "wasm32")))]
 mod imp {
+    use super::*;
     #[cfg(kani)]
     use crate::kani;
-    use super::*;
     impl_Display!(i8, u8, i16, u16, i32, u32, isize, usize; as u32 into display_u32);
     impl_Display!(i64, u64; as u64 into display_u64);
 

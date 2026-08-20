@@ -17,8 +17,7 @@ use safety::{ensures, requires};
 use super::*;
 use crate::mem::{self, MaybeUninit, SizedTypeProperties};
 use crate::ptr::{self, DynMetadata};
-use crate::kani;
-use crate::ub_checks;
+use crate::{kani, ub_checks};
 
 /// Object-safe probe so vtable tests are not tied to `fmt::Debug` (or to one
 /// erased type). An empty trait still has a vtable with drop/size/align.
@@ -249,11 +248,7 @@ unsafe fn volatile_store_wrapper<T>(dst: *mut T, val: T) {
 )]
 #[ensures(|_| check_copy_untyped(src, dst, count))]
 #[kani::modifies(ptr::slice_from_raw_parts(dst, count))]
-unsafe fn volatile_copy_nonoverlapping_memory_wrapper<T>(
-    dst: *mut T,
-    src: *const T,
-    count: usize,
-) {
+unsafe fn volatile_copy_nonoverlapping_memory_wrapper<T>(dst: *mut T, src: *const T, count: usize) {
     // Safety-equivalent model (see module comment).
     unsafe { copy_nonoverlapping(src, dst, count) }
 }
@@ -552,10 +547,7 @@ fn check_arith_offset_unbounded_u32() {
     let offset: isize = kani::any();
     let dst = &x as *const u32;
     let result = unsafe { arith_offset_wrapper(dst, offset) };
-    assert_eq!(
-        result as usize,
-        (dst as usize).wrapping_add((offset as usize).wrapping_mul(4))
-    );
+    assert_eq!(result as usize, (dst as usize).wrapping_add((offset as usize).wrapping_mul(4)));
     kani::cover(offset < 0, "negative arith_offset");
 }
 
