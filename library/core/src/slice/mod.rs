@@ -5983,14 +5983,16 @@ mod verify {
     #[kani::unwind(3)]
     fn check_rotate_left() {
         let mut arr: [u8; 2] = kani::any();
-        arr.rotate_left(kani::any_where(|&m: &usize| m <= arr.len()));
+        let len = arr.len();
+        arr.rotate_left(kani::any_where(|&m: &usize| m <= len));
     }
 
     #[kani::proof_for_contract(<[u8]>::rotate_right)]
     #[kani::unwind(3)]
     fn check_rotate_right() {
         let mut arr: [u8; 2] = kani::any();
-        arr.rotate_right(kani::any_where(|&k: &usize| k <= arr.len()));
+        let len = arr.len();
+        arr.rotate_right(kani::any_where(|&k: &usize| k <= len));
     }
 
     #[kani::proof_for_contract(super::rotate::ptr_rotate)]
