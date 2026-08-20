@@ -142,6 +142,21 @@ macro_rules! iterator {
                     },
                 )
             }
+
+            /// Contracted inherent form of [`Iterator::__iterator_get_unchecked`].
+            ///
+            /// Kani cannot attach `proof_for_contract` to generic trait methods, so the
+            /// safety contract lives here and the trait method forwards to it.
+            #[inline]
+            #[safety::requires(idx < len!(self))]
+            #[safety::ensures(|_| self.is_safe())]
+            unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> $elem {
+                // SAFETY: the caller must guarantee that `idx` is in bounds of
+                // the underlying slice, so `idx` cannot overflow an `isize`, and
+                // the returned reference is guaranteed to refer to an element
+                // of the slice and thus guaranteed to be valid.
+                unsafe { & $( $mut_ )? * self.ptr.as_ptr().add(idx) }
+            }
         }
 
         #[stable(feature = "rust1", since = "1.0.0")]
@@ -258,6 +273,9 @@ macro_rules! iterator {
                 let mut acc = init;
                 let mut i = 0;
                 let len = len!(self);
+                // `i < len` at the header: the empty case returned above, and we
+                // `break` as soon as `i == len` after the increment.
+                #[safety::loop_invariant(i < len)]
                 loop {
                     // SAFETY: the loop iterates `i in 0..len`, which always is in bounds of
                     // the slice allocation
@@ -282,6 +300,7 @@ macro_rules! iterator {
                 Self: Sized,
                 F: FnMut(Self::Item),
             {
+                #[safety::loop_invariant(self.is_safe())]
                 while let Some(x) = self.next() {
                     f(x);
                 }
@@ -365,6 +384,7 @@ macro_rules! iterator {
             {
                 let n = len!(self);
                 let mut i = 0;
+                #[safety::loop_invariant(i <= n && self.is_safe())]
                 while let Some(x) = self.next() {
                     if predicate(x) {
                         // SAFETY: we are guaranteed to be in bounds by the loop invariant:
@@ -387,6 +407,7 @@ macro_rules! iterator {
             {
                 let n = len!(self);
                 let mut i = n;
+                #[safety::loop_invariant(i <= n && self.is_safe())]
                 while let Some(x) = self.next_back() {
                     i -= 1;
                     if predicate(x) {
@@ -400,22 +421,12 @@ macro_rules! iterator {
             }
 
             #[inline]
-            #[safety::requires(idx < len!(self))]
             unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-                // SAFETY: the caller must guarantee that `i` is in bounds of
-                // the underlying slice, so `i` cannot overflow an `isize`, and
-                // the returned references is guaranteed to refer to an element
-                // of the slice and thus guaranteed to be valid.
-                //
-                // Also note that the caller also guarantees that we're never
-                // called with the same index again, and that no other methods
-                // that will access this subslice are called, so it is valid
-                // for the returned reference to be mutable in the case of
-                // `IterMut`
-                unsafe { & $( $mut_ )? * self.ptr.as_ptr().add(idx) }
+                // SAFETY: same contract as `iterator_get_unchecked`.
+                unsafe { self.iterator_get_unchecked(idx) }
             }
 
-            $($extra)*
+            $($extra)*}
         }
 
         #[stable(feature = "rust1", since = "1.0.0")]
