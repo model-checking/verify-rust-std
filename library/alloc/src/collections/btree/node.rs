@@ -1917,10 +1917,6 @@ mod verify {
     use core::kani;
     use core::mem::MaybeUninit;
 
-    use super::{
-        move_to_slice, slice_insert, slice_remove, slice_shl, slice_shr, Handle, LeafNode,
-        LeftOrRight, NodeRef, CAPACITY,
-    };
     use super::*;
     use crate::alloc::Global;
     use crate::boxed::Box;
@@ -1936,17 +1932,25 @@ mod verify {
         kani::any_where(|&n: &usize| n > 0 && n <= CAPACITY)
     }
 
-    /// Fill every slot (loop over the compile-time `CAPACITY`), then restrict
-    /// `len` to `n`. Extra initialized slots past `len` are not observed.
+    /// Initialize `n` slots by writing the key/value arrays directly.
+    /// Avoids `push`/`Handle::new_kv` so contract proofs can call those once at top level.
     fn leaf_with_len(n: usize) -> Leaf {
         kani::assume(n <= CAPACITY);
         let mut node = NodeRef::new_leaf(Global);
         let keys: [u8; CAPACITY] = kani::any();
         let vals: [u8; CAPACITY] = kani::any();
-        for i in 0..CAPACITY {
-            node.borrow_mut().push(keys[i], vals[i]);
+        {
+            let mut borrow = node.borrow_mut();
+            for i in 0..CAPACITY {
+                if i < n {
+                    unsafe {
+                        borrow.key_area_mut(i).write(keys[i]);
+                        borrow.val_area_mut(i).write(vals[i]);
+                    }
+                }
+            }
+            *borrow.len_mut() = n as u16;
         }
-        *node.borrow_mut().len_mut() = n as u16;
         node
     }
 
@@ -1991,9 +1995,9 @@ mod verify {
     #[kani::proof_for_contract(Handle::new_kv)]
     #[kani::unwind(13)]
     fn check_handle_new_kv() {
-        let node = any_nonempty_leaf();
+        let mut node = any_nonempty_leaf();
         let idx = kani::any_where(|&i: &usize| i < node.len());
-        let handle = unsafe { Handle::new_kv(node.reborrow(), idx) };
+        let handle = unsafe { Handle::new_kv(node.borrow_mut(), idx) };
         assert!(handle.idx() == idx);
     }
 
@@ -2346,13 +2350,13 @@ mod verify {
     fn check_do_merge_via_merge_tracking_child_edge() {
         let left_n = any_len();
         let right_n = any_len();
-        kani::assume(left_n + 1 + right_n <= CAPACITY);
+        kani::assume(left_n.saturating_add(1).saturating_add(right_n) <= CAPACITY);
         let mut parent = parent_with_leaves(left_n, right_n);
         let ctx = parent.borrow_mut().first_kv().consider_for_balancing();
         let track = kani::any_where(|&i: &usize| i <= left_n);
         let edge = ctx.merge_tracking_child_edge(LeftOrRight::Left(track), Global);
         assert!(edge.idx() == track);
-        assert!(edge.into_node().len() == left_n + 1 + right_n);
+        assert!(edge.into_node().len() == left_n.saturating_add(1).saturating_add(right_n));
     }
 
     #[kani::proof]
@@ -2384,24 +2388,24 @@ mod verify {
     fn check_bulk_steal_left() {
         let count = kani::any_where(|&c: &usize| c > 0 && c <= CAPACITY);
         let left_n = kani::any_where(|&n: &usize| n >= count && n <= CAPACITY);
-        let right_n = kani::any_where(|&n: &usize| n + count <= CAPACITY);
+        let right_n = kani::any_where(|&n: &usize| n <= CAPACITY.saturating_sub(count));
         let mut parent = parent_with_leaves(left_n, right_n);
         let mut ctx = parent.borrow_mut().first_kv().consider_for_balancing();
         ctx.bulk_steal_left(count);
-        assert!(ctx.left_child_len() == left_n - count);
-        assert!(ctx.right_child_len() == right_n + count);
+        assert!(ctx.left_child_len() == left_n.saturating_sub(count));
+        assert!(ctx.right_child_len() == right_n.saturating_add(count));
     }
 
     #[kani::proof]
     #[kani::unwind(13)]
     fn check_bulk_steal_right() {
         let count = kani::any_where(|&c: &usize| c > 0 && c <= CAPACITY);
-        let left_n = kani::any_where(|&n: &usize| n + count <= CAPACITY);
+        let left_n = kani::any_where(|&n: &usize| n <= CAPACITY.saturating_sub(count));
         let right_n = kani::any_where(|&n: &usize| n >= count && n <= CAPACITY);
         let mut parent = parent_with_leaves(left_n, right_n);
         let mut ctx = parent.borrow_mut().first_kv().consider_for_balancing();
         ctx.bulk_steal_right(count);
-        assert!(ctx.left_child_len() == left_n + count);
-        assert!(ctx.right_child_len() == right_n - count);
+        assert!(ctx.left_child_len() == left_n.saturating_add(count));
+        assert!(ctx.right_child_len() == right_n.saturating_sub(count));
     }
 }
