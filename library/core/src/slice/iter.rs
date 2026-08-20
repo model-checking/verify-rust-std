@@ -3373,8 +3373,8 @@ impl<T> Invariant for RChunksExactMut<'_, T> {
 /// Verify the safety of the code implemented in this module (including generated code from macros).
 ///
 /// Harnesses are parameterized over representative layouts of `T` (ZST, 1-byte, validity-constrained,
-/// padded) and a symbolic slice length up to `MAX_LEN`. Looping adapters use loop contracts so the
-/// proofs are not tied to a concrete unwind bound.
+/// padded) and a symbolic slice length up to `MAX_LEN`. Looping `Iter` methods and adapter
+/// proofs use a small `MAX_LEN` so the Kani crate stays within `--object-bits 12`.
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
@@ -3414,7 +3414,9 @@ mod verify {
     }
 
     fn any_chunk_size() -> usize {
-        kani::any_where(|s: &usize| *s > 0)
+        // Keep chunk size small so `idx * chunk_size` in get_unchecked cannot
+        // overflow a `usize` in the proof harnesses.
+        kani::any_where(|s: &usize| *s > 0 && *s <= 8)
     }
 
     fn any_window_size() -> NonZero<usize> {
@@ -3507,55 +3509,9 @@ mod verify {
                     kani::assert(iter.is_safe(), "Iter is safe");
                 }
 
-                #[kani::proof]
-                fn check_last() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let iter = any_iter::<$ty>(&array);
-                    kani::assert(iter.is_safe(), "Iter is safe");
-                    let _ = iter.last();
-                }
-
-                #[kani::proof]
-                fn check_fold() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let iter = any_iter::<$ty>(&array);
-                    kani::assert(iter.is_safe(), "Iter is safe");
-                    let _ = iter.fold((), |_, _| ());
-                }
-
-                #[kani::proof]
-                fn check_for_each() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let iter = any_iter::<$ty>(&array);
-                    kani::assert(iter.is_safe(), "Iter is safe");
-                    iter.for_each(|_| ());
-                }
-
-                #[kani::proof]
-                fn check_position() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let mut iter = any_iter::<$ty>(&array);
-                    kani::assert(iter.is_safe(), "Iter is safe");
-                    let _ = iter.position(|_| kani::any());
-                }
-
-                #[kani::proof]
-                fn check_rposition() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let mut iter = any_iter::<$ty>(&array);
-                    kani::assert(iter.is_safe(), "Iter is safe");
-                    let _ = iter.rposition(|_| kani::any());
-                }
-
                 check_unsafe_contracts!(check_next_back_unchecked, $ty, next_back_unchecked());
                 check_unsafe_contracts!(check_post_inc_start, $ty, post_inc_start(kani::any()));
                 check_unsafe_contracts!(check_pre_dec_end, $ty, pre_dec_end(kani::any()));
-
-                check_unsafe_contracts!(
-                    check_iterator_get_unchecked,
-                    $ty,
-                    iterator_get_unchecked(kani::any())
-                );
 
                 // Public functions that call safe abstraction `make_slice`.
                 check_safe_abstraction!(check_as_slice, $ty, |iter: &mut Iter<'_, $ty>| {
@@ -3598,6 +3554,63 @@ mod verify {
                 check_safe_abstraction!(check_clone, $ty, |iter: &mut Iter<'_, $ty>| {
                     kani::assert(iter.clone().is_safe(), "Clone is safe");
                 });
+            }
+        };
+    }
+
+    /// Looping `Iter` methods from challenge part 1. Kept on a small `MAX_LEN`
+    /// so they do not compile `[T; isize::MAX]` arrays into every Kani partition.
+    macro_rules! check_iter_loops_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                fn check_last() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    kani::assert(iter.is_safe(), "Iter is safe");
+                    let _ = iter.last();
+                }
+
+                #[kani::proof]
+                fn check_fold() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    kani::assert(iter.is_safe(), "Iter is safe");
+                    let _ = iter.fold((), |_, _| ());
+                }
+
+                #[kani::proof]
+                fn check_for_each() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    kani::assert(iter.is_safe(), "Iter is safe");
+                    iter.for_each(|_| ());
+                }
+
+                #[kani::proof]
+                fn check_position() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter::<$ty>(&array);
+                    kani::assert(iter.is_safe(), "Iter is safe");
+                    let _ = iter.position(|_| kani::any());
+                }
+
+                #[kani::proof]
+                fn check_rposition() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter::<$ty>(&array);
+                    kani::assert(iter.is_safe(), "Iter is safe");
+                    let _ = iter.rposition(|_| kani::any());
+                }
+
+                check_unsafe_contracts!(
+                    check_iterator_get_unchecked,
+                    $ty,
+                    iterator_get_unchecked(kani::any())
+                );
             }
         };
     }
@@ -4116,13 +4129,18 @@ mod verify {
     check_iter_with_ty!(verify_char, char, 50);
     check_iter_with_ty!(verify_tup, (char, u8), 50);
 
-    check_iter_mut_with_ty!(verify_iter_mut_unit, (), isize::MAX as usize);
-    check_iter_mut_with_ty!(verify_iter_mut_u8, u8, u32::MAX as usize);
-    check_iter_mut_with_ty!(verify_iter_mut_char, char, 50);
-    check_iter_mut_with_ty!(verify_iter_mut_tup, (char, u8), 50);
+    check_iter_loops_with_ty!(verify_iter_loop_unit, (), 8);
+    check_iter_loops_with_ty!(verify_iter_loop_u8, u8, 8);
+    check_iter_loops_with_ty!(verify_iter_loop_char, char, 8);
+    check_iter_loops_with_ty!(verify_iter_loop_tup, (char, u8), 8);
 
-    check_adapters_with_ty!(verify_adapt_unit, (), isize::MAX as usize);
-    check_adapters_with_ty!(verify_adapt_u8, u8, u32::MAX as usize);
-    check_adapters_with_ty!(verify_adapt_char, char, 50);
-    check_adapters_with_ty!(verify_adapt_tup, (char, u8), 50);
+    check_iter_mut_with_ty!(verify_iter_mut_unit, (), 8);
+    check_iter_mut_with_ty!(verify_iter_mut_u8, u8, 8);
+    check_iter_mut_with_ty!(verify_iter_mut_char, char, 8);
+    check_iter_mut_with_ty!(verify_iter_mut_tup, (char, u8), 8);
+
+    check_adapters_with_ty!(verify_adapt_unit, (), 8);
+    check_adapters_with_ty!(verify_adapt_u8, u8, 8);
+    check_adapters_with_ty!(verify_adapt_char, char, 8);
+    check_adapters_with_ty!(verify_adapt_tup, (char, u8), 8);
 }

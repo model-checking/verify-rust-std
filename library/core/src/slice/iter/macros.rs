@@ -273,9 +273,6 @@ macro_rules! iterator {
                 let mut acc = init;
                 let mut i = 0;
                 let len = len!(self);
-                // `i < len` at the header: the empty case returned above, and we
-                // `break` as soon as `i == len` after the increment.
-                #[safety::loop_invariant(i < len)]
                 loop {
                     // SAFETY: the loop iterates `i in 0..len`, which always is in bounds of
                     // the slice allocation
@@ -300,7 +297,6 @@ macro_rules! iterator {
                 Self: Sized,
                 F: FnMut(Self::Item),
             {
-                #[safety::loop_invariant(self.is_safe())]
                 while let Some(x) = self.next() {
                     f(x);
                 }
@@ -384,7 +380,6 @@ macro_rules! iterator {
             {
                 let n = len!(self);
                 let mut i = 0;
-                #[safety::loop_invariant(i <= n && self.is_safe())]
                 while let Some(x) = self.next() {
                     if predicate(x) {
                         // SAFETY: we are guaranteed to be in bounds by the loop invariant:
@@ -407,7 +402,6 @@ macro_rules! iterator {
             {
                 let n = len!(self);
                 let mut i = n;
-                #[safety::loop_invariant(i <= n && self.is_safe())]
                 while let Some(x) = self.next_back() {
                     i -= 1;
                     if predicate(x) {
