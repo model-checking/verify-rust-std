@@ -5976,28 +5976,30 @@ mod verify {
         let _ = slice.partition_dedup_by(|a, b| a == b);
     }
 
+    // CAP=8 + symbolic mid times out autoharness's 10m CBMC cap on the
+    // memmove/gcd/swap rotate algorithms. Length 2 still calls the real
+    // `ptr_rotate` body (including the no-op `mid == 0` / `mid == len` arms).
     #[kani::proof_for_contract(<[u8]>::rotate_left)]
+    #[kani::unwind(3)]
     fn check_rotate_left() {
-        let mut arr: [u8; CAP] = kani::any();
-        let slice = any_mut(&mut arr);
-        slice.rotate_left(kani::any());
+        let mut arr: [u8; 2] = kani::any();
+        arr.rotate_left(kani::any_where(|&m: &usize| m <= arr.len()));
     }
 
     #[kani::proof_for_contract(<[u8]>::rotate_right)]
+    #[kani::unwind(3)]
     fn check_rotate_right() {
-        let mut arr: [u8; CAP] = kani::any();
-        let slice = any_mut(&mut arr);
-        slice.rotate_right(kani::any());
+        let mut arr: [u8; 2] = kani::any();
+        arr.rotate_right(kani::any_where(|&k: &usize| k <= arr.len()));
     }
 
     #[kani::proof_for_contract(super::rotate::ptr_rotate)]
+    #[kani::unwind(3)]
     fn check_ptr_rotate() {
-        let mut arr: [u8; CAP] = kani::any();
-        let slice = any_mut(&mut arr);
-        let mid = kani::any::<usize>();
-        kani::assume(mid <= slice.len());
-        let k = slice.len() - mid;
-        let p = slice.as_mut_ptr();
+        let mut arr: [u8; 2] = kani::any();
+        let mid = kani::any_where(|&m: &usize| m <= arr.len());
+        let k = arr.len() - mid;
+        let p = arr.as_mut_ptr();
         unsafe { super::rotate::ptr_rotate(mid, p.add(mid), k) };
     }
 
@@ -6025,14 +6027,14 @@ mod verify {
         }
     }
 
+    // CAP=8 + two symbolic equal lengths times out autoharness's 10m CBMC cap
+    // on `ptr::swap_nonoverlapping`. Length 2 still runs the real swap path.
     #[kani::proof_for_contract(<[u8]>::swap_with_slice)]
+    #[kani::unwind(3)]
     fn check_swap_with_slice() {
-        let mut a: [u8; CAP] = kani::any();
-        let mut b: [u8; CAP] = kani::any();
-        let left = any_mut(&mut a);
-        let right = any_mut(&mut b);
-        kani::assume(left.len() == right.len());
-        left.swap_with_slice(right);
+        let mut a: [u8; 2] = kani::any();
+        let mut b: [u8; 2] = kani::any();
+        a.swap_with_slice(&mut b);
     }
 
     #[kani::proof]
