@@ -36,6 +36,10 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::{ensures, requires};
+
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::{Destruct, PointeeSized};
 
 mod uninit;
@@ -576,6 +580,23 @@ unsafe impl CloneToUninit for str {
 #[unstable(feature = "clone_to_uninit", issue = "126799")]
 unsafe impl CloneToUninit for crate::ffi::CStr {
     #[cfg_attr(debug_assertions, track_caller)]
+    // Documented safety: `dest` is valid for writes of `size_of_val(self)` bytes
+    // and aligned to `align_of_val(self)` (1 for `CStr`). `self` must be a
+    // well-formed `CStr` so the copied bytes remain a valid C string.
+    #[requires(crate::ub_checks::Invariant::is_safe(self))]
+    #[requires(crate::ub_checks::can_write(crate::ptr::slice_from_raw_parts_mut(
+        dest,
+        crate::mem::size_of_val(self),
+    )))]
+    #[cfg_attr(
+        kani,
+        kani::modifies(crate::ptr::slice_from_raw_parts_mut(dest, crate::mem::size_of_val(self)))
+    )]
+    #[ensures(|_: &()| {
+        let n = crate::mem::size_of_val(self);
+        // SAFETY: `dest` was writable for `n` bytes and this function initialized them.
+        unsafe { crate::slice::from_raw_parts(dest, n) == self.to_bytes_with_nul() }
+    })]
     unsafe fn clone_to_uninit(&self, dest: *mut u8) {
         // SAFETY: For now, CStr is just a #[repr(trasnsparent)] [c_char] with some invariants.
         // And we can cast [c_char] to [u8] on all supported platforms (see: to_bytes_with_nul).

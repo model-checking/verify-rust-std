@@ -146,7 +146,10 @@ impl fmt::Display for FromBytesWithNulError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InteriorNul { position } => {
-                write!(f, "data provided contains an interior nul byte at byte position {position}")
+                write!(
+                    f,
+                    "data provided contains an interior nul byte at byte position {position}"
+                )
             }
             Self::NotNulTerminated => write!(f, "data provided is not nul terminated"),
         }
@@ -191,17 +194,12 @@ impl Default for &CStr {
 }
 
 #[unstable(feature = "ub_checks", issue = "none")]
-impl Invariant for &CStr {
-    /**
-     * Safety invariant of a valid CStr:
-     * 1. An empty CStr should have a null byte.
-     * 2. A valid CStr should end with a null-terminator and contains
-     *    no intermediate null bytes.
-     */
+impl Invariant for CStr {
+    /// A `CStr` is safe iff its byte view is non-empty, ends with a NUL
+    /// terminator, and contains no interior NUL bytes.
     fn is_safe(&self) -> bool {
         let bytes: &[c_char] = &self.inner;
         let len = bytes.len();
-
         !bytes.is_empty() && bytes[len - 1] == 0 && !bytes[..len - 1].contains(&0)
     }
 }
@@ -223,6 +221,51 @@ fn is_null_terminated(ptr: *const c_char) -> bool {
         return false;
     }
     found_null
+}
+
+/// `idx` is a legal offset of the first NUL along `ptr`.
+#[cfg(kani)]
+fn is_first_nul(ptr: *const c_char, idx: usize) -> bool {
+    idx < isize::MAX as usize
+        && unsafe { *ptr.add(idx) == 0 }
+        && (0..idx).all(|i| unsafe { *ptr.add(i) != 0 })
+}
+
+/// Spec for [`CStr::from_bytes_until_nul`]: `Ok` is the prefix through the
+/// first NUL; `Err` iff the slice has no NUL.
+#[cfg(kani)]
+fn until_nul_post(bytes: &[u8], result: &Result<&CStr, FromBytesUntilNulError>) -> bool {
+    match memchr::memchr(0, bytes) {
+        Some(i) => match result {
+            Ok(c) => {
+                c.is_safe()
+                    && c.to_bytes_with_nul().len() == i + 1
+                    && crate::ptr::eq(c.as_ptr() as *const u8, bytes.as_ptr())
+            }
+            Err(_) => false,
+        },
+        None => result.is_err(),
+    }
+}
+
+/// Spec for [`CStr::from_bytes_with_nul`]: success iff the unique NUL is the
+/// final byte; each `Err` variant matches the first-NUL position.
+#[cfg(kani)]
+fn with_nul_post(bytes: &[u8], result: &Result<&CStr, FromBytesWithNulError>) -> bool {
+    match memchr::memchr(0, bytes) {
+        Some(i) if i + 1 == bytes.len() => match result {
+            Ok(c) => {
+                c.is_safe()
+                    && c.to_bytes_with_nul().len() == bytes.len()
+                    && crate::ptr::eq(c.as_ptr() as *const u8, bytes.as_ptr())
+            }
+            Err(_) => false,
+        },
+        Some(i) => {
+            matches!(result, Err(FromBytesWithNulError::InteriorNul { position }) if *position == i)
+        }
+        None => matches!(result, Err(FromBytesWithNulError::NotNulTerminated)),
+    }
 }
 
 impl CStr {
@@ -294,6 +337,7 @@ impl CStr {
     #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
     #[requires(!ptr.is_null() && is_null_terminated(ptr))]
     #[ensures(|result: &&CStr| result.is_safe())]
+    #[ensures(|result: &&CStr| result.as_ptr() == ptr)]
     pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr {
         // SAFETY: The caller has provided a pointer that points to a valid C
         // string with a NUL terminator less than `isize::MAX` from `ptr`.
@@ -339,6 +383,7 @@ impl CStr {
     ///
     #[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
     #[rustc_const_stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
+    #[ensures(|result| until_nul_post(bytes, result))]
     pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError> {
         let nul_pos = memchr::memchr(0, bytes);
         match nul_pos {
@@ -392,6 +437,7 @@ impl CStr {
     /// ```
     #[stable(feature = "cstr_from_bytes", since = "1.10.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    #[ensures(|result| with_nul_post(bytes, result))]
     pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError> {
         let nul_pos = memchr::memchr(0, bytes);
         match nul_pos {
@@ -431,8 +477,12 @@ impl CStr {
     #[rustc_allow_const_fn_unstable(const_eval_select)]
     // Preconditions: Null-terminated and no intermediate null bytes
     #[requires(!bytes.is_empty() && bytes[bytes.len() - 1] == 0 && !bytes[..bytes.len()-1].contains(&0))]
-    // Postcondition: The resulting CStr satisfies the same conditions as preconditions
+    // Postcondition: 0-cost cast of that slice; result upholds the CStr invariant
     #[ensures(|result| result.is_safe())]
+    #[ensures(|result| {
+        result.to_bytes_with_nul().len() == bytes.len()
+            && crate::ptr::eq(result.as_ptr() as *const u8, bytes.as_ptr())
+    })]
     pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr {
         const_eval_select!(
             @capture { bytes: &[u8] } -> &CStr:
@@ -528,6 +578,7 @@ impl CStr {
     #[rustc_const_stable(feature = "const_str_as_ptr", since = "1.32.0")]
     #[rustc_as_ptr]
     #[rustc_never_returns_null_ptr]
+    #[ensures(|p| *p == self.inner.as_ptr())]
     pub const fn as_ptr(&self) -> *const c_char {
         self.inner.as_ptr()
     }
@@ -559,6 +610,8 @@ impl CStr {
     #[doc(alias("len", "strlen"))]
     #[stable(feature = "cstr_count_bytes", since = "1.79.0")]
     #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
+    #[requires(self.is_safe())]
+    #[ensures(|n| *n + 1 == self.inner.len())]
     pub const fn count_bytes(&self) -> usize {
         self.inner.len() - 1
     }
@@ -574,6 +627,8 @@ impl CStr {
     #[inline]
     #[stable(feature = "cstr_is_empty", since = "1.71.0")]
     #[rustc_const_stable(feature = "cstr_is_empty", since = "1.71.0")]
+    #[requires(self.is_safe())]
+    #[ensures(|b| *b == (self.inner[0] == 0))]
     pub const fn is_empty(&self) -> bool {
         // SAFETY: We know there is at least one byte; for empty strings it
         // is the NUL terminator.
@@ -600,6 +655,10 @@ impl CStr {
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    #[requires(self.is_safe())]
+    #[ensures(|bytes| bytes.len() + 1 == self.inner.len())]
+    #[ensures(|bytes| crate::ptr::eq(bytes.as_ptr(), self.inner.as_ptr() as *const u8))]
+    #[ensures(|bytes| !bytes.contains(&0))]
     pub const fn to_bytes(&self) -> &[u8] {
         let bytes = self.to_bytes_with_nul();
         // FIXME(const-hack) replace with range index
@@ -626,6 +685,9 @@ impl CStr {
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    #[requires(self.is_safe())]
+    #[ensures(|bytes| bytes.len() == self.inner.len())]
+    #[ensures(|bytes| crate::ptr::eq(bytes.as_ptr(), self.inner.as_ptr() as *const u8))]
     pub const fn to_bytes_with_nul(&self) -> &[u8] {
         // SAFETY: Transmuting a slice of `c_char`s to a slice of `u8`s
         // is safe on all supported targets.
@@ -735,6 +797,12 @@ impl ops::Index<ops::RangeFrom<usize>> for CStr {
     type Output = CStr;
 
     #[inline]
+    #[requires(self.is_safe())]
+    #[requires(index.start < self.inner.len())]
+    #[ensures(|result: &&CStr| result.is_safe())]
+    #[ensures(|result: &&CStr| {
+        result.to_bytes_with_nul() == &self.to_bytes_with_nul()[index.start..]
+    })]
     fn index(&self, index: ops::RangeFrom<usize>) -> &CStr {
         let bytes = self.to_bytes_with_nul();
         // we need to manually check the starting index to account for the null
@@ -772,7 +840,7 @@ impl const AsRef<CStr> for CStr {
 #[unstable(feature = "cstr_internals", issue = "none")]
 #[rustc_allow_const_fn_unstable(const_eval_select)]
 #[requires(is_null_terminated(ptr))]
-#[ensures(|&result| result < isize::MAX as usize && unsafe { *ptr.add(result) } == 0)]
+#[ensures(|&result| is_first_nul(ptr, result))]
 const unsafe fn strlen(ptr: *const c_char) -> usize {
     const_eval_select!(
         @capture { s: *const c_char = ptr } -> usize:
@@ -821,7 +889,10 @@ unsafe impl Sync for Bytes<'_> {}
 impl<'a> Bytes<'a> {
     #[inline]
     fn new(s: &'a CStr) -> Self {
-        Self { ptr: s.as_non_null_ptr().cast(), phantom: PhantomData }
+        Self {
+            ptr: s.as_non_null_ptr().cast(),
+            phantom: PhantomData,
+        }
     }
 
     #[inline]
@@ -858,7 +929,11 @@ impl Iterator for Bytes<'_> {
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.is_empty() { (0, Some(0)) } else { (1, None) }
+        if self.is_empty() {
+            (0, Some(0))
+        } else {
+            (1, None)
+        }
     }
 
     #[inline]
@@ -889,7 +964,7 @@ mod verify {
     }
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
-    #[kani::proof]
+    #[kani::proof_for_contract(CStr::from_bytes_until_nul)]
     #[kani::unwind(32)] // 7.3 seconds when 16; 33.1 seconds when 32
     fn check_from_bytes_until_nul() {
         const MAX_SIZE: usize = 32;
@@ -902,6 +977,8 @@ mod verify {
         if let Ok(c_str) = result {
             assert!(c_str.is_safe());
         }
+        kani::cover(result.is_ok(), "until_nul Ok");
+        kani::cover(result.is_err(), "until_nul Err");
     }
 
     //  pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr
@@ -959,7 +1036,7 @@ mod verify {
     }
 
     // pub const fn as_ptr(&self) -> *const c_char
-    #[kani::proof]
+    #[kani::proof_for_contract(CStr::as_ptr)]
     #[kani::unwind(33)]
     fn check_as_ptr() {
         const MAX_SIZE: usize = 32;
@@ -986,7 +1063,7 @@ mod verify {
     }
 
     // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
-    #[kani::proof]
+    #[kani::proof_for_contract(CStr::from_bytes_with_nul)]
     #[kani::unwind(17)]
     fn check_from_bytes_with_nul() {
         const MAX_SIZE: usize = 16;
@@ -997,10 +1074,19 @@ mod verify {
         if let Ok(c_str) = result {
             assert!(c_str.is_safe());
         }
+        kani::cover(result.is_ok(), "with_nul Ok");
+        kani::cover(
+            matches!(result, Err(FromBytesWithNulError::InteriorNul { .. })),
+            "interior nul",
+        );
+        kani::cover(
+            matches!(result, Err(FromBytesWithNulError::NotNulTerminated)),
+            "no terminator",
+        );
     }
 
     // pub const fn count_bytes(&self) -> usize
-    #[kani::proof]
+    #[kani::proof_for_contract(CStr::count_bytes)]
     #[kani::unwind(32)]
     fn check_count_bytes() {
         const MAX_SIZE: usize = 32;
@@ -1025,7 +1111,7 @@ mod verify {
     }
 
     // pub const fn to_bytes(&self) -> &[u8]
-    #[kani::proof]
+    #[kani::proof_for_contract(CStr::to_bytes)]
     #[kani::unwind(32)]
     fn check_to_bytes() {
         const MAX_SIZE: usize = 32;
@@ -1041,7 +1127,7 @@ mod verify {
     }
 
     // pub const fn to_bytes_with_nul(&self) -> &[u8]
-    #[kani::proof]
+    #[kani::proof_for_contract(CStr::to_bytes_with_nul)]
     #[kani::unwind(33)]
     fn check_to_bytes_with_nul() {
         const MAX_SIZE: usize = 32;
@@ -1061,12 +1147,13 @@ mod verify {
     #[kani::unwind(33)]
     fn check_strlen_contract() {
         const MAX_SIZE: usize = 32;
-        let mut string: [u8; MAX_SIZE] = kani::any();
+        let string: [u8; MAX_SIZE] = kani::any();
         let ptr = string.as_ptr() as *const c_char;
 
-        unsafe {
-            super::strlen(ptr);
-        }
+        let n = unsafe { super::strlen(ptr) };
+        assert!(is_first_nul(ptr, n));
+        kani::cover(n == 0, "empty c string");
+        kani::cover(n > 0, "non-empty c string");
     }
 
     // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr
@@ -1083,7 +1170,7 @@ mod verify {
     }
 
     // pub const fn is_empty(&self) -> bool
-    #[kani::proof]
+    #[kani::proof_for_contract(CStr::is_empty)]
     #[kani::unwind(33)]
     fn check_is_empty() {
         const MAX_SIZE: usize = 32;
@@ -1095,5 +1182,90 @@ mod verify {
         let expected_is_empty = bytes.len() == 0;
         assert_eq!(expected_is_empty, c_str.is_empty());
         assert!(c_str.is_safe());
+        kani::cover(expected_is_empty, "empty CStr");
+        kani::cover(!expected_is_empty, "non-empty CStr");
+    }
+
+    /// `is_safe` agrees with two independent oracles: the first-NUL-at-end
+    /// structural test, and the safe constructor `from_bytes_with_nul`.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn check_invariant_soundness() {
+        const MAX_SIZE: usize = 16;
+        let data: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        // SAFETY: `is_safe` only reads initialized bytes of the slice view.
+        let c_str: &CStr = unsafe { &*(slice as *const [u8] as *const CStr) };
+
+        let first = slice.iter().position(|&b| b == 0);
+        let structurally_valid = first == Some(slice.len().wrapping_sub(1)) && !slice.is_empty();
+        assert_eq!(c_str.is_safe(), structurally_valid);
+        assert_eq!(c_str.is_safe(), CStr::from_bytes_with_nul(slice).is_ok());
+        kani::cover(c_str.is_safe(), "valid layout");
+        kani::cover(!c_str.is_safe(), "invalid layout");
+    }
+
+    // impl ops::Index<ops::RangeFrom<usize>> for CStr
+    #[kani::proof_for_contract(CStr::index)]
+    #[kani::unwind(33)]
+    fn check_index_range_from() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+        let bytes = c_str.to_bytes_with_nul();
+        let start: usize = kani::any();
+        kani::assume(start < bytes.len());
+
+        let tail = &c_str[start..];
+        assert!(tail.is_safe());
+        assert_eq!(tail.to_bytes_with_nul(), &bytes[start..]);
+        kani::cover(start == 0, "index from 0");
+        kani::cover(start > 0, "proper suffix");
+    }
+
+    // unsafe impl CloneToUninit for CStr
+    #[kani::proof_for_contract(CStr::clone_to_uninit)]
+    #[kani::unwind(17)]
+    fn check_clone_to_uninit_contract() {
+        const MAX_SIZE: usize = 16;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let src = arbitrary_cstr(slice);
+        let n = src.to_bytes_with_nul().len();
+
+        // Write-only destination: the contract claims validity for writes, not reads.
+        let mut dest: [crate::mem::MaybeUninit<u8>; MAX_SIZE] =
+            [crate::mem::MaybeUninit::uninit(); MAX_SIZE];
+        unsafe {
+            crate::clone::CloneToUninit::clone_to_uninit(src, dest.as_mut_ptr() as *mut u8);
+            let written = slice::from_raw_parts(dest.as_ptr() as *const u8, n);
+            let cloned = CStr::from_bytes_with_nul_unchecked(written);
+            assert!(cloned.is_safe());
+            assert_eq!(cloned.to_bytes_with_nul(), src.to_bytes_with_nul());
+        }
+    }
+
+    /// Same write, but `dest` has *exactly* `size_of_val(src)` bytes of space,
+    /// so a write past the documented footprint is UB under CBMC.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_clone_to_uninit_write_bound() {
+        const MAX_SIZE: usize = 8;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let src = arbitrary_cstr(slice);
+        let n = src.to_bytes_with_nul().len();
+        kani::assume(n <= MAX_SIZE);
+
+        let mut dest: [u8; MAX_SIZE] = kani::any();
+        let start = MAX_SIZE - n;
+        unsafe {
+            crate::clone::CloneToUninit::clone_to_uninit(src, dest[start..].as_mut_ptr());
+        }
+        assert_eq!(&dest[start..], src.to_bytes_with_nul());
+        // SAFETY: the written suffix is a copy of a valid `CStr`.
+        let cloned = unsafe { CStr::from_bytes_with_nul_unchecked(&dest[start..]) };
+        assert!(cloned.is_safe());
     }
 }
