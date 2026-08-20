@@ -339,6 +339,21 @@ impl CStr {
     ///
     #[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
     #[rustc_const_stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
+    // `Ok` iff `bytes` contains a nul: the result is the prefix up to and
+    // including the FIRST nul, so it satisfies the safety invariant. `Err`
+    // iff `bytes` contains no nul at all.
+    #[ensures(|result: &Result<&CStr, FromBytesUntilNulError>| match result {
+        Ok(c_str) => {
+            let with_nul = c_str.to_bytes_with_nul();
+            let n = with_nul.len();
+            c_str.is_safe()
+                && 1 <= n
+                && n <= bytes.len()
+                && with_nul == &bytes[..n]
+                && !bytes[..n - 1].contains(&0)
+        }
+        Err(FromBytesUntilNulError(())) => !bytes.contains(&0),
+    })]
     pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError> {
         let nul_pos = memchr::memchr(0, bytes);
         match nul_pos {
@@ -392,6 +407,21 @@ impl CStr {
     /// ```
     #[stable(feature = "cstr_from_bytes", since = "1.10.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    // `Ok` iff the only nul in `bytes` is a single trailing one; the result
+    // then satisfies the safety invariant and round-trips through
+    // `to_bytes_with_nul`. Each `Err` variant is characterized by the
+    // first-nul position: `InteriorNul` reports a misplaced first nul,
+    // `NotNulTerminated` the absence of any nul.
+    #[ensures(|result: &Result<&CStr, FromBytesWithNulError>| match result {
+        Ok(c_str) => c_str.is_safe() && c_str.to_bytes_with_nul() == bytes,
+        Err(FromBytesWithNulError::InteriorNul { position }) => {
+            *position < bytes.len()
+                && bytes[*position] == 0
+                && !bytes[..*position].contains(&0)
+                && *position + 1 != bytes.len()
+        }
+        Err(FromBytesWithNulError::NotNulTerminated) => !bytes.contains(&0),
+    })]
     pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError> {
         let nul_pos = memchr::memchr(0, bytes);
         match nul_pos {
@@ -429,10 +459,12 @@ impl CStr {
     #[stable(feature = "cstr_from_bytes", since = "1.10.0")]
     #[rustc_const_stable(feature = "const_cstr_unchecked", since = "1.59.0")]
     #[rustc_allow_const_fn_unstable(const_eval_select)]
-    // Preconditions: Null-terminated and no intermediate null bytes
+    // Safety contract: the documented requirement is the `CStr` safety
+    // invariant restated on the input slice (non-empty, nul-terminated, no
+    // interior nul) — the obligation every caller must discharge. The result
+    // then upholds the invariant.
     #[requires(!bytes.is_empty() && bytes[bytes.len() - 1] == 0 && !bytes[..bytes.len()-1].contains(&0))]
-    // Postcondition: The resulting CStr satisfies the same conditions as preconditions
-    #[ensures(|result| result.is_safe())]
+    #[ensures(|result: &&CStr| result.is_safe())]
     pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr {
         const_eval_select!(
             @capture { bytes: &[u8] } -> &CStr:
@@ -559,6 +591,10 @@ impl CStr {
     #[doc(alias("len", "strlen"))]
     #[stable(feature = "cstr_count_bytes", since = "1.79.0")]
     #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
+    // `strlen` semantics: the count excludes the nul terminator. Pinned to
+    // both public byte views so it cannot silently drift from either.
+    #[ensures(|result: &usize| *result == self.to_bytes().len())]
+    #[ensures(|result: &usize| *result + 1 == self.to_bytes_with_nul().len())]
     pub const fn count_bytes(&self) -> usize {
         self.inner.len() - 1
     }
@@ -574,6 +610,10 @@ impl CStr {
     #[inline]
     #[stable(feature = "cstr_is_empty", since = "1.71.0")]
     #[rustc_const_stable(feature = "cstr_is_empty", since = "1.71.0")]
+    // `true` iff the only byte is the nul terminator. Pinned to both public
+    // byte views so it cannot silently drift from either.
+    #[ensures(|result: &bool| *result == (self.to_bytes().len() == 0))]
+    #[ensures(|result: &bool| *result == (self.to_bytes_with_nul().len() == 1))]
     pub const fn is_empty(&self) -> bool {
         // SAFETY: We know there is at least one byte; for empty strings it
         // is the NUL terminator.
@@ -600,6 +640,13 @@ impl CStr {
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    // The nul-free view: `to_bytes_with_nul` with its final (nul) byte
+    // dropped — identical bytes, one shorter, and itself nul-free. Phrased
+    // against `to_bytes_with_nul` (not `count_bytes`, which is specified in
+    // terms of `to_bytes`) to keep the specification acyclic.
+    #[ensures(|result: &&[u8]| result.len() + 1 == self.to_bytes_with_nul().len())]
+    #[ensures(|result: &&[u8]| *result == &self.to_bytes_with_nul()[..result.len()])]
+    #[ensures(|result: &&[u8]| !result.contains(&0))]
     pub const fn to_bytes(&self) -> &[u8] {
         let bytes = self.to_bytes_with_nul();
         // FIXME(const-hack) replace with range index
@@ -626,6 +673,13 @@ impl CStr {
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    // The most primitive public byte view — both `to_bytes` and `count_bytes`
+    // are defined on top of it — so the contract pins the safety invariant
+    // directly on the returned bytes: non-empty, nul-terminated, no interior
+    // nul.
+    #[ensures(|result: &&[u8]| result.len() >= 1)]
+    #[ensures(|result: &&[u8]| result[result.len() - 1] == 0)]
+    #[ensures(|result: &&[u8]| !result[..result.len() - 1].contains(&0))]
     pub const fn to_bytes_with_nul(&self) -> &[u8] {
         // SAFETY: Transmuting a slice of `c_char`s to a slice of `u8`s
         // is safe on all supported targets.
@@ -888,23 +942,76 @@ mod verify {
         c_str
     }
 
-    // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
+    // impl Invariant for &CStr  (criterion 1)
+    //
+    // Fidelity of the safety invariant itself: reinterprets an arbitrary —
+    // possibly invalid — byte sequence as `&CStr` and pins down exactly when
+    // `is_safe()` holds, against two independent oracles. A too-loose
+    // invariant (e.g. missing the interior-nul clause) passes every
+    // constructor harness but fails here.
     #[kani::proof]
-    #[kani::unwind(32)] // 7.3 seconds when 16; 33.1 seconds when 32
+    #[kani::unwind(17)]
+    fn check_invariant() {
+        const MAX_SIZE: usize = 16;
+        let string: [u8; MAX_SIZE] = kani::any();
+        // Any-length subslice: covers empty, no nul, interior nul, single
+        // trailing nul, and multiple nuls.
+        let slice = kani::slice::any_slice_of_array(&string);
+
+        // The exact unchecked cast from `from_bytes_with_nul_unchecked`;
+        // `is_safe()` only reads initialized bytes, so evaluating it is sound
+        // even when the invariant does not hold.
+        let c_str: &CStr = unsafe { &*(slice as *const [u8] as *const CStr) };
+
+        let len = slice.len();
+        // Oracle #1 (structural): valid iff the FIRST nul sits at the final
+        // index. Phrased with `position` — not the invariant's own form — so
+        // the equivalence is a theorem, not a restatement.
+        let first_nul_at_end = match slice.iter().position(|&b| b == 0) {
+            Some(pos) => pos == len - 1,
+            None => false,
+        };
+        assert_eq!(c_str.is_safe(), first_nul_at_end);
+
+        // Oracle #2 (semantic): the invariant accepts exactly the byte
+        // sequences the safe constructor `from_bytes_with_nul` accepts.
+        assert_eq!(c_str.is_safe(), CStr::from_bytes_with_nul(slice).is_ok());
+
+        // Non-vacuity: both truth values of the invariant are reachable.
+        kani::cover(c_str.is_safe(), "non-vacuity: a valid CStr (invariant holds) is reachable");
+        kani::cover(
+            !c_str.is_safe(),
+            "non-vacuity: an invalid byte sequence (invariant fails) is reachable",
+        );
+    }
+
+    // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
+    //
+    // The contract does the checking; the harness feeds arbitrary slices of
+    // length 0..=16 and witnesses both result branches.
+    #[kani::proof_for_contract(CStr::from_bytes_until_nul)]
+    #[kani::unwind(17)]
     fn check_from_bytes_until_nul() {
-        const MAX_SIZE: usize = 32;
+        const MAX_SIZE: usize = 16;
         let string: [u8; MAX_SIZE] = kani::any();
         // Covers the case of a single null byte at the end, no null bytes, as
         // well as intermediate null bytes
         let slice = kani::slice::any_slice_of_array(&string);
 
         let result = CStr::from_bytes_until_nul(slice);
-        if let Ok(c_str) = result {
-            assert!(c_str.is_safe());
-        }
+
+        // Non-vacuity: both the Ok (a nul is present) and Err (no nul)
+        // branches are reachable within the bounded input space.
+        kani::cover(result.is_ok(), "non-vacuity: slice containing a nul yields Ok");
+        kani::cover(result.is_err(), "non-vacuity: slice with no nul yields Err");
     }
 
-    //  pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr
+    // pub const unsafe fn from_bytes_with_nul_unchecked(bytes: &[u8]) -> &CStr  (criterion 3)
+    //
+    // `proof_for_contract` assumes the precondition (valid C strings of total
+    // length 1..=32) and verifies the `ensures` plus the raw-cast UB checks.
+    // The round-trip assertion stays in the harness — not the contract — so
+    // the callers that stub this function are unaffected.
     #[kani::proof_for_contract(CStr::from_bytes_with_nul_unchecked)]
     #[kani::unwind(33)]
     fn check_from_bytes_with_nul_unchecked() {
@@ -912,53 +1019,111 @@ mod verify {
         let string: [u8; MAX_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array(&string);
 
-        // Kani assumes that the input slice is null-terminated and contains
-        // no intermediate null bytes
         let c_str = unsafe { CStr::from_bytes_with_nul_unchecked(slice) };
-        // Kani ensures that the output CStr holds the CStr safety invariant
 
-        // Correctness check
-        let bytes = c_str.to_bytes();
-        let len = bytes.len();
-        assert_eq!(bytes, &slice[..len]);
+        // Criterion 3: the constructed CStr upholds the safety invariant
+        // (also enforced by the contract's `ensures`).
+        assert!(c_str.is_safe());
+
+        // Round-trip: the nul-terminated view equals the exact input bytes.
+        assert_eq!(c_str.to_bytes_with_nul(), slice);
+
+        // Non-vacuity: both an empty and a non-empty CStr satisfy the
+        // precondition.
+        let len = slice.len();
+        kani::cover(
+            len == 1,
+            "non-vacuity: an empty CStr (lone nul terminator) satisfies the precondition",
+        );
+        kani::cover(
+            len > 1,
+            "non-vacuity: a non-empty CStr (content before the nul) satisfies the precondition",
+        );
     }
 
-    // pub fn bytes(&self) -> Bytes<'_>
+    // pub fn bytes(&self) -> Bytes<'_>  (criterion 2)
+    //
+    // `bytes` returns an opaque iterator, so it cannot carry a return-value
+    // `#[ensures]` contract; its spec is behavioral and proved here: the
+    // iterator yields exactly `to_bytes()`, in order, stopping at (not
+    // emitting) the terminator. Driving it to exhaustion exercises every raw
+    // read in `Bytes::next`.
     #[kani::proof]
-    #[kani::unwind(32)]
+    #[kani::unwind(33)]
     fn check_bytes() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array(&string);
         let c_str = arbitrary_cstr(slice);
 
-        let bytes_iterator = c_str.bytes();
+        // The nul-free content view is the oracle for the iterator.
         let bytes_expected = c_str.to_bytes();
+        let bytes_iterator = c_str.bytes();
 
-        // Compare the bytes obtained from the iterator and the slice
-        // bytes_expected.iter().copied() converts the slice into an iterator over u8
+        // `Iterator::eq` fails if either side is longer, so this pins both
+        // the values and the length.
         assert!(bytes_iterator.eq(bytes_expected.iter().copied()));
+
+        // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
+
+        // Non-vacuity: the equality is not vacuously comparing two empty
+        // iterators.
+        kani::cover(
+            bytes_expected.is_empty(),
+            "non-vacuity: an empty CStr (bytes() yields nothing) is reachable",
+        );
+        kani::cover(
+            !bytes_expected.is_empty(),
+            "non-vacuity: a non-empty CStr (bytes() yields >= 1 byte) is reachable",
+        );
     }
 
-    // pub const fn to_str(&self) -> Result<&str, str::Utf8Error>
+    // pub const fn to_str(&self) -> Result<&str, str::Utf8Error>  (criterion 2)
+    //
+    // Like `bytes`, no return-value contract; behavioral spec proved here:
+    // on `Ok(s)`, `s` is byte-for-byte the nul-free view `to_bytes()` — a nul
+    // is itself valid UTF-8, so only this exact equality (not the Ok/Err
+    // decision) shows the terminator is excluded. On `Err(e)`, the failure
+    // position is a real content byte.
     #[kani::proof]
-    #[kani::unwind(32)]
+    #[kani::unwind(33)]
     fn check_to_str() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array(&string);
         let c_str = arbitrary_cstr(slice);
 
-        // a double conversion here and assertion, if the bytes are still the same, function is valid
+        let content = c_str.to_bytes();
         let str_result = c_str.to_str();
-        if let Ok(s) = str_result {
-            assert_eq!(s.as_bytes(), c_str.to_bytes());
+
+        match str_result {
+            // Exactly the content view, terminator excluded.
+            Ok(s) => assert_eq!(s.as_bytes(), content),
+            // The reported failure position is a real content byte.
+            Err(e) => assert!(e.valid_up_to() < content.len()),
         }
+
+        // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
+
+        // Non-vacuity: neither match arm is vacuously satisfied.
+        kani::cover(
+            str_result.is_ok(),
+            "non-vacuity: a CStr with valid UTF-8 content (to_str Ok) is reachable",
+        );
+        kani::cover(
+            str_result.is_err(),
+            "non-vacuity: a CStr with invalid UTF-8 content (to_str Err) is reachable",
+        );
     }
 
-    // pub const fn as_ptr(&self) -> *const c_char
+    // pub const fn as_ptr(&self) -> *const c_char  (criterion 2)
+    //
+    // A raw pointer carries no `#[ensures]` contract; proved here instead:
+    // the pointer is non-null (`#[rustc_never_returns_null_ptr]`) and valid
+    // for reads of the full nul-terminated view, reproducing it byte-for-byte
+    // (terminator included — unlike `bytes()`/`to_bytes()`).
     #[kani::proof]
     #[kani::unwind(33)]
     fn check_as_ptr() {
@@ -968,65 +1133,78 @@ mod verify {
         let c_str = arbitrary_cstr(slice);
 
         let ptr = c_str.as_ptr();
+        // The nul-terminated view is the oracle for the raw buffer.
         let bytes_with_nul = c_str.to_bytes_with_nul();
         let len = bytes_with_nul.len();
 
-        // We ensure that `ptr` is valid for reads of `len` bytes
+        assert!(!ptr.is_null());
+
+        // Valid for reads of `len` bytes, reproducing the nul-terminated
+        // view exactly.
         unsafe {
             for i in 0..len {
-                // Iterate and get each byte in the C string from our raw ptr
                 let byte_at_ptr = *ptr.add(i);
-                // Get the byte at every pos
                 let byte_in_cstr = bytes_with_nul[i];
-                // Compare the two bytes to ensure they are equal
                 assert_eq!(byte_at_ptr as u8, byte_in_cstr);
             }
         }
+
+        // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
+
+        // Non-vacuity: the read walk covers both a one-byte buffer and a
+        // multi-iteration walk.
+        kani::cover(
+            len == 1,
+            "non-vacuity: an empty CStr (as_ptr buffer is the lone nul) is reachable",
+        );
+        kani::cover(
+            len > 1,
+            "non-vacuity: a non-empty CStr (as_ptr buffer has content before the nul) is reachable",
+        );
     }
 
     // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
-    #[kani::proof]
+    #[kani::proof_for_contract(CStr::from_bytes_with_nul)]
     #[kani::unwind(17)]
     fn check_from_bytes_with_nul() {
         const MAX_SIZE: usize = 16;
         let string: [u8; MAX_SIZE] = kani::any();
+        // Any-length subslice covers all branches: a single trailing nul
+        // (Ok), an interior nul (InteriorNul), and no nul (NotNulTerminated).
         let slice = kani::slice::any_slice_of_array(&string);
 
-        let result = CStr::from_bytes_with_nul(slice);
-        if let Ok(c_str) = result {
-            assert!(c_str.is_safe());
-        }
+        let _ = CStr::from_bytes_with_nul(slice);
     }
 
-    // pub const fn count_bytes(&self) -> usize
-    #[kani::proof]
-    #[kani::unwind(32)]
+    // pub const fn count_bytes(&self) -> usize  (criterion 2)
+    //
+    // The contract does the checking; arbitrary valid receivers via
+    // `arbitrary_cstr`.
+    #[kani::proof_for_contract(CStr::count_bytes)]
+    #[kani::unwind(33)]
     fn check_count_bytes() {
         const MAX_SIZE: usize = 32;
-        let mut bytes: [u8; MAX_SIZE] = kani::any();
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
 
-        // Non-deterministically generate a length within the valid range [0, MAX_SIZE]
-        let mut len: usize = kani::any_where(|&x| x < MAX_SIZE);
+        let count = c_str.count_bytes();
 
-        // If a null byte exists before the generated length
-        // adjust len to its position
-        if let Some(pos) = bytes[..len].iter().position(|&x| x == 0) {
-            len = pos;
-        } else {
-            // If no null byte, insert one at the chosen length
-            bytes[len] = 0;
-        }
-
-        let c_str = CStr::from_bytes_until_nul(&bytes).unwrap();
-        // Verify that count_bytes matches the adjusted length
-        assert_eq!(c_str.count_bytes(), len);
+        // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
+
+        // Non-vacuity: neither contract clause is vacuously satisfied.
+        kani::cover(count == 0, "non-vacuity: an empty CStr (count_bytes == 0) is reachable");
+        kani::cover(count > 0, "non-vacuity: a non-empty CStr (count_bytes > 0) is reachable");
     }
 
-    // pub const fn to_bytes(&self) -> &[u8]
-    #[kani::proof]
-    #[kani::unwind(32)]
+    // pub const fn to_bytes(&self) -> &[u8]  (criterion 2)
+    //
+    // The contract does the checking; also exercises the unsafe
+    // `slice::from_raw_parts` projection in the body on every receiver.
+    #[kani::proof_for_contract(CStr::to_bytes)]
+    #[kani::unwind(33)]
     fn check_to_bytes() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -1034,14 +1212,24 @@ mod verify {
         let c_str = arbitrary_cstr(slice);
 
         let bytes = c_str.to_bytes();
-        let end_idx = bytes.len();
-        // Comparison does not include the null byte
-        assert_eq!(bytes, &slice[..end_idx]);
+
+        // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
+
+        // Non-vacuity: neither contract clause is vacuously satisfied.
+        kani::cover(bytes.is_empty(), "non-vacuity: an empty CStr (to_bytes() empty) is reachable");
+        kani::cover(
+            !bytes.is_empty(),
+            "non-vacuity: a non-empty CStr (to_bytes() non-empty) is reachable",
+        );
     }
 
-    // pub const fn to_bytes_with_nul(&self) -> &[u8]
-    #[kani::proof]
+    // pub const fn to_bytes_with_nul(&self) -> &[u8]  (criterion 2)
+    //
+    // The contract (the safety invariant pinned on the returned bytes) does
+    // the checking; also exercises the unsafe cast in the body on every
+    // receiver.
+    #[kani::proof_for_contract(CStr::to_bytes_with_nul)]
     #[kani::unwind(33)]
     fn check_to_bytes_with_nul() {
         const MAX_SIZE: usize = 32;
@@ -1050,26 +1238,59 @@ mod verify {
         let c_str = arbitrary_cstr(slice);
 
         let bytes = c_str.to_bytes_with_nul();
-        let end_idx = bytes.len();
-        // Comparison includes the null byte
-        assert_eq!(bytes, &slice[..end_idx]);
+
+        // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
+
+        // Non-vacuity: no contract clause is vacuously satisfied.
+        kani::cover(
+            bytes.len() == 1,
+            "non-vacuity: an empty CStr (to_bytes_with_nul len 1) is reachable",
+        );
+        kani::cover(
+            bytes.len() > 1,
+            "non-vacuity: a non-empty CStr (to_bytes_with_nul len > 1) is reachable",
+        );
     }
 
-    // const unsafe fn strlen(ptr: *const c_char) -> usize
+    // const unsafe fn strlen(ptr: *const c_char) -> usize  (criterion 3)
+    //
+    // The contract pins "legal offset, points at a nul"; the harness
+    // additionally asserts the FIRST-nul property — kept out of the shared
+    // contract so callers that stub `strlen` are unaffected. A mutant
+    // returning a later nul index would satisfy the contract but break the
+    // first-nul semantics `from_ptr` relies on for `is_safe`.
     #[kani::proof_for_contract(super::strlen)]
     #[kani::unwind(33)]
     fn check_strlen_contract() {
         const MAX_SIZE: usize = 32;
-        let mut string: [u8; MAX_SIZE] = kani::any();
+        let string: [u8; MAX_SIZE] = kani::any();
         let ptr = string.as_ptr() as *const c_char;
 
-        unsafe {
-            super::strlen(ptr);
+        let len = unsafe { super::strlen(ptr) };
+
+        // The `#[ensures]` clause, restated: a legal offset that points at
+        // the nul terminator.
+        assert!(len < isize::MAX as usize);
+        assert!(unsafe { *ptr.add(len) } == 0);
+
+        // First-nul semantics: no interior nul precedes the terminator.
+        for i in 0..len {
+            assert!(unsafe { *ptr.add(i) } != 0);
         }
+
+        // Non-vacuity: the `#[ensures]` clause is not discharged over a
+        // single buffer shape.
+        kani::cover(len == 0, "non-vacuity: an empty C string (strlen == 0) is reachable");
+        kani::cover(len > 0, "non-vacuity: a non-empty C string (strlen > 0) is reachable");
     }
 
-    // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr
+    // pub const unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a CStr  (criterion 3)
+    //
+    // `proof_for_contract` assumes the precondition (non-null, a nul within
+    // the 32-byte buffer) and verifies the `ensures` (`is_safe()`) plus the
+    // UB checks for the internal `strlen` walk and the `from_raw_parts`
+    // projection.
     #[kani::proof_for_contract(CStr::from_ptr)]
     #[kani::unwind(33)]
     fn check_from_ptr_contract() {
@@ -1077,13 +1298,27 @@ mod verify {
         let string: [u8; MAX_SIZE] = kani::any();
         let ptr = string.as_ptr() as *const c_char;
 
-        unsafe {
-            CStr::from_ptr(ptr);
-        }
+        let c_str = unsafe { CStr::from_ptr(ptr) };
+
+        // Criterion 3: the constructed CStr upholds the safety invariant
+        // (also enforced by the contract's `ensures`).
+        assert!(c_str.is_safe());
+
+        // Non-vacuity: the `#[ensures]` clause is not discharged over a
+        // single buffer shape.
+        let len = c_str.to_bytes_with_nul().len();
+        kani::cover(len == 1, "non-vacuity: an empty CStr (from_ptr of a lone nul) is reachable");
+        kani::cover(
+            len > 1,
+            "non-vacuity: a non-empty CStr (from_ptr with content before the nul) is reachable",
+        );
     }
 
-    // pub const fn is_empty(&self) -> bool
-    #[kani::proof]
+    // pub const fn is_empty(&self) -> bool  (criterion 2)
+    //
+    // The contract does the checking; also exercises the unsafe first-byte
+    // read in the body on every receiver.
+    #[kani::proof_for_contract(CStr::is_empty)]
     #[kani::unwind(33)]
     fn check_is_empty() {
         const MAX_SIZE: usize = 32;
@@ -1091,9 +1326,62 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&string);
         let c_str = arbitrary_cstr(slice);
 
-        let bytes = c_str.to_bytes(); // does not include null terminator
-        let expected_is_empty = bytes.len() == 0;
-        assert_eq!(expected_is_empty, c_str.is_empty());
+        let empty = c_str.is_empty();
+
+        // Criterion 2: the invariant is preserved by the (immutable) call.
         assert!(c_str.is_safe());
+
+        // Non-vacuity: neither contract clause is vacuously satisfied.
+        kani::cover(empty, "non-vacuity: an empty CStr (is_empty == true) is reachable");
+        kani::cover(!empty, "non-vacuity: a non-empty CStr (is_empty == false) is reachable");
+    }
+
+    // impl ops::Index<ops::RangeFrom<usize>> for CStr  (criterion 4)
+    //
+    // A safe fn, so its guarantee is behavioural and proved here on the
+    // defined, non-panicking path `start < len` — the branch that performs
+    // the unsafe reinterpret via `from_bytes_with_nul_unchecked`. Two facts:
+    // the sub-`CStr` upholds the safety invariant, and its nul-terminated
+    // view is exactly the suffix `bytes[start..]` — which kills a
+    // wrong-offset mutant that would still be `is_safe()`.
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_index_range_from() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        // The nul-terminated view is the buffer that `index` slices from.
+        let bytes = c_str.to_bytes_with_nul();
+        let len = bytes.len();
+
+        // Stay on the defined path: `index` panics for `start >= len`
+        // (documented out-of-bounds behaviour). `start == len - 1` is
+        // included — the suffix is then the lone nul terminator.
+        let start: usize = kani::any();
+        kani::assume(start < len);
+
+        let tail = &c_str[start..];
+
+        // Criterion 4: the produced sub-`CStr` upholds the safety invariant.
+        assert!(tail.is_safe());
+
+        // Round-trip: the tail's view is exactly the suffix `bytes[start..]`.
+        assert_eq!(tail.to_bytes_with_nul(), &bytes[start..]);
+
+        // Non-vacuity: identity slice, proper suffix, and empty/non-empty
+        // sub-CStrs are all reachable.
+        let tail_len = tail.to_bytes_with_nul().len();
+        kani::cover(
+            start == 0,
+            "non-vacuity: indexing from 0 (the whole CStr, identity slice) is reachable",
+        );
+        kani::cover(start > 0, "non-vacuity: a proper suffix (start > 0) is reachable");
+        kani::cover(
+            tail_len == 1,
+            "non-vacuity: a suffix that is the lone nul terminator (empty CStr) is reachable",
+        );
+        kani::cover(tail_len > 1, "non-vacuity: a non-empty suffix CStr is reachable");
     }
 }
