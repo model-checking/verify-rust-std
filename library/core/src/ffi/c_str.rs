@@ -146,10 +146,7 @@ impl fmt::Display for FromBytesWithNulError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InteriorNul { position } => {
-                write!(
-                    f,
-                    "data provided contains an interior nul byte at byte position {position}"
-                )
+                write!(f, "data provided contains an interior nul byte at byte position {position}")
             }
             Self::NotNulTerminated => write!(f, "data provided is not nul terminated"),
         }
@@ -889,10 +886,7 @@ unsafe impl Sync for Bytes<'_> {}
 impl<'a> Bytes<'a> {
     #[inline]
     fn new(s: &'a CStr) -> Self {
-        Self {
-            ptr: s.as_non_null_ptr().cast(),
-            phantom: PhantomData,
-        }
+        Self { ptr: s.as_non_null_ptr().cast(), phantom: PhantomData }
     }
 
     #[inline]
@@ -929,11 +923,7 @@ impl Iterator for Bytes<'_> {
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.is_empty() {
-            (0, Some(0))
-        } else {
-            (1, None)
-        }
+        if self.is_empty() { (0, Some(0)) } else { (1, None) }
     }
 
     #[inline]
