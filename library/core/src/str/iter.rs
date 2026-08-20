@@ -1106,9 +1106,7 @@ where
     P: Pattern<Searcher<'a>: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("MatchIndicesInternal")
-            .field(&self.0)
-            .finish()
+        f.debug_tuple("MatchIndicesInternal").field(&self.0).finish()
     }
 }
 
@@ -1489,9 +1487,7 @@ impl<'a, P: Pattern> Iterator for SplitInclusive<'a, P> {
 #[stable(feature = "split_inclusive", since = "1.51.0")]
 impl<'a, P: Pattern<Searcher<'a>: fmt::Debug>> fmt::Debug for SplitInclusive<'a, P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SplitInclusive")
-            .field("0", &self.0)
-            .finish()
+        f.debug_struct("SplitInclusive").field("0", &self.0).finish()
     }
 }
 
@@ -1726,11 +1722,7 @@ pub mod verify {
         type Searcher<'a> = SpecSearcher<'a>;
 
         fn into_searcher(self, haystack: &str) -> SpecSearcher<'_> {
-            SpecSearcher {
-                haystack,
-                front: 0,
-                back: haystack.len(),
-            }
+            SpecSearcher { haystack, front: 0, back: haystack.len() }
         }
     }
 
@@ -1805,11 +1797,7 @@ pub mod verify {
         SplitInternal {
             start,
             end,
-            matcher: SpecSearcher {
-                haystack: s,
-                front: start,
-                back: end,
-            },
+            matcher: SpecSearcher { haystack: s, front: start, back: end },
             allow_trailing_empty: kani::any(),
             finished: kani::any(),
         }
@@ -1819,22 +1807,14 @@ pub mod verify {
         let back = kani::any_where(|e: &usize| *e <= s.len());
         let front = kani::any_where(|st: &usize| *st <= back);
         kani::assume(s.is_char_boundary(front) && s.is_char_boundary(back));
-        MatchIndicesInternal(SpecSearcher {
-            haystack: s,
-            front,
-            back,
-        })
+        MatchIndicesInternal(SpecSearcher { haystack: s, front, back })
     }
 
     fn any_matches<'a>(s: &'a str) -> MatchesInternal<'a, SpecPattern> {
         let back = kani::any_where(|e: &usize| *e <= s.len());
         let front = kani::any_where(|st: &usize| *st <= back);
         kani::assume(s.is_char_boundary(front) && s.is_char_boundary(back));
-        MatchesInternal(SpecSearcher {
-            haystack: s,
-            front,
-            back,
-        })
+        MatchesInternal(SpecSearcher { haystack: s, front, back })
     }
 
     // --- Chars ---
