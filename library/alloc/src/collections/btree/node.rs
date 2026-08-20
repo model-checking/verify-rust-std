@@ -2334,11 +2334,11 @@ mod verify {
     }
 
     /// Full child under a parent: the loop takes the `Ok(parent)` arm once.
-    /// Unwind is 3 (not 13): a loop contract on `insert_recursing` would havoc
-    /// `SplitResult` node pointers and OOM the autoharness job.
-    /// Concrete idx/key so autoharness stays under the 10m CBMC cap.
+    /// Unwind 2 = one parent hop + exit. unwind(3) lets CBMC havoc a second
+    /// hop and times out autoharness's 10m cap (1411/1/1412 on 5aca52c).
+    /// Concrete idx/key so autoharness stays under that cap.
     #[kani::proof]
-    #[kani::unwind(3)]
+    #[kani::unwind(2)]
     fn check_insert_recursing_into_parent() {
         let mut parent = NodeRef::new_internal(leaf_with_len(CAPACITY).forget_type(), Global);
         let child = parent.borrow_mut().first_edge().descend();
