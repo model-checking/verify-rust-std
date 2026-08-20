@@ -185,6 +185,7 @@ macro_rules! impl_Display {
                 issue = "none"
             )]
             #[requires(buf.len() >= Self::MAX.ilog10() as usize + 1)]
+            #[cfg_attr(kani, kani::modifies(buf))]
             pub unsafe fn _fmt<'a>(self, buf: &'a mut [MaybeUninit::<u8>]) -> &'a str {
                 // SAFETY: `buf` will always be big enough to contain all digits.
                 let offset = unsafe { self._fmt_inner(buf) };
@@ -655,6 +656,7 @@ impl u128 {
         issue = "none"
     )]
     #[requires(buf.len() >= U128_MAX_DEC_N)]
+    #[cfg_attr(kani, kani::modifies(buf))]
     pub unsafe fn _fmt<'a>(self, buf: &'a mut [MaybeUninit<u8>]) -> &'a str {
         // SAFETY: `buf` will always be big enough to contain all digits.
         let offset = unsafe { self._fmt_inner(buf) };
@@ -885,7 +887,7 @@ mod verify {
     /// with ASCII digits of a `u64`.
     #[cfg(not(feature = "optimize_for_size"))]
     #[kani::proof_for_contract(u64::_fmt)]
-    #[kani::unwind(8)]
+    #[kani::unwind(21)]
     fn check_u64_fmt_parse_u64_into_successor() {
         let n: u64 = kani::any();
         const MAX: usize = 20;

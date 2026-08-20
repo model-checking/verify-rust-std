@@ -401,6 +401,8 @@
 // There are many unsafe functions taking pointers that don't dereference them.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+use safety::requires;
+
 use crate::cmp::Ordering;
 use crate::intrinsics::const_eval_select;
 #[cfg(kani)]
@@ -416,7 +418,7 @@ pub use alignment::Alignment;
 
 mod metadata;
 #[unstable(feature = "ptr_metadata", issue = "81513")]
-pub use metadata::{DynMetadata, Pointee, Thin, from_raw_parts, from_raw_parts_mut, metadata};
+pub use metadata::{from_raw_parts, from_raw_parts_mut, metadata, DynMetadata, Pointee, Thin};
 
 mod non_null;
 #[stable(feature = "nonnull", since = "1.25.0")]
@@ -525,6 +527,32 @@ mod mut_ptr;
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy_nonoverlapping"]
+#[requires(
+    !count.overflowing_mul(size_of::<T>()).1
+        && ub_checks::maybe_is_aligned_and_not_null(
+            src as *const (),
+            align_of::<T>(),
+            T::IS_ZST || count == 0,
+        )
+        && ub_checks::maybe_is_aligned_and_not_null(
+            dst as *const (),
+            align_of::<T>(),
+            T::IS_ZST || count == 0,
+        )
+        && (count == 0
+            || ub_checks::can_dereference(slice_from_raw_parts(
+                src as *const MaybeUninit<T>,
+                count,
+            )))
+        && (count == 0 || ub_checks::can_write(slice_from_raw_parts_mut(dst, count)))
+        && ub_checks::maybe_is_nonoverlapping(
+            src as *const (),
+            dst as *const (),
+            size_of::<T>(),
+            count,
+        )
+)]
+#[cfg_attr(kani, kani::modifies(slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
     ub_checks::assert_unsafe_precondition!(
         check_language_ub,
@@ -622,6 +650,26 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy"]
+#[requires(
+    !count.overflowing_mul(size_of::<T>()).1
+        && ub_checks::maybe_is_aligned_and_not_null(
+            src as *const (),
+            align_of::<T>(),
+            T::IS_ZST || count == 0,
+        )
+        && ub_checks::maybe_is_aligned_and_not_null(
+            dst as *const (),
+            align_of::<T>(),
+            T::IS_ZST || count == 0,
+        )
+        && (count == 0
+            || ub_checks::can_dereference(slice_from_raw_parts(
+                src as *const MaybeUninit<T>,
+                count,
+            )))
+        && (count == 0 || ub_checks::can_write(slice_from_raw_parts_mut(dst, count)))
+)]
+#[cfg_attr(kani, kani::modifies(slice_from_raw_parts(dst, count)))]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
     // SAFETY: the safety contract for `copy` must be upheld by the caller.
     unsafe {
@@ -696,6 +744,16 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_write_bytes"]
+#[requires(
+    !count.overflowing_mul(size_of::<T>()).1
+        && ub_checks::maybe_is_aligned_and_not_null(
+            dst as *const (),
+            align_of::<T>(),
+            T::IS_ZST || count == 0,
+        )
+        && (count == 0 || ub_checks::can_write(slice_from_raw_parts_mut(dst, count)))
+)]
+#[cfg_attr(kani, kani::modifies(slice_from_raw_parts(dst, count)))]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     // SAFETY: the safety contract for `write_bytes` must be upheld by the caller.
     unsafe {
@@ -1296,6 +1354,10 @@ pub const fn slice_from_raw_parts_mut<T>(data: *mut T, len: usize) -> *mut [T] {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
 #[rustc_diagnostic_item = "ptr_swap"]
+#[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
+#[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
+#[cfg_attr(kani, kani::modifies(x))]
+#[cfg_attr(kani, kani::modifies(y))]
 pub const unsafe fn swap<T>(x: *mut T, y: *mut T) {
     // Give ourselves some scratch space to work with.
     // We do not have to worry about drops: `MaybeUninit` does nothing when dropped.
@@ -1795,7 +1857,11 @@ pub const unsafe fn read_unaligned<T>(src: *const T) -> T {
     // Also, since we just wrote a valid value into `tmp`, it is guaranteed
     // to be properly initialized.
     unsafe {
-        copy_nonoverlapping(src as *const u8, tmp.as_mut_ptr() as *mut u8, size_of::<T>());
+        copy_nonoverlapping(
+            src as *const u8,
+            tmp.as_mut_ptr() as *mut u8,
+            size_of::<T>(),
+        );
         tmp.assume_init()
     }
 }
@@ -1993,7 +2059,11 @@ pub const unsafe fn write_unaligned<T>(dst: *mut T, src: T) {
     // `dst` cannot overlap `src` because the caller has mutable access
     // to `dst` while `src` is owned by this function.
     unsafe {
-        copy_nonoverlapping((&raw const src) as *const u8, dst as *mut u8, size_of::<T>());
+        copy_nonoverlapping(
+            (&raw const src) as *const u8,
+            dst as *mut u8,
+            size_of::<T>(),
+        );
         // We are calling the intrinsic directly to avoid function calls in the generated code.
         intrinsics::forget(src);
     }
@@ -2353,7 +2423,11 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     let gcdpow = unsafe {
         let x = cttz_nonzero(stride);
         let y = cttz_nonzero(a);
-        if x < y { x } else { y }
+        if x < y {
+            x
+        } else {
+            y
+        }
     };
     // SAFETY: gcdpow has an upper-bound that’s at most the number of bits in a `usize`.
     let gcd = unsafe { unchecked_shl(1usize, gcdpow) };
@@ -2798,7 +2872,7 @@ mod verify {
         assert_eq!(val, copy);
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(copy_nonoverlapping)]
     fn check_ptr_copy_nonoverlapping_u8() {
         let src: [u8; 4] = kani::any();
         let mut dst: [u8; 4] = kani::any();
@@ -2810,7 +2884,7 @@ mod verify {
         }
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(copy)]
     fn check_ptr_copy_u8() {
         let src: [u8; 4] = kani::any();
         let mut dst: [u8; 4] = kani::any();
@@ -2818,7 +2892,7 @@ mod verify {
         unsafe { copy(src.as_ptr(), dst.as_mut_ptr(), count) }
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(write_bytes)]
     fn check_ptr_write_bytes_u8() {
         let mut dst: [u8; 4] = kani::any();
         let val: u8 = kani::any();
@@ -2830,7 +2904,7 @@ mod verify {
         }
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(swap)]
     fn check_ptr_swap_u8() {
         let mut x: u8 = kani::any();
         let mut y: u8 = kani::any();
