@@ -21,7 +21,7 @@ This diagram describes the extraction and verification workflow for KMIR:
 ![kmir_env_diagram_march_2025](https://github.com/user-attachments/assets/bf426c8d-f241-4ad6-8cb2-86ca06d8d15b)
 
 
-The K Framework ([kframework.org](https://kframework.org/) is the basis of how
+The K Framework ([kframework.org](https://kframework.org/)) is the basis of how
 KMIR operates to guarantee properties of Rust programs. K is a rewrite-based
 semantic framework based on [matching logic](http://www.matching-logic.org/) in
 which programming languages, their operational semantics and type systems, and
@@ -30,9 +30,9 @@ The _syntax_ definitions in KMIR model the AST of Stable MIR (e.g., the
 statements and terminator of a basic block in a function body) and configuration
 data that exists at runtime (e.g., the stack frame structure of a function
 call).
-The _configuration_ of a KMIR program organizes the state of an executed program in
-nested configuration units called cells (e.g., a stack frame is part of a stack
-stored in the configuration).
+The _configuration_ of a KMIR program organizes the state of an executed
+program in nested configuration units called cells (e.g., a stack frame is part
+of a stack stored in the configuration).
 _K Framework transition rules_ of the KMIR semantics are rewriting steps that
 match patterns and transform the current continuation and state accordingly.
 They describe how program configuration and its contained data changes when
@@ -44,31 +44,35 @@ Using the K semantics of Stable MIR, the KMIR execution of an entire Rust
 program represented as Stable MIR breaks down to a series of configuration
 rewrites that compute data held in local variables, and the program may either
 terminate normally or reach an exception or construct with undefined behaviour,
-which terminates the execution abnormally. KMIR is designed to provide sound 
-assurances about undefined behavior (UB) in Rust’s MIR. Rather than statically 
-over‑approximating or flagging UB at every unsafe block, KMIR models the full 
-MIR semantics, including UB transitions, using a **refusal-to-execute** strategy.
-This means that if symbolic execution reaches a MIR instruction and cannot prove 
-that executing it would not result in UB (e.g., an out-of-bounds pointer dereference 
-or an unchecked arithmetic overflow), execution halts in a `UB DETECTED` state. 
-This state cannot be unified with a valid target state in the proof, so the proof 
-fails. KMIR systematically explores all feasible paths under the user-supplied 
-preconditions. Only when **every** path terminates without hitting UB *and* 
-satisfies the target property does KMIR declare the program UB-free (and correct 
-for the property). This ensures that any “no UB” claim holds under the sole assumption
-that KMIR’s implementation is correct. 
+which terminates the execution abnormally. KMIR is designed to provide sound
+assurances about undefined behavior (UB) for the MIR constructs it supports
+(see [Known Limitations](#known-limitations)). Rather than statically
+over‑approximating or flagging UB at every unsafe block, KMIR models the MIR
+semantics, including UB transitions, using a **refusal-to-execute** strategy.
+This means that if symbolic execution reaches a MIR instruction and cannot
+prove that executing it would not result in UB (e.g., an out-of-bounds pointer
+dereference or an unchecked arithmetic overflow), execution halts in a
+`UB DETECTED` state. This state cannot be unified with a valid target state in
+the proof, so the proof fails. KMIR systematically explores all feasible paths
+under the user-supplied preconditions. Only when **every** path terminates
+without hitting UB *and* satisfies the target property does KMIR declare the
+program UB-free (and correct for the property). A “no UB” claim therefore holds
+under the assumptions that KMIR’s implementation is correct and that the
+program stays within the supported subset of MIR.
 
-Programs modelled in K Framework can be executed _symbolically_, i.e., operating 
-on abstract input which is not fully specified but characterized by _path conditions_ 
-(e.g., that an integer variable holds an unknown but non-negative value).
+Programs modelled in K Framework can be executed _symbolically_, i.e.,
+operating on abstract input which is not fully specified but characterized by
+_path conditions_ (e.g., that an integer variable holds an unknown but
+non-negative value).
 
 In practice, KMIR proof harnesses work similarly to property tests. Arguments
 to the entry function are automatically instantiated as fully symbolic values,
 so the proof covers all possible inputs. Post-conditions are expressed using
-`assert!` statements. Pre-conditions can be added using `std::intrinsics::assume`,
-which constrains the symbolic path condition to restrict the inputs under
-consideration. This design allows users to write verification harnesses in
-plain Rust without needing to learn write K (excepting advanced features).
+`assert!` statements. Pre-conditions can be added using
+`std::intrinsics::assume`, which constrains the symbolic path condition to
+restrict the inputs under consideration. This design allows users to write
+verification harnesses in plain Rust without needing to write K (excepting
+advanced features).
 
 ```rust
 #![feature(core_intrinsics)]
@@ -89,17 +93,18 @@ K (and thus KMIR) verifies program correctness by performing an
 _all-path-reachability proof_ using the symbolic execution engine and verifier
 derived from the K encoding of the Public MIR operational semantics.
 The K semantics framework is based on reachability logic, which is a theory
-describing transition systems in [matching logic](http://www.matching-logic.org/).
+describing transition systems in
+[matching logic](http://www.matching-logic.org/).
 An all-path-reachability proof in this system verifies that a particular
 _target_ end state is _always_ reached from a given starting state.
-The rewrite rules branch on symbolic inputs covering the possible transitions,
-creating a model that is provably complete. For all-path reachability, every
-leaf state is required to unify with the target state.
+The rewrite rules branch on symbolic inputs, covering the feasible transitions
+of the program. For all-path reachability, every leaf state is required to
+unify with the target state.
 A one-path-reachability proof is similar to the above, but the proof requirement
 is that _at least one_ leaf state unifies with the target state.
 
-When performing a proof of a program that involves recursion or a loop construct,
-one of several possible techniques can be used:
+When performing a proof of a program that involves recursion or a loop
+construct, one of several possible techniques can be used:
 
 1) K (and thus KMIR) are capable of unbounded verification via allowing the
    user to write loop invariants. However, these loop invariants would then
@@ -115,10 +120,11 @@ one of several possible techniques can be used:
 
 By default, KMIR will attempt to exhaustively unroll a loop. Loop invariants
 have been applied to the verification of the Solana P-Token / SPL-Token
-Equivalence (see Case Study 2.) to summarise the behaviour of iterator [
-[P-Token Loop](https://github.com/runtimeverification/solana-token/blob/proofs/specs/shared/inner_test_validate_owner.rs),
-[P-Token Lemma](https://github.com/runtimeverification/mir-semantics/blob/mk/lemmas-inner_test_validate_owner/kmir/src/kmir/kdist/mir-semantics/symbolic/inner_test_validate_owner.md)
-].
+Equivalence (see Case Study 2) to summarise the behaviour of an iterator; see
+the
+[P-Token loop](https://github.com/runtimeverification/solana-token/blob/proofs/specs/shared/inner_test_validate_owner.rs)
+and the
+[P-Token lemma](https://github.com/runtimeverification/mir-semantics/blob/mk/lemmas-inner_test_validate_owner/kmir/src/kmir/kdist/mir-semantics/symbolic/inner_test_validate_owner.md).
 
 KMIR also prioritizes UI with interactive proof exploration available
 out-of-the-box through the terminal KCFG (K Control Flow Graph) viewer, allowing
@@ -140,7 +146,8 @@ example of a KMIR proof being analyzed using the KCFG viewer can be seen below:
   *Yes – KMIR can be integrated into CI workflows via our package manager and
   Nix-based build system or through a docker image provided.*
 * [x] Is the tool open source?
-  *Yes – KMIR is [open source and available on GitHub](https://github.com/runtimeverification/mir-semantics).*
+  *Yes – KMIR is [open source and available on
+  GitHub](https://github.com/runtimeverification/mir-semantics).*
 * [x] Is the tool under development?
   *Yes – KMIR is actively under development, with ongoing improvements to MIR
   syntax coverage and verification capabilities.*
@@ -201,11 +208,13 @@ at the time of writing:
 
 ### Installation
 
-3 methods to install KMIR are listed. Recommended is the Nix installation via kup.
+3 methods to install KMIR are listed. Recommended is the Nix installation via
+kup.
 
 <figure>
 <img width="931" height="627" alt="Demo installing KMIR via kup" src="https://github.com/user-attachments/assets/e31c16ad-7d78-4b62-93a6-8c7e61948d50" />
-<figcaption>Installing KMIR via kup (cached install shown; first install takes longer)</figcaption>
+<figcaption>Installing KMIR via kup (cached install shown; first install
+takes longer)</figcaption>
 </figure>
 
 #### Nix (via kup)
@@ -263,7 +272,8 @@ files are accessible and proof output persists after the container exits.
 #### From source
 
 The tools can be built from source as described in the
-[`mir-semantics` repository](https://github.com/runtimeverification/mir-semantics).
+[`mir-semantics`
+repository](https://github.com/runtimeverification/mir-semantics).
 This requires [Python](https://www.python.org/) >= 3.10,
 [`uv`](https://docs.astral.sh/uv/),
 [K Framework](https://github.com/runtimeverification/k), and Rust via
@@ -324,12 +334,16 @@ kmir view <FILE>.<SYMBOL> --proof-dir <DIR>
 
 <figure>
 <img width="1276" height="560" alt="Passing KMIR proof with show" src="https://github.com/user-attachments/assets/936b42fe-9bdc-480d-962f-390576193634" />
-<figcaption><code>kmir prove</code> on passing proof with <code>kmir show</code> (time is shortened, real time is in output)</figcaption>
+<figcaption><code>kmir prove</code> on passing proof with
+<code>kmir show</code> (time is shortened, real time is in
+output)</figcaption>
 </figure>
 
 <figure>
 <img width="1276" height="560" alt="Failing KMIR proof with view" src="https://github.com/user-attachments/assets/2638696b-6249-4b21-93a9-123edca5b66a" />
-<figcaption><code>kmir prove</code> on failing proof with <code>kmir view</code> (time is shortened, real time is in output)</figcaption>
+<figcaption><code>kmir prove</code> on failing proof with
+<code>kmir view</code> (time is shortened, real time is in
+output)</figcaption>
 </figure>
 
 #### Useful Prove Flags
