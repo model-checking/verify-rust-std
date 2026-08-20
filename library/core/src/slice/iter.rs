@@ -3481,6 +3481,28 @@ mod verify {
         };
     }
 
+    /// `proof_for_contract(IterMut::post_inc_start)` needs a single top-level
+    /// call. For `char`, extra calls appear (`UncheckedIterator::next_unchecked`
+    /// also calls it; char/UTF-8 setup can pull that in), so that harness is a
+    /// `#[kani::proof]` under the documented `offset <= len` precondition.
+    /// The contract stays on the std method. Other types keep `proof_for_contract`.
+    macro_rules! check_iter_mut_post_inc_start {
+        (contract, $elem_ty:ty) => {
+            check_iter_mut_contracts!(check_post_inc_start, $elem_ty, post_inc_start(kani::any()));
+        };
+        (proof, $elem_ty:ty) => {
+            #[kani::proof]
+            fn check_post_inc_start() {
+                let mut array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut iter = any_iter_mut::<$elem_ty>(&mut array);
+                let offset = kani::any();
+                kani::assume(offset <= iter.len());
+                let _ = unsafe { iter.post_inc_start(offset) };
+                kani::assert(iter.is_safe(), "IterMut is safe");
+            }
+        };
+    }
+
     macro_rules! check_iter_with_ty {
         ($module:ident, $ty:ty, $max:expr) => {
             mod $module {
@@ -3617,6 +3639,9 @@ mod verify {
 
     macro_rules! check_iter_mut_with_ty {
         ($module:ident, $ty:ty, $max:expr) => {
+            check_iter_mut_with_ty!($module, $ty, $max, contract);
+        };
+        ($module:ident, $ty:ty, $max:expr, $post_inc:ident) => {
             mod $module {
                 use super::*;
                 const MAX_LEN: usize = $max;
@@ -3699,7 +3724,7 @@ mod verify {
                 }
 
                 check_iter_mut_contracts!(check_next_back_unchecked, $ty, next_back_unchecked());
-                check_iter_mut_contracts!(check_post_inc_start, $ty, post_inc_start(kani::any()));
+                check_iter_mut_post_inc_start!($post_inc, $ty);
                 check_iter_mut_contracts!(check_pre_dec_end, $ty, pre_dec_end(kani::any()));
 
                 check_iter_mut_contracts!(
@@ -4136,7 +4161,7 @@ mod verify {
 
     check_iter_mut_with_ty!(verify_iter_mut_unit, (), 8);
     check_iter_mut_with_ty!(verify_iter_mut_u8, u8, 8);
-    check_iter_mut_with_ty!(verify_iter_mut_char, char, 8);
+    check_iter_mut_with_ty!(verify_iter_mut_char, char, 8, proof);
     check_iter_mut_with_ty!(verify_iter_mut_tup, (char, u8), 8);
 
     check_adapters_with_ty!(verify_adapt_unit, (), 8);
