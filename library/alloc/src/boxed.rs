@@ -191,6 +191,8 @@ use core::error::{self, Error};
 use core::fmt;
 use core::future::Future;
 use core::hash::{Hash, Hasher};
+#[cfg(kani)]
+use core::kani;
 use core::marker::{Tuple, Unsize};
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
@@ -205,9 +207,8 @@ use core::pin::{Pin, PinCoerceUnsized};
 use core::ptr::{self, NonNull, Unique};
 use core::task::{Context, Poll};
 #[cfg(kani)]
-use core::kani;
-#[cfg(kani)]
 use core::ub_checks;
+
 use safety::{ensures, requires};
 
 #[cfg(not(no_global_oom_handling))]

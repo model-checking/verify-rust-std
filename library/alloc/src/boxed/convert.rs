@@ -2,14 +2,15 @@ use core::any::Any;
 #[cfg(not(no_global_oom_handling))]
 use core::clone::TrivialClone;
 use core::error::Error;
-use core::mem;
-use core::pin::Pin;
 #[cfg(kani)]
 use core::kani;
+use core::mem;
+use core::pin::Pin;
 #[cfg(kani)]
 use core::ub_checks;
 #[cfg(not(no_global_oom_handling))]
 use core::{fmt, ptr};
+
 use safety::{ensures, requires};
 
 use crate::alloc::Allocator;
@@ -801,8 +802,7 @@ mod verify {
 
     use core::any::Any;
     use core::error::Error;
-    use core::fmt;
-    use core::kani;
+    use core::{fmt, kani};
 
     use super::{BoxFromSlice, boxed_slice_as_array_unchecked};
     use crate::alloc::Global;

@@ -6,6 +6,8 @@ use core::error::Error;
 use core::fmt::{self, Debug, Display, Formatter};
 #[cfg(not(no_global_oom_handling))]
 use core::intrinsics::{const_allocate, const_make_global};
+#[cfg(kani)]
+use core::kani;
 use core::marker::PhantomData;
 #[cfg(not(no_global_oom_handling))]
 use core::marker::Unsize;
@@ -14,9 +16,8 @@ use core::mem::{self, SizedTypeProperties};
 use core::ops::{Deref, DerefMut};
 use core::ptr::{self, NonNull, Pointee};
 #[cfg(kani)]
-use core::kani;
-#[cfg(kani)]
 use core::ub_checks;
+
 use safety::requires;
 
 use crate::alloc::{self, Layout, LayoutError};
