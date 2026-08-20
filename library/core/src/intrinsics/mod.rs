@@ -71,7 +71,11 @@ pub mod simd;
 
 // These imports are used for simplifying intra-doc links
 #[allow(unused_imports)]
-#[cfg(all(target_has_atomic = "8", target_has_atomic = "32", target_has_atomic = "ptr"))]
+#[cfg(all(
+    target_has_atomic = "8",
+    target_has_atomic = "32",
+    target_has_atomic = "ptr"
+))]
 use crate::sync::atomic::{self, AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
 
 /// A type for atomic ordering parameters for intrinsics. This is a separate type from
@@ -492,7 +496,11 @@ pub const fn select_unpredictable<T>(b: bool, true_val: T, false_val: T) -> T
 where
     T: [const] Destruct,
 {
-    if b { true_val } else { false_val }
+    if b {
+        true_val
+    } else {
+        false_val
+    }
 }
 
 /// A guard for unsafe functions that cannot ever be executed if `T` is uninhabited:
@@ -3096,7 +3104,11 @@ pub const fn minimumf16(x: f16, y: f16) -> f16 {
     } else if y < x {
         y
     } else if x == y {
-        if x.is_sign_negative() && y.is_sign_positive() { x } else { y }
+        if x.is_sign_negative() && y.is_sign_positive() {
+            x
+        } else {
+            y
+        }
     } else {
         // At least one input is NaN. Use `+` to perform NaN propagation and quieting.
         x + y
@@ -3117,7 +3129,11 @@ pub const fn minimumf32(x: f32, y: f32) -> f32 {
     } else if y < x {
         y
     } else if x == y {
-        if x.is_sign_negative() && y.is_sign_positive() { x } else { y }
+        if x.is_sign_negative() && y.is_sign_positive() {
+            x
+        } else {
+            y
+        }
     } else {
         // At least one input is NaN. Use `+` to perform NaN propagation and quieting.
         x + y
@@ -3138,7 +3154,11 @@ pub const fn minimumf64(x: f64, y: f64) -> f64 {
     } else if y < x {
         y
     } else if x == y {
-        if x.is_sign_negative() && y.is_sign_positive() { x } else { y }
+        if x.is_sign_negative() && y.is_sign_positive() {
+            x
+        } else {
+            y
+        }
     } else {
         // At least one input is NaN. Use `+` to perform NaN propagation and quieting.
         x + y
@@ -3159,7 +3179,11 @@ pub const fn minimumf128(x: f128, y: f128) -> f128 {
     } else if y < x {
         y
     } else if x == y {
-        if x.is_sign_negative() && y.is_sign_positive() { x } else { y }
+        if x.is_sign_negative() && y.is_sign_positive() {
+            x
+        } else {
+            y
+        }
     } else {
         // At least one input is NaN. Use `+` to perform NaN propagation and quieting.
         x + y
@@ -3234,7 +3258,11 @@ pub const fn maximumf16(x: f16, y: f16) -> f16 {
     } else if y > x {
         y
     } else if x == y {
-        if x.is_sign_positive() && y.is_sign_negative() { x } else { y }
+        if x.is_sign_positive() && y.is_sign_negative() {
+            x
+        } else {
+            y
+        }
     } else {
         x + y
     }
@@ -3254,7 +3282,11 @@ pub const fn maximumf32(x: f32, y: f32) -> f32 {
     } else if y > x {
         y
     } else if x == y {
-        if x.is_sign_positive() && y.is_sign_negative() { x } else { y }
+        if x.is_sign_positive() && y.is_sign_negative() {
+            x
+        } else {
+            y
+        }
     } else {
         x + y
     }
@@ -3274,7 +3306,11 @@ pub const fn maximumf64(x: f64, y: f64) -> f64 {
     } else if y > x {
         y
     } else if x == y {
-        if x.is_sign_positive() && y.is_sign_negative() { x } else { y }
+        if x.is_sign_positive() && y.is_sign_negative() {
+            x
+        } else {
+            y
+        }
     } else {
         x + y
     }
@@ -3294,7 +3330,11 @@ pub const fn maximumf128(x: f128, y: f128) -> f128 {
     } else if y > x {
         y
     } else if x == y {
-        if x.is_sign_positive() && y.is_sign_negative() { x } else { y }
+        if x.is_sign_positive() && y.is_sign_negative() {
+            x
+        } else {
+            y
+        }
     } else {
         x + y
     }
@@ -3799,7 +3839,9 @@ mod verify {
             #[kani::proof]
             fn $harness() {
                 let src: $src = kani::any();
-                kani::assume(ub_checks::can_dereference(&src as *const $src as *const $dst));
+                kani::assume(ub_checks::can_dereference(
+                    &src as *const $src as *const $dst,
+                ));
                 let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
                 let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
                 assert_eq!(src, src2);
@@ -3815,7 +3857,9 @@ mod verify {
             #[kani::proof]
             fn $harness() {
                 let src: $src = kani::any();
-                kani::assume(ub_checks::can_dereference(&src as *const $src as *const $dst));
+                kani::assume(ub_checks::can_dereference(
+                    &src as *const $src as *const $dst,
+                ));
                 let dst: $dst = unsafe { transmute_unchecked_wrapper(src) };
                 let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
                 if src.is_nan() {
@@ -3871,7 +3915,10 @@ mod verify {
         let mut generator = PointerGenerator::<10000>::new();
         let arb_ptr: *const bool = generator.any_in_bounds().ptr;
         let arb_ptr_2: *const u8 = unsafe { transmute_unchecked(arb_ptr) };
-        assert_eq!(arb_ptr as *const bool, arb_ptr_2 as *const u8 as *const bool);
+        assert_eq!(
+            arb_ptr as *const bool,
+            arb_ptr_2 as *const u8 as *const bool
+        );
     }
 
     //Tests that transmuting (unchecked) a ref does not mutate the stored address
@@ -3881,7 +3928,10 @@ mod verify {
         let arb_ptr: *const bool = generator.any_in_bounds().ptr;
         let arb_ref: &bool = unsafe { &*(arb_ptr) };
         let arb_ref_2: &u8 = unsafe { transmute_unchecked(arb_ref) };
-        assert_eq!(arb_ref as *const bool, arb_ref_2 as *const u8 as *const bool);
+        assert_eq!(
+            arb_ref as *const bool,
+            arb_ref_2 as *const u8 as *const bool
+        );
     }
 
     //Tests that transmuting (unchecked) a slice does not mutate the slice metadata (address and length)
@@ -3907,7 +3957,9 @@ mod verify {
             #[kani::proof]
             fn $harness() {
                 let src: $src = kani::any();
-                kani::assume(ub_checks::can_dereference(&src as *const $src as *const $dst));
+                kani::assume(ub_checks::can_dereference(
+                    &src as *const $src as *const $dst,
+                ));
                 let dst: $dst = unsafe { transmute(src) };
                 let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
                 assert_eq!(src, src2);
@@ -3923,7 +3975,9 @@ mod verify {
             #[kani::proof]
             fn $harness() {
                 let src: $src = kani::any();
-                kani::assume(ub_checks::can_dereference(&src as *const $src as *const $dst));
+                kani::assume(ub_checks::can_dereference(
+                    &src as *const $src as *const $dst,
+                ));
                 let dst: $dst = unsafe { transmute(src) };
                 let src2: $src = unsafe { *(&dst as *const $dst as *const $src) };
                 if src.is_nan() {
@@ -3979,7 +4033,10 @@ mod verify {
         let mut generator = PointerGenerator::<10000>::new();
         let arb_ptr: *const bool = generator.any_in_bounds().ptr;
         let arb_ptr_2: *const u8 = unsafe { transmute(arb_ptr) };
-        assert_eq!(arb_ptr as *const bool, arb_ptr_2 as *const u8 as *const bool);
+        assert_eq!(
+            arb_ptr as *const bool,
+            arb_ptr_2 as *const u8 as *const bool
+        );
     }
 
     //Tests that transmuting a ref does not mutate the stored address
@@ -3989,7 +4046,10 @@ mod verify {
         let arb_ptr: *const bool = generator.any_in_bounds().ptr;
         let arb_ref: &bool = unsafe { &*(arb_ptr) };
         let arb_ref_2: &u8 = unsafe { transmute(arb_ref) };
-        assert_eq!(arb_ref as *const bool, arb_ref_2 as *const u8 as *const bool);
+        assert_eq!(
+            arb_ref as *const bool,
+            arb_ref_2 as *const u8 as *const bool
+        );
     }
 
     //Tests that transmuting a slice does not mutate the slice metadata (address and length)
@@ -4131,9 +4191,16 @@ mod verify {
     fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
         let mut generator1 = PointerGenerator::<100>::new();
         let mut generator2 = PointerGenerator::<100>::new();
-        let ArbitraryPointer { ptr: src, status: src_status, .. } =
-            generator1.any_alloc_status::<T>();
-        let ArbitraryPointer { ptr: dst, status: dst_status, .. } = if kani::any() {
+        let ArbitraryPointer {
+            ptr: src,
+            status: src_status,
+            ..
+        } = generator1.any_alloc_status::<T>();
+        let ArbitraryPointer {
+            ptr: dst,
+            status: dst_status,
+            ..
+        } = if kani::any() {
             generator1.any_alloc_status::<T>()
         } else {
             generator2.any_alloc_status::<T>()
@@ -4150,4 +4217,593 @@ mod verify {
     fn supported_status(status: AllocationStatus) -> bool {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
+
+    // --- Challenge 7 Part 3: atomic intrinsic contracts ---
+    //
+    // `rustc_intrinsic` declarations have no body, so Kani cannot attach
+    // contracts to them (model-checking/kani#3345). These wrappers encode the
+    // documented pointer preconditions and invoke the const-generic intrinsics
+    // that replaced the older `atomic_*_{relaxed,acquire,...}` names.
+
+    fn atomic_ptr_at_offset<T>(buf: &mut [u8; 64]) -> *mut T {
+        let offset = kani::any_where(|o: &usize| *o < 64);
+        buf.as_mut_ptr().wrapping_add(offset).cast::<T>()
+    }
+
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_store_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, val: T) {
+        // SAFETY: `requires` guarantees `dst` is aligned and writable.
+        unsafe { atomic_store::<T, ORD>(dst, val) }
+    }
+
+    #[requires(ub_checks::can_dereference(src))]
+    unsafe fn atomic_load_wrapper<T: Copy, const ORD: AtomicOrdering>(src: *const T) -> T {
+        // SAFETY: `requires` guarantees `src` is aligned, allocated, and initialized.
+        unsafe { atomic_load::<T, ORD>(src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_xchg_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_xchg::<T, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_xadd_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+        dst: *mut T,
+        src: U,
+    ) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_xadd::<T, U, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_xsub_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+        dst: *mut T,
+        src: U,
+    ) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_xsub::<T, U, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_and_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+        dst: *mut T,
+        src: U,
+    ) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_and::<T, U, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_nand_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+        dst: *mut T,
+        src: U,
+    ) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_nand::<T, U, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_or_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+        dst: *mut T,
+        src: U,
+    ) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_or::<T, U, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_xor_wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+        dst: *mut T,
+        src: U,
+    ) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_xor::<T, U, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_max_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_max::<T, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_min_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_min::<T, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_umax_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_umax::<T, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_umin_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_umin::<T, ORD>(dst, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_cxchg_wrapper<
+        T: Copy,
+        const ORD_SUCC: AtomicOrdering,
+        const ORD_FAIL: AtomicOrdering,
+    >(
+        dst: *mut T,
+        old: T,
+        src: T,
+    ) -> (T, bool) {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_cxchg::<T, ORD_SUCC, ORD_FAIL>(dst, old, src) }
+    }
+
+    #[requires(ub_checks::can_dereference(dst as *const T))]
+    #[requires(ub_checks::can_write(dst))]
+    unsafe fn atomic_cxchgweak_wrapper<
+        T: Copy,
+        const ORD_SUCC: AtomicOrdering,
+        const ORD_FAIL: AtomicOrdering,
+    >(
+        dst: *mut T,
+        old: T,
+        src: T,
+    ) -> (T, bool) {
+        // SAFETY: `requires` guarantees `dst` is valid for a read-modify-write.
+        unsafe { atomic_cxchgweak::<T, ORD_SUCC, ORD_FAIL>(dst, old, src) }
+    }
+
+    macro_rules! proof_atomic_store_ord {
+        ($name:ident, $ord:ident) => {
+            #[kani::proof_for_contract(atomic_store_wrapper)]
+            fn $name() {
+                let mut buf: [u8; 64] = kani::any();
+                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                unsafe {
+                    atomic_store_wrapper::<u8, { AtomicOrdering::$ord }>(ptr, kani::any());
+                }
+            }
+        };
+    }
+
+    proof_atomic_store_ord!(check_atomic_store_relaxed, Relaxed);
+    proof_atomic_store_ord!(check_atomic_store_release, Release);
+    proof_atomic_store_ord!(check_atomic_store_seqcst, SeqCst);
+
+    macro_rules! proof_atomic_load_ord {
+        ($name:ident, $ord:ident) => {
+            #[kani::proof_for_contract(atomic_load_wrapper)]
+            fn $name() {
+                let mut buf: [u8; 64] = kani::any();
+                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                unsafe {
+                    let _ = atomic_load_wrapper::<u8, { AtomicOrdering::$ord }>(ptr as *const u8);
+                }
+            }
+        };
+    }
+
+    proof_atomic_load_ord!(check_atomic_load_relaxed, Relaxed);
+    proof_atomic_load_ord!(check_atomic_load_acquire, Acquire);
+    proof_atomic_load_ord!(check_atomic_load_seqcst, SeqCst);
+
+    macro_rules! proof_atomic_rmw_u8 {
+        ($wrapper:ident, $name:ident, $ord:ident) => {
+            #[kani::proof_for_contract($wrapper)]
+            fn $name() {
+                let mut buf: [u8; 64] = kani::any();
+                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                unsafe {
+                    let _ = $wrapper::<u8, { AtomicOrdering::$ord }>(ptr, kani::any());
+                }
+            }
+        };
+        ($wrapper:ident, $name:ident, $ord:ident, two_ty) => {
+            #[kani::proof_for_contract($wrapper)]
+            fn $name() {
+                let mut buf: [u8; 64] = kani::any();
+                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                unsafe {
+                    let _ = $wrapper::<u8, u8, { AtomicOrdering::$ord }>(ptr, kani::any());
+                }
+            }
+        };
+    }
+
+    proof_atomic_rmw_u8!(atomic_xchg_wrapper, check_atomic_xchg_relaxed, Relaxed);
+    proof_atomic_rmw_u8!(atomic_xchg_wrapper, check_atomic_xchg_acquire, Acquire);
+    proof_atomic_rmw_u8!(atomic_xchg_wrapper, check_atomic_xchg_release, Release);
+    proof_atomic_rmw_u8!(atomic_xchg_wrapper, check_atomic_xchg_acqrel, AcqRel);
+    proof_atomic_rmw_u8!(atomic_xchg_wrapper, check_atomic_xchg_seqcst, SeqCst);
+
+    proof_atomic_rmw_u8!(
+        atomic_xadd_wrapper,
+        check_atomic_xadd_relaxed,
+        Relaxed,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xadd_wrapper,
+        check_atomic_xadd_acquire,
+        Acquire,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xadd_wrapper,
+        check_atomic_xadd_release,
+        Release,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xadd_wrapper,
+        check_atomic_xadd_acqrel,
+        AcqRel,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xadd_wrapper,
+        check_atomic_xadd_seqcst,
+        SeqCst,
+        two_ty
+    );
+
+    proof_atomic_rmw_u8!(
+        atomic_xsub_wrapper,
+        check_atomic_xsub_relaxed,
+        Relaxed,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xsub_wrapper,
+        check_atomic_xsub_acquire,
+        Acquire,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xsub_wrapper,
+        check_atomic_xsub_release,
+        Release,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xsub_wrapper,
+        check_atomic_xsub_acqrel,
+        AcqRel,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xsub_wrapper,
+        check_atomic_xsub_seqcst,
+        SeqCst,
+        two_ty
+    );
+
+    proof_atomic_rmw_u8!(
+        atomic_and_wrapper,
+        check_atomic_and_relaxed,
+        Relaxed,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_and_wrapper,
+        check_atomic_and_acquire,
+        Acquire,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_and_wrapper,
+        check_atomic_and_release,
+        Release,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(atomic_and_wrapper, check_atomic_and_acqrel, AcqRel, two_ty);
+    proof_atomic_rmw_u8!(atomic_and_wrapper, check_atomic_and_seqcst, SeqCst, two_ty);
+
+    proof_atomic_rmw_u8!(
+        atomic_nand_wrapper,
+        check_atomic_nand_relaxed,
+        Relaxed,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_nand_wrapper,
+        check_atomic_nand_acquire,
+        Acquire,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_nand_wrapper,
+        check_atomic_nand_release,
+        Release,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_nand_wrapper,
+        check_atomic_nand_acqrel,
+        AcqRel,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_nand_wrapper,
+        check_atomic_nand_seqcst,
+        SeqCst,
+        two_ty
+    );
+
+    proof_atomic_rmw_u8!(atomic_or_wrapper, check_atomic_or_relaxed, Relaxed, two_ty);
+    proof_atomic_rmw_u8!(atomic_or_wrapper, check_atomic_or_acquire, Acquire, two_ty);
+    proof_atomic_rmw_u8!(atomic_or_wrapper, check_atomic_or_release, Release, two_ty);
+    proof_atomic_rmw_u8!(atomic_or_wrapper, check_atomic_or_acqrel, AcqRel, two_ty);
+    proof_atomic_rmw_u8!(atomic_or_wrapper, check_atomic_or_seqcst, SeqCst, two_ty);
+
+    proof_atomic_rmw_u8!(
+        atomic_xor_wrapper,
+        check_atomic_xor_relaxed,
+        Relaxed,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xor_wrapper,
+        check_atomic_xor_acquire,
+        Acquire,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(
+        atomic_xor_wrapper,
+        check_atomic_xor_release,
+        Release,
+        two_ty
+    );
+    proof_atomic_rmw_u8!(atomic_xor_wrapper, check_atomic_xor_acqrel, AcqRel, two_ty);
+    proof_atomic_rmw_u8!(atomic_xor_wrapper, check_atomic_xor_seqcst, SeqCst, two_ty);
+
+    macro_rules! proof_atomic_minmax_ord {
+        ($wrapper:ident, $name:ident, $ty:ty, $ord:ident) => {
+            #[kani::proof_for_contract($wrapper)]
+            fn $name() {
+                let mut buf: [u8; 64] = kani::any();
+                let ptr = atomic_ptr_at_offset::<$ty>(&mut buf);
+                unsafe {
+                    let _ = $wrapper::<$ty, { AtomicOrdering::$ord }>(ptr, kani::any());
+                }
+            }
+        };
+    }
+
+    proof_atomic_minmax_ord!(atomic_max_wrapper, check_atomic_max_relaxed, i8, Relaxed);
+    proof_atomic_minmax_ord!(atomic_max_wrapper, check_atomic_max_acquire, i8, Acquire);
+    proof_atomic_minmax_ord!(atomic_max_wrapper, check_atomic_max_release, i8, Release);
+    proof_atomic_minmax_ord!(atomic_max_wrapper, check_atomic_max_acqrel, i8, AcqRel);
+    proof_atomic_minmax_ord!(atomic_max_wrapper, check_atomic_max_seqcst, i8, SeqCst);
+
+    proof_atomic_minmax_ord!(atomic_min_wrapper, check_atomic_min_relaxed, i8, Relaxed);
+    proof_atomic_minmax_ord!(atomic_min_wrapper, check_atomic_min_acquire, i8, Acquire);
+    proof_atomic_minmax_ord!(atomic_min_wrapper, check_atomic_min_release, i8, Release);
+    proof_atomic_minmax_ord!(atomic_min_wrapper, check_atomic_min_acqrel, i8, AcqRel);
+    proof_atomic_minmax_ord!(atomic_min_wrapper, check_atomic_min_seqcst, i8, SeqCst);
+
+    proof_atomic_minmax_ord!(atomic_umax_wrapper, check_atomic_umax_relaxed, u8, Relaxed);
+    proof_atomic_minmax_ord!(atomic_umax_wrapper, check_atomic_umax_acquire, u8, Acquire);
+    proof_atomic_minmax_ord!(atomic_umax_wrapper, check_atomic_umax_release, u8, Release);
+    proof_atomic_minmax_ord!(atomic_umax_wrapper, check_atomic_umax_acqrel, u8, AcqRel);
+    proof_atomic_minmax_ord!(atomic_umax_wrapper, check_atomic_umax_seqcst, u8, SeqCst);
+
+    proof_atomic_minmax_ord!(atomic_umin_wrapper, check_atomic_umin_relaxed, u8, Relaxed);
+    proof_atomic_minmax_ord!(atomic_umin_wrapper, check_atomic_umin_acquire, u8, Acquire);
+    proof_atomic_minmax_ord!(atomic_umin_wrapper, check_atomic_umin_release, u8, Release);
+    proof_atomic_minmax_ord!(atomic_umin_wrapper, check_atomic_umin_acqrel, u8, AcqRel);
+    proof_atomic_minmax_ord!(atomic_umin_wrapper, check_atomic_umin_seqcst, u8, SeqCst);
+
+    macro_rules! proof_atomic_cxchg_ord {
+        ($wrapper:ident, $name:ident, $succ:ident, $fail:ident) => {
+            #[kani::proof_for_contract($wrapper)]
+            fn $name() {
+                let mut buf: [u8; 64] = kani::any();
+                let ptr = atomic_ptr_at_offset::<u8>(&mut buf);
+                unsafe {
+                    let _ = $wrapper::<u8, { AtomicOrdering::$succ }, { AtomicOrdering::$fail }>(
+                        ptr,
+                        kani::any(),
+                        kani::any(),
+                    );
+                }
+            }
+        };
+    }
+
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_relaxed_relaxed,
+        Relaxed,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_relaxed_acquire,
+        Relaxed,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_relaxed_seqcst,
+        Relaxed,
+        SeqCst
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_acquire_relaxed,
+        Acquire,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_acquire_acquire,
+        Acquire,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_acquire_seqcst,
+        Acquire,
+        SeqCst
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_release_relaxed,
+        Release,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_release_acquire,
+        Release,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_release_seqcst,
+        Release,
+        SeqCst
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_acqrel_relaxed,
+        AcqRel,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_acqrel_acquire,
+        AcqRel,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_acqrel_seqcst,
+        AcqRel,
+        SeqCst
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_seqcst_relaxed,
+        SeqCst,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_seqcst_acquire,
+        SeqCst,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchg_wrapper,
+        check_atomic_cxchg_seqcst_seqcst,
+        SeqCst,
+        SeqCst
+    );
+
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_relaxed_relaxed,
+        Relaxed,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_relaxed_acquire,
+        Relaxed,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_relaxed_seqcst,
+        Relaxed,
+        SeqCst
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_acquire_relaxed,
+        Acquire,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_acquire_acquire,
+        Acquire,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_acquire_seqcst,
+        Acquire,
+        SeqCst
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_release_relaxed,
+        Release,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_release_acquire,
+        Release,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_release_seqcst,
+        Release,
+        SeqCst
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_acqrel_relaxed,
+        AcqRel,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_acqrel_acquire,
+        AcqRel,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_acqrel_seqcst,
+        AcqRel,
+        SeqCst
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_seqcst_relaxed,
+        SeqCst,
+        Relaxed
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_seqcst_acquire,
+        SeqCst,
+        Acquire
+    );
+    proof_atomic_cxchg_ord!(
+        atomic_cxchgweak_wrapper,
+        check_atomic_cxchgweak_seqcst_seqcst,
+        SeqCst,
+        SeqCst
+    );
 }

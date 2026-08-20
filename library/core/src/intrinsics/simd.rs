@@ -413,7 +413,7 @@ pub enum SimdAlign {
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn simd_masked_load<V, U, T, const ALIGN: SimdAlign>(mask: V, ptr: U, val: T)
--> T;
+    -> T;
 
 /// Writes to a vector of pointers.
 ///
