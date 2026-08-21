@@ -5675,7 +5675,16 @@ mod verify {
             #[kani::proof_for_contract(<[$ty]>::get_unchecked_mut::<$ity>)]
             fn $h_mut() {
                 const ARR_SIZE: usize = 100;
-                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                // A repeat expression, not `kani::any::<[T; N]>()`: for an
+                // element type with a validity invariant (`char`), array
+                // `kani::any` fills the array through `array::map`, whose
+                // init guard calls `<[MaybeUninit<T>]>::get_unchecked_mut`.
+                // That is a second monomorphization of the fn under contract
+                // and it trips the contract single-top-level-call check.
+                // `get_unchecked_mut` never reads the elements, so equal
+                // element values lose nothing: the verified property depends
+                // only on the still-nondet slice length and index.
+                let mut arr: [$ty; ARR_SIZE] = [kani::any(); ARR_SIZE];
                 let slice = kani::slice::any_slice_of_array_mut(&mut arr);
                 let index: $ity = $mk;
                 let _ = unsafe { slice.get_unchecked_mut(index) };
