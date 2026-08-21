@@ -4181,7 +4181,9 @@ mod verify {
     check_iter_mut_with_ty!(verify_iter_mut_unit, (), 8);
     check_iter_mut_with_ty!(verify_iter_mut_u8, u8, 8);
     check_iter_mut_with_ty!(verify_iter_mut_char, char, 8, proof);
-    check_iter_mut_with_ty!(verify_iter_mut_tup, (char, u8), 8);
+    // tup: same extra top-level `post_inc_start` call as char (ubuntu AH 1670/1
+    // on 81fc343: "Only a single top-level call" for IterMut<(char, u8)>).
+    check_iter_mut_with_ty!(verify_iter_mut_tup, (char, u8), 8, proof);
 
     check_adapters_with_ty!(verify_adapt_unit, (), 8);
     check_adapters_with_ty!(verify_adapt_u8, u8, 8);
