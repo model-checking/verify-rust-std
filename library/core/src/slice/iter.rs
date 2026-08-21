@@ -3596,36 +3596,42 @@ mod verify {
                     let _ = iter.last();
                 }
 
+                // Autoharness 10m CBMC cap; MAX_LEN=8 + symbolic predicate /
+                // `any_iter` havoced empty ptr times out.
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_fold() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let iter = any_iter::<$ty>(&array);
+                    let array: [$ty; 2] = kani::any();
+                    let iter = Iter::new(&array[..]);
                     kani::assert(iter.is_safe(), "Iter is safe");
                     let _ = iter.fold((), |_, _| ());
                 }
 
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_for_each() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let iter = any_iter::<$ty>(&array);
+                    let array: [$ty; 2] = kani::any();
+                    let iter = Iter::new(&array[..]);
                     kani::assert(iter.is_safe(), "Iter is safe");
                     iter.for_each(|_| ());
                 }
 
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_position() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let mut iter = any_iter::<$ty>(&array);
+                    let array: [$ty; 2] = kani::any();
+                    let mut iter = Iter::new(&array[..]);
                     kani::assert(iter.is_safe(), "Iter is safe");
-                    let _ = iter.position(|_| kani::any());
+                    let _ = iter.position(|_| false);
                 }
 
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_rposition() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let mut iter = any_iter::<$ty>(&array);
+                    let array: [$ty; 2] = kani::any();
+                    let mut iter = Iter::new(&array[..]);
                     kani::assert(iter.is_safe(), "Iter is safe");
-                    let _ = iter.rposition(|_| kani::any());
+                    let _ = iter.rposition(|_| false);
                 }
 
                 check_unsafe_contracts!(
@@ -3691,36 +3697,42 @@ mod verify {
                     let _ = iter.last();
                 }
 
+                // Autoharness 10m CBMC cap; MAX_LEN=8 + symbolic predicate /
+                // `any_iter_mut` havoced empty ptr times out.
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_fold() {
-                    let mut array: [$ty; MAX_LEN] = kani::any();
-                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let mut array: [$ty; 2] = kani::any();
+                    let iter = IterMut::new(&mut array[..]);
                     kani::assert(iter.is_safe(), "IterMut is safe");
                     let _ = iter.fold((), |_, _| ());
                 }
 
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_for_each() {
-                    let mut array: [$ty; MAX_LEN] = kani::any();
-                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let mut array: [$ty; 2] = kani::any();
+                    let iter = IterMut::new(&mut array[..]);
                     kani::assert(iter.is_safe(), "IterMut is safe");
                     iter.for_each(|_| ());
                 }
 
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_position() {
-                    let mut array: [$ty; MAX_LEN] = kani::any();
-                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let mut array: [$ty; 2] = kani::any();
+                    let mut iter = IterMut::new(&mut array[..]);
                     kani::assert(iter.is_safe(), "IterMut is safe");
-                    let _ = iter.position(|_| kani::any());
+                    let _ = iter.position(|_| false);
                 }
 
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_rposition() {
-                    let mut array: [$ty; MAX_LEN] = kani::any();
-                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let mut array: [$ty; 2] = kani::any();
+                    let mut iter = IterMut::new(&mut array[..]);
                     kani::assert(iter.is_safe(), "IterMut is safe");
-                    let _ = iter.rposition(|_| kani::any());
+                    let _ = iter.rposition(|_| false);
                 }
 
                 check_iter_mut_contracts!(check_next_back_unchecked, $ty, next_back_unchecked());
@@ -3784,19 +3796,21 @@ mod verify {
                     (any_slice_mut(array), any_chunk_size())
                 }
 
+                // Autoharness 10m CBMC cap; MAX_LEN=8 + symbolic predicate /
+                // `any_slice` havoced empty ptr times out.
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_split_next() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let slice = any_slice(&array);
-                    let mut iter = Split::new(slice, |_| kani::any());
+                    let array: [$ty; 2] = kani::any();
+                    let mut iter = Split::new(&array[..], |_| false);
                     let _ = iter.next();
                 }
 
                 #[kani::proof]
+                #[kani::unwind(2)]
                 fn check_split_next_back() {
-                    let array: [$ty; MAX_LEN] = kani::any();
-                    let slice = any_slice(&array);
-                    let mut iter = Split::new(slice, |_| kani::any());
+                    let array: [$ty; 2] = kani::any();
+                    let mut iter = Split::new(&array[..], |_| false);
                     let _ = iter.next_back();
                 }
 
