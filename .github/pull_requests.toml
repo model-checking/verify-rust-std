@@ -3,7 +3,6 @@ members = [
     "celinval",
     "rahulku",
     "pnkfelix",
-    "adpaco-aws",
     "feliperodri",
     "remi-delmas-3000",
     "tautschnig",
@@ -18,5 +17,6 @@ members = [
     "thanhnguyen-aws",
     "btj",
     "rafaelsamenezes",
-    "lucasccordeiro"
+    "lucasccordeiro",
+    "dkcumming"
 ]
