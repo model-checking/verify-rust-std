@@ -8,7 +8,7 @@ This repository is a fork of the official Rust programming
 language repository, created solely to verify the Rust standard
 library. It should not be used as an alternative to the official
 Rust releases. The repository is tool agnostic and welcomes the addition of
-new tools. The currently accepted tools are [Flux](https://model-checking.github.io/verify-rust-std/tools/flux.html), [GOTO Transcoder (ESBMC)](https://model-checking.github.io/verify-rust-std/tools/goto-transcoder.html), [Kani](https://model-checking.github.io/verify-rust-std/tools/kani.html), and [VeriFast](https://model-checking.github.io/verify-rust-std/tools/verifast.html).
+new tools. The currently accepted tools are [Flux](https://model-checking.github.io/verify-rust-std/tools/flux.html), [GOTO Transcoder (ESBMC)](https://model-checking.github.io/verify-rust-std/tools/goto-transcoder.html), [Kani](https://model-checking.github.io/verify-rust-std/tools/kani.html), [KMIR](https://model-checking.github.io/verify-rust-std/tools/kmir.html), and [VeriFast](https://model-checking.github.io/verify-rust-std/tools/verifast.html).
 
 The goal is to have a verified [Rust standard library](https://doc.rust-lang.org/std/) and prove that it is safe.
 1. Contributing to the core mechanism of verifying the rust standard library
@@ -120,6 +120,10 @@ See [LICENSE](https://github.com/flux-rs/flux/blob/main/LICENSE) for details.
 ### VeriFast
 [VeriFast](https://github.com/verifast/verifast) is distributed under the terms of the MIT license.
 See [LICENSE.md](https://github.com/verifast/verifast/blob/master/LICENSE.md) for details.
+
+### KMIR
+[KMIR](https://github.com/runtimeverification/mir-semantics) is distributed under the terms of the BSD-3-Clause license.
+See [LICENSE](https://github.com/runtimeverification/mir-semantics/blob/master/LICENSE) for details.
 
 ### Rust
 Rust is primarily distributed under the terms of both the MIT license and the Apache License (Version 2.0), with portions covered by various BSD-like licenses.
