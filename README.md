@@ -110,7 +110,7 @@ See [LICENSE-APACHE](https://github.com/model-checking/kani/blob/main/LICENSE-AP
 The [goto-transcoder](https://github.com/rafaelsamenezes/goto-transcoder) is distributed under the terms of the MIT license.
 See [LICENSE](https://github.com/rafaelsamenezes/goto-transcoder/blob/main/LICENSE) for details.
 
-[ESBMC](https://github.com/esbmc/esbmc) is based on CBMC: CBMC is distributed under the terms of the BSD 4-clause license, and the ESBMC modifications are distributed under the terms of the Apache License (Version 2.0).
+[ESBMC](https://github.com/esbmc/esbmc) is distributed under the terms of the Apache License (Version 2.0).
 See [COPYING](https://github.com/esbmc/esbmc/blob/master/COPYING) for details.
 
 ### Flux
