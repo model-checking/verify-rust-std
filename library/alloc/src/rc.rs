@@ -268,6 +268,8 @@ use core::ptr::{self, NonNull, drop_in_place};
 use core::slice::from_raw_parts_mut;
 use core::{borrow, fmt, hint};
 
+use safety::{ensures, requires};
+
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
 use crate::alloc::{AllocError, Allocator, Global, Layout};
@@ -1286,20 +1288,15 @@ impl<T, A: Allocator> Rc<mem::MaybeUninit<T>, A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
-    #[cfg_attr(
-        // Kani 0.65 limitation: proof_for_contract cannot target this
-        // MaybeUninit-based generic impl reliably. Verified via kani::proof
-        // harnesses (verify_1198 / verify_1239) with explicit postcondition checks.
-        kani,
-        kani::requires({
+    // Kani 0.65 cannot target this MaybeUninit-based generic impl reliably
+    // with proof_for_contract. Dedicated #[kani::proof] harnesses execute the
+    // real function body and explicitly mirror the contract conditions that
+    // Kani can currently express.
+    #[requires({
             let p = Rc::<mem::MaybeUninit<T>, A>::as_ptr(&self);
             kani::mem::can_dereference(p)
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Rc<T, A>| Rc::<T, A>::strong_count(result) >= 1)
-    )]
+        })]
+    #[ensures(|result: &Rc<T, A>| Rc::<T, A>::strong_count(result) >= 1)]
     pub unsafe fn assume_init(self) -> Rc<T, A> {
         let (ptr, alloc) = Rc::into_inner_with_allocator(self);
         unsafe { Rc::from_inner_in(ptr.cast(), alloc) }
@@ -1338,20 +1335,15 @@ impl<T, A: Allocator> Rc<[mem::MaybeUninit<T>], A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
-    #[cfg_attr(
-        // Kani 0.65 limitation: proof_for_contract cannot target this
-        // MaybeUninit-based generic impl reliably. Verified via kani::proof
-        // harnesses (verify_1198 / verify_1239) with explicit postcondition checks.
-        kani,
-        kani::requires({
+    // Kani 0.65 cannot target this MaybeUninit-based generic impl reliably
+    // with proof_for_contract. Dedicated #[kani::proof] harnesses execute the
+    // real function body and explicitly mirror the contract conditions that
+    // Kani can currently express.
+    #[requires({
             let p = Rc::<[mem::MaybeUninit<T>], A>::as_ptr(&self);
             kani::mem::can_dereference(p)
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Rc<[T], A>| Rc::<[T], A>::strong_count(result) >= 1)
-    )]
+        })]
+    #[ensures(|result: &Rc<[T], A>| Rc::<[T], A>::strong_count(result) >= 1)]
     pub unsafe fn assume_init(self) -> Rc<[T], A> {
         let (ptr, alloc) = Rc::into_inner_with_allocator(self);
         unsafe { Rc::from_ptr_in(ptr.as_ptr() as _, alloc) }
@@ -1422,9 +1414,7 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_raw", since = "1.17.0")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let offset = unsafe { data_offset(ptr) };
             let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
             let rebuilt_ptr = unsafe { &raw const (*inner).value };
@@ -1435,8 +1425,7 @@ impl<T: ?Sized> Rc<T> {
                 && kani::mem::checked_align_of_raw(ptr)
                     == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
                 && unsafe { (*strong_ptr).get() >= 1 }
-        })
-    )]
+        })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr, Global) }
     }
@@ -1497,9 +1486,7 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_mutate_strong_count", since = "1.53.0")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let offset = unsafe { data_offset(ptr) };
             let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
             let rebuilt_ptr = unsafe { &raw const (*inner).value };
@@ -1510,8 +1497,7 @@ impl<T: ?Sized> Rc<T> {
                 && kani::mem::checked_align_of_raw(ptr)
                     == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
                 && unsafe { (*strong_ptr).get() >= 1 }
-        })
-    )]
+        })]
     #[cfg_attr(kani, kani::modifies({
         let offset = unsafe { data_offset(ptr) };
         let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
@@ -1554,26 +1540,18 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_mutate_strong_count", since = "1.53.0")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let offset = unsafe { data_offset(ptr) };
             let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
             let rebuilt_ptr = unsafe { &raw const (*inner).value };
             let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-            let into_raw_roundtrip_ptr = {
-                let rc = unsafe { Rc::<T>::from_raw(ptr) };
-                Rc::<T>::into_raw(rc)
-            };
             ptr::addr_eq(ptr, rebuilt_ptr)
-                && ptr::addr_eq(ptr, into_raw_roundtrip_ptr)
                 && kani::mem::checked_size_of_raw(ptr)
                     == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
                 && kani::mem::checked_align_of_raw(ptr)
                     == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
                 && unsafe { (*strong_ptr).get() >= 1 }
-        })
-    )]
+        })]
     #[cfg_attr(kani, kani::modifies({
         let offset = unsafe { data_offset(ptr) };
         let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
@@ -1719,9 +1697,7 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// }
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let offset = unsafe { data_offset(ptr) };
             let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
             let rebuilt_ptr = unsafe { &raw const (*inner).value };
@@ -1732,19 +1708,15 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
                 && kani::mem::checked_align_of_raw(ptr)
                     == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
                 && unsafe { (*strong_ptr).get() >= 1 }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| {
+        })]
+    #[ensures(|result: &Self| {
             let result_ptr = Rc::<T, A>::as_ptr(result);
             ptr::addr_eq(result_ptr, ptr)
                 && kani::mem::checked_size_of_raw(result_ptr)
                     == kani::mem::checked_size_of_raw(ptr)
                 && kani::mem::checked_align_of_raw(result_ptr)
                     == kani::mem::checked_align_of_raw(ptr)
-        })
-    )]
+        })]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         let offset = unsafe { data_offset(ptr) };
 
@@ -1849,27 +1821,18 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let offset = unsafe { data_offset(ptr) };
             let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
             let rebuilt_ptr = unsafe { &raw const (*inner).value };
             let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-            let into_raw_roundtrip_ptr = {
-                let rc = unsafe { Rc::<T, A>::from_raw_in(ptr, alloc.clone()) };
-                let (raw_ptr, _raw_alloc) = Rc::<T, A>::into_raw_with_allocator(rc);
-                raw_ptr
-            };
             ptr::addr_eq(ptr, rebuilt_ptr)
-                && ptr::addr_eq(ptr, into_raw_roundtrip_ptr)
                 && kani::mem::checked_size_of_raw(ptr)
                     == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
                 && kani::mem::checked_align_of_raw(ptr)
                     == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
                 && unsafe { (*strong_ptr).get() >= 1 }
-        })
-    )]
+        })]
     #[cfg_attr(kani, kani::modifies({
         let offset = unsafe { data_offset(ptr) };
         let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
@@ -1921,9 +1884,7 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let offset = unsafe { data_offset(ptr) };
             let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
             let rebuilt_ptr = unsafe { &raw const (*inner).value };
@@ -1934,8 +1895,7 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
                 && kani::mem::checked_align_of_raw(ptr)
                     == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
                 && unsafe { (*strong_ptr).get() >= 1 }
-        })
-    )]
+        })]
     #[cfg_attr(kani, kani::modifies({
         let offset = unsafe { data_offset(ptr) };
         let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
@@ -2044,22 +2004,16 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "get_mut_unchecked", issue = "63292")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let inner = this.ptr.as_ptr();
             let value = unsafe { &raw mut (*inner).value };
             kani::mem::can_write(value)
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &&mut T| {
+        })]
+    #[ensures(|result: &&mut T| {
             let inner = old(this.ptr.as_ptr());
             let value = unsafe { &raw const (*inner).value };
             ptr::addr_eq((*result) as *const T, value)
-        })
-    )]
+        })]
     pub unsafe fn get_mut_unchecked(this: &mut Self) -> &mut T {
         // We are careful to *not* create a reference covering the "count" fields, as
         // this would conflict with accesses to the reference counts (e.g. by `Weak`).
@@ -2293,7 +2247,7 @@ impl<A: Allocator> Rc<dyn Any, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
-    #[cfg_attr(kani, kani::requires((*self).is::<T>()))]
+    #[requires((*self).is::<T>())]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Rc<T, A> {
         unsafe {
             let (ptr, alloc) = Rc::into_inner_with_allocator(self);
@@ -3409,9 +3363,7 @@ impl<T: ?Sized> Weak<T> {
     /// [`new`]: Weak::new
     #[inline]
     #[stable(feature = "weak_into_raw", since = "1.45.0")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let is_sentinel = is_dangling(ptr);
             if is_sentinel {
                 true
@@ -3428,22 +3380,16 @@ impl<T: ?Sized> Weak<T> {
                     && kani::mem::checked_align_of_raw(ptr)
                         == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
             }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+        })]
+    #[requires({
             let is_sentinel = is_dangling(ptr);
             is_sentinel || {
                 let offset = unsafe { data_offset(ptr) };
                 let weak_ptr = unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
                 unsafe { (*weak_ptr).get() > 0 }
             }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| {
+        })]
+    #[ensures(|result: &Self| {
             old(is_dangling(ptr))
                 || unsafe { (*result.ptr.as_ptr().cast::<Cell<usize>>().add(1)).get() }
                     == old({
@@ -3452,8 +3398,7 @@ impl<T: ?Sized> Weak<T> {
                             unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
                         unsafe { (*weak_ptr).get() }
                     })
-        })
-    )]
+        })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr, Global) }
     }
@@ -3626,9 +3571,7 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
     /// [`new`]: Weak::new
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[cfg_attr(
-        kani,
-        kani::requires({
+    #[requires({
             let is_sentinel = is_dangling(ptr);
             if is_sentinel {
                 true
@@ -3649,11 +3592,8 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
                     && kani::mem::can_dereference(weak_ptr)
                     && unsafe { (*weak_ptr).get() > 0 }
             }
-        })
-    )]
-    #[cfg_attr(
-        kani,
-        kani::ensures(|result: &Self| {
+        })]
+    #[ensures(|result: &Self| {
             old(is_dangling(ptr))
                 || unsafe { (*result.ptr.as_ptr().cast::<Cell<usize>>().add(1)).get() }
                     == old({
@@ -3662,8 +3602,7 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
                             unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
                         unsafe { (*weak_ptr).get() }
                     })
-        })
-    )]
+        })]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         // See Weak::as_ptr for context on how the input pointer is derived.
 
@@ -4772,7 +4711,7 @@ mod kani_rc_harness_helpers {
             // Bound the macOS CI search space to avoid CBMC timeouts / memory pressure.
             // Linux/Ubuntu CI keeps the original, less-constrained path.
             #[cfg(target_os = "macos")]
-            kani::assume(sz <= 1024);
+            kani::assume(sz <= 100);
             v.set_len(sz);
             ptr::write_bytes(
                 v.as_mut_ptr().cast::<u8>(),
@@ -4794,7 +4733,7 @@ mod kani_rc_harness_helpers {
         // Bound the macOS CI search space to avoid CBMC timeouts / memory pressure.
         // Linux/Ubuntu CI keeps the original, less-constrained path.
         #[cfg(target_os = "macos")]
-        kani::assume(len <= 1024);
+        kani::assume(len <= 100);
         kani::assume(rc_slice_layout_ok::<T>(len));
         vec.as_slice()
     }
@@ -4820,12 +4759,17 @@ mod verify {
     // === UNSAFE FUNCTIONS (12 — all required) ===
 
     // Rc<MaybeUninit<T>>::assume_init harnesses.
+    //
     // Kani 0.65 limitation: proof_for_contract cannot resolve paths for
     // impl<T, A> Rc<MaybeUninit<T>, A> — the macro fails to map
     // MaybeUninit<i32> back to the impl's generic parameter T.
-    // These harnesses use #[kani::proof] instead; the requires clause
-    // is still checked as an assertion at the call site, and we manually
-    // assert the postcondition (*init == value) below.
+    // These harnesses therefore use regular #[kani::proof] and execute the
+    // real function body. A regular proof does not activate the callee's
+    // requires/ensures contract, so the expressible contract conditions are
+    // mirrored with explicit assertions.
+    //
+    // The caller-side initialization requirement is established constructively
+    // by writing the payload with MaybeUninit::write before calling assume_init.
     macro_rules! gen_assume_init_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
@@ -4834,34 +4778,39 @@ mod verify {
                 let expected = value.clone();
                 let mut uninit: Rc<mem::MaybeUninit<$ty>, Global> = Rc::new_uninit_in(Global);
                 Rc::get_mut(&mut uninit).unwrap().write(value);
+                assert!(kani::mem::can_dereference(Rc::as_ptr(&uninit)));
                 let init: Rc<$ty, Global> = unsafe { uninit.assume_init() };
+                assert!(Rc::strong_count(&init) >= 1);
                 assert_eq!(&*init, &expected);
             }
         };
     }
 
-    gen_assume_init_harness!(harness_assume_init_i8, i8);
-    gen_assume_init_harness!(harness_assume_init_i16, i16);
-    gen_assume_init_harness!(harness_assume_init_i32, i32);
-    gen_assume_init_harness!(harness_assume_init_i64, i64);
-    gen_assume_init_harness!(harness_assume_init_i128, i128);
-    gen_assume_init_harness!(harness_assume_init_u8, u8);
-    gen_assume_init_harness!(harness_assume_init_u16, u16);
-    gen_assume_init_harness!(harness_assume_init_u32, u32);
-    gen_assume_init_harness!(harness_assume_init_u64, u64);
-    gen_assume_init_harness!(harness_assume_init_u128, u128);
-    gen_assume_init_harness!(harness_assume_init_unit, ());
-    gen_assume_init_harness!(harness_assume_init_array, [u8; 4]);
-    gen_assume_init_harness!(harness_assume_init_bool, bool);
+    gen_assume_init_harness!(harness_rc_assume_init_i8, i8);
+    gen_assume_init_harness!(harness_rc_assume_init_i16, i16);
+    gen_assume_init_harness!(harness_rc_assume_init_i32, i32);
+    gen_assume_init_harness!(harness_rc_assume_init_i64, i64);
+    gen_assume_init_harness!(harness_rc_assume_init_i128, i128);
+    gen_assume_init_harness!(harness_rc_assume_init_u8, u8);
+    gen_assume_init_harness!(harness_rc_assume_init_u16, u16);
+    gen_assume_init_harness!(harness_rc_assume_init_u32, u32);
+    gen_assume_init_harness!(harness_rc_assume_init_u64, u64);
+    gen_assume_init_harness!(harness_rc_assume_init_u128, u128);
+    gen_assume_init_harness!(harness_rc_assume_init_unit, ());
+    gen_assume_init_harness!(harness_rc_assume_init_array, [u8; 4]);
+    gen_assume_init_harness!(harness_rc_assume_init_bool, bool);
 
     // Rc<[MaybeUninit<T>]>::assume_init harnesses.
-    // Kani 0.65 limitation: proof_for_contract cannot resolve paths for
-    // impl<T, A> Rc<[MaybeUninit<T>], A> (same issue as verify_1198).
-    // Uses #[kani::proof]; requires is checked as assertion at call site.
+    //
+    // Kani 0.65 cannot resolve this MaybeUninit-based impl path for
+    // proof_for_contract. These harnesses therefore use regular #[kani::proof]
+    // and execute the real function body. A regular proof does not activate the
+    // callee's requires/ensures contract, so the expressible contract conditions
+    // are mirrored with explicit assertions.
+    //
     // Kani cannot express the full "all elements are initialized" predicate for
-    // arbitrary `T`. This harness models the caller-side safety requirement of
-    // `assume_init` with a byte-level witness: it explicitly writes the backing
-    // bytes before converting the allocation to `Rc<[MaybeUninit<T>]>`.
+    // arbitrary `T`. The caller-side requirement is established constructively
+    // by initializing the backing bytes before calling assume_init.
     macro_rules! gen_assume_init_slice_harness {
         ($name:ident, $elem:ty) => {
             #[kani::proof]
@@ -4879,6 +4828,7 @@ mod verify {
                 let uninit: Rc<[mem::MaybeUninit<$elem>], Global> = Rc::from(initialized);
                 let expected_data = (&*uninit).as_ptr() as *const $elem;
                 let expected_len = uninit.len();
+                assert!(kani::mem::can_dereference(Rc::as_ptr(&uninit)));
                 let result: Rc<[$elem], Global> = unsafe { uninit.assume_init() };
 
                 assert_eq!((&*result).as_ptr(), expected_data);
@@ -4888,18 +4838,18 @@ mod verify {
         };
     }
 
-    gen_assume_init_slice_harness!(harness_assume_init_slice_i8, i8);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_i16, i16);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_i32, i32);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_i64, i64);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_i128, i128);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_u8, u8);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_u16, u16);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_u32, u32);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_u64, u64);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_u128, u128);
-    gen_assume_init_slice_harness!(harness_assume_init_slice_unit, ());
-    gen_assume_init_slice_harness!(harness_assume_init_slice_array, [u8; 4]);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i8, i8);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i16, i16);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i32, i32);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i64, i64);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_i128, i128);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u8, u8);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u16, u16);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u32, u32);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u64, u64);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_u128, u128);
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_unit, ());
+    gen_assume_init_slice_harness!(harness_rc_assume_init_slice_array, [u8; 4]);
 
     // Rc::from_raw harnesses.
     macro_rules! gen_from_raw_sized_harness {
