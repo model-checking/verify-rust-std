@@ -2361,6 +2361,21 @@ mod verify {
         }
     }
 
+    /// Heap-allocate a `[u8]` without `Box::from` / `from_raw_in` (Kani
+    /// `proof_for_contract` allows only one top-level call to the contracted fn).
+    fn alloc_write_slice(data: &[u8]) -> *mut [u8] {
+        let len = data.len();
+        let ptr = if len == 0 {
+            NonNull::<u8>::dangling().as_ptr()
+        } else {
+            let layout = Layout::array::<u8>(len).expect("layout");
+            let ptr = Global.allocate(layout).expect("alloc").cast::<u8>().as_ptr();
+            unsafe { ptr::copy_nonoverlapping(data.as_ptr(), ptr, len) };
+            ptr
+        };
+        ptr::slice_from_raw_parts_mut(ptr, len)
+    }
+
     // ---- required unsafe: assume_init (sized) ----
 
     #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
@@ -2490,10 +2505,9 @@ mod verify {
     pub fn check_from_raw_in_slice() {
         let data: [u8; SLICE_CAP] = kani::any();
         let slice = kani::slice::any_slice_of_array(&data);
-        let boxed: Box<[u8]> = Box::from(slice);
-        let len = boxed.len();
-        let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
-        let boxed = unsafe { Box::from_raw_in(ptr, alloc) };
+        let len = slice.len();
+        let ptr = alloc_write_slice(slice);
+        let boxed = unsafe { Box::from_raw_in(ptr, Global) };
         assert!(boxed.len() == len);
     }
 
@@ -2517,10 +2531,9 @@ mod verify {
     pub fn check_from_non_null_in_slice() {
         let data: [u8; SLICE_CAP] = kani::any();
         let slice = kani::slice::any_slice_of_array(&data);
-        let boxed: Box<[u8]> = Box::from(slice);
-        let len = boxed.len();
-        let (ptr, alloc) = Box::into_non_null_with_allocator(boxed);
-        let boxed = unsafe { Box::from_non_null_in(ptr, alloc) };
+        let len = slice.len();
+        let ptr = NonNull::new(alloc_write_slice(slice)).unwrap();
+        let boxed = unsafe { Box::from_non_null_in(ptr, Global) };
         assert!(boxed.len() == len);
     }
 
