@@ -211,6 +211,18 @@ use core::ub_checks;
 
 use safety::{ensures, requires};
 
+/// Kani-only: documented Box raw-pointer layout besides “valid `T`”.
+/// `can_dereference` covers aligned/initialized; Box also forbids size > `isize::MAX`.
+/// Allocator provenance is a caller obligation we cannot express.
+#[cfg(kani)]
+fn box_ptr_fits_box_layout<T: ?Sized>(ptr: *const T) -> bool {
+    ub_checks::can_dereference(ptr) && {
+        // SAFETY: `can_dereference` means `ptr` is a valid `T`, so size/align exist.
+        let layout = unsafe { Layout::for_value_raw(ptr) };
+        layout.size() <= isize::MAX as usize
+    }
+}
+
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
 use crate::alloc::{AllocError, Allocator, Global, Layout};
@@ -1157,10 +1169,10 @@ impl<T: ?Sized> Box<T> {
     #[stable(feature = "box_raw", since = "1.4.0")]
     #[inline]
     #[must_use = "call `drop(Box::from_raw(ptr))` if you intend to drop the `Box`"]
-    // Memory-layout contract: non-null, aligned, in-bounds, and a valid `T`
-    // (including ZST dangling pointers). Provenance/allocator identity is a
-    // caller obligation Kani cannot fully express.
-    #[requires(!raw.is_null() && ub_checks::can_dereference(raw))]
+    // Memory-layout contract: non-null, aligned, in-bounds, valid `T`,
+    // size ≤ isize::MAX (including ZST dangling pointers).
+    // Provenance/allocator identity is a caller obligation Kani cannot fully express.
+    #[requires(!raw.is_null() && box_ptr_fits_box_layout(raw))]
     #[ensures(|result| (&**result) as *const T == raw as *const T)]
     pub unsafe fn from_raw(raw: *mut T) -> Self {
         unsafe { Self::from_raw_in(raw, Global) }
@@ -1216,7 +1228,7 @@ impl<T: ?Sized> Box<T> {
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
     #[must_use = "call `drop(Box::from_non_null(ptr))` if you intend to drop the `Box`"]
-    #[requires(ub_checks::can_dereference(ptr.as_ptr()))]
+    #[requires(box_ptr_fits_box_layout(ptr.as_ptr()))]
     #[ensures(|result| (&**result) as *const T == ptr.as_ptr() as *const T)]
     pub unsafe fn from_non_null(ptr: NonNull<T>) -> Self {
         unsafe { Self::from_raw(ptr.as_ptr()) }
@@ -1391,7 +1403,7 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// [memory layout]: self#memory-layout
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
-    #[requires(!raw.is_null() && ub_checks::can_dereference(raw))]
+    #[requires(!raw.is_null() && box_ptr_fits_box_layout(raw))]
     #[ensures(|result| (&**result) as *const T == raw as *const T)]
     pub unsafe fn from_raw_in(raw: *mut T, alloc: A) -> Self {
         Box(unsafe { Unique::new_unchecked(raw) }, alloc)
@@ -1446,7 +1458,7 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
-    #[requires(ub_checks::can_dereference(raw.as_ptr()))]
+    #[requires(box_ptr_fits_box_layout(raw.as_ptr()))]
     #[ensures(|result| (&**result) as *const T == raw.as_ptr() as *const T)]
     pub unsafe fn from_non_null_in(raw: NonNull<T>, alloc: A) -> Self {
         // SAFETY: guaranteed by the caller.
@@ -2422,10 +2434,12 @@ mod verify {
     #[kani::proof_for_contract(Box::<[u8]>::from_raw)]
     pub fn check_from_raw_slice() {
         let data: [u8; SLICE_CAP] = kani::any();
-        let boxed: Box<[u8]> = Box::from(data);
+        let slice = kani::slice::any_slice_of_array(&data);
+        let boxed: Box<[u8]> = Box::from(slice);
+        let len = boxed.len();
         let ptr = Box::into_raw(boxed);
         let boxed = unsafe { Box::<[u8]>::from_raw(ptr) };
-        assert!(boxed.len() == SLICE_CAP);
+        assert!(boxed.len() == len);
     }
 
     // ---- required unsafe: from_non_null ----
@@ -2447,10 +2461,12 @@ mod verify {
     #[kani::proof_for_contract(Box::<[u8]>::from_non_null)]
     pub fn check_from_non_null_slice() {
         let data: [u8; SLICE_CAP] = kani::any();
-        let boxed: Box<[u8]> = Box::from(data);
+        let slice = kani::slice::any_slice_of_array(&data);
+        let boxed: Box<[u8]> = Box::from(slice);
+        let len = boxed.len();
         let ptr = Box::into_non_null(boxed);
         let boxed = unsafe { Box::<[u8]>::from_non_null(ptr) };
-        assert!(boxed.len() == SLICE_CAP);
+        assert!(boxed.len() == len);
     }
 
     // ---- required unsafe: from_raw_in ----
@@ -2470,6 +2486,17 @@ mod verify {
         let _boxed = unsafe { Box::from_raw_in(ptr, Global) };
     }
 
+    #[kani::proof_for_contract(Box::<[u8], Global>::from_raw_in)]
+    pub fn check_from_raw_in_slice() {
+        let data: [u8; SLICE_CAP] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let boxed: Box<[u8]> = Box::from(slice);
+        let len = boxed.len();
+        let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
+        let boxed = unsafe { Box::from_raw_in(ptr, alloc) };
+        assert!(boxed.len() == len);
+    }
+
     // ---- required unsafe: from_non_null_in ----
 
     #[kani::proof_for_contract(Box::<i32, Global>::from_non_null_in)]
@@ -2484,6 +2511,17 @@ mod verify {
     pub fn check_from_non_null_in_zst() {
         let ptr = NonNull::new(alloc_write(())).unwrap();
         let _boxed = unsafe { Box::from_non_null_in(ptr, Global) };
+    }
+
+    #[kani::proof_for_contract(Box::<[u8], Global>::from_non_null_in)]
+    pub fn check_from_non_null_in_slice() {
+        let data: [u8; SLICE_CAP] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let boxed: Box<[u8]> = Box::from(slice);
+        let len = boxed.len();
+        let (ptr, alloc) = Box::into_non_null_with_allocator(boxed);
+        let boxed = unsafe { Box::from_non_null_in(ptr, alloc) };
+        assert!(boxed.len() == len);
     }
 
     // ---- safe functions with unsafe bodies ----
@@ -2546,17 +2584,24 @@ mod verify {
     }
 
     #[kani::proof]
+    #[kani::unwind(4)]
     pub fn check_try_new_uninit_slice() {
-        let slot = Box::<[i32]>::try_new_uninit_slice(1).expect("alloc");
-        assert!(slot.len() == 1);
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let slot = Box::<[i32]>::try_new_uninit_slice(len).expect("alloc");
+        assert!(slot.len() == len);
         assert!(Box::<[u64]>::try_new_uninit_slice(usize::MAX).is_err());
     }
 
     #[kani::proof]
+    #[kani::unwind(4)]
     pub fn check_try_new_zeroed_slice() {
-        let slot = Box::<[u8]>::try_new_zeroed_slice(1).expect("alloc");
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let slot = Box::<[u8]>::try_new_zeroed_slice(len).expect("alloc");
         let boxed = unsafe { slot.assume_init() };
-        assert!(boxed[0] == 0);
+        assert!(boxed.len() == len);
+        for i in 0..len {
+            assert!(boxed[i] == 0);
+        }
         assert!(Box::<[u64]>::try_new_zeroed_slice(usize::MAX).is_err());
     }
 
@@ -2573,28 +2618,39 @@ mod verify {
     }
 
     #[kani::proof]
+    #[kani::unwind(4)]
     pub fn check_new_uninit_slice_in() {
-        let slot: Box<[MaybeUninit<i32>], _> = Box::new_uninit_slice_in(1, Global);
-        assert!(slot.len() == 1);
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let slot: Box<[MaybeUninit<i32>], _> = Box::new_uninit_slice_in(len, Global);
+        assert!(slot.len() == len);
     }
 
     #[kani::proof]
+    #[kani::unwind(4)]
     pub fn check_new_zeroed_slice_in() {
-        let slot: Box<[MaybeUninit<u8>], _> = Box::new_zeroed_slice_in(1, Global);
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let slot: Box<[MaybeUninit<u8>], _> = Box::new_zeroed_slice_in(len, Global);
         let boxed = unsafe { slot.assume_init() };
-        assert!(boxed[0] == 0);
+        assert!(boxed.len() == len);
+        for i in 0..len {
+            assert!(boxed[i] == 0);
+        }
     }
 
     #[kani::proof]
+    #[kani::unwind(4)]
     pub fn check_try_new_uninit_slice_in() {
-        let slot = Box::<[i32]>::try_new_uninit_slice_in(0, Global).expect("zst/empty");
-        assert!(slot.is_empty());
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let slot = Box::<[i32]>::try_new_uninit_slice_in(len, Global).expect("alloc");
+        assert!(slot.len() == len);
     }
 
     #[kani::proof]
+    #[kani::unwind(4)]
     pub fn check_try_new_zeroed_slice_in() {
-        let slot = Box::<[u8]>::try_new_zeroed_slice_in(1, Global).expect("alloc");
-        assert!(slot.len() == 1);
+        let len = kani::any_where(|n: &usize| *n <= SLICE_CAP);
+        let slot = Box::<[u8]>::try_new_zeroed_slice_in(len, Global).expect("alloc");
+        assert!(slot.len() == len);
     }
 
     #[kani::proof]
