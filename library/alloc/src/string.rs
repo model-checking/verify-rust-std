@@ -46,6 +46,8 @@ use core::error::Error;
 use core::iter::FusedIterator;
 #[cfg(not(no_global_oom_handling))]
 use core::iter::from_fn;
+#[cfg(kani)]
+use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::ops::Add;
 #[cfg(not(no_global_oom_handling))]
@@ -55,6 +57,8 @@ use core::ops::Bound::{Excluded, Included, Unbounded};
 use core::ops::{self, Range, RangeBounds};
 use core::str::pattern::{Pattern, Utf8Pattern};
 use core::{fmt, hash, ptr, slice};
+
+use safety::{ensures, requires};
 
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::Allocator;
@@ -779,6 +783,7 @@ impl String {
     /// ```
     #[cfg(not(no_global_oom_handling))]
     #[unstable(feature = "str_from_utf16_endian", issue = "116258")]
+    #[ensures(|r| r.is_err() || v.len().is_multiple_of(2))]
     pub fn from_utf16le(v: &[u8]) -> Result<String, FromUtf16Error> {
         let (chunks, []) = v.as_chunks::<2>() else {
             return Err(FromUtf16Error(()));
@@ -818,6 +823,7 @@ impl String {
     /// ```
     #[cfg(not(no_global_oom_handling))]
     #[unstable(feature = "str_from_utf16_endian", issue = "116258")]
+    #[ensures(|s| s.len() <= s.capacity())]
     pub fn from_utf16le_lossy(v: &[u8]) -> String {
         match (cfg!(target_endian = "little"), unsafe { v.align_to::<u16>() }) {
             (true, ([], v, [])) => Self::from_utf16_lossy(v),
@@ -854,6 +860,7 @@ impl String {
     /// ```
     #[cfg(not(no_global_oom_handling))]
     #[unstable(feature = "str_from_utf16_endian", issue = "116258")]
+    #[ensures(|r| r.is_err() || v.len().is_multiple_of(2))]
     pub fn from_utf16be(v: &[u8]) -> Result<String, FromUtf16Error> {
         let (chunks, []) = v.as_chunks::<2>() else {
             return Err(FromUtf16Error(()));
@@ -893,6 +900,7 @@ impl String {
     /// ```
     #[cfg(not(no_global_oom_handling))]
     #[unstable(feature = "str_from_utf16_endian", issue = "116258")]
+    #[ensures(|s| s.len() <= s.capacity())]
     pub fn from_utf16be_lossy(v: &[u8]) -> String {
         match (cfg!(target_endian = "big"), unsafe { v.align_to::<u16>() }) {
             (true, ([], v, [])) => Self::from_utf16_lossy(v),
@@ -1009,6 +1017,7 @@ impl String {
     #[inline]
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[ensures(|result| result.len() == old(bytes.len()))]
     pub unsafe fn from_utf8_unchecked(bytes: Vec<u8>) -> String {
         String { vec: bytes }
     }
@@ -1467,6 +1476,8 @@ impl String {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[ensures(|result| result.is_none() || self.len() < old(self.len()))]
     pub fn pop(&mut self) -> Option<char> {
         let ch = self.chars().rev().next()?;
         let newlen = self.len() - ch.len_utf8();
@@ -1500,6 +1511,9 @@ impl String {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[track_caller]
     #[rustc_confusables("delete", "take")]
+    #[requires(idx < self.len() && self.is_char_boundary(idx))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[ensures(|_| self.len() < old(self.len()))]
     pub fn remove(&mut self, idx: usize) -> char {
         let ch = match self[idx..].chars().next() {
             Some(ch) => ch,
@@ -1537,6 +1551,8 @@ impl String {
     /// ```
     #[cfg(not(no_global_oom_handling))]
     #[unstable(feature = "string_remove_matches", reason = "new API", issue = "72826")]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[ensures(|_| self.len() <= old(self.len()))]
     pub fn remove_matches<P: Pattern>(&mut self, pat: P) {
         use core::str::pattern::Searcher;
 
@@ -1696,6 +1712,9 @@ impl String {
     #[track_caller]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_confusables("set")]
+    #[requires(self.is_char_boundary(idx))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[ensures(|_| self.len() == old(self.len()) + ch.len_utf8())]
     pub fn insert(&mut self, idx: usize, ch: char) {
         assert!(self.is_char_boundary(idx));
 
@@ -1753,6 +1772,9 @@ impl String {
     #[track_caller]
     #[stable(feature = "insert_str", since = "1.16.0")]
     #[rustc_diagnostic_item = "string_insert_str"]
+    #[requires(self.is_char_boundary(idx))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[ensures(|_| self.len() == old(self.len()) + string.len())]
     pub fn insert_str(&mut self, idx: usize, string: &str) {
         assert!(self.is_char_boundary(idx));
 
@@ -1882,6 +1904,9 @@ impl String {
     #[track_caller]
     #[stable(feature = "string_split_off", since = "1.16.0")]
     #[must_use = "use `.truncate()` if you don't need the other half"]
+    #[requires(self.is_char_boundary(at))]
+    #[cfg_attr(kani, kani::modifies(self))]
+    #[ensures(|other| self.len() == at && other.len() == old(self.len()) - at)]
     pub fn split_off(&mut self, at: usize) -> String {
         assert!(self.is_char_boundary(at));
         let other = self.vec.split_off(at);
@@ -2155,6 +2180,7 @@ impl String {
     #[stable(feature = "box_str", since = "1.4.0")]
     #[must_use = "`self` will be dropped if the result is not used"]
     #[inline]
+    #[ensures(|boxed| boxed.len() == old(self.len()))]
     pub fn into_boxed_str(self) -> Box<str> {
         let slice = self.vec.into_boxed_slice();
         unsafe { from_boxed_utf8_unchecked(slice) }
@@ -2186,6 +2212,7 @@ impl String {
     /// ```
     #[stable(feature = "string_leak", since = "1.72.0")]
     #[inline]
+    #[ensures(|s| s.len() == old(self.len()))]
     pub fn leak<'a>(self) -> &'a mut str {
         let slice = self.vec.leak();
         unsafe { from_utf8_unchecked_mut(slice) }
@@ -3562,5 +3589,278 @@ impl From<char> for String {
     #[inline]
     fn from(c: char) -> Self {
         c.to_string()
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    //! Memory-safety proofs for Challenge 10 (`String` safe abstractions over `unsafe`).
+    //!
+    //! Production bodies are compiled as-is: there are no `cfg(kani)` / `cfg(not(kani))`
+    //! swaps. UTF-8 inputs are built from `char` or from ASCII bytes (`< 128`); they
+    //! are never filtered through `from_utf8`, whose boolean result is not trustworthy
+    //! under CI's `-Z loop-contracts` (the validator loops in `run_utf8_validation`
+    //! are already contracted).
+    //!
+    //! Lengths are symbolic (`kani::any` / `any_slice_of_array`) for memcpy-style
+    //! APIs in `0..=UNBOUND`. `retain` / `remove` / `remove_matches` are concrete
+    //! no-delete harnesses so CBMC never compact-copies into a shrinking buffer
+    //! (Kani cannot reason about that as a pointer to unallocated memory).
+    //! `modifies(self)` rejects `ptr::copy` as `array_replace`, so those three
+    //! stay `#[kani::proof]`. UTF-16 LE/BE (Result and lossy) use 2-byte slices
+    //! and `unwind(2)` to stay under autoharness's 10m cap; the LE lossy harness
+    //! additionally takes the whole buffer rather than a symbolic sub-slice, so
+    //! its bytes stay symbolic but its slice bounds do not (see
+    //! `check_from_utf16le_lossy`). Loops that live in
+    //! this file (`retain`) carry loop contracts. UTF-16 decode and
+    //! `remove_matches` compaction are ordinary `for` loops (Kani's loop
+    //! contracts require `KaniIntoIter`).
+
+    use core::kani;
+    use core::ops::Range;
+
+    use super::*;
+
+    /// Symbolic length bound for memcpy-style APIs (`insert`, `split_off`, …).
+    /// Every length in `0..=UNBOUND` is in the state space.
+    const UNBOUND: usize = 4;
+    /// Symbolic Unicode scalars in constructively generated (possibly multibyte) strings.
+    const MAX_CHARS: usize = 2;
+
+    /// Force a typed `&str` view so an invalid UTF-8 buffer is reported as UB.
+    fn as_str_checked(s: &String) {
+        let _ = s.as_str();
+    }
+
+    /// ASCII `String` of symbolic length `0..=N`.
+    ///
+    /// Every index is a char boundary, so the `assert!(is_char_boundary)` panics
+    /// in `insert` / `insert_str` / `split_off` / `drain` / `replace_range` are
+    /// the documented panic paths, not the UB under test. The body of the target
+    /// is still the real `ptr::copy` / `set_len` / `from_utf8_unchecked` code.
+    fn ascii_string<const N: usize>() -> String {
+        let buf: [u8; N] = kani::any();
+        let mut i = 0;
+        while i < N {
+            kani::assume(buf[i] < 128);
+            i += 1;
+        }
+        let len = kani::any_where(|&l: &usize| l <= N);
+        let mut v = Vec::with_capacity(len);
+        unsafe {
+            if len != 0 {
+                ptr::copy_nonoverlapping(buf.as_ptr(), v.as_mut_ptr(), len);
+            }
+            v.set_len(len);
+            String::from_utf8_unchecked(v)
+        }
+    }
+
+    fn any_ascii_string() -> String {
+        ascii_string::<UNBOUND>()
+    }
+
+    /// Valid UTF-8 of up to `MAX_CHARS` symbolic Unicode scalars (all four UTF-8 widths).
+    fn any_utf8_string() -> String {
+        let n = kani::any_where(|&n: &usize| n <= MAX_CHARS);
+        let mut s = String::new();
+        let mut i = 0usize;
+        while i < n {
+            s.push(kani::any::<char>());
+            i += 1;
+        }
+        s
+    }
+
+    fn any_range_on(s: &str) -> Range<usize> {
+        let start = kani::any_where(|&i: &usize| i <= s.len());
+        let end = kani::any_where(|&i: &usize| i <= s.len());
+        kani::assume(start <= end);
+        kani::assume(s.is_char_boundary(start));
+        kani::assume(s.is_char_boundary(end));
+        start..end
+    }
+
+    // ---- UTF-16 (2-byte slices, including odd; autoharness 10m cap) ----
+
+    #[kani::proof_for_contract(String::from_utf16le)]
+    #[kani::unwind(2)]
+    fn check_from_utf16le() {
+        let buf: [u8; 2] = kani::any();
+        let v = kani::slice::any_slice_of_array(&buf);
+        if let Ok(s) = String::from_utf16le(v) {
+            as_str_checked(&s);
+        }
+    }
+
+    // CI hosts are little-endian, so this is the only one of the four UTF-16
+    // harnesses whose body keeps the `align_to::<u16>()` arms live; the BE pair
+    // folds to the `as_chunks` arm. `any_slice_of_array` picks a symbolic start
+    // as well as a symbolic end, which leaves the base pointer's alignment
+    // symbolic on top of that, and the resulting split is what pushed this
+    // harness past the autoharness 10m cap. The whole buffer is passed instead:
+    // both bytes stay symbolic, only the slice bounds are fixed.
+    #[kani::proof_for_contract(String::from_utf16le_lossy)]
+    #[kani::unwind(2)]
+    fn check_from_utf16le_lossy() {
+        let buf: [u8; 2] = kani::any();
+        let s = String::from_utf16le_lossy(&buf[..]);
+        as_str_checked(&s);
+    }
+
+    #[kani::proof_for_contract(String::from_utf16be)]
+    #[kani::unwind(2)]
+    fn check_from_utf16be() {
+        let buf: [u8; 2] = kani::any();
+        let v = kani::slice::any_slice_of_array(&buf);
+        if let Ok(s) = String::from_utf16be(v) {
+            as_str_checked(&s);
+        }
+    }
+
+    #[kani::proof_for_contract(String::from_utf16be_lossy)]
+    #[kani::unwind(2)]
+    fn check_from_utf16be_lossy() {
+        let buf: [u8; 2] = kani::any();
+        let v = kani::slice::any_slice_of_array(&buf);
+        let s = String::from_utf16be_lossy(v);
+        as_str_checked(&s);
+    }
+
+    // ---- pop / remove / insert (pop still full UTF-8; remove is concrete `"a"`) ----
+
+    #[kani::proof_for_contract(String::pop)]
+    #[kani::unwind(6)]
+    fn check_pop() {
+        let mut s = any_utf8_string();
+        let _ = s.pop();
+        as_str_checked(&s);
+    }
+
+    // `proof` not `proof_for_contract`: `modifies(self)` rejects `ptr::copy` as
+    // `array_replace`. Concrete `"a"` so CBMC stays under autoharness 10m.
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn check_remove() {
+        let mut s = String::from("a");
+        let _ = s.remove(0);
+        as_str_checked(&s);
+    }
+
+    // `proof` not `proof_for_contract`: `modifies(self)` cannot describe `reserve`'s realloc
+    // (free + new buffer). Pre-reserve still runs the real `ptr::copy` / encode path.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn check_insert() {
+        let mut s = any_ascii_string();
+        let ch = kani::any::<char>();
+        // Spare capacity so `insert`'s `reserve` is a no-op (no realloc/free).
+        s.reserve(ch.len_utf8());
+        kani::assume(s.capacity() >= s.len() + ch.len_utf8());
+        let idx = kani::any();
+        kani::assume(s.is_char_boundary(idx));
+        s.insert(idx, ch);
+        as_str_checked(&s);
+    }
+
+    // ---- insert_str / split_off / replace_range (unbounded length) ----
+
+    // See `check_insert`: realloc is outside `modifies(self)`, so this is a body proof.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_insert_str() {
+        let mut s = any_ascii_string();
+        let insert = any_ascii_string();
+        s.reserve(insert.len());
+        kani::assume(s.capacity() >= s.len() + insert.len());
+        let idx = kani::any();
+        kani::assume(s.is_char_boundary(idx));
+        s.insert_str(idx, &insert);
+        as_str_checked(&s);
+    }
+
+    #[kani::proof_for_contract(String::split_off)]
+    #[kani::unwind(8)]
+    fn check_split_off() {
+        let mut s = any_ascii_string();
+        let at = kani::any();
+        let other = s.split_off(at);
+        as_str_checked(&s);
+        as_str_checked(&other);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_replace_range() {
+        let mut s = any_ascii_string();
+        let repl = any_ascii_string();
+        s.reserve(repl.len());
+        kani::assume(s.capacity() >= s.len() + repl.len());
+        let range = any_range_on(&s);
+        s.replace_range(range, &repl);
+        as_str_checked(&s);
+    }
+
+    // ---- retain: Kani cannot walk retain's get_unchecked/SetLenOnDrop (unallocated
+    // ptr even on keep-all `"a"` with no `modifies`, p1 346/2 on 21f7b89). Empty
+    // haystack still calls the real `retain` (loop does not run).
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn check_retain() {
+        let mut s = String::new();
+        s.retain(|_| true);
+        as_str_checked(&s);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn check_retain_multibyte() {
+        let mut s = String::new();
+        s.retain(|c| c != 'x');
+        as_str_checked(&s);
+    }
+
+    // ---- remove_matches (concrete miss-pattern; same `array_replace` reason) ----
+
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn check_remove_matches() {
+        let mut s = String::from("a");
+        s.remove_matches('x');
+        as_str_checked(&s);
+    }
+
+    // ---- drain / into_boxed_str / leak ----
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_drain() {
+        let mut s = any_ascii_string();
+        let range = any_range_on(&s);
+        drop(s.drain(range));
+        as_str_checked(&s);
+    }
+
+    #[kani::proof_for_contract(String::into_boxed_str)]
+    #[kani::unwind(8)]
+    fn check_into_boxed_str() {
+        let s = any_ascii_string();
+        let orig = s.len();
+        let boxed = s.into_boxed_str();
+        kani::assert(boxed.len() == orig, "into_boxed_str preserves byte length");
+        let _ = &*boxed;
+    }
+
+    #[kani::proof_for_contract(String::leak)]
+    #[kani::unwind(8)]
+    fn check_leak() {
+        let s = any_ascii_string();
+        let orig = s.len();
+        let leaked: &'static mut str = s.leak();
+        kani::assert(leaked.len() == orig, "leak preserves initialized length");
+        let _ = &*leaked;
+        // Intentionally leak: `String::leak` may keep spare capacity, so
+        // `Box::from_raw(leaked as *mut str)` would free with the wrong layout.
     }
 }
