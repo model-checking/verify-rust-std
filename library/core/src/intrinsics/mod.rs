@@ -2941,12 +2941,12 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: 
 
 /// Return whether the initialization state is preserved.
 ///
-/// For untyped copy, done via `copy` and `copy_nonoverlapping`, the copies of non-initialized
-/// bytes (such as padding bytes) should result in a non-initialized copy, while copies of
-/// initialized bytes result in initialized bytes.
+/// For untyped copy (`copy` and `copy_nonoverlapping`), copying an uninitialized byte (such as a
+/// padding byte) produces an uninitialized byte. Copying an initialized byte produces an
+/// initialized byte.
 ///
-/// It is UB to read the uninitialized bytes, so we cannot compare their values only their
-/// initialization state.
+/// Reading an uninitialized byte is UB, so this check compares only initialization state, never
+/// byte values.
 ///
 /// This is used for contracts only.
 #[allow(dead_code)]
@@ -2956,11 +2956,11 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
     if count > 0 {
         // Inspect a non-deterministically chosen byte in the copy.
         let byte = kani::any_where(|sz: &usize| *sz < size_of::<T>());
-        // Instead of checking each of the `count`-many copies, non-deterministically pick one of
-        // them and check it. Using quantifiers would not add value as we can rely on the solver to
-        // pick an uninitialized element if such an element exists.
+        // Instead of checking every one of the `count` copies, this picks one
+        // non-deterministically and inspects it. Quantifiers add no value here: the solver already
+        // picks an uninitialized element if one exists.
         let elem = kani::any_where(|val: &usize| *val < count);
-        let src_data = src as *const u8;
+        let src_data = unsafe { src.add(elem) } as *const u8;
         let dst_data = unsafe { dst.add(elem) } as *const u8;
         ub_checks::can_dereference(unsafe { src_data.add(byte) })
             == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
@@ -3479,6 +3479,8 @@ mod verify {
 
     use super::*;
     use crate::kani;
+    // Provides `T::IS_ZST` for `write_bytes_wrapper`.
+    use crate::mem::SizedTypeProperties;
 
     #[kani::proof_for_contract(typed_swap_nonoverlapping)]
     pub fn check_typed_swap_u8() {
@@ -3497,36 +3499,126 @@ mod verify {
         });
     }
 
-    // #[kani::proof_for_contract(copy)]
-    // fn check_copy() {
-    //     run_with_arbitrary_ptrs::<char>(|src, dst| unsafe { copy(src, dst, kani::any()) });
-    // }
+    // Kani models `typed_swap_nonoverlapping` with `codegen_swap` instead of its fallback body.
+    // This wrapper copies that body so `#[kani::proof_for_contract]` executes it.
+    // `ptr::swap_nonoverlapping` reaches `copy_nonoverlapping`, never `typed_swap_nonoverlapping`.
+    // The proof is therefore not circular.
+    // Scope limit: this proves the copied fallback meets the contract, not that it equals
+    // `codegen_swap`. Sharing the body would require an out-of-scope std-source refactor.
+    #[cfg_attr(kani, kani::modifies(x))]
+    #[cfg_attr(kani, kani::modifies(y))]
+    #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
+    #[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
+    #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
+    #[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), size_of::<T>(), 1))]
+    #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
+    #[allow(dead_code)]
+    unsafe fn typed_swap_fallback_wrapper<T>(x: *mut T, y: *mut T) {
+        unsafe { crate::ptr::swap_nonoverlapping(x, y, 1) }
+    }
 
-    // #[kani::proof_for_contract(copy_nonoverlapping)]
-    // fn check_copy_nonoverlapping() {
-    //     // Note: cannot use `ArbitraryPointer` here.
-    //     // The `ArbitraryPtr` will arbitrarily initialize memory by indirectly invoking
-    //     // `copy_nonoverlapping`.
-    //     // Kani contract checking would fail due to existing restriction on calls to
-    //     // the function under verification.
-    //     let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
-    //         let base = buf.as_mut_ptr() as *mut u8;
-    //         base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
-    //     };
-    //     let mut buffer1 = [MaybeUninit::<char>::uninit(); 100];
-    //     for i in 0..100 {
-    //         if kani::any() {
-    //             buffer1[i] = MaybeUninit::new(kani::any());
-    //         }
-    //     }
-    //     let mut buffer2 = [MaybeUninit::<char>::uninit(); 100];
-    //     let src = gen_any_ptr(&mut buffer1);
-    //     let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
-    //     unsafe { copy_nonoverlapping(src, dst, kani::any()) }
-    // }
+    #[kani::proof_for_contract(typed_swap_fallback_wrapper)]
+    pub fn check_typed_swap_fallback_u8() {
+        run_with_arbitrary_ptrs::<u8>(|x, y| unsafe { typed_swap_fallback_wrapper(x, y) });
+    }
 
-    //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does
-    //not currently support contracts (https://github.com/model-checking/kani/issues/3345)
+    #[kani::proof_for_contract(typed_swap_fallback_wrapper)]
+    pub fn check_typed_swap_fallback_char() {
+        run_with_arbitrary_ptrs::<char>(|x, y| unsafe { typed_swap_fallback_wrapper(x, y) });
+    }
+
+    #[kani::proof_for_contract(typed_swap_fallback_wrapper)]
+    pub fn check_typed_swap_fallback_non_zero() {
+        run_with_arbitrary_ptrs::<core::num::NonZeroI32>(|x, y| unsafe {
+            typed_swap_fallback_wrapper(x, y)
+        });
+    }
+
+    // kani#3325 rejects contracts on no-body intrinsics. These wrappers carry the contracts.
+    // This is the same workaround used for `transmute_unchecked` in kani#3345.
+    #[requires(!count.overflowing_mul(size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
+        && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), size_of::<T>(), count))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[kani::modifies(crate::ptr::slice_from_raw_parts(dst, count))]
+    #[allow(dead_code)]
+    unsafe fn copy_nonoverlapping_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
+        unsafe { copy_nonoverlapping(src, dst, count) }
+    }
+
+    #[requires(!count.overflowing_mul(size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[kani::modifies(crate::ptr::slice_from_raw_parts(dst, count))]
+    #[allow(dead_code)]
+    unsafe fn copy_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
+        unsafe { copy(src, dst, count) }
+    }
+
+    #[requires(!count.overflowing_mul(size_of::<T>()).1
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[requires(ub_checks::maybe_is_aligned_and_not_null(dst as *const (), align_of::<T>(), T::IS_ZST || count == 0))]
+    #[ensures(|_| ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(dst as *const u8, count * size_of::<T>())))]
+    #[kani::modifies(crate::ptr::slice_from_raw_parts(dst, count))]
+    #[allow(dead_code)]
+    unsafe fn write_bytes_wrapper<T>(dst: *mut T, val: u8, count: usize) {
+        unsafe { write_bytes(dst, val, count) }
+    }
+
+    #[kani::proof_for_contract(copy_wrapper)]
+    fn check_copy() {
+        run_with_arbitrary_ptrs::<char>(|src, dst| {
+            let count: usize = kani::any();
+            // Witness a valid overlap. The same overflow, `can_dereference`, and `can_write`
+            // conditions guard the contract call.
+            let sz = core::mem::size_of::<char>();
+            let s = src as usize;
+            let d = dst as usize;
+            let requires_hold = !count.overflowing_mul(sz).1
+                && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(
+                    src as *const MaybeUninit<char>,
+                    count,
+                ))
+                && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count));
+            let overlap = count > 0
+                && s < d.wrapping_add(count.wrapping_mul(sz))
+                && d < s.wrapping_add(count.wrapping_mul(sz));
+            kani::cover(
+                requires_hold && overlap,
+                "copy: contract-admissible overlapping src/dst (count>0) is reachable",
+            );
+            // Witness valid overlap with a source not fully initialized as `char`.
+            // This makes the `check_copy_untyped` initialization oracle non-trivial.
+            kani::cover(
+                requires_hold && overlap && !ub_checks::can_dereference(src as *const char),
+                "copy: overlapping call with a non-fully-initialized source is reachable",
+            );
+            unsafe { copy_wrapper(src, dst, count) }
+        });
+    }
+
+    #[kani::proof_for_contract(copy_nonoverlapping_wrapper)]
+    fn check_copy_nonoverlapping() {
+        // `ArbitraryPointer` calls `copy_nonoverlapping`, which this contract check forbids.
+        let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
+            let base = buf.as_mut_ptr() as *mut u8;
+            base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
+        };
+        let mut buffer1 = [MaybeUninit::<char>::uninit(); 100];
+        for i in 0..100 {
+            if kani::any() {
+                buffer1[i] = MaybeUninit::new(kani::any());
+            }
+        }
+        let mut buffer2 = [MaybeUninit::<char>::uninit(); 100];
+        let src = gen_any_ptr(&mut buffer1);
+        let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+        unsafe { copy_nonoverlapping_wrapper(src, dst, kani::any()) }
+    }
+
+    // kani#3345 requires a wrapper to contract `transmute_unchecked`.
     #[requires(crate::mem::size_of::<T>() == crate::mem::size_of::<U>())] //T and U have same size (transmute_unchecked does not guarantee this)
     #[requires(ub_checks::can_dereference(&input as *const T as *const U))] //output can be deref'd as value of type U
     #[allow(dead_code)]
@@ -3534,7 +3626,7 @@ mod verify {
         unsafe { transmute_unchecked(input) }
     }
 
-    //generates harness that transmutes arbitrary values of input type to output type
+    // Generate harnesses for arbitrary input values.
     macro_rules! proof_of_contract_for_transmute_unchecked {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof_for_contract(transmute_unchecked_wrapper)]
@@ -3545,16 +3637,16 @@ mod verify {
         };
     }
 
-    //We check the contract for all combinations of primitives
-    //transmute between 1-byte primitives
+    // Check all primitive combinations.
+    // One-byte primitives.
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i8_to_u8, i8, u8);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u8_to_i8, u8, i8);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_bool_to_i8, bool, i8);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_bool_to_u8, bool, u8);
-    //transmute between 2-byte primitives
+    // Two-byte primitives.
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i16_to_u16, i16, u16);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u16_to_i16, u16, i16);
-    //transmute between 4-byte primitives
+    // Four-byte primitives.
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i32_to_u32, i32, u32);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i32_to_f32, i32, f32);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u32_to_i32, u32, i32);
@@ -3564,28 +3656,25 @@ mod verify {
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_char_to_f32, char, f32);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f32_to_i32, f32, i32);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f32_to_u32, f32, u32);
-    //transmute between 8-byte primitives
+    // Eight-byte primitives.
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i64_to_u64, i64, u64);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i64_to_f64, i64, f64);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u64_to_i64, u64, i64);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u64_to_f64, u64, f64);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f64_to_i64, f64, i64);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f64_to_u64, f64, u64);
-    //transmute between 16-byte primitives
+    // Sixteen-byte primitives.
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i128_to_u128, i128, u128);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u128_to_i128, u128, i128);
-    //transmute to type with potentially invalid bit patterns
+    // Outputs with invalid bit patterns.
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i8_to_bool, i8, bool);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u8_to_bool, u8, bool);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_i32_to_char, i32, char);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_u32_to_char, u32, char);
     proof_of_contract_for_transmute_unchecked!(transmute_unchecked_f32_to_char, f32, char);
 
-    //The follow are harnesses that check our function contract (specifically the weakness/strength
-    //of our generic validity precondition)
-    //In particular, should_succeed harnesses check that type-specific validity preconditions imply our generic precondition
-    //should_fail harnesses check that when we assume the negation of a type-specific validity
-    //precondition, the harness should trigger at least one failure
+    // Check the generic validity precondition.
+    // `should_succeed` checks that type rules imply it. `should_fail` negates those rules.
 
     #[kani::proof]
     #[kani::stub_verified(transmute_unchecked_wrapper)]
@@ -3666,12 +3755,9 @@ mod verify {
         let dst: bool = unsafe { transmute_unchecked_wrapper(src) };
     }
 
-    //The following harnesses do the same as above, but for compound types
-    //Since the goal is just to show that the generic precondition can work
-    //with compound types, we keep the examples of compound types simple, rather
-    //than attempting to enumerate them.
+    // Check simple compound types without enumerating them.
 
-    //This is 2-bytes large
+    // Two bytes.
     #[cfg_attr(kani, derive(kani::Arbitrary))]
     #[cfg_attr(kani, derive(PartialEq, Debug))]
     #[derive(Clone, Copy)]
@@ -3726,7 +3812,7 @@ mod verify {
         let dst: [bool; 2] = unsafe { transmute_unchecked_wrapper(src) };
     }
 
-    //generates should_succeed harnesses when the output type has no possible invalid values, like ints
+    // Generate `should_succeed` harnesses for always-valid output types.
     macro_rules! should_succeed_no_validity_reqs {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof]
@@ -3738,16 +3824,16 @@ mod verify {
         };
     }
 
-    //call the above macro for all combinations of primitives where the output value cannot be invalid
-    //transmute between 1-byte primitives
+    // Check primitive combinations with always-valid outputs.
+    // One-byte primitives.
     should_succeed_no_validity_reqs!(should_succeed_i8_to_u8, i8, u8);
     should_succeed_no_validity_reqs!(should_succeed_u8_to_i8, u8, i8);
     should_succeed_no_validity_reqs!(should_succeed_bool_to_i8, bool, i8);
     should_succeed_no_validity_reqs!(should_succeed_bool_to_u8, bool, u8);
-    //transmute between 2-byte primitives
+    // Two-byte primitives.
     should_succeed_no_validity_reqs!(should_succeed_i16_to_u16, i16, u16);
     should_succeed_no_validity_reqs!(should_succeed_u16_to_i16, u16, i16);
-    //transmute between 4-byte primitives
+    // Four-byte primitives.
     should_succeed_no_validity_reqs!(should_succeed_i32_to_u32, i32, u32);
     should_succeed_no_validity_reqs!(should_succeed_i32_to_f32, i32, f32);
     should_succeed_no_validity_reqs!(should_succeed_u32_to_i32, u32, i32);
@@ -3757,22 +3843,19 @@ mod verify {
     should_succeed_no_validity_reqs!(should_succeed_char_to_f32, char, f32);
     should_succeed_no_validity_reqs!(should_succeed_f32_to_i32, f32, i32);
     should_succeed_no_validity_reqs!(should_succeed_f32_to_u32, f32, u32);
-    //transmute between 8-byte primitives
+    // Eight-byte primitives.
     should_succeed_no_validity_reqs!(should_succeed_i64_to_u64, i64, u64);
     should_succeed_no_validity_reqs!(should_succeed_i64_to_f64, i64, f64);
     should_succeed_no_validity_reqs!(should_succeed_u64_to_i64, u64, i64);
     should_succeed_no_validity_reqs!(should_succeed_u64_to_f64, u64, f64);
     should_succeed_no_validity_reqs!(should_succeed_f64_to_i64, f64, i64);
     should_succeed_no_validity_reqs!(should_succeed_f64_to_u64, f64, u64);
-    //transmute between 16-byte primitives
+    // Sixteen-byte primitives.
     should_succeed_no_validity_reqs!(should_succeed_i128_to_u128, i128, u128);
     should_succeed_no_validity_reqs!(should_succeed_u128_to_i128, u128, i128);
 
-    //Note: the following harness fails when it in theory should not
-    //The problem is that ub_checks::can_dereference(), used in a validity precondition
-    //for transmute_unchecked_wrapper, doesn't catch references that refer to invalid values.
-    //Thus, this harness transmutes u8's to invalid bool values
-    //Maybe we can augment can_dereference() to handle this
+    // This fails because `ub_checks::can_dereference()` accepts references to invalid values.
+    // Extend it to reject invalid `bool` values produced from `u8`.
     /*
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
     fn transmute_unchecked_refs() {
@@ -3783,7 +3866,7 @@ mod verify {
         assert!(*int_ref2 == 0 || *int_ref2 == 1);
     }*/
 
-    //tests that transmute works correctly when transmuting something with zero size
+    // Check a zero-sized transmute.
     #[kani::proof_for_contract(transmute_unchecked_wrapper)]
     fn transmute_zero_size() {
         let empty_arr: [u8; 0] = [];
@@ -3791,9 +3874,7 @@ mod verify {
         assert!(unit_val == ());
     }
 
-    //generates harness that transmuted (unchecked) values, and casts them back to the original type
-    //i.e. (src -> dest) then (dest -> src)
-    //we then assert that the resulting value is equal to the initial value
+    // Generate unchecked round-trip harnesses.
     macro_rules! transmute_unchecked_two_ways {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof]
@@ -3807,9 +3888,7 @@ mod verify {
         };
     }
 
-    //generates 2-way harnesses again, but handles the [float => X => float] cases
-    //This is because kani::any can generate NaN floats, so we treat those
-    //separately rather than testing for equality like any other value
+    // Handle float round trips separately because `kani::any` can produce NaN.
     macro_rules! transmute_unchecked_two_ways_from_float {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof]
@@ -3827,18 +3906,18 @@ mod verify {
         };
     }
 
-    //The following invoke transmute_unchecked_two_ways for all the main primitives
-    //transmute 2-ways between 1-byte primitives
+    // Run unchecked round trips for the main primitives.
+    // One-byte primitives.
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i8_to_u8, i8, u8);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i8_to_bool, i8, bool);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u8_to_i8, u8, i8);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u8_to_bool, u8, bool);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_bool_to_i8, bool, i8);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_bool_to_u8, bool, u8);
-    //transmute 2-ways between 2-byte primitives
+    // Two-byte primitives.
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i16_to_u16, i16, u16);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u16_to_i16, u16, i16);
-    //transmute 2-ways between 4-byte primitives
+    // Four-byte primitives.
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i32_to_u32, i32, u32);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i32_to_f32, i32, f32);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i32_to_char, i32, char);
@@ -3851,21 +3930,19 @@ mod verify {
     transmute_unchecked_two_ways_from_float!(transmute_unchecked_2ways_f32_to_i32, f32, i32);
     transmute_unchecked_two_ways_from_float!(transmute_unchecked_2ways_f32_to_u32, f32, u32);
     transmute_unchecked_two_ways_from_float!(transmute_unchecked_2ways_f32_to_char, f32, char);
-    //transmute 2-ways between 8-byte primitives
+    // Eight-byte primitives.
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i64_to_u64, i64, u64);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i64_to_f64, i64, f64);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u64_to_i64, u64, i64);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u64_to_f64, u64, f64);
     transmute_unchecked_two_ways_from_float!(transmute_unchecked_2ways_f64_to_i64, f64, i64);
     transmute_unchecked_two_ways_from_float!(transmute_unchecked_2ways_f64_to_u64, f64, u64);
-    //transmute 2-ways between 16-byte primitives
+    // Sixteen-byte primitives.
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_i128_to_u128, i128, u128);
     transmute_unchecked_two_ways!(transmute_unchecked_2ways_u128_to_i128, u128, i128);
 
-    //Tests that transmuting (unchecked) a ptr does not mutate the stored address
-    //Note: the types being pointed to are intentionally small to avoid alignment issues
-    //The types are otherwise arbitrary -- the point of these harnesses is just to test
-    //that the value passed to transmute_unchecked (i.e., an address) is not mutated
+    // Check that unchecked pointer transmute preserves the address.
+    // Small pointees avoid alignment issues.
     #[kani::proof]
     fn check_transmute_unchecked_ptr_address() {
         let mut generator = PointerGenerator::<10000>::new();
@@ -3874,7 +3951,7 @@ mod verify {
         assert_eq!(arb_ptr as *const bool, arb_ptr_2 as *const u8 as *const bool);
     }
 
-    //Tests that transmuting (unchecked) a ref does not mutate the stored address
+    // Check that unchecked reference transmute preserves the address.
     #[kani::proof]
     fn check_transmute_unchecked_ref_address() {
         let mut generator = PointerGenerator::<10000>::new();
@@ -3884,24 +3961,21 @@ mod verify {
         assert_eq!(arb_ref as *const bool, arb_ref_2 as *const u8 as *const bool);
     }
 
-    //Tests that transmuting (unchecked) a slice does not mutate the slice metadata (address and length)
-    //Here, both the address and length of the slices are non-deterministic
+    // Check that unchecked slice transmute preserves an arbitrary address and length.
     #[kani::proof]
     fn check_transmute_unchecked_slice_metadata() {
         const MAX_SIZE: usize = 32;
         let mut generator = PointerGenerator::<10000>::new();
         let arb_arr_ptr: *const [bool; MAX_SIZE] = generator.any_in_bounds().ptr;
         let arb_slice = kani::slice::any_slice_of_array(unsafe { &*(arb_arr_ptr) });
-        //The following prevents taking redundant slices:
+        // Exclude redundant subslices.
         kani::assume(arb_slice.as_ptr() == arb_arr_ptr as *const bool);
         let arb_slice_2: &[u8] = unsafe { transmute_unchecked(arb_slice) };
         assert_eq!(arb_slice.as_ptr(), arb_slice_2.as_ptr() as *const bool);
         assert_eq!(arb_slice.len(), arb_slice_2.len());
     }
 
-    //generates harness that transmutes values, and casts them back to the original type
-    //i.e. (src -> dest) then (dest -> src)
-    //we then assert that the resulting value is equal to the initial value
+    // Generate checked round-trip harnesses.
     macro_rules! transmute_two_ways {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof]
@@ -3915,9 +3989,7 @@ mod verify {
         };
     }
 
-    //generates 2-way harnesses again, but handles the [float => X => float] cases
-    //This is because kani::any can generate NaN floats, so we treat those
-    //separately rather than testing for equality like any other value
+    // Handle float round trips separately because `kani::any` can produce NaN.
     macro_rules! transmute_two_ways_from_float {
         ($harness:ident, $src:ty, $dst:ty) => {
             #[kani::proof]
@@ -3935,18 +4007,18 @@ mod verify {
         };
     }
 
-    //The following invoke transmute_two_ways for all the main primitives
-    //transmute 2-ways between 1-byte primitives
+    // Run checked round trips for the main primitives.
+    // One-byte primitives.
     transmute_two_ways!(transmute_2ways_i8_to_u8, i8, u8);
     transmute_two_ways!(transmute_2ways_i8_to_bool, i8, bool);
     transmute_two_ways!(transmute_2ways_u8_to_i8, u8, i8);
     transmute_two_ways!(transmute_2ways_u8_to_bool, u8, bool);
     transmute_two_ways!(transmute_2ways_bool_to_i8, bool, i8);
     transmute_two_ways!(transmute_2ways_bool_to_u8, bool, u8);
-    //transmute 2-ways between 2-byte primitives
+    // Two-byte primitives.
     transmute_two_ways!(transmute_2ways_i16_to_u16, i16, u16);
     transmute_two_ways!(transmute_2ways_u16_to_i16, u16, i16);
-    //transmute 2-ways between 4-byte primitives
+    // Four-byte primitives.
     transmute_two_ways!(transmute_2ways_i32_to_u32, i32, u32);
     transmute_two_ways!(transmute_2ways_i32_to_f32, i32, f32);
     transmute_two_ways!(transmute_2ways_i32_to_char, i32, char);
@@ -3959,21 +4031,19 @@ mod verify {
     transmute_two_ways_from_float!(transmute_2ways_f32_to_i32, f32, i32);
     transmute_two_ways_from_float!(transmute_2ways_f32_to_u32, f32, u32);
     transmute_two_ways_from_float!(transmute_2ways_f32_to_char, f32, char);
-    //transmute 2-ways between 8-byte primitives
+    // Eight-byte primitives.
     transmute_two_ways!(transmute_2ways_i64_to_u64, i64, u64);
     transmute_two_ways!(transmute_2ways_i64_to_f64, i64, f64);
     transmute_two_ways!(transmute_2ways_u64_to_i64, u64, i64);
     transmute_two_ways!(transmute_2ways_u64_to_f64, u64, f64);
     transmute_two_ways_from_float!(transmute_2ways_f64_to_i64, f64, i64);
     transmute_two_ways_from_float!(transmute_2ways_f64_to_u64, f64, u64);
-    //transmute 2-ways between 16-byte primitives
+    // Sixteen-byte primitives.
     transmute_two_ways!(transmute_2ways_i128_to_u128, i128, u128);
     transmute_two_ways!(transmute_2ways_u128_to_i128, u128, i128);
 
-    //Tests that transmuting a ptr does not mutate the stored address
-    //Note: the types being pointed to are intentionally small to avoid alignment issues
-    //The types are otherwise arbitrary -- the point of these harnesses is just to test
-    //that the value passed to transmute (i.e., an address) is not mutated
+    // Check that pointer transmute preserves the address.
+    // Small pointees avoid alignment issues.
     #[kani::proof]
     fn check_transmute_ptr_address() {
         let mut generator = PointerGenerator::<10000>::new();
@@ -3982,7 +4052,7 @@ mod verify {
         assert_eq!(arb_ptr as *const bool, arb_ptr_2 as *const u8 as *const bool);
     }
 
-    //Tests that transmuting a ref does not mutate the stored address
+    // Check that reference transmute preserves the address.
     #[kani::proof]
     fn check_transmute_ref_address() {
         let mut generator = PointerGenerator::<10000>::new();
@@ -3992,25 +4062,21 @@ mod verify {
         assert_eq!(arb_ref as *const bool, arb_ref_2 as *const u8 as *const bool);
     }
 
-    //Tests that transmuting a slice does not mutate the slice metadata (address and length)
-    //Here, both the address and length of the slices are non-deterministic
+    // Check that slice transmute preserves an arbitrary address and length.
     #[kani::proof]
     fn check_transmute_slice_metadata() {
         const MAX_SIZE: usize = 32;
         let mut generator = PointerGenerator::<10000>::new();
         let arb_arr_ptr: *const [bool; MAX_SIZE] = generator.any_in_bounds().ptr;
         let arb_slice = kani::slice::any_slice_of_array(unsafe { &*(arb_arr_ptr) });
-        //The following prevents taking redundant slices:
+        // Exclude redundant subslices.
         kani::assume(arb_slice.as_ptr() == arb_arr_ptr as *const bool);
         let arb_slice_2: &[u8] = unsafe { transmute(arb_slice) };
         assert_eq!(arb_slice.as_ptr(), arb_slice_2.as_ptr() as *const bool);
         assert_eq!(arb_slice.len(), arb_slice_2.len());
     }
 
-    //tests that transmutes between compound data structures (currently structs,
-    //arrays, and tuples) do not mutate the underlying data.
-    //To keep things simple, we limit these structures to containing two of whatever
-    //the input type is, since that's the smallest non-trivial amount.
+    // Check two-element structs, arrays, and tuples.
     macro_rules! gen_compound_harnesses {
         ($mod_name:ident, $base_type:ty) => {
             mod $mod_name {
@@ -4024,7 +4090,7 @@ mod verify {
                     f2: $base_type,
                 }
 
-                //transmute harnesses
+                // Checked harnesses.
                 transmute_two_ways!(
                     transmute_2ways_struct_to_arr,
                     generated_struct,
@@ -4055,7 +4121,7 @@ mod verify {
                     ($base_type, $base_type),
                     [$base_type; 2]
                 );
-                //transmute_unchecked harnesses
+                // Unchecked harnesses.
                 transmute_unchecked_two_ways!(
                     transmute_unchecked_2ways_struct_to_arr,
                     generated_struct,
@@ -4098,8 +4164,7 @@ mod verify {
         f2: u8,
     }
 
-    //generate compound harnesses for main primitive types, as well as with
-    //some compound types (to obtain nested compound types)
+    // Generate primitive and nested compound harnesses.
     gen_compound_harnesses!(u8_mod, u8);
     gen_compound_harnesses!(u16_mod, u16);
     gen_compound_harnesses!(u32_mod, u32);
@@ -4116,16 +4181,941 @@ mod verify {
     gen_compound_harnesses!(arr_mod, [u8; 2]);
     gen_compound_harnesses!(struct_mod, u8_struct);
 
-    // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
-    // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
-    // which is a safe operation.
-    #[cfg(not(kani))]
-    #[kani::proof_for_contract(write_bytes)]
+    // Kani 0.67 fixes kani#90. kani#3325 puts this contract on `write_bytes_wrapper`.
+    #[kani::proof_for_contract(write_bytes_wrapper)]
     fn check_write_bytes() {
         let mut generator = PointerGenerator::<100>::new();
         let ArbitraryPointer { ptr, status, .. } = generator.any_alloc_status::<char>();
         kani::assume(supported_status(status));
-        unsafe { write_bytes(ptr, kani::any(), kani::any()) };
+        let count: usize = kani::any();
+        // Witness the kani#90 case: a valid zero-count write to `Null` or `OutOfBounds`.
+        // Zero makes the overflow, `can_write`, and alignment requirements hold.
+        kani::cover(
+            count == 0 && status != AllocationStatus::InBounds,
+            "write_bytes: 0-count write to a non-dereferenceable dst is reachable (kani#90 trigger)",
+        );
+        unsafe { write_bytes_wrapper(ptr, kani::any(), count) };
+    }
+
+    // Independently check each byte written by `write_bytes`. This rejects a no-op.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_write_bytes_sets_value() {
+        let mut buf = [MaybeUninit::<u8>::uninit(); 4];
+        let ptr = buf.as_mut_ptr() as *mut u8;
+        let val: u8 = kani::any();
+        let count: usize = kani::any_where(|c: &usize| *c <= 4);
+        unsafe { write_bytes(ptr, val, count) };
+        for i in 0..count {
+            assert_eq!(unsafe { *ptr.add(i) }, val);
+        }
+        kani::cover(count > 0, "write_bytes value check: nonzero count reached");
+    }
+
+    // kani#3325 and kani#3345 reject contracts on no-body intrinsics.
+    // Thin wrappers carry the same requirements and independent oracles as the plain proofs.
+
+    // `arith_offset` has no safety precondition. See `ptr/const_ptr.rs`.
+    // `check_arith_offset_unconditional_safety` checks all offsets without dereferencing them.
+    // Probe only: the bounded wrapper checks behavior in Kani's pointer model, not the intrinsic's
+    // general contract. CBMC preserves the address identity only within the fixture object.
+    #[requires(offset >= 0 && offset <= 8)]
+    #[ensures(|result| *result as usize == (dst as usize).wrapping_add(offset as usize))]
+    #[allow(dead_code)]
+    unsafe fn arith_offset_wrapper(dst: *const u8, offset: isize) -> *const u8 {
+        unsafe { arith_offset(dst, offset) }
+    }
+
+    #[kani::proof_for_contract(arith_offset_wrapper)]
+    pub fn check_arith_offset_wrapper_contract() {
+        let arr: [u8; 8] = kani::any();
+        let base = arr.as_ptr();
+        // The bound scopes only the pointer-model probe, not safety.
+        let offset: isize = kani::any();
+        let _ = unsafe { arith_offset_wrapper(base, offset) };
+    }
+
+    // Check unconditional `arith_offset` safety for every `offset: isize`.
+    // The cover witnesses a non-null result.
+    #[kani::proof]
+    pub fn check_arith_offset_unconditional_safety() {
+        let arr: [u8; 8] = kani::any();
+        let base = arr.as_ptr();
+        let offset: isize = kani::any();
+        let r = unsafe { arith_offset(base, offset) };
+        kani::cover(!r.is_null(), "arith_offset result observed with unbounded offset (no UB)");
+    }
+
+    // Match `ptr_offset_from` in `ptr/const_ptr.rs`: no overflow, whole elements, same allocation.
+    #[requires(
+        (ptr as isize).checked_sub(base as isize).is_some()
+            && (ptr as isize - base as isize) % (size_of::<u8>() as isize) == 0
+            && (ptr as isize == base as isize || ub_checks::same_allocation(ptr, base))
+    )]
+    #[ensures(|result| *result == (ptr as isize - base as isize) / (size_of::<u8>() as isize))]
+    #[allow(dead_code)]
+    unsafe fn ptr_offset_from_wrapper(ptr: *const u8, base: *const u8) -> isize {
+        unsafe { ptr_offset_from(ptr, base) }
+    }
+
+    #[kani::proof_for_contract(ptr_offset_from_wrapper)]
+    pub fn check_ptr_offset_from_wrapper_contract() {
+        let arr_a: [u8; 8] = kani::any();
+        let arr_b: [u8; 8] = kani::any();
+        let base_a = arr_a.as_ptr();
+        let base_b = arr_b.as_ptr();
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i <= 8 && j <= 8);
+        // Reach both same- and cross-allocation pairs. `#[requires]` filters them.
+        let pi_from_a: bool = kani::any();
+        let pj_from_a: bool = kani::any();
+        let pi = if pi_from_a { unsafe { base_a.add(i) } } else { unsafe { base_b.add(i) } };
+        let pj = if pj_from_a { unsafe { base_a.add(j) } } else { unsafe { base_b.add(j) } };
+        let _ = unsafe { ptr_offset_from_wrapper(pi, pj) };
+    }
+
+    // `ptr_offset_from_unsigned` also requires `ptr >= base`. See `ptr/const_ptr.rs`.
+    #[requires(
+        (ptr as isize).checked_sub(base as isize).is_some()
+            && (ptr as isize - base as isize) % (size_of::<u8>() as isize) == 0
+            && (ptr as isize == base as isize || ub_checks::same_allocation(ptr, base))
+            && ptr as usize >= base as usize
+    )]
+    #[ensures(|result| *result == (ptr as usize - base as usize) / size_of::<u8>())]
+    #[allow(dead_code)]
+    unsafe fn ptr_offset_from_unsigned_wrapper(ptr: *const u8, base: *const u8) -> usize {
+        unsafe { ptr_offset_from_unsigned(ptr, base) }
+    }
+
+    #[kani::proof_for_contract(ptr_offset_from_unsigned_wrapper)]
+    pub fn check_ptr_offset_from_unsigned_wrapper_contract() {
+        let arr_a: [u8; 8] = kani::any();
+        let arr_b: [u8; 8] = kani::any();
+        let base_a = arr_a.as_ptr();
+        let base_b = arr_b.as_ptr();
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i <= 8 && j <= 8);
+        let pi_from_a: bool = kani::any();
+        let pj_from_a: bool = kani::any();
+        let pi = if pi_from_a { unsafe { base_a.add(i) } } else { unsafe { base_b.add(i) } };
+        let pj = if pj_from_a { unsafe { base_a.add(j) } } else { unsafe { base_b.add(j) } };
+        let _ = unsafe { ptr_offset_from_unsigned_wrapper(pi, pj) };
+    }
+
+    // `read_via_copy` requires a projection-free local accepted by `can_dereference`.
+    // A plain load is the independent oracle.
+    #[requires(ub_checks::can_dereference(ptr))]
+    #[ensures(|result| *result == unsafe { *ptr })]
+    #[allow(dead_code)]
+    unsafe fn read_via_copy_wrapper(ptr: *const u32) -> u32 {
+        unsafe { read_via_copy(ptr) }
+    }
+
+    #[kani::proof_for_contract(read_via_copy_wrapper)]
+    pub fn check_read_via_copy_wrapper_contract() {
+        let val: u32 = kani::any();
+        let local = val;
+        let ptr: *const u32 = &local;
+        let _ = unsafe { read_via_copy_wrapper(ptr) };
+    }
+
+    // `write_via_move` requires `can_write`. A plain dereference is the independent oracle.
+    #[cfg_attr(kani, kani::modifies(ptr))]
+    #[requires(ub_checks::can_write(ptr))]
+    #[ensures(|_| unsafe { *ptr } == value)]
+    #[allow(dead_code)]
+    unsafe fn write_via_move_wrapper(ptr: *mut u32, value: u32) {
+        unsafe { write_via_move(ptr, value) }
+    }
+
+    #[kani::proof_for_contract(write_via_move_wrapper)]
+    pub fn check_write_via_move_wrapper_contract() {
+        let val: u32 = kani::any();
+        let mut local: u32 = kani::any();
+        let ptr: *mut u32 = &mut local;
+        unsafe { write_via_move_wrapper(ptr, val) };
+    }
+
+    // `compare_bytes` requires both regions to be readable for `bytes` bytes.
+    // An independent loop checks every symbolic `bytes` value.
+    // `COMPARE_BYTES_CAP` bounds only the harness, not the contract.
+    const COMPARE_BYTES_CAP: usize = 4;
+    #[requires(ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(left, bytes))
+        && ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(right, bytes)))]
+    #[ensures(|result| {
+        // Independently compare the first `bytes` bytes.
+        let mut idx = 0;
+        let mut verdict: i32 = 0;
+        let mut decided = false;
+        while idx < bytes {
+            let lb = unsafe { *left.add(idx) };
+            let rb = unsafe { *right.add(idx) };
+            if !decided && lb != rb {
+                verdict = if lb < rb { -1 } else { 1 };
+                decided = true;
+            }
+            idx += 1;
+        }
+        if decided {
+            (verdict < 0 && *result < 0) || (verdict > 0 && *result > 0)
+        } else {
+            *result == 0
+        }
+    })]
+    #[allow(dead_code)]
+    unsafe fn compare_bytes_wrapper(left: *const u8, right: *const u8, bytes: usize) -> i32 {
+        unsafe { compare_bytes(left, right, bytes) }
+    }
+
+    #[kani::unwind(5)] // CAP (4) + 1
+    #[kani::proof_for_contract(compare_bytes_wrapper)]
+    pub fn check_compare_bytes_wrapper_contract() {
+        const CAP: usize = COMPARE_BYTES_CAP;
+        let left: [u8; CAP] = kani::any();
+        let right: [u8; CAP] = kani::any();
+        let bytes: usize = kani::any();
+        kani::assume(bytes <= CAP);
+        let _ = unsafe { compare_bytes_wrapper(left.as_ptr(), right.as_ptr(), bytes) };
+    }
+
+    // For sized `T`, `size_of_val` reads no memory and accepts any pointer.
+    // `size_of::<T>()` is the independent oracle. The harness covers null, dangling, and raw cases.
+    // Residual: this wrapper excludes `?Sized`, whose metadata must be valid. Later wrappers cover
+    // trait objects and slices.
+    #[ensures(|result| *result == core::mem::size_of::<T>())]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_wrapper<T>(ptr: *const T) -> usize {
+        unsafe { size_of_val(ptr) }
+    }
+
+    #[kani::proof_for_contract(size_of_val_wrapper)]
+    pub fn check_size_of_val_wrapper_contract() {
+        let val: u32 = kani::any();
+        let raw_addr: usize = kani::any();
+        let case: u8 = kani::any();
+        kani::assume(case < 4);
+        let ptr: *const u32 = match case {
+            0 => core::ptr::null(),
+            1 => core::ptr::NonNull::<u32>::dangling().as_ptr() as *const u32,
+            2 => raw_addr as *const u32,
+            _ => &val as *const u32,
+        };
+        kani::cover(case == 0, "size_of_val: null pointer case reached");
+        kani::cover(case == 1, "size_of_val: dangling pointer case reached");
+        kani::cover(case == 2, "size_of_val: nondet-address pointer case reached");
+        let _ = unsafe { size_of_val_wrapper::<u32>(ptr) };
+    }
+
+    // `size_of_val` for `?Sized` uses metadata. These wrappers establish its documented conditions.
+    // The trait-object wrapper creates the vtable by unsizing. `size_of::<T>()` is its oracle.
+    // The slice wrapper requires initialized `len` metadata whose byte size fits in `isize`.
+    // Its oracle is `size_of::<T>() * len`; the ZST branch avoids division by zero.
+    // Residual: composite unsized tails are not instantiated. Kani models them, so this is only
+    // untested scope. Extern types are excluded because Kani's model panics on them.
+    #[ensures(|result| *result == core::mem::size_of::<T>())]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_dyn_wrapper<T: core::fmt::Debug>(ptr: *const T) -> usize {
+        // The unsize coercion creates a valid vtable bound to `T`.
+        let dyn_ptr: *const dyn core::fmt::Debug = ptr;
+        unsafe { size_of_val(dyn_ptr) }
+    }
+
+    #[requires(
+        core::mem::size_of::<T>() == 0
+            || len <= (isize::MAX as usize) / core::mem::size_of::<T>()
+    )]
+    #[ensures(|result| *result == core::mem::size_of::<T>() * len)]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_slice_wrapper<T>(ptr: *const T, len: usize) -> usize {
+        let slice_ptr: *const [T] = crate::ptr::slice_from_raw_parts(ptr, len);
+        unsafe { size_of_val(slice_ptr) }
+    }
+
+    #[kani::proof_for_contract(size_of_val_dyn_wrapper)]
+    pub fn check_size_of_val_dyn_wrapper_contract_u32() {
+        let val: u32 = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u32 = if real { &val } else { addr as *const u32 };
+        kani::cover(!real, "size_of_val dyn u32: nondet-address pointer case reached");
+        let _ = unsafe { size_of_val_dyn_wrapper::<u32>(ptr) };
+    }
+
+    // Distinguish the size slot from alignment with an 8-byte, 1-aligned type.
+    #[kani::proof_for_contract(size_of_val_dyn_wrapper)]
+    pub fn check_size_of_val_dyn_wrapper_contract_arr_u8_8() {
+        let val: [u8; 8] = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const [u8; 8] = if real { &val } else { addr as *const [u8; 8] };
+        kani::cover(!real, "size_of_val dyn [u8; 8]: nondet-address pointer case reached");
+        let _ = unsafe { size_of_val_dyn_wrapper::<[u8; 8]>(ptr) };
+    }
+
+    // Add an independent `(size, align) = (16, 16)` case.
+    // Residual: only a composite unsized tail can exercise non-trivial alignment rounding.
+    #[kani::proof_for_contract(size_of_val_dyn_wrapper)]
+    pub fn check_size_of_val_dyn_wrapper_contract_over_aligned() {
+        let val = OverAligned16(kani::any());
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const OverAligned16 = if real { &val } else { addr as *const OverAligned16 };
+        kani::cover(!real, "size_of_val dyn OverAligned16: nondet-address case reached");
+        let _ = unsafe { size_of_val_dyn_wrapper::<OverAligned16>(ptr) };
+    }
+
+    #[kani::proof_for_contract(size_of_val_dyn_wrapper)]
+    pub fn check_size_of_val_dyn_wrapper_contract_zst() {
+        let val = VtableZst;
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const VtableZst = if real { &val } else { addr as *const VtableZst };
+        kani::cover(!real, "size_of_val dyn ZST: nondet-address pointer case reached");
+        let _ = unsafe { size_of_val_dyn_wrapper::<VtableZst>(ptr) };
+    }
+
+    // Check every contract-valid symbolic `len`. `size_of_val` reads only slice metadata.
+    #[kani::proof_for_contract(size_of_val_slice_wrapper)]
+    pub fn check_size_of_val_slice_wrapper_contract_u8() {
+        let val: [u8; 4] = kani::any();
+        let len: usize = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u8 = if real { val.as_ptr() } else { addr as *const u8 };
+        kani::cover(len == 0, "size_of_val slice u8: zero-length case reached");
+        kani::cover(len > 1, "size_of_val slice u8: multi-element case reached");
+        let _ = unsafe { size_of_val_slice_wrapper::<u8>(ptr, len) };
+    }
+
+    #[kani::proof_for_contract(size_of_val_slice_wrapper)]
+    pub fn check_size_of_val_slice_wrapper_contract_u32() {
+        let val: [u32; 4] = kani::any();
+        let len: usize = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u32 = if real { val.as_ptr() } else { addr as *const u32 };
+        kani::cover(len == 0, "size_of_val slice u32: zero-length case reached");
+        kani::cover(len > 1, "size_of_val slice u32: multi-element case reached");
+        let _ = unsafe { size_of_val_slice_wrapper::<u32>(ptr, len) };
+    }
+
+    // A 16-byte element reaches the `isize::MAX` bound earliest.
+    #[kani::proof_for_contract(size_of_val_slice_wrapper)]
+    pub fn check_size_of_val_slice_wrapper_contract_over_aligned() {
+        let val = OverAligned16(kani::any());
+        let len: usize = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const OverAligned16 = if real { &val } else { addr as *const OverAligned16 };
+        kani::cover(len == 0, "size_of_val slice OverAligned16: zero-length case reached");
+        kani::cover(len > 1, "size_of_val slice OverAligned16: multi-element case reached");
+        let _ = unsafe { size_of_val_slice_wrapper::<OverAligned16>(ptr, len) };
+    }
+
+    // Exercise the ZST branch for every `len`, including `usize::MAX`.
+    #[kani::proof_for_contract(size_of_val_slice_wrapper)]
+    pub fn check_size_of_val_slice_wrapper_contract_zst_elem() {
+        let val = VtableZst;
+        let len: usize = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const VtableZst = if real { &val } else { addr as *const VtableZst };
+        kani::cover(len == usize::MAX, "size_of_val slice ZST elem: usize::MAX length reached");
+        let _ = unsafe { size_of_val_slice_wrapper::<VtableZst>(ptr, len) };
+    }
+
+    // Check `volatile_load` and `volatile_store` by value-preserving round trips.
+    // Residual: `can_dereference` and `can_write` cover only Rust-backed allocations. Kani's
+    // pointer model cannot represent the documented external-memory MMIO case.
+    #[requires(ub_checks::can_dereference(src))]
+    #[ensures(|result| *result == unsafe { *src })]
+    #[allow(dead_code)]
+    unsafe fn volatile_load_wrapper(src: *const u32) -> u32 {
+        unsafe { volatile_load(src) }
+    }
+
+    #[kani::proof_for_contract(volatile_load_wrapper)]
+    pub fn check_volatile_load_wrapper_contract() {
+        let val: u32 = kani::any();
+        let local = val;
+        let ptr: *const u32 = &local;
+        let _ = unsafe { volatile_load_wrapper(ptr) };
+    }
+
+    #[cfg_attr(kani, kani::modifies(dst))]
+    #[requires(ub_checks::can_write(dst))]
+    #[ensures(|_| unsafe { *dst } == val)]
+    #[allow(dead_code)]
+    unsafe fn volatile_store_wrapper(dst: *mut u32, val: u32) {
+        unsafe { volatile_store(dst, val) }
+    }
+
+    #[kani::proof_for_contract(volatile_store_wrapper)]
+    pub fn check_volatile_store_wrapper_contract() {
+        let val: u32 = kani::any();
+        let mut local: u32 = kani::any();
+        let ptr: *mut u32 = &mut local;
+        unsafe { volatile_store_wrapper(ptr, val) };
+    }
+
+    // Monomorphic probe, not the general `vtable_size` or `vtable_align` contract.
+    // Raw `*const ()` erases the link between `T` and the vtable. `can_dereference` only proves
+    // that three `usize`s are readable. Each wrapper therefore checks one fixed `T` only.
+    // These probes keep the intrinsic's exact signature but are excluded from the verified count.
+    #[requires(ub_checks::can_dereference(ptr as *const [usize; 3]))]
+    #[ensures(|result| *result == core::mem::size_of::<T>())]
+    #[allow(dead_code)]
+    unsafe fn vtable_size_wrapper<T>(ptr: *const ()) -> usize {
+        unsafe { vtable_size(ptr) }
+    }
+
+    #[requires(ub_checks::can_dereference(ptr as *const [usize; 3]))]
+    #[ensures(|result| *result == core::mem::align_of::<T>())]
+    #[allow(dead_code)]
+    unsafe fn vtable_align_wrapper<T>(ptr: *const ()) -> usize {
+        unsafe { vtable_align(ptr) }
+    }
+
+    // Mirror private `DynMetadata::vtable_ptr`; the compiler guarantees this transmute layout.
+    // `dyn core::fmt::Debug` meets the renamed `PointeeSized` bound.
+    fn vtable_ptr_of<Dyn: core::fmt::Debug + ?Sized>(
+        meta: crate::ptr::DynMetadata<Dyn>,
+    ) -> *const () {
+        unsafe { crate::mem::transmute::<crate::ptr::DynMetadata<Dyn>, *const ()>(meta) }
+    }
+
+    #[kani::proof_for_contract(vtable_size_wrapper)]
+    pub fn check_vtable_size_wrapper_contract() {
+        let val: u32 = kani::any();
+        let debug_ref: &dyn core::fmt::Debug = &val;
+        let meta = crate::ptr::metadata(debug_ref as *const dyn core::fmt::Debug);
+        let vtable_ptr = vtable_ptr_of(meta);
+        let _ = unsafe { vtable_size_wrapper::<u32>(vtable_ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_wrapper)]
+    pub fn check_vtable_align_wrapper_contract() {
+        let val: u32 = kani::any();
+        let debug_ref: &dyn core::fmt::Debug = &val;
+        let meta = crate::ptr::metadata(debug_ref as *const dyn core::fmt::Debug);
+        let vtable_ptr = vtable_ptr_of(meta);
+        let _ = unsafe { vtable_align_wrapper::<u32>(vtable_ptr) };
+    }
+
+    // A second monomorphic probe uses `T = u64`; this is still not a generic proof.
+    #[kani::proof_for_contract(vtable_size_wrapper)]
+    pub fn check_vtable_size_wrapper_contract_u64() {
+        let val: u64 = kani::any();
+        let debug_ref: &dyn core::fmt::Debug = &val;
+        let meta = crate::ptr::metadata(debug_ref as *const dyn core::fmt::Debug);
+        let vtable_ptr = vtable_ptr_of(meta);
+        let _ = unsafe { vtable_size_wrapper::<u64>(vtable_ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_wrapper)]
+    pub fn check_vtable_align_wrapper_contract_u64() {
+        let val: u64 = kani::any();
+        let debug_ref: &dyn core::fmt::Debug = &val;
+        let meta = crate::ptr::metadata(debug_ref as *const dyn core::fmt::Debug);
+        let vtable_ptr = vtable_ptr_of(meta);
+        let _ = unsafe { vtable_align_wrapper::<u64>(vtable_ptr) };
+    }
+
+    // General `vtable_size` and `vtable_align` contracts.
+    // Taking `*const T` and unsizing inside the wrapper binds the vtable to `T`.
+    // Kani emits its `codegen_vtable`, so callers cannot substitute another type's vtable.
+    // The wrapper establishes the documented vtable precondition and needs no `#[requires]`.
+    // Residual: rustc's `layout_of` supplies both the vtable constant and `size_of::<T>()`.
+    // The proof still checks vtable selection, `Kani::CommonVTable` slot layout, and rustc's value
+    // against CBMC's independent `__CPROVER_OBJECT_SIZE` value.
+    // It cannot detect `layout_of` disagreeing with the final LLVM vtable.
+    // Residual: the wrappers use only `core::fmt::Debug`. Rustc fixes size, align, and drop as the
+    // first three slots for every trait, but this does not prove all traits.
+    // Keep the raw `*const ()` wrappers above as monomorphic probes of the intrinsic's exact form.
+    // Only these typed contracts count as general contracts.
+    #[ensures(|result| *result == core::mem::size_of::<T>())]
+    #[allow(dead_code)]
+    unsafe fn vtable_size_coerced_wrapper<T: core::fmt::Debug>(ptr: *const T) -> usize {
+        // The unsize coercion binds the vtable to `T`.
+        let dyn_ptr: *const dyn core::fmt::Debug = ptr;
+        let vtable_ptr = vtable_ptr_of(crate::ptr::metadata(dyn_ptr));
+        unsafe { vtable_size(vtable_ptr) }
+    }
+
+    #[ensures(|result| *result == core::mem::align_of::<T>())]
+    #[allow(dead_code)]
+    unsafe fn vtable_align_coerced_wrapper<T: core::fmt::Debug>(ptr: *const T) -> usize {
+        // The unsize coercion binds the vtable to `T`.
+        let dyn_ptr: *const dyn core::fmt::Debug = ptr;
+        let vtable_ptr = vtable_ptr_of(crate::ptr::metadata(dyn_ptr));
+        unsafe { vtable_align(vtable_ptr) }
+    }
+
+    // Trivial `Debug` impls avoid unused formatting code in the vtables.
+    struct VtableZst;
+    impl core::fmt::Debug for VtableZst {
+        fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            Ok(())
+        }
+    }
+
+    // Size 16, alignment 8.
+    #[repr(C)]
+    struct MixedAlign {
+        a: u8,
+        b: u64,
+    }
+    impl core::fmt::Debug for MixedAlign {
+        fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            Ok(())
+        }
+    }
+
+    // Size 16, alignment 16.
+    #[repr(align(16))]
+    struct OverAligned16(#[allow(dead_code)] u8);
+    impl core::fmt::Debug for OverAligned16 {
+        fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            Ok(())
+        }
+    }
+
+    #[kani::proof_for_contract(vtable_size_coerced_wrapper)]
+    pub fn check_vtable_size_coerced_wrapper_contract_u8() {
+        let val: u8 = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u8 = if real { &val } else { addr as *const u8 };
+        kani::cover(!real, "vtable_size coerced u8: nondet-address pointer case reached");
+        let _ = unsafe { vtable_size_coerced_wrapper::<u8>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_coerced_wrapper)]
+    pub fn check_vtable_align_coerced_wrapper_contract_u8() {
+        let val: u8 = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u8 = if real { &val } else { addr as *const u8 };
+        kani::cover(!real, "vtable_align coerced u8: nondet-address pointer case reached");
+        let _ = unsafe { vtable_align_coerced_wrapper::<u8>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_size_coerced_wrapper)]
+    pub fn check_vtable_size_coerced_wrapper_contract_u32() {
+        let val: u32 = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u32 = if real { &val } else { addr as *const u32 };
+        kani::cover(!real, "vtable_size coerced u32: nondet-address pointer case reached");
+        let _ = unsafe { vtable_size_coerced_wrapper::<u32>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_coerced_wrapper)]
+    pub fn check_vtable_align_coerced_wrapper_contract_u32() {
+        let val: u32 = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u32 = if real { &val } else { addr as *const u32 };
+        kani::cover(!real, "vtable_align coerced u32: nondet-address pointer case reached");
+        let _ = unsafe { vtable_align_coerced_wrapper::<u32>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_size_coerced_wrapper)]
+    pub fn check_vtable_size_coerced_wrapper_contract_u64() {
+        let val: u64 = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u64 = if real { &val } else { addr as *const u64 };
+        kani::cover(!real, "vtable_size coerced u64: nondet-address pointer case reached");
+        let _ = unsafe { vtable_size_coerced_wrapper::<u64>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_coerced_wrapper)]
+    pub fn check_vtable_align_coerced_wrapper_contract_u64() {
+        let val: u64 = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const u64 = if real { &val } else { addr as *const u64 };
+        kani::cover(!real, "vtable_align coerced u64: nondet-address pointer case reached");
+        let _ = unsafe { vtable_align_coerced_wrapper::<u64>(ptr) };
+    }
+
+    // Size 8, alignment 1 rejects a `T = u32` monomorphic claim.
+    #[kani::proof_for_contract(vtable_size_coerced_wrapper)]
+    pub fn check_vtable_size_coerced_wrapper_contract_arr_u8_8() {
+        let val: [u8; 8] = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const [u8; 8] = if real { &val } else { addr as *const [u8; 8] };
+        kani::cover(!real, "vtable_size coerced [u8; 8]: nondet-address pointer case reached");
+        let _ = unsafe { vtable_size_coerced_wrapper::<[u8; 8]>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_coerced_wrapper)]
+    pub fn check_vtable_align_coerced_wrapper_contract_arr_u8_8() {
+        let val: [u8; 8] = kani::any();
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const [u8; 8] = if real { &val } else { addr as *const [u8; 8] };
+        kani::cover(!real, "vtable_align coerced [u8; 8]: nondet-address pointer case reached");
+        let _ = unsafe { vtable_align_coerced_wrapper::<[u8; 8]>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_size_coerced_wrapper)]
+    pub fn check_vtable_size_coerced_wrapper_contract_zst() {
+        let val = VtableZst;
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const VtableZst = if real { &val } else { addr as *const VtableZst };
+        kani::cover(!real, "vtable_size coerced ZST: nondet-address pointer case reached");
+        let _ = unsafe { vtable_size_coerced_wrapper::<VtableZst>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_coerced_wrapper)]
+    pub fn check_vtable_align_coerced_wrapper_contract_zst() {
+        let val = VtableZst;
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const VtableZst = if real { &val } else { addr as *const VtableZst };
+        kani::cover(!real, "vtable_align coerced ZST: nondet-address pointer case reached");
+        let _ = unsafe { vtable_align_coerced_wrapper::<VtableZst>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_size_coerced_wrapper)]
+    pub fn check_vtable_size_coerced_wrapper_contract_mixed_align() {
+        let val = MixedAlign { a: kani::any(), b: kani::any() };
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const MixedAlign = if real { &val } else { addr as *const MixedAlign };
+        kani::cover(!real, "vtable_size coerced MixedAlign: nondet-address pointer case reached");
+        let _ = unsafe { vtable_size_coerced_wrapper::<MixedAlign>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_coerced_wrapper)]
+    pub fn check_vtable_align_coerced_wrapper_contract_mixed_align() {
+        let val = MixedAlign { a: kani::any(), b: kani::any() };
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const MixedAlign = if real { &val } else { addr as *const MixedAlign };
+        kani::cover(!real, "vtable_align coerced MixedAlign: nondet-address pointer case reached");
+        let _ = unsafe { vtable_align_coerced_wrapper::<MixedAlign>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_size_coerced_wrapper)]
+    pub fn check_vtable_size_coerced_wrapper_contract_over_aligned() {
+        let val = OverAligned16(kani::any());
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const OverAligned16 = if real { &val } else { addr as *const OverAligned16 };
+        kani::cover(!real, "vtable_size coerced OverAligned16: nondet-address case reached");
+        let _ = unsafe { vtable_size_coerced_wrapper::<OverAligned16>(ptr) };
+    }
+
+    #[kani::proof_for_contract(vtable_align_coerced_wrapper)]
+    pub fn check_vtable_align_coerced_wrapper_contract_over_aligned() {
+        let val = OverAligned16(kani::any());
+        let addr: usize = kani::any();
+        let real: bool = kani::any();
+        let ptr: *const OverAligned16 = if real { &val } else { addr as *const OverAligned16 };
+        kani::cover(!real, "vtable_align coerced OverAligned16: nondet-address case reached");
+        let _ = unsafe { vtable_align_coerced_wrapper::<OverAligned16>(ptr) };
+    }
+
+    // Behavioral probe: check Kani's no-body `arith_offset` model with an in-bounds offset.
+    // `library/core/src/ptr/const_ptr.rs` gives `arith_offset` no call preconditions.
+    #[kani::proof]
+    pub fn check_arith_offset_no_ub() {
+        let arr: [u8; 8] = kani::any();
+        let base = arr.as_ptr();
+        let offset: isize = kani::any();
+        kani::assume(offset >= 0 && offset <= 8);
+        let p = unsafe { arith_offset(base, offset) };
+        assert_eq!(p as usize, (base as usize).wrapping_add(offset as usize));
+        kani::cover(p as usize != base as usize, "nonzero offset reached");
+    }
+
+    // Check `ptr_offset_from` on two positions in one array against their index difference.
+    #[kani::proof]
+    pub fn check_ptr_offset_from_no_ub() {
+        let arr: [u8; 8] = kani::any();
+        let base = arr.as_ptr();
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i <= 8 && j <= 8);
+        let pi = unsafe { base.add(i) };
+        let pj = unsafe { base.add(j) };
+        let d = unsafe { ptr_offset_from(pi, pj) };
+        assert_eq!(d, i as isize - j as isize);
+        kani::cover(pi as usize != pj as usize, "nonzero offset reached");
+    }
+
+    // Check non-negative `ptr_offset_from_unsigned` against the unsigned index difference.
+    #[kani::proof]
+    pub fn check_ptr_offset_from_unsigned_no_ub() {
+        let arr: [u8; 8] = kani::any();
+        let base = arr.as_ptr();
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i <= 8 && j <= 8 && i >= j);
+        let pi = unsafe { base.add(i) };
+        let pj = unsafe { base.add(j) };
+        let d = unsafe { ptr_offset_from_unsigned(pi, pj) };
+        assert_eq!(d, i - j);
+        kani::cover(d > 0, "nonzero unsigned offset reached");
+    }
+
+    // Check `read_via_copy` against an ordinary assignment as an independent oracle.
+    #[kani::proof]
+    pub fn check_read_via_copy_no_ub() {
+        let val: u32 = kani::any();
+        let local = val;
+        let ptr: *const u32 = &local;
+        let read_back = unsafe { read_via_copy(ptr) };
+        assert_eq!(read_back, val);
+        kani::cover(read_back == val, "read_via_copy reproduced the written value");
+    }
+
+    // Check `write_via_move` with an independent plain pointer read.
+    #[kani::proof]
+    pub fn check_write_via_move_no_ub() {
+        let val: u32 = kani::any();
+        let mut local: u32 = kani::any();
+        let ptr: *mut u32 = &mut local;
+        unsafe { write_via_move(ptr, val) };
+        let observed = unsafe { *ptr };
+        assert_eq!(observed, val);
+        kani::cover(observed == val, "write_via_move's write is observable via a plain deref");
+    }
+
+    // Check `compare_bytes` against an independent lexicographic comparison of two-byte arrays.
+    // Cover equal, less, and greater results.
+    fn lexicographic_cmp_u8(a: &[u8; 2], b: &[u8; 2]) -> core::cmp::Ordering {
+        match a[0].cmp(&b[0]) {
+            core::cmp::Ordering::Equal => a[1].cmp(&b[1]),
+            other => other,
+        }
+    }
+
+    #[kani::proof]
+    pub fn check_compare_bytes_no_ub() {
+        let left: [u8; 2] = kani::any();
+        let right: [u8; 2] = kani::any();
+        let result = unsafe { compare_bytes(left.as_ptr(), right.as_ptr(), 2) };
+        let expected = lexicographic_cmp_u8(&left, &right);
+        match expected {
+            core::cmp::Ordering::Equal => assert_eq!(result, 0),
+            core::cmp::Ordering::Less => assert!(result < 0),
+            core::cmp::Ordering::Greater => assert!(result > 0),
+        }
+        kani::cover(result == 0, "compare_bytes: equal buffers reached");
+        kani::cover(result < 0, "compare_bytes: left < right reached");
+        kani::cover(result > 0, "compare_bytes: left > right reached");
+    }
+
+    // Check sized `size_of_val` against the independent `size_of::<T>()` builtin.
+    #[kani::proof]
+    pub fn check_size_of_val_u32_no_ub() {
+        let val: u32 = kani::any();
+        let ptr: *const u32 = &val;
+        let sz = unsafe { size_of_val(ptr) };
+        assert_eq!(sz, core::mem::size_of::<u32>());
+        kani::cover(sz == 4, "size_of_val(&u32) reached the expected byte count");
+    }
+
+    // kani#3325 blocks contracts, but not plain proofs, on these no-body intrinsics.
+
+    // Check `copy_nonoverlapping` against an independent element-wise copy.
+    #[kani::proof]
+    pub fn check_copy_nonoverlapping_no_ub() {
+        const N: usize = 4;
+        let src: [u32; N] = kani::any();
+        let mut dst: [u32; N] = kani::any();
+        let mut oracle = dst;
+        unsafe { copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), N) };
+        for i in 0..N {
+            oracle[i] = src[i];
+        }
+        assert_eq!(dst, oracle);
+        kani::cover(dst == src, "copy_nonoverlapping: dst now equals src (full copy observed)");
+    }
+
+    // Check `copy` against an independent overlap-safe element-wise copy.
+    #[kani::proof]
+    pub fn check_copy_no_ub() {
+        const N: usize = 4;
+        let src: [u32; N] = kani::any();
+        let mut dst: [u32; N] = kani::any();
+        let mut oracle = dst;
+        unsafe { copy(src.as_ptr(), dst.as_mut_ptr(), N) };
+        for i in 0..N {
+            oracle[i] = src[i];
+        }
+        assert_eq!(dst, oracle);
+    }
+
+    // Kani 0.65.0 and CBMC 6.7.1 failed symbolic-offset `memmove` but accepted a fixed shift.
+    // Kani d4df833 verifies the general overlap contract in `check_copy`.
+    // Keep this fixed-shift proof as a small cross-check.
+    #[kani::proof]
+    pub fn check_copy_overlapping_shift_no_ub() {
+        const N: usize = 4;
+        const SHIFT: usize = 3; // fixed representative shift (1 <= SHIFT < N); see limitation note above
+        let mut buf: [u32; N] = kani::any();
+        let original = buf;
+        // Test a self-overlapping right shift.
+        let src_ptr = buf.as_ptr();
+        let dst_ptr = unsafe { buf.as_mut_ptr().add(SHIFT) };
+        unsafe { copy(src_ptr, dst_ptr, N - SHIFT) };
+        // A symbolic index can select any failing element.
+        let i: usize = kani::any();
+        kani::assume(i < N - SHIFT);
+        assert_eq!(buf[i + SHIFT], original[i]);
+        kani::cover(
+            true,
+            "copy: self-overlapping right shift completed with the expected post-state",
+        );
+    }
+
+    // This plain `volatile_set_memory` proof avoids the zero-byte contract case in kani#90.
+    // Kani reports `volatile_set_memory` as unsupported, so preserve it under `#[cfg(not(kani))]`.
+    #[cfg(not(kani))]
+    #[kani::proof]
+    pub fn check_volatile_set_memory_no_ub() {
+        const N: usize = 4;
+        let mut buf: [u8; N] = kani::any();
+        let val: u8 = kani::any();
+        unsafe { volatile_set_memory(buf.as_mut_ptr(), val, N) };
+        for i in 0..N {
+            assert_eq!(buf[i], val);
+        }
+        kani::cover(true, "volatile_set_memory: buffer fully set to val");
+    }
+
+    // Check the observable `volatile_copy_nonoverlapping_memory` result.
+    // Kani reports this intrinsic as unsupported.
+    #[cfg(not(kani))]
+    #[kani::proof]
+    pub fn check_volatile_copy_nonoverlapping_memory_no_ub() {
+        const N: usize = 4;
+        let src: [u32; N] = kani::any();
+        let mut dst: [u32; N] = kani::any();
+        let mut oracle = dst;
+        unsafe { volatile_copy_nonoverlapping_memory(dst.as_mut_ptr(), src.as_ptr(), N) };
+        for i in 0..N {
+            oracle[i] = src[i];
+        }
+        assert_eq!(dst, oracle);
+    }
+
+    // Check `volatile_copy_memory` with a self-overlapping shift.
+    // Kani reports this intrinsic as unsupported.
+    #[cfg(not(kani))]
+    #[kani::proof]
+    pub fn check_volatile_copy_memory_no_ub() {
+        const N: usize = 4;
+        // Use a fixed shift and a symbolic checked index, as in the `copy` cross-check.
+        const SHIFT: usize = 3; // fixed representative shift (1 <= SHIFT < N)
+        let mut buf: [u32; N] = kani::any();
+        let original = buf;
+        let src_ptr = buf.as_ptr();
+        let dst_ptr = unsafe { buf.as_mut_ptr().add(SHIFT) };
+        unsafe { volatile_copy_memory(dst_ptr, src_ptr, N - SHIFT) };
+        let i: usize = kani::any();
+        kani::assume(i < N - SHIFT);
+        assert_eq!(buf[i + SHIFT], original[i]);
+        kani::cover(
+            true,
+            "volatile_copy_memory: self-overlapping shift completed with the expected post-state",
+        );
+    }
+
+    // Check `volatile_load` and `volatile_store` with local round trips.
+    #[kani::proof]
+    pub fn check_volatile_load_no_ub() {
+        let val: u32 = kani::any();
+        let local = val;
+        let ptr: *const u32 = &local;
+        let read_back = unsafe { volatile_load(ptr) };
+        assert_eq!(read_back, val);
+        kani::cover(read_back == val, "volatile_load reproduced the written value");
+    }
+
+    #[kani::proof]
+    pub fn check_volatile_store_no_ub() {
+        let val: u32 = kani::any();
+        let mut local: u32 = kani::any();
+        let ptr: *mut u32 = &mut local;
+        unsafe { volatile_store(ptr, val) };
+        let observed = unsafe { *ptr };
+        assert_eq!(observed, val);
+        kani::cover(observed == val, "volatile_store's write is observable via a plain deref");
+    }
+
+    // Check unaligned volatile round trips at any valid byte offset.
+    // Kani reports `unaligned_volatile_load` and `unaligned_volatile_store` as unsupported.
+    #[cfg(not(kani))]
+    #[kani::proof]
+    pub fn check_unaligned_volatile_load_no_ub() {
+        let mut buf: [u8; 8] = kani::any();
+        let val: u32 = kani::any();
+        let offset: usize = kani::any();
+        kani::assume(offset <= 4); // leaves room for a full 4-byte u32 read in the 8-byte buffer
+        let bytes = val.to_ne_bytes();
+        buf[offset..offset + 4].copy_from_slice(&bytes);
+        let ptr = unsafe { buf.as_ptr().add(offset) } as *const u32;
+        let read_back = unsafe { unaligned_volatile_load(ptr) };
+        assert_eq!(read_back, val);
+        kani::cover(
+            read_back == val,
+            "unaligned_volatile_load reproduced the written value at a possibly-misaligned offset",
+        );
+    }
+
+    #[cfg(not(kani))]
+    #[kani::proof]
+    pub fn check_unaligned_volatile_store_no_ub() {
+        let mut buf: [u8; 8] = kani::any();
+        let val: u32 = kani::any();
+        let offset: usize = kani::any();
+        kani::assume(offset <= 4);
+        let ptr = unsafe { buf.as_mut_ptr().add(offset) } as *mut u32;
+        unsafe { unaligned_volatile_store(ptr, val) };
+        let mut observed = [0u8; 4];
+        observed.copy_from_slice(&buf[offset..offset + 4]);
+        assert_eq!(u32::from_ne_bytes(observed), val);
+        kani::cover(
+            u32::from_ne_bytes(observed) == val,
+            "unaligned_volatile_store's write is observable at a possibly-misaligned offset",
+        );
+    }
+
+    // `min_align_of_val` is a deprecated wrapper around `align_of_val`, not another intrinsic.
+    // Check that forwarding for one sized type.
+    #[kani::proof]
+    pub fn check_min_align_of_val_no_ub() {
+        let val: u32 = kani::any();
+        #[allow(deprecated)]
+        let min_align = core::mem::min_align_of_val(&val);
+        let align = core::mem::align_of_val(&val);
+        assert_eq!(min_align, align);
+        assert_eq!(min_align, core::mem::align_of::<u32>());
+        kani::cover(min_align == 4, "min_align_of_val(&u32) reached the expected alignment");
+    }
+
+    // Plainly probe `vtable_size` and `vtable_align` despite kani#3325.
+    // Compare a real `u32` `DynMetadata` with independent `size_of` and `align_of` values.
+    #[kani::proof]
+    pub fn check_vtable_size_align_no_ub() {
+        let val: u32 = kani::any();
+        let debug_ref: &dyn core::fmt::Debug = &val;
+        let meta = crate::ptr::metadata(debug_ref as *const dyn core::fmt::Debug);
+        let size = meta.size_of();
+        let align = meta.align_of();
+        assert_eq!(size, core::mem::size_of::<u32>());
+        assert_eq!(align, core::mem::align_of::<u32>());
+        kani::cover(size == 4 && align == 4, "vtable_size/vtable_align reached u32's real layout");
     }
 
     fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
@@ -4143,10 +5133,7 @@ mod verify {
         harness(src, dst);
     }
 
-    /// Return whether the current status is supported by Kani's contract.
-    ///
-    /// Kani memory predicates currently doesn't support pointers to dangling or dead allocations.
-    /// Thus, we have to explicitly exclude those cases.
+    /// Return whether Kani's memory predicates support this allocation status.
     fn supported_status(status: AllocationStatus) -> bool {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
