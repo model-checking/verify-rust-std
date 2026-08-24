@@ -1404,6 +1404,15 @@ pub const unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize) {
 #[inline]
 const unsafe fn swap_nonoverlapping_const<T>(x: *mut T, y: *mut T, count: usize) {
     let mut i = 0;
+    #[cfg_attr(kani, kani::loop_invariant(i <= count))]
+    #[cfg_attr(
+        kani,
+        kani::loop_modifies(
+            &i,
+            slice_from_raw_parts_mut(x, count),
+            slice_from_raw_parts_mut(y, count)
+        )
+    )]
     while i < count {
         // SAFETY: By precondition, `i` is in-bounds because it's below `n`
         let x = unsafe { x.add(i) };
@@ -1445,6 +1454,14 @@ unsafe fn swap_nonoverlapping_bytes(x: *mut u8, y: *mut u8, bytes: NonZero<usize
         chunks: NonZero<usize>,
     ) {
         let chunks = chunks.get();
+        #[cfg_attr(kani, kani::loop_invariant(kani::index <= chunks))]
+        #[cfg_attr(
+            kani,
+            kani::loop_modifies(
+                slice_from_raw_parts_mut(x, chunks),
+                slice_from_raw_parts_mut(y, chunks)
+            )
+        )]
         for i in 0..chunks {
             // SAFETY: i is in [0, chunks) so the adds and dereferences are in-bounds.
             unsafe { swap_chunk(&mut *x.add(i), &mut *y.add(i)) };

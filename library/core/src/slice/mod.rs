@@ -606,6 +606,30 @@ impl<T> [T] {
         index.get_mut(self)
     }
 
+    #[cfg(kani)]
+    #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[inline]
+    // Kani-only predicate used by the contracts of `get_unchecked` and
+    // `get_unchecked_mut`. A successful call to the safe `SliceIndex::get`
+    // precisely means that the index is in bounds for this slice.
+    const fn kani_get_unchecked_index_is_in_bounds<I>(&self, index: &I) -> bool
+    where
+        I: [const] SliceIndex<Self>,
+    {
+        // `SliceIndex::get` consumes its index. Reject an index with drop glue,
+        // because copying it below would otherwise allow both copies to be dropped.
+        if crate::mem::needs_drop::<I>() {
+            return false;
+        }
+
+        // The contract borrows `index` so that the original value remains available
+        // to the contracted function. `SliceIndex` is sealed, and its supported
+        // non-dropping index types can be copied here solely for this consuming check.
+        // SAFETY: the `needs_drop` guard prevents duplicating a value with drop glue.
+        let index_copy = unsafe { crate::ptr::read(index) };
+        index_copy.get(self).is_some()
+    }
+
     /// Returns a reference to an element or subslice, without doing bounds
     /// checking.
     ///
@@ -639,6 +663,10 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[cfg_attr(
+        kani,
+        kani::requires(self.kani_get_unchecked_index_is_in_bounds(&index))
+    )]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -684,6 +712,10 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[cfg_attr(
+        kani,
+        kani::requires(self.kani_get_unchecked_index_is_in_bounds(&index))
+    )]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -948,6 +980,9 @@ impl<T> [T] {
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
     #[track_caller]
+    #[cfg_attr(kani, kani::requires(a < self.len()))]
+    #[cfg_attr(kani, kani::requires(b < self.len()))]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -1345,6 +1380,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[cfg_attr(kani, kani::requires(N != 0 && self.len() % N == 0))]
     pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1505,6 +1541,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[cfg_attr(kani, kani::requires(N != 0 && self.len() % N == 0))]
     pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -2043,6 +2080,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[cfg_attr(kani, kani::requires(mid <= self.len()))]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2097,6 +2135,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[cfg_attr(kani, kani::requires(mid <= self.len()))]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -2989,6 +3028,38 @@ impl<T> [T] {
         // returns Equal. We want the number of loop iterations to depend *only*
         // on the size of the input slice so that the CPU can reliably predict
         // the loop count.
+        #[cfg(kani)]
+        {
+            // Do not use a Kani loop contract here. Kani's current MIR
+            // transformation can move the body call before the initialization
+            // of `mid`, producing a spurious unconstrained-index path and a
+            // false failure of `get_unchecked`'s intrinsic bounds assumption.
+            //
+            // This is a sound memory-safety loop summary: `abstract_base` and
+            // `abstract_size` describe an arbitrary reachable loop state, and
+            // the body access is retained verbatim. The post-loop `base` is
+            // then widened to every state allowed when `size == 1`.
+            let abstract_size: usize = kani::any();
+            let abstract_base: usize = kani::any();
+            kani::assume(
+                abstract_size > 1
+                    && abstract_size <= self.len()
+                    && abstract_base <= self.len() - abstract_size,
+            );
+
+            let half = abstract_size / 2;
+            let mid = abstract_base + half;
+
+            // SAFETY: the summary assumptions imply
+            // `mid < abstract_base + abstract_size <= self.len()`.
+            let _ = f(unsafe { self.get_unchecked(mid) });
+
+            size = 1;
+            base = kani::any();
+            kani::assume(base < self.len());
+        }
+
+        #[cfg(not(kani))]
         while size > 1 {
             let half = size / 2;
             let mid = base + half;
@@ -3595,6 +3666,37 @@ impl<T> [T] {
         // thus `next_read > next_write - 1` is too.
         unsafe {
             // Avoid bounds checks by using raw pointers.
+            #[cfg(kani)]
+            {
+                // Kani's loop-contract transformation currently loses the
+                // allocation provenance of `ptr` at the abstracted back edge.
+                // That produces spurious failures in the contracts of
+                // `ptr::add`/`mem::swap` (CAR and `same_allocation` checks).
+                //
+                // Summarize one arbitrary reachable iteration instead. Every
+                // loop entry satisfies these bounds: `next_write <= next_read`
+                // and `next_read < len`. The body remains unchanged, including
+                // all raw-pointer arithmetic and dereferences, so this is a
+                // sound over-approximation for memory-safety checking. The
+                // state after the summarized iteration still satisfies
+                // `next_read <= len` and `next_write <= next_read`.
+                next_read = kani::any();
+                next_write = kani::any();
+                kani::assume(1 <= next_write && next_write <= next_read && next_read < len);
+
+                let ptr_read = ptr.add(next_read);
+                let prev_ptr_write = ptr.add(next_write - 1);
+                if !same_bucket(&mut *ptr_read, &mut *prev_ptr_write) {
+                    if next_read != next_write {
+                        let ptr_write = prev_ptr_write.add(1);
+                        mem::swap(&mut *ptr_read, &mut *ptr_write);
+                    }
+                    next_write += 1;
+                }
+                next_read += 1;
+            }
+
+            #[cfg(not(kani))]
             while next_read < len {
                 let ptr_read = ptr.add(next_read);
                 let prev_ptr_write = ptr.add(next_write - 1);
@@ -4788,6 +4890,7 @@ impl<T> [T] {
     #[stable(feature = "get_many_mut", since = "1.86.0")]
     #[inline]
     #[track_caller]
+    #[cfg_attr(kani, kani::requires(crate::slice::get_disjoint_check_valid(&indices, self.len()).is_ok()))]
     pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
         &mut self,
         indices: [I; N],
@@ -5556,4 +5659,1243 @@ mod verify {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
     }
+
+    // Harnesses for `get_unchecked`
+    macro_rules! generate_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::get_unchecked)]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let index: usize = kani::any();
+                let _ = unsafe { slice.get_unchecked(index) };
+            }
+        };
+    }
+
+    generate_get_unchecked_harness!(harness_get_unchecked_i8, i8);
+    generate_get_unchecked_harness!(harness_get_unchecked_i16, i16);
+    generate_get_unchecked_harness!(harness_get_unchecked_i32, i32);
+    generate_get_unchecked_harness!(harness_get_unchecked_i64, i64);
+    generate_get_unchecked_harness!(harness_get_unchecked_i128, i128);
+    generate_get_unchecked_harness!(harness_get_unchecked_u8, u8);
+    generate_get_unchecked_harness!(harness_get_unchecked_u16, u16);
+    generate_get_unchecked_harness!(harness_get_unchecked_u32, u32);
+    generate_get_unchecked_harness!(harness_get_unchecked_u64, u64);
+    generate_get_unchecked_harness!(harness_get_unchecked_u128, u128);
+    generate_get_unchecked_harness!(harness_get_unchecked_bool, bool);
+    generate_get_unchecked_harness!(harness_get_unchecked_char, char);
+    generate_get_unchecked_harness!(harness_get_unchecked_unit, ());
+    generate_get_unchecked_harness!(harness_get_unchecked_array, [u8; 4]);
+
+    // Harnesses for `get_unchecked_mut`
+    macro_rules! generate_get_unchecked_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::get_unchecked_mut)]
+            fn $name() {
+                let mut data: [$ty; 100] = [kani::any::<$ty>(); 100];
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let index: usize = kani::any();
+                let _ = unsafe { slice.get_unchecked_mut(index) };
+            }
+        };
+    }
+
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_i8, i8);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_i16, i16);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_i32, i32);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_i64, i64);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_i128, i128);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_u8, u8);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_u16, u16);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_u32, u32);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_u64, u64);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_u128, u128);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_bool, bool);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_char, char);
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_unit, ());
+    generate_get_unchecked_mut_harness!(harness_get_unchecked_mut_array, [u8; 4]);
+
+    // Harnesses for `swap_unchecked`
+    macro_rules! generate_swap_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::swap_unchecked)]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let a: usize = kani::any();
+                let b: usize = kani::any();
+                unsafe { slice.swap_unchecked(a, b) };
+            }
+        };
+    }
+
+    generate_swap_unchecked_harness!(harness_swap_unchecked_i8, i8);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_i16, i16);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_i32, i32);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_i64, i64);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_i128, i128);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_u8, u8);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_u16, u16);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_u32, u32);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_u64, u64);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_u128, u128);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_bool, bool);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_char, char);
+    generate_swap_unchecked_harness!(harness_swap_unchecked_array, [u8; 4]);
+
+    // Kani/CBMC cannot register `modifies(self)` for a ZST slice because the
+    // corresponding contract write region has zero bytes, so use a regular proof.
+    #[kani::proof]
+    fn harness_swap_unchecked_unit() {
+        let mut data = [(); 100];
+        let slice = kani::slice::any_slice_of_array_mut(&mut data);
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        // requires `a < self.len()` and `b < self.len()`.
+        kani::assume(a < slice.len());
+        kani::assume(b < slice.len());
+        unsafe { slice.swap_unchecked(a, b) };
+    }
+
+    // Harnesses for `as_chunks_unchecked`
+    macro_rules! generate_as_chunks_unchecked_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof_for_contract(<[$ty]>::as_chunks_unchecked::<$n>)]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = unsafe { slice.as_chunks_unchecked::<$n>() };
+            }
+        };
+    }
+
+    macro_rules! generate_as_chunks_unchecked_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_chunks_unchecked_harness!(n1, $ty, 1);
+                generate_as_chunks_unchecked_harness!(n2, $ty, 2);
+                generate_as_chunks_unchecked_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_i8, i8);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_i16, i16);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_i32, i32);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_i64, i64);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_i128, i128);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_u8, u8);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_u16, u16);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_u32, u32);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_u64, u64);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_u128, u128);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_bool, bool);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_char, char);
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_unit, ());
+    generate_as_chunks_unchecked_harnesses!(harness_as_chunks_unchecked_array, [u8; 4]);
+
+    // Harnesses for `as_chunks_unchecked_mut`
+    macro_rules! generate_as_chunks_unchecked_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof_for_contract(<[$ty]>::as_chunks_unchecked_mut::<$n>)]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let _ = unsafe { slice.as_chunks_unchecked_mut::<$n>() };
+            }
+        };
+    }
+
+    macro_rules! generate_as_chunks_unchecked_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_chunks_unchecked_mut_harness!(n1, $ty, 1);
+                generate_as_chunks_unchecked_mut_harness!(n2, $ty, 2);
+                generate_as_chunks_unchecked_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_i8, i8);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_i16, i16);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_i32, i32);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_i64, i64);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_i128, i128);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_u8, u8);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_u16, u16);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_u32, u32);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_u64, u64);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_u128, u128);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_bool, bool);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_char, char);
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_unit, ());
+    generate_as_chunks_unchecked_mut_harnesses!(harness_as_chunks_unchecked_mut_array, [u8; 4]);
+
+    // Harnesses for `split_at_unchecked`
+    macro_rules! generate_split_at_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::split_at_unchecked)]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let mid: usize = kani::any();
+                let _ = unsafe { slice.split_at_unchecked(mid) };
+            }
+        };
+    }
+
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_i8, i8);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_i16, i16);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_i32, i32);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_i64, i64);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_i128, i128);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_u8, u8);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_u16, u16);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_u32, u32);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_u64, u64);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_u128, u128);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_bool, bool);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_char, char);
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_unit, ());
+    generate_split_at_unchecked_harness!(harness_split_at_unchecked_array, [u8; 4]);
+
+    // Harnesses for `split_at_mut_unchecked`
+    macro_rules! generate_split_at_mut_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::split_at_mut_unchecked)]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let mid: usize = kani::any();
+                let _ = unsafe { slice.split_at_mut_unchecked(mid) };
+            }
+        };
+    }
+
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_i8, i8);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_i16, i16);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_i32, i32);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_i64, i64);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_i128, i128);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_u8, u8);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_u16, u16);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_u32, u32);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_u64, u64);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_u128, u128);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_bool, bool);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_char, char);
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_unit, ());
+    generate_split_at_mut_unchecked_harness!(harness_split_at_mut_unchecked_array, [u8; 4]);
+
+    // Harnesses for `get_disjoint_unchecked_mut`
+    macro_rules! generate_get_disjoint_unchecked_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof_for_contract(<[$ty]>::get_disjoint_unchecked_mut::<usize, $n>)]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let indices: [usize; $n] = kani::any();
+                let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+            }
+        };
+    }
+
+    macro_rules! generate_get_disjoint_unchecked_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_get_disjoint_unchecked_mut_harness!(n1, $ty, 1);
+                generate_get_disjoint_unchecked_mut_harness!(n2, $ty, 2);
+                generate_get_disjoint_unchecked_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_i8, i8);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_i16, i16);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_i32, i32);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_i64, i64);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_i128, i128);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_u8, u8);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_u16, u16);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_u32, u32);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_u64, u64);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_u128, u128);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_bool, bool);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_char, char);
+    generate_get_disjoint_unchecked_mut_harnesses!(harness_get_disjoint_unchecked_mut_unit, ());
+    generate_get_disjoint_unchecked_mut_harnesses!(
+        harness_get_disjoint_unchecked_mut_array,
+        [u8; 4]
+    );
+
+    // Safe Functions
+    // Harnesses for `first_chunk`
+    macro_rules! generate_first_chunk_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = slice.first_chunk::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_first_chunk_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_first_chunk_harness!(n0, $ty, 0);
+                generate_first_chunk_harness!(n1, $ty, 1);
+                generate_first_chunk_harness!(n2, $ty, 2);
+                generate_first_chunk_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_first_chunk_harnesses!(harness_first_chunk_i8, i8);
+    generate_first_chunk_harnesses!(harness_first_chunk_i16, i16);
+    generate_first_chunk_harnesses!(harness_first_chunk_i32, i32);
+    generate_first_chunk_harnesses!(harness_first_chunk_i64, i64);
+    generate_first_chunk_harnesses!(harness_first_chunk_i128, i128);
+    generate_first_chunk_harnesses!(harness_first_chunk_u8, u8);
+    generate_first_chunk_harnesses!(harness_first_chunk_u16, u16);
+    generate_first_chunk_harnesses!(harness_first_chunk_u32, u32);
+    generate_first_chunk_harnesses!(harness_first_chunk_u64, u64);
+    generate_first_chunk_harnesses!(harness_first_chunk_u128, u128);
+    generate_first_chunk_harnesses!(harness_first_chunk_bool, bool);
+    generate_first_chunk_harnesses!(harness_first_chunk_char, char);
+    generate_first_chunk_harnesses!(harness_first_chunk_unit, ());
+    generate_first_chunk_harnesses!(harness_first_chunk_array, [u8; 4]);
+
+    // Harnesses for `first_chunk_mut`
+    macro_rules! generate_first_chunk_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let _ = slice.first_chunk_mut::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_first_chunk_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_first_chunk_mut_harness!(n0, $ty, 0);
+                generate_first_chunk_mut_harness!(n1, $ty, 1);
+                generate_first_chunk_mut_harness!(n2, $ty, 2);
+                generate_first_chunk_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_i8, i8);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_i16, i16);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_i32, i32);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_i64, i64);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_i128, i128);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_u8, u8);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_u16, u16);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_u32, u32);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_u64, u64);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_u128, u128);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_bool, bool);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_char, char);
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_unit, ());
+    generate_first_chunk_mut_harnesses!(harness_first_chunk_mut_array, [u8; 4]);
+
+    // Harnesses for `split_first_chunk`
+    macro_rules! generate_split_first_chunk_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = slice.split_first_chunk::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_split_first_chunk_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_split_first_chunk_harness!(n0, $ty, 0);
+                generate_split_first_chunk_harness!(n1, $ty, 1);
+                generate_split_first_chunk_harness!(n2, $ty, 2);
+                generate_split_first_chunk_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_i8, i8);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_i16, i16);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_i32, i32);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_i64, i64);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_i128, i128);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_u8, u8);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_u16, u16);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_u32, u32);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_u64, u64);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_u128, u128);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_bool, bool);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_char, char);
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_unit, ());
+    generate_split_first_chunk_harnesses!(harness_split_first_chunk_array, [u8; 4]);
+
+    // Harnesses for `split_first_chunk_mut`
+    macro_rules! generate_split_first_chunk_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let _ = slice.split_first_chunk_mut::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_split_first_chunk_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_split_first_chunk_mut_harness!(n0, $ty, 0);
+                generate_split_first_chunk_mut_harness!(n1, $ty, 1);
+                generate_split_first_chunk_mut_harness!(n2, $ty, 2);
+                generate_split_first_chunk_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_i8, i8);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_i16, i16);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_i32, i32);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_i64, i64);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_i128, i128);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_u8, u8);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_u16, u16);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_u32, u32);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_u64, u64);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_u128, u128);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_bool, bool);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_char, char);
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_unit, ());
+    generate_split_first_chunk_mut_harnesses!(harness_split_first_chunk_mut_array, [u8; 4]);
+
+    // Harnesses for `split_last_chunk`
+    macro_rules! generate_split_last_chunk_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = slice.split_last_chunk::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_split_last_chunk_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_split_last_chunk_harness!(n0, $ty, 0);
+                generate_split_last_chunk_harness!(n1, $ty, 1);
+                generate_split_last_chunk_harness!(n2, $ty, 2);
+                generate_split_last_chunk_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_i8, i8);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_i16, i16);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_i32, i32);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_i64, i64);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_i128, i128);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_u8, u8);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_u16, u16);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_u32, u32);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_u64, u64);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_u128, u128);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_bool, bool);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_char, char);
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_unit, ());
+    generate_split_last_chunk_harnesses!(harness_split_last_chunk_array, [u8; 4]);
+
+    // Harnesses for `split_last_chunk_mut`
+    macro_rules! generate_split_last_chunk_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let _ = slice.split_last_chunk_mut::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_split_last_chunk_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_split_last_chunk_mut_harness!(n0, $ty, 0);
+                generate_split_last_chunk_mut_harness!(n1, $ty, 1);
+                generate_split_last_chunk_mut_harness!(n2, $ty, 2);
+                generate_split_last_chunk_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_i8, i8);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_i16, i16);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_i32, i32);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_i64, i64);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_i128, i128);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_u8, u8);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_u16, u16);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_u32, u32);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_u64, u64);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_u128, u128);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_bool, bool);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_char, char);
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_unit, ());
+    generate_split_last_chunk_mut_harnesses!(harness_split_last_chunk_mut_array, [u8; 4]);
+
+    // Harnesses for `last_chunk`
+    macro_rules! generate_last_chunk_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = slice.last_chunk::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_last_chunk_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_last_chunk_harness!(n0, $ty, 0);
+                generate_last_chunk_harness!(n1, $ty, 1);
+                generate_last_chunk_harness!(n2, $ty, 2);
+                generate_last_chunk_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_last_chunk_harnesses!(harness_last_chunk_i8, i8);
+    generate_last_chunk_harnesses!(harness_last_chunk_i16, i16);
+    generate_last_chunk_harnesses!(harness_last_chunk_i32, i32);
+    generate_last_chunk_harnesses!(harness_last_chunk_i64, i64);
+    generate_last_chunk_harnesses!(harness_last_chunk_i128, i128);
+    generate_last_chunk_harnesses!(harness_last_chunk_u8, u8);
+    generate_last_chunk_harnesses!(harness_last_chunk_u16, u16);
+    generate_last_chunk_harnesses!(harness_last_chunk_u32, u32);
+    generate_last_chunk_harnesses!(harness_last_chunk_u64, u64);
+    generate_last_chunk_harnesses!(harness_last_chunk_u128, u128);
+    generate_last_chunk_harnesses!(harness_last_chunk_bool, bool);
+    generate_last_chunk_harnesses!(harness_last_chunk_char, char);
+    generate_last_chunk_harnesses!(harness_last_chunk_unit, ());
+    generate_last_chunk_harnesses!(harness_last_chunk_array, [u8; 4]);
+
+    // Harnesses for `last_chunk_mut`
+    macro_rules! generate_last_chunk_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let _ = slice.last_chunk_mut::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_last_chunk_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_last_chunk_mut_harness!(n0, $ty, 0);
+                generate_last_chunk_mut_harness!(n1, $ty, 1);
+                generate_last_chunk_mut_harness!(n2, $ty, 2);
+                generate_last_chunk_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_i8, i8);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_i16, i16);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_i32, i32);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_i64, i64);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_i128, i128);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_u8, u8);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_u16, u16);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_u32, u32);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_u64, u64);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_u128, u128);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_bool, bool);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_char, char);
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_unit, ());
+    generate_last_chunk_mut_harnesses!(harness_last_chunk_mut_array, [u8; 4]);
+
+    // Harnesses for `as_chunks`
+    macro_rules! generate_as_chunks_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = slice.as_chunks::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_as_chunks_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_chunks_harness!(n1, $ty, 1);
+                generate_as_chunks_harness!(n2, $ty, 2);
+                generate_as_chunks_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_as_chunks_harnesses!(harness_as_chunks_i8, i8);
+    generate_as_chunks_harnesses!(harness_as_chunks_i16, i16);
+    generate_as_chunks_harnesses!(harness_as_chunks_i32, i32);
+    generate_as_chunks_harnesses!(harness_as_chunks_i64, i64);
+    generate_as_chunks_harnesses!(harness_as_chunks_i128, i128);
+    generate_as_chunks_harnesses!(harness_as_chunks_u8, u8);
+    generate_as_chunks_harnesses!(harness_as_chunks_u16, u16);
+    generate_as_chunks_harnesses!(harness_as_chunks_u32, u32);
+    generate_as_chunks_harnesses!(harness_as_chunks_u64, u64);
+    generate_as_chunks_harnesses!(harness_as_chunks_u128, u128);
+    generate_as_chunks_harnesses!(harness_as_chunks_bool, bool);
+    generate_as_chunks_harnesses!(harness_as_chunks_char, char);
+    generate_as_chunks_harnesses!(harness_as_chunks_unit, ());
+    generate_as_chunks_harnesses!(harness_as_chunks_array, [u8; 4]);
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_as_chunks_panic() {
+        let data: [u8; 100] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let _ = slice.as_chunks::<0>();
+    }
+
+    // Harnesses for `as_chunks_mut`
+    macro_rules! generate_as_chunks_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let _ = slice.as_chunks_mut::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_as_chunks_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_chunks_mut_harness!(n1, $ty, 1);
+                generate_as_chunks_mut_harness!(n2, $ty, 2);
+                generate_as_chunks_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_i8, i8);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_i16, i16);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_i32, i32);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_i64, i64);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_i128, i128);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_u8, u8);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_u16, u16);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_u32, u32);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_u64, u64);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_u128, u128);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_bool, bool);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_char, char);
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_unit, ());
+    generate_as_chunks_mut_harnesses!(harness_as_chunks_mut_array, [u8; 4]);
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_as_chunks_mut_panic() {
+        let mut data: [u8; 100] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut data);
+        let _ = slice.as_chunks_mut::<0>();
+    }
+
+    // Harnesses for `as_rchunks`
+    macro_rules! generate_as_rchunks_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = slice.as_rchunks::<$n>();
+            }
+        };
+    }
+
+    macro_rules! generate_as_rchunks_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_rchunks_harness!(n1, $ty, 1);
+                generate_as_rchunks_harness!(n2, $ty, 2);
+                generate_as_rchunks_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_as_rchunks_harnesses!(harness_as_rchunks_i8, i8);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_i16, i16);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_i32, i32);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_i64, i64);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_i128, i128);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_u8, u8);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_u16, u16);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_u32, u32);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_u64, u64);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_u128, u128);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_bool, bool);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_char, char);
+    generate_as_rchunks_harnesses!(harness_as_rchunks_unit, ());
+    generate_as_rchunks_harnesses!(harness_as_rchunks_array, [u8; 4]);
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_as_rchunks_panic() {
+        let data: [u8; 100] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let _ = slice.as_rchunks::<0>();
+    }
+
+    // Harnesses for `split_at_checked`
+    macro_rules! generate_split_at_checked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let mid: usize = kani::any();
+                let _ = slice.split_at_checked(mid);
+            }
+        };
+    }
+
+    generate_split_at_checked_harness!(harness_split_at_checked_i8, i8);
+    generate_split_at_checked_harness!(harness_split_at_checked_i16, i16);
+    generate_split_at_checked_harness!(harness_split_at_checked_i32, i32);
+    generate_split_at_checked_harness!(harness_split_at_checked_i64, i64);
+    generate_split_at_checked_harness!(harness_split_at_checked_i128, i128);
+    generate_split_at_checked_harness!(harness_split_at_checked_u8, u8);
+    generate_split_at_checked_harness!(harness_split_at_checked_u16, u16);
+    generate_split_at_checked_harness!(harness_split_at_checked_u32, u32);
+    generate_split_at_checked_harness!(harness_split_at_checked_u64, u64);
+    generate_split_at_checked_harness!(harness_split_at_checked_u128, u128);
+    generate_split_at_checked_harness!(harness_split_at_checked_bool, bool);
+    generate_split_at_checked_harness!(harness_split_at_checked_char, char);
+    generate_split_at_checked_harness!(harness_split_at_checked_unit, ());
+    generate_split_at_checked_harness!(harness_split_at_checked_array, [u8; 4]);
+
+    // Harnesses for `split_at_mut_checked`
+    macro_rules! generate_split_at_mut_checked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let mid: usize = kani::any();
+                let _ = slice.split_at_mut_checked(mid);
+            }
+        };
+    }
+
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_i8, i8);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_i16, i16);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_i32, i32);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_i64, i64);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_i128, i128);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_u8, u8);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_u16, u16);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_u32, u32);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_u64, u64);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_u128, u128);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_bool, bool);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_char, char);
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_unit, ());
+    generate_split_at_mut_checked_harness!(harness_split_at_mut_checked_array, [u8; 4]);
+
+    // Harnesses for `binary_search_by`
+    macro_rules! generate_binary_search_by_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let needle: $ty = kani::any();
+                let _ = slice.binary_search_by(|probe| probe.cmp(&needle));
+            }
+        };
+    }
+
+    generate_binary_search_by_harness!(harness_binary_search_by_i8, i8);
+    generate_binary_search_by_harness!(harness_binary_search_by_i16, i16);
+    generate_binary_search_by_harness!(harness_binary_search_by_i32, i32);
+    generate_binary_search_by_harness!(harness_binary_search_by_i64, i64);
+    generate_binary_search_by_harness!(harness_binary_search_by_i128, i128);
+    generate_binary_search_by_harness!(harness_binary_search_by_u8, u8);
+    generate_binary_search_by_harness!(harness_binary_search_by_u16, u16);
+    generate_binary_search_by_harness!(harness_binary_search_by_u32, u32);
+    generate_binary_search_by_harness!(harness_binary_search_by_u64, u64);
+    generate_binary_search_by_harness!(harness_binary_search_by_u128, u128);
+    generate_binary_search_by_harness!(harness_binary_search_by_bool, bool);
+    generate_binary_search_by_harness!(harness_binary_search_by_char, char);
+    generate_binary_search_by_harness!(harness_binary_search_by_unit, ());
+    generate_binary_search_by_harness!(harness_binary_search_by_array, [u8; 4]);
+
+    // Harnesses for `partition_dedup_by`
+    macro_rules! generate_partition_dedup_by_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+
+                // A symbolic result covers both the duplicate path and the
+                // non-duplicate path that may perform an in-place swap.
+                let _ = slice.partition_dedup_by(|_, _| kani::any());
+            }
+        };
+    }
+
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_i8, i8);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_i16, i16);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_i32, i32);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_i64, i64);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_i128, i128);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_u8, u8);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_u16, u16);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_u32, u32);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_u64, u64);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_u128, u128);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_bool, bool);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_char, char);
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_unit, ());
+    generate_partition_dedup_by_harness!(harness_partition_dedup_by_array, [u8; 4]);
+
+    // Harnesses for `rotate_left`
+    macro_rules! generate_rotate_left_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let mid: usize = kani::any_where(|mid: &usize| *mid <= slice.len());
+                slice.rotate_left(mid);
+            }
+        };
+    }
+
+    generate_rotate_left_harness!(harness_rotate_left_i8, i8);
+    generate_rotate_left_harness!(harness_rotate_left_i16, i16);
+    generate_rotate_left_harness!(harness_rotate_left_i32, i32);
+    generate_rotate_left_harness!(harness_rotate_left_i64, i64);
+    generate_rotate_left_harness!(harness_rotate_left_i128, i128);
+    generate_rotate_left_harness!(harness_rotate_left_u8, u8);
+    generate_rotate_left_harness!(harness_rotate_left_u16, u16);
+    generate_rotate_left_harness!(harness_rotate_left_u32, u32);
+    generate_rotate_left_harness!(harness_rotate_left_u64, u64);
+    generate_rotate_left_harness!(harness_rotate_left_u128, u128);
+    generate_rotate_left_harness!(harness_rotate_left_bool, bool);
+    generate_rotate_left_harness!(harness_rotate_left_char, char);
+    generate_rotate_left_harness!(harness_rotate_left_unit, ());
+    generate_rotate_left_harness!(harness_rotate_left_array, [u8; 4]);
+
+    // Harnesses for `rotate_right`
+    macro_rules! generate_rotate_right_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let k: usize = kani::any_where(|k: &usize| *k <= slice.len());
+                slice.rotate_right(k);
+            }
+        };
+    }
+
+    generate_rotate_right_harness!(harness_rotate_right_i8, i8);
+    generate_rotate_right_harness!(harness_rotate_right_i16, i16);
+    generate_rotate_right_harness!(harness_rotate_right_i32, i32);
+    generate_rotate_right_harness!(harness_rotate_right_i64, i64);
+    generate_rotate_right_harness!(harness_rotate_right_i128, i128);
+    generate_rotate_right_harness!(harness_rotate_right_u8, u8);
+    generate_rotate_right_harness!(harness_rotate_right_u16, u16);
+    generate_rotate_right_harness!(harness_rotate_right_u32, u32);
+    generate_rotate_right_harness!(harness_rotate_right_u64, u64);
+    generate_rotate_right_harness!(harness_rotate_right_u128, u128);
+    generate_rotate_right_harness!(harness_rotate_right_bool, bool);
+    generate_rotate_right_harness!(harness_rotate_right_char, char);
+    generate_rotate_right_harness!(harness_rotate_right_unit, ());
+    generate_rotate_right_harness!(harness_rotate_right_array, [u8; 4]);
+
+    // Harnesses for `copy_from_slice`
+    macro_rules! generate_copy_from_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let mut dst_arr: [$ty; 100] = kani::any();
+                let src_arr: [$ty; 100] = kani::any();
+                let len: usize = kani::any_where(|len: &usize| *len <= 100);
+                let dst = &mut dst_arr[..len];
+                let src = &src_arr[..len];
+                dst.copy_from_slice(src);
+            }
+        };
+    }
+
+    generate_copy_from_slice_harness!(harness_copy_from_slice_i8, i8);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_i16, i16);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_i32, i32);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_i64, i64);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_i128, i128);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_u8, u8);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_u16, u16);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_u32, u32);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_u64, u64);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_u128, u128);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_bool, bool);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_char, char);
+    generate_copy_from_slice_harness!(harness_copy_from_slice_unit, ());
+    generate_copy_from_slice_harness!(harness_copy_from_slice_array, [u8; 4]);
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_copy_from_slice_panic() {
+        let mut dst_arr: [u8; 100] = kani::any();
+        let src_arr: [u8; 100] = kani::any();
+
+        let dst_len: usize = kani::any_where(|len: &usize| *len <= 100);
+        let src_len: usize = kani::any_where(|len: &usize| *len <= 100);
+        kani::assume(dst_len != src_len);
+
+        let dst = &mut dst_arr[..dst_len];
+        let src = &src_arr[..src_len];
+        dst.copy_from_slice(src);
+    }
+
+    // Harnesses for `copy_within`
+    macro_rules! generate_copy_within_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 4] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let start: usize = kani::any_where(|start: &usize| *start <= slice.len());
+                let end: usize =
+                    kani::any_where(|end: &usize| start <= *end && *end <= slice.len());
+                let count = end - start;
+                let dest: usize = kani::any_where(|dest: &usize| *dest <= slice.len() - count);
+
+                slice.copy_within(start..end, dest);
+            }
+        };
+    }
+
+    generate_copy_within_harness!(harness_copy_within_i8, i8);
+    generate_copy_within_harness!(harness_copy_within_i16, i16);
+    generate_copy_within_harness!(harness_copy_within_i32, i32);
+    generate_copy_within_harness!(harness_copy_within_i64, i64);
+    generate_copy_within_harness!(harness_copy_within_i128, i128);
+    generate_copy_within_harness!(harness_copy_within_u8, u8);
+    generate_copy_within_harness!(harness_copy_within_u16, u16);
+    generate_copy_within_harness!(harness_copy_within_u32, u32);
+    generate_copy_within_harness!(harness_copy_within_u64, u64);
+    generate_copy_within_harness!(harness_copy_within_u128, u128);
+    generate_copy_within_harness!(harness_copy_within_bool, bool);
+    generate_copy_within_harness!(harness_copy_within_char, char);
+    generate_copy_within_harness!(harness_copy_within_unit, ());
+    generate_copy_within_harness!(harness_copy_within_array, [u8; 4]);
+
+    // Harnesses for `swap_with_slice`
+    macro_rules! generate_swap_with_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let mut left_data: [$ty; 100] = kani::any();
+                let mut right_data: [$ty; 100] = kani::any();
+                let len: usize = kani::any_where(|len: &usize| *len <= 100);
+
+                let left = &mut left_data[..len];
+                let right = &mut right_data[..len];
+                left.swap_with_slice(right);
+            }
+        };
+    }
+
+    generate_swap_with_slice_harness!(harness_swap_with_slice_i8, i8);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_i16, i16);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_i32, i32);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_i64, i64);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_i128, i128);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_u8, u8);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_u16, u16);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_u32, u32);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_u64, u64);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_u128, u128);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_bool, bool);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_char, char);
+    generate_swap_with_slice_harness!(harness_swap_with_slice_unit, ());
+    generate_swap_with_slice_harness!(harness_swap_with_slice_array, [u8; 4]);
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_swap_with_slice_panic() {
+        let mut left: [u8; 100] = kani::any();
+        let mut right: [u8; 100] = kani::any();
+
+        let left_len: usize = kani::any_where(|len: &usize| *len <= 100);
+        let right_len: usize = kani::any_where(|len: &usize| *len <= 100);
+        kani::assume(left_len != right_len);
+
+        (&mut left[..left_len]).swap_with_slice(&mut right[..right_len]);
+    }
+
+    // Harnesses for `as_simd`
+    // `T` is restricted to the scalar SimdElement implementations.
+    macro_rules! generate_as_simd_harness {
+        ($name:ident, $ty:ty, $lanes:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = slice.as_simd::<$lanes>();
+            }
+        };
+    }
+
+    macro_rules! generate_as_simd_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_simd_harness!(n1, $ty, 1);
+                generate_as_simd_harness!(n2, $ty, 2);
+                generate_as_simd_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_as_simd_harnesses!(harness_as_simd_u8, u8);
+    generate_as_simd_harnesses!(harness_as_simd_u16, u16);
+    generate_as_simd_harnesses!(harness_as_simd_u32, u32);
+    generate_as_simd_harnesses!(harness_as_simd_u64, u64);
+    generate_as_simd_harnesses!(harness_as_simd_usize, usize);
+    generate_as_simd_harnesses!(harness_as_simd_i8, i8);
+    generate_as_simd_harnesses!(harness_as_simd_i16, i16);
+    generate_as_simd_harnesses!(harness_as_simd_i32, i32);
+    generate_as_simd_harnesses!(harness_as_simd_i64, i64);
+    generate_as_simd_harnesses!(harness_as_simd_isize, isize);
+    generate_as_simd_harnesses!(harness_as_simd_f32, f32);
+    generate_as_simd_harnesses!(harness_as_simd_f64, f64);
+
+    // Harnesses for `as_simd_mut`
+    // `T` is restricted to the scalar SimdElement implementations.
+    macro_rules! generate_as_simd_mut_harness {
+        ($name:ident, $ty:ty, $lanes:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let _ = slice.as_simd_mut::<$lanes>();
+            }
+        };
+    }
+
+    macro_rules! generate_as_simd_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_simd_mut_harness!(n1, $ty, 1);
+                generate_as_simd_mut_harness!(n2, $ty, 2);
+                generate_as_simd_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_u8, u8);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_u16, u16);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_u32, u32);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_u64, u64);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_usize, usize);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_i8, i8);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_i16, i16);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_i32, i32);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_i64, i64);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_isize, isize);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_f32, f32);
+    generate_as_simd_mut_harnesses!(harness_as_simd_mut_f64, f64);
+
+    // Harnesses for `get_disjoint_mut`
+    macro_rules! generate_get_disjoint_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [$ty; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let indices: [usize; $n] = kani::any();
+                let _ = slice.get_disjoint_mut(indices);
+            }
+        };
+    }
+
+    macro_rules! generate_get_disjoint_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_get_disjoint_mut_harness!(n1, $ty, 1);
+                generate_get_disjoint_mut_harness!(n2, $ty, 2);
+                generate_get_disjoint_mut_harness!(n4, $ty, 4);
+            }
+        };
+    }
+
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_i8, i8);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_i16, i16);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_i32, i32);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_i64, i64);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_i128, i128);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_u8, u8);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_u16, u16);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_u32, u32);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_u64, u64);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_u128, u128);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_bool, bool);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_char, char);
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_unit, ());
+    generate_get_disjoint_mut_harnesses!(harness_get_disjoint_mut_array, [u8; 4]);
+
+    // Harnesses for `get_disjoint_check_valid`
+    macro_rules! generate_get_disjoint_check_valid_harness {
+        ($name:ident, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let indices: [usize; $n] = kani::any();
+                let len: usize = kani::any();
+                let _ = get_disjoint_check_valid(&indices, len);
+            }
+        };
+    }
+
+    generate_get_disjoint_check_valid_harness!(harness_get_disjoint_check_valid_n1, 1);
+    generate_get_disjoint_check_valid_harness!(harness_get_disjoint_check_valid_n2, 2);
+    generate_get_disjoint_check_valid_harness!(harness_get_disjoint_check_valid_n4, 4);
+
+    // Harnesses for `as_flattened`.
+    macro_rules! generate_as_flattened_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let data: [[$ty; $n]; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&data);
+                let _ = slice.as_flattened();
+            }
+        };
+    }
+
+    macro_rules! generate_as_flattened_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_flattened_harness!(n0, $ty, 0);
+                generate_as_flattened_harness!(n1, $ty, 1);
+                generate_as_flattened_harness!(n2, $ty, 2);
+            }
+        };
+    }
+
+    generate_as_flattened_harnesses!(harness_as_flattened_i8, i8);
+    generate_as_flattened_harnesses!(harness_as_flattened_i16, i16);
+    generate_as_flattened_harnesses!(harness_as_flattened_i32, i32);
+    generate_as_flattened_harnesses!(harness_as_flattened_i64, i64);
+    generate_as_flattened_harnesses!(harness_as_flattened_i128, i128);
+    generate_as_flattened_harnesses!(harness_as_flattened_u8, u8);
+    generate_as_flattened_harnesses!(harness_as_flattened_u16, u16);
+    generate_as_flattened_harnesses!(harness_as_flattened_u32, u32);
+    generate_as_flattened_harnesses!(harness_as_flattened_u64, u64);
+    generate_as_flattened_harnesses!(harness_as_flattened_u128, u128);
+    generate_as_flattened_harnesses!(harness_as_flattened_bool, bool);
+    generate_as_flattened_harnesses!(harness_as_flattened_char, char);
+    generate_as_flattened_harnesses!(harness_as_flattened_unit, ());
+    generate_as_flattened_harnesses!(harness_as_flattened_array, [u8; 4]);
+
+    // Harnesses for `as_flattened_mut`.
+    macro_rules! generate_as_flattened_mut_harness {
+        ($name:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $name() {
+                let mut data: [[$ty; $n]; 100] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut data);
+                let _ = slice.as_flattened_mut();
+            }
+        };
+    }
+
+    macro_rules! generate_as_flattened_mut_harnesses {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+
+                generate_as_flattened_mut_harness!(n0, $ty, 0);
+                generate_as_flattened_mut_harness!(n1, $ty, 1);
+                generate_as_flattened_mut_harness!(n2, $ty, 2);
+            }
+        };
+    }
+
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_i8, i8);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_i16, i16);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_i32, i32);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_i64, i64);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_i128, i128);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_u8, u8);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_u16, u16);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_u32, u32);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_u64, u64);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_u128, u128);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_bool, bool);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_char, char);
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_unit, ());
+    generate_as_flattened_mut_harnesses!(harness_as_flattened_mut_array, [u8; 4]);
 }

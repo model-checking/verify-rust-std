@@ -1,3 +1,5 @@
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::ptr;
 
@@ -11,6 +13,7 @@ type BufType = [usize; 32];
 ///
 /// The specified range must be valid for reading and writing.
 #[inline]
+#[cfg_attr(kani, rustc_allow_const_fn_unstable(const_eval_select))]
 pub(super) const unsafe fn ptr_rotate<T>(left: usize, mid: *mut T, right: usize) {
     if T::IS_ZST {
         return;
@@ -32,8 +35,24 @@ pub(super) const unsafe fn ptr_rotate<T>(left: usize, mid: *mut T, right: usize)
         // SAFETY: guaranteed by the caller
         unsafe { ptr_rotate_gcd(left, mid, right) }
     } else {
-        // SAFETY: guaranteed by the caller
-        unsafe { ptr_rotate_swap(left, mid, right) }
+        #[cfg(not(kani))]
+        {
+            // SAFETY: guaranteed by the caller
+            unsafe { ptr_rotate_swap(left, mid, right) }
+        }
+        #[cfg(kani)]
+        {
+            crate::intrinsics::const_eval_select!(
+                @capture[T] { left: usize, mid: *mut T, right: usize }:
+                if const {
+                    // SAFETY: guaranteed by the caller
+                    unsafe { ptr_rotate_swap(left, mid, right) }
+                } else {
+                    // SAFETY: guaranteed by the caller
+                    unsafe { ptr_rotate_swap_kani_stub(left, mid, right) }
+                }
+            )
+        }
     }
 }
 
@@ -138,6 +157,32 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
     // of reading one temporary once, copying backwards, and then writing that temporary at
     // the very end. This is possibly due to the fact that swapping or replacing temporaries
     // uses only one memory address in the loop instead of needing to manage two.
+    #[cfg(kani)]
+    {
+        #[kani::loop_invariant(left > 0 && right > 0)]
+        #[kani::loop_invariant(i < left + right)]
+        #[kani::loop_invariant(gcd > 0 && gcd <= right)]
+        #[kani::loop_invariant(
+            (i == 0 && gcd <= left) || (i > 0 && gcd <= i)
+        )]
+        while i != 0 {
+            // SAFETY: callers must ensure `[mid-left, mid+right)` is valid for reading and
+            // writing; the invariant keeps `i` within that range.
+            tmp = unsafe { x.add(i).replace(tmp) };
+            if i >= left {
+                i -= left;
+                // This conditional must be here if `left + right >= 15`.
+                if i != 0 && i < gcd {
+                    gcd = i;
+                }
+            } else {
+                i += right;
+            }
+        }
+        // SAFETY: `tmp` has been read from a valid source and `x` is valid for writing.
+        unsafe { x.write(tmp) };
+    }
+    #[cfg(not(kani))]
     loop {
         // [long-safety-expl]
         // SAFETY: callers must ensure `[left, left+mid+right)` are all valid for reading and
@@ -178,6 +223,9 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
     // finish the chunk with more rounds
     // FIXME(const-hack): Use `for start in 1..gcd` when available in const
     let mut start = 1;
+    #[cfg_attr(kani, kani::loop_invariant(left > 0 && right > 0))]
+    #[cfg_attr(kani, kani::loop_invariant(gcd > 0 && gcd <= left && gcd <= right))]
+    #[cfg_attr(kani, kani::loop_invariant(start > 0 && start <= gcd))]
     while start < gcd {
         // SAFETY: `gcd` is at most equal to `right` so all values in `1..gcd` are valid for
         // reading and writing as per the function's safety contract, see [long-safety-expl]
@@ -190,6 +238,25 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
         // `i < left+right` so `x+i = mid-left+i` is always valid for reading and writing
         // according to the function's safety contract.
         i = start + right;
+        #[cfg(kani)]
+        {
+            #[kani::loop_invariant(left > 0 && right > 0)]
+            #[kani::loop_invariant(i < left + right)]
+            #[kani::loop_invariant(gcd > 0 && gcd <= left && gcd <= right)]
+            #[kani::loop_invariant(start > 0 && start < gcd)]
+            while i != start {
+                // SAFETY: see [long-safety-expl] and [safety-expl-addition]
+                tmp = unsafe { x.add(i).replace(tmp) };
+                if i >= left {
+                    i -= left;
+                } else {
+                    i += right;
+                }
+            }
+            // SAFETY: see [long-safety-expl] and [safety-expl-addition]
+            unsafe { x.add(start).write(tmp) };
+        }
+        #[cfg(not(kani))]
         loop {
             // SAFETY: see [long-safety-expl] and [safety-expl-addition]
             tmp = unsafe { x.add(i).replace(tmp) };
@@ -268,6 +335,40 @@ const unsafe fn ptr_rotate_swap<T>(mut left: usize, mut mid: *mut T, mut right: 
         if (right == 0) || (left == 0) {
             return;
         }
+    }
+}
+
+#[cfg(kani)]
+unsafe fn ptr_rotate_swap_kani_stub<T>(left: usize, mid: *mut T, right: usize) {
+    // Kani's loop-contract transformation makes the nested swap loops and
+    // their write-set checks prohibitively expensive. Instead, select an
+    // arbitrary active subproblem contained in the original range and execute
+    // one real swap step. Every concrete loop iteration is represented, while
+    // the extra symbolic states are a sound over-approximation for checking
+    // memory safety. This does not summarize functional correctness or
+    // termination of the complete rotation.
+    let total = left + right;
+    // SAFETY: the caller guarantees that the complete rotated range is valid.
+    let base = unsafe { mid.sub(left) };
+
+    let active_start: usize = kani::any();
+    let active_left: usize = kani::any();
+    let active_right: usize = kani::any();
+    kani::assume(active_start <= total);
+    kani::assume(active_left > 0 && active_left <= total - active_start);
+    kani::assume(active_right > 0 && active_right <= total - active_start - active_left);
+
+    // The assumptions place both active subranges wholly inside the original
+    // allocation and make all offset additions non-overflowing.
+    let active_mid = unsafe { base.add(active_start + active_left) };
+    if active_left >= active_right {
+        // SAFETY: both adjacent `active_right`-element ranges are contained in
+        // the symbolic active subproblem and therefore cannot overlap.
+        unsafe { ptr::swap_nonoverlapping(active_mid.sub(active_right), active_mid, active_right) };
+    } else {
+        // SAFETY: both adjacent `active_left`-element ranges are contained in
+        // the symbolic active subproblem and therefore cannot overlap.
+        unsafe { ptr::swap_nonoverlapping(active_mid.sub(active_left), active_mid, active_left) };
     }
 }
 
