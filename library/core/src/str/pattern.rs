@@ -471,12 +471,9 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
     fn haystack(&self) -> &'a str {
         self.haystack
     }
-    #[cfg_attr(
-        kani,
-        kani::requires(kani_pattern_harness_helpers::type_invariant_char_searcher(self))
-    )]
+    #[safety::requires(kani_pattern_harness_helpers::type_invariant_char_searcher(self))]
     #[cfg_attr(kani, kani::modifies(&mut self.finger))]
-    #[cfg_attr(kani, kani::ensures(|step: &SearchStep| {
+    #[safety::ensures(|step: &SearchStep| {
         kani_pattern_harness_helpers::type_invariant_char_searcher(self)
             && kani_pattern_harness_helpers::valid_char_next_step(
                 self.haystack,
@@ -486,7 +483,7 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 self.finger_back,
                 *step,
             )
-    }))]
+    })]
     #[inline]
     fn next(&mut self) -> SearchStep {
         let old_finger = self.finger;
@@ -655,7 +652,7 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
         let mut step = SearchStep::Done;
 
         // == Kani Loop Contract Start: CharSearcher::next_reject ==
-        #[cfg_attr(kani, kani::loop_invariant(
+        #[safety::loop_invariant(
             search_start <= self.finger
                 && self.finger <= search_end
                 && self.finger_back == search_end
@@ -665,7 +662,7 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
                 && self.utf8_size == utf8_size
                 && 1 <= self.utf8_size
                 && self.utf8_size <= MAX_LEN_UTF8 as u8
-        ))]
+        )]
         #[cfg_attr(kani, kani::loop_modifies(
             &self.finger,
             &old_finger,
@@ -717,12 +714,9 @@ unsafe impl<'a> Searcher<'a> for CharSearcher<'a> {
 }
 
 unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
-    #[cfg_attr(
-        kani,
-        kani::requires(kani_pattern_harness_helpers::type_invariant_char_searcher(self))
-    )]
+    #[safety::requires(kani_pattern_harness_helpers::type_invariant_char_searcher(self))]
     #[cfg_attr(kani, kani::modifies(&mut self.finger_back))]
-    #[cfg_attr(kani, kani::ensures(|step: &SearchStep| {
+    #[safety::ensures(|step: &SearchStep| {
         kani_pattern_harness_helpers::type_invariant_char_searcher(self)
             && kani_pattern_harness_helpers::valid_char_next_back_step(
                 self.haystack,
@@ -732,7 +726,7 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
                 self.finger_back,
                 *step,
             )
-    }))]
+    })]
     #[inline]
     fn next_back(&mut self) -> SearchStep {
         let old_finger = self.finger_back;
@@ -810,7 +804,7 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
         let utf8_encoded_3 = self.utf8_encoded[3];
 
         // == Kani Loop Contract Start: CharSearcher::next_match_back ==
-        #[cfg_attr(kani, kani::loop_invariant(
+        #[safety::loop_invariant(
             self.haystack.as_ptr() == haystack_ptr
                 && self.haystack.len() == haystack_len
                 && self.needle == needle
@@ -827,7 +821,7 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
                 && self.utf8_size == utf8_size
                 && 1 <= self.utf8_size
                 && self.utf8_size <= MAX_LEN_UTF8 as u8
-        ))]
+        )]
         // == Kani Loop Contract End: CharSearcher::next_match_back ==
         loop {
             // get the haystack up to but not including the last character searched
@@ -901,7 +895,7 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
         let mut step = SearchStep::Done;
 
         // == Kani Loop Contract Start: CharSearcher::next_reject_back ==
-        #[cfg_attr(kani, kani::loop_invariant(
+        #[safety::loop_invariant(
             self.finger == search_start
                 && search_start <= self.finger_back
                 && self.finger_back <= search_end
@@ -912,7 +906,7 @@ unsafe impl<'a> ReverseSearcher<'a> for CharSearcher<'a> {
                 && self.utf8_size == utf8_size
                 && 1 <= self.utf8_size
                 && self.utf8_size <= MAX_LEN_UTF8 as u8
-        ))]
+        )]
         #[cfg_attr(kani, kani::loop_modifies(
             &self.finger_back,
             &old_finger,
@@ -3791,23 +3785,30 @@ mod verify_char_searcher {
     // separately prove that production initialization establishes C; method
     // harnesses use this helper to prove preservation from an arbitrary C state.
     fn any_char_searcher_state(haystack: &str) -> CharSearcher<'_> {
+        let needle: char = kani::any();
+
+        // Keep the unused tail symbolic because C does not constrain it.
+        let mut utf8_encoded: [u8; MAX_LEN_UTF8] = kani::any();
+        let utf8_size = needle.encode_utf8(&mut utf8_encoded).len() as u8;
+
+        let finger: usize = kani::any();
+        let finger_back: usize = kani::any();
+
+        kani::assume(finger <= finger_back);
+        kani::assume(finger_back <= haystack.len());
+        kani::assume(haystack.is_char_boundary(finger));
+        kani::assume(haystack.is_char_boundary(finger_back));
+
         let searcher = CharSearcher {
             haystack,
-            finger: kani::any(),
-            finger_back: kani::any(),
-            needle: kani::any(),
-            utf8_size: kani::any(),
-            utf8_encoded: kani::any(),
+            finger,
+            finger_back,
+            needle,
+            utf8_size,
+            utf8_encoded,
         };
-        kani::assume(type_invariant_char_searcher(&searcher));
 
-        // Challenge 20 permits importing valid-UTF-8 properties. Since C says
-        // both fingers are boundaries in a valid haystack, their intervening
-        // byte range is itself valid UTF-8. Kani does not derive this theorem
-        // automatically through `Chars`.
-        let active =
-            searcher.haystack.as_bytes().get(searcher.finger..searcher.finger_back).unwrap();
-        kani::assume(crate::str::from_utf8(active).is_ok());
+        assert!(type_invariant_char_searcher(&searcher));
         searcher
     }
 
