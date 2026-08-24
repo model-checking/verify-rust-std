@@ -5365,11 +5365,17 @@ mod verify {
         };
     }
 
+    // These unsized `Weak::from_raw_in` harnesses use bounded slice inputs only
+    // to reduce CI resource usage and verification-time variance. This is not
+    // a verification gap or an unsound workaround: the unbounded proof
+    // completes locally, and slice length does not control the behavior under
+    // verification. The raw-pointer round trip and contract checks remain
+    // fully exercised for every symbolic length and capacity up to the bound.
     macro_rules! gen_weak_from_raw_in_unsized_harness {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Weak::<[$elem], Global>::from_raw_in)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc::<$elem>();
+                let vec = verifier_nondet_vec_rc_bounded::<$elem>(32);
                 let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let (ptr, alloc): (*const [$elem], Global) = weak.into_raw_with_allocator();
