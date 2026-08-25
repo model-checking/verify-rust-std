@@ -3808,6 +3808,15 @@ mod verify_char_searcher {
             utf8_encoded,
         };
 
+        // Challenge 20 permits importing valid-UTF-8 properties. Since C says
+        // both fingers are boundaries in a valid haystack, their intervening
+        // byte range is itself valid UTF-8. Kani does not derive this theorem
+        // automatically through `Chars`; provide it before calling the
+        // unchecked UTF-8 decoder used by `next` and `next_back`.
+        let active =
+            searcher.haystack.as_bytes().get(searcher.finger..searcher.finger_back).unwrap();
+        kani::assume(crate::str::from_utf8(active).is_ok());
+
         assert!(type_invariant_char_searcher(&searcher));
         searcher
     }
