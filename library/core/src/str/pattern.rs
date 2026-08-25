@@ -4223,6 +4223,38 @@ mod verify_str_searcher {
     use super::kani_pattern_harness_helpers::*;
     use super::*;
 
+    // Keep the constructor proof small enough for CBMC to enumerate while
+    // still covering empty, ASCII, and all UTF-8 character widths. The
+    // resulting proof is bounded to these buffers; the step harnesses below
+    // separately quantify over every state satisfying the invariant.
+    const TWO_WAY_HAYSTACK_BYTES: usize = 4;
+    const TWO_WAY_NEEDLE_BYTES: usize = 3;
+
+    fn symbolic_two_way_str<const N: usize>(buf: &mut [u8; N]) -> &str {
+        let mut len = 0usize;
+        let mut append = || {
+            if kani::any() {
+                let c: char = kani::any();
+                if let Some(next) = len.checked_add(c.len_utf8()) {
+                    if next <= N {
+                        c.encode_utf8(&mut buf[len..]);
+                        len = next;
+                    }
+                }
+            }
+        };
+
+        // Four steps are enough for every string fitting either constructor
+        // buffer: each appended character contributes at least one byte.
+        append();
+        append();
+        append();
+        append();
+
+        // SAFETY: the buffer is built only from valid UTF-8 char encodings.
+        unsafe { crate::str::from_utf8_unchecked(&buf[..len]) }
+    }
+
     //===============================================================================
     // Challenge 21: Verify the safety of substring-related functions in str::pattern
     //===============================================================================
@@ -4419,11 +4451,39 @@ mod verify_str_searcher {
         );
     }
 
-    // Two-Way method harnesses are conditional on the type invariant.
-    // Establishing it for the production preprocessing algorithm is a separate
-    // proof obligation and is not claimed by this module.
-    // The loop summaries avoid a fixed iteration unwind, but the concrete
-    // haystack and needle models remain bounded by `MAX_UTF8_BYTES`.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn harness_str_searcher_two_way_into_searcher() {
+        let mut haystack_storage = [0u8; TWO_WAY_HAYSTACK_BYTES];
+        let mut needle_storage = [0u8; TWO_WAY_NEEDLE_BYTES];
+        let haystack = symbolic_two_way_str(&mut haystack_storage);
+        let needle = symbolic_two_way_str(&mut needle_storage);
+
+        // The empty constructor has its own harness; this proof targets the
+        // production Two-Way path for every non-empty bounded UTF-8 needle.
+        kani::assume(!needle.is_empty());
+
+        // Pattern::into_searcher -> StrSearcher::new -> TwoWaySearcher::new
+        let searcher: StrSearcher<'_, '_> = needle.into_searcher(haystack);
+
+        let two_way = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way,
+            StrSearcherImpl::Empty(_) => {
+                kani::assert(false, "non-empty needle must create a TwoWay searcher");
+                return;
+            }
+        };
+
+        assert!(type_invariant_two_way_searcher(two_way, haystack, needle));
+        assert_eq!(two_way.position, 0);
+        assert_eq!(two_way.end, haystack.len());
+        kani::cover(two_way.memory == usize::MAX, "long-period constructor branch");
+        kani::cover(two_way.memory != usize::MAX, "short-period constructor branch");
+        assert!(type_invariant_str_searcher(&searcher));
+    }
+
+    // Two-Way method harnesses are conditional on the type invariant established
+    // by the constructor harness above.
     #[kani::proof]
     fn harness_str_searcher_two_way_next() {
         let haystack_storage: [u8; MAX_UTF8_BYTES] = kani::any();
