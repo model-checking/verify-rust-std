@@ -215,6 +215,7 @@ mod verify {
         let mut iter = Cloned::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let result = unsafe { iter.__iterator_get_unchecked(idx) };
         assert_eq!(result, slice[idx]);
     }
@@ -235,6 +236,7 @@ mod verify {
         let mut iter = Cloned::new(items.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let result = unsafe { iter.__iterator_get_unchecked(idx) };
         assert_eq!(result.0, items[idx].0);
     }
@@ -251,6 +253,7 @@ mod verify {
         let mut iter = Cloned::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 
@@ -262,6 +265,7 @@ mod verify {
         let mut iter = Cloned::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 
@@ -274,6 +278,7 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let mut iter = Cloned::new(slice.iter());
         kani::assume(iter.size_hint().0 > 0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.next_unchecked() };
     }
 
@@ -284,6 +289,7 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let mut iter = Cloned::new(slice.iter());
         kani::assume(iter.size_hint().0 > 0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.next_unchecked() };
     }
 
@@ -295,6 +301,7 @@ mod verify {
         let mut iter = Cloned::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 
@@ -306,6 +313,7 @@ mod verify {
         let mut iter = Cloned::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 
@@ -316,6 +324,7 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let mut iter = Cloned::new(slice.iter());
         kani::assume(iter.size_hint().0 > 0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.next_unchecked() };
     }
 
@@ -326,6 +335,7 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let mut iter = Cloned::new(slice.iter());
         kani::assume(iter.size_hint().0 > 0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.next_unchecked() };
     }
 }

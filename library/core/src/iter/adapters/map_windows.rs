@@ -327,6 +327,7 @@ mod verify {
         let array: [u8; MAX_LEN] = kani::any();
         let slice = kani::slice::any_slice_of_array(&array);
         kani::assume(slice.len() >= 3); // Need N+1 elements for 2 iterations
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let mut mw = MapWindows::new(slice.iter().copied(), map_sum_u8 as fn(&[u8; 2]) -> u8);
         let _ = mw.next(); // Initializes buffer, exercises push + as_array_ref
         let _ = mw.next(); // Exercises push ring buffer wrap + as_array_ref
@@ -390,6 +391,7 @@ mod verify {
         let array: [u8; MAX_LEN] = kani::any();
         let slice = kani::slice::any_slice_of_array(&array);
         kani::assume(slice.len() >= 4); // Need N+1 elements for 2 iterations
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let mut mw = MapWindows::new(slice.iter().copied(), map_sum3_u8 as fn(&[u8; 3]) -> u8);
         let _ = mw.next(); // Initializes buffer with 3 elements
         let _ = mw.next(); // Exercises push ring buffer wrap
@@ -402,6 +404,7 @@ mod verify {
         let array: [u8; MAX_LEN] = kani::any();
         let slice = kani::slice::any_slice_of_array(&array);
         kani::assume(slice.len() >= 2);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let mut mw = MapWindows::new(slice.iter().copied(), map_sum_u8 as fn(&[u8; 2]) -> u8);
         let _ = mw.next(); // Initialize buffer
         let _mw_clone = mw.clone(); // Exercises as_uninit_array_mut via Buffer::clone
@@ -428,6 +431,7 @@ mod verify {
         let array: [char; MAX_LEN] = kani::any();
         let slice = kani::slice::any_slice_of_array(&array);
         kani::assume(slice.len() >= 3);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let mut mw =
             MapWindows::new(slice.iter().copied(), map_first_char as fn(&[char; 2]) -> char);
         let _ = mw.next();

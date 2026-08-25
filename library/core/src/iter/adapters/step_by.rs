@@ -612,6 +612,7 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let step: usize = kani::any();
         kani::assume(step >= 1);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let sb = StepBy::new(slice.iter(), step);
         // size_hint calls original_step internally
         let _ = sb.size_hint();
@@ -627,6 +628,7 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let step: usize = kani::any();
         kani::assume(step >= 1);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let mut sb = StepBy::new(slice.iter(), step);
         let _ = sb.next();
     }
@@ -641,6 +643,7 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let step: usize = kani::any();
         kani::assume(step >= 1);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let mut sb = StepBy::new(slice.iter(), step);
         let _ = sb.next_back();
     }
@@ -652,6 +655,7 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let step: usize = kani::any();
         kani::assume(step >= 1);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let sb = StepBy::new(slice.iter(), step);
         let _ = sb.size_hint();
     }
@@ -666,6 +670,7 @@ mod verify {
     fn check_step_by_original_step_contract() {
         let sb = StepBy { iter: 0u8..0u8, step_minus_one: kani::any(), first_take: kani::any() };
         kani::assume(sb.step_minus_one < usize::MAX);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = sb.original_step();
     }
 }

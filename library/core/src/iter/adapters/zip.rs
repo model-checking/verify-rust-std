@@ -745,6 +745,7 @@ mod verify {
         let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
         let idx: usize = kani::any();
         kani::assume(idx < Iterator::size_hint(&zip).0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { zip.__iterator_get_unchecked(idx) };
     }
 
@@ -758,6 +759,7 @@ mod verify {
         let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
         let idx: usize = kani::any();
         kani::assume(idx < Iterator::size_hint(&zip).0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { zip.__iterator_get_unchecked(idx) };
     }
 
@@ -801,6 +803,7 @@ mod verify {
                 && zip.index <= slice_b.len()
                 && idx < slice_b.len() - zip.index,
         );
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let (a, b) = unsafe { ZipImpl::get_unchecked(&mut zip, idx) };
         assert_eq!(*a, slice_a[index + idx]);
         assert_eq!(*b, slice_b[index + idx]);
@@ -900,6 +903,7 @@ mod verify {
         let len_b: u8 = kani::any();
         kani::assume(len_a as usize <= MAX_LEN);
         kani::assume(len_b as usize <= MAX_LEN);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let zip =
             Zip::new(iter::repeat_n(1u8, len_a as usize), iter::repeat_n(2u8, len_b as usize));
         Iterator::fold(zip, (), |(), _| ());
@@ -918,6 +922,7 @@ mod verify {
         let k: usize = kani::any();
         let upper = cmp::min(len_a, len_b);
         kani::assume(k < upper);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
 
         // Iterator state at iteration k: (original_len - k) elements remaining
         let mut a = CountDown(len_a - k);
@@ -938,6 +943,7 @@ mod verify {
         let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
         let idx: usize = kani::any();
         kani::assume(idx < Iterator::size_hint(&zip).0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { zip.__iterator_get_unchecked(idx) };
     }
 
@@ -951,6 +957,7 @@ mod verify {
         let mut zip = Zip::new(slice_a.iter(), slice_b.iter());
         let idx: usize = kani::any();
         kani::assume(idx < Iterator::size_hint(&zip).0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { zip.__iterator_get_unchecked(idx) };
     }
 

@@ -340,6 +340,7 @@ mod verify {
         let mut iter = Enumerate::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let (i, val) = unsafe { iter.__iterator_get_unchecked(idx) };
         assert_eq!(i, idx);
         assert_eq!(*val, slice[idx]);
@@ -357,6 +358,7 @@ mod verify {
         let mut iter = Enumerate::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 
@@ -368,6 +370,7 @@ mod verify {
         let mut iter = Enumerate::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 
@@ -379,6 +382,7 @@ mod verify {
         let mut iter = Enumerate::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 
@@ -390,6 +394,7 @@ mod verify {
         let mut iter = Enumerate::new(slice.iter());
         let idx: usize = kani::any();
         kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 }

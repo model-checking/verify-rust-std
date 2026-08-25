@@ -277,6 +277,7 @@ mod verify {
         // Symbolic loop state at arbitrary iteration k (any source iterator length)
         let initialized: usize = kani::any();
         kani::assume(initialized < N); // Loop continues only when initialized < N
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
 
         let idx = initialized;
         let val: Option<u8> = kani::any();
