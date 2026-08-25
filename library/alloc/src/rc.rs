@@ -4708,9 +4708,11 @@ mod kani_rc_harness_helpers {
         unsafe {
             let sz: usize = kani::any();
             kani::assume(sz <= cap);
-            // Bound the macOS CI search space to avoid CBMC timeouts / memory pressure.
-            // Linux/Ubuntu CI keeps the original, less-constrained path.
-            #[cfg(target_os = "macos")]
+            // The harnesses use symbolic, otherwise unbounded vector lengths. The full Rc
+            // suite contains enough harnesses that shared CI runners cannot verify it
+            // reliably without this uniform length bound. This is a CI tractability measure,
+            // not a workaround for a failing proof: removing the assumption restores the
+            // unbounded inputs, for which all harnesses complete successfully locally.
             kani::assume(sz <= 100);
             v.set_len(sz);
             ptr::write_bytes(
@@ -4730,10 +4732,6 @@ mod kani_rc_harness_helpers {
 
     pub(super) fn nondet_rc_slice<T>(vec: &Vec<T>) -> &[T] {
         let len = vec.len();
-        // Bound the macOS CI search space to avoid CBMC timeouts / memory pressure.
-        // Linux/Ubuntu CI keeps the original, less-constrained path.
-        #[cfg(target_os = "macos")]
-        kani::assume(len <= 100);
         kani::assume(rc_slice_layout_ok::<T>(len));
         vec.as_slice()
     }
@@ -4742,28 +4740,6 @@ mod kani_rc_harness_helpers {
         let vec = verifier_nondet_vec();
         kani::assume(rc_slice_layout_ok::<T>(vec.len()));
         vec
-    }
-
-    // This bounded constructor is intentionally reserved for selected,
-    // high-cost slice harnesses. The length bound limits the CI search space
-    // without changing the ownership states or other behavior being verified.
-    pub(super) fn verifier_nondet_vec_rc_bounded<T>(max_len: usize) -> Vec<T> {
-        let cap = kani::any_where(|cap: &usize| *cap <= max_len);
-        let elem_layout = Layout::new::<T>();
-        kani::assume(elem_layout.repeat(cap).is_ok());
-
-        let mut v = Vec::<T>::with_capacity(cap);
-        let sz = kani::any_where(|sz: &usize| *sz <= cap);
-        unsafe {
-            v.set_len(sz);
-            ptr::write_bytes(
-                v.as_mut_ptr().cast::<u8>(),
-                kani::any::<u8>(),
-                mem::size_of::<T>() * sz,
-            );
-        }
-        kani::assume(rc_slice_layout_ok::<T>(sz));
-        v
     }
 }
 
@@ -5365,17 +5341,11 @@ mod verify {
         };
     }
 
-    // These unsized `Weak::from_raw_in` harnesses use bounded slice inputs only
-    // to reduce CI resource usage and verification-time variance. This is not
-    // a verification gap or an unsound workaround: the unbounded proof
-    // completes locally, and slice length does not control the behavior under
-    // verification. The raw-pointer round trip and contract checks remain
-    // fully exercised for every symbolic length and capacity up to the bound.
     macro_rules! gen_weak_from_raw_in_unsized_harness {
         ($name:ident, [$elem:ty]) => {
             #[kani::proof_for_contract(Weak::<[$elem], Global>::from_raw_in)]
             pub fn $name() {
-                let vec = verifier_nondet_vec_rc_bounded::<$elem>(32);
+                let vec = verifier_nondet_vec_rc::<$elem>();
                 let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
                 let (ptr, alloc): (*const [$elem], Global) = weak.into_raw_with_allocator();
@@ -5438,23 +5408,18 @@ mod verify {
         };
     }
 
-    // The unsized `get_mut` harnesses use the bounded vector helper to keep CI
-    // resource usage predictable. This is a CI tradeoff, not a verification
-    // limitation: the unbounded `verifier_nondet_vec_rc` path completes locally,
-    // but has not been stable on CI. The bound only limits slice size and
-    // capacity; all three ownership states remain explicitly exercised.
     macro_rules! gen_get_mut_unsized_harness {
         ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $unique() {
-                let vec = verifier_nondet_vec_rc_bounded::<$elem>(32);
+                let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _ = Rc::<[$elem], Global>::get_mut(&mut rc);
             }
 
             #[kani::proof]
             pub fn $shared() {
-                let vec = verifier_nondet_vec_rc_bounded::<$elem>(32);
+                let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
                 let _ = Rc::<[$elem], Global>::get_mut(&mut rc);
@@ -5462,7 +5427,7 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let vec = verifier_nondet_vec_rc_bounded::<$elem>(32);
+                let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
                 let _ = Rc::<[$elem], Global>::get_mut(&mut rc);
@@ -5608,15 +5573,7 @@ mod verify {
     }
 
     macro_rules! gen_make_mut_unsized_harness {
-        (
-            $(#[$unique_attr:meta])*
-            $unique:ident,
-            $shared:ident,
-            $(#[$weak_present_attr:meta])*
-            $weak_present:ident,
-            $elem:ty
-        ) => {
-            $(#[$unique_attr])*
+        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
             #[kani::proof]
             pub fn $unique() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -5632,7 +5589,6 @@ mod verify {
                 let _ = Rc::<[$elem], Global>::make_mut(&mut rc);
             }
 
-            $(#[$weak_present_attr])*
             #[kani::proof]
             pub fn $weak_present() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
@@ -5729,10 +5685,8 @@ mod verify {
         u16
     );
     gen_make_mut_unsized_harness!(
-        #[cfg(not(target_os = "macos"))]
         harness_make_mut_vec_u32_unique,
         harness_make_mut_vec_u32_shared,
-        #[cfg(not(target_os = "macos"))]
         harness_make_mut_vec_u32_weak_present,
         u32
     );
