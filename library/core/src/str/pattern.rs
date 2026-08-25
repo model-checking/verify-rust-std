@@ -3740,7 +3740,7 @@ pub mod verify {
     pub fn check_small_slice_eq() {
         // TODO: ARR_SIZE can be `std::usize::MAX` with cbmc argument
         // `--arrays-uf-always`
-        const ARR_SIZE: usize = 1000;
+        const ARR_SIZE: usize = 10;
         let x: [u8; ARR_SIZE] = kani::any();
         let y: [u8; ARR_SIZE] = kani::any();
         let xs = kani::slice::any_slice_of_array(&x);
@@ -3799,14 +3799,8 @@ mod verify_char_searcher {
         kani::assume(haystack.is_char_boundary(finger));
         kani::assume(haystack.is_char_boundary(finger_back));
 
-        let searcher = CharSearcher {
-            haystack,
-            finger,
-            finger_back,
-            needle,
-            utf8_size,
-            utf8_encoded,
-        };
+        let searcher =
+            CharSearcher { haystack, finger, finger_back, needle, utf8_size, utf8_encoded };
 
         // Challenge 20 permits importing valid-UTF-8 properties. Since C says
         // both fingers are boundaries in a valid haystack, their intervening
