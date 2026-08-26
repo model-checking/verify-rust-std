@@ -9,7 +9,7 @@ use core::pin::Pin;
 #[cfg(not(no_global_oom_handling))]
 use core::{fmt, ptr};
 
-use safety::requires;
+use safety::{ensures, requires};
 
 use crate::alloc::Allocator;
 #[cfg(not(no_global_oom_handling))]
@@ -400,6 +400,9 @@ impl<A: Allocator> Box<dyn Any, A> {
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     #[requires(self.is::<T>())]
+    #[ensures(|result: &Box<T, A>| {
+        core::ub_checks::can_dereference(&**result as *const T)
+    })]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -460,6 +463,9 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     #[requires(self.is::<T>())]
+    #[ensures(|result: &Box<T, A>| {
+        core::ub_checks::can_dereference(&**result as *const T)
+    })]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -520,6 +526,9 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     #[requires(self.is::<T>())]
+    #[ensures(|result: &Box<T, A>| {
+        core::ub_checks::can_dereference(&**result as *const T)
+    })]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -866,11 +875,11 @@ mod verify {
     // full target path to a single contract target when the receiver is a
     // trait-object instantiation and the method is also generic. The failure
     // happens during target-path resolution, before contract checking starts.
-    // These harnesses therefore use plain `#[kani::proof]` and restate the
-    // contract's key precondition explicitly with `erased.is::<T>()`.
-    // They verify the concrete function body under that precondition, but are
-    // not machine-linked to the function contract, so contract changes could
-    // drift without causing these proofs to fail.
+    // These harnesses therefore use plain `#[kani::proof]`, mirror the
+    // contract precondition with `erased.is::<T>()`, and assert its
+    // `can_dereference` postcondition after the call. They verify the concrete
+    // function body under the contract, but are not machine-linked to its
+    // attributes, so contract changes must also be reflected here manually.
     macro_rules! gen_downcast_unchecked_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
@@ -885,8 +894,11 @@ mod verify {
                 kani::assume(erased.is::<$ty>());
 
                 // Perform the unchecked downcast back to the concrete box type.
-                let _downcasted: Box<$ty> =
+                let downcasted: Box<$ty> =
                     unsafe { Box::<dyn Any>::downcast_unchecked::<$ty>(erased) };
+
+                // Check the contract postcondition on the returned box.
+                assert!(core::ub_checks::can_dereference(&*downcasted as *const $ty));
             }
         };
     }
@@ -911,11 +923,10 @@ mod verify {
     // bind the full target path to a single contract target when the receiver
     // is a trait-object instantiation and the method is also generic. The
     // failure happens during target-path resolution, before contract checking
-    // starts. These harnesses therefore use plain `#[kani::proof]` and
-    // restate the contract's key precondition explicitly with `erased.is::<T>()`.
-    // They verify the concrete function body under that precondition, but are
-    // not machine-linked to the function contract, so contract changes could
-    // drift without causing these proofs to fail.
+    // starts. These harnesses therefore use plain `#[kani::proof]`, mirror the
+    // contract precondition with `erased.is::<T>()`, and assert its
+    // `can_dereference` postcondition after the call. They remain manually
+    // synchronized with the contract attributes.
     macro_rules! gen_downcast_unchecked_send_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
@@ -930,8 +941,11 @@ mod verify {
                 kani::assume(erased.is::<$ty>());
 
                 // Perform the unchecked downcast back to the concrete box type.
-                let _downcasted: Box<$ty> =
+                let downcasted: Box<$ty> =
                     unsafe { Box::<dyn Any + Send>::downcast_unchecked::<$ty>(erased) };
+
+                // Check the contract postcondition on the returned box.
+                assert!(core::ub_checks::can_dereference(&*downcasted as *const $ty));
             }
         };
     }
@@ -961,10 +975,9 @@ mod verify {
     // The failure happens during target-path resolution, before contract
     // checking starts. These harnesses therefore use plain `#[kani::proof]`
     // and restate the contract's key precondition explicitly with
-    // `erased.is::<T>()`.
-    // They verify the concrete function body under that precondition, but are
-    // not machine-linked to the function contract, so contract changes could
-    // drift without causing these proofs to fail.
+    // `erased.is::<T>()` and assert the contract's `can_dereference`
+    // postcondition after the call. They remain manually synchronized with the
+    // contract attributes.
     macro_rules! gen_downcast_unchecked_send_sync_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
@@ -979,8 +992,11 @@ mod verify {
                 kani::assume(erased.is::<$ty>());
 
                 // Perform the unchecked downcast back to the concrete box type.
-                let _downcasted: Box<$ty> =
+                let downcasted: Box<$ty> =
                     unsafe { Box::<dyn Any + Send + Sync>::downcast_unchecked::<$ty>(erased) };
+
+                // Check the contract postcondition on the returned box.
+                assert!(core::ub_checks::can_dereference(&*downcasted as *const $ty));
             }
         };
     }
