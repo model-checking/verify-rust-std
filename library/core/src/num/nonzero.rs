@@ -402,6 +402,29 @@ where
     #[rustc_const_stable(feature = "const_nonzero_int_methods", since = "1.47.0")]
     #[must_use]
     #[inline]
+    #[ensures(|result: &Option<Self>| {
+        let size = core::mem::size_of::<T>();
+        // Layout precondition backing the body's `transmute_unchecked`.
+        let layout_ok = size == core::mem::size_of::<Option<Self>>();
+        // Read `n` as raw bytes to reason about "is zero" generically over `T`.
+        let n_ptr: *const T = &n;
+        let n_slice = unsafe { core::slice::from_raw_parts(n_ptr as *const u8, size) };
+        let n_is_zero = n_slice.iter().all(|&byte| byte == 0);
+        // (2a) A `NonZero` is produced if and only if the input was nonzero.
+        let created_iff_nonzero = result.is_some() == !n_is_zero;
+        // (2b) When produced, the inner value equals the input `n`.
+        let value_preserved = match result {
+            Some(nz) => {
+                let inner: T = nz.get();
+                let inner_ptr: *const T = &inner;
+                let inner_slice =
+                    unsafe { core::slice::from_raw_parts(inner_ptr as *const u8, size) };
+                n_slice == inner_slice
+            }
+            None => true,
+        };
+        layout_ok && created_iff_nonzero && value_preserved
+    })]
     pub const fn new(n: T) -> Option<Self> {
         // SAFETY: Memory layout optimization guarantees that `Option<NonZero<T>>` has
         //         the same layout and size as `T`, with `0` representing `None`.
@@ -897,6 +920,8 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() != 0)]
+            #[ensures(|result| result.get() == old(self).get().swap_bytes())]
             pub const fn swap_bytes(self) -> Self {
                 let result = self.get().swap_bytes();
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -925,6 +950,8 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() != 0)]
+            #[ensures(|result| result.get() == old(self).get().reverse_bits())]
             pub const fn reverse_bits(self) -> Self {
                 let result = self.get().reverse_bits();
                 // SAFETY: Reversing bits preserves the property int > 0.
@@ -958,6 +985,8 @@ macro_rules! nonzero_integer {
             #[unstable(feature = "nonzero_bitwise", issue = "128281")]
             #[must_use]
             #[inline(always)]
+            #[ensures(|result| result.get() != 0)]
+            #[ensures(|result| result.get() == $Int::from_be(x.get()))]
             pub const fn from_be(x: Self) -> Self {
                 let result = $Int::from_be(x.get());
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -991,6 +1020,8 @@ macro_rules! nonzero_integer {
             #[unstable(feature = "nonzero_bitwise", issue = "128281")]
             #[must_use]
             #[inline(always)]
+            #[ensures(|result| result.get() != 0)]
+            #[ensures(|result| result.get() == $Int::from_le(x.get()))]
             pub const fn from_le(x: Self) -> Self {
                 let result = $Int::from_le(x.get());
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -1024,6 +1055,8 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() != 0)]
+            #[ensures(|result| result.get() == old(self).get().to_be())]
             pub const fn to_be(self) -> Self {
                 let result = self.get().to_be();
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -1057,6 +1090,8 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                         without modifying the original"]
             #[inline(always)]
+            #[ensures(|result| result.get() != 0)]
+            #[ensures(|result| result.get() == old(self).get().to_le())]
             pub const fn to_le(self) -> Self {
                 let result = self.get().to_le();
                 // SAFETY: Shuffling bytes preserves the property int > 0.
@@ -1094,6 +1129,14 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
+            #[ensures(|result: &Option<Self>| {
+                // `Some` iff no overflow, with the exact product — which is
+                // nonzero (nonzero factors), discharging `new_unchecked`.
+                match result {
+                    Some(v) => self.get().checked_mul(other.get()) == Some(v.get()),
+                    None => self.get().checked_mul(other.get()).is_none(),
+                }
+            })]
             pub const fn checked_mul(self, other: Self) -> Option<Self> {
                 if let Some(result) = self.get().checked_mul(other.get()) {
                     // SAFETY:
@@ -1133,6 +1176,12 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
+            #[ensures(|result: &Self| {
+                // Exact `saturating_mul` value — nonzero both when the product
+                // fits (nonzero factors) and when it saturates (`MAX`/`MIN`),
+                // discharging `new_unchecked`.
+                result.get() == self.get().saturating_mul(other.get())
+            })]
             pub const fn saturating_mul(self, other: Self) -> Self {
                 // SAFETY:
                 // - `saturating_mul` returns `u*::MAX`/`i*::MAX`/`i*::MIN` on overflow/underflow,
@@ -1217,6 +1266,19 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
+            #[ensures(|result: &Option<Self>| {
+                // Safety property, verified unboundedly: a non-overflowing
+                // power of a nonzero base is nonzero, discharging
+                // `new_unchecked`. No exact-value clause: under
+                // `-Z loop-contracts` the pow loop is abstracted by its
+                // `safety::loop_invariant`, and only invariant-derived facts
+                // (nonzero-ness) survive — a functional invariant would need
+                // ghost state for the original exponent.
+                match result {
+                    Some(v) => v.get() != 0,
+                    None => true,
+                }
+            })]
             pub const fn checked_pow(self, other: u32) -> Option<Self> {
                 if let Some(result) = self.get().checked_pow(other) {
                     // SAFETY:
@@ -1265,6 +1327,13 @@ macro_rules! nonzero_integer {
             #[must_use = "this returns the result of the operation, \
                           without modifying the original"]
             #[inline]
+            #[ensures(|result: &Self| {
+                // Safety property, verified unboundedly: nonzero both in-range
+                // (nonzero factors) and when saturating (`MAX`/`MIN`),
+                // discharging `new_unchecked`. No exact-value clause — same
+                // loop-abstraction trade-off as `checked_pow` above.
+                result.get() != 0
+            })]
             pub const fn saturating_pow(self, other: u32) -> Self {
                 // SAFETY:
                 // - `saturating_pow` returns `u*::MAX`/`i*::MAX`/`i*::MIN` on overflow/underflow,
@@ -1518,6 +1587,14 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<Self>| {
+            // `Some` iff no overflow, with the exact sum — which is >= 1
+            // (nonzero + unsigned), discharging `new_unchecked`.
+            match result {
+                Some(v) => self.get().checked_add(other) == Some(v.get()),
+                None => self.get().checked_add(other).is_none(),
+            }
+        })]
         pub const fn checked_add(self, other: $Int) -> Option<Self> {
             if let Some(result) = self.get().checked_add(other) {
                 // SAFETY:
@@ -1557,6 +1634,12 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Self| {
+            // Exact `saturating_add` value — >= 1 both when the sum fits
+            // (nonzero + unsigned) and on overflow (`MAX`), discharging
+            // `new_unchecked`.
+            result.get() == self.get().saturating_add(other)
+        })]
         pub const fn saturating_add(self, other: $Int) -> Self {
             // SAFETY:
             // - `saturating_add` returns `u*::MAX` on overflow, which is non-zero
@@ -1635,6 +1718,14 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Option<Self>| {
+            // `Some` iff the next power of two fits, with the exact value —
+            // which is >= 1 for input >= 1, discharging `new_unchecked`.
+            match result {
+                Some(v) => self.get().checked_next_power_of_two() == Some(v.get()),
+                None => self.get().checked_next_power_of_two().is_none(),
+            }
+        })]
         pub const fn checked_next_power_of_two(self) -> Option<Self> {
             if let Some(nz) = self.get().checked_next_power_of_two() {
                 // SAFETY: The next power of two is positive
@@ -1732,6 +1823,12 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[doc(alias = "average_floor")]
         #[doc(alias = "average")]
         #[inline]
+        #[ensures(|result: &Self| result.get() != 0)]
+        #[ensures(|result: &Self| {
+            // Exact overflow-free `midpoint` value — the average of two values
+            // >= 1 is >= 1, discharging `new_unchecked`.
+            result.get() == self.get().midpoint(rhs.get())
+        })]
         pub const fn midpoint(self, rhs: Self) -> Self {
             // SAFETY: The only way to get `0` with midpoint is to have two opposite or
             // near opposite numbers: (-5, 5), (0, 1), (0, 0) which is impossible because
@@ -1793,6 +1890,12 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[ensures(|result: &Self| result.get() != 0)]
+        #[ensures(|result: &Self| {
+            // Exact `isqrt` value — `isqrt` is nondecreasing and the input is
+            // >= 1, so the root is >= 1, discharging `new_unchecked`.
+            result.get() == self.get().isqrt()
+        })]
         pub const fn isqrt(self) -> Self {
             let result = self.get().isqrt();
 
@@ -1919,6 +2022,14 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        // `abs` is safe and total: `MIN` is a defined input (panics under overflow
+        // checks, wraps to `MIN` otherwise), so no `#[requires]`. Both clauses hold
+        // on every normal return in either build mode. The result is deliberately
+        // not claimed positive: with overflow checks off, `MIN` wraps to the
+        // negative `MIN`. Nonzero-ness discharges the internal `new_unchecked`.
+        // Signed `NonZero` only; see the paired value/panic harnesses.
+        #[ensures(|result: &Self| result.get() != 0)]
+        #[ensures(|result: &Self| result.get() == self.get().abs())]
         pub const fn abs(self) -> Self {
             // SAFETY: This cannot overflow to zero.
             unsafe { Self::new_unchecked(self.get().abs()) }
@@ -1950,6 +2061,12 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        // `None` exactly for `MIN` (the only overflowing input), else `Some(|self|)`;
+        // `|x|` of nonzero is nonzero, discharging the internal `new_unchecked`.
+        // `wrapping_abs` keeps the value clause itself overflow-free. Signed
+        // `NonZero` only.
+        #[ensures(|result: &Option<Self>| result.is_none() == (self.get() == <$Int>::MIN))]
+        #[ensures(|result: &Option<Self>| result.is_none() || result.unwrap().get() == self.get().wrapping_abs())]
         pub const fn checked_abs(self) -> Option<Self> {
             if let Some(nz) = self.get().checked_abs() {
                 // SAFETY: absolute value of nonzero cannot yield zero values.
@@ -1985,6 +2102,12 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        // The flag is exactly `self == MIN`; the value always equals
+        // `self.wrapping_abs()`, which is nonzero for nonzero input, discharging the
+        // internal `new_unchecked`. `wrapping_abs` keeps the value clause itself
+        // overflow-free. Signed `NonZero` only.
+        #[ensures(|result: &(Self, bool)| result.1 == (self.get() == <$Int>::MIN))]
+        #[ensures(|result: &(Self, bool)| result.0.get() == self.get().wrapping_abs())]
         pub const fn overflowing_abs(self) -> (Self, bool) {
             let (nz, flag) = self.get().overflowing_abs();
             (
@@ -2022,6 +2145,11 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        // `|self|` with `MIN` clamped to `MAX`: strictly positive for nonzero input,
+        // discharging the internal `new_unchecked`. The value clause is itself
+        // overflow-free. Signed `NonZero` only.
+        #[ensures(|result: &Self| result.get() > 0)]
+        #[ensures(|result: &Self| result.get() == self.get().saturating_abs())]
         pub const fn saturating_abs(self) -> Self {
             // SAFETY: absolute value of nonzero cannot yield zero values.
             unsafe { Self::new_unchecked(self.get().saturating_abs()) }
@@ -2054,6 +2182,10 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        // `|self|` with `MIN` wrapping to `MIN`: never zero for nonzero input,
+        // discharging the internal `new_unchecked`. Not claimed positive — `MIN`
+        // wraps to the negative `MIN`. Signed `NonZero` only.
+        #[ensures(|result: &Self| result.get() == self.get().wrapping_abs())]
         pub const fn wrapping_abs(self) -> Self {
             // SAFETY: absolute value of nonzero cannot yield zero values.
             unsafe { Self::new_unchecked(self.get().wrapping_abs()) }
@@ -2086,6 +2218,12 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        // The magnitude of every signed value fits the unsigned width (`MIN` maps to
+        // `2^(N-1)`), so the value clause is overflow-free and the result strictly
+        // positive, discharging the internal `new_unchecked`. Signed `NonZero` only;
+        // returns the corresponding unsigned `NonZero`.
+        #[ensures(|result: &NonZero<$Uint>| result.get() > 0)]
+        #[ensures(|result: &NonZero<$Uint>| result.get() == self.get().unsigned_abs())]
         pub const fn unsigned_abs(self) -> NonZero<$Uint> {
             // SAFETY: absolute value of nonzero cannot yield zero values.
             unsafe { NonZero::new_unchecked(self.get().unsigned_abs()) }
@@ -2165,6 +2303,11 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[inline]
         #[stable(feature = "nonzero_negation_ops", since = "1.71.0")]
         #[rustc_const_stable(feature = "nonzero_negation_ops", since = "1.71.0")]
+        // `None` exactly for `MIN` (the only overflowing input), else `Some(-self)`;
+        // `-x` of nonzero is nonzero, discharging the internal `new_unchecked`.
+        // `wrapping_neg` keeps the value clause itself overflow-free.
+        #[ensures(|result: &Option<Self>| result.is_none() == (self.get() == <$Int>::MIN))]
+        #[ensures(|result: &Option<Self>| result.is_none() || result.unwrap().get() == self.get().wrapping_neg())]
         pub const fn checked_neg(self) -> Option<Self> {
             if let Some(result) = self.get().checked_neg() {
                 // SAFETY: negation of nonzero cannot yield zero values.
@@ -2197,6 +2340,12 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[inline]
         #[stable(feature = "nonzero_negation_ops", since = "1.71.0")]
         #[rustc_const_stable(feature = "nonzero_negation_ops", since = "1.71.0")]
+        // The flag is exactly `self == MIN`; the value always equals
+        // `self.wrapping_neg()`, which is nonzero for nonzero input, discharging the
+        // internal `new_unchecked`. `wrapping_neg` keeps the value clause itself
+        // overflow-free.
+        #[ensures(|result: &(Self, bool)| result.1 == (self.get() == <$Int>::MIN))]
+        #[ensures(|result: &(Self, bool)| result.0.get() == self.get().wrapping_neg())]
         pub const fn overflowing_neg(self) -> (Self, bool) {
             let (result, overflow) = self.get().overflowing_neg();
             // SAFETY: negation of nonzero cannot yield zero values.
@@ -2262,6 +2411,10 @@ macro_rules! nonzero_integer_signedness_dependent_methods {
         #[inline]
         #[stable(feature = "nonzero_negation_ops", since = "1.71.0")]
         #[rustc_const_stable(feature = "nonzero_negation_ops", since = "1.71.0")]
+        // `-self` with `MIN` wrapping to `MIN`: never zero for nonzero input,
+        // discharging the internal `new_unchecked`. `wrapping_neg` never overflows,
+        // so no input assumption is needed.
+        #[ensures(|result: &Self| result.get() == self.get().wrapping_neg())]
         pub const fn wrapping_neg(self) -> Self {
             let result = self.get().wrapping_neg();
             // SAFETY: negation of nonzero cannot yield zero values.
@@ -2522,6 +2675,33 @@ mod verify {
     nonzero_check!(u128, core::num::NonZeroU128, nonzero_check_new_unchecked_for_u128);
     nonzero_check!(usize, core::num::NonZeroUsize, nonzero_check_new_unchecked_for_usize);
 
+    // `new` harnesses: the contract checks the layout precondition backing the
+    // body's `transmute_unchecked` (`size_of::<T>() == size_of::<Option<Self>>()`),
+    // that a `NonZero` is produced iff the input is nonzero, and that the inner
+    // value equals the input. Full input domain (zero included) per width.
+    macro_rules! nonzero_check_new {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::new)]
+            pub fn $harness_name() {
+                let x: $t = kani::any();
+                let _ = <$nonzero_type>::new(x);
+            }
+        };
+    }
+
+    nonzero_check_new!(i8, core::num::NonZeroI8, nonzero_check_new_for_i8);
+    nonzero_check_new!(i16, core::num::NonZeroI16, nonzero_check_new_for_i16);
+    nonzero_check_new!(i32, core::num::NonZeroI32, nonzero_check_new_for_i32);
+    nonzero_check_new!(i64, core::num::NonZeroI64, nonzero_check_new_for_i64);
+    nonzero_check_new!(i128, core::num::NonZeroI128, nonzero_check_new_for_i128);
+    nonzero_check_new!(isize, core::num::NonZeroIsize, nonzero_check_new_for_isize);
+    nonzero_check_new!(u8, core::num::NonZeroU8, nonzero_check_new_for_u8);
+    nonzero_check_new!(u16, core::num::NonZeroU16, nonzero_check_new_for_u16);
+    nonzero_check_new!(u32, core::num::NonZeroU32, nonzero_check_new_for_u32);
+    nonzero_check_new!(u64, core::num::NonZeroU64, nonzero_check_new_for_u64);
+    nonzero_check_new!(u128, core::num::NonZeroU128, nonzero_check_new_for_u128);
+    nonzero_check_new!(usize, core::num::NonZeroUsize, nonzero_check_new_for_usize);
+
     macro_rules! nonzero_check_from_mut_unchecked {
         ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
             #[kani::proof_for_contract(NonZero::<$t>::from_mut_unchecked)]
@@ -2595,6 +2775,47 @@ mod verify {
         core::num::NonZeroUsize,
         nonzero_check_from_mut_unchecked_usize
     );
+
+    // `from_mut` harnesses: verify the unsafe reborrow through the raw-pointer
+    // cast (Kani's memory checks are always on) and the `new`-equivalent
+    // correctness properties. In-body assertions instead of `#[ensures]`: the
+    // returned `Option<&mut Self>` mutably aliases the input, so a contract
+    // reading both would be an aliasing hazard. Full input domain per width.
+    macro_rules! nonzero_check_from_mut {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let mut x: $t = kani::any();
+                let orig = x;
+                let result = <$nonzero_type>::from_mut(&mut x);
+                match result {
+                    Some(nz) => {
+                        // A NonZero is produced only when the input was nonzero,
+                        // and it preserves the referenced value.
+                        assert!(orig != 0);
+                        assert!(nz.get() == orig);
+                    }
+                    None => {
+                        // `None` is produced exactly when the input was zero.
+                        assert!(orig == 0);
+                    }
+                }
+            }
+        };
+    }
+
+    nonzero_check_from_mut!(i8, core::num::NonZeroI8, nonzero_check_from_mut_i8);
+    nonzero_check_from_mut!(i16, core::num::NonZeroI16, nonzero_check_from_mut_i16);
+    nonzero_check_from_mut!(i32, core::num::NonZeroI32, nonzero_check_from_mut_i32);
+    nonzero_check_from_mut!(i64, core::num::NonZeroI64, nonzero_check_from_mut_i64);
+    nonzero_check_from_mut!(i128, core::num::NonZeroI128, nonzero_check_from_mut_i128);
+    nonzero_check_from_mut!(isize, core::num::NonZeroIsize, nonzero_check_from_mut_isize);
+    nonzero_check_from_mut!(u8, core::num::NonZeroU8, nonzero_check_from_mut_u8);
+    nonzero_check_from_mut!(u16, core::num::NonZeroU16, nonzero_check_from_mut_u16);
+    nonzero_check_from_mut!(u32, core::num::NonZeroU32, nonzero_check_from_mut_u32);
+    nonzero_check_from_mut!(u64, core::num::NonZeroU64, nonzero_check_from_mut_u64);
+    nonzero_check_from_mut!(u128, core::num::NonZeroU128, nonzero_check_from_mut_u128);
+    nonzero_check_from_mut!(usize, core::num::NonZeroUsize, nonzero_check_from_mut_usize);
 
     macro_rules! nonzero_check_cmp {
         ($nonzero_type:ty, $nonzero_check_cmp_for:ident) => {
@@ -2694,6 +2915,7 @@ mod verify {
                 let max: $nonzero_type = kani::any();
                 // Ensure min <= max, so the function should no panic
                 kani::assume(min <= max);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
                 // Use the clamp function and check the result
                 let result = x.clamp(min, max);
                 if x < min {
@@ -2731,6 +2953,7 @@ mod verify {
                 let max: $nonzero_type = kani::any();
                 // Ensure min > max, so the function should panic
                 kani::assume(min > max);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
                 // Use the clamp function and check the result
                 let result = x.clamp(min, max);
                 if x < min {
@@ -2772,16 +2995,33 @@ mod verify {
         };
     }
 
-    // Use for NonZero what already worked well for general numeric types (see num/mod.rs)
+    // `unchecked_mul` interval harnesses (pattern from num/mod.rs). Two
+    // vacuity guards: the extreme intervals are paired with a small
+    // counter-operand interval (same-interval extreme pairs always overflow,
+    // making the assumed `#[requires(checked_mul(..).is_some())]`
+    // unsatisfiable and the harness vacuous), and the `kani::cover` witnesses
+    // that precondition itself, so a pairing with no valid input fails loudly
+    // instead of verifying vacuously.
     macro_rules! check_mul_unchecked_intervals {
-        ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident, $min:expr, $max:expr) => {
+        ($t:ty, $nonzero_type:ty, $nonzero_check_mul_for:ident,
+         $xmin:expr, $xmax:expr, $ymin:expr, $ymax:expr) => {
             #[kani::proof_for_contract(NonZero::<$t>::unchecked_mul)]
             pub fn $nonzero_check_mul_for() {
                 let x = kani::any::<$t>();
                 let y = kani::any::<$t>();
 
-                kani::assume(x != 0 && x >= $min && x <= $max);
-                kani::assume(y != 0 && y >= $min && y <= $max);
+                // Vacuity guard: inverted endpoints would make the assumes
+                // unsatisfiable; assert before assuming so it fails loudly.
+                let (__x_min, __x_max): ($t, $t) = ($xmin, $xmax);
+                assert!(__x_min <= __x_max, "x interval endpoints inverted");
+                let (__y_min, __y_max): ($t, $t) = ($ymin, $ymax);
+                assert!(__y_min <= __y_max, "y interval endpoints inverted");
+                kani::assume(x != 0 && x >= $xmin && x <= $xmax);
+                kani::assume(y != 0 && y >= $ymin && y <= $ymax);
+                kani::cover(
+                    x.checked_mul(y).is_some(),
+                    "non-vacuity witness: a pair satisfying unchecked_mul's precondition exists",
+                );
 
                 let x = <$nonzero_type>::new(x).unwrap();
                 let y = <$nonzero_type>::new(y).unwrap();
@@ -2793,244 +3033,144 @@ mod verify {
         };
     }
 
-    //Calls for i32
-    check_mul_unchecked_intervals!(
+    // Signed widths: a symmetric small×small harness, plus each extreme
+    // interval (near-MAX, near-MIN, and the half-range edges) × a small
+    // counter-operand interval (so |y| == 1 keeps the product in range and
+    // the precondition satisfiable).
+    macro_rules! check_mul_unchecked_intervals_signed {
+        ($t:ty, $nonzero_type:ty, $small:ident, $large_pos:ident, $large_neg:ident,
+         $edge_pos:ident, $edge_neg:ident) => {
+            check_mul_unchecked_intervals!($t, $nonzero_type, $small, -10, 10, -10, 10);
+            check_mul_unchecked_intervals!(
+                $t,
+                $nonzero_type,
+                $large_pos,
+                <$t>::MAX - 1000,
+                <$t>::MAX,
+                -10,
+                10
+            );
+            check_mul_unchecked_intervals!(
+                $t,
+                $nonzero_type,
+                $large_neg,
+                <$t>::MIN + 1,
+                <$t>::MIN + 1000,
+                -10,
+                10
+            );
+            check_mul_unchecked_intervals!(
+                $t,
+                $nonzero_type,
+                $edge_pos,
+                <$t>::MAX / 2,
+                <$t>::MAX,
+                -10,
+                10
+            );
+            check_mul_unchecked_intervals!(
+                $t,
+                $nonzero_type,
+                $edge_neg,
+                <$t>::MIN + 1,
+                <$t>::MIN / 2,
+                -10,
+                10
+            );
+        };
+    }
+
+    // Unsigned widths: small×small, plus near-MAX and half-range-edge
+    // intervals × a small counter-operand interval (y == 1 keeps the product
+    // in range and the precondition satisfiable).
+    macro_rules! check_mul_unchecked_intervals_unsigned {
+        ($t:ty, $nonzero_type:ty, $small:ident, $large:ident, $edge:ident) => {
+            check_mul_unchecked_intervals!($t, $nonzero_type, $small, 1, 10, 1, 10);
+            check_mul_unchecked_intervals!(
+                $t,
+                $nonzero_type,
+                $large,
+                <$t>::MAX - 1000,
+                <$t>::MAX,
+                1,
+                10
+            );
+            check_mul_unchecked_intervals!(
+                $t,
+                $nonzero_type,
+                $edge,
+                <$t>::MAX / 2,
+                <$t>::MAX,
+                1,
+                10
+            );
+        };
+    }
+
+    check_mul_unchecked_intervals_signed!(
         i32,
         NonZeroI32,
         check_mul_i32_small,
-        NonZeroI32::new(-10i32).unwrap().into(),
-        NonZeroI32::new(10i32).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i32,
-        NonZeroI32,
         check_mul_i32_large_pos,
-        NonZeroI32::new(i32::MAX - 1000i32).unwrap().into(),
-        NonZeroI32::new(i32::MAX).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i32,
-        NonZeroI32,
         check_mul_i32_large_neg,
-        NonZeroI32::new(i32::MIN + 1000i32).unwrap().into(),
-        NonZeroI32::new(i32::MIN + 1).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i32,
-        NonZeroI32,
         check_mul_i32_edge_pos,
-        NonZeroI32::new(i32::MAX / 2).unwrap().into(),
-        NonZeroI32::new(i32::MAX).unwrap().into()
+        check_mul_i32_edge_neg
     );
-    check_mul_unchecked_intervals!(
-        i32,
-        NonZeroI32,
-        check_mul_i32_edge_neg,
-        NonZeroI32::new(i32::MIN / 2).unwrap().into(),
-        NonZeroI32::new(i32::MIN + 1).unwrap().into()
-    );
-
-    //Calls for i64
-    check_mul_unchecked_intervals!(
+    check_mul_unchecked_intervals_signed!(
         i64,
         NonZeroI64,
         check_mul_i64_small,
-        NonZeroI64::new(-10i64).unwrap().into(),
-        NonZeroI64::new(10i64).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i64,
-        NonZeroI64,
         check_mul_i64_large_pos,
-        NonZeroI64::new(i64::MAX - 1000i64).unwrap().into(),
-        NonZeroI64::new(i64::MAX).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i64,
-        NonZeroI64,
         check_mul_i64_large_neg,
-        NonZeroI64::new(i64::MIN + 1000i64).unwrap().into(),
-        NonZeroI64::new(i64::MIN + 1).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i64,
-        NonZeroI64,
         check_mul_i64_edge_pos,
-        NonZeroI64::new(i64::MAX / 2).unwrap().into(),
-        NonZeroI64::new(i64::MAX).unwrap().into()
+        check_mul_i64_edge_neg
     );
-    check_mul_unchecked_intervals!(
-        i64,
-        NonZeroI64,
-        check_mul_i64_edge_neg,
-        NonZeroI64::new(i64::MIN / 2).unwrap().into(),
-        NonZeroI64::new(i64::MIN + 1).unwrap().into()
-    );
-
-    //calls for i128
-    check_mul_unchecked_intervals!(
+    check_mul_unchecked_intervals_signed!(
         i128,
         NonZeroI128,
         check_mul_i128_small,
-        NonZeroI128::new(-10i128).unwrap().into(),
-        NonZeroI128::new(10i128).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i128,
-        NonZeroI128,
         check_mul_i128_large_pos,
-        NonZeroI128::new(i128::MAX - 1000i128).unwrap().into(),
-        NonZeroI128::new(i128::MAX).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i128,
-        NonZeroI128,
         check_mul_i128_large_neg,
-        NonZeroI128::new(i128::MIN + 1000i128).unwrap().into(),
-        NonZeroI128::new(i128::MIN + 1).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        i128,
-        NonZeroI128,
         check_mul_i128_edge_pos,
-        NonZeroI128::new(i128::MAX / 2).unwrap().into(),
-        NonZeroI128::new(i128::MAX).unwrap().into()
+        check_mul_i128_edge_neg
     );
-    check_mul_unchecked_intervals!(
-        i128,
-        NonZeroI128,
-        check_mul_i128_edge_neg,
-        NonZeroI128::new(i128::MIN / 2).unwrap().into(),
-        NonZeroI128::new(i128::MIN + 1).unwrap().into()
-    );
-
-    //calls for isize
-    check_mul_unchecked_intervals!(
+    check_mul_unchecked_intervals_signed!(
         isize,
         NonZeroIsize,
         check_mul_isize_small,
-        NonZeroIsize::new(-10isize).unwrap().into(),
-        NonZeroIsize::new(10isize).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        isize,
-        NonZeroIsize,
         check_mul_isize_large_pos,
-        NonZeroIsize::new(isize::MAX - 1000isize).unwrap().into(),
-        NonZeroIsize::new(isize::MAX).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        isize,
-        NonZeroIsize,
         check_mul_isize_large_neg,
-        NonZeroIsize::new(isize::MIN + 1000isize).unwrap().into(),
-        NonZeroIsize::new(isize::MIN + 1).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        isize,
-        NonZeroIsize,
         check_mul_isize_edge_pos,
-        NonZeroIsize::new(isize::MAX / 2).unwrap().into(),
-        NonZeroIsize::new(isize::MAX).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        isize,
-        NonZeroIsize,
-        check_mul_isize_edge_neg,
-        NonZeroIsize::new(isize::MIN / 2).unwrap().into(),
-        NonZeroIsize::new(isize::MIN + 1).unwrap().into()
+        check_mul_isize_edge_neg
     );
 
-    //calls for u32
-    check_mul_unchecked_intervals!(
+    check_mul_unchecked_intervals_unsigned!(
         u32,
         NonZeroU32,
         check_mul_u32_small,
-        NonZeroU32::new(1u32).unwrap().into(),
-        NonZeroU32::new(10u32).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        u32,
-        NonZeroU32,
         check_mul_u32_large,
-        NonZeroU32::new(u32::MAX - 1000u32).unwrap().into(),
-        NonZeroU32::new(u32::MAX).unwrap().into()
+        check_mul_u32_edge
     );
-    check_mul_unchecked_intervals!(
-        u32,
-        NonZeroU32,
-        check_mul_u32_edge,
-        NonZeroU32::new(u32::MAX / 2).unwrap().into(),
-        NonZeroU32::new(u32::MAX).unwrap().into()
-    );
-
-    //calls for u64
-    check_mul_unchecked_intervals!(
+    check_mul_unchecked_intervals_unsigned!(
         u64,
         NonZeroU64,
         check_mul_u64_small,
-        NonZeroU64::new(1u64).unwrap().into(),
-        NonZeroU64::new(10u64).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        u64,
-        NonZeroU64,
         check_mul_u64_large,
-        NonZeroU64::new(u64::MAX - 1000u64).unwrap().into(),
-        NonZeroU64::new(u64::MAX).unwrap().into()
+        check_mul_u64_edge
     );
-    check_mul_unchecked_intervals!(
-        u64,
-        NonZeroU64,
-        check_mul_u64_edge,
-        NonZeroU64::new(u64::MAX / 2).unwrap().into(),
-        NonZeroU64::new(u64::MAX).unwrap().into()
-    );
-
-    //calls for u128
-    check_mul_unchecked_intervals!(
+    check_mul_unchecked_intervals_unsigned!(
         u128,
         NonZeroU128,
         check_mul_u128_small,
-        NonZeroU128::new(1u128).unwrap().into(),
-        NonZeroU128::new(10u128).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        u128,
-        NonZeroU128,
         check_mul_u128_large,
-        NonZeroU128::new(u128::MAX - 1000u128).unwrap().into(),
-        NonZeroU128::new(u128::MAX).unwrap().into()
+        check_mul_u128_edge
     );
-    check_mul_unchecked_intervals!(
-        u128,
-        NonZeroU128,
-        check_mul_u128_edge,
-        NonZeroU128::new(u128::MAX / 2).unwrap().into(),
-        NonZeroU128::new(u128::MAX).unwrap().into()
-    );
-
-    //calls for usize
-    check_mul_unchecked_intervals!(
+    check_mul_unchecked_intervals_unsigned!(
         usize,
         NonZeroUsize,
         check_mul_usize_small,
-        NonZeroUsize::new(1usize).unwrap().into(),
-        NonZeroUsize::new(10usize).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        usize,
-        NonZeroUsize,
         check_mul_usize_large,
-        NonZeroUsize::new(usize::MAX - 1000usize).unwrap().into(),
-        NonZeroUsize::new(usize::MAX).unwrap().into()
-    );
-    check_mul_unchecked_intervals!(
-        usize,
-        NonZeroUsize,
-        check_mul_usize_edge,
-        NonZeroUsize::new(usize::MAX / 2).unwrap().into(),
-        NonZeroUsize::new(usize::MAX).unwrap().into()
+        check_mul_usize_edge
     );
 
     //calls for i8, i16, u8, u16
@@ -3038,6 +3178,631 @@ mod verify {
     check_mul_unchecked_small!(i16, NonZeroI16, nonzero_check_mul_for_i16);
     check_mul_unchecked_small!(u8, NonZeroU8, nonzero_check_mul_for_u8);
     check_mul_unchecked_small!(u16, NonZeroU16, nonzero_check_mul_for_u16);
+
+    // `checked_mul` harnesses: verify the contract (`Some` iff no overflow, with
+    // the exact product) and, with it, the internal `new_unchecked`. Small types
+    // get the full domain; wider types use bounded intervals to keep the
+    // multiplication tractable for CBMC (`unchecked_mul` pattern above).
+    macro_rules! nonzero_check_checked_mul_small {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::checked_mul)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let _ = x.checked_mul(y);
+            }
+        };
+    }
+
+    macro_rules! nonzero_check_checked_mul_intervals {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident, $min:expr, $max:expr) => {
+            #[kani::proof_for_contract(NonZero::<$t>::checked_mul)]
+            pub fn $harness_name() {
+                let x = kani::any::<$t>();
+                let y = kani::any::<$t>();
+
+                // Vacuity guard: inverted endpoints would make the assume(s)
+                // unsatisfiable; assert before assuming so it fails loudly.
+                let (__ival_min, __ival_max): ($t, $t) = ($min, $max);
+                assert!(__ival_min <= __ival_max, "interval endpoints inverted");
+                kani::assume(x != 0 && x >= $min && x <= $max);
+                kani::assume(y != 0 && y >= $min && y <= $max);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+
+                let x = <$nonzero_type>::new(x).unwrap();
+                let y = <$nonzero_type>::new(y).unwrap();
+
+                let _ = x.checked_mul(y);
+            }
+        };
+    }
+
+    // Small types: full input domain.
+    nonzero_check_checked_mul_small!(i8, NonZeroI8, nonzero_check_checked_mul_for_i8);
+    nonzero_check_checked_mul_small!(i16, NonZeroI16, nonzero_check_checked_mul_for_i16);
+    nonzero_check_checked_mul_small!(u8, NonZeroU8, nonzero_check_checked_mul_for_u8);
+    nonzero_check_checked_mul_small!(u16, NonZeroU16, nonzero_check_checked_mul_for_u16);
+
+    // i32 intervals
+    nonzero_check_checked_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_checked_mul_i32_small,
+        NonZeroI32::new(-10i32).unwrap().into(),
+        NonZeroI32::new(10i32).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_checked_mul_i32_large_pos,
+        NonZeroI32::new(i32::MAX - 1000i32).unwrap().into(),
+        NonZeroI32::new(i32::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_checked_mul_i32_large_neg,
+        NonZeroI32::new(i32::MIN + 1).unwrap().into(),
+        NonZeroI32::new(i32::MIN + 1000i32).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_checked_mul_i32_edge_pos,
+        NonZeroI32::new(i32::MAX / 2).unwrap().into(),
+        NonZeroI32::new(i32::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_checked_mul_i32_edge_neg,
+        NonZeroI32::new(i32::MIN + 1).unwrap().into(),
+        NonZeroI32::new(i32::MIN / 2).unwrap().into()
+    );
+
+    // i64 intervals
+    nonzero_check_checked_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_checked_mul_i64_small,
+        NonZeroI64::new(-10i64).unwrap().into(),
+        NonZeroI64::new(10i64).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_checked_mul_i64_large_pos,
+        NonZeroI64::new(i64::MAX - 1000i64).unwrap().into(),
+        NonZeroI64::new(i64::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_checked_mul_i64_large_neg,
+        NonZeroI64::new(i64::MIN + 1).unwrap().into(),
+        NonZeroI64::new(i64::MIN + 1000i64).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_checked_mul_i64_edge_pos,
+        NonZeroI64::new(i64::MAX / 2).unwrap().into(),
+        NonZeroI64::new(i64::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_checked_mul_i64_edge_neg,
+        NonZeroI64::new(i64::MIN + 1).unwrap().into(),
+        NonZeroI64::new(i64::MIN / 2).unwrap().into()
+    );
+
+    // i128 intervals
+    nonzero_check_checked_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_checked_mul_i128_small,
+        NonZeroI128::new(-10i128).unwrap().into(),
+        NonZeroI128::new(10i128).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_checked_mul_i128_large_pos,
+        NonZeroI128::new(i128::MAX - 1000i128).unwrap().into(),
+        NonZeroI128::new(i128::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_checked_mul_i128_large_neg,
+        NonZeroI128::new(i128::MIN + 1).unwrap().into(),
+        NonZeroI128::new(i128::MIN + 1000i128).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_checked_mul_i128_edge_pos,
+        NonZeroI128::new(i128::MAX / 2).unwrap().into(),
+        NonZeroI128::new(i128::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_checked_mul_i128_edge_neg,
+        NonZeroI128::new(i128::MIN + 1).unwrap().into(),
+        NonZeroI128::new(i128::MIN / 2).unwrap().into()
+    );
+
+    // isize intervals
+    nonzero_check_checked_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_checked_mul_isize_small,
+        NonZeroIsize::new(-10isize).unwrap().into(),
+        NonZeroIsize::new(10isize).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_checked_mul_isize_large_pos,
+        NonZeroIsize::new(isize::MAX - 1000isize).unwrap().into(),
+        NonZeroIsize::new(isize::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_checked_mul_isize_large_neg,
+        NonZeroIsize::new(isize::MIN + 1).unwrap().into(),
+        NonZeroIsize::new(isize::MIN + 1000isize).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_checked_mul_isize_edge_pos,
+        NonZeroIsize::new(isize::MAX / 2).unwrap().into(),
+        NonZeroIsize::new(isize::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_checked_mul_isize_edge_neg,
+        NonZeroIsize::new(isize::MIN + 1).unwrap().into(),
+        NonZeroIsize::new(isize::MIN / 2).unwrap().into()
+    );
+
+    // u32 intervals
+    nonzero_check_checked_mul_intervals!(
+        u32,
+        NonZeroU32,
+        nonzero_check_checked_mul_u32_small,
+        NonZeroU32::new(1u32).unwrap().into(),
+        NonZeroU32::new(10u32).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        u32,
+        NonZeroU32,
+        nonzero_check_checked_mul_u32_large,
+        NonZeroU32::new(u32::MAX - 1000u32).unwrap().into(),
+        NonZeroU32::new(u32::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        u32,
+        NonZeroU32,
+        nonzero_check_checked_mul_u32_edge,
+        NonZeroU32::new(u32::MAX / 2).unwrap().into(),
+        NonZeroU32::new(u32::MAX).unwrap().into()
+    );
+
+    // u64 intervals
+    nonzero_check_checked_mul_intervals!(
+        u64,
+        NonZeroU64,
+        nonzero_check_checked_mul_u64_small,
+        NonZeroU64::new(1u64).unwrap().into(),
+        NonZeroU64::new(10u64).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        u64,
+        NonZeroU64,
+        nonzero_check_checked_mul_u64_large,
+        NonZeroU64::new(u64::MAX - 1000u64).unwrap().into(),
+        NonZeroU64::new(u64::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        u64,
+        NonZeroU64,
+        nonzero_check_checked_mul_u64_edge,
+        NonZeroU64::new(u64::MAX / 2).unwrap().into(),
+        NonZeroU64::new(u64::MAX).unwrap().into()
+    );
+
+    // u128 intervals
+    nonzero_check_checked_mul_intervals!(
+        u128,
+        NonZeroU128,
+        nonzero_check_checked_mul_u128_small,
+        NonZeroU128::new(1u128).unwrap().into(),
+        NonZeroU128::new(10u128).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        u128,
+        NonZeroU128,
+        nonzero_check_checked_mul_u128_large,
+        NonZeroU128::new(u128::MAX - 1000u128).unwrap().into(),
+        NonZeroU128::new(u128::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        u128,
+        NonZeroU128,
+        nonzero_check_checked_mul_u128_edge,
+        NonZeroU128::new(u128::MAX / 2).unwrap().into(),
+        NonZeroU128::new(u128::MAX).unwrap().into()
+    );
+
+    // usize intervals
+    nonzero_check_checked_mul_intervals!(
+        usize,
+        NonZeroUsize,
+        nonzero_check_checked_mul_usize_small,
+        NonZeroUsize::new(1usize).unwrap().into(),
+        NonZeroUsize::new(10usize).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        usize,
+        NonZeroUsize,
+        nonzero_check_checked_mul_usize_large,
+        NonZeroUsize::new(usize::MAX - 1000usize).unwrap().into(),
+        NonZeroUsize::new(usize::MAX).unwrap().into()
+    );
+    nonzero_check_checked_mul_intervals!(
+        usize,
+        NonZeroUsize,
+        nonzero_check_checked_mul_usize_edge,
+        NonZeroUsize::new(usize::MAX / 2).unwrap().into(),
+        NonZeroUsize::new(usize::MAX).unwrap().into()
+    );
+
+    // `checked_pow` harnesses: full base and exponent domain on every width,
+    // unbounded. Under `-Z loop-contracts` the pow loop is abstracted by its
+    // `safety::loop_invariant`, so no exponent bound, `#[kani::unwind]`, or
+    // interval split is needed — but only invariant-derived facts (nonzero-ness)
+    // are provable about the result, which is why the contract states no
+    // exact-value clause.
+    macro_rules! nonzero_check_checked_pow {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::checked_pow)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let exp: u32 = kani::any();
+                let _ = x.checked_pow(exp);
+            }
+        };
+    }
+
+    nonzero_check_checked_pow!(i8, NonZeroI8, nonzero_check_checked_pow_for_i8);
+    nonzero_check_checked_pow!(i16, NonZeroI16, nonzero_check_checked_pow_for_i16);
+    nonzero_check_checked_pow!(i32, NonZeroI32, nonzero_check_checked_pow_for_i32);
+    nonzero_check_checked_pow!(i64, NonZeroI64, nonzero_check_checked_pow_for_i64);
+    nonzero_check_checked_pow!(i128, NonZeroI128, nonzero_check_checked_pow_for_i128);
+    nonzero_check_checked_pow!(isize, NonZeroIsize, nonzero_check_checked_pow_for_isize);
+    nonzero_check_checked_pow!(u8, NonZeroU8, nonzero_check_checked_pow_for_u8);
+    nonzero_check_checked_pow!(u16, NonZeroU16, nonzero_check_checked_pow_for_u16);
+    nonzero_check_checked_pow!(u32, NonZeroU32, nonzero_check_checked_pow_for_u32);
+    nonzero_check_checked_pow!(u64, NonZeroU64, nonzero_check_checked_pow_for_u64);
+    nonzero_check_checked_pow!(u128, NonZeroU128, nonzero_check_checked_pow_for_u128);
+    nonzero_check_checked_pow!(usize, NonZeroUsize, nonzero_check_checked_pow_for_usize);
+
+    // `saturating_pow` harnesses: full base and exponent domain on every width,
+    // unbounded — same loop-abstraction setup and exact-value trade-off as
+    // `checked_pow` above (`saturating_pow` delegates to the same loop).
+    macro_rules! nonzero_check_saturating_pow {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::saturating_pow)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let exp: u32 = kani::any();
+                let _ = x.saturating_pow(exp);
+            }
+        };
+    }
+
+    nonzero_check_saturating_pow!(i8, NonZeroI8, nonzero_check_saturating_pow_for_i8);
+    nonzero_check_saturating_pow!(i16, NonZeroI16, nonzero_check_saturating_pow_for_i16);
+    nonzero_check_saturating_pow!(i32, NonZeroI32, nonzero_check_saturating_pow_for_i32);
+    nonzero_check_saturating_pow!(i64, NonZeroI64, nonzero_check_saturating_pow_for_i64);
+    nonzero_check_saturating_pow!(i128, NonZeroI128, nonzero_check_saturating_pow_for_i128);
+    nonzero_check_saturating_pow!(isize, NonZeroIsize, nonzero_check_saturating_pow_for_isize);
+    nonzero_check_saturating_pow!(u8, NonZeroU8, nonzero_check_saturating_pow_for_u8);
+    nonzero_check_saturating_pow!(u16, NonZeroU16, nonzero_check_saturating_pow_for_u16);
+    nonzero_check_saturating_pow!(u32, NonZeroU32, nonzero_check_saturating_pow_for_u32);
+    nonzero_check_saturating_pow!(u64, NonZeroU64, nonzero_check_saturating_pow_for_u64);
+    nonzero_check_saturating_pow!(u128, NonZeroU128, nonzero_check_saturating_pow_for_u128);
+    nonzero_check_saturating_pow!(usize, NonZeroUsize, nonzero_check_saturating_pow_for_usize);
+
+    // `saturating_mul` harnesses: verify the contract (exact
+    // `$Int::saturating_mul` value; nonzero since the saturation bounds are
+    // nonzero) and, with it, the internal `new_unchecked`. Small types get the
+    // full domain; wider types use bounded intervals (`checked_mul` pattern).
+    macro_rules! nonzero_check_saturating_mul_small {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::saturating_mul)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let _ = x.saturating_mul(y);
+            }
+        };
+    }
+
+    macro_rules! nonzero_check_saturating_mul_intervals {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident, $min:expr, $max:expr) => {
+            #[kani::proof_for_contract(NonZero::<$t>::saturating_mul)]
+            pub fn $harness_name() {
+                let x = kani::any::<$t>();
+                let y = kani::any::<$t>();
+
+                // Vacuity guard: inverted endpoints would make the assume(s)
+                // unsatisfiable; assert before assuming so it fails loudly.
+                let (__ival_min, __ival_max): ($t, $t) = ($min, $max);
+                assert!(__ival_min <= __ival_max, "interval endpoints inverted");
+                kani::assume(x != 0 && x >= $min && x <= $max);
+                kani::assume(y != 0 && y >= $min && y <= $max);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+
+                let x = <$nonzero_type>::new(x).unwrap();
+                let y = <$nonzero_type>::new(y).unwrap();
+
+                let _ = x.saturating_mul(y);
+            }
+        };
+    }
+
+    // Small types: full input domain.
+    nonzero_check_saturating_mul_small!(i8, NonZeroI8, nonzero_check_saturating_mul_for_i8);
+    nonzero_check_saturating_mul_small!(i16, NonZeroI16, nonzero_check_saturating_mul_for_i16);
+    nonzero_check_saturating_mul_small!(u8, NonZeroU8, nonzero_check_saturating_mul_for_u8);
+    nonzero_check_saturating_mul_small!(u16, NonZeroU16, nonzero_check_saturating_mul_for_u16);
+
+    // i32 intervals
+    nonzero_check_saturating_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_saturating_mul_i32_small,
+        NonZeroI32::new(-10i32).unwrap().into(),
+        NonZeroI32::new(10i32).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_saturating_mul_i32_large_pos,
+        NonZeroI32::new(i32::MAX - 1000i32).unwrap().into(),
+        NonZeroI32::new(i32::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_saturating_mul_i32_large_neg,
+        NonZeroI32::new(i32::MIN + 1).unwrap().into(),
+        NonZeroI32::new(i32::MIN + 1000i32).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_saturating_mul_i32_edge_pos,
+        NonZeroI32::new(i32::MAX / 2).unwrap().into(),
+        NonZeroI32::new(i32::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i32,
+        NonZeroI32,
+        nonzero_check_saturating_mul_i32_edge_neg,
+        NonZeroI32::new(i32::MIN + 1).unwrap().into(),
+        NonZeroI32::new(i32::MIN / 2).unwrap().into()
+    );
+
+    // i64 intervals
+    nonzero_check_saturating_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_saturating_mul_i64_small,
+        NonZeroI64::new(-10i64).unwrap().into(),
+        NonZeroI64::new(10i64).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_saturating_mul_i64_large_pos,
+        NonZeroI64::new(i64::MAX - 1000i64).unwrap().into(),
+        NonZeroI64::new(i64::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_saturating_mul_i64_large_neg,
+        NonZeroI64::new(i64::MIN + 1).unwrap().into(),
+        NonZeroI64::new(i64::MIN + 1000i64).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_saturating_mul_i64_edge_pos,
+        NonZeroI64::new(i64::MAX / 2).unwrap().into(),
+        NonZeroI64::new(i64::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i64,
+        NonZeroI64,
+        nonzero_check_saturating_mul_i64_edge_neg,
+        NonZeroI64::new(i64::MIN + 1).unwrap().into(),
+        NonZeroI64::new(i64::MIN / 2).unwrap().into()
+    );
+
+    // i128 intervals
+    nonzero_check_saturating_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_saturating_mul_i128_small,
+        NonZeroI128::new(-10i128).unwrap().into(),
+        NonZeroI128::new(10i128).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_saturating_mul_i128_large_pos,
+        NonZeroI128::new(i128::MAX - 1000i128).unwrap().into(),
+        NonZeroI128::new(i128::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_saturating_mul_i128_large_neg,
+        NonZeroI128::new(i128::MIN + 1).unwrap().into(),
+        NonZeroI128::new(i128::MIN + 1000i128).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_saturating_mul_i128_edge_pos,
+        NonZeroI128::new(i128::MAX / 2).unwrap().into(),
+        NonZeroI128::new(i128::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        i128,
+        NonZeroI128,
+        nonzero_check_saturating_mul_i128_edge_neg,
+        NonZeroI128::new(i128::MIN + 1).unwrap().into(),
+        NonZeroI128::new(i128::MIN / 2).unwrap().into()
+    );
+
+    // isize intervals
+    nonzero_check_saturating_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_saturating_mul_isize_small,
+        NonZeroIsize::new(-10isize).unwrap().into(),
+        NonZeroIsize::new(10isize).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_saturating_mul_isize_large_pos,
+        NonZeroIsize::new(isize::MAX - 1000isize).unwrap().into(),
+        NonZeroIsize::new(isize::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_saturating_mul_isize_large_neg,
+        NonZeroIsize::new(isize::MIN + 1).unwrap().into(),
+        NonZeroIsize::new(isize::MIN + 1000isize).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_saturating_mul_isize_edge_pos,
+        NonZeroIsize::new(isize::MAX / 2).unwrap().into(),
+        NonZeroIsize::new(isize::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        isize,
+        NonZeroIsize,
+        nonzero_check_saturating_mul_isize_edge_neg,
+        NonZeroIsize::new(isize::MIN + 1).unwrap().into(),
+        NonZeroIsize::new(isize::MIN / 2).unwrap().into()
+    );
+
+    // u32 intervals
+    nonzero_check_saturating_mul_intervals!(
+        u32,
+        NonZeroU32,
+        nonzero_check_saturating_mul_u32_small,
+        NonZeroU32::new(1u32).unwrap().into(),
+        NonZeroU32::new(10u32).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        u32,
+        NonZeroU32,
+        nonzero_check_saturating_mul_u32_large,
+        NonZeroU32::new(u32::MAX - 1000u32).unwrap().into(),
+        NonZeroU32::new(u32::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        u32,
+        NonZeroU32,
+        nonzero_check_saturating_mul_u32_edge,
+        NonZeroU32::new(u32::MAX / 2).unwrap().into(),
+        NonZeroU32::new(u32::MAX).unwrap().into()
+    );
+
+    // u64 intervals
+    nonzero_check_saturating_mul_intervals!(
+        u64,
+        NonZeroU64,
+        nonzero_check_saturating_mul_u64_small,
+        NonZeroU64::new(1u64).unwrap().into(),
+        NonZeroU64::new(10u64).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        u64,
+        NonZeroU64,
+        nonzero_check_saturating_mul_u64_large,
+        NonZeroU64::new(u64::MAX - 1000u64).unwrap().into(),
+        NonZeroU64::new(u64::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        u64,
+        NonZeroU64,
+        nonzero_check_saturating_mul_u64_edge,
+        NonZeroU64::new(u64::MAX / 2).unwrap().into(),
+        NonZeroU64::new(u64::MAX).unwrap().into()
+    );
+
+    // u128 intervals
+    nonzero_check_saturating_mul_intervals!(
+        u128,
+        NonZeroU128,
+        nonzero_check_saturating_mul_u128_small,
+        NonZeroU128::new(1u128).unwrap().into(),
+        NonZeroU128::new(10u128).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        u128,
+        NonZeroU128,
+        nonzero_check_saturating_mul_u128_large,
+        NonZeroU128::new(u128::MAX - 1000u128).unwrap().into(),
+        NonZeroU128::new(u128::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        u128,
+        NonZeroU128,
+        nonzero_check_saturating_mul_u128_edge,
+        NonZeroU128::new(u128::MAX / 2).unwrap().into(),
+        NonZeroU128::new(u128::MAX).unwrap().into()
+    );
+
+    // usize intervals
+    nonzero_check_saturating_mul_intervals!(
+        usize,
+        NonZeroUsize,
+        nonzero_check_saturating_mul_usize_small,
+        NonZeroUsize::new(1usize).unwrap().into(),
+        NonZeroUsize::new(10usize).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        usize,
+        NonZeroUsize,
+        nonzero_check_saturating_mul_usize_large,
+        NonZeroUsize::new(usize::MAX - 1000usize).unwrap().into(),
+        NonZeroUsize::new(usize::MAX).unwrap().into()
+    );
+    nonzero_check_saturating_mul_intervals!(
+        usize,
+        NonZeroUsize,
+        nonzero_check_saturating_mul_usize_edge,
+        NonZeroUsize::new(usize::MAX / 2).unwrap().into(),
+        NonZeroUsize::new(usize::MAX).unwrap().into()
+    );
 
     macro_rules! nonzero_check_add {
         ($t:ty, $nonzero_type:ty, $nonzero_check_unchecked_add_for:ident) => {
@@ -3059,4 +3824,1009 @@ mod verify {
     nonzero_check_add!(u64, core::num::NonZeroU64, nonzero_check_unchecked_add_for_u64);
     nonzero_check_add!(u128, core::num::NonZeroU128, nonzero_check_unchecked_add_for_u128);
     nonzero_check_add!(usize, core::num::NonZeroUsize, nonzero_check_unchecked_add_for_usize);
+
+    // `checked_add` harnesses: verify the contract (`Some` iff no overflow, with
+    // the exact sum, necessarily >= 1) and, with it, the internal
+    // `new_unchecked`. Unsigned only; full input domain per width.
+    macro_rules! nonzero_check_checked_add {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::checked_add)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $t = kani::any();
+                let _ = x.checked_add(y);
+            }
+        };
+    }
+
+    nonzero_check_checked_add!(u8, core::num::NonZeroU8, nonzero_check_checked_add_for_u8);
+    nonzero_check_checked_add!(u16, core::num::NonZeroU16, nonzero_check_checked_add_for_u16);
+    nonzero_check_checked_add!(u32, core::num::NonZeroU32, nonzero_check_checked_add_for_u32);
+    nonzero_check_checked_add!(u64, core::num::NonZeroU64, nonzero_check_checked_add_for_u64);
+    nonzero_check_checked_add!(u128, core::num::NonZeroU128, nonzero_check_checked_add_for_u128);
+    nonzero_check_checked_add!(usize, core::num::NonZeroUsize, nonzero_check_checked_add_for_usize);
+
+    // `saturating_add` harnesses: verify the contract (exact
+    // `$Int::saturating_add` value, >= 1 in both the exact and saturated cases)
+    // and, with it, the internal `new_unchecked`. Unsigned only; full input
+    // domain per width.
+    macro_rules! nonzero_check_saturating_add {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::saturating_add)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $t = kani::any();
+                let _ = x.saturating_add(y);
+            }
+        };
+    }
+
+    nonzero_check_saturating_add!(u8, core::num::NonZeroU8, nonzero_check_saturating_add_for_u8);
+    nonzero_check_saturating_add!(u16, core::num::NonZeroU16, nonzero_check_saturating_add_for_u16);
+    nonzero_check_saturating_add!(u32, core::num::NonZeroU32, nonzero_check_saturating_add_for_u32);
+    nonzero_check_saturating_add!(u64, core::num::NonZeroU64, nonzero_check_saturating_add_for_u64);
+    nonzero_check_saturating_add!(
+        u128,
+        core::num::NonZeroU128,
+        nonzero_check_saturating_add_for_u128
+    );
+    nonzero_check_saturating_add!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_saturating_add_for_usize
+    );
+
+    // `checked_next_power_of_two` harnesses: verify the contract (`Some` iff the
+    // next power of two fits, with the exact value, necessarily >= 1) and, with
+    // it, the internal `new_unchecked`. Unsigned only; full nonzero domain per
+    // width.
+    macro_rules! nonzero_check_checked_next_power_of_two {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::checked_next_power_of_two)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.checked_next_power_of_two();
+            }
+        };
+    }
+
+    nonzero_check_checked_next_power_of_two!(
+        u8,
+        core::num::NonZeroU8,
+        nonzero_check_checked_next_power_of_two_for_u8
+    );
+    nonzero_check_checked_next_power_of_two!(
+        u16,
+        core::num::NonZeroU16,
+        nonzero_check_checked_next_power_of_two_for_u16
+    );
+    nonzero_check_checked_next_power_of_two!(
+        u32,
+        core::num::NonZeroU32,
+        nonzero_check_checked_next_power_of_two_for_u32
+    );
+    nonzero_check_checked_next_power_of_two!(
+        u64,
+        core::num::NonZeroU64,
+        nonzero_check_checked_next_power_of_two_for_u64
+    );
+    nonzero_check_checked_next_power_of_two!(
+        u128,
+        core::num::NonZeroU128,
+        nonzero_check_checked_next_power_of_two_for_u128
+    );
+    nonzero_check_checked_next_power_of_two!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_checked_next_power_of_two_for_usize
+    );
+
+    // `count_ones` harnesses: a nonzero input has at least one set bit, so the
+    // popcount is nonzero, discharging the internal `new_unchecked`. Full
+    // nonzero domain per width.
+    macro_rules! nonzero_check_count_ones {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::count_ones)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.count_ones();
+            }
+        };
+    }
+
+    nonzero_check_count_ones!(i8, core::num::NonZeroI8, nonzero_check_count_ones_for_i8);
+    nonzero_check_count_ones!(i16, core::num::NonZeroI16, nonzero_check_count_ones_for_i16);
+    nonzero_check_count_ones!(i32, core::num::NonZeroI32, nonzero_check_count_ones_for_i32);
+    nonzero_check_count_ones!(i64, core::num::NonZeroI64, nonzero_check_count_ones_for_i64);
+    nonzero_check_count_ones!(i128, core::num::NonZeroI128, nonzero_check_count_ones_for_i128);
+    nonzero_check_count_ones!(isize, core::num::NonZeroIsize, nonzero_check_count_ones_for_isize);
+    nonzero_check_count_ones!(u8, core::num::NonZeroU8, nonzero_check_count_ones_for_u8);
+    nonzero_check_count_ones!(u16, core::num::NonZeroU16, nonzero_check_count_ones_for_u16);
+    nonzero_check_count_ones!(u32, core::num::NonZeroU32, nonzero_check_count_ones_for_u32);
+    nonzero_check_count_ones!(u64, core::num::NonZeroU64, nonzero_check_count_ones_for_u64);
+    nonzero_check_count_ones!(u128, core::num::NonZeroU128, nonzero_check_count_ones_for_u128);
+    nonzero_check_count_ones!(usize, core::num::NonZeroUsize, nonzero_check_count_ones_for_usize);
+
+    // `swap_bytes` harnesses: a byte permutation keeps a nonzero value nonzero,
+    // discharging the internal `new_unchecked`; the contract also pins the exact
+    // value. Full nonzero domain per width.
+    macro_rules! nonzero_check_swap_bytes {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::swap_bytes)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.swap_bytes();
+            }
+        };
+    }
+
+    nonzero_check_swap_bytes!(i8, core::num::NonZeroI8, nonzero_check_swap_bytes_for_i8);
+    nonzero_check_swap_bytes!(i16, core::num::NonZeroI16, nonzero_check_swap_bytes_for_i16);
+    nonzero_check_swap_bytes!(i32, core::num::NonZeroI32, nonzero_check_swap_bytes_for_i32);
+    nonzero_check_swap_bytes!(i64, core::num::NonZeroI64, nonzero_check_swap_bytes_for_i64);
+    nonzero_check_swap_bytes!(i128, core::num::NonZeroI128, nonzero_check_swap_bytes_for_i128);
+    nonzero_check_swap_bytes!(isize, core::num::NonZeroIsize, nonzero_check_swap_bytes_for_isize);
+    nonzero_check_swap_bytes!(u8, core::num::NonZeroU8, nonzero_check_swap_bytes_for_u8);
+    nonzero_check_swap_bytes!(u16, core::num::NonZeroU16, nonzero_check_swap_bytes_for_u16);
+    nonzero_check_swap_bytes!(u32, core::num::NonZeroU32, nonzero_check_swap_bytes_for_u32);
+    nonzero_check_swap_bytes!(u64, core::num::NonZeroU64, nonzero_check_swap_bytes_for_u64);
+    nonzero_check_swap_bytes!(u128, core::num::NonZeroU128, nonzero_check_swap_bytes_for_u128);
+    nonzero_check_swap_bytes!(usize, core::num::NonZeroUsize, nonzero_check_swap_bytes_for_usize);
+
+    // `reverse_bits` harnesses: a bit permutation keeps a nonzero value nonzero,
+    // discharging the internal `new_unchecked`; the contract also pins the exact
+    // value. Full nonzero domain per width.
+    macro_rules! nonzero_check_reverse_bits {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::reverse_bits)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.reverse_bits();
+            }
+        };
+    }
+
+    nonzero_check_reverse_bits!(i8, core::num::NonZeroI8, nonzero_check_reverse_bits_for_i8);
+    nonzero_check_reverse_bits!(i16, core::num::NonZeroI16, nonzero_check_reverse_bits_for_i16);
+    nonzero_check_reverse_bits!(i32, core::num::NonZeroI32, nonzero_check_reverse_bits_for_i32);
+    nonzero_check_reverse_bits!(i64, core::num::NonZeroI64, nonzero_check_reverse_bits_for_i64);
+    nonzero_check_reverse_bits!(i128, core::num::NonZeroI128, nonzero_check_reverse_bits_for_i128);
+    nonzero_check_reverse_bits!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_reverse_bits_for_isize
+    );
+    nonzero_check_reverse_bits!(u8, core::num::NonZeroU8, nonzero_check_reverse_bits_for_u8);
+    nonzero_check_reverse_bits!(u16, core::num::NonZeroU16, nonzero_check_reverse_bits_for_u16);
+    nonzero_check_reverse_bits!(u32, core::num::NonZeroU32, nonzero_check_reverse_bits_for_u32);
+    nonzero_check_reverse_bits!(u64, core::num::NonZeroU64, nonzero_check_reverse_bits_for_u64);
+    nonzero_check_reverse_bits!(u128, core::num::NonZeroU128, nonzero_check_reverse_bits_for_u128);
+    nonzero_check_reverse_bits!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_reverse_bits_for_usize
+    );
+
+    // `rotate_left` harnesses: a rotation is a bit permutation, so nonzero stays
+    // nonzero, discharging the internal `new_unchecked`; the `rotate_right`
+    // round-trip pins correctness. Full nonzero domain per width; `n` ranges
+    // over all of `u32` (rotation reduces it modulo the bit width).
+    macro_rules! nonzero_check_rotate_left {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::rotate_left)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let n: u32 = kani::any();
+                let _ = x.rotate_left(n);
+            }
+        };
+    }
+
+    nonzero_check_rotate_left!(i8, core::num::NonZeroI8, nonzero_check_rotate_left_for_i8);
+    nonzero_check_rotate_left!(i16, core::num::NonZeroI16, nonzero_check_rotate_left_for_i16);
+    nonzero_check_rotate_left!(i32, core::num::NonZeroI32, nonzero_check_rotate_left_for_i32);
+    nonzero_check_rotate_left!(i64, core::num::NonZeroI64, nonzero_check_rotate_left_for_i64);
+    nonzero_check_rotate_left!(i128, core::num::NonZeroI128, nonzero_check_rotate_left_for_i128);
+    nonzero_check_rotate_left!(isize, core::num::NonZeroIsize, nonzero_check_rotate_left_for_isize);
+    nonzero_check_rotate_left!(u8, core::num::NonZeroU8, nonzero_check_rotate_left_for_u8);
+    nonzero_check_rotate_left!(u16, core::num::NonZeroU16, nonzero_check_rotate_left_for_u16);
+    nonzero_check_rotate_left!(u32, core::num::NonZeroU32, nonzero_check_rotate_left_for_u32);
+    nonzero_check_rotate_left!(u64, core::num::NonZeroU64, nonzero_check_rotate_left_for_u64);
+    nonzero_check_rotate_left!(u128, core::num::NonZeroU128, nonzero_check_rotate_left_for_u128);
+    nonzero_check_rotate_left!(usize, core::num::NonZeroUsize, nonzero_check_rotate_left_for_usize);
+
+    // `rotate_right` harnesses: mirror of `rotate_left` above, with the
+    // `rotate_left` round-trip pinning correctness. Full nonzero domain per
+    // width; `n` ranges over all of `u32`.
+    macro_rules! nonzero_check_rotate_right {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::rotate_right)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let n: u32 = kani::any();
+                let _ = x.rotate_right(n);
+            }
+        };
+    }
+
+    nonzero_check_rotate_right!(i8, core::num::NonZeroI8, nonzero_check_rotate_right_for_i8);
+    nonzero_check_rotate_right!(i16, core::num::NonZeroI16, nonzero_check_rotate_right_for_i16);
+    nonzero_check_rotate_right!(i32, core::num::NonZeroI32, nonzero_check_rotate_right_for_i32);
+    nonzero_check_rotate_right!(i64, core::num::NonZeroI64, nonzero_check_rotate_right_for_i64);
+    nonzero_check_rotate_right!(i128, core::num::NonZeroI128, nonzero_check_rotate_right_for_i128);
+    nonzero_check_rotate_right!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_rotate_right_for_isize
+    );
+    nonzero_check_rotate_right!(u8, core::num::NonZeroU8, nonzero_check_rotate_right_for_u8);
+    nonzero_check_rotate_right!(u16, core::num::NonZeroU16, nonzero_check_rotate_right_for_u16);
+    nonzero_check_rotate_right!(u32, core::num::NonZeroU32, nonzero_check_rotate_right_for_u32);
+    nonzero_check_rotate_right!(u64, core::num::NonZeroU64, nonzero_check_rotate_right_for_u64);
+    nonzero_check_rotate_right!(u128, core::num::NonZeroU128, nonzero_check_rotate_right_for_u128);
+    nonzero_check_rotate_right!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_rotate_right_for_usize
+    );
+
+    // `from_be` harnesses: identity or byte permutation depending on target
+    // endianness — either way nonzero stays nonzero, discharging the internal
+    // `new_unchecked`; the contract also pins the exact value. Full nonzero
+    // domain per width.
+    macro_rules! nonzero_check_from_be {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::from_be)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = <$nonzero_type>::from_be(x);
+            }
+        };
+    }
+
+    nonzero_check_from_be!(i8, core::num::NonZeroI8, nonzero_check_from_be_for_i8);
+    nonzero_check_from_be!(i16, core::num::NonZeroI16, nonzero_check_from_be_for_i16);
+    nonzero_check_from_be!(i32, core::num::NonZeroI32, nonzero_check_from_be_for_i32);
+    nonzero_check_from_be!(i64, core::num::NonZeroI64, nonzero_check_from_be_for_i64);
+    nonzero_check_from_be!(i128, core::num::NonZeroI128, nonzero_check_from_be_for_i128);
+    nonzero_check_from_be!(isize, core::num::NonZeroIsize, nonzero_check_from_be_for_isize);
+    nonzero_check_from_be!(u8, core::num::NonZeroU8, nonzero_check_from_be_for_u8);
+    nonzero_check_from_be!(u16, core::num::NonZeroU16, nonzero_check_from_be_for_u16);
+    nonzero_check_from_be!(u32, core::num::NonZeroU32, nonzero_check_from_be_for_u32);
+    nonzero_check_from_be!(u64, core::num::NonZeroU64, nonzero_check_from_be_for_u64);
+    nonzero_check_from_be!(u128, core::num::NonZeroU128, nonzero_check_from_be_for_u128);
+    nonzero_check_from_be!(usize, core::num::NonZeroUsize, nonzero_check_from_be_for_usize);
+
+    // `from_le` harnesses: identity or byte permutation depending on target
+    // endianness — either way nonzero stays nonzero, discharging the internal
+    // `new_unchecked`; the contract also pins the exact value. Full nonzero
+    // domain per width.
+    macro_rules! nonzero_check_from_le {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::from_le)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = <$nonzero_type>::from_le(x);
+            }
+        };
+    }
+
+    nonzero_check_from_le!(i8, core::num::NonZeroI8, nonzero_check_from_le_for_i8);
+    nonzero_check_from_le!(i16, core::num::NonZeroI16, nonzero_check_from_le_for_i16);
+    nonzero_check_from_le!(i32, core::num::NonZeroI32, nonzero_check_from_le_for_i32);
+    nonzero_check_from_le!(i64, core::num::NonZeroI64, nonzero_check_from_le_for_i64);
+    nonzero_check_from_le!(i128, core::num::NonZeroI128, nonzero_check_from_le_for_i128);
+    nonzero_check_from_le!(isize, core::num::NonZeroIsize, nonzero_check_from_le_for_isize);
+    nonzero_check_from_le!(u8, core::num::NonZeroU8, nonzero_check_from_le_for_u8);
+    nonzero_check_from_le!(u16, core::num::NonZeroU16, nonzero_check_from_le_for_u16);
+    nonzero_check_from_le!(u32, core::num::NonZeroU32, nonzero_check_from_le_for_u32);
+    nonzero_check_from_le!(u64, core::num::NonZeroU64, nonzero_check_from_le_for_u64);
+    nonzero_check_from_le!(u128, core::num::NonZeroU128, nonzero_check_from_le_for_u128);
+    nonzero_check_from_le!(usize, core::num::NonZeroUsize, nonzero_check_from_le_for_usize);
+
+    // `to_be` harnesses: identity or byte permutation depending on target
+    // endianness — either way nonzero stays nonzero, discharging the internal
+    // `new_unchecked`; the contract also pins the exact value. Full nonzero
+    // domain per width.
+    macro_rules! nonzero_check_to_be {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::to_be)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.to_be();
+            }
+        };
+    }
+
+    nonzero_check_to_be!(i8, core::num::NonZeroI8, nonzero_check_to_be_for_i8);
+    nonzero_check_to_be!(i16, core::num::NonZeroI16, nonzero_check_to_be_for_i16);
+    nonzero_check_to_be!(i32, core::num::NonZeroI32, nonzero_check_to_be_for_i32);
+    nonzero_check_to_be!(i64, core::num::NonZeroI64, nonzero_check_to_be_for_i64);
+    nonzero_check_to_be!(i128, core::num::NonZeroI128, nonzero_check_to_be_for_i128);
+    nonzero_check_to_be!(isize, core::num::NonZeroIsize, nonzero_check_to_be_for_isize);
+    nonzero_check_to_be!(u8, core::num::NonZeroU8, nonzero_check_to_be_for_u8);
+    nonzero_check_to_be!(u16, core::num::NonZeroU16, nonzero_check_to_be_for_u16);
+    nonzero_check_to_be!(u32, core::num::NonZeroU32, nonzero_check_to_be_for_u32);
+    nonzero_check_to_be!(u64, core::num::NonZeroU64, nonzero_check_to_be_for_u64);
+    nonzero_check_to_be!(u128, core::num::NonZeroU128, nonzero_check_to_be_for_u128);
+    nonzero_check_to_be!(usize, core::num::NonZeroUsize, nonzero_check_to_be_for_usize);
+
+    // `to_le` harnesses: identity or byte permutation depending on target
+    // endianness — either way nonzero stays nonzero, discharging the internal
+    // `new_unchecked`; the contract also pins the exact value. Full nonzero
+    // domain per width.
+    macro_rules! nonzero_check_to_le {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::to_le)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.to_le();
+            }
+        };
+    }
+
+    nonzero_check_to_le!(i8, core::num::NonZeroI8, nonzero_check_to_le_for_i8);
+    nonzero_check_to_le!(i16, core::num::NonZeroI16, nonzero_check_to_le_for_i16);
+    nonzero_check_to_le!(i32, core::num::NonZeroI32, nonzero_check_to_le_for_i32);
+    nonzero_check_to_le!(i64, core::num::NonZeroI64, nonzero_check_to_le_for_i64);
+    nonzero_check_to_le!(i128, core::num::NonZeroI128, nonzero_check_to_le_for_i128);
+    nonzero_check_to_le!(isize, core::num::NonZeroIsize, nonzero_check_to_le_for_isize);
+    nonzero_check_to_le!(u8, core::num::NonZeroU8, nonzero_check_to_le_for_u8);
+    nonzero_check_to_le!(u16, core::num::NonZeroU16, nonzero_check_to_le_for_u16);
+    nonzero_check_to_le!(u32, core::num::NonZeroU32, nonzero_check_to_le_for_u32);
+    nonzero_check_to_le!(u64, core::num::NonZeroU64, nonzero_check_to_le_for_u64);
+    nonzero_check_to_le!(u128, core::num::NonZeroU128, nonzero_check_to_le_for_u128);
+    nonzero_check_to_le!(usize, core::num::NonZeroUsize, nonzero_check_to_le_for_usize);
+
+    // `BitOr` harnesses (all three impls): OR-ing with a `NonZero` operand keeps
+    // at least one bit set, so the result is nonzero, discharging the internal
+    // `new_unchecked`; assertions pin nonzero-ness and the exact value. `bitor`
+    // is generic over `ZeroablePrimitive`, so — like `max`/`min`/`clamp` above —
+    // plain `#[kani::proof]` harnesses are used instead of a contract. Full
+    // nonzero domain per width.
+
+    // `impl BitOr for NonZero<T>`: `NonZero | NonZero -> NonZero`.
+    macro_rules! nonzero_check_bitor_both_nonzero {
+        ($nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let a: $nonzero_type = kani::any();
+                let b: $nonzero_type = kani::any();
+                let result = a | b;
+                assert!(result.get() == (a.get() | b.get()));
+                assert!(result.get() != 0);
+            }
+        };
+    }
+
+    nonzero_check_bitor_both_nonzero!(core::num::NonZeroI8, nonzero_check_bitor_both_nonzero_i8);
+    nonzero_check_bitor_both_nonzero!(core::num::NonZeroI16, nonzero_check_bitor_both_nonzero_i16);
+    nonzero_check_bitor_both_nonzero!(core::num::NonZeroI32, nonzero_check_bitor_both_nonzero_i32);
+    nonzero_check_bitor_both_nonzero!(core::num::NonZeroI64, nonzero_check_bitor_both_nonzero_i64);
+    nonzero_check_bitor_both_nonzero!(
+        core::num::NonZeroI128,
+        nonzero_check_bitor_both_nonzero_i128
+    );
+    nonzero_check_bitor_both_nonzero!(
+        core::num::NonZeroIsize,
+        nonzero_check_bitor_both_nonzero_isize
+    );
+    nonzero_check_bitor_both_nonzero!(core::num::NonZeroU8, nonzero_check_bitor_both_nonzero_u8);
+    nonzero_check_bitor_both_nonzero!(core::num::NonZeroU16, nonzero_check_bitor_both_nonzero_u16);
+    nonzero_check_bitor_both_nonzero!(core::num::NonZeroU32, nonzero_check_bitor_both_nonzero_u32);
+    nonzero_check_bitor_both_nonzero!(core::num::NonZeroU64, nonzero_check_bitor_both_nonzero_u64);
+    nonzero_check_bitor_both_nonzero!(
+        core::num::NonZeroU128,
+        nonzero_check_bitor_both_nonzero_u128
+    );
+    nonzero_check_bitor_both_nonzero!(
+        core::num::NonZeroUsize,
+        nonzero_check_bitor_both_nonzero_usize
+    );
+
+    // `impl BitOr<T> for NonZero<T>`: `NonZero | primitive -> NonZero`.
+    macro_rules! nonzero_check_bitor_rhs_primitive {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let a: $nonzero_type = kani::any();
+                let b: $t = kani::any();
+                let result = a | b;
+                assert!(result.get() == (a.get() | b));
+                assert!(result.get() != 0);
+            }
+        };
+    }
+
+    nonzero_check_bitor_rhs_primitive!(
+        i8,
+        core::num::NonZeroI8,
+        nonzero_check_bitor_rhs_primitive_i8
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        i16,
+        core::num::NonZeroI16,
+        nonzero_check_bitor_rhs_primitive_i16
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        i32,
+        core::num::NonZeroI32,
+        nonzero_check_bitor_rhs_primitive_i32
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        i64,
+        core::num::NonZeroI64,
+        nonzero_check_bitor_rhs_primitive_i64
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        i128,
+        core::num::NonZeroI128,
+        nonzero_check_bitor_rhs_primitive_i128
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_bitor_rhs_primitive_isize
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        u8,
+        core::num::NonZeroU8,
+        nonzero_check_bitor_rhs_primitive_u8
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        u16,
+        core::num::NonZeroU16,
+        nonzero_check_bitor_rhs_primitive_u16
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        u32,
+        core::num::NonZeroU32,
+        nonzero_check_bitor_rhs_primitive_u32
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        u64,
+        core::num::NonZeroU64,
+        nonzero_check_bitor_rhs_primitive_u64
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        u128,
+        core::num::NonZeroU128,
+        nonzero_check_bitor_rhs_primitive_u128
+    );
+    nonzero_check_bitor_rhs_primitive!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_bitor_rhs_primitive_usize
+    );
+
+    // `impl BitOr<NonZero<T>> for T`: `primitive | NonZero -> NonZero`.
+    macro_rules! nonzero_check_bitor_lhs_primitive {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let a: $t = kani::any();
+                let b: $nonzero_type = kani::any();
+                let result = a | b;
+                assert!(result.get() == (a | b.get()));
+                assert!(result.get() != 0);
+            }
+        };
+    }
+
+    nonzero_check_bitor_lhs_primitive!(
+        i8,
+        core::num::NonZeroI8,
+        nonzero_check_bitor_lhs_primitive_i8
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        i16,
+        core::num::NonZeroI16,
+        nonzero_check_bitor_lhs_primitive_i16
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        i32,
+        core::num::NonZeroI32,
+        nonzero_check_bitor_lhs_primitive_i32
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        i64,
+        core::num::NonZeroI64,
+        nonzero_check_bitor_lhs_primitive_i64
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        i128,
+        core::num::NonZeroI128,
+        nonzero_check_bitor_lhs_primitive_i128
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_bitor_lhs_primitive_isize
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        u8,
+        core::num::NonZeroU8,
+        nonzero_check_bitor_lhs_primitive_u8
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        u16,
+        core::num::NonZeroU16,
+        nonzero_check_bitor_lhs_primitive_u16
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        u32,
+        core::num::NonZeroU32,
+        nonzero_check_bitor_lhs_primitive_u32
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        u64,
+        core::num::NonZeroU64,
+        nonzero_check_bitor_lhs_primitive_u64
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        u128,
+        core::num::NonZeroU128,
+        nonzero_check_bitor_lhs_primitive_u128
+    );
+    nonzero_check_bitor_lhs_primitive!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_bitor_lhs_primitive_usize
+    );
+
+    // `neg` harnesses (the `Neg` impl, signed only): negating nonzero is
+    // nonzero, discharging the internal `new_unchecked`. As a trait method it
+    // gets plain harnesses instead of a contract. Paired value/panic harnesses
+    // split the domain (`abs`/`clamp` pattern): the value harness covers all
+    // non-`MIN` inputs and asserts nonzero-ness plus `result == -x`; the
+    // `should_panic` harness proves `MIN` panics (overflow checks are always on
+    // under Kani).
+    macro_rules! nonzero_check_neg {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident, $panic_harness_name:ident) => {
+            #[kani::proof]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                kani::assume(x.get() != <$t>::MIN);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let result = -x;
+                assert!(result.get() == -x.get());
+                assert!(result.get() != 0);
+            }
+
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $panic_harness_name() {
+                let x: $nonzero_type = kani::any();
+                kani::assume(x.get() == <$t>::MIN);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = -x;
+            }
+        };
+    }
+
+    nonzero_check_neg!(
+        i8,
+        core::num::NonZeroI8,
+        nonzero_check_neg_i8,
+        nonzero_check_neg_min_panics_i8
+    );
+    nonzero_check_neg!(
+        i16,
+        core::num::NonZeroI16,
+        nonzero_check_neg_i16,
+        nonzero_check_neg_min_panics_i16
+    );
+    nonzero_check_neg!(
+        i32,
+        core::num::NonZeroI32,
+        nonzero_check_neg_i32,
+        nonzero_check_neg_min_panics_i32
+    );
+    nonzero_check_neg!(
+        i64,
+        core::num::NonZeroI64,
+        nonzero_check_neg_i64,
+        nonzero_check_neg_min_panics_i64
+    );
+    nonzero_check_neg!(
+        i128,
+        core::num::NonZeroI128,
+        nonzero_check_neg_i128,
+        nonzero_check_neg_min_panics_i128
+    );
+    nonzero_check_neg!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_neg_isize,
+        nonzero_check_neg_min_panics_isize
+    );
+
+    // `checked_neg` harnesses: verify the contract (`None` iff `self == MIN`,
+    // else the exact negation) and, with it, the internal `new_unchecked`.
+    // Signed only; full nonzero domain per width, no input assumption (the
+    // overflow case returns `None`).
+    macro_rules! nonzero_check_checked_neg {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::checked_neg)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.checked_neg();
+            }
+        };
+    }
+
+    nonzero_check_checked_neg!(i8, core::num::NonZeroI8, nonzero_check_checked_neg_i8);
+    nonzero_check_checked_neg!(i16, core::num::NonZeroI16, nonzero_check_checked_neg_i16);
+    nonzero_check_checked_neg!(i32, core::num::NonZeroI32, nonzero_check_checked_neg_i32);
+    nonzero_check_checked_neg!(i64, core::num::NonZeroI64, nonzero_check_checked_neg_i64);
+    nonzero_check_checked_neg!(i128, core::num::NonZeroI128, nonzero_check_checked_neg_i128);
+    nonzero_check_checked_neg!(isize, core::num::NonZeroIsize, nonzero_check_checked_neg_isize);
+
+    // `overflowing_neg` harnesses: verify the contract (flag iff `self == MIN`,
+    // value == `wrapping_neg`) and, with it, the internal `new_unchecked`.
+    // Signed only; full nonzero domain per width, no input assumption (the
+    // overflow case wraps).
+    macro_rules! nonzero_check_overflowing_neg {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::overflowing_neg)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.overflowing_neg();
+            }
+        };
+    }
+
+    nonzero_check_overflowing_neg!(i8, core::num::NonZeroI8, nonzero_check_overflowing_neg_i8);
+    nonzero_check_overflowing_neg!(i16, core::num::NonZeroI16, nonzero_check_overflowing_neg_i16);
+    nonzero_check_overflowing_neg!(i32, core::num::NonZeroI32, nonzero_check_overflowing_neg_i32);
+    nonzero_check_overflowing_neg!(i64, core::num::NonZeroI64, nonzero_check_overflowing_neg_i64);
+    nonzero_check_overflowing_neg!(
+        i128,
+        core::num::NonZeroI128,
+        nonzero_check_overflowing_neg_i128
+    );
+    nonzero_check_overflowing_neg!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_overflowing_neg_isize
+    );
+
+    // `wrapping_neg` harnesses: verify the contract (value == `wrapping_neg`)
+    // and, with it, the internal `new_unchecked`. Signed only; full nonzero
+    // domain per width, no input assumption (the overflow case wraps).
+    macro_rules! nonzero_check_wrapping_neg {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::wrapping_neg)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.wrapping_neg();
+            }
+        };
+    }
+
+    nonzero_check_wrapping_neg!(i8, core::num::NonZeroI8, nonzero_check_wrapping_neg_i8);
+    nonzero_check_wrapping_neg!(i16, core::num::NonZeroI16, nonzero_check_wrapping_neg_i16);
+    nonzero_check_wrapping_neg!(i32, core::num::NonZeroI32, nonzero_check_wrapping_neg_i32);
+    nonzero_check_wrapping_neg!(i64, core::num::NonZeroI64, nonzero_check_wrapping_neg_i64);
+    nonzero_check_wrapping_neg!(i128, core::num::NonZeroI128, nonzero_check_wrapping_neg_i128);
+    nonzero_check_wrapping_neg!(isize, core::num::NonZeroIsize, nonzero_check_wrapping_neg_isize);
+
+    // `abs` harnesses (signed only): paired value/panic harnesses split the
+    // domain (`clamp`/`clamp_panic` pattern) since `abs` is total but panics on
+    // `MIN` under overflow checks (always on under Kani). The value harness
+    // covers all non-`MIN` inputs against the contract; the `should_panic`
+    // harness proves the `MIN` panic.
+    macro_rules! nonzero_check_abs {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident, $panic_harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::abs)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                kani::assume(x.get() != <$t>::MIN);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = x.abs();
+            }
+
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $panic_harness_name() {
+                let x: $nonzero_type = kani::any();
+                kani::assume(x.get() == <$t>::MIN);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = x.abs();
+            }
+        };
+    }
+
+    nonzero_check_abs!(
+        i8,
+        core::num::NonZeroI8,
+        nonzero_check_abs_i8,
+        nonzero_check_abs_min_panics_i8
+    );
+    nonzero_check_abs!(
+        i16,
+        core::num::NonZeroI16,
+        nonzero_check_abs_i16,
+        nonzero_check_abs_min_panics_i16
+    );
+    nonzero_check_abs!(
+        i32,
+        core::num::NonZeroI32,
+        nonzero_check_abs_i32,
+        nonzero_check_abs_min_panics_i32
+    );
+    nonzero_check_abs!(
+        i64,
+        core::num::NonZeroI64,
+        nonzero_check_abs_i64,
+        nonzero_check_abs_min_panics_i64
+    );
+    nonzero_check_abs!(
+        i128,
+        core::num::NonZeroI128,
+        nonzero_check_abs_i128,
+        nonzero_check_abs_min_panics_i128
+    );
+    nonzero_check_abs!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_abs_isize,
+        nonzero_check_abs_min_panics_isize
+    );
+
+    // `checked_abs` harnesses: verify the contract (`None` iff `self == MIN`,
+    // else the exact absolute value) and, with it, the internal `new_unchecked`.
+    // Signed only; full nonzero domain per width, no input assumption (the
+    // overflow case returns `None`).
+    macro_rules! nonzero_check_checked_abs {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::checked_abs)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.checked_abs();
+            }
+        };
+    }
+
+    nonzero_check_checked_abs!(i8, core::num::NonZeroI8, nonzero_check_checked_abs_i8);
+    nonzero_check_checked_abs!(i16, core::num::NonZeroI16, nonzero_check_checked_abs_i16);
+    nonzero_check_checked_abs!(i32, core::num::NonZeroI32, nonzero_check_checked_abs_i32);
+    nonzero_check_checked_abs!(i64, core::num::NonZeroI64, nonzero_check_checked_abs_i64);
+    nonzero_check_checked_abs!(i128, core::num::NonZeroI128, nonzero_check_checked_abs_i128);
+    nonzero_check_checked_abs!(isize, core::num::NonZeroIsize, nonzero_check_checked_abs_isize);
+
+    // `overflowing_abs` harnesses: verify the contract (flag iff `self == MIN`,
+    // value == `wrapping_abs`) and, with it, the internal `new_unchecked`.
+    // Signed only; full nonzero domain per width, no input assumption (the
+    // overflow case wraps and flags).
+    macro_rules! nonzero_check_overflowing_abs {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::overflowing_abs)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.overflowing_abs();
+            }
+        };
+    }
+
+    nonzero_check_overflowing_abs!(i8, core::num::NonZeroI8, nonzero_check_overflowing_abs_i8);
+    nonzero_check_overflowing_abs!(i16, core::num::NonZeroI16, nonzero_check_overflowing_abs_i16);
+    nonzero_check_overflowing_abs!(i32, core::num::NonZeroI32, nonzero_check_overflowing_abs_i32);
+    nonzero_check_overflowing_abs!(i64, core::num::NonZeroI64, nonzero_check_overflowing_abs_i64);
+    nonzero_check_overflowing_abs!(
+        i128,
+        core::num::NonZeroI128,
+        nonzero_check_overflowing_abs_i128
+    );
+    nonzero_check_overflowing_abs!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_overflowing_abs_isize
+    );
+
+    // `saturating_abs` harnesses: verify the contract (exact value, strictly
+    // positive) and, with it, the internal `new_unchecked`. Signed only; full
+    // nonzero domain per width, no input assumption (the overflow case clamps to
+    // `MAX`).
+    macro_rules! nonzero_check_saturating_abs {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::saturating_abs)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.saturating_abs();
+            }
+        };
+    }
+
+    nonzero_check_saturating_abs!(i8, core::num::NonZeroI8, nonzero_check_saturating_abs_i8);
+    nonzero_check_saturating_abs!(i16, core::num::NonZeroI16, nonzero_check_saturating_abs_i16);
+    nonzero_check_saturating_abs!(i32, core::num::NonZeroI32, nonzero_check_saturating_abs_i32);
+    nonzero_check_saturating_abs!(i64, core::num::NonZeroI64, nonzero_check_saturating_abs_i64);
+    nonzero_check_saturating_abs!(i128, core::num::NonZeroI128, nonzero_check_saturating_abs_i128);
+    nonzero_check_saturating_abs!(
+        isize,
+        core::num::NonZeroIsize,
+        nonzero_check_saturating_abs_isize
+    );
+
+    // `wrapping_abs` harnesses: verify the contract (value == `wrapping_abs`)
+    // and, with it, the internal `new_unchecked`. Signed only; full nonzero
+    // domain per width, no input assumption (the overflow case wraps).
+    macro_rules! nonzero_check_wrapping_abs {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::wrapping_abs)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.wrapping_abs();
+            }
+        };
+    }
+
+    nonzero_check_wrapping_abs!(i8, core::num::NonZeroI8, nonzero_check_wrapping_abs_i8);
+    nonzero_check_wrapping_abs!(i16, core::num::NonZeroI16, nonzero_check_wrapping_abs_i16);
+    nonzero_check_wrapping_abs!(i32, core::num::NonZeroI32, nonzero_check_wrapping_abs_i32);
+    nonzero_check_wrapping_abs!(i64, core::num::NonZeroI64, nonzero_check_wrapping_abs_i64);
+    nonzero_check_wrapping_abs!(i128, core::num::NonZeroI128, nonzero_check_wrapping_abs_i128);
+    nonzero_check_wrapping_abs!(isize, core::num::NonZeroIsize, nonzero_check_wrapping_abs_isize);
+
+    // `unsigned_abs` harnesses: verify the contract (exact magnitude, strictly
+    // positive) and, with it, the internal `new_unchecked`. Signed input, full
+    // nonzero domain per width; never overflows (`MIN`'s magnitude fits the
+    // unsigned target).
+    macro_rules! nonzero_check_unsigned_abs {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::unsigned_abs)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.unsigned_abs();
+            }
+        };
+    }
+
+    nonzero_check_unsigned_abs!(i8, core::num::NonZeroI8, nonzero_check_unsigned_abs_i8);
+    nonzero_check_unsigned_abs!(i16, core::num::NonZeroI16, nonzero_check_unsigned_abs_i16);
+    nonzero_check_unsigned_abs!(i32, core::num::NonZeroI32, nonzero_check_unsigned_abs_i32);
+    nonzero_check_unsigned_abs!(i64, core::num::NonZeroI64, nonzero_check_unsigned_abs_i64);
+    nonzero_check_unsigned_abs!(i128, core::num::NonZeroI128, nonzero_check_unsigned_abs_i128);
+    nonzero_check_unsigned_abs!(isize, core::num::NonZeroIsize, nonzero_check_unsigned_abs_isize);
+
+    // `midpoint` harnesses: verify the contract (exact value; the average of two
+    // values >= 1 is >= 1, and the underlying `midpoint` cannot overflow) and,
+    // with it, the internal `new_unchecked`. Unsigned only; both operands range
+    // over the full nonzero domain per width.
+    macro_rules! nonzero_check_midpoint {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::midpoint)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let y: $nonzero_type = kani::any();
+                let _ = x.midpoint(y);
+            }
+        };
+    }
+
+    nonzero_check_midpoint!(u8, core::num::NonZeroU8, nonzero_check_midpoint_u8);
+    nonzero_check_midpoint!(u16, core::num::NonZeroU16, nonzero_check_midpoint_u16);
+    nonzero_check_midpoint!(u32, core::num::NonZeroU32, nonzero_check_midpoint_u32);
+    nonzero_check_midpoint!(u64, core::num::NonZeroU64, nonzero_check_midpoint_u64);
+    nonzero_check_midpoint!(u128, core::num::NonZeroU128, nonzero_check_midpoint_u128);
+    nonzero_check_midpoint!(usize, core::num::NonZeroUsize, nonzero_check_midpoint_usize);
+
+    // `isqrt` harnesses: verify the contract (exact root; `isqrt(x >= 1) >= 1`)
+    // and, with it, the internal `new_unchecked`. u8/u16/u32 get the full
+    // nonzero domain. For u64/usize/u128 the staged `int_sqrt` reduction is
+    // multiplication-heavy and CBMC cannot discharge full-width multiplication,
+    // so those widths use value intervals: near 1, the root's half-width
+    // transition band (2^32 / 2^64), and near `MAX`.
+    //
+    // KNOWN VERIFICATION GAP (u64/usize/u128): the contract — including the
+    // exact-value clause — is machine-checked only within these intervals.
+    // Monotonicity of `isqrt` is an informal (unchecked) argument that
+    // nonzero-ness extends to the uncovered bands; it says nothing about the
+    // exact-value clause. Closing the gap needs a tractable full-width
+    // multiplication encoding or a functional invariant for the Newton loop.
+    macro_rules! nonzero_check_isqrt {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident) => {
+            #[kani::proof_for_contract(NonZero::<$t>::isqrt)]
+            pub fn $harness_name() {
+                let x: $nonzero_type = kani::any();
+                let _ = x.isqrt();
+            }
+        };
+    }
+
+    nonzero_check_isqrt!(u8, core::num::NonZeroU8, nonzero_check_isqrt_u8);
+    nonzero_check_isqrt!(u16, core::num::NonZeroU16, nonzero_check_isqrt_u16);
+    nonzero_check_isqrt!(u32, core::num::NonZeroU32, nonzero_check_isqrt_u32);
+
+    // Interval-bounded harnesses for the wide widths (see note above). `$min`
+    // and `$max` bound the underlying integer; `kani::assume` fixes the input's
+    // high bits so CBMC can simplify the staged multiplications.
+    macro_rules! nonzero_check_isqrt_interval {
+        ($t:ty, $nonzero_type:ty, $harness_name:ident, $min:expr, $max:expr) => {
+            #[kani::proof_for_contract(NonZero::<$t>::isqrt)]
+            pub fn $harness_name() {
+                let v = kani::any::<$t>();
+                // Vacuity guard: inverted endpoints would make the assume
+                // unsatisfiable; assert before assuming so it fails loudly.
+                let (__ival_min, __ival_max): ($t, $t) = ($min, $max);
+                assert!(__ival_min <= __ival_max, "interval endpoints inverted");
+                kani::assume(v >= $min && v <= $max);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let x = <$nonzero_type>::new(v).unwrap();
+                let _ = x.isqrt();
+            }
+        };
+    }
+
+    // u64: small magnitudes (roots in [1, 0xFFFF]), the 2^32 half-width
+    // transition band (roots crossing 0xFFFF_FFFF), and near-MAX magnitudes.
+    nonzero_check_isqrt_interval!(
+        u64,
+        core::num::NonZeroU64,
+        nonzero_check_isqrt_u64_small,
+        1u64,
+        0xFFFFu64
+    );
+    nonzero_check_isqrt_interval!(
+        u64,
+        core::num::NonZeroU64,
+        nonzero_check_isqrt_u64_mid,
+        (1u64 << 32) - 0xFFFFu64,
+        (1u64 << 32) + 0xFFFFu64
+    );
+    nonzero_check_isqrt_interval!(
+        u64,
+        core::num::NonZeroU64,
+        nonzero_check_isqrt_u64_large,
+        u64::MAX - 0xFFFFu64,
+        u64::MAX
+    );
+
+    // usize mirrors u64 on this 64-bit target.
+    nonzero_check_isqrt_interval!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_isqrt_usize_small,
+        1usize,
+        0xFFFFusize
+    );
+    nonzero_check_isqrt_interval!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_isqrt_usize_mid,
+        (1usize << 32) - 0xFFFFusize,
+        (1usize << 32) + 0xFFFFusize
+    );
+    nonzero_check_isqrt_interval!(
+        usize,
+        core::num::NonZeroUsize,
+        nonzero_check_isqrt_usize_large,
+        usize::MAX - 0xFFFFusize,
+        usize::MAX
+    );
+
+    // u128: same interval strategy at the widest type, with the transition
+    // band at 2^64.
+    nonzero_check_isqrt_interval!(
+        u128,
+        core::num::NonZeroU128,
+        nonzero_check_isqrt_u128_small,
+        1u128,
+        0xFFFFu128
+    );
+    nonzero_check_isqrt_interval!(
+        u128,
+        core::num::NonZeroU128,
+        nonzero_check_isqrt_u128_mid,
+        (1u128 << 64) - 0xFFFFu128,
+        (1u128 << 64) + 0xFFFFu128
+    );
+    nonzero_check_isqrt_interval!(
+        u128,
+        core::num::NonZeroU128,
+        nonzero_check_isqrt_u128_large,
+        u128::MAX - 0xFFFFu128,
+        u128::MAX
+    );
 }
