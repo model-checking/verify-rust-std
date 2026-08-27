@@ -2555,6 +2555,16 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
     false
 }
 
+/// Shared fallback body of [`typed_swap_nonoverlapping`], factored out so the
+/// Kani verification wrapper can execute the same code the intrinsic falls back to.
+#[rustc_const_stable_indirect] // must follow stable const rules: reachable from the const-stable-indirect intrinsic below
+#[inline]
+const unsafe fn typed_swap_nonoverlapping_fallback<T>(x: *mut T, y: *mut T) {
+    // SAFETY: The caller provided single non-overlapping items behind
+    // pointers, so swapping them with `count: 1` is fine.
+    unsafe { ptr::swap_nonoverlapping(x, y, 1) };
+}
+
 /// Non-overlapping *typed* swap of a single value.
 ///
 /// The codegen backends will replace this with a better implementation when
@@ -2587,9 +2597,8 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), size_of::<T>(), 1))]
 #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
 pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
-    // SAFETY: The caller provided single non-overlapping items behind
-    // pointers, so swapping them with `count: 1` is fine.
-    unsafe { ptr::swap_nonoverlapping(x, y, 1) };
+    // SAFETY: Same contract as this intrinsic; forwarded verbatim to the shared fallback.
+    unsafe { typed_swap_nonoverlapping_fallback(x, y) };
 }
 
 /// Returns whether we should perform some UB-checking at runtime. This eventually evaluates to
@@ -3499,12 +3508,13 @@ mod verify {
         });
     }
 
-    // Kani models `typed_swap_nonoverlapping` with `codegen_swap` instead of its fallback body.
-    // This wrapper copies that body so `#[kani::proof_for_contract]` executes it.
+    // Kani models `typed_swap_nonoverlapping` itself with `codegen_swap`, so
+    // `#[kani::proof_for_contract]` can never enter its fallback body directly. This wrapper
+    // and the intrinsic's fallback body both call the same shared helper,
+    // `typed_swap_nonoverlapping_fallback`, so proving this wrapper against the contract proves
+    // the production fallback path too, and the two cannot drift apart.
     // `ptr::swap_nonoverlapping` reaches `copy_nonoverlapping`, never `typed_swap_nonoverlapping`.
     // The proof is therefore not circular.
-    // Scope limit: this proves the copied fallback meets the contract, not that it equals
-    // `codegen_swap`. Sharing the body would require an out-of-scope std-source refactor.
     #[cfg_attr(kani, kani::modifies(x))]
     #[cfg_attr(kani, kani::modifies(y))]
     #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
@@ -3514,7 +3524,7 @@ mod verify {
     #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
     #[allow(dead_code)]
     unsafe fn typed_swap_fallback_wrapper<T>(x: *mut T, y: *mut T) {
-        unsafe { crate::ptr::swap_nonoverlapping(x, y, 1) }
+        unsafe { typed_swap_nonoverlapping_fallback(x, y) }
     }
 
     #[kani::proof_for_contract(typed_swap_fallback_wrapper)]
