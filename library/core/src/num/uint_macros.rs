@@ -2091,7 +2091,11 @@ macro_rules! uint_impl {
             let mut base = self;
             let mut acc: Self = 1;
 
-            #[safety::loop_invariant(true)]
+            // Inductive (`acc` starts at 1; `try_opt!` bails on overflow, so
+            // positive × positive stays positive); discharges the nonzero
+            // obligation in `NonZero::checked_pow`, which a `true` invariant
+            // cannot (loop abstraction havocs `acc`).
+            #[safety::loop_invariant(self == 0 || (acc > 0 && base > 0))]
             loop {
                 if (exp & 1) == 1 {
                     acc = try_opt!(acc.checked_mul(base));
