@@ -48,6 +48,7 @@ use crate::io::{
 /// }
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "IoBufReader")]
 pub struct BufReader<R: ?Sized> {
     buf: Buffer,
     inner: R,
@@ -288,7 +289,7 @@ impl<R: ?Sized> BufReader<R> {
 #[cfg(test)]
 impl<R: ?Sized> BufReader<R> {
     #[allow(missing_docs)]
-    pub fn initialized(&self) -> usize {
+    pub fn initialized(&self) -> bool {
         self.buf.initialized()
     }
 }

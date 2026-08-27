@@ -35,6 +35,7 @@ pub mod consts {
     pub const TAU: f16 = 6.28318530717958647692528676655900577_f16;
 
     /// The golden ratio (φ)
+    #[doc(alias = "phi")]
     #[unstable(feature = "f16", issue = "116909")]
     pub const GOLDEN_RATIO: f16 = 1.618033988749894848204586834365638118_f16;
 
@@ -333,14 +334,80 @@ impl f16 {
     #[unstable(feature = "float_exact_integer_constants", issue = "152466")]
     pub const MIN_EXACT_INTEGER: i16 = -Self::MAX_EXACT_INTEGER;
 
-    /// Sign bit
-    pub(crate) const SIGN_MASK: u16 = 0x8000;
+    /// The mask of the bit used to encode the sign of an [`f16`].
+    ///
+    /// This bit is set when the sign is negative and unset when the sign is
+    /// positive.
+    /// If you only need to check whether a value is positive or negative,
+    /// [`is_sign_positive`] or [`is_sign_negative`] can be used.
+    ///
+    /// [`is_sign_positive`]: f16::is_sign_positive
+    /// [`is_sign_negative`]: f16::is_sign_negative
+    /// ```rust
+    /// #![feature(float_masks)]
+    /// #![feature(f16)]
+    /// # #[cfg(target_has_reliable_f16)] {
+    /// let sign_mask = f16::SIGN_MASK;
+    /// let a = 1.6552f16;
+    /// let a_bits = a.to_bits();
+    ///
+    /// assert_eq!(a_bits & sign_mask, 0x0);
+    /// assert_eq!(f16::from_bits(a_bits ^ sign_mask), -a);
+    /// assert_eq!(sign_mask, (-0.0f16).to_bits());
+    /// # }
+    /// ```
+    #[unstable(feature = "float_masks", issue = "154064")]
+    pub const SIGN_MASK: u16 = 0x8000;
 
-    /// Exponent mask
-    pub(crate) const EXP_MASK: u16 = 0x7c00;
+    /// The mask of the bits used to encode the exponent of an [`f16`].
+    ///
+    /// Note that the exponent is stored as a biased value, with a bias of 15 for `f16`.
+    ///
+    /// ```rust
+    /// #![feature(float_masks)]
+    /// #![feature(f16)]
+    /// # #[cfg(target_has_reliable_f16)] {
+    /// let exponent_mask = f16::EXPONENT_MASK;
+    ///
+    /// fn get_exp(a: f16) -> i16 {
+    ///     let bias = 15;
+    ///     let biased = a.to_bits() & f16::EXPONENT_MASK;
+    ///     (biased >> (f16::MANTISSA_DIGITS - 1)).cast_signed() - bias
+    /// }
+    ///
+    /// assert_eq!(get_exp(0.5), -1);
+    /// assert_eq!(get_exp(1.0), 0);
+    /// assert_eq!(get_exp(2.0), 1);
+    /// assert_eq!(get_exp(4.0), 2);
+    /// # }
+    /// ```
+    #[unstable(feature = "float_masks", issue = "154064")]
+    pub const EXPONENT_MASK: u16 = 0x7c00;
 
-    /// Mantissa mask
-    pub(crate) const MAN_MASK: u16 = 0x03ff;
+    /// The mask of the bits used to encode the mantissa of an [`f16`].
+    ///
+    /// ```rust
+    /// #![feature(float_masks)]
+    /// #![feature(f16)]
+    /// # #[cfg(target_has_reliable_f16)] {
+    /// let mantissa_mask = f16::MANTISSA_MASK;
+    ///
+    /// assert_eq!(0f16.to_bits() & mantissa_mask, 0x0);
+    /// assert_eq!(1f16.to_bits() & mantissa_mask, 0x0);
+    ///
+    /// // multiplying a finite value by a power of 2 doesn't change its mantissa
+    /// // unless the result or initial value is not normal.
+    /// let a = 1.6552f16;
+    /// let b = 4.0 * a;
+    /// assert_eq!(a.to_bits() & mantissa_mask, b.to_bits() & mantissa_mask);
+    ///
+    /// // The maximum and minimum values have a saturated significand
+    /// assert_eq!(f16::MAX.to_bits() & f16::MANTISSA_MASK, f16::MANTISSA_MASK);
+    /// assert_eq!(f16::MIN.to_bits() & f16::MANTISSA_MASK, f16::MANTISSA_MASK);
+    /// # }
+    /// ```
+    #[unstable(feature = "float_masks", issue = "154064")]
+    pub const MANTISSA_MASK: u16 = 0x03ff;
 
     /// Minimum representable positive value (min subnormal)
     const TINY_BITS: u16 = 0x1;
@@ -500,11 +567,12 @@ impl f16 {
     /// ```
     #[inline]
     #[unstable(feature = "f16", issue = "116909")]
+    #[must_use]
     pub const fn classify(self) -> FpCategory {
         let b = self.to_bits();
-        match (b & Self::MAN_MASK, b & Self::EXP_MASK) {
-            (0, Self::EXP_MASK) => FpCategory::Infinite,
-            (_, Self::EXP_MASK) => FpCategory::Nan,
+        match (b & Self::MANTISSA_MASK, b & Self::EXPONENT_MASK) {
+            (0, Self::EXPONENT_MASK) => FpCategory::Infinite,
+            (_, Self::EXPONENT_MASK) => FpCategory::Nan,
             (0, 0) => FpCategory::Zero,
             (_, 0) => FpCategory::Subnormal,
             _ => FpCategory::Normal,
@@ -604,6 +672,7 @@ impl f16 {
     #[inline]
     #[doc(alias = "nextUp")]
     #[unstable(feature = "f16", issue = "116909")]
+    #[must_use = "method returns a new number and does not mutate the original value"]
     pub const fn next_up(self) -> Self {
         // Some targets violate Rust's assumption of IEEE semantics, e.g. by flushing
         // denormals to zero. This is in general unsound and unsupported, but here
@@ -658,6 +727,7 @@ impl f16 {
     #[inline]
     #[doc(alias = "nextDown")]
     #[unstable(feature = "f16", issue = "116909")]
+    #[must_use = "method returns a new number and does not mutate the original value"]
     pub const fn next_down(self) -> Self {
         // Some targets violate Rust's assumption of IEEE semantics, e.g. by flushing
         // denormals to zero. This is in general unsound and unsupported, but here
@@ -901,8 +971,10 @@ impl f16 {
     #[doc(alias = "average")]
     #[unstable(feature = "f16", issue = "116909")]
     #[rustc_const_unstable(feature = "f16", issue = "116909")]
+    #[must_use = "this returns the result of the operation, \
+                  without modifying the original"]
     pub const fn midpoint(self, other: f16) -> f16 {
-        const HI: f16 = f16::MAX / 2.;
+        const HI: f16 = f16::MAX * 0.5;
 
         let (a, b) = (self, other);
         let abs_a = a.abs();
@@ -910,9 +982,9 @@ impl f16 {
 
         if abs_a <= HI && abs_b <= HI {
             // Overflow is impossible
-            (a + b) / 2.
+            (a + b) * 0.5
         } else {
-            (a / 2.) + (b / 2.)
+            (a * 0.5) + (b * 0.5)
         }
     }
 
@@ -1377,7 +1449,7 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(target_has_reliable_f16_math)] {
+    /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let x = 3.5_f16;
     /// let y = -3.5_f16;
@@ -1442,7 +1514,7 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(target_has_reliable_f16_math)] {
+    /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let f = 3.5_f16;
     ///
@@ -1535,7 +1607,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let f = 3.7_f16;
@@ -1564,7 +1635,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let f = 3.01_f16;
@@ -1593,7 +1663,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let f = 3.3_f16;
@@ -1627,7 +1696,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let f = 3.3_f16;
@@ -1659,7 +1727,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let f = 3.7_f16;
@@ -1689,7 +1756,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let x = 3.6_f16;
@@ -1728,7 +1794,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let m = 10.0_f16;
@@ -1773,7 +1838,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let a: f16 = 7.0;
@@ -1817,7 +1881,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let a: f16 = 7.0;
@@ -1860,12 +1923,11 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
-    /// # #[cfg(target_has_reliable_f16)] {
+    /// # #[cfg(target_has_reliable_f16_math)] {
     ///
     /// let x = 2.0_f16;
     /// let abs_difference = (x.powi(2) - (x * x)).abs();
-    /// assert!(abs_difference <= f16::EPSILON);
+    /// assert!(abs_difference <= 0.1);
     ///
     /// assert_eq!(f16::powi(f16::NAN, 0), 1.0);
     /// assert_eq!(f16::powi(0.0, 0), 1.0);
@@ -1893,7 +1955,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let positive = 4.0_f16;
@@ -1928,7 +1989,6 @@ impl f16 {
     ///
     /// ```
     /// #![feature(f16)]
-    /// # #[cfg(not(miri))]
     /// # #[cfg(target_has_reliable_f16)] {
     ///
     /// let x = 8.0f16;

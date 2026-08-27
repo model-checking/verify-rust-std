@@ -243,7 +243,7 @@ impl Socket {
                 }
             }
             _ => {
-                unsafe { buf.advance_unchecked(result as usize) };
+                unsafe { buf.advance(result as usize) };
                 Ok(())
             }
         }
@@ -413,7 +413,8 @@ impl Socket {
     pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
         let linger = c::LINGER {
             l_onoff: linger.is_some() as c_ushort,
-            l_linger: linger.unwrap_or_default().as_secs() as c_ushort,
+            l_linger: cmp::min(linger.unwrap_or_default().as_secs(), c_ushort::MAX as u64)
+                as c_ushort,
         };
 
         unsafe { setsockopt(self, c::SOL_SOCKET, c::SO_LINGER, linger) }
@@ -423,6 +424,15 @@ impl Socket {
         let val: c::LINGER = unsafe { getsockopt(self, c::SOL_SOCKET, c::SO_LINGER)? };
 
         Ok((val.l_onoff != 0).then(|| Duration::from_secs(val.l_linger as u64)))
+    }
+
+    pub fn set_keepalive(&self, keepalive: bool) -> io::Result<()> {
+        unsafe { setsockopt(self, c::SOL_SOCKET, c::SO_KEEPALIVE, keepalive as c::BOOL) }
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
+        let raw: c::BOOL = unsafe { getsockopt(self, c::SOL_SOCKET, c::SO_KEEPALIVE)? };
+        Ok(raw != 0)
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {

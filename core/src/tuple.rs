@@ -47,8 +47,7 @@ macro_rules! tuple_impls {
 
         maybe_tuple_doc! {
             $($T)+ @
-            #[unstable(feature = "adt_const_params", issue = "95174")]
-            #[unstable_feature_bound(unsized_const_params)]
+            #[unstable(feature = "min_adt_const_params", issue = "154042")]
             impl<$($T: ConstParamTy_),+> ConstParamTy_ for ($($T,)+)
             {}
         }
@@ -121,7 +120,8 @@ macro_rules! tuple_impls {
         maybe_tuple_doc! {
             $($T)+ @
             #[stable(feature = "rust1", since = "1.0.0")]
-            impl<$($T: Default),+> Default for ($($T,)+) {
+            #[rustc_const_unstable(feature = "const_default", issue = "143894")]
+            impl<$($T: [const] Default),+> const Default for ($($T,)+) {
                 #[inline]
                 fn default() -> ($($T,)+) {
                     ($({ let x: $T = Default::default(); x},)+)

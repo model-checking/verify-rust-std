@@ -371,22 +371,20 @@ where
         // * perform _unsigned_ reduce-min
         // * check if the result is -1 or an index
 
-        let index = Simd::from_array(
-            const {
-                let mut index = [0; N];
-                let mut i = 0;
-                while i < N {
-                    index[i] = i;
-                    i += 1;
-                }
-                index
-            },
-        );
+        let index: Simd<T, N> = const {
+            let mut index = [0; N];
+            let mut i = 0;
+            while i < N {
+                index[i] = i;
+                i += 1;
+            }
+            // Safety: the input and output are integer vectors
+            unsafe { core::intrinsics::simd::simd_cast(Simd::from_array(index)) }
+        };
 
         // Safety: the input and output are integer vectors
-        let index: Simd<T, N> = unsafe { core::intrinsics::simd::simd_cast(index) };
-
-        let masked_index = self.select(index, Self::splat(true).to_simd());
+        let masked_index: Simd<T, N> =
+            unsafe { core::intrinsics::simd::simd_or((!self).to_simd(), index) };
 
         // Safety: the input and output are integer vectors
         let masked_index: Simd<T::Unsigned, N> =
@@ -402,7 +400,15 @@ where
         if min_index.eq(T::TRUE) {
             None
         } else {
-            Some(min_index.to_usize())
+            let min_index = min_index.to_usize();
+
+            // Allow eliminating bounds checks when using the index
+            // Safety: the index can't exceed the number of elements in the vector
+            unsafe {
+                core::hint::assert_unchecked(min_index < N);
+            }
+
+            Some(min_index)
         }
     }
 }

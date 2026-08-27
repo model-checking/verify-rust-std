@@ -15,6 +15,22 @@ macro_rules! static_assert {
 }
 
 #[allow(unused_macros)]
+macro_rules! static_assert_range {
+    ($imm:ident, $min:literal..=$max:literal) => {
+        static_assert!(
+            $min <= $imm && $imm <= $max,
+            concat!(
+                stringify!($imm),
+                " is not in range ",
+                stringify!($min),
+                "-",
+                stringify!($max),
+            )
+        )
+    };
+}
+
+#[allow(unused_macros)]
 macro_rules! static_assert_uimm_bits {
     ($imm:ident, $bits:expr) => {
         // `0 <= $imm` produces a warning if the immediate has an unsigned type
@@ -26,7 +42,7 @@ macro_rules! static_assert_uimm_bits {
                     stringify!($imm),
                     " doesn't fit in ",
                     stringify!($bits),
-                    " bits",
+                    " bits (unsigned)",
                 )
             )
         }
@@ -42,7 +58,7 @@ macro_rules! static_assert_simm_bits {
                 stringify!($imm),
                 " doesn't fit in ",
                 stringify!($bits),
-                " bits",
+                " bits (signed)",
             )
         )
     };

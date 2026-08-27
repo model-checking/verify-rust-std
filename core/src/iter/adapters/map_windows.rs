@@ -1,5 +1,5 @@
 use crate::iter::FusedIterator;
-use crate::mem::MaybeUninit;
+use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::{fmt, ptr};
 
 /// An iterator over the mapped windows of another iterator.
@@ -43,11 +43,11 @@ struct Buffer<T, const N: usize> {
 }
 
 impl<I: Iterator, F, const N: usize> MapWindows<I, F, N> {
-    pub(in crate::iter) fn new(iter: I, f: F) -> Self {
+    pub(in crate::iter) const fn new(iter: I, f: F) -> Self {
         assert!(N != 0, "array in `Iterator::map_windows` must contain more than 0 elements");
 
         // Only ZST arrays' length can be so large.
-        if size_of::<I::Item>() == 0 {
+        if I::Item::IS_ZST {
             assert!(
                 N.checked_mul(2).is_some(),
                 "array size of `Iterator::map_windows` is too large"
@@ -60,7 +60,7 @@ impl<I: Iterator, F, const N: usize> MapWindows<I, F, N> {
 
 impl<I: Iterator, const N: usize> MapWindowsInner<I, N> {
     #[inline]
-    fn new(iter: I) -> Self {
+    const fn new(iter: I) -> Self {
         Self { iter, buffer: None }
     }
 
@@ -218,10 +218,8 @@ impl<T, const N: usize> Drop for Buffer<T, N> {
         // SAFETY: our invariant guarantees that N elements starting from
         // `self.start` are initialized. We drop them here.
         unsafe {
-            let initialized_part: *mut [T] = crate::ptr::slice_from_raw_parts_mut(
-                self.buffer_mut_ptr().add(self.start).cast(),
-                N,
-            );
+            let initialized_part: *mut [T] =
+                self.buffer_mut_ptr().add(self.start).cast::<T>().cast_slice(N);
             ptr::drop_in_place(initialized_part);
         }
     }

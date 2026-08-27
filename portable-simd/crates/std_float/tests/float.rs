@@ -25,23 +25,6 @@ macro_rules! unary_approx_test {
                     &core_simd::simd::Simd::<$scalar, LANES>::$func,
                     &$scalar::$func,
                     &|_| true,
-                    8,
-                )
-            }
-            )*
-        }
-    }
-}
-
-macro_rules! binary_approx_test {
-    { $scalar:tt, $($func:tt),+ } => {
-        test_helpers::test_lanes! {
-            $(
-            fn $func<const LANES: usize>() {
-                test_helpers::test_binary_elementwise_approx(
-                    &core_simd::simd::Simd::<$scalar, LANES>::$func,
-                    &$scalar::$func,
-                    &|_, _| true,
                     16,
                 )
             }
@@ -71,12 +54,24 @@ macro_rules! impl_tests {
         mod $scalar {
             use std_float::StdFloat;
 
-            unary_test! { $scalar, sqrt, ceil, floor, round, trunc }
+            unary_test! { $scalar, sqrt, ceil, floor, round, trunc, round_ties_even }
             ternary_test! { $scalar, mul_add }
 
             // https://github.com/rust-lang/miri/issues/3555
             unary_approx_test! { $scalar, sin, cos, exp, exp2, ln, log2, log10 }
-            binary_approx_test! { $scalar, log }
+
+            // The implementation of log is a.ln() / b.ln(), so there are 2 inexact operations,
+            // hence a larger ulps is needed.
+            test_helpers::test_lanes! {
+                fn log<const LANES: usize>() {
+                    test_helpers::test_binary_elementwise_approx(
+                        &core_simd::simd::Simd::<$scalar, LANES>::log,
+                        &$scalar::log,
+                        &|_, _| true,
+                        32,
+                    )
+                }
+            }
 
             test_helpers::test_lanes! {
                 fn fract<const LANES: usize>() {

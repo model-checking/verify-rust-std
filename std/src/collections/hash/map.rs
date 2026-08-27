@@ -1,13 +1,12 @@
 #[cfg(test)]
 mod tests;
 
-use hashbrown::hash_map as base;
+use hashbrown::hash_map::{self as base, RustcOccupiedError};
 
 use self::Entry::*;
 use crate::alloc::{Allocator, Global};
 use crate::borrow::Borrow;
 use crate::collections::{TryReserveError, TryReserveErrorKind};
-use crate::error::Error;
 use crate::fmt::{self, Debug};
 use crate::hash::{BuildHasher, Hash, RandomState};
 use crate::iter::FusedIterator;
@@ -20,7 +19,7 @@ use crate::ops::Index;
 /// reasonable best-effort is made to generate this seed from a high quality,
 /// secure source of randomness provided by the host without blocking the
 /// program. Because of this, the randomness of the seed depends on the output
-/// quality of the system's random number coroutine when the seed is created.
+/// quality of the system's random number generator when the seed is created.
 /// In particular, seeds generated when the system's entropy pool is abnormally
 /// low such as during system boot may be of a lower quality.
 ///
@@ -301,8 +300,11 @@ impl<K, V, A: Allocator> HashMap<K, V, RandomState, A> {
     /// # Examples
     ///
     /// ```
+    /// # #![feature(allocator_api)]
     /// use std::collections::HashMap;
-    /// let mut map: HashMap<&str, i32> = HashMap::new();
+    /// use std::alloc::Global;
+    ///
+    /// let map: HashMap<i32, i32> = HashMap::new_in(Global);
     /// ```
     #[inline]
     #[must_use]
@@ -321,8 +323,11 @@ impl<K, V, A: Allocator> HashMap<K, V, RandomState, A> {
     /// # Examples
     ///
     /// ```
+    /// # #![feature(allocator_api)]
     /// use std::collections::HashMap;
-    /// let mut map: HashMap<&str, i32> = HashMap::with_capacity(10);
+    /// use std::alloc::Global;
+    ///
+    /// let map: HashMap<i32, i32> = HashMap::with_capacity_in(10, Global);
     /// ```
     #[inline]
     #[must_use]
@@ -410,6 +415,18 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     ///
     /// The `hash_builder` passed should implement the [`BuildHasher`] trait for
     /// the `HashMap` to be useful, see its documentation for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    /// use std::alloc::Global;
+    /// use std::collections::HashMap;
+    /// use std::hash::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let map: HashMap<i32, i32> = HashMap::with_hasher_in(s, Global);
+    /// ```
     #[inline]
     #[must_use]
     #[unstable(feature = "allocator_api", issue = "32838")]
@@ -432,6 +449,17 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// The `hasher` passed should implement the [`BuildHasher`] trait for
     /// the `HashMap` to be useful, see its documentation for details.
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    /// use std::alloc::Global;
+    /// use std::collections::HashMap;
+    /// use std::hash::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let map: HashMap<i32, i32> = HashMap::with_capacity_and_hasher_in(10, s, Global);
+    /// ```
     #[inline]
     #[must_use]
     #[unstable(feature = "allocator_api", issue = "32838")]
@@ -465,15 +493,16 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// ```
     /// use std::collections::HashMap;
     ///
-    /// let map = HashMap::from([
+    /// let map: HashMap<&str, i32> = HashMap::from([
     ///     ("a", 1),
     ///     ("b", 2),
     ///     ("c", 3),
     /// ]);
     ///
-    /// for key in map.keys() {
-    ///     println!("{key}");
-    /// }
+    /// let mut values: Vec<_> = map.keys().copied().collect();
+    /// values.sort();
+    ///
+    /// assert_eq!(values, vec!["a", "b", "c"]);
     /// ```
     ///
     /// # Performance
@@ -527,15 +556,16 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// ```
     /// use std::collections::HashMap;
     ///
-    /// let map = HashMap::from([
+    /// let map: HashMap<&str, i32> = HashMap::from([
     ///     ("a", 1),
     ///     ("b", 2),
     ///     ("c", 3),
     /// ]);
     ///
-    /// for val in map.values() {
-    ///     println!("{val}");
-    /// }
+    /// let mut values: Vec<_> = map.values().copied().collect();
+    /// values.sort();
+    ///
+    /// assert_eq!(values, vec![1, 2, 3]);
     /// ```
     ///
     /// # Performance
@@ -563,12 +593,12 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     /// ]);
     ///
     /// for val in map.values_mut() {
-    ///     *val = *val + 10;
+    ///     *val += 10;
     /// }
     ///
-    /// for val in map.values() {
-    ///     println!("{val}");
-    /// }
+    /// assert_eq!(map.get("a"), Some(&11));
+    /// assert_eq!(map.get("b"), Some(&12));
+    /// assert_eq!(map.get("c"), Some(&13));
     /// ```
     ///
     /// # Performance
@@ -628,9 +658,13 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     ///     ("c", 3),
     /// ]);
     ///
-    /// for (key, val) in map.iter() {
-    ///     println!("key: {key} val: {val}");
+    /// let mut count = 0;
+    ///
+    /// for (_key, _val) in map.iter() {
+    ///     count += 1;
     /// }
+    ///
+    /// assert_eq!(count, 3);
     /// ```
     ///
     /// # Performance
@@ -663,9 +697,9 @@ impl<K, V, S, A: Allocator> HashMap<K, V, S, A> {
     ///     *val *= 2;
     /// }
     ///
-    /// for (key, val) in &map {
-    ///     println!("key: {key} val: {val}");
-    /// }
+    /// assert_eq!(map.get("a"), Some(&2));
+    /// assert_eq!(map.get("b"), Some(&4));
+    /// assert_eq!(map.get("c"), Some(&6));
     /// ```
     ///
     /// # Performance
@@ -1304,7 +1338,7 @@ where
     /// a mutable reference to the value in the entry.
     ///
     /// If the map already had this key present, nothing is updated, and
-    /// an error containing the occupied entry and the value is returned.
+    /// an error containing the occupied entry, key, and the value is returned.
     ///
     /// # Examples
     ///
@@ -1321,13 +1355,16 @@ where
     /// let err = map.try_insert(37, "b").unwrap_err();
     /// assert_eq!(err.entry.key(), &37);
     /// assert_eq!(err.entry.get(), &"a");
+    /// assert_eq!(err.key, 37);
     /// assert_eq!(err.value, "b");
     /// ```
     #[unstable(feature = "map_try_insert", issue = "82766")]
     pub fn try_insert(&mut self, key: K, value: V) -> Result<&mut V, OccupiedError<'_, K, V, A>> {
-        match self.entry(key) {
-            Occupied(entry) => Err(OccupiedError { entry, value }),
-            Vacant(entry) => Ok(entry.insert(value)),
+        match self.base.rustc_try_insert(key, value) {
+            Result::Ok(value) => Ok(value),
+            Result::Err(RustcOccupiedError { entry, key, value, .. }) => {
+                Err(OccupiedError { entry: OccupiedEntry { base: entry }, key, value })
+            }
         }
     }
 
@@ -1449,7 +1486,7 @@ where
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_unstable(feature = "const_default", issue = "143894")]
-impl<K, V, S> const Default for HashMap<K, V, S>
+const impl<K, V, S> Default for HashMap<K, V, S>
 where
     S: [const] Default,
 {
@@ -1978,8 +2015,9 @@ impl<K: Debug, V, A: Allocator> Debug for VacantEntry<'_, K, V, A> {
 
 /// The error returned by [`try_insert`](HashMap::try_insert) when the key already exists.
 ///
-/// Contains the occupied entry, and the value that was not inserted.
+/// Contains the occupied entry, key, and the value that was not inserted.
 #[unstable(feature = "map_try_insert", issue = "82766")]
+#[non_exhaustive]
 pub struct OccupiedError<
     'a,
     K: 'a,
@@ -1988,6 +2026,8 @@ pub struct OccupiedError<
 > {
     /// The entry in the map that was already occupied.
     pub entry: OccupiedEntry<'a, K, V, A>,
+    /// The key which was not inserted, because the entry was already occupied.
+    pub key: K,
     /// The value which was not inserted, because the entry was already occupied.
     pub value: V,
 }
@@ -1997,27 +2037,12 @@ impl<K: Debug, V: Debug, A: Allocator> Debug for OccupiedError<'_, K, V, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OccupiedError")
             .field("key", self.entry.key())
+            .field("uninserted_key", &self.key)
             .field("old_value", self.entry.get())
             .field("new_value", &self.value)
             .finish_non_exhaustive()
     }
 }
-
-#[unstable(feature = "map_try_insert", issue = "82766")]
-impl<'a, K: Debug, V: Debug, A: Allocator> fmt::Display for OccupiedError<'a, K, V, A> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "failed to insert {:?}, key {:?} already exists with value {:?}",
-            self.value,
-            self.entry.key(),
-            self.entry.get(),
-        )
-    }
-}
-
-#[unstable(feature = "map_try_insert", issue = "82766")]
-impl<'a, K: Debug, V: Debug, A: Allocator> Error for OccupiedError<'a, K, V, A> {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a, K, V, S, A: Allocator> IntoIterator for &'a HashMap<K, V, S, A> {

@@ -241,10 +241,9 @@ use crate::ops::ControlFlow;
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(alias = "==")]
 #[doc(alias = "!=")]
-#[rustc_on_unimplemented(
+#[diagnostic::on_unimplemented(
     message = "can't compare `{Self}` with `{Rhs}`",
-    label = "no implementation for `{Self} == {Rhs}`",
-    append_const_msg
+    label = "no implementation for `{Self} == {Rhs}`"
 )]
 #[rustc_diagnostic_item = "PartialEq"]
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
@@ -281,8 +280,9 @@ pub macro PartialEq($item:item) {
 /// The primary difference to [`PartialEq`] is the additional requirement for reflexivity. A type
 /// that implements [`PartialEq`] guarantees that for all `a`, `b` and `c`:
 ///
-/// - symmetric: `a == b` implies `b == a` and `a != b` implies `!(a == b)`
+/// - symmetric: `a == b` implies `b == a`
 /// - transitive: `a == b` and `b == c` implies `a == c`
+/// - consistent: `a != b` if and only if `!(a == b)`
 ///
 /// `Eq`, which builds on top of [`PartialEq`] also implies:
 ///
@@ -685,7 +685,7 @@ pub struct Reverse<T>(#[stable(feature = "reverse_cmp_key", since = "1.19.0")] p
 
 #[stable(feature = "reverse_cmp_key", since = "1.19.0")]
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<T: [const] PartialOrd> const PartialOrd for Reverse<T> {
+const impl<T: [const] PartialOrd> PartialOrd for Reverse<T> {
     #[inline]
     fn partial_cmp(&self, other: &Reverse<T>) -> Option<Ordering> {
         other.0.partial_cmp(&self.0)
@@ -711,7 +711,7 @@ impl<T: [const] PartialOrd> const PartialOrd for Reverse<T> {
 
 #[stable(feature = "reverse_cmp_key", since = "1.19.0")]
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-impl<T: [const] Ord> const Ord for Reverse<T> {
+const impl<T: [const] Ord> Ord for Reverse<T> {
     #[inline]
     fn cmp(&self, other: &Reverse<T>) -> Ordering {
         other.0.cmp(&self.0)
@@ -1356,10 +1356,9 @@ pub macro Ord($item:item) {
 #[doc(alias = "<")]
 #[doc(alias = "<=")]
 #[doc(alias = ">=")]
-#[rustc_on_unimplemented(
+#[diagnostic::on_unimplemented(
     message = "can't compare `{Self}` with `{Rhs}`",
-    label = "no implementation for `{Self} < {Rhs}` and `{Self} > {Rhs}`",
-    append_const_msg
+    label = "no implementation for `{Self} < {Rhs}` and `{Self} > {Rhs}`"
 )]
 #[rustc_diagnostic_item = "PartialOrd"]
 #[allow(multiple_supertrait_upcastable)] // FIXME(sized_hierarchy): remove this
@@ -1885,7 +1884,7 @@ mod impls {
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const PartialEq for () {
+    const impl PartialEq for () {
         #[inline]
         fn eq(&self, _other: &()) -> bool {
             true
@@ -1971,7 +1970,7 @@ mod impls {
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const PartialOrd for () {
+    const impl PartialOrd for () {
         #[inline]
         fn partial_cmp(&self, _: &()) -> Option<Ordering> {
             Some(Equal)
@@ -1980,7 +1979,7 @@ mod impls {
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const PartialOrd for bool {
+    const impl PartialOrd for bool {
         #[inline]
         fn partial_cmp(&self, other: &bool) -> Option<Ordering> {
             Some(self.cmp(other))
@@ -2037,7 +2036,7 @@ mod impls {
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const Ord for () {
+    const impl Ord for () {
         #[inline]
         fn cmp(&self, _other: &()) -> Ordering {
             Equal
@@ -2046,7 +2045,7 @@ mod impls {
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const Ord for bool {
+    const impl Ord for bool {
         #[inline]
         fn cmp(&self, other: &bool) -> Ordering {
             // Casting to i8's and converting the difference to an Ordering generates
@@ -2082,7 +2081,7 @@ mod impls {
 
     #[unstable(feature = "never_type", issue = "35121")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const PartialEq for ! {
+    const impl PartialEq for ! {
         #[inline]
         fn eq(&self, _: &!) -> bool {
             *self
@@ -2091,11 +2090,11 @@ mod impls {
 
     #[unstable(feature = "never_type", issue = "35121")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const Eq for ! {}
+    const impl Eq for ! {}
 
     #[unstable(feature = "never_type", issue = "35121")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const PartialOrd for ! {
+    const impl PartialOrd for ! {
         #[inline]
         fn partial_cmp(&self, _: &!) -> Option<Ordering> {
             *self
@@ -2104,7 +2103,7 @@ mod impls {
 
     #[unstable(feature = "never_type", issue = "35121")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl const Ord for ! {
+    const impl Ord for ! {
         #[inline]
         fn cmp(&self, _: &!) -> Ordering {
             *self
@@ -2115,7 +2114,7 @@ mod impls {
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized, B: PointeeSized> const PartialEq<&B> for &A
+    const impl<A: PointeeSized, B: PointeeSized> PartialEq<&B> for &A
     where
         A: [const] PartialEq<B>,
     {
@@ -2130,7 +2129,7 @@ mod impls {
     }
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized, B: PointeeSized> const PartialOrd<&B> for &A
+    const impl<A: PointeeSized, B: PointeeSized> PartialOrd<&B> for &A
     where
         A: [const] PartialOrd<B>,
     {
@@ -2173,7 +2172,7 @@ mod impls {
     }
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized> const Ord for &A
+    const impl<A: PointeeSized> Ord for &A
     where
         A: [const] Ord,
     {
@@ -2184,13 +2183,13 @@ mod impls {
     }
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized> const Eq for &A where A: [const] Eq {}
+    const impl<A: PointeeSized> Eq for &A where A: [const] Eq {}
 
     // &mut pointers
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized, B: PointeeSized> const PartialEq<&mut B> for &mut A
+    const impl<A: PointeeSized, B: PointeeSized> PartialEq<&mut B> for &mut A
     where
         A: [const] PartialEq<B>,
     {
@@ -2205,7 +2204,7 @@ mod impls {
     }
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized, B: PointeeSized> const PartialOrd<&mut B> for &mut A
+    const impl<A: PointeeSized, B: PointeeSized> PartialOrd<&mut B> for &mut A
     where
         A: [const] PartialOrd<B>,
     {
@@ -2248,7 +2247,7 @@ mod impls {
     }
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized> const Ord for &mut A
+    const impl<A: PointeeSized> Ord for &mut A
     where
         A: [const] Ord,
     {
@@ -2259,11 +2258,11 @@ mod impls {
     }
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized> const Eq for &mut A where A: [const] Eq {}
+    const impl<A: PointeeSized> Eq for &mut A where A: [const] Eq {}
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized, B: PointeeSized> const PartialEq<&mut B> for &A
+    const impl<A: PointeeSized, B: PointeeSized> PartialEq<&mut B> for &A
     where
         A: [const] PartialEq<B>,
     {
@@ -2279,7 +2278,7 @@ mod impls {
 
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
-    impl<A: PointeeSized, B: PointeeSized> const PartialEq<&B> for &mut A
+    const impl<A: PointeeSized, B: PointeeSized> PartialEq<&B> for &mut A
     where
         A: [const] PartialEq<B>,
     {

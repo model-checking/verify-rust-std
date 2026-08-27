@@ -26,7 +26,7 @@ use crate::sys::cmath;
 
 #[cfg(not(test))]
 impl f64 {
-    /// Returns the largest integer less than or equal to `self`.
+    /// Returns the largest integer that is less than or equal to `self`.
     ///
     /// This function always returns the precise result.
     ///
@@ -50,7 +50,7 @@ impl f64 {
         core::f64::math::floor(self)
     }
 
-    /// Returns the smallest integer greater than or equal to `self`.
+    /// Returns the smallest integer that is greater than or equal to `self`.
     ///
     /// This function always returns the precise result.
     ///
@@ -59,9 +59,11 @@ impl f64 {
     /// ```
     /// let f = 3.01_f64;
     /// let g = 4.0_f64;
+    /// let h = -3.01_f64;
     ///
     /// assert_eq!(f.ceil(), 4.0);
     /// assert_eq!(g.ceil(), 4.0);
+    /// assert_eq!(h.ceil(), -3.0);
     /// ```
     #[doc(alias = "ceiling")]
     #[rustc_allow_incoherent_impl]
@@ -907,6 +909,7 @@ impl f64 {
     #[rustc_allow_incoherent_impl]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
+    #[must_use = "this returns the result of the operation, without modifying the original"]
     pub fn sin_cos(self) -> (f64, f64) {
         (self.sin(), self.cos())
     }
@@ -1091,9 +1094,7 @@ impl f64 {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn asinh(self) -> f64 {
-        let ax = self.abs();
-        let ix = 1.0 / ax;
-        (ax + (ax / (Self::hypot(1.0, ix) + ix))).ln_1p().copysign(self)
+        cmath::asinh(self)
     }
 
     /// Inverse hyperbolic cosine function.
@@ -1119,11 +1120,7 @@ impl f64 {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn acosh(self) -> f64 {
-        if self < 1.0 {
-            Self::NAN
-        } else {
-            (self + ((self - 1.0).sqrt() * (self + 1.0).sqrt())).ln()
-        }
+        cmath::acosh(self)
     }
 
     /// Inverse hyperbolic tangent function.

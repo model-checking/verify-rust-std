@@ -294,7 +294,7 @@ impl Socket {
             )
         })?;
         unsafe {
-            buf.advance_unchecked(ret as usize);
+            buf.advance(ret as usize);
         }
         Ok(())
     }
@@ -432,8 +432,8 @@ impl Socket {
     #[cfg(not(target_os = "cygwin"))]
     pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
         let linger = libc::linger {
-            l_onoff: linger.is_some() as libc::c_int,
-            l_linger: linger.unwrap_or_default().as_secs() as libc::c_int,
+            l_onoff: linger.is_some() as c_int,
+            l_linger: cmp::min(linger.unwrap_or_default().as_secs(), c_int::MAX as u64) as c_int,
         };
 
         unsafe { setsockopt(self, libc::SOL_SOCKET, SO_LINGER, linger) }
@@ -443,7 +443,8 @@ impl Socket {
     pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
         let linger = libc::linger {
             l_onoff: linger.is_some() as libc::c_ushort,
-            l_linger: linger.unwrap_or_default().as_secs() as libc::c_ushort,
+            l_linger: cmp::min(linger.unwrap_or_default().as_secs(), libc::c_ushort::MAX as u64)
+                as libc::c_ushort,
         };
 
         unsafe { setsockopt(self, libc::SOL_SOCKET, SO_LINGER, linger) }
@@ -453,6 +454,15 @@ impl Socket {
         let val: libc::linger = unsafe { getsockopt(self, libc::SOL_SOCKET, SO_LINGER)? };
 
         Ok((val.l_onoff != 0).then(|| Duration::from_secs(val.l_linger as u64)))
+    }
+
+    pub fn set_keepalive(&self, keepalive: bool) -> io::Result<()> {
+        unsafe { setsockopt(self, libc::SOL_SOCKET, libc::SO_KEEPALIVE, keepalive as c_int) }
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
+        let raw: c_int = unsafe { getsockopt(self, libc::SOL_SOCKET, libc::SO_KEEPALIVE)? };
+        Ok(raw != 0)
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {

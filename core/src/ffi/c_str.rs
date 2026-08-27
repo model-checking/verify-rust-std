@@ -155,7 +155,7 @@ impl Error for FromBytesWithNulError {}
 /// within the slice.
 ///
 /// This error is created by the [`CStr::from_bytes_until_nul`] method.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
 pub struct FromBytesUntilNulError(());
 
@@ -176,7 +176,8 @@ impl fmt::Debug for CStr {
 }
 
 #[stable(feature = "cstr_default", since = "1.10.0")]
-impl Default for &CStr {
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
+const impl Default for &CStr {
     #[inline]
     fn default() -> Self {
         c""
@@ -716,7 +717,7 @@ impl ops::Index<ops::RangeFrom<usize>> for CStr {
     }
 }
 
-#[stable(feature = "new_range_from_api", since = "CURRENT_RUSTC_VERSION")]
+#[stable(feature = "new_range_from_api", since = "1.96.0")]
 impl ops::Index<range::RangeFrom<usize>> for CStr {
     type Output = CStr;
 
@@ -728,7 +729,7 @@ impl ops::Index<range::RangeFrom<usize>> for CStr {
 
 #[stable(feature = "cstring_asref", since = "1.7.0")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl const AsRef<CStr> for CStr {
+const impl AsRef<CStr> for CStr {
     #[inline]
     fn as_ref(&self) -> &CStr {
         self

@@ -299,6 +299,10 @@ mod tests;
 
 #[unstable(feature = "read_buf", issue = "78485")]
 pub use core::io::{BorrowedBuf, BorrowedCursor};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use core::io::{Chain, Empty, Repeat, Sink, Take, empty, repeat, sink};
+#[stable(feature = "iovec", since = "1.36.0")]
+pub use core::io::{IoSlice, IoSliceMut};
 use core::slice::memchr;
 
 #[stable(feature = "bufwriter_into_parts", since = "1.56.0")]
@@ -328,11 +332,9 @@ pub use self::{
     cursor::Cursor,
     error::{Error, ErrorKind, Result},
     stdio::{Stderr, StderrLock, Stdin, StdinLock, Stdout, StdoutLock, stderr, stdin, stdout},
-    util::{Empty, Repeat, Sink, empty, repeat, sink},
 };
-use crate::mem::{MaybeUninit, take};
-use crate::ops::{Deref, DerefMut};
-use crate::{cmp, fmt, slice, str, sys};
+use crate::mem::MaybeUninit;
+use crate::{cmp, fmt, slice, str};
 
 mod buffered;
 pub(crate) mod copy;
@@ -419,8 +421,6 @@ pub(crate) fn default_read_to_end<R: Read + ?Sized>(
         .and_then(|s| s.checked_add(1024)?.checked_next_multiple_of(DEFAULT_BUF_SIZE))
         .unwrap_or(DEFAULT_BUF_SIZE);
 
-    let mut initialized = 0; // Extra initialized bytes from previous loop iteration
-
     const PROBE_SIZE: usize = 32;
 
     fn small_probe_read<R: Read + ?Sized>(r: &mut R, buf: &mut Vec<u8>) -> Result<usize> {
@@ -449,8 +449,6 @@ pub(crate) fn default_read_to_end<R: Read + ?Sized>(
         }
     }
 
-    let mut consecutive_short_reads = 0;
-
     loop {
         if buf.len() == buf.capacity() && buf.capacity() == start_cap {
             // The buffer might be an exact fit. Let's read into a probe buffer
@@ -474,11 +472,8 @@ pub(crate) fn default_read_to_end<R: Read + ?Sized>(
         spare = &mut spare[..buf_len];
         let mut read_buf: BorrowedBuf<'_> = spare.into();
 
-        // SAFETY: These bytes were initialized but not filled in the previous loop
-        unsafe {
-            read_buf.set_init(initialized);
-        }
-
+        // Note that we don't track already initialized bytes here, but this is fine
+        // because we explicitly limit the read size
         let mut cursor = read_buf.unfilled();
         let result = loop {
             match r.read_buf(cursor.reborrow()) {
@@ -489,9 +484,8 @@ pub(crate) fn default_read_to_end<R: Read + ?Sized>(
             }
         };
 
-        let unfilled_but_initialized = cursor.init_mut().len();
         let bytes_read = cursor.written();
-        let was_fully_initialized = read_buf.init_len() == buf_len;
+        let is_init = read_buf.is_init();
 
         // SAFETY: BorrowedBuf's invariants mean this much memory is initialized.
         unsafe {
@@ -506,15 +500,6 @@ pub(crate) fn default_read_to_end<R: Read + ?Sized>(
             return Ok(buf.len() - start_len);
         }
 
-        if bytes_read < buf_len {
-            consecutive_short_reads += 1;
-        } else {
-            consecutive_short_reads = 0;
-        }
-
-        // store how much was initialized but not filled
-        initialized = unfilled_but_initialized;
-
         // Use heuristics to determine the max read size if no initial size hint was provided
         if size_hint.is_none() {
             // The reader is returning short reads but it doesn't call ensure_init().
@@ -523,13 +508,12 @@ pub(crate) fn default_read_to_end<R: Read + ?Sized>(
             // When reading from disk we usually don't get any short reads except at EOF.
             // So we wait for at least 2 short reads before uncapping the read buffer;
             // this helps with the Windows issue.
-            if !was_fully_initialized && consecutive_short_reads > 1 {
+            if !is_init {
                 max_read_size = usize::MAX;
             }
-
             // we have passed a larger buffer than previously and the
             // reader still hasn't returned a short read
-            if buf_len >= max_read_size && bytes_read == buf_len {
+            else if buf_len >= max_read_size && bytes_read == buf_len {
                 max_read_size = max_read_size.saturating_mul(2);
             }
         }
@@ -587,8 +571,8 @@ pub(crate) fn default_read_buf<F>(read: F, mut cursor: BorrowedCursor<'_>) -> Re
 where
     F: FnOnce(&mut [u8]) -> Result<usize>,
 {
-    let n = read(cursor.ensure_init().init_mut())?;
-    cursor.advance(n);
+    let n = read(cursor.ensure_init())?;
+    cursor.advance_checked(n);
     Ok(())
 }
 
@@ -1201,7 +1185,7 @@ pub trait Read {
     where
         Self: Sized,
     {
-        Chain { first: self, second: next, done_first: false }
+        core::io::chain(self, next)
     }
 
     /// Creates an adapter which will read at most `limit` bytes from it.
@@ -1240,7 +1224,7 @@ pub trait Read {
     where
         Self: Sized,
     {
-        Take { inner: self, len: limit, limit }
+        core::io::take(self, limit)
     }
 
     /// Read and return a fixed array of bytes from this source.
@@ -1347,323 +1331,6 @@ pub fn read_to_string<R: Read>(mut reader: R) -> Result<String> {
     let mut buf = String::new();
     reader.read_to_string(&mut buf)?;
     Ok(buf)
-}
-
-/// A buffer type used with `Read::read_vectored`.
-///
-/// It is semantically a wrapper around a `&mut [u8]`, but is guaranteed to be
-/// ABI compatible with the `iovec` type on Unix platforms and `WSABUF` on
-/// Windows.
-#[stable(feature = "iovec", since = "1.36.0")]
-#[repr(transparent)]
-pub struct IoSliceMut<'a>(sys::io::IoSliceMut<'a>);
-
-#[stable(feature = "iovec_send_sync", since = "1.44.0")]
-unsafe impl<'a> Send for IoSliceMut<'a> {}
-
-#[stable(feature = "iovec_send_sync", since = "1.44.0")]
-unsafe impl<'a> Sync for IoSliceMut<'a> {}
-
-#[stable(feature = "iovec", since = "1.36.0")]
-impl<'a> fmt::Debug for IoSliceMut<'a> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.0.as_slice(), fmt)
-    }
-}
-
-impl<'a> IoSliceMut<'a> {
-    /// Creates a new `IoSliceMut` wrapping a byte slice.
-    ///
-    /// # Panics
-    ///
-    /// Panics on Windows if the slice is larger than 4GB.
-    #[stable(feature = "iovec", since = "1.36.0")]
-    #[inline]
-    pub fn new(buf: &'a mut [u8]) -> IoSliceMut<'a> {
-        IoSliceMut(sys::io::IoSliceMut::new(buf))
-    }
-
-    /// Advance the internal cursor of the slice.
-    ///
-    /// Also see [`IoSliceMut::advance_slices`] to advance the cursors of
-    /// multiple buffers.
-    ///
-    /// # Panics
-    ///
-    /// Panics when trying to advance beyond the end of the slice.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::io::IoSliceMut;
-    /// use std::ops::Deref;
-    ///
-    /// let mut data = [1; 8];
-    /// let mut buf = IoSliceMut::new(&mut data);
-    ///
-    /// // Mark 3 bytes as read.
-    /// buf.advance(3);
-    /// assert_eq!(buf.deref(), [1; 5].as_ref());
-    /// ```
-    #[stable(feature = "io_slice_advance", since = "1.81.0")]
-    #[inline]
-    pub fn advance(&mut self, n: usize) {
-        self.0.advance(n)
-    }
-
-    /// Advance a slice of slices.
-    ///
-    /// Shrinks the slice to remove any `IoSliceMut`s that are fully advanced over.
-    /// If the cursor ends up in the middle of an `IoSliceMut`, it is modified
-    /// to start at that cursor.
-    ///
-    /// For example, if we have a slice of two 8-byte `IoSliceMut`s, and we advance by 10 bytes,
-    /// the result will only include the second `IoSliceMut`, advanced by 2 bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics when trying to advance beyond the end of the slices.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::io::IoSliceMut;
-    /// use std::ops::Deref;
-    ///
-    /// let mut buf1 = [1; 8];
-    /// let mut buf2 = [2; 16];
-    /// let mut buf3 = [3; 8];
-    /// let mut bufs = &mut [
-    ///     IoSliceMut::new(&mut buf1),
-    ///     IoSliceMut::new(&mut buf2),
-    ///     IoSliceMut::new(&mut buf3),
-    /// ][..];
-    ///
-    /// // Mark 10 bytes as read.
-    /// IoSliceMut::advance_slices(&mut bufs, 10);
-    /// assert_eq!(bufs[0].deref(), [2; 14].as_ref());
-    /// assert_eq!(bufs[1].deref(), [3; 8].as_ref());
-    /// ```
-    #[stable(feature = "io_slice_advance", since = "1.81.0")]
-    #[inline]
-    pub fn advance_slices(bufs: &mut &mut [IoSliceMut<'a>], n: usize) {
-        // Number of buffers to remove.
-        let mut remove = 0;
-        // Remaining length before reaching n.
-        let mut left = n;
-        for buf in bufs.iter() {
-            if let Some(remainder) = left.checked_sub(buf.len()) {
-                left = remainder;
-                remove += 1;
-            } else {
-                break;
-            }
-        }
-
-        *bufs = &mut take(bufs)[remove..];
-        if bufs.is_empty() {
-            assert!(left == 0, "advancing io slices beyond their length");
-        } else {
-            bufs[0].advance(left);
-        }
-    }
-
-    /// Get the underlying bytes as a mutable slice with the original lifetime.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(io_slice_as_bytes)]
-    /// use std::io::IoSliceMut;
-    ///
-    /// let mut data = *b"abcdef";
-    /// let io_slice = IoSliceMut::new(&mut data);
-    /// io_slice.into_slice()[0] = b'A';
-    ///
-    /// assert_eq!(&data, b"Abcdef");
-    /// ```
-    #[unstable(feature = "io_slice_as_bytes", issue = "132818")]
-    pub const fn into_slice(self) -> &'a mut [u8] {
-        self.0.into_slice()
-    }
-}
-
-#[stable(feature = "iovec", since = "1.36.0")]
-impl<'a> Deref for IoSliceMut<'a> {
-    type Target = [u8];
-
-    #[inline]
-    fn deref(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-}
-
-#[stable(feature = "iovec", since = "1.36.0")]
-impl<'a> DerefMut for IoSliceMut<'a> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut [u8] {
-        self.0.as_mut_slice()
-    }
-}
-
-/// A buffer type used with `Write::write_vectored`.
-///
-/// It is semantically a wrapper around a `&[u8]`, but is guaranteed to be
-/// ABI compatible with the `iovec` type on Unix platforms and `WSABUF` on
-/// Windows.
-#[stable(feature = "iovec", since = "1.36.0")]
-#[derive(Copy, Clone)]
-#[repr(transparent)]
-pub struct IoSlice<'a>(sys::io::IoSlice<'a>);
-
-#[stable(feature = "iovec_send_sync", since = "1.44.0")]
-unsafe impl<'a> Send for IoSlice<'a> {}
-
-#[stable(feature = "iovec_send_sync", since = "1.44.0")]
-unsafe impl<'a> Sync for IoSlice<'a> {}
-
-#[stable(feature = "iovec", since = "1.36.0")]
-impl<'a> fmt::Debug for IoSlice<'a> {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.0.as_slice(), fmt)
-    }
-}
-
-impl<'a> IoSlice<'a> {
-    /// Creates a new `IoSlice` wrapping a byte slice.
-    ///
-    /// # Panics
-    ///
-    /// Panics on Windows if the slice is larger than 4GB.
-    #[stable(feature = "iovec", since = "1.36.0")]
-    #[must_use]
-    #[inline]
-    pub fn new(buf: &'a [u8]) -> IoSlice<'a> {
-        IoSlice(sys::io::IoSlice::new(buf))
-    }
-
-    /// Advance the internal cursor of the slice.
-    ///
-    /// Also see [`IoSlice::advance_slices`] to advance the cursors of multiple
-    /// buffers.
-    ///
-    /// # Panics
-    ///
-    /// Panics when trying to advance beyond the end of the slice.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::io::IoSlice;
-    /// use std::ops::Deref;
-    ///
-    /// let data = [1; 8];
-    /// let mut buf = IoSlice::new(&data);
-    ///
-    /// // Mark 3 bytes as read.
-    /// buf.advance(3);
-    /// assert_eq!(buf.deref(), [1; 5].as_ref());
-    /// ```
-    #[stable(feature = "io_slice_advance", since = "1.81.0")]
-    #[inline]
-    pub fn advance(&mut self, n: usize) {
-        self.0.advance(n)
-    }
-
-    /// Advance a slice of slices.
-    ///
-    /// Shrinks the slice to remove any `IoSlice`s that are fully advanced over.
-    /// If the cursor ends up in the middle of an `IoSlice`, it is modified
-    /// to start at that cursor.
-    ///
-    /// For example, if we have a slice of two 8-byte `IoSlice`s, and we advance by 10 bytes,
-    /// the result will only include the second `IoSlice`, advanced by 2 bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics when trying to advance beyond the end of the slices.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::io::IoSlice;
-    /// use std::ops::Deref;
-    ///
-    /// let buf1 = [1; 8];
-    /// let buf2 = [2; 16];
-    /// let buf3 = [3; 8];
-    /// let mut bufs = &mut [
-    ///     IoSlice::new(&buf1),
-    ///     IoSlice::new(&buf2),
-    ///     IoSlice::new(&buf3),
-    /// ][..];
-    ///
-    /// // Mark 10 bytes as written.
-    /// IoSlice::advance_slices(&mut bufs, 10);
-    /// assert_eq!(bufs[0].deref(), [2; 14].as_ref());
-    /// assert_eq!(bufs[1].deref(), [3; 8].as_ref());
-    #[stable(feature = "io_slice_advance", since = "1.81.0")]
-    #[inline]
-    pub fn advance_slices(bufs: &mut &mut [IoSlice<'a>], n: usize) {
-        // Number of buffers to remove.
-        let mut remove = 0;
-        // Remaining length before reaching n. This prevents overflow
-        // that could happen if the length of slices in `bufs` were instead
-        // accumulated. Those slice may be aliased and, if they are large
-        // enough, their added length may overflow a `usize`.
-        let mut left = n;
-        for buf in bufs.iter() {
-            if let Some(remainder) = left.checked_sub(buf.len()) {
-                left = remainder;
-                remove += 1;
-            } else {
-                break;
-            }
-        }
-
-        *bufs = &mut take(bufs)[remove..];
-        if bufs.is_empty() {
-            assert!(left == 0, "advancing io slices beyond their length");
-        } else {
-            bufs[0].advance(left);
-        }
-    }
-
-    /// Get the underlying bytes as a slice with the original lifetime.
-    ///
-    /// This doesn't borrow from `self`, so is less restrictive than calling
-    /// `.deref()`, which does.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(io_slice_as_bytes)]
-    /// use std::io::IoSlice;
-    ///
-    /// let data = b"abcdef";
-    ///
-    /// let mut io_slice = IoSlice::new(data);
-    /// let tail = &io_slice.as_slice()[3..];
-    ///
-    /// // This works because `tail` doesn't borrow `io_slice`
-    /// io_slice = IoSlice::new(tail);
-    ///
-    /// assert_eq!(io_slice.as_slice(), b"def");
-    /// ```
-    #[unstable(feature = "io_slice_as_bytes", issue = "132818")]
-    pub const fn as_slice(self) -> &'a [u8] {
-        self.0.as_slice()
-    }
-}
-
-#[stable(feature = "iovec", since = "1.36.0")]
-impl<'a> Deref for IoSlice<'a> {
-    type Target = [u8];
-
-    #[inline]
-    fn deref(&self) -> &[u8] {
-        self.0.as_slice()
-    }
 }
 
 /// A trait for objects which are byte-oriented sinks.
@@ -2244,6 +1911,21 @@ pub enum SeekFrom {
     Current(#[stable(feature = "rust1", since = "1.0.0")] i64),
 }
 
+/// Marks that a type `T` can have IO traits such as [`Seek`], [`Write`], etc. automatically
+/// implemented for handle types like [`Arc`][arc] as well.
+///
+/// This trait should only be implemented for types where `<&T as Trait>::method(&mut &value, ..)`
+/// would be identical to `<T as Trait>::method(&mut value, ..)`.
+///
+/// [`File`][file] passes this test, as operations on `&File` and `File` both affect
+/// the same underlying file.
+/// `[u8]` fails, because any modification to `&mut &[u8]` would only affect a temporary
+/// and be lost after the method has been called.
+///
+/// [file]: crate::fs::File
+/// [arc]: crate::sync::Arc
+pub(crate) trait IoHandle {}
+
 fn read_until<R: BufRead + ?Sized>(r: &mut R, delim: u8, buf: &mut Vec<u8>) -> Result<usize> {
     let mut read = 0;
     loop {
@@ -2707,99 +2389,6 @@ pub trait BufRead: Read {
     }
 }
 
-/// Adapter to chain together two readers.
-///
-/// This struct is generally created by calling [`chain`] on a reader.
-/// Please see the documentation of [`chain`] for more details.
-///
-/// [`chain`]: Read::chain
-#[stable(feature = "rust1", since = "1.0.0")]
-#[derive(Debug)]
-pub struct Chain<T, U> {
-    first: T,
-    second: U,
-    done_first: bool,
-}
-
-impl<T, U> Chain<T, U> {
-    /// Consumes the `Chain`, returning the wrapped readers.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io;
-    /// use std::io::prelude::*;
-    /// use std::fs::File;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let mut foo_file = File::open("foo.txt")?;
-    ///     let mut bar_file = File::open("bar.txt")?;
-    ///
-    ///     let chain = foo_file.chain(bar_file);
-    ///     let (foo_file, bar_file) = chain.into_inner();
-    ///     Ok(())
-    /// }
-    /// ```
-    #[stable(feature = "more_io_inner_methods", since = "1.20.0")]
-    pub fn into_inner(self) -> (T, U) {
-        (self.first, self.second)
-    }
-
-    /// Gets references to the underlying readers in this `Chain`.
-    ///
-    /// Care should be taken to avoid modifying the internal I/O state of the
-    /// underlying readers as doing so may corrupt the internal state of this
-    /// `Chain`.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io;
-    /// use std::io::prelude::*;
-    /// use std::fs::File;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let mut foo_file = File::open("foo.txt")?;
-    ///     let mut bar_file = File::open("bar.txt")?;
-    ///
-    ///     let chain = foo_file.chain(bar_file);
-    ///     let (foo_file, bar_file) = chain.get_ref();
-    ///     Ok(())
-    /// }
-    /// ```
-    #[stable(feature = "more_io_inner_methods", since = "1.20.0")]
-    pub fn get_ref(&self) -> (&T, &U) {
-        (&self.first, &self.second)
-    }
-
-    /// Gets mutable references to the underlying readers in this `Chain`.
-    ///
-    /// Care should be taken to avoid modifying the internal I/O state of the
-    /// underlying readers as doing so may corrupt the internal state of this
-    /// `Chain`.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io;
-    /// use std::io::prelude::*;
-    /// use std::fs::File;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let mut foo_file = File::open("foo.txt")?;
-    ///     let mut bar_file = File::open("bar.txt")?;
-    ///
-    ///     let mut chain = foo_file.chain(bar_file);
-    ///     let (foo_file, bar_file) = chain.get_mut();
-    ///     Ok(())
-    /// }
-    /// ```
-    #[stable(feature = "more_io_inner_methods", since = "1.20.0")]
-    pub fn get_mut(&mut self) -> (&mut T, &mut U) {
-        (&mut self.first, &mut self.second)
-    }
-}
-
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Read, U: Read> Read for Chain<T, U> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
@@ -2909,170 +2498,6 @@ impl<T, U> SizeHint for Chain<T, U> {
     }
 }
 
-/// Reader adapter which limits the bytes read from an underlying reader.
-///
-/// This struct is generally created by calling [`take`] on a reader.
-/// Please see the documentation of [`take`] for more details.
-///
-/// [`take`]: Read::take
-#[stable(feature = "rust1", since = "1.0.0")]
-#[derive(Debug)]
-pub struct Take<T> {
-    inner: T,
-    len: u64,
-    limit: u64,
-}
-
-impl<T> Take<T> {
-    /// Returns the number of bytes that can be read before this instance will
-    /// return EOF.
-    ///
-    /// # Note
-    ///
-    /// This instance may reach `EOF` after reading fewer bytes than indicated by
-    /// this method if the underlying [`Read`] instance reaches EOF.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io;
-    /// use std::io::prelude::*;
-    /// use std::fs::File;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let f = File::open("foo.txt")?;
-    ///
-    ///     // read at most five bytes
-    ///     let handle = f.take(5);
-    ///
-    ///     println!("limit: {}", handle.limit());
-    ///     Ok(())
-    /// }
-    /// ```
-    #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn limit(&self) -> u64 {
-        self.limit
-    }
-
-    /// Returns the number of bytes read so far.
-    #[unstable(feature = "seek_io_take_position", issue = "97227")]
-    pub fn position(&self) -> u64 {
-        self.len - self.limit
-    }
-
-    /// Sets the number of bytes that can be read before this instance will
-    /// return EOF. This is the same as constructing a new `Take` instance, so
-    /// the amount of bytes read and the previous limit value don't matter when
-    /// calling this method.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io;
-    /// use std::io::prelude::*;
-    /// use std::fs::File;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let f = File::open("foo.txt")?;
-    ///
-    ///     // read at most five bytes
-    ///     let mut handle = f.take(5);
-    ///     handle.set_limit(10);
-    ///
-    ///     assert_eq!(handle.limit(), 10);
-    ///     Ok(())
-    /// }
-    /// ```
-    #[stable(feature = "take_set_limit", since = "1.27.0")]
-    pub fn set_limit(&mut self, limit: u64) {
-        self.len = limit;
-        self.limit = limit;
-    }
-
-    /// Consumes the `Take`, returning the wrapped reader.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io;
-    /// use std::io::prelude::*;
-    /// use std::fs::File;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let mut file = File::open("foo.txt")?;
-    ///
-    ///     let mut buffer = [0; 5];
-    ///     let mut handle = file.take(5);
-    ///     handle.read(&mut buffer)?;
-    ///
-    ///     let file = handle.into_inner();
-    ///     Ok(())
-    /// }
-    /// ```
-    #[stable(feature = "io_take_into_inner", since = "1.15.0")]
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
-
-    /// Gets a reference to the underlying reader.
-    ///
-    /// Care should be taken to avoid modifying the internal I/O state of the
-    /// underlying reader as doing so may corrupt the internal limit of this
-    /// `Take`.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io;
-    /// use std::io::prelude::*;
-    /// use std::fs::File;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let mut file = File::open("foo.txt")?;
-    ///
-    ///     let mut buffer = [0; 5];
-    ///     let mut handle = file.take(5);
-    ///     handle.read(&mut buffer)?;
-    ///
-    ///     let file = handle.get_ref();
-    ///     Ok(())
-    /// }
-    /// ```
-    #[stable(feature = "more_io_inner_methods", since = "1.20.0")]
-    pub fn get_ref(&self) -> &T {
-        &self.inner
-    }
-
-    /// Gets a mutable reference to the underlying reader.
-    ///
-    /// Care should be taken to avoid modifying the internal I/O state of the
-    /// underlying reader as doing so may corrupt the internal limit of this
-    /// `Take`.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io;
-    /// use std::io::prelude::*;
-    /// use std::fs::File;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let mut file = File::open("foo.txt")?;
-    ///
-    ///     let mut buffer = [0; 5];
-    ///     let mut handle = file.take(5);
-    ///     handle.read(&mut buffer)?;
-    ///
-    ///     let file = handle.get_mut();
-    ///     Ok(())
-    /// }
-    /// ```
-    #[stable(feature = "more_io_inner_methods", since = "1.20.0")]
-    pub fn get_mut(&mut self) -> &mut T {
-        &mut self.inner
-    }
-}
-
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: Read> Read for Take<T> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
@@ -3098,31 +2523,40 @@ impl<T: Read> Read for Take<T> {
             // The condition above guarantees that `self.limit` fits in `usize`.
             let limit = self.limit as usize;
 
-            let extra_init = cmp::min(limit, buf.init_mut().len());
+            let is_init = buf.is_init();
 
             // SAFETY: no uninit data is written to ibuf
-            let ibuf = unsafe { &mut buf.as_mut()[..limit] };
+            let mut sliced_buf = BorrowedBuf::from(unsafe { &mut buf.as_mut()[..limit] });
 
-            let mut sliced_buf: BorrowedBuf<'_> = ibuf.into();
-
-            // SAFETY: extra_init bytes of ibuf are known to be initialized
-            unsafe {
-                sliced_buf.set_init(extra_init);
+            if is_init {
+                // SAFETY: `sliced_buf` is a subslice of `buf`, so if `buf` was initialized then
+                // `sliced_buf` is.
+                unsafe { sliced_buf.set_init() };
             }
 
-            let mut cursor = sliced_buf.unfilled();
-            let result = self.inner.read_buf(cursor.reborrow());
+            let result = self.inner.read_buf(sliced_buf.unfilled());
 
-            let new_init = cursor.init_mut().len();
+            let did_init_up_to_limit = sliced_buf.is_init();
             let filled = sliced_buf.len();
 
-            // cursor / sliced_buf / ibuf must drop here
+            // sliced_buf must drop here
+
+            // Avoid accidentally quadratic behaviour by initializing the whole
+            // cursor if only part of it was initialized.
+            if did_init_up_to_limit && !is_init {
+                // SAFETY: No uninit data will be written.
+                let unfilled_before_advance = unsafe { buf.as_mut() };
+
+                unfilled_before_advance[limit..].write_filled(0);
+
+                // SAFETY: `unfilled_before_advance[..limit]` was initialized by `T::read_buf`, and
+                // `unfilled_before_advance[limit..]` was just initialized.
+                unsafe { buf.set_init() };
+            }
 
             unsafe {
-                // SAFETY: filled bytes have been filled and therefore initialized
-                buf.advance_unchecked(filled);
-                // SAFETY: new_init bytes of buf's unfilled buffer have been initialized
-                buf.set_init(new_init);
+                // SAFETY: filled bytes have been filled
+                buf.advance(filled);
             }
 
             self.limit -= filled as u64;

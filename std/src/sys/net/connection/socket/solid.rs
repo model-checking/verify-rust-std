@@ -6,6 +6,7 @@ use crate::ffi::CStr;
 use crate::io::{self, BorrowedBuf, BorrowedCursor, ErrorKind, IoSlice, IoSliceMut};
 use crate::net::{Shutdown, SocketAddr};
 use crate::os::solid::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
+use crate::sys::pal::unsupported;
 use crate::sys::{FromInner, IntoInner, abi};
 use crate::time::Duration;
 use crate::{cmp, mem, ptr, str};
@@ -190,7 +191,7 @@ impl Socket {
             netc::recv(self.as_raw_fd(), buf.as_mut().as_mut_ptr().cast(), buf.capacity(), flags)
         })?;
         unsafe {
-            buf.advance_unchecked(ret as usize);
+            buf.advance(ret as usize);
         }
         Ok(())
     }
@@ -319,7 +320,8 @@ impl Socket {
     pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
         let linger = netc::linger {
             l_onoff: linger.is_some() as netc::c_int,
-            l_linger: linger.unwrap_or_default().as_secs() as netc::c_int,
+            l_linger: cmp::min(linger.unwrap_or_default().as_secs(), netc::c_int::MAX as u64)
+                as netc::c_int,
         };
 
         unsafe { setsockopt(self, netc::SOL_SOCKET, netc::SO_LINGER, linger) }
@@ -329,6 +331,14 @@ impl Socket {
         let val: netc::linger = unsafe { getsockopt(self, netc::SOL_SOCKET, netc::SO_LINGER)? };
 
         Ok((val.l_onoff != 0).then(|| Duration::from_secs(val.l_linger as u64)))
+    }
+
+    pub fn set_keepalive(&self, _: bool) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
+        unsupported()
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {

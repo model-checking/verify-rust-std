@@ -61,11 +61,11 @@
     target_has_atomic = "32",
     target_has_atomic = "64",
     target_has_atomic = "ptr",
-    target_has_atomic_equal_alignment = "8",
-    target_has_atomic_equal_alignment = "16",
-    target_has_atomic_equal_alignment = "32",
-    target_has_atomic_equal_alignment = "64",
-    target_has_atomic_equal_alignment = "ptr",
+    target_has_atomic_primitive_alignment = "8",
+    target_has_atomic_primitive_alignment = "16",
+    target_has_atomic_primitive_alignment = "32",
+    target_has_atomic_primitive_alignment = "64",
+    target_has_atomic_primitive_alignment = "ptr",
     target_has_atomic_load_store = "8",
     target_has_atomic_load_store = "16",
     target_has_atomic_load_store = "32",
@@ -110,6 +110,7 @@
 #![feature(offset_of_enum)]
 #![feature(panic_internals)]
 #![feature(pattern_type_macro)]
+#![feature(sealed)]
 #![feature(ub_checks)]
 // tidy-alphabetical-end
 //
@@ -122,14 +123,15 @@
 #![feature(auto_traits)]
 #![feature(cfg_sanitize)]
 #![feature(cfg_target_has_atomic)]
-#![feature(cfg_target_has_atomic_equal_alignment)]
 #![feature(cfg_ub_checks)]
+#![feature(const_closures)]
 #![feature(const_precise_live_drops)]
 #![feature(const_trait_impl)]
 #![feature(decl_macro)]
 #![feature(deprecated_suggestion)]
 #![feature(derive_const)]
 #![feature(diagnostic_on_const)]
+#![feature(diagnostic_on_unmatch_args)]
 #![feature(doc_cfg)]
 #![feature(doc_notable_trait)]
 #![feature(extern_types)]
@@ -155,6 +157,7 @@
 #![feature(no_core)]
 #![feature(optimize_attribute)]
 #![feature(pattern_types)]
+#![feature(pin_macro_internals)]
 #![feature(prelude_import)]
 #![feature(repr_simd)]
 #![feature(rustc_attrs)]
@@ -163,7 +166,6 @@
 #![feature(staged_api)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance_lints)]
-#![feature(target_feature_inline_always)]
 #![feature(trait_alias)]
 #![feature(transparent_unions)]
 #![feature(try_blocks)]
@@ -206,7 +208,7 @@ use prelude::rust_2024::*;
 #[macro_use]
 mod macros;
 
-#[stable(feature = "assert_matches", since = "1.95.0")]
+#[stable(feature = "assert_matches", since = "1.96.0")]
 pub use crate::macros::{assert_matches, debug_assert_matches};
 
 #[unstable(feature = "derive_from", issue = "144889")]
@@ -216,17 +218,31 @@ pub mod from {
     pub use crate::macros::builtin::From;
 }
 
+mod sealed {
+    /// This trait being unreachable from outside the crate
+    /// prevents outside implementations of our extension traits.
+    /// This allows adding more trait methods in the future.
+    #[unstable(feature = "sealed", issue = "none")]
+    pub trait Sealed {}
+}
+
 // We don't export this through #[macro_export] for now, to avoid breakage.
 #[unstable(feature = "autodiff", issue = "124509")]
-/// Unstable module containing the unstable `autodiff` macro.
+#[doc = include_str!("../../core/src/autodiff.md")]
 pub mod autodiff {
     #[unstable(feature = "autodiff", issue = "124509")]
     pub use crate::macros::builtin::{autodiff_forward, autodiff_reverse};
 }
 
+#[unstable(feature = "gpu_offload", issue = "131513")]
+#[doc = include_str!("../../core/src/offload.md")]
+pub mod offload;
+
 #[unstable(feature = "contracts", issue = "128044")]
 pub mod contracts;
 
+#[unstable(feature = "derive_macro_global_path", issue = "154645")]
+pub use crate::macros::builtin::derive;
 #[stable(feature = "cfg_select", since = "1.95.0")]
 pub use crate::macros::cfg_select;
 
@@ -294,7 +310,7 @@ pub mod bstr;
 pub mod cell;
 pub mod char;
 pub mod ffi;
-#[unstable(feature = "core_io_borrowed_buf", issue = "117693")]
+#[unstable(feature = "core_io", issue = "154046")]
 pub mod io;
 pub mod iter;
 pub mod net;
@@ -305,6 +321,8 @@ pub mod panicking;
 #[unstable(feature = "pattern_type_macro", issue = "123646")]
 pub mod pat;
 pub mod pin;
+#[unstable(feature = "abort_immediate", issue = "154601")]
+pub mod process;
 #[unstable(feature = "random", issue = "130703")]
 pub mod random;
 #[stable(feature = "new_range_inclusive_api", since = "1.95.0")]
