@@ -1404,7 +1404,7 @@ pub const unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize) {
 #[inline]
 const unsafe fn swap_nonoverlapping_const<T>(x: *mut T, y: *mut T, count: usize) {
     let mut i = 0;
-    #[cfg_attr(kani, kani::loop_invariant(i <= count))]
+    #[safety::loop_invariant(i <= count)]
     #[cfg_attr(
         kani,
         kani::loop_modifies(
@@ -1454,7 +1454,7 @@ unsafe fn swap_nonoverlapping_bytes(x: *mut u8, y: *mut u8, bytes: NonZero<usize
         chunks: NonZero<usize>,
     ) {
         let chunks = chunks.get();
-        #[cfg_attr(kani, kani::loop_invariant(kani::index <= chunks))]
+        #[safety::loop_invariant(kani::index <= chunks)]
         #[cfg_attr(
             kani,
             kani::loop_modifies(
