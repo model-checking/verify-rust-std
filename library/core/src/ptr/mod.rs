@@ -1454,14 +1454,26 @@ unsafe fn swap_nonoverlapping_bytes(x: *mut u8, y: *mut u8, bytes: NonZero<usize
         chunks: NonZero<usize>,
     ) {
         let chunks = chunks.get();
-        #[safety::loop_invariant(kani::index <= chunks)]
-        #[cfg_attr(
-            kani,
-            kani::loop_modifies(
+        // Kani needs the loop counter to be explicit so it can include it in
+        // the loop frame. This is only a direct `for`-to-`while` rewrite: the
+        // iteration range and swap body are unchanged, so it does not weaken
+        // the verification with a summary or stub.
+        #[cfg(kani)]
+        {
+            let mut i = 0;
+            #[safety::loop_invariant(i <= chunks)]
+            #[kani::loop_modifies(
+                &i,
                 slice_from_raw_parts_mut(x, chunks),
                 slice_from_raw_parts_mut(y, chunks)
-            )
-        )]
+            )]
+            while i < chunks {
+                // SAFETY: i is in [0, chunks) so the adds and dereferences are in-bounds.
+                unsafe { swap_chunk(&mut *x.add(i), &mut *y.add(i)) };
+                i += 1;
+            }
+        }
+        #[cfg(not(kani))]
         for i in 0..chunks {
             // SAFETY: i is in [0, chunks) so the adds and dereferences are in-bounds.
             unsafe { swap_chunk(&mut *x.add(i), &mut *y.add(i)) };
