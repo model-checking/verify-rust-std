@@ -3021,12 +3021,16 @@ impl<T> [T] {
             #[cfg(not(kani))]
             let half = size / 2;
             #[cfg(kani)]
-            half = size / 2;
+            {
+                half = size / 2;
+            }
 
             #[cfg(not(kani))]
             let mid = base + half;
             #[cfg(kani)]
-            mid = base + half;
+            {
+                mid = base + half;
+            }
 
             // SAFETY: the call is made safe by the following invariants:
             // - `mid >= 0`: by definition
@@ -3034,7 +3038,9 @@ impl<T> [T] {
             #[cfg(not(kani))]
             let cmp = f(unsafe { self.get_unchecked(mid) });
             #[cfg(kani)]
-            cmp = f(unsafe { self.get_unchecked(mid) });
+            {
+                cmp = f(unsafe { self.get_unchecked(mid) });
+            }
 
             // Binary search interacts poorly with branch prediction, so force
             // the compiler to use conditional moves if supported by the target
@@ -3662,18 +3668,24 @@ impl<T> [T] {
                 #[cfg(not(kani))]
                 let ptr_read = ptr.add(next_read);
                 #[cfg(kani)]
-                ptr_read = ptr.add(next_read);
+                {
+                    ptr_read = ptr.add(next_read);
+                }
 
                 #[cfg(not(kani))]
                 let prev_ptr_write = ptr.add(next_write - 1);
                 #[cfg(kani)]
-                prev_ptr_write = ptr.add(next_write - 1);
+                {
+                    prev_ptr_write = ptr.add(next_write - 1);
+                }
                 if !same_bucket(&mut *ptr_read, &mut *prev_ptr_write) {
                     if next_read != next_write {
                         #[cfg(not(kani))]
                         let ptr_write = prev_ptr_write.add(1);
                         #[cfg(kani)]
-                        ptr_write = prev_ptr_write.add(1);
+                        {
+                            ptr_write = prev_ptr_write.add(1);
+                        }
                         mem::swap(&mut *ptr_read, &mut *ptr_write);
                     }
                     next_write += 1;
