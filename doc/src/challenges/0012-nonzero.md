@@ -1,6 +1,7 @@
 # Challenge 12: Safety of `NonZero`
 
-- **Status:** Open
+- **Status:** Resolved
+- **Winning Solution:** [#637](https://github.com/model-checking/verify-rust-std/pull/637)
 - **Tracking Issue:** [#71](https://github.com/model-checking/verify-rust-std/issues/71)
 - **Start date:** *2024/08/23*
 - **End date:** *2025/04/10*
