@@ -2193,10 +2193,34 @@ mod verify {
     );
 
     // `unchecked_disjoint_bitor` proofs
-    generate_unchecked_math_harness!(u8, unchecked_disjoint_bitor, checked_unchecked_disjoint_bitor_u8);
-    generate_unchecked_math_harness!(u16, unchecked_disjoint_bitor, checked_unchecked_disjoint_bitor_u16);
-    generate_unchecked_math_harness!(u32, unchecked_disjoint_bitor, checked_unchecked_disjoint_bitor_u32);
-    generate_unchecked_math_harness!(u64, unchecked_disjoint_bitor, checked_unchecked_disjoint_bitor_u64);
-    generate_unchecked_math_harness!(u128, unchecked_disjoint_bitor, checked_unchecked_disjoint_bitor_u128);
-    generate_unchecked_math_harness!(usize, unchecked_disjoint_bitor, checked_unchecked_disjoint_bitor_usize);
+    generate_unchecked_math_harness!(
+        u8,
+        unchecked_disjoint_bitor,
+        checked_unchecked_disjoint_bitor_u8
+    );
+    generate_unchecked_math_harness!(
+        u16,
+        unchecked_disjoint_bitor,
+        checked_unchecked_disjoint_bitor_u16
+    );
+    generate_unchecked_math_harness!(
+        u32,
+        unchecked_disjoint_bitor,
+        checked_unchecked_disjoint_bitor_u32
+    );
+    generate_unchecked_math_harness!(
+        u64,
+        unchecked_disjoint_bitor,
+        checked_unchecked_disjoint_bitor_u64
+    );
+    generate_unchecked_math_harness!(
+        u128,
+        unchecked_disjoint_bitor,
+        checked_unchecked_disjoint_bitor_u128
+    );
+    generate_unchecked_math_harness!(
+        usize,
+        unchecked_disjoint_bitor,
+        checked_unchecked_disjoint_bitor_usize
+    );
 }
