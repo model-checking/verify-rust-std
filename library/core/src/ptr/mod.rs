@@ -696,6 +696,20 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_write_bytes"]
+// Challenge 2, part 3: the intrinsic's contract carried through this thin wrapper
+// (identical to `write_bytes_wrapper` in `intrinsics/mod.rs`). Alignment is demanded
+// even for a zero-sized write, matching the body's `assert_unsafe_precondition!`.
+// Ensures as `*const u8`: the region is initialized as bytes, need not be a valid `T`.
+#[cfg_attr(kani, kani::modifies(slice_from_raw_parts(dst, count)))]
+#[safety::requires(!count.overflowing_mul(mem::size_of::<T>()).1
+    && ub_checks::can_write(slice_from_raw_parts_mut(dst, count)))]
+#[safety::requires(ub_checks::maybe_is_aligned_and_not_null(
+    dst as *const (),
+    mem::align_of::<T>(),
+    mem::size_of::<T>() == 0 || count == 0,
+))]
+#[safety::ensures(|_| ub_checks::can_dereference(
+    slice_from_raw_parts(dst as *const u8, count * mem::size_of::<T>())))]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     // SAFETY: the safety contract for `write_bytes` must be upheld by the caller.
     unsafe {
@@ -1296,6 +1310,14 @@ pub const fn slice_from_raw_parts_mut<T>(data: *mut T, len: usize) -> *mut [T] {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
 #[rustc_diagnostic_item = "ptr_swap"]
+// `swap` permits overlap (unlike `swap_nonoverlapping`), so no non-overlap clause.
+// Ensures mirrors `typed_swap_nonoverlapping`: both pointers stay dereferenceable.
+// `modifies` covers caller-visible writes only (the scratch is a function local).
+#[cfg_attr(kani, kani::modifies(x))]
+#[cfg_attr(kani, kani::modifies(y))]
+#[safety::requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
+#[safety::requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
+#[safety::ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
 pub const unsafe fn swap<T>(x: *mut T, y: *mut T) {
     // Give ourselves some scratch space to work with.
     // We do not have to worry about drops: `MaybeUninit` does nothing when dropped.
@@ -2855,4 +2877,110 @@ mod verify {
         let p = kani::any::<usize>() as *const [char; 5];
         check_align_offset(p);
     }
+
+    // -------------------------------------------------------------------------
+    // swap: the `copy` / `copy_nonoverlapping` intrinsics carry no attachable
+    // contract (kani#3325 note in `intrinsics/mod.rs`), so nothing to stub; verify
+    // against Kani's model. Contract harnesses exercise the overlap-permitted
+    // path; value harnesses are per type (bound is only `T`, no `PartialEq`).
+
+    // `y` may come from `x`'s generator, so regions may overlap (for these
+    // `align == size` types aligned overlap means `x == y`). Dangling / dead
+    // allocations are excluded: Kani's memory predicates do not model them
+    // (same restriction as the intrinsics' `run_with_arbitrary_ptrs`).
+    fn swap_with_arbitrary_ptrs<T: kani::Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
+        let mut generator1 = kani::PointerGenerator::<100>::new();
+        let mut generator2 = kani::PointerGenerator::<100>::new();
+        let kani::ArbitraryPointer { ptr: x, status: x_status, .. } =
+            generator1.any_alloc_status::<T>();
+        let kani::ArbitraryPointer { ptr: y, status: y_status, .. } = if kani::any() {
+            generator1.any_alloc_status::<T>()
+        } else {
+            generator2.any_alloc_status::<T>()
+        };
+        kani::assume(
+            x_status != kani::AllocationStatus::Dangling
+                && x_status != kani::AllocationStatus::DeadObject,
+        );
+        kani::assume(
+            y_status != kani::AllocationStatus::Dangling
+                && y_status != kani::AllocationStatus::DeadObject,
+        );
+        // Non-vacuity witness for the assumed pointer space.
+        kani::cover(true, "swap contract: the arbitrary-pointer input space is non-empty");
+        harness(x, y);
+    }
+
+    macro_rules! check_swap_contract_for {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(swap)]
+            fn $name() {
+                swap_with_arbitrary_ptrs::<$ty>(|x, y| unsafe { swap(x, y) });
+            }
+        };
+    }
+
+    check_swap_contract_for!(check_swap_contract_u8, u8);
+    check_swap_contract_for!(check_swap_contract_u16, u16);
+    check_swap_contract_for!(check_swap_contract_u32, u32);
+    check_swap_contract_for!(check_swap_contract_u64, u64);
+    check_swap_contract_for!(check_swap_contract_char, char);
+    check_swap_contract_for!(check_swap_contract_non_zero, core::num::NonZeroI32);
+
+    macro_rules! check_swap_value_for {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(swap)]
+            fn $name() {
+                let mut a: $ty = kani::any();
+                let mut b: $ty = kani::any();
+                let old_a = a;
+                let old_b = b;
+                kani::cover(old_a != old_b, "swap exchanges two distinct values");
+                unsafe { swap(&mut a as *mut $ty, &mut b as *mut $ty) };
+                assert!(a == old_b && b == old_a, "swap exchanges the two values");
+            }
+        };
+    }
+
+    check_swap_value_for!(check_swap_value_u8, u8);
+    check_swap_value_for!(check_swap_value_u16, u16);
+    check_swap_value_for!(check_swap_value_u32, u32);
+    check_swap_value_for!(check_swap_value_u64, u64);
+    check_swap_value_for!(check_swap_value_char, char);
+
+    // -------------------------------------------------------------------------
+    // write_bytes: challenge-2 part-3 raw-pointer item for `zeroed` (`ptr_zeroed`).
+    // The intrinsic is body-less (dummy body removed by rust-lang/rust#137489), so
+    // nothing to stub; verify the wrapper's contract against Kani's `memset` model.
+    // Post-write content is deliberately not asserted; see note after the harnesses.
+
+    // Manual pointer setup keeps `dst` in a real allocation with byte-granular
+    // offsets, so misaligned `*mut $ty` values give the alignment clause teeth.
+    // Mirrors the intrinsic-side `check_write_bytes_*` in `intrinsics/mod.rs`.
+    macro_rules! check_ptr_write_bytes_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(write_bytes)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: u8 = kani::any();
+                let count: usize = kani::any();
+                kani::cover(count > 0, "write_bytes writes a non-empty range");
+                unsafe { write_bytes(dst, val, count) };
+            }
+        };
+    }
+
+    check_ptr_write_bytes_for!(check_ptr_write_bytes_u8, u8);
+    check_ptr_write_bytes_for!(check_ptr_write_bytes_char, char);
+    check_ptr_write_bytes_for!(check_ptr_write_bytes_u32, u32);
+    check_ptr_write_bytes_for!(check_ptr_write_bytes_u64, u64);
+
+    // No content harness: the `zeroed` case is pinned by `check_zeroed_value_*`
+    // in `maybe_uninit.rs`. A byte-granular post-read yields a spurious
+    // counterexample for multi-byte types in this Kani version, so left out.
 }

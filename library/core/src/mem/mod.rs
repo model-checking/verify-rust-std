@@ -5,13 +5,15 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::{ensures, requires};
+
 use crate::alloc::Layout;
 use crate::clone::TrivialClone;
 #[cfg(kani)]
 use crate::kani;
 use crate::marker::{Destruct, DiscriminantKind};
 use crate::panic::const_assert;
-use crate::{clone, cmp, fmt, hash, intrinsics, ptr};
+use crate::{clone, cmp, fmt, hash, intrinsics, ptr, ub_checks};
 
 mod manually_drop;
 #[stable(feature = "manually_drop", since = "1.20.0")]
@@ -510,6 +512,10 @@ pub const fn align_of<T>() -> usize {
 #[must_use]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_stable(feature = "const_align_of_val", since = "1.85.0")]
+// No `requires` (challenge 2, part 2): the intrinsic's sole documented condition,
+// `can_dereference`, holds structurally for the live reference `val: &T`.
+// Intrinsic-side contract: `align_of_val_{sized,slice}_wrapper` in `intrinsics/mod.rs`.
+#[ensures(|result: &usize| result.is_power_of_two())]
 pub const fn align_of_val<T: ?Sized>(val: &T) -> usize {
     // SAFETY: val is a reference, so it's a valid raw pointer
     unsafe { intrinsics::align_of_val(val) }
@@ -557,6 +563,10 @@ pub const fn align_of_val<T: ?Sized>(val: &T) -> usize {
 #[inline]
 #[must_use]
 #[unstable(feature = "layout_for_ptr", issue = "69835")]
+// No `requires` (challenge 2, part 3): the documented `# Safety` condition is per-case,
+// and the Kani-modeled intrinsic reads only pointer metadata, never the referent;
+// per-case demos: `align_of_val_{sized,slice}_wrapper` in `intrinsics/mod.rs`.
+#[ensures(|result: &usize| result.is_power_of_two())]
 pub const unsafe fn align_of_val_raw<T: ?Sized>(val: *const T) -> usize {
     // SAFETY: the caller must provide a valid raw pointer
     unsafe { intrinsics::align_of_val(val) }
@@ -1529,4 +1539,148 @@ mod verify {
         forget(x);
         forget(y);
     }
+
+    // -------------------------------------------------------------------------
+    // swap: two live `&mut T` structurally satisfy the `typed_swap_nonoverlapping`
+    // contract (`intrinsics/mod.rs`). `stub_verified` turns each intrinsic
+    // `requires` into a call-site obligation; without the stub they are absent.
+    // Value equality is per concrete type: bound is only `T`, no `PartialEq`.
+    macro_rules! check_swap_usage_for {
+        ($safety:ident, $value:ident, $ty:ty) => {
+            #[kani::proof_for_contract(swap)]
+            #[kani::stub_verified(intrinsics::typed_swap_nonoverlapping)]
+            fn $safety() {
+                let mut x: $ty = kani::any();
+                let mut y: $ty = kani::any();
+                // Non-vacuity witness: no assume narrows the inputs.
+                kani::cover(true, "swap usage: the &mut argument space is non-empty");
+                swap(&mut x, &mut y);
+            }
+
+            #[kani::proof_for_contract(swap)]
+            fn $value() {
+                let mut x: $ty = kani::any();
+                let mut y: $ty = kani::any();
+                let old_x = x;
+                let old_y = y;
+                kani::cover(old_x != old_y, "swap exchanges two distinct values");
+                swap(&mut x, &mut y);
+                assert!(x == old_y && y == old_x, "swap exchanges the two values");
+            }
+        };
+    }
+
+    check_swap_usage_for!(check_swap_usage_u8, check_swap_value_u8, u8);
+    check_swap_usage_for!(check_swap_usage_u16, check_swap_value_u16, u16);
+    check_swap_usage_for!(check_swap_usage_u32, check_swap_value_u32, u32);
+    check_swap_usage_for!(check_swap_usage_u64, check_swap_value_u64, u64);
+    check_swap_usage_for!(check_swap_usage_char, check_swap_value_char, char);
+
+    // -------------------------------------------------------------------------
+    // align_of_val: body-less intrinsic, so no contract to stub
+    // (https://github.com/model-checking/kani/issues/3325); intrinsic-side contract
+    // is on `align_of_val_{sized,slice}_wrapper` in `intrinsics/mod.rs`. Harnesses
+    // pin Kani's model per type (generic `ensures` impossible for `T: ?Sized`).
+
+    // Sized case: model must return `align_of::<T>()`, pointer-independent.
+    macro_rules! check_align_of_val_usage_sized_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let r = align_of_val(&val);
+                kani::cover(true, "align_of_val usage (sized) is reachable");
+                assert_eq!(r, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_u8, u8);
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_u32, u32);
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_u64, u64);
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_i128, i128);
+    check_align_of_val_usage_sized_for!(check_align_of_val_usage_char, char);
+
+    // Slice case: a slice's alignment is its element's, independent of `len`.
+    macro_rules! check_align_of_val_usage_slice_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val)]
+            fn $harness() {
+                const N: usize = 4;
+                let arr: [$ty; N] = kani::any();
+                let len: usize = kani::any_where(|l: &usize| *l <= N);
+                let s: &[$ty] = &arr[..len];
+                kani::cover(len > 0, "align_of_val usage measures a non-empty slice");
+                let r = align_of_val(s);
+                assert_eq!(r, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_usage_slice_for!(check_align_of_val_usage_slice_u8, u8);
+    check_align_of_val_usage_slice_for!(check_align_of_val_usage_slice_u32, u32);
+    check_align_of_val_usage_slice_for!(check_align_of_val_usage_slice_i64, i64);
+
+    // -------------------------------------------------------------------------
+    // align_of_val_raw (challenge 2, part 3): raw-pointer sibling; same body-less
+    // modeling as above, pinned per type. Each harness builds `val` from a live
+    // allocation, so the input space is non-empty.
+
+    // Sized case: model must return `align_of::<T>()`, pointer-independent.
+    macro_rules! check_align_of_val_raw_sized_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let ptr: *const $ty = &val;
+                let align = unsafe { align_of_val_raw(ptr) };
+                kani::cover(true, "align_of_val_raw (sized) call is reachable");
+                assert_eq!(align, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_u8, u8);
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_u32, u32);
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_u64, u64);
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_i128, i128);
+    check_align_of_val_raw_sized_for!(check_align_of_val_raw_char, char);
+
+    // Sized + dangling: demonstrates the documented "always safe if `T: Sized`",
+    // even non-dereferenceable (the modeled intrinsic reads no memory).
+    macro_rules! check_align_of_val_raw_dangling_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $harness() {
+                let ptr: *const $ty = crate::ptr::dangling();
+                let align = unsafe { align_of_val_raw(ptr) };
+                kani::cover(true, "align_of_val_raw accepts a dangling sized pointer");
+                assert_eq!(align, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_raw_dangling_for!(check_align_of_val_raw_dangling_u8, u8);
+    check_align_of_val_raw_dangling_for!(check_align_of_val_raw_dangling_u64, u64);
+
+    // Slice case: initialized backing array so `can_dereference` holds;
+    // alignment is independent of `len`.
+    macro_rules! check_align_of_val_raw_slice_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $harness() {
+                const N: usize = 4;
+                let arr: [$ty; N] = kani::any();
+                let len: usize = kani::any_where(|l: &usize| *l <= N);
+                let ptr: *const [$ty] = core::ptr::slice_from_raw_parts(arr.as_ptr(), len);
+                let align = unsafe { align_of_val_raw(ptr) };
+                kani::cover(len > 0, "align_of_val_raw measures a non-empty slice");
+                assert_eq!(align, align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_raw_slice_for!(check_align_of_val_raw_slice_u8, u8);
+    check_align_of_val_raw_slice_for!(check_align_of_val_raw_slice_u32, u32);
+    check_align_of_val_raw_slice_for!(check_align_of_val_raw_slice_i64, i64);
 }

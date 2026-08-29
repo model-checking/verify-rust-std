@@ -2960,7 +2960,10 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
         // them and check it. Using quantifiers would not add value as we can rely on the solver to
         // pick an uninitialized element if such an element exists.
         let elem = kani::any_where(|val: &usize| *val < count);
-        let src_data = src as *const u8;
+        // Offset *both* sides by `elem`: comparing `dst[elem]` against `src[0]`
+        // would be wrong whenever initialization differs across elements.
+        // (Oracle fix independently found by #643.)
+        let src_data = unsafe { src.add(elem) } as *const u8;
         let dst_data = unsafe { dst.add(elem) } as *const u8;
         ub_checks::can_dereference(unsafe { src_data.add(byte) })
             == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
@@ -3497,33 +3500,410 @@ mod verify {
         });
     }
 
-    // #[kani::proof_for_contract(copy)]
-    // fn check_copy() {
-    //     run_with_arbitrary_ptrs::<char>(|src, dst| unsafe { copy(src, dst, kani::any()) });
-    // }
+    // ---- vtable_size ----
+    // Wrapper pattern, used throughout: Kani cannot attach contracts to body-less
+    // `#[rustc_intrinsic]`s (rust-lang/rust#137489, model-checking/kani#3325), so
+    // each contract lives on a thin wrapper (or `*_model`) fn; harnesses verify that.
+    // `[usize; 3]`: vtable = (size, align, drop-in-place), per rust-lang/unsafe-code-guidelines#166.
+    #[requires(ub_checks::can_dereference(ptr as *const [usize; 3]))]
+    #[ensures(|result: &usize| *result <= isize::MAX as usize)]
+    #[allow(dead_code)]
+    unsafe fn vtable_size_wrapper(ptr: *const ()) -> usize {
+        // SAFETY: guaranteed by the precondition (`ptr` points to a vtable).
+        unsafe { vtable_size(ptr) }
+    }
 
-    // #[kani::proof_for_contract(copy_nonoverlapping)]
-    // fn check_copy_nonoverlapping() {
-    //     // Note: cannot use `ArbitraryPointer` here.
-    //     // The `ArbitraryPtr` will arbitrarily initialize memory by indirectly invoking
-    //     // `copy_nonoverlapping`.
-    //     // Kani contract checking would fail due to existing restriction on calls to
-    //     // the function under verification.
-    //     let gen_any_ptr = |buf: &mut [MaybeUninit<char>; 100]| -> *mut char {
-    //         let base = buf.as_mut_ptr() as *mut u8;
-    //         base.wrapping_add(kani::any_where(|offset: &usize| *offset < 400)) as *mut char
-    //     };
-    //     let mut buffer1 = [MaybeUninit::<char>::uninit(); 100];
-    //     for i in 0..100 {
-    //         if kani::any() {
-    //             buffer1[i] = MaybeUninit::new(kani::any());
-    //         }
-    //     }
-    //     let mut buffer2 = [MaybeUninit::<char>::uninit(); 100];
-    //     let src = gen_any_ptr(&mut buffer1);
-    //     let dst = if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
-    //     unsafe { copy_nonoverlapping(src, dst, kani::any()) }
-    // }
+    // Real vtable pointer via `dyn Debug`; the `assert_eq!` pins Kani's model
+    // and witnesses non-vacuity.
+    macro_rules! check_vtable_size_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(vtable_size_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let obj: &dyn core::fmt::Debug = &val;
+                let fat: *const dyn core::fmt::Debug = obj;
+                let meta = core::ptr::metadata(fat);
+                // Same transmute `DynMetadata::vtable_ptr` performs (layout-compatible).
+                let vptr = unsafe {
+                    core::mem::transmute::<core::ptr::DynMetadata<dyn core::fmt::Debug>, *const ()>(
+                        meta,
+                    )
+                };
+                let size = unsafe { vtable_size_wrapper(vptr) };
+                kani::cover(true, "vtable_size call is reachable");
+                assert_eq!(size, core::mem::size_of::<$ty>());
+            }
+        };
+    }
+
+    check_vtable_size_for!(check_vtable_size_u8, u8);
+    check_vtable_size_for!(check_vtable_size_u32, u32);
+    check_vtable_size_for!(check_vtable_size_u64, u64);
+    check_vtable_size_for!(check_vtable_size_i128, i128);
+
+    // ---- vtable_align ----
+    // As `vtable_size`; the ensures encodes non-zero power of two.
+    #[requires(ub_checks::can_dereference(ptr as *const [usize; 3]))]
+    #[ensures(|result: &usize| result.is_power_of_two())]
+    #[allow(dead_code)]
+    unsafe fn vtable_align_wrapper(ptr: *const ()) -> usize {
+        // SAFETY: guaranteed by the precondition (`ptr` points to a vtable).
+        unsafe { vtable_align(ptr) }
+    }
+
+    macro_rules! check_vtable_align_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(vtable_align_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let obj: &dyn core::fmt::Debug = &val;
+                let fat: *const dyn core::fmt::Debug = obj;
+                let meta = core::ptr::metadata(fat);
+                // Same transmute `DynMetadata::vtable_ptr` performs.
+                let vptr = unsafe {
+                    core::mem::transmute::<core::ptr::DynMetadata<dyn core::fmt::Debug>, *const ()>(
+                        meta,
+                    )
+                };
+                let align = unsafe { vtable_align_wrapper(vptr) };
+                kani::cover(true, "vtable_align call is reachable");
+                assert_eq!(align, core::mem::align_of::<$ty>());
+            }
+        };
+    }
+
+    check_vtable_align_for!(check_vtable_align_u8, u8);
+    check_vtable_align_for!(check_vtable_align_u32, u32);
+    check_vtable_align_for!(check_vtable_align_u64, u64);
+    check_vtable_align_for!(check_vtable_align_i128, i128);
+
+    // ---- size_of_val ----
+    // Kani models this intrinsic (no fallback body); harness asserts pin it.
+    // `size_of_val_raw` documents per-case safety, so each case gets its own
+    // wrapper: `Sized` is always safe; a slice needs total size <= `isize::MAX`.
+    #[ensures(|result: &usize| *result <= isize::MAX as usize)]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_sized_wrapper<T>(ptr: *const T) -> usize {
+        // SAFETY: `Sized` case never reads `*ptr`; safe for any pointer.
+        unsafe { size_of_val(ptr) }
+    }
+
+    // Division-first so the check never overflows; a ZST element makes it 0.
+    #[requires(size_of::<E>() == 0 || ptr.len() <= (isize::MAX as usize) / size_of::<E>())]
+    #[ensures(|result: &usize| *result <= isize::MAX as usize)]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_slice_wrapper<E>(ptr: *const [E]) -> usize {
+        // SAFETY: only the length metadata is read; precondition bounds the size.
+        unsafe { size_of_val(ptr) }
+    }
+
+    // Model must return `size_of::<T>()`, pointer-independent.
+    macro_rules! check_size_of_val_sized_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_sized_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let ptr: *const $ty = &val;
+                let size = unsafe { size_of_val_sized_wrapper(ptr) };
+                kani::cover(true, "size_of_val (sized) call is reachable");
+                assert_eq!(size, core::mem::size_of::<$ty>());
+            }
+        };
+    }
+
+    check_size_of_val_sized_for!(check_size_of_val_u8, u8);
+    check_size_of_val_sized_for!(check_size_of_val_u32, u32);
+    check_size_of_val_sized_for!(check_size_of_val_u64, u64);
+    check_size_of_val_sized_for!(check_size_of_val_i128, i128);
+    check_size_of_val_sized_for!(check_size_of_val_char, char);
+
+    // In-bounds `len` over a real array; model must return `len * size_of::<E>()`.
+    macro_rules! check_size_of_val_slice_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_slice_wrapper)]
+            fn $harness() {
+                const N: usize = 4;
+                let arr: [$ty; N] = kani::any();
+                let len: usize = kani::any_where(|l: &usize| *l <= N);
+                let ptr: *const [$ty] = core::ptr::slice_from_raw_parts(arr.as_ptr(), len);
+                let size = unsafe { size_of_val_slice_wrapper(ptr) };
+                kani::cover(len > 0, "size_of_val measures a non-empty slice");
+                assert_eq!(size, len * core::mem::size_of::<$ty>());
+            }
+        };
+    }
+
+    check_size_of_val_slice_for!(check_size_of_val_slice_u8, u8);
+    check_size_of_val_slice_for!(check_size_of_val_slice_u32, u32);
+    check_size_of_val_slice_for!(check_size_of_val_slice_i64, i64);
+
+    // ---- align_of_val (historically `min_align_of_val`) ----
+    // Same modeling and per-case wrapper split as `size_of_val`; the slice
+    // contract keeps the documented size-fits-`isize` condition.
+    #[ensures(|result: &usize| result.is_power_of_two())]
+    #[allow(dead_code)]
+    unsafe fn align_of_val_sized_wrapper<T>(ptr: *const T) -> usize {
+        // SAFETY: `Sized` case never reads `*ptr`; safe for any pointer.
+        unsafe { align_of_val(ptr) }
+    }
+
+    #[requires(size_of::<E>() == 0 || ptr.len() <= (isize::MAX as usize) / size_of::<E>())]
+    #[ensures(|result: &usize| result.is_power_of_two())]
+    #[allow(dead_code)]
+    unsafe fn align_of_val_slice_wrapper<E>(ptr: *const [E]) -> usize {
+        // SAFETY: only the length metadata is read; precondition bounds the size.
+        unsafe { align_of_val(ptr) }
+    }
+
+    // Model must return `align_of::<T>()`, pointer-independent.
+    macro_rules! check_align_of_val_sized_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_sized_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let ptr: *const $ty = &val;
+                let align = unsafe { align_of_val_sized_wrapper(ptr) };
+                kani::cover(true, "align_of_val (sized) call is reachable");
+                assert_eq!(align, core::mem::align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_sized_for!(check_align_of_val_u8, u8);
+    check_align_of_val_sized_for!(check_align_of_val_u32, u32);
+    check_align_of_val_sized_for!(check_align_of_val_u64, u64);
+    check_align_of_val_sized_for!(check_align_of_val_i128, i128);
+    check_align_of_val_sized_for!(check_align_of_val_char, char);
+
+    // In-bounds `len`; model must return `align_of::<E>()` regardless of `len`.
+    macro_rules! check_align_of_val_slice_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_slice_wrapper)]
+            fn $harness() {
+                const N: usize = 4;
+                let arr: [$ty; N] = kani::any();
+                let len: usize = kani::any_where(|l: &usize| *l <= N);
+                let ptr: *const [$ty] = core::ptr::slice_from_raw_parts(arr.as_ptr(), len);
+                let align = unsafe { align_of_val_slice_wrapper(ptr) };
+                kani::cover(len > 0, "align_of_val measures a non-empty slice");
+                assert_eq!(align, core::mem::align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_slice_for!(check_align_of_val_slice_u8, u8);
+    check_align_of_val_slice_for!(check_align_of_val_slice_u32, u32);
+    check_align_of_val_slice_for!(check_align_of_val_slice_i64, i64);
+
+    // ---- size_of_val / align_of_val: trait-object (`dyn`) tails ----
+    // Third documented case of `size_of_val_raw` / `align_of_val_raw`: the
+    // vtable must be valid. Kani has no vtable predicate, so (exactly as for
+    // `vtable_size_wrapper`) dereferenceability of the three metadata words is
+    // the necessary approximation; harnesses supply real compiler-produced
+    // vtables, so the precondition is satisfied non-vacuously.
+    #[allow(dead_code)]
+    fn dyn_vtable_ptr(ptr: *const dyn core::fmt::Debug) -> *const () {
+        let meta = core::ptr::metadata(ptr);
+        // Same transmute `DynMetadata::vtable_ptr` performs (layout-compatible).
+        unsafe {
+            core::mem::transmute::<core::ptr::DynMetadata<dyn core::fmt::Debug>, *const ()>(meta)
+        }
+    }
+
+    #[requires(ub_checks::can_dereference(dyn_vtable_ptr(ptr) as *const [usize; 3]))]
+    #[ensures(|result: &usize| *result <= isize::MAX as usize)]
+    #[allow(dead_code)]
+    unsafe fn size_of_val_dyn_wrapper(ptr: *const dyn core::fmt::Debug) -> usize {
+        // SAFETY: only the vtable is read; readable by the precondition.
+        unsafe { size_of_val(ptr) }
+    }
+
+    #[requires(ub_checks::can_dereference(dyn_vtable_ptr(ptr) as *const [usize; 3]))]
+    #[ensures(|result: &usize| result.is_power_of_two())]
+    #[allow(dead_code)]
+    unsafe fn align_of_val_dyn_wrapper(ptr: *const dyn core::fmt::Debug) -> usize {
+        // SAFETY: only the vtable is read; readable by the precondition.
+        unsafe { align_of_val(ptr) }
+    }
+
+    // Erased-type fidelity: the model must return the *underlying* type's
+    // size/align through the vtable, not a fixture value.
+    macro_rules! check_size_of_val_dyn_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_dyn_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let obj: &dyn core::fmt::Debug = &val;
+                let size = unsafe { size_of_val_dyn_wrapper(obj) };
+                kani::cover(true, "size_of_val (dyn) call is reachable");
+                assert_eq!(size, core::mem::size_of::<$ty>());
+            }
+        };
+    }
+
+    check_size_of_val_dyn_for!(check_size_of_val_dyn_u8, u8);
+    check_size_of_val_dyn_for!(check_size_of_val_dyn_u32, u32);
+    check_size_of_val_dyn_for!(check_size_of_val_dyn_i128, i128);
+
+    macro_rules! check_align_of_val_dyn_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_dyn_wrapper)]
+            fn $harness() {
+                let val: $ty = kani::any();
+                let obj: &dyn core::fmt::Debug = &val;
+                let align = unsafe { align_of_val_dyn_wrapper(obj) };
+                kani::cover(true, "align_of_val (dyn) call is reachable");
+                assert_eq!(align, core::mem::align_of::<$ty>());
+            }
+        };
+    }
+
+    check_align_of_val_dyn_for!(check_align_of_val_dyn_u8, u8);
+    check_align_of_val_dyn_for!(check_align_of_val_dyn_u32, u32);
+    check_align_of_val_dyn_for!(check_align_of_val_dyn_i128, i128);
+
+    // ---- copy_nonoverlapping ----
+    // Restores the pre-body-removal contract. `MaybeUninit<T>` because the copy is
+    // untyped; the ensures checks per-byte initialization state is preserved.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
+        && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), crate::mem::size_of::<T>(), count))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn copy_nonoverlapping_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { copy_nonoverlapping(src, dst, count) }
+    }
+
+    // No `ArbitraryPointer`: it initializes memory via the function under
+    // verification. Non-deterministic `src` init gives the untyped-copy ensures
+    // teeth; `dst` may alias `buffer1` so non-overlap is genuinely exercised.
+    macro_rules! check_copy_nonoverlapping_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(copy_nonoverlapping_wrapper)]
+            fn $harness() {
+                const N: usize = 100;
+                let gen_any_ptr = |buf: &mut [MaybeUninit<$ty>; N]| -> *mut $ty {
+                    let base = buf.as_mut_ptr() as *mut u8;
+                    base.wrapping_add(kani::any_where(|o: &usize| {
+                        *o < N * core::mem::size_of::<$ty>()
+                    })) as *mut $ty
+                };
+                let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    if kani::any() {
+                        buffer1[i] = MaybeUninit::new(kani::any());
+                    }
+                }
+                let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
+                let src = gen_any_ptr(&mut buffer1) as *const $ty;
+                let dst =
+                    if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+                let count: usize = kani::any();
+                kani::cover(count > 0, "copy_nonoverlapping copies a non-empty range");
+                unsafe { copy_nonoverlapping_wrapper(src, dst, count) };
+            }
+        };
+    }
+
+    check_copy_nonoverlapping_for!(check_copy_nonoverlapping_u8, u8);
+    check_copy_nonoverlapping_for!(check_copy_nonoverlapping_char, char);
+    check_copy_nonoverlapping_for!(check_copy_nonoverlapping_u32, u32);
+
+    // ---- copy ----
+    // Memmove: overlap permitted, so `copy_nonoverlapping`'s contract minus the
+    // non-overlap clause.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn copy_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { copy(src, dst, count) }
+    }
+
+    // Same setup as `copy_nonoverlapping`, but the aliasing `dst` now exercises
+    // the overlapping case `copy` permits.
+    macro_rules! check_copy_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(copy_wrapper)]
+            fn $harness() {
+                const N: usize = 100;
+                let gen_any_ptr = |buf: &mut [MaybeUninit<$ty>; N]| -> *mut $ty {
+                    let base = buf.as_mut_ptr() as *mut u8;
+                    base.wrapping_add(kani::any_where(|o: &usize| {
+                        *o < N * core::mem::size_of::<$ty>()
+                    })) as *mut $ty
+                };
+                let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    if kani::any() {
+                        buffer1[i] = MaybeUninit::new(kani::any());
+                    }
+                }
+                let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
+                let src = gen_any_ptr(&mut buffer1) as *const $ty;
+                // `dst` may alias `buffer1` (overlap is permitted by `copy`).
+                let dst =
+                    if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+                let count: usize = kani::any();
+                kani::cover(count > 0, "copy copies a non-empty range");
+                unsafe { copy_wrapper(src, dst, count) };
+            }
+        };
+    }
+
+    check_copy_for!(check_copy_u8, u8);
+    check_copy_for!(check_copy_char, char);
+    check_copy_for!(check_copy_u32, u32);
+
+    // ---- write_bytes ----
+    // C `memset`; contract is the pre-body-removal one. Supersedes the old
+    // harness parked on <https://github.com/model-checking/kani/issues/90>.
+    // Ensures is over `*const u8`: arbitrary `val` bytes need not form a valid `T`.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[requires(ub_checks::maybe_is_aligned_and_not_null(
+        dst as *const (),
+        crate::mem::align_of::<T>(),
+        crate::mem::size_of::<T>() == 0 || count == 0,
+    ))]
+    #[ensures(|_| ub_checks::can_dereference(
+        core::ptr::slice_from_raw_parts(dst as *const u8, count * crate::mem::size_of::<T>())))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn write_bytes_wrapper<T>(dst: *mut T, val: u8, count: usize) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { write_bytes(dst, val, count) }
+    }
+
+    // `dst` stays inside a real stack allocation; the byte-granular offset
+    // generates misaligned pointers the alignment clause must prune.
+    macro_rules! check_write_bytes_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(write_bytes_wrapper)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: u8 = kani::any();
+                let count: usize = kani::any();
+                kani::cover(count > 0, "write_bytes writes a non-empty range");
+                unsafe { write_bytes_wrapper(dst, val, count) };
+            }
+        };
+    }
+
+    check_write_bytes_for!(check_write_bytes_u8, u8);
+    check_write_bytes_for!(check_write_bytes_char, char);
+    check_write_bytes_for!(check_write_bytes_u32, u32);
 
     //We need this wrapper because transmute_unchecked is an intrinsic, for which Kani does
     //not currently support contracts (https://github.com/model-checking/kani/issues/3345)
@@ -4116,17 +4496,607 @@ mod verify {
     gen_compound_harnesses!(arr_mod, [u8; 2]);
     gen_compound_harnesses!(struct_mod, u8_struct);
 
+    // ---- arith_offset ----
+    // Kani models this as wrapping pointer arithmetic; no safety precondition,
+    // hence no `requires`. Ensures: address displaced by `offset` elements,
+    // wrapping over the pointer width (unlike the bounds-restricted `offset`).
+    #[ensures(|result: &*const T|
+        (*result).addr()
+            == dst.addr().wrapping_add((offset as usize).wrapping_mul(crate::mem::size_of::<T>())))]
+    #[allow(dead_code)]
+    unsafe fn arith_offset_wrapper<T>(dst: *const T, offset: isize) -> *const T {
+        // SAFETY: no preconditions; pure wrapping arithmetic, no memory access.
+        unsafe { arith_offset(dst, offset) }
+    }
+
+    // Nothing is dereferenced, so a provenance-free integer address is the most
+    // general base. CBMC mismodels arithmetic near NULL and `usize::MAX`, so the
+    // harness pins the base to a mid-range window and bounds `|offset|`.
+    macro_rules! check_arith_offset_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(arith_offset_wrapper)]
+            fn $harness() {
+                // `base_addr` in `[2^32, 2^45]`, `|offset| <= 2^20`: result stays
+                // in `(0, 2^46)` for every `T` here, clear of NULL and wrap edges.
+                let base_addr: usize = kani::any();
+                kani::assume(base_addr >= (1usize << 32) && base_addr <= (1usize << 45));
+                let offset: isize = kani::any();
+                kani::assume(offset >= -(1isize << 20) && offset <= (1isize << 20));
+
+                let dst: *const $ty = crate::ptr::without_provenance(base_addr);
+                kani::cover(offset > 0, "arith_offset applies a forward displacement");
+                kani::cover(offset < 0, "arith_offset applies a backward displacement");
+                let _ = unsafe { arith_offset_wrapper::<$ty>(dst, offset) };
+            }
+        };
+    }
+
+    check_arith_offset_for!(check_arith_offset_u8, u8);
+    check_arith_offset_for!(check_arith_offset_u32, u32);
+    check_arith_offset_for!(check_arith_offset_u64, u64);
+    check_arith_offset_for!(check_arith_offset_i128, i128);
+
+    // ---- volatile_copy_nonoverlapping_memory ----
+    // Volatile-model scheme, used for all volatile intrinsics Kani does not
+    // support: the contract is verified on a `*_model` fn whose body is the
+    // non-volatile equivalent (here `copy_nonoverlapping`). Fidelity: the two
+    // differ only in LLVM's volatile flag, an optimization barrier with no
+    // effect on the abstract memory state CBMC reasons about.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count))
+        && ub_checks::maybe_is_nonoverlapping(src as *const (), dst as *const (), crate::mem::size_of::<T>(), count))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn volatile_copy_nonoverlapping_memory_model<T>(
+        dst: *mut T,
+        src: *const T,
+        count: usize,
+    ) {
+        // MODEL: forwards to the non-volatile copy (identical memory effects).
+        // SAFETY: guaranteed by the precondition.
+        unsafe { copy_nonoverlapping(src, dst, count) }
+    }
+
+    // Same setup rationale as `check_copy_nonoverlapping_for`.
+    macro_rules! check_volatile_copy_nonoverlapping_memory_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_copy_nonoverlapping_memory_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let gen_any_ptr = |buf: &mut [MaybeUninit<$ty>; N]| -> *mut $ty {
+                    let base = buf.as_mut_ptr() as *mut u8;
+                    base.wrapping_add(kani::any_where(|o: &usize| {
+                        *o < N * core::mem::size_of::<$ty>()
+                    })) as *mut $ty
+                };
+                let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    if kani::any() {
+                        buffer1[i] = MaybeUninit::new(kani::any());
+                    }
+                }
+                let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
+                let src = gen_any_ptr(&mut buffer1) as *const $ty;
+                // `dst` may point into a separate buffer or alias `buffer1`.
+                let dst =
+                    if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+                let count: usize = kani::any();
+                kani::cover(
+                    count > 0,
+                    "volatile_copy_nonoverlapping_memory copies a non-empty range",
+                );
+                unsafe { volatile_copy_nonoverlapping_memory_model(dst, src, count) };
+            }
+        };
+    }
+
+    check_volatile_copy_nonoverlapping_memory_for!(
+        check_volatile_copy_nonoverlapping_memory_u8,
+        u8
+    );
+    check_volatile_copy_nonoverlapping_memory_for!(
+        check_volatile_copy_nonoverlapping_memory_char,
+        char
+    );
+    check_volatile_copy_nonoverlapping_memory_for!(
+        check_volatile_copy_nonoverlapping_memory_u32,
+        u32
+    );
+
+    // ---- volatile_copy_memory ----
+    // Same volatile-model scheme, body `copy` (memmove): the contract is
+    // `volatile_copy_nonoverlapping_memory`'s minus the non-overlap clause.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(src as *const crate::mem::MaybeUninit<T>, count))
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[ensures(|_| check_copy_untyped(src, dst, count))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn volatile_copy_memory_model<T>(dst: *mut T, src: *const T, count: usize) {
+        // MODEL: non-volatile `copy`. SAFETY: guaranteed by the precondition.
+        unsafe { copy(src, dst, count) }
+    }
+
+    // Same setup as `check_copy_for`, including the aliasing `dst`.
+    macro_rules! check_volatile_copy_memory_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_copy_memory_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let gen_any_ptr = |buf: &mut [MaybeUninit<$ty>; N]| -> *mut $ty {
+                    let base = buf.as_mut_ptr() as *mut u8;
+                    base.wrapping_add(kani::any_where(|o: &usize| {
+                        *o < N * core::mem::size_of::<$ty>()
+                    })) as *mut $ty
+                };
+                let mut buffer1 = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    if kani::any() {
+                        buffer1[i] = MaybeUninit::new(kani::any());
+                    }
+                }
+                let mut buffer2 = [MaybeUninit::<$ty>::uninit(); N];
+                let src = gen_any_ptr(&mut buffer1) as *const $ty;
+                let dst =
+                    if kani::any() { gen_any_ptr(&mut buffer2) } else { gen_any_ptr(&mut buffer1) };
+                let count: usize = kani::any();
+                kani::cover(count > 0, "volatile_copy_memory copies a non-empty range");
+                unsafe { volatile_copy_memory_model(dst, src, count) };
+            }
+        };
+    }
+
+    check_volatile_copy_memory_for!(check_volatile_copy_memory_u8, u8);
+    check_volatile_copy_memory_for!(check_volatile_copy_memory_char, char);
+    check_volatile_copy_memory_for!(check_volatile_copy_memory_u32, u32);
+
+    // ---- volatile_set_memory ----
+    // Same volatile-model scheme, body `write_bytes` (memset); contract is
+    // `write_bytes`'s verbatim, including the bytes-only ensures.
+    #[requires(!count.overflowing_mul(crate::mem::size_of::<T>()).1
+        && ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(dst, count)))]
+    #[requires(ub_checks::maybe_is_aligned_and_not_null(
+        dst as *const (),
+        crate::mem::align_of::<T>(),
+        crate::mem::size_of::<T>() == 0 || count == 0,
+    ))]
+    #[ensures(|_| ub_checks::can_dereference(
+        core::ptr::slice_from_raw_parts(dst as *const u8, count * crate::mem::size_of::<T>())))]
+    #[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts(dst, count)))]
+    #[allow(dead_code)]
+    unsafe fn volatile_set_memory_model<T>(dst: *mut T, val: u8, count: usize) {
+        // MODEL: non-volatile `write_bytes`. SAFETY: guaranteed by the precondition.
+        unsafe { write_bytes(dst, val, count) }
+    }
+
+    // Same setup rationale as `check_write_bytes_for`.
+    macro_rules! check_volatile_set_memory_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_set_memory_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: u8 = kani::any();
+                let count: usize = kani::any();
+                kani::cover(count > 0, "volatile_set_memory sets a non-empty range");
+                unsafe { volatile_set_memory_model(dst, val, count) };
+            }
+        };
+    }
+
+    check_volatile_set_memory_for!(check_volatile_set_memory_u8, u8);
+    check_volatile_set_memory_for!(check_volatile_set_memory_char, char);
+    check_volatile_set_memory_for!(check_volatile_set_memory_u32, u32);
+
+    // ---- volatile_load ----
+    // Backs `ptr::read_volatile`; Kani models it as the same read. Requires is
+    // verbatim from `read_volatile`; a read has no `modifies` and no ensures.
+    #[requires(ub_checks::can_dereference(src))]
+    #[allow(dead_code)]
+    unsafe fn volatile_load_model<T>(src: *const T) -> T {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_load(src) }
+    }
+
+    // `src` stays inside a fully initialized stack allocation (uninit would make
+    // `can_dereference` unsatisfiable, hence vacuous); the byte-granular offset
+    // generates misaligned pointers the alignment clause must prune.
+    macro_rules! check_volatile_load_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_load_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    buffer[i] = MaybeUninit::new(kani::any());
+                }
+                let base = buffer.as_ptr() as *const u8;
+                let src = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *const $ty;
+                kani::cover(true, "volatile_load reaches a dereferenceable src");
+                let _val = unsafe { volatile_load_model(src) };
+            }
+        };
+    }
+
+    check_volatile_load_for!(check_volatile_load_u8, u8);
+    check_volatile_load_for!(check_volatile_load_char, char);
+    check_volatile_load_for!(check_volatile_load_u32, u32);
+
+    // ---- volatile_store ----
+    // Backs `ptr::write_volatile`; Kani models it as the same write. Requires is
+    // verbatim from `write_volatile`; `modifies(dst)` scopes the write. No
+    // ensures: `dst` may be write-only I/O memory, so asserting post-state
+    // readability would over-claim; fidelity is pinned by the harness read-back.
+    #[requires(ub_checks::can_write(dst))]
+    #[cfg_attr(kani, kani::modifies(dst))]
+    #[allow(dead_code)]
+    unsafe fn volatile_store_model<T>(dst: *mut T, val: T) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { volatile_store(dst, val) }
+    }
+
+    // `dst` need not be initialized (the store only writes); misaligned pointers
+    // from the byte-granular offset must be pruned by the alignment clause.
+    macro_rules! check_volatile_store_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_store_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: $ty = kani::any();
+                kani::cover(true, "volatile_store reaches a writeable dst");
+                unsafe { volatile_store_model(dst, val) };
+                // Fidelity: the model actually stored `val` at `dst`.
+                let read_back = unsafe { volatile_load(dst) };
+                assert!(read_back == val);
+            }
+        };
+    }
+
+    check_volatile_store_for!(check_volatile_store_u8, u8);
+    check_volatile_store_for!(check_volatile_store_char, char);
+    check_volatile_store_for!(check_volatile_store_u32, u32);
+
+    // ---- unaligned_volatile_load ----
+    // Volatile analogue of `ptr::read_unaligned`; same volatile-model scheme.
+    // Requires `can_read_unaligned(src)`: dropping the alignment obligation is
+    // the whole difference from `volatile_load`.
+    #[requires(ub_checks::can_read_unaligned(src))]
+    #[allow(dead_code)]
+    unsafe fn unaligned_volatile_load_model<T>(src: *const T) -> T {
+        // MODEL: non-volatile `read_unaligned`. SAFETY: guaranteed by the precondition.
+        unsafe { crate::ptr::read_unaligned(src) }
+    }
+
+    // As `check_volatile_load_for`, but misaligned pointers are NOT pruned; the
+    // cover witnesses that a misaligned read is actually reachable.
+    macro_rules! check_unaligned_volatile_load_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(unaligned_volatile_load_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    buffer[i] = MaybeUninit::new(kani::any());
+                }
+                let base = buffer.as_ptr() as *const u8;
+                let src = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *const $ty;
+                kani::cover(
+                    src.addr() % core::mem::align_of::<$ty>() != 0,
+                    "unaligned_volatile_load reaches a misaligned src",
+                );
+                let _val = unsafe { unaligned_volatile_load_model(src) };
+            }
+        };
+    }
+
+    // `char`/`u32` (alignment > 1) make the misaligned cover satisfiable; `u8`
+    // is handled separately since every address is 1-aligned.
+    check_unaligned_volatile_load_for!(check_unaligned_volatile_load_char, char);
+    check_unaligned_volatile_load_for!(check_unaligned_volatile_load_u32, u32);
+
+    #[kani::proof_for_contract(unaligned_volatile_load_model)]
+    fn check_unaligned_volatile_load_u8() {
+        const N: usize = 100;
+        let mut buffer = [MaybeUninit::<u8>::uninit(); N];
+        for i in 0..N {
+            buffer[i] = MaybeUninit::new(kani::any());
+        }
+        let base = buffer.as_ptr();
+        let src = base.wrapping_add(kani::any_where(|o: &usize| *o < N)) as *const u8;
+        // `u8` is always aligned; just witness a dereferenceable read (non-vacuity).
+        kani::cover(true, "unaligned_volatile_load reaches a dereferenceable src");
+        let _val = unsafe { unaligned_volatile_load_model(src) };
+    }
+
+    // ---- unaligned_volatile_store ----
+    // Volatile analogue of `ptr::write_unaligned`; same volatile-model scheme.
+    // Requires `can_write_unaligned(dst)`: dropping alignment is the whole
+    // difference from `volatile_store`. No ensures (write-only I/O memory);
+    // fidelity is pinned by the harness read-back.
+    #[requires(ub_checks::can_write_unaligned(dst))]
+    #[cfg_attr(kani, kani::modifies(dst))]
+    #[allow(dead_code)]
+    unsafe fn unaligned_volatile_store_model<T>(dst: *mut T, val: T) {
+        // MODEL: non-volatile `write_unaligned`. SAFETY: guaranteed by the precondition.
+        unsafe { crate::ptr::write_unaligned(dst, val) }
+    }
+
+    // As `check_volatile_store_for`, but misaligned pointers are NOT pruned; the
+    // cover witnesses a misaligned write, and the read-back assert pins fidelity.
+    macro_rules! check_unaligned_volatile_store_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(unaligned_volatile_store_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let dst = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let val: $ty = kani::any();
+                kani::cover(
+                    dst.addr() % core::mem::align_of::<$ty>() != 0,
+                    "unaligned_volatile_store reaches a misaligned dst",
+                );
+                unsafe { unaligned_volatile_store_model(dst, val) };
+                // Fidelity: the model actually stored `val` at `dst`.
+                let read_back = unsafe { crate::ptr::read_unaligned(dst) };
+                assert!(read_back == val);
+            }
+        };
+    }
+
+    // `char`/`u32` have alignment > 1, so the misaligned cover is satisfiable;
+    // `u8` is handled separately as for the load case.
+    check_unaligned_volatile_store_for!(check_unaligned_volatile_store_char, char);
+    check_unaligned_volatile_store_for!(check_unaligned_volatile_store_u32, u32);
+
+    #[kani::proof_for_contract(unaligned_volatile_store_model)]
+    fn check_unaligned_volatile_store_u8() {
+        const N: usize = 100;
+        let mut buffer = [MaybeUninit::<u8>::uninit(); N];
+        let base = buffer.as_mut_ptr();
+        let dst = base.wrapping_add(kani::any_where(|o: &usize| *o < N)) as *mut u8;
+        let val: u8 = kani::any();
+        // `u8` is always aligned; just witness a writeable dst (non-vacuity).
+        kani::cover(true, "unaligned_volatile_store reaches a writeable dst");
+        unsafe { unaligned_volatile_store_model(dst, val) };
+        let read_back = unsafe { crate::ptr::read_unaligned(dst) };
+        assert!(read_back == val);
+    }
+
+    // ---- ptr_offset_from ----
+    // Kani models this as the CBMC pointer difference scaled to units of `T`
+    // (primitive behind `<*const T>::offset_from`). The four `requires` encode
+    // the `# Safety` of `offset_from`, matching the already-verified contract in
+    // `ptr/const_ptr.rs`. Ensures: the exact signed element distance.
+    #[requires(crate::mem::size_of::<T>() != 0)]
+    // Subtracting `base` from `ptr` (as addresses) does not overflow `isize`.
+    #[requires((ptr as isize).checked_sub(base as isize).is_some())]
+    // The byte distance is an exact multiple of the pointee size.
+    #[requires((ptr as isize - base as isize) % (crate::mem::size_of::<T>() as isize) == 0)]
+    // The pointers share an allocation (or are literally the same address).
+    #[requires(ptr as isize == base as isize || ub_checks::same_allocation(ptr, base))]
+    #[ensures(|result: &isize|
+        *result == (ptr as isize - base as isize) / (crate::mem::size_of::<T>() as isize))]
+    #[allow(dead_code)]
+    unsafe fn ptr_offset_from_wrapper<T>(ptr: *const T, base: *const T) -> isize {
+        // SAFETY: guaranteed by the preconditions.
+        unsafe { ptr_offset_from(ptr, base) }
+    }
+
+    // Same-generator pairs satisfy `same_allocation`; cross-generator pairs are
+    // pruned. For these primitive `T`, size == align, so in-bounds pairs satisfy
+    // the exact-multiple clause; covers witness zero/forward/backward distances.
+    macro_rules! check_ptr_offset_from_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(ptr_offset_from_wrapper)]
+            fn $harness() {
+                const GEN_SIZE: usize = mem::size_of::<$ty>();
+                let mut generator1 = PointerGenerator::<{ GEN_SIZE * 4 }>::new();
+                let mut generator2 = PointerGenerator::<{ GEN_SIZE * 4 }>::new();
+                let ptr: *const $ty = generator1.any_in_bounds().ptr;
+                let base: *const $ty = if kani::any() {
+                    generator1.any_in_bounds().ptr
+                } else {
+                    generator2.any_in_bounds().ptr
+                };
+                kani::cover(ptr.addr() == base.addr(), "offset_from: zero distance");
+                kani::cover(ptr.addr() > base.addr(), "offset_from: forward distance");
+                kani::cover(ptr.addr() < base.addr(), "offset_from: backward distance");
+                let _ = unsafe { ptr_offset_from_wrapper::<$ty>(ptr, base) };
+            }
+        };
+    }
+
+    check_ptr_offset_from_for!(check_ptr_offset_from_u8, u8);
+    check_ptr_offset_from_for!(check_ptr_offset_from_u32, u32);
+    check_ptr_offset_from_for!(check_ptr_offset_from_u64, u64);
+    check_ptr_offset_from_for!(check_ptr_offset_from_i32, i32);
+    check_ptr_offset_from_for!(check_ptr_offset_from_i128, i128);
+
+    // ---- ptr_offset_from_unsigned ----
+    // Unsigned variant of `ptr_offset_from`, same model. The first four
+    // `requires` are shared verbatim with `ptr_offset_from_wrapper`; the fifth
+    // adds the variant-specific `ptr >= base`. Ensures: the exact unsigned
+    // element distance (loss-free cast, since the distance is non-negative).
+    #[requires(crate::mem::size_of::<T>() != 0)]
+    #[requires((ptr as isize).checked_sub(base as isize).is_some())]
+    #[requires((ptr as isize - base as isize) % (crate::mem::size_of::<T>() as isize) == 0)]
+    #[requires(ptr as isize == base as isize || ub_checks::same_allocation(ptr, base))]
+    #[requires(ptr as isize >= base as isize)]
+    #[ensures(|result: &usize|
+        *result == ((ptr as isize - base as isize) / (crate::mem::size_of::<T>() as isize)) as usize)]
+    #[allow(dead_code)]
+    unsafe fn ptr_offset_from_unsigned_wrapper<T>(ptr: *const T, base: *const T) -> usize {
+        // SAFETY: guaranteed by the preconditions.
+        unsafe { ptr_offset_from_unsigned(ptr, base) }
+    }
+
+    // As `check_ptr_offset_from_for`; `ptr >= base` prunes backward distances,
+    // so only the zero and forward covers remain.
+    macro_rules! check_ptr_offset_from_unsigned_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(ptr_offset_from_unsigned_wrapper)]
+            fn $harness() {
+                const GEN_SIZE: usize = mem::size_of::<$ty>();
+                let mut generator1 = PointerGenerator::<{ GEN_SIZE * 4 }>::new();
+                let mut generator2 = PointerGenerator::<{ GEN_SIZE * 4 }>::new();
+                let ptr: *const $ty = generator1.any_in_bounds().ptr;
+                let base: *const $ty = if kani::any() {
+                    generator1.any_in_bounds().ptr
+                } else {
+                    generator2.any_in_bounds().ptr
+                };
+                kani::cover(ptr.addr() == base.addr(), "offset_from_unsigned: zero distance");
+                kani::cover(ptr.addr() > base.addr(), "offset_from_unsigned: forward distance");
+                let _ = unsafe { ptr_offset_from_unsigned_wrapper::<$ty>(ptr, base) };
+            }
+        };
+    }
+
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_u8, u8);
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_u32, u32);
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_u64, u64);
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_i32, i32);
+    check_ptr_offset_from_unsigned_for!(check_ptr_offset_from_unsigned_i128, i128);
+
+    // ---- read_via_copy ----
+    // Backs `ptr::read`; Kani models it as the plain typed load. Requires
+    // `can_dereference(ptr)`, the `# Safety` of `ptr::read`; a read has no
+    // `modifies` and no ensures.
+    #[requires(ub_checks::can_dereference(ptr))]
+    #[allow(dead_code)]
+    unsafe fn read_via_copy_model<T>(ptr: *const T) -> T {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { read_via_copy(ptr) }
+    }
+
+    // Same setup rationale as `check_volatile_load_for`.
+    macro_rules! check_read_via_copy_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(read_via_copy_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                for i in 0..N {
+                    buffer[i] = MaybeUninit::new(kani::any());
+                }
+                let base = buffer.as_ptr() as *const u8;
+                let ptr = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *const $ty;
+                kani::cover(true, "read_via_copy reaches a dereferenceable ptr");
+                let _val = unsafe { read_via_copy_model(ptr) };
+            }
+        };
+    }
+
+    check_read_via_copy_for!(check_read_via_copy_u8, u8);
+    check_read_via_copy_for!(check_read_via_copy_char, char);
+    check_read_via_copy_for!(check_read_via_copy_u32, u32);
+
+    // ---- write_via_move ----
+    // Backs `ptr::write`; Kani models it as the plain typed store. Requires only
+    // `can_write(ptr)`: the write overwrites without reading. Ensures the
+    // destination holds a fully-formed `T`; `*ptr == value` is not expressible
+    // because `value` is moved and generic `T: !Copy` cannot be re-read.
+    #[requires(ub_checks::can_write(ptr))]
+    #[ensures(|_| ub_checks::can_dereference(ptr as *const T))]
+    #[cfg_attr(kani, kani::modifies(ptr))]
+    #[allow(dead_code)]
+    unsafe fn write_via_move_model<T>(ptr: *mut T, value: T) {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { write_via_move(ptr, value) }
+    }
+
+    // Destination deliberately left `MaybeUninit`: overwriting uninit memory is
+    // legal and exercised here; misaligned pointers from the byte-granular
+    // offset must be pruned by the alignment clause.
+    macro_rules! check_write_via_move_for {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(write_via_move_model)]
+            fn $harness() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let ptr = base
+                    .wrapping_add(kani::any_where(|o: &usize| *o < N * core::mem::size_of::<$ty>()))
+                    as *mut $ty;
+                let value: $ty = kani::any();
+                kani::cover(true, "write_via_move reaches a writeable ptr");
+                unsafe { write_via_move_model(ptr, value) };
+            }
+        };
+    }
+
+    check_write_via_move_for!(check_write_via_move_u8, u8);
+    check_write_via_move_for!(check_write_via_move_char, char);
+    check_write_via_move_for!(check_write_via_move_u32, u32);
+
+    // ---- compare_bytes ----
+    // Backs slice comparison; Kani models it as a memcmp. Requires each pointer
+    // readable and initialized for the WHOLE `bytes` range, not merely up to the
+    // first differing byte (the docs stress chunked reads). No ensures: relating
+    // the returned sign to the first differing byte is functional, not safety.
+    #[requires(ub_checks::can_dereference(core::ptr::slice_from_raw_parts(left, bytes))
+        && ub_checks::can_dereference(core::ptr::slice_from_raw_parts(right, bytes)))]
+    #[allow(dead_code)]
+    unsafe fn compare_bytes_model(left: *const u8, right: *const u8, bytes: usize) -> i32 {
+        // SAFETY: guaranteed by the precondition.
+        unsafe { compare_bytes(left, right, bytes) }
+    }
+
+    // Both buffers fully initialized (whole-range clause otherwise
+    // unsatisfiable); `right` may alias `buffer1`. BOUNDED DOMAIN: the per-byte
+    // memcmp loop does not terminate under bounded model checking for unbounded
+    // `bytes`, so the range is capped at `MAX_BYTES = 8` with matching
+    // `kani::unwind`; the bound limits the checked instances, not the contract.
+    const MAX_BYTES: usize = 8;
+
+    #[kani::proof_for_contract(compare_bytes_model)]
+    #[kani::unwind(9)] // MAX_BYTES + 1
+    fn check_compare_bytes() {
+        const N: usize = MAX_BYTES;
+        let mut buffer1 = [MaybeUninit::<u8>::uninit(); N];
+        let mut buffer2 = [MaybeUninit::<u8>::uninit(); N];
+        for i in 0..N {
+            buffer1[i] = MaybeUninit::new(kani::any());
+            buffer2[i] = MaybeUninit::new(kani::any());
+        }
+        let gen_any_ptr = |buf: &[MaybeUninit<u8>; N]| -> *const u8 {
+            (buf.as_ptr() as *const u8).wrapping_add(kani::any_where(|o: &usize| *o < N))
+        };
+        let left = gen_any_ptr(&buffer1);
+        // `right` may alias `buffer1` or point into a separate allocation.
+        let right = if kani::any() { gen_any_ptr(&buffer2) } else { gen_any_ptr(&buffer1) };
+        // Unconstrained `bytes` is pruned to `<= MAX_BYTES` by `can_dereference`.
+        let bytes: usize = kani::any();
+        kani::cover(bytes > 0, "compare_bytes compares a non-empty range");
+        let _ = unsafe { compare_bytes_model(left, right, bytes) };
+    }
+
     // FIXME: Enable this harness once <https://github.com/model-checking/kani/issues/90> is fixed.
     // Harness triggers a spurious failure when writing 0 bytes to an invalid memory location,
     // which is a safe operation.
-    #[cfg(not(kani))]
-    #[kani::proof_for_contract(write_bytes)]
-    fn check_write_bytes() {
-        let mut generator = PointerGenerator::<100>::new();
-        let ArbitraryPointer { ptr, status, .. } = generator.any_alloc_status::<char>();
-        kani::assume(supported_status(status));
-        unsafe { write_bytes(ptr, kani::any(), kani::any()) };
-    }
+    //
+    // Superseded by `write_bytes_wrapper` + `check_write_bytes_*` above, which
+    // carry a contract and keep `dst` in a live allocation (sidestepping #90).
 
     fn run_with_arbitrary_ptrs<T: Arbitrary>(harness: impl Fn(*mut T, *mut T)) {
         let mut generator1 = PointerGenerator::<100>::new();

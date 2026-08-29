@@ -3898,6 +3898,12 @@ impl<T> [T] {
     #[stable(feature = "copy_from_slice", since = "1.9.0")]
     #[rustc_const_stable(feature = "const_copy_from_slice", since = "1.87.0")]
     #[track_caller]
+    // Equal lengths select the non-panicking path and make `ptr::copy_nonoverlapping`
+    // sound: both regions span `len` elements and cannot overlap (`&mut [T]` is
+    // exclusive). Element equality is per type below (`T: Copy`, no `PartialEq`).
+    #[requires(self.len() == src.len())]
+    #[ensures(|_| self.len() == src.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const fn copy_from_slice(&mut self, src: &[T])
     where
         T: Copy,
@@ -5556,4 +5562,44 @@ mod verify {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
     }
+
+    // -------------------------------------------------------------------------
+    // copy_from_slice: safety harnesses use a nondeterministic `len <= N`; value
+    // harnesses assert equality at one nondeterministic index over fixed `N`
+    // (the `check_copy_untyped` idiom in `intrinsics`). Fixed length is required:
+    // a symbolic index after a symbolic-length copy exceeds the memcpy model.
+    macro_rules! check_copy_from_slice_for {
+        ($safety:ident, $value:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::copy_from_slice)]
+            fn $safety() {
+                const N: usize = 32;
+                let src_arr: [$ty; N] = kani::any();
+                let mut dst_arr: [$ty; N] = kani::any();
+                let len = kani::any_where(|l: &usize| *l <= N);
+                let src = &src_arr[..len];
+                let dst = &mut dst_arr[..len];
+                kani::cover(len > 0, "copy_from_slice copies a non-empty slice");
+                dst.copy_from_slice(src);
+            }
+
+            #[kani::proof_for_contract(<[$ty]>::copy_from_slice)]
+            fn $value() {
+                const N: usize = 32;
+                let src_arr: [$ty; N] = kani::any();
+                let mut dst_arr: [$ty; N] = kani::any();
+                let src = &src_arr[..];
+                let dst = &mut dst_arr[..];
+                kani::cover(N > 0, "copy_from_slice copies a non-empty slice");
+                dst.copy_from_slice(src);
+                let i = kani::any_where(|i: &usize| *i < N);
+                assert!(dst[i] == src[i], "copy_from_slice preserves elements");
+            }
+        };
+    }
+
+    check_copy_from_slice_for!(check_copy_from_slice_u8, check_copy_from_slice_value_u8, u8);
+    check_copy_from_slice_for!(check_copy_from_slice_u16, check_copy_from_slice_value_u16, u16);
+    check_copy_from_slice_for!(check_copy_from_slice_u32, check_copy_from_slice_value_u32, u32);
+    check_copy_from_slice_for!(check_copy_from_slice_u64, check_copy_from_slice_value_u64, u64);
+    check_copy_from_slice_for!(check_copy_from_slice_char, check_copy_from_slice_value_char, char);
 }
