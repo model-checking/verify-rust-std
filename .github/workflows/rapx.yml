@@ -8,7 +8,7 @@ on:
     branches: [main]
 
 env:
-  RAPX_VERSION: "0.7.30"
+  RAPX_VERSION: "0.7.38"
   TOOLCHAIN: "nightly-2025-11-25"
 
 jobs:
