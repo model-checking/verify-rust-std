@@ -2124,7 +2124,10 @@ pub mod verify {
         match &searcher.searcher {
             StrSearcherImpl::TwoWay(t) => {
                 assert_ne!(t.memory, usize::MAX, "needle \"abab\" must be short-period");
-                assert!(t.crit_pos_back > 0, "needle \"abab\" must have a non-degenerate backward factorization");
+                assert!(
+                    t.crit_pos_back > 0,
+                    "needle \"abab\" must have a non-degenerate backward factorization"
+                );
             }
             StrSearcherImpl::Empty(_) => unreachable!("needle \"abab\" is non-empty"),
         }
@@ -2153,7 +2156,10 @@ pub mod verify {
         let mut saw_arm_right_mismatch_ff = false;
         loop {
             calls += 1;
-            assert!(calls <= HAY_LEN + 2, "next_back() did not terminate in bound (arm-attribution loop)");
+            assert!(
+                calls <= HAY_LEN + 2,
+                "next_back() did not terminate in bound (arm-attribution loop)"
+            );
 
             // Pre-call facts, independent of the returned step and used ONLY
             // for arm attribution (the `kani::cover`s below), never by the
@@ -2163,8 +2169,8 @@ pub mod verify {
             let (out_of_room_before, front_in_byteset) = match &searcher.searcher {
                 StrSearcherImpl::TwoWay(t) => {
                     let out_of_room = t.end < needle.len();
-                    let front_in_set =
-                        !out_of_room && t.byteset_contains(haystack.as_bytes()[t.end - needle.len()]);
+                    let front_in_set = !out_of_room
+                        && t.byteset_contains(haystack.as_bytes()[t.end - needle.len()]);
                     (out_of_room, front_in_set)
                 }
                 StrSearcherImpl::Empty(_) => unreachable!("needle \"abab\" is non-empty"),
@@ -2265,7 +2271,10 @@ pub mod verify {
         // position 0 (Done only fires when `searcher.end == 0`, and
         // `last_start` tracks `self.end` exactly per the adjacency argument
         // above), not merely "somewhere in bounds".
-        assert_eq!(last_start, 0, "search must fully tile the haystack down to position 0 once Done is reached");
+        assert_eq!(
+            last_start, 0,
+            "search must fully tile the haystack down to position 0 once Done is reached"
+        );
 
         // The actual completeness proof -- the observed match set
         // (collected above, at most one by construction) must exactly equal
@@ -2278,9 +2287,15 @@ pub mod verify {
         );
 
         kani::cover(saw_arm_match, "search-loop arm (back): a real Match fires");
-        kani::cover(saw_arm_terminal, "search-loop arm (back): a genuine no-match/Done (terminal) fires");
+        kani::cover(
+            saw_arm_terminal,
+            "search-loop arm (back): a genuine no-match/Done (terminal) fires",
+        );
         kani::cover(saw_arm_byteset_skip, "search-loop arm (back): byteset-skip fast path fires");
-        kani::cover(saw_arm_left_mismatch, "search-loop arm (back): left-part (crit_pos_back) mismatch fires");
+        kani::cover(
+            saw_arm_left_mismatch,
+            "search-loop arm (back): left-part (crit_pos_back) mismatch fires",
+        );
         kani::cover(
             saw_arm_right_mismatch_ff,
             "search-loop arm (back): short-period memory_back-guarded fast-forward fires",
