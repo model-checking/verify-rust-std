@@ -2030,4 +2030,260 @@ pub mod verify {
             true
         );
     }
+
+    // -----------------------------------------------------------------------
+    // LABEL: PROBE -- does NOT count toward Challenge-21 success criteria.
+    // Residual (one line): bounded to needle "abab", HAY_LEN=5, alphabet
+    // {a,b,z}, ASCII-only, kani::unwind-bounded; proves per-step safety +
+    // Match soundness + bounded completeness (reference no-miss oracle) +
+    // 5-arm reachability on the shipped code; does NOT prove other
+    // needles/lengths, multibyte char-boundary, or the generic `next_back`.
+    //
+    // Challenge #21 -- REVERSE bounded real-search-loop harness for
+    // `TwoWaySearcher::next_back`: drives the real public `ReverseSearcher`
+    // API over the SHIPPED algorithm (no `#[cfg(kani)]` body swap), targeting
+    // the two short-period bookkeeping arms in the backward search loop (the
+    // `memory_back`-guarded fast-forward on a right-part mismatch, and the
+    // `crit_pos_back`-guarded left-part-mismatch arm just above it). Both
+    // also execute in long-period mode; only their `memory_back`
+    // updates/bounds are short-period-specific (guarded by `!long_period`).
+    // A long-period needle (e.g. "ab") never touches `memory_back`, so this
+    // harness picks a short-period needle so those paths genuinely fire
+    // (witnessed by the `kani::cover`s below).
+    //
+    // NEEDLE: "abab" -- short-period (`crit_pos=1, crit_pos_back=3,
+    // period=2`), non-degenerate on both critical factorizations, so the
+    // left-mismatch arm is reachable. The harness re-checks both facts
+    // (`t.memory != usize::MAX`, `t.crit_pos_back > 0`) against the real
+    // constructed searcher rather than assuming them.
+    //
+    // HAYSTACK: HAY_LEN=5 (`needle.len() + 1`), content over {a,b,z}.
+    // HAY_LEN=4 leaves the terminal-arm cover unreachable because the
+    // `StrSearcher` wrapper's `end == 0 => Done` short-circuit intercepts
+    // the next call first; HAY_LEN=5 is the smallest size where the MATCH
+    // arm can land at position 1, so the following call genuinely starts
+    // out of room.
+    //
+    // UNWIND BOUND -- `#[kani::unwind(6)]`, VM-confirmed: every unwinding
+    // assertion reports SUCCESS at this bound.
+    //
+    // ORACLE STRENGTH (soundness AND bounded completeness): a soundness-only
+    // check would not catch a silent missed match (e.g. a fast-forward arm
+    // returning a plausible Reject over a span that contains a real match).
+    // Two checks close that gap:
+    //   (a) ADJACENCY/TILING (`assert_eq!(b, last_start, ...)` on every
+    //       step, `last_start == 0` once `Done`) detects gaps, overlaps, or
+    //       malformed ordering in the `SearchStep` partition -- but NOT a
+    //       semantically invalid jump: an arm returning `Reject(new_end,
+    //       old_end)` can stay perfectly adjacent, so adjacency alone does
+    //       not catch a skipped real match.
+    //   (b) REFERENCE NO-MISS ORACLE (independently computed, not derived
+    //       from the algorithm under test): at HAY_LEN=5 the only two
+    //       possible match starts, 0 and 1, are mutually exclusive
+    //       (`hay[0..4] == "abab"` forces `hay[1] == 'b'`, but
+    //       `hay[1..5] == "abab"` forces `hay[1] == 'a'`), so the expected
+    //       match set is a closed-form `Option<usize>`; the driver asserts
+    //       the OBSERVED set equals it. This is what catches a skipped real
+    //       match or an over-jump.
+    //
+    // POSTCONDITIONS: per-step safety, Match soundness (exact slice
+    // equality against the needle), bounded completeness (oracle above),
+    // and (via the five `kani::cover`s) non-vacuous 5-arm reachability.
+    //
+    // ALSO NOT COVERED: a generic (symbolic-needle, arbitrary-length)
+    // `next_back` contract -- not addressed by this contribution, future
+    // work -- and the `MatchOnly` instantiation of the backward search
+    // (`next_match_back`/`rfind`, where `use_early_reject() == false` gives
+    // different control flow): the 5-arm reachability here is witnessed
+    // under `RejectAndMatch` only.
+    // -----------------------------------------------------------------------
+
+    #[kani::proof]
+    #[kani::unwind(6)]
+    pub fn check_twoway_search_back_arm_covers() {
+        const HAY_LEN: usize = 5;
+        let needle: &str = "abab";
+
+        let mut hay_bytes: [u8; HAY_LEN] = kani::any();
+        for b in hay_bytes.iter_mut() {
+            kani::assume(*b == b'a' || *b == b'b' || *b == b'z');
+        }
+        // SAFETY: every byte was assumed to be one of b'a'/b'b'/b'z' above, so
+        // `hay_bytes` is valid ASCII and therefore valid UTF-8.
+        let haystack: &str = unsafe { crate::str::from_utf8_unchecked(&hay_bytes) };
+
+        let mut searcher = StrSearcher::new(haystack, needle);
+        // Restated (checked, not assumed) fact this harness's whole design
+        // depends on: "abab" is genuinely short-period. `TwoWaySearcher::
+        // next_back`'s own `is_long` computation reads `searcher.memory` (not
+        // `memory_back`), so `t.memory != usize::MAX` checks the exact same
+        // field the source itself branches on to pick the short-period path.
+        // AND "abab" has a NON-DEGENERATE backward critical factorization
+        // (`crit_pos_back > 0`), so the left-mismatch arm below is not
+        // vacuously unreachable.
+        match &searcher.searcher {
+            StrSearcherImpl::TwoWay(t) => {
+                assert_ne!(t.memory, usize::MAX, "needle \"abab\" must be short-period");
+                assert!(t.crit_pos_back > 0, "needle \"abab\" must have a non-degenerate backward factorization");
+            }
+            StrSearcherImpl::Empty(_) => unreachable!("needle \"abab\" is non-empty"),
+        }
+
+        // ---- reference no-miss oracle (bounded completeness) ----
+        // Independently computed (NOT re-derived from the search algorithm
+        // under test): at HAY_LEN=5/needle "abab" the only two possible
+        // match start positions, 0 and 1, are mutually exclusive (see the
+        // comment above), so the expected match set is a closed-form
+        // `Option<usize>`.
+        let expected_match: Option<usize> = if &haystack.as_bytes()[1..5] == needle.as_bytes() {
+            Some(1)
+        } else if &haystack.as_bytes()[0..4] == needle.as_bytes() {
+            Some(0)
+        } else {
+            None
+        };
+
+        let mut last_start = haystack.len();
+        let mut calls = 0usize;
+        let mut observed_match: Option<usize> = None;
+        let mut saw_arm_match = false;
+        let mut saw_arm_terminal = false;
+        let mut saw_arm_byteset_skip = false;
+        let mut saw_arm_left_mismatch = false;
+        let mut saw_arm_right_mismatch_ff = false;
+        loop {
+            calls += 1;
+            assert!(calls <= HAY_LEN + 2, "next_back() did not terminate in bound (arm-attribution loop)");
+
+            // Pre-call facts, independent of the returned step and used ONLY
+            // for arm attribution (the `kani::cover`s below), never by the
+            // correctness oracles: read off the `end` cursor / front byte the
+            // backward algorithm uses -- is this call already out of room,
+            // and if not, is the front byte a member of the needle's byteset.
+            let (out_of_room_before, front_in_byteset) = match &searcher.searcher {
+                StrSearcherImpl::TwoWay(t) => {
+                    let out_of_room = t.end < needle.len();
+                    let front_in_set =
+                        !out_of_room && t.byteset_contains(haystack.as_bytes()[t.end - needle.len()]);
+                    (out_of_room, front_in_set)
+                }
+                StrSearcherImpl::Empty(_) => unreachable!("needle \"abab\" is non-empty"),
+            };
+
+            let step = ReverseSearcher::next_back(&mut searcher);
+
+            let mem_back_after = match &searcher.searcher {
+                StrSearcherImpl::TwoWay(t) => t.memory_back,
+                StrSearcherImpl::Empty(_) => unreachable!("needle \"abab\" is non-empty"),
+            };
+
+            match step {
+                SearchStep::Match(a, b) => {
+                    assert!(a <= b, "step indices out of order");
+                    assert!(b <= haystack.len(), "step end out of bounds");
+                    // Strengthened from `b <= last_start` (non-increasing) to
+                    // exact adjacency/tiling -- the shipped RejectAndMatch
+                    // early-reject guarantees `b == last_start` (see the
+                    // comment above). This is free and catches gaps/overlaps
+                    // in the step partition, but not a semantically invalid
+                    // jump (that's what the no-miss oracle below is for).
+                    assert_eq!(
+                        b, last_start,
+                        "step must exactly tile against the prior step's start (adjacency/no-skip)"
+                    );
+                    // Functional correctness, not just in-bounds: the
+                    // returned Match slice genuinely equals the needle.
+                    assert_eq!(b - a, needle.len(), "match span must equal needle length");
+                    assert_eq!(
+                        &haystack.as_bytes()[a..b],
+                        needle.as_bytes(),
+                        "returned Match slice must genuinely equal the needle (not just in-bounds)"
+                    );
+                    // Reference no-miss oracle -- record the observed
+                    // match. At most one is ever expected at this fixture
+                    // (mirrors `expected_match`'s own at-most-one property);
+                    // a second Match here would itself be a genuine anomaly
+                    // worth failing loudly on, not silently overwriting.
+                    assert!(
+                        observed_match.is_none(),
+                        "more than one Match observed -- expected at most one for this fixture"
+                    );
+                    observed_match = Some(a);
+                    last_start = a;
+                    saw_arm_match = true;
+                }
+                SearchStep::Reject(a, b) => {
+                    assert!(a <= b, "step indices out of order");
+                    assert!(b <= haystack.len(), "step end out of bounds");
+                    // Same adjacency strengthening as the Match arm above.
+                    assert_eq!(
+                        b, last_start,
+                        "step must exactly tile against the prior step's start (adjacency/no-skip)"
+                    );
+                    last_start = a;
+                    if out_of_room_before {
+                        // (i) genuine terminal arm: the call's one-and-only
+                        // check ("no room left to search",
+                        // `end < needle.len()`) fired immediately -- zero
+                        // `'search:` loop arms ran.
+                        saw_arm_terminal = true;
+                    } else if !front_in_byteset {
+                        // (ii) byteset-skip arm: the pre-call front byte is
+                        // NOT in the needle's byteset.
+                        saw_arm_byteset_skip = true;
+                    } else if mem_back_after != needle.len() {
+                        // (iii) short-period `memory_back`-guarded
+                        // fast-forward arm: the ONLY arm that leaves
+                        // `memory_back` different from `needle.len()`
+                        // afterward (every other short-period arm resets it
+                        // TO `needle.len()`, by construction of the
+                        // source).
+                        saw_arm_right_mismatch_ff = true;
+                    } else {
+                        // (iv) left-part (crit_pos_back) mismatch arm, by
+                        // elimination over the pre-call facts: front byte WAS
+                        // in the byteset (so byteset-skip did not fire), and
+                        // `memory_back` reset to `needle.len()` (so it wasn't
+                        // the memory_back-guarded fast-forward). This
+                        // `memory_back == needle.len()` signature identifies
+                        // the left arm regardless of what runs next: the
+                        // no-room check precedes the early-reject check in
+                        // the `'search:` loop, so the terminal arm MAY still
+                        // fire later in this same call (witness: haystack
+                        // "aaaaa" with needle "abab" runs this arm moving
+                        // end 5 -> 3, then the terminal arm, returning
+                        // Reject(0, 5)) -- that does not change this arm's
+                        // attribution signature.
+                        saw_arm_left_mismatch = true;
+                    }
+                }
+                SearchStep::Done => break,
+            }
+        }
+        // Strengthened from `last_start <= haystack.len()` -- once Done
+        // fires, the search has genuinely tiled all the way down to
+        // position 0 (Done only fires when `searcher.end == 0`, and
+        // `last_start` tracks `self.end` exactly per the adjacency argument
+        // above), not merely "somewhere in bounds".
+        assert_eq!(last_start, 0, "search must fully tile the haystack down to position 0 once Done is reached");
+
+        // The actual completeness proof -- the observed match set
+        // (collected above, at most one by construction) must exactly equal
+        // the independently-computed expected match set. A silently missed
+        // real match (or a spurious phantom one) now fails this assert
+        // directly.
+        assert_eq!(
+            observed_match, expected_match,
+            "reference no-miss oracle: observed Match set must equal the independently-computed expected set"
+        );
+
+        kani::cover(saw_arm_match, "search-loop arm (back): a real Match fires");
+        kani::cover(saw_arm_terminal, "search-loop arm (back): a genuine no-match/Done (terminal) fires");
+        kani::cover(saw_arm_byteset_skip, "search-loop arm (back): byteset-skip fast path fires");
+        kani::cover(saw_arm_left_mismatch, "search-loop arm (back): left-part (crit_pos_back) mismatch fires");
+        kani::cover(
+            saw_arm_right_mismatch_ff,
+            "search-loop arm (back): short-period memory_back-guarded fast-forward fires",
+        );
+    }
 }
