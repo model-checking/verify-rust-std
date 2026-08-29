@@ -1993,7 +1993,11 @@ mod verify {
             "correct_all_childrens_parent_links: child at check_i lost its parent link"
         );
         let parent_edge = ascended.ok().unwrap();
-        assert_eq!(parent_edge.idx(), check_i, "correct_all_childrens_parent_links: wrong parent_idx");
+        assert_eq!(
+            parent_edge.idx(),
+            check_i,
+            "correct_all_childrens_parent_links: wrong parent_idx"
+        );
         let parent_addr = NodeRef::as_internal_ptr(&parent_edge.into_node()) as usize;
         assert_eq!(
             parent_addr, internal_addr,
@@ -2306,7 +2310,10 @@ mod verify {
             idx < old_len,
             "internal insert_fit content: interior insertion, multi-edge relink witnessed",
         );
-        kani::cover(idx == old_len, "internal insert_fit content: append insertion (single relink)");
+        kani::cover(
+            idx == old_len,
+            "internal insert_fit content: append insertion (single relink)",
+        );
     }
 
     // ---------------------------------------------------------------------
@@ -2577,11 +2584,23 @@ mod verify {
             );
         }
 
-        kani::cover(check_i >= lo && check_i < hi, "checked an edge INSIDE the sub-range (expect fixed)");
-        kani::cover(check_i < lo || check_i >= hi, "checked an edge OUTSIDE the sub-range (expect untouched)");
-        kani::cover(lo < hi && hi < len + 1, "a proper subrange not extending to the end (may start at 0)");
+        kani::cover(
+            check_i >= lo && check_i < hi,
+            "checked an edge INSIDE the sub-range (expect fixed)",
+        );
+        kani::cover(
+            check_i < lo || check_i >= hi,
+            "checked an edge OUTSIDE the sub-range (expect untouched)",
+        );
+        kani::cover(
+            lo < hi && hi < len + 1,
+            "a proper subrange not extending to the end (may start at 0)",
+        );
         kani::cover(lo == hi, "empty range: zero-iteration call, nothing relinked");
-        kani::cover(lo == 0 && hi == len + 1, "full range via DIRECT call (mirrors correct_all_... behavior)");
+        kani::cover(
+            lo == 0 && hi == len + 1,
+            "full range via DIRECT call (mirrors correct_all_... behavior)",
+        );
         kani::cover(
             check_i >= lo && check_i < hi && len == CAP,
             "an in-range index is checked on a maximal-occupancy node",
