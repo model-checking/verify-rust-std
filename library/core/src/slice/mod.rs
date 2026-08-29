@@ -639,6 +639,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[requires(index.kani_in_bounds(self.len()))]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -684,6 +685,7 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[requires(index.kani_in_bounds(self.len()))]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -948,6 +950,8 @@ impl<T> [T] {
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
     #[track_caller]
+    #[requires(a < self.len() && b < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -1345,6 +1349,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(N != 0 && self.len() % N == 0)]
     pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1505,6 +1510,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(N != 0 && self.len() % N == 0)]
     pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -2043,6 +2049,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(mid <= self.len())]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2097,6 +2104,7 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[requires(mid <= self.len())]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -4788,6 +4796,7 @@ impl<T> [T] {
     #[stable(feature = "get_many_mut", since = "1.86.0")]
     #[inline]
     #[track_caller]
+    #[requires(get_disjoint_check_valid(&indices, self.len()).is_ok())]
     pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
         &mut self,
         indices: [I; N],
@@ -5555,5 +5564,730 @@ mod verify {
     fn check_reverse() {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
+    }
+
+    // ---- Challenge 17: O(1) unsafe split/swap fns ----
+    // These are bounds-geometry proofs (no element-value dependence and no loop),
+    // so they need no `#[kani::unwind]`; the symbolic-length sub-slice over a fixed
+    // backing array is the accepted "unbounded" encoding.
+
+    macro_rules! check_split_at_unchecked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::split_at_unchecked)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let mid: usize = kani::any();
+                let _ = unsafe { slice.split_at_unchecked(mid) };
+            }
+        };
+    }
+    check_split_at_unchecked!(check_split_at_unchecked_unit, ());
+    check_split_at_unchecked!(check_split_at_unchecked_u8, u8);
+    check_split_at_unchecked!(check_split_at_unchecked_u64, u64);
+    check_split_at_unchecked!(check_split_at_unchecked_char, char);
+
+    macro_rules! check_split_at_mut_unchecked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::split_at_mut_unchecked)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let mid: usize = kani::any();
+                let _ = unsafe { slice.split_at_mut_unchecked(mid) };
+            }
+        };
+    }
+    check_split_at_mut_unchecked!(check_split_at_mut_unchecked_unit, ());
+    check_split_at_mut_unchecked!(check_split_at_mut_unchecked_u8, u8);
+    check_split_at_mut_unchecked!(check_split_at_mut_unchecked_u64, u64);
+    check_split_at_mut_unchecked!(check_split_at_mut_unchecked_char, char);
+
+    macro_rules! check_swap_unchecked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(<[$ty]>::swap_unchecked)]
+            fn $harness() {
+                const ARR_SIZE: usize = 100;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let a: usize = kani::any();
+                let b: usize = kani::any();
+                unsafe { slice.swap_unchecked(a, b) };
+            }
+        };
+    }
+    // NOTE: no ZST (`()`) instantiation for `swap_unchecked`: `kani::modifies(self)`
+    // over a zero-size slice region trips a CBMC contracts-library limitation
+    // (`car_set_insert`). Swapping ZSTs moves zero bytes, so it is trivially safe;
+    // the non-ZST instantiations below exercise the actual `ptr::swap` memory writes.
+    check_swap_unchecked!(check_swap_unchecked_u8, u8);
+    check_swap_unchecked!(check_swap_unchecked_u16, u16);
+    check_swap_unchecked!(check_swap_unchecked_u64, u64);
+    check_swap_unchecked!(check_swap_unchecked_char, char);
+
+    // ---- get_unchecked / get_unchecked_mut ----
+    // These are generic over the `SliceIndex` type `I`. Kani does not support
+    // contracts on trait functions (model-checking/kani#1997), so the
+    // `SliceIndex` impls cannot carry them. Instead, the kani-only trait
+    // predicate `SliceIndex::kani_in_bounds` (implemented by every
+    // `SliceIndex<[T]>` impl with that impl's documented in-bounds
+    // precondition) gives the generic inherent wrappers
+    // `<[T]>::get_unchecked{,_mut}` a real fn-level `#[requires]` contract.
+    // Each `proof_for_contract` harness verifies the wrapper through the real
+    // body of one concrete index-type impl; together they cover every
+    // `SliceIndex<[T]>` impl. O(1): no loop, so no `#[kani::unwind]`.
+    // `RangeInclusive` inputs come from `any_range_inclusive`, which also
+    // exhausts the range by iteration on a nondet branch, so the `exhausted`
+    // arm of its `kani_in_bounds` predicate is exercised too.
+
+    use crate::ops::{Bound, IndexRange};
+
+    fn any_range_inclusive() -> crate::ops::RangeInclusive<usize> {
+        let mut range = kani::any::<usize>()..=kani::any::<usize>();
+        let exhaust: bool = kani::any();
+        if exhaust {
+            let _ = range.next();
+        }
+        range
+    }
+
+    fn any_bound() -> Bound<usize> {
+        let selector: u8 = kani::any();
+        match selector % 3 {
+            0 => Bound::Included(kani::any()),
+            1 => Bound::Excluded(kani::any()),
+            2..=u8::MAX => Bound::Unbounded,
+        }
+    }
+
+    macro_rules! check_get_unchecked_contract {
+        ($h:ident, $h_mut:ident, $ity:ty, $ty:ty, $mk:expr) => {
+            #[kani::proof_for_contract(<[$ty]>::get_unchecked::<$ity>)]
+            fn $h() {
+                const ARR_SIZE: usize = 100;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let index: $ity = $mk;
+                let _ = unsafe { slice.get_unchecked(index) };
+            }
+            #[kani::proof_for_contract(<[$ty]>::get_unchecked_mut::<$ity>)]
+            fn $h_mut() {
+                const ARR_SIZE: usize = 100;
+                // A repeat expression, not `kani::any::<[T; N]>()`: for an
+                // element type with a validity invariant (`char`), array
+                // `kani::any` fills the array through `array::map`, whose
+                // init guard calls `<[MaybeUninit<T>]>::get_unchecked_mut`.
+                // That is a second monomorphization of the fn under contract
+                // and it trips the contract single-top-level-call check.
+                // `get_unchecked_mut` never reads the elements, so equal
+                // element values lose nothing: the verified property depends
+                // only on the still-nondet slice length and index.
+                let mut arr: [$ty; ARR_SIZE] = [kani::any(); ARR_SIZE];
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let index: $ity = $mk;
+                let _ = unsafe { slice.get_unchecked_mut(index) };
+            }
+        };
+    }
+    check_get_unchecked_contract!(
+        check_get_unchecked_usize_unit,
+        check_get_unchecked_mut_usize_unit,
+        usize,
+        (),
+        kani::any()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_usize_u8,
+        check_get_unchecked_mut_usize_u8,
+        usize,
+        u8,
+        kani::any()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_usize_u64,
+        check_get_unchecked_mut_usize_u64,
+        usize,
+        u64,
+        kani::any()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_usize_char,
+        check_get_unchecked_mut_usize_char,
+        usize,
+        char,
+        kani::any()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_index_range_u8,
+        check_get_unchecked_mut_index_range_u8,
+        IndexRange,
+        u8,
+        {
+            let start: usize = kani::any();
+            let end: usize = kani::any();
+            kani::assume(start <= end);
+            // SAFETY: `start <= end` is the constructor's documented precondition.
+            unsafe { IndexRange::new_unchecked(start, end) }
+        }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_unit,
+        check_get_unchecked_mut_range_unit,
+        crate::ops::Range<usize>,
+        (),
+        kani::any::<usize>()..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_u8,
+        check_get_unchecked_mut_range_u8,
+        crate::ops::Range<usize>,
+        u8,
+        kani::any::<usize>()..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_u64,
+        check_get_unchecked_mut_range_u64,
+        crate::ops::Range<usize>,
+        u64,
+        kani::any::<usize>()..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_char,
+        check_get_unchecked_mut_range_char,
+        crate::ops::Range<usize>,
+        char,
+        kani::any::<usize>()..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_new_range_u8,
+        check_get_unchecked_mut_new_range_u8,
+        crate::range::Range<usize>,
+        u8,
+        crate::range::Range { start: kani::any(), end: kani::any() }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_to_u8,
+        check_get_unchecked_mut_range_to_u8,
+        crate::ops::RangeTo<usize>,
+        u8,
+        ..kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_from_u8,
+        check_get_unchecked_mut_range_from_u8,
+        crate::ops::RangeFrom<usize>,
+        u8,
+        kani::any::<usize>()..
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_new_range_from_u8,
+        check_get_unchecked_mut_new_range_from_u8,
+        crate::range::RangeFrom<usize>,
+        u8,
+        crate::range::RangeFrom { start: kani::any() }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_full_u8,
+        check_get_unchecked_mut_range_full_u8,
+        crate::ops::RangeFull,
+        u8,
+        ..
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_inclusive_u8,
+        check_get_unchecked_mut_range_inclusive_u8,
+        crate::ops::RangeInclusive<usize>,
+        u8,
+        any_range_inclusive()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_new_range_inclusive_u8,
+        check_get_unchecked_mut_new_range_inclusive_u8,
+        crate::range::RangeInclusive<usize>,
+        u8,
+        crate::range::RangeInclusive { start: kani::any(), last: kani::any() }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_range_to_inclusive_u8,
+        check_get_unchecked_mut_range_to_inclusive_u8,
+        crate::ops::RangeToInclusive<usize>,
+        u8,
+        ..=kani::any::<usize>()
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_new_range_to_inclusive_u8,
+        check_get_unchecked_mut_new_range_to_inclusive_u8,
+        crate::range::RangeToInclusive<usize>,
+        u8,
+        crate::range::RangeToInclusive { last: kani::any() }
+    );
+    check_get_unchecked_contract!(
+        check_get_unchecked_bound_pair_u8,
+        check_get_unchecked_mut_bound_pair_u8,
+        (Bound<usize>, Bound<usize>),
+        u8,
+        (any_bound(), any_bound())
+    );
+
+    // ---- as_chunks_unchecked / as_chunks_unchecked_mut ----
+    // Reinterpret `[T]` as `[[T; N]]`; precondition `N != 0 && len % N == 0` is
+    // expressible generically, so these carry real `#[requires]` contracts and are
+    // checked per concrete (T, N) monomorphization. O(1) (no loop): exact_div + a
+    // single from_raw_parts cast. No writes -> no `modifies`.
+
+    macro_rules! check_as_chunks_unchecked {
+        ($harness:ident, $ty:ty, $n:literal) => {
+            #[kani::proof_for_contract(<[$ty]>::as_chunks_unchecked::<$n>)]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let _ = unsafe { slice.as_chunks_unchecked::<$n>() };
+            }
+        };
+    }
+    check_as_chunks_unchecked!(check_as_chunks_unchecked_u8_2, u8, 2);
+    check_as_chunks_unchecked!(check_as_chunks_unchecked_u8_3, u8, 3);
+    check_as_chunks_unchecked!(check_as_chunks_unchecked_u64_2, u64, 2);
+    check_as_chunks_unchecked!(check_as_chunks_unchecked_char_3, char, 3);
+
+    macro_rules! check_as_chunks_unchecked_mut {
+        ($harness:ident, $ty:ty, $n:literal) => {
+            #[kani::proof_for_contract(<[$ty]>::as_chunks_unchecked_mut::<$n>)]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let _ = unsafe { slice.as_chunks_unchecked_mut::<$n>() };
+            }
+        };
+    }
+    check_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_u8_2, u8, 2);
+    check_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_u8_3, u8, 3);
+    check_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_u64_2, u64, 2);
+    check_as_chunks_unchecked_mut!(check_as_chunks_unchecked_mut_char_3, char, 3);
+
+    // ---- get_disjoint_unchecked_mut ----
+    // Generic over the index type `I` and const `N`, with a two-part safety
+    // precondition: every index in bounds AND the indices pairwise disjoint.
+    // `get_disjoint_check_valid` (the checker the safe `get_disjoint_mut`
+    // gates on) is exactly that predicate over the `GetDisjointMutIndex`
+    // methods, so it is the fn-level `#[requires]` contract, and these
+    // harnesses verify it per concrete `I` and `N`: element indices (`usize`)
+    // plus all four `GetDisjointMutIndex` range impls (`ops` and `core::range`
+    // flavors of `Range` and `RangeInclusive`; `RangeInclusive` inputs include
+    // iteration-exhausted values via `any_range_inclusive`). The body loops
+    // `0..N` with concrete `N`, so the loop bound is concrete and needs no
+    // `#[kani::unwind]`.
+
+    #[kani::proof_for_contract(<[u8]>::get_disjoint_unchecked_mut::<usize, 2>)]
+    fn check_get_disjoint_unchecked_mut_2_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices: [usize; 2] = kani::any();
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(<[u64]>::get_disjoint_unchecked_mut::<usize, 2>)]
+    fn check_get_disjoint_unchecked_mut_2_u64() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u64; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices: [usize; 2] = kani::any();
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(<[u8]>::get_disjoint_unchecked_mut::<usize, 3>)]
+    fn check_get_disjoint_unchecked_mut_3_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices: [usize; 3] = kani::any();
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(
+        <[u8]>::get_disjoint_unchecked_mut::<crate::ops::Range<usize>, 2>
+    )]
+    fn check_get_disjoint_unchecked_mut_2_range_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices = [
+            kani::any::<usize>()..kani::any::<usize>(),
+            kani::any::<usize>()..kani::any::<usize>(),
+        ];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(
+        <[u8]>::get_disjoint_unchecked_mut::<crate::ops::RangeInclusive<usize>, 2>
+    )]
+    fn check_get_disjoint_unchecked_mut_2_range_inclusive_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices = [any_range_inclusive(), any_range_inclusive()];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(
+        <[u8]>::get_disjoint_unchecked_mut::<crate::range::Range<usize>, 2>
+    )]
+    fn check_get_disjoint_unchecked_mut_2_new_range_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices = [
+            crate::range::Range { start: kani::any(), end: kani::any() },
+            crate::range::Range { start: kani::any(), end: kani::any() },
+        ];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    #[kani::proof_for_contract(
+        <[u8]>::get_disjoint_unchecked_mut::<crate::range::RangeInclusive<usize>, 2>
+    )]
+    fn check_get_disjoint_unchecked_mut_2_new_range_inclusive_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+        let indices = [
+            crate::range::RangeInclusive { start: kani::any(), last: kani::any() },
+            crate::range::RangeInclusive { start: kani::any(), last: kani::any() },
+        ];
+        let _ = unsafe { slice.get_disjoint_unchecked_mut(indices) };
+    }
+
+    // ---- Safe chunk accessors (first/last/split_first/split_last _chunk) ----
+    // Safe abstractions: prove the internal unsafe (a bounded `cast_array` ptr cast
+    // guarded by a `len < N` / `split_at_checked(N)` check) is UB-free for a slice of
+    // any (symbolic) length. O(1), no loop -> no `#[kani::unwind]`. The symbolic
+    // length exercises both the `None` (too short) and `Some` (cast) branches.
+
+    macro_rules! check_chunk_accessor {
+        ($harness:ident, $ty:ty, $n:literal, $method:ident) => {
+            #[kani::proof]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let _ = slice.$method::<$n>();
+            }
+        };
+    }
+    macro_rules! check_chunk_accessor_mut {
+        ($harness:ident, $ty:ty, $n:literal, $method:ident) => {
+            #[kani::proof]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let _ = slice.$method::<$n>();
+            }
+        };
+    }
+
+    check_chunk_accessor!(check_first_chunk_u8_0, u8, 0, first_chunk);
+    check_chunk_accessor!(check_first_chunk_u8_2, u8, 2, first_chunk);
+    check_chunk_accessor!(check_first_chunk_char_3, char, 3, first_chunk);
+    check_chunk_accessor!(check_split_first_chunk_u8_2, u8, 2, split_first_chunk);
+    check_chunk_accessor!(check_split_first_chunk_char_3, char, 3, split_first_chunk);
+    check_chunk_accessor!(check_split_last_chunk_u8_2, u8, 2, split_last_chunk);
+    check_chunk_accessor!(check_split_last_chunk_char_3, char, 3, split_last_chunk);
+    check_chunk_accessor!(check_last_chunk_u8_0, u8, 0, last_chunk);
+    check_chunk_accessor!(check_last_chunk_u8_2, u8, 2, last_chunk);
+    check_chunk_accessor!(check_last_chunk_char_3, char, 3, last_chunk);
+
+    check_chunk_accessor_mut!(check_first_chunk_mut_u8_2, u8, 2, first_chunk_mut);
+    check_chunk_accessor_mut!(check_first_chunk_mut_char_3, char, 3, first_chunk_mut);
+    check_chunk_accessor_mut!(check_split_first_chunk_mut_u8_2, u8, 2, split_first_chunk_mut);
+    check_chunk_accessor_mut!(check_split_first_chunk_mut_char_3, char, 3, split_first_chunk_mut);
+    check_chunk_accessor_mut!(check_split_last_chunk_mut_u8_2, u8, 2, split_last_chunk_mut);
+    check_chunk_accessor_mut!(check_split_last_chunk_mut_char_3, char, 3, split_last_chunk_mut);
+    check_chunk_accessor_mut!(check_last_chunk_mut_u8_2, u8, 2, last_chunk_mut);
+    check_chunk_accessor_mut!(check_last_chunk_mut_char_3, char, 3, last_chunk_mut);
+
+    // ---- split_at_checked / split_at_mut_checked ----
+    // Safe wrappers over split_at_unchecked guarded by `mid <= len`; symbolic `mid`
+    // exercises both the `Some` and `None` branches. O(1), no loop.
+
+    macro_rules! check_split_at_checked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array(&arr);
+                let mid: usize = kani::any();
+                let _ = slice.split_at_checked(mid);
+            }
+        };
+    }
+    check_split_at_checked!(check_split_at_checked_u8, u8);
+    check_split_at_checked!(check_split_at_checked_u64, u64);
+    check_split_at_checked!(check_split_at_checked_char, char);
+
+    macro_rules! check_split_at_mut_checked {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $harness() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let slice = kani::slice::any_slice_of_array_mut(&mut arr);
+                let mid: usize = kani::any();
+                let _ = slice.split_at_mut_checked(mid);
+            }
+        };
+    }
+    check_split_at_mut_checked!(check_split_at_mut_checked_u8, u8);
+    check_split_at_mut_checked!(check_split_at_mut_checked_u64, u64);
+    check_split_at_mut_checked!(check_split_at_mut_checked_char, char);
+
+    // ---- as_chunks / as_chunks_mut / as_rchunks (O(1), no loop) ----
+    // Split into a slice of `[T; N]` plus a remainder via split_at_unchecked +
+    // as_chunks_unchecked; pure pointer/length arithmetic, no loops -> no unwind.
+
+    macro_rules! check_as_chunks_fam {
+        ($h:ident, $ty:ty, $n:literal, $m:ident) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let _ = s.$m::<$n>();
+            }
+        };
+    }
+    check_as_chunks_fam!(check_as_chunks_u8_2, u8, 2, as_chunks);
+    check_as_chunks_fam!(check_as_chunks_char_3, char, 3, as_chunks);
+    check_as_chunks_fam!(check_as_rchunks_u8_2, u8, 2, as_rchunks);
+    check_as_chunks_fam!(check_as_rchunks_char_3, char, 3, as_rchunks);
+
+    #[kani::proof]
+    fn check_as_chunks_mut_u8_2() {
+        const ARR_SIZE: usize = 64;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let _ = s.as_chunks_mut::<2>();
+    }
+    #[kani::proof]
+    fn check_as_chunks_mut_char_3() {
+        const ARR_SIZE: usize = 64;
+        let mut arr: [char; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let _ = s.as_chunks_mut::<3>();
+    }
+
+    // ---- as_flattened / as_flattened_mut (receiver is `[[T; N]]`) ----
+    macro_rules! check_as_flattened {
+        ($h:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let arr: [[$ty; $n]; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let _ = s.as_flattened();
+            }
+        };
+    }
+    check_as_flattened!(check_as_flattened_u8_2, u8, 2);
+    check_as_flattened!(check_as_flattened_char_3, char, 3);
+
+    macro_rules! check_as_flattened_mut {
+        ($h:ident, $ty:ty, $n:literal) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [[$ty; $n]; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array_mut(&mut arr);
+                let _ = s.as_flattened_mut();
+            }
+        };
+    }
+    check_as_flattened_mut!(check_as_flattened_mut_u8_2, u8, 2);
+    check_as_flattened_mut!(check_as_flattened_mut_char_3, char, 3);
+
+    // ---- as_simd / as_simd_mut (delegate to the already-verified align_to) ----
+    // Plain proof replays align_to's body (no contract assertion at the call site),
+    // so the real transmute is verified. T must be a SimdElement; LANES supported.
+
+    macro_rules! check_as_simd {
+        ($h:ident, $ty:ty, $lanes:literal) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let arr: [$ty; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array(&arr);
+                let _ = s.as_simd::<$lanes>();
+            }
+        };
+    }
+    check_as_simd!(check_as_simd_u8_4, u8, 4);
+    check_as_simd!(check_as_simd_u32_8, u32, 8);
+
+    macro_rules! check_as_simd_mut {
+        ($h:ident, $ty:ty, $lanes:literal) => {
+            #[kani::proof]
+            fn $h() {
+                const ARR_SIZE: usize = 64;
+                let mut arr: [$ty; ARR_SIZE] = kani::any();
+                let s = kani::slice::any_slice_of_array_mut(&mut arr);
+                let _ = s.as_simd_mut::<$lanes>();
+            }
+        };
+    }
+    check_as_simd_mut!(check_as_simd_mut_u8_4, u8, 4);
+    check_as_simd_mut!(check_as_simd_mut_u32_8, u32, 8);
+
+    // ---- binary_search_by (loop count is logarithmic in len) ----
+    // A nondeterministic (possibly inconsistent) comparator still must keep every
+    // probe index in bounds. `size` halves each iteration, so unwind = log2(len)+2.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_binary_search_by_u8() {
+        const ARR_SIZE: usize = 32;
+        let arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let _ = s.binary_search_by(|_probe: &u8| match kani::any::<u8>() % 3 {
+            0 => crate::cmp::Ordering::Less,
+            1 => crate::cmp::Ordering::Equal,
+            _ => crate::cmp::Ordering::Greater,
+        });
+    }
+
+    // ---- get_disjoint_mut / get_disjoint_check_valid (loops bounded by const N) ----
+    // get_disjoint_mut validates (bounds + pairwise-disjoint) then calls the unchecked
+    // path; fully symbolic indices exercise both the Ok and Err branches with no UB.
+    // Loops are `0..N` and the O(N^2) overlap check, both const-N bounded -> no unwind.
+
+    #[kani::proof]
+    fn check_get_disjoint_mut_2_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let i0: usize = kani::any();
+        let i1: usize = kani::any();
+        let _ = s.get_disjoint_mut([i0, i1]);
+    }
+    #[kani::proof]
+    fn check_get_disjoint_mut_3_u8() {
+        const ARR_SIZE: usize = 100;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let i0: usize = kani::any();
+        let i1: usize = kani::any();
+        let i2: usize = kani::any();
+        let _ = s.get_disjoint_mut([i0, i1, i2]);
+    }
+
+    #[kani::proof]
+    fn check_get_disjoint_check_valid_2() {
+        let len: usize = kani::any();
+        let i0: usize = kani::any();
+        let i1: usize = kani::any();
+        let _ = get_disjoint_check_valid::<usize, 2>(&[i0, i1], len);
+    }
+    #[kani::proof]
+    fn check_get_disjoint_check_valid_3() {
+        let len: usize = kani::any();
+        let i0: usize = kani::any();
+        let i1: usize = kani::any();
+        let i2: usize = kani::any();
+        let _ = get_disjoint_check_valid::<usize, 3>(&[i0, i1, i2], len);
+    }
+
+    // ---- Heavy linear-loop safe abstractions (small backing + tuned unwind) ----
+    // These iterate over the slice length, so they need an explicit `#[kani::unwind]`
+    // (per the challenge-16 lesson) and a deliberately small backing array to keep
+    // the symbolic-length unrolling tractable.
+
+    // rotate_left/right: proven over representative CONCRETE (length, amount)
+    // configurations with symbolic element values. A *symbolic* rotation amount is
+    // intractable here: `ptr_rotate` performs symbolic-size memcpys at a symbolic
+    // split point (and explores its block-swap/juggling paths), exceeding the 6GB
+    // CBMC budget on this machine even at length 3. With concrete (len, amount) the
+    // function takes a single concrete path whose bounds safety verifies cheaply;
+    // the spread of lengths/amounts exercises the early-return, buffer, and
+    // block-swap branches. (Disclosed bound: rotate coverage is per-config, not
+    // symbolic-length, unlike the rest of this challenge.)
+    macro_rules! check_rotate_cfg {
+        ($lh:ident, $rh:ident, $len:literal, $amt:literal, $uw:literal) => {
+            #[kani::proof]
+            #[kani::unwind($uw)]
+            fn $lh() {
+                let mut arr: [u8; $len] = kani::any();
+                arr.rotate_left($amt);
+            }
+            #[kani::proof]
+            #[kani::unwind($uw)]
+            fn $rh() {
+                let mut arr: [u8; $len] = kani::any();
+                arr.rotate_right($amt);
+            }
+        };
+    }
+    check_rotate_cfg!(check_rotate_left_2_1, check_rotate_right_2_1, 2, 1, 4);
+    check_rotate_cfg!(check_rotate_left_3_1, check_rotate_right_3_1, 3, 1, 5);
+    check_rotate_cfg!(check_rotate_left_3_2, check_rotate_right_3_2, 3, 2, 5);
+    check_rotate_cfg!(check_rotate_left_4_2, check_rotate_right_4_2, 4, 2, 6);
+    check_rotate_cfg!(check_rotate_left_5_2, check_rotate_right_5_2, 5, 2, 7);
+    check_rotate_cfg!(check_rotate_left_8_3, check_rotate_right_8_3, 8, 3, 10);
+
+    // src and dst come from SEPARATE backing arrays (disjoint, as copy_from_slice
+    // requires) with a shared symbolic length so the equal-length precondition holds.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_copy_from_slice_u8() {
+        const ARR_SIZE: usize = 8;
+        let mut dst_arr: [u8; ARR_SIZE] = kani::any();
+        let src_arr: [u8; ARR_SIZE] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= ARR_SIZE);
+        let dst = &mut dst_arr[..len];
+        let src = &src_arr[..len];
+        dst.copy_from_slice(src);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_copy_within_u8() {
+        const ARR_SIZE: usize = 8;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let start: usize = kani::any();
+        let end: usize = kani::any();
+        let dest: usize = kani::any();
+        kani::assume(start <= end && end <= s.len());
+        let count = end - start;
+        kani::assume(dest <= s.len() - count);
+        s.copy_within(start..end, dest);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_swap_with_slice_u8() {
+        const ARR_SIZE: usize = 8;
+        let mut a_arr: [u8; ARR_SIZE] = kani::any();
+        let mut b_arr: [u8; ARR_SIZE] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= ARR_SIZE);
+        let a = &mut a_arr[..len];
+        let b = &mut b_arr[..len];
+        a.swap_with_slice(b);
+    }
+
+    // Heaviest: the dedup loop runs `next_read` from 1 to len with two &mut creations
+    // and a swap per iteration. Nondeterministic `same_bucket` exercises all branches.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn check_partition_dedup_by_u8() {
+        const ARR_SIZE: usize = 5;
+        let mut arr: [u8; ARR_SIZE] = kani::any();
+        let s = kani::slice::any_slice_of_array_mut(&mut arr);
+        let _ = s.partition_dedup_by(|_a, _b| kani::any());
     }
 }
