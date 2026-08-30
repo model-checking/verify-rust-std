@@ -2804,8 +2804,19 @@ mod verify {
         }
 
         kani::cover(right_len == 0, "NV1: an EMPTY right child is merged in");
-        kani::cover(right_len == ib && ib > 0, "NV2: a maximal right child for this bound");
-        kani::cover(old_left_len == ib && ib > 0, "NV3: a maximal left prefix for this bound");
+        // NOTE: a cover of the form `right_len == ib` would be UNSATISFIABLE at ib == CAPACITY,
+        // because do_merge's own precondition (asserted in the function) caps
+        // old_left_len + 1 + right_len at CAPACITY -- so no single child can hold CAPACITY pairs
+        // before the merge. The reachable extremes are one child empty and the other as large as
+        // that precondition admits.
+        kani::cover(
+            old_left_len == 0 && right_len + 1 == CAP,
+            "NV2: the largest right child the merge precondition admits, with an empty left child",
+        );
+        kani::cover(
+            right_len == 0 && old_left_len + 1 == CAP,
+            "NV3: the largest left child the merge precondition admits, with an empty right child",
+        );
         kani::cover(
             old_left_len + 1 + right_len == CAP,
             "NV4: the merge fills the surviving child to CAPACITY",
@@ -3091,10 +3102,11 @@ mod verify {
         );
     }
     // ---------------------------------------------------------------------
-    // CONTRACT CANDIDATE — `Handle::<_, KV>::split` on a LEAF, the whole public function.
+    // PROBE — `Handle::<_, KV>::split` on a LEAF (the leaf arm of the pub(super) function).
     //
-    // Drives the whole public function, which allocates the new right node itself and returns a
-    // `SplitResult`, rather than only its private helper `split_leaf_data`. This drives the real `split`, which allocates the new right node
+    // Drives the real `split`, which allocates the new right node itself and returns a
+    // `SplitResult`, rather than only its private helper `split_leaf_data`. Residual: monomorphic
+    // at i32, and `old_len` is SAMPLED at {1, CAPACITY}, not left symbolic across the range. This drives the real `split`, which allocates the new right node
     // itself and returns a `SplitResult`, and checks the returned kv plus both sides' stored
     // lengths and their boundary content.
     // ---------------------------------------------------------------------
@@ -3151,17 +3163,26 @@ mod verify {
                     == (old_len - 1) as i32,
                 "SP6: the new node's last key is the source's original last key"
             );
+            assert!(
+                unsafe { (*right_ptr).vals[new_right_len - 1].assume_init_read() }
+                    == 1000 + (old_len - 1) as i32,
+                "SP6v: the new node's last val is the source's original last val"
+            );
         }
         if idx > 0 {
             assert!(
                 unsafe { (*left_ptr).keys[0].assume_init_read() } == 0,
-                "SP7: the source node's head is untouched by the split"
+                "SP7: the source node's head key is untouched by the split"
+            );
+            assert!(
+                unsafe { (*left_ptr).vals[0].assume_init_read() } == 1000,
+                "SP7v: the source node's head val is untouched by the split"
             );
         }
 
         kani::cover(
             old_len == CAP && idx == MIN_LEN_AFTER_SPLIT,
-            "NV1: the real call site's shape (full node, split at B - 1)",
+            "NV1: a real call-site shape (full node, split at B - 1)",
         );
         kani::cover(new_right_len == 0, "NV2: the split produced an empty right node");
         kani::cover(idx == 0, "NV3: the split point is the very first pair");
@@ -3222,6 +3243,14 @@ mod verify {
                 == Some(built_nn.cast::<InternalNode<i32, i32>>()),
             "NI4: the child points back at the node just built"
         );
+        // The backlink alone would be satisfied by a node that does not actually hold the child
+        // at edge 0, so check the forward direction too.
+        assert!(
+            unsafe {
+                (*built_nn.cast::<InternalNode<i32, i32>>().as_ptr()).edges[0].assume_init_read()
+            } == child_nn,
+            "NI5: the built node's edge 0 IS the child"
+        );
 
         kani::cover(expected_height == 1, "NV1: built over a leaf child");
         kani::cover(expected_height == 2, "NV2: built over an internal child");
@@ -3252,6 +3281,7 @@ mod verify {
         kani::assume(len <= CAP);
 
         let mut internal = symbolic_internal(len);
+        let internal_addr = NodeRef::as_internal_ptr(&internal.borrow_mut()) as usize;
 
         let garbage = NonNull::<InternalNode<i32, i32>>::dangling();
         for i in 0..=len {
@@ -3273,6 +3303,13 @@ mod verify {
         assert!(ascended.is_ok(), "CA2: a relinked child failed to ascend to its parent");
         let parent_edge = ascended.ok().unwrap();
         assert!(parent_edge.idx() == check_i, "CA1: the child ascends to its own edge index");
+        // Checking only the index would be satisfied by a child still carrying the perturbed
+        // (dangling) parent pointer, so check the node the ascent actually landed on.
+        let reached = NodeRef::as_internal_ptr(&parent_edge.into_node()) as usize;
+        assert!(
+            reached == internal_addr,
+            "CA3: the child ascends to THIS node, not a stale pointer"
+        );
 
         kani::cover(len == 0, "NV1: a childless (single-edge) node");
         kani::cover(len > 1 && len < CAP, "NV2: a strictly intermediate occupancy");
@@ -3320,8 +3357,11 @@ mod verify {
         // `bulk_steal_right(1)`'s own preconditions, specialised to count == 1.
         kani::assume(old_right_len >= 1);
         kani::assume(old_left_len + 1 <= CAP);
-        // The caller contract `steal_right` documents: the tracked edge lives in the LEFT child,
-        // which has grown by one, so the admissible range is `..= old_left_len + 1`.
+        // `steal_right`'s doc describes the tracked edge as one in the LEFT child "which didn't
+        // move" -- an ORIGINAL edge, i.e. `0..=old_left_len`. The range assumed here is a
+        // deliberate SUPERSET: `old_left_len + 1` is not an original edge, but it is still within
+        // `Handle::new_edge`'s post-steal bound, so admitting it widens the domain without
+        // asserting anything the doc does not support.
         let track: usize = kani::any();
         kani::assume(track <= old_left_len + 1);
 
@@ -3334,7 +3374,10 @@ mod verify {
         }
 
         kani::cover(track == 0, "NV1: the tracked edge was the first one");
-        kani::cover(track == old_left_len + 1, "NV2: the tracked edge was the new last one");
+        kani::cover(
+            track == old_left_len + 1,
+            "NV2: the post-steal-valid index just past the original edges (outside the doc's range)",
+        );
         kani::cover(old_left_len + 1 == CAP, "NV3: the steal filled the left child to CAPACITY");
 
         unsafe { balance_teardown(&f) };
@@ -3826,12 +3869,14 @@ mod verify {
         let mut left_k_before = [0i32; CAP];
         let mut left_v_before = [0i32; CAP];
         let mut right_k_before = [0i32; CAP];
+        let mut right_v_before = [0i32; CAP];
         for i in 0..CAP {
             if i < old_left_len {
                 left_k_before[i] = unsafe { (*left_ptr).keys[i].assume_init_read() };
                 left_v_before[i] = unsafe { (*left_ptr).vals[i].assume_init_read() };
             }
             if i < old_right_len {
+                right_v_before[i] = unsafe { (*right_ptr).vals[i].assume_init_read() };
                 right_k_before[i] = unsafe { (*right_ptr).keys[i].assume_init_read() };
             }
         }
