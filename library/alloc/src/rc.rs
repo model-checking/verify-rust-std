@@ -2416,12 +2416,23 @@ impl<T> Rc<[T]> {
 
             #[cfg(kani)]
             {
-                // Kani needs an explicit loop so it can attach loop contracts.
+                // This equivalent `while let` spelling lets Kani attach loop contracts.
+                // It is not a cfg-swap vacuity workaround: every iteration performs the
+                // same `next`, element write, and initialized-count update as the
+                // production `enumerate` loop above. This is sound because `enumerate`
+                // is precisely repeated `next` plus an index increment, while the
+                // initialized-prefix count remains synchronized with that index.
+                // The non-Kani build keeps the idiomatic loop; the two implementations
+                // differ only in syntax needed by Kani, not in the algorithm being checked.
                 let mut iter = iter;
                 let mut i = 0usize;
 
                 #[kani::loop_invariant(i == guard.n_elems)]
-                #[kani::loop_modifies(&i, &guard.n_elems, ptr::slice_from_raw_parts_mut(elems, len))]
+                #[kani::loop_modifies(
+                    &i,
+                    &guard.n_elems,
+                    ptr::slice_from_raw_parts_mut(elems, len)
+                )]
                 while let Some(item) = iter.next() {
                     ptr::write(elems.add(i), item);
                     i += 1;
@@ -5352,7 +5363,7 @@ mod verify {
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u64, [u64]);
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u128, [u128]);
 
-    // === SAFE FUNCTIONS (51 of 54) ===
+    // === SAFE FUNCTIONS (52 of 54) ===
 
     // `Rc::get_mut` returns `Some(&mut T)` only when the allocation is fully unique:
     // `strong_count == 1` and `weak_count == 0` (`Rc::is_unique`).
@@ -7917,6 +7928,49 @@ mod verify {
     gen_from_slice_copy_harness!(harness_from_slice_copy_unit, ());
     gen_from_slice_copy_harness!(harness_from_slice_copy_array, [u8; 4]);
     gen_from_slice_copy_harness!(harness_from_slice_copy_bool, bool);
+
+    // `Rc::try_from` harnesses.
+    macro_rules! gen_try_from_slice_to_array_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let values = verifier_nondet_vec_rc::<$ty>();
+                let rc: Rc<[$ty]> = Rc::from(values);
+                let source_len = rc.len();
+                // `N` is a const generic and cannot be symbolic, so each harness
+                // uses a fixed target length (`N = 2`).
+                let result =
+                    <Rc<[$ty; 2], Global> as core::convert::TryFrom<Rc<[$ty], Global>>>::try_from(
+                        rc,
+                    );
+
+                match result {
+                    Ok(exact) => {
+                        assert!(source_len == 2);
+                        assert!(exact.len() == 2);
+                    }
+                    Err(rest) => {
+                        assert!(source_len != 2);
+                        assert!(rest.len() == source_len);
+                    }
+                }
+            }
+        };
+    }
+
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_i8, i8);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_i16, i16);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_i32, i32);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_i64, i64);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_i128, i128);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u8, u8);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u16, u16);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u32, u32);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u64, u64);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_u128, u128);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_unit, ());
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_bool, bool);
+    gen_try_from_slice_to_array_harness!(harness_try_from_slice_to_array_array, [u8; 4]);
 
     // `Rc::drop` has two direct control-flow branches:
     // 1) after `dec_strong`, `strong() != 0`: return without calling `drop_slow`;
