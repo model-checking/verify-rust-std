@@ -327,6 +327,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn first_chunk<const N: usize>(&self) -> Option<&[T; N]> {
         if self.len() < N {
             None
@@ -357,6 +358,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn first_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
         if self.len() < N {
             None
@@ -387,6 +389,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn split_first_chunk<const N: usize>(&self) -> Option<(&[T; N], &[T])> {
         let Some((first, tail)) = self.split_at_checked(N) else { return None };
 
@@ -417,6 +420,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn split_first_chunk_mut<const N: usize>(
         &mut self,
     ) -> Option<(&mut [T; N], &mut [T])> {
@@ -447,6 +451,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "slice_first_last_chunk", since = "1.77.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn split_last_chunk<const N: usize>(&self) -> Option<(&[T], &[T; N])> {
         let Some(index) = self.len().checked_sub(N) else { return None };
         let (init, last) = self.split_at(index);
@@ -478,6 +483,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn split_last_chunk_mut<const N: usize>(
         &mut self,
     ) -> Option<(&mut [T], &mut [T; N])> {
@@ -509,6 +515,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_last_chunk", since = "1.80.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn last_chunk<const N: usize>(&self) -> Option<&[T; N]> {
         // FIXME(const-hack): Without const traits, we need this instead of `get`.
         let Some(index) = self.len().checked_sub(N) else { return None };
@@ -539,6 +546,7 @@ impl<T> [T] {
     #[inline]
     #[stable(feature = "slice_first_last_chunk", since = "1.77.0")]
     #[rustc_const_stable(feature = "const_slice_first_last_chunk", since = "1.83.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn last_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
         // FIXME(const-hack): Without const traits, we need this instead of `get`.
         let Some(index) = self.len().checked_sub(N) else { return None };
@@ -639,6 +647,8 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(InBound(index_access(self, index))))]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -684,6 +694,8 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(InBound(index_access(self, index))))]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -948,6 +960,9 @@ impl<T> [T] {
     /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[unstable(feature = "slice_swap_unchecked", issue = "88539")]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(ValidNum(a, "[0,self.len())")))]
+    #[cfg_attr(rapx, rapx::requires(ValidNum(b, "[0,self.len())")))]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -978,6 +993,7 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_slice_reverse", since = "1.90.0")]
     #[inline]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn reverse(&mut self) {
         let half_len = self.len() / 2;
         let Range { start, end } = self.as_mut_ptr_range();
@@ -1345,6 +1361,9 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(ValidNum(N, "[1,)")))]
+    #[cfg_attr(rapx, rapx::requires(ValidNum(len(self) % N == 0)))]
     pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1403,6 +1422,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn as_chunks<const N: usize>(&self) -> (&[[T; N]], &[T]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len_rounded_down = self.len() / N * N;
@@ -1450,6 +1470,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn as_rchunks<const N: usize>(&self) -> (&[T], &[[T; N]]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len = self.len() / N;
@@ -1505,6 +1526,9 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(ValidNum(N, "[1,)")))]
+    #[cfg_attr(rapx, rapx::requires(ValidNum(len(self) % N == 0)))]
     pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1559,6 +1583,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn as_chunks_mut<const N: usize>(&mut self) -> (&mut [[T; N]], &mut [T]) {
         assert!(N != 0, "chunk size must be non-zero");
         let len_rounded_down = self.len() / N * N;
@@ -2043,6 +2068,8 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(ValidNum(mid, [0,self.len()])))]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2097,6 +2124,8 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(ValidNum(mid, [0,self.len()])))]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -2158,6 +2187,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "split_at_checked", since = "1.80.0")]
     #[inline]
     #[must_use]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn split_at_checked(&self, mid: usize) -> Option<(&[T], &[T])> {
         if mid <= self.len() {
             // SAFETY: `[ptr; mid]` and `[mid; len]` are inside `self`, which
@@ -2197,6 +2227,7 @@ impl<T> [T] {
     #[rustc_const_stable(feature = "const_slice_split_at_mut", since = "1.83.0")]
     #[inline]
     #[must_use]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn split_at_mut_checked(&mut self, mid: usize) -> Option<(&mut [T], &mut [T])> {
         if mid <= self.len() {
             // SAFETY: `[ptr; mid]` and `[mid; len]` are inside `self`, which
@@ -2975,6 +3006,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
+    #[cfg_attr(rapx, rapx::verify)]
     pub fn binary_search_by<'a, F>(&'a self, mut f: F) -> Result<usize, usize>
     where
         F: FnMut(&'a T) -> Ordering,
@@ -3508,6 +3540,7 @@ impl<T> [T] {
     /// ```
     #[unstable(feature = "slice_partition_dedup", issue = "54279")]
     #[inline]
+    #[cfg_attr(rapx, rapx::verify)]
     pub fn partition_dedup_by<F>(&mut self, mut same_bucket: F) -> (&mut [T], &mut [T])
     where
         F: FnMut(&mut T, &mut T) -> bool,
@@ -3676,6 +3709,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_rotate", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_slice_rotate", since = "1.92.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn rotate_left(&mut self, mid: usize) {
         assert!(mid <= self.len());
         let k = self.len() - mid;
@@ -3722,6 +3756,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "slice_rotate", since = "1.26.0")]
     #[rustc_const_stable(feature = "const_slice_rotate", since = "1.92.0")]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn rotate_right(&mut self, k: usize) {
         assert!(k <= self.len());
         let mid = self.len() - k;
@@ -3898,6 +3933,7 @@ impl<T> [T] {
     #[stable(feature = "copy_from_slice", since = "1.9.0")]
     #[rustc_const_stable(feature = "const_copy_from_slice", since = "1.87.0")]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn copy_from_slice(&mut self, src: &[T])
     where
         T: Copy,
@@ -3932,6 +3968,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "copy_within", since = "1.37.0")]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
     pub fn copy_within<R: RangeBounds<usize>>(&mut self, src: R, dest: usize)
     where
         T: Copy,
@@ -4000,6 +4037,7 @@ impl<T> [T] {
     #[stable(feature = "swap_with_slice", since = "1.27.0")]
     #[rustc_const_unstable(feature = "const_swap_with_slice", issue = "142204")]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
     pub const fn swap_with_slice(&mut self, other: &mut [T]) {
         assert!(self.len() == other.len(), "destination and source slices have different lengths");
         // SAFETY: `self` is valid for `self.len()` elements by definition, and `src` was
@@ -4110,6 +4148,8 @@ impl<T> [T] {
             ((suffix.as_ptr()).add(suffix.len()) == (self.as_ptr()).add(self.len())) )
         )
     )]
+    #[cfg_attr(rapx, rapx::requires(ValidTransmute(T, U)))]
+    #[cfg_attr(rapx, rapx::verify)]
     pub unsafe fn align_to<U>(&self) -> (&[T], &[U], &[T]) {
         // Note that most of this function will be constant-evaluated,
         if U::IS_ZST || T::IS_ZST {
@@ -4208,6 +4248,8 @@ impl<T> [T] {
             ((suffix.as_ptr()).add(suffix.len()) == old((self.as_ptr()).add(self.len())))
         ))
     )]
+    #[cfg_attr(rapx, rapx::requires(ValidTransmute(T, U)))]
+    #[cfg_attr(rapx, rapx::verify)]
     pub unsafe fn align_to_mut<U>(&mut self) -> (&mut [T], &mut [U], &mut [T]) {
         // Note that most of this function will be constant-evaluated,
         if U::IS_ZST || T::IS_ZST {
@@ -4299,6 +4341,7 @@ impl<T> [T] {
     /// ```
     #[unstable(feature = "portable_simd", issue = "86656")]
     #[must_use]
+    #[cfg_attr(rapx, rapx::verify)]
     pub fn as_simd<const LANES: usize>(&self) -> (&[T], &[Simd<T, LANES>], &[T])
     where
         Simd<T, LANES>: AsRef<[T; LANES]>,
@@ -4335,6 +4378,7 @@ impl<T> [T] {
     /// method for something like `LANES == 3`.
     #[unstable(feature = "portable_simd", issue = "86656")]
     #[must_use]
+    #[cfg_attr(rapx, rapx::verify)]
     pub fn as_simd_mut<const LANES: usize>(&mut self) -> (&mut [T], &mut [Simd<T, LANES>], &mut [T])
     where
         Simd<T, LANES>: AsMut<[T; LANES]>,
@@ -4788,6 +4832,9 @@ impl<T> [T] {
     #[stable(feature = "get_many_mut", since = "1.86.0")]
     #[inline]
     #[track_caller]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(InBound(index_access(self, indices))))]
+    #[cfg_attr(rapx, rapx::requires(NonOverlap(indices)))]
     pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
         &mut self,
         indices: [I; N],
@@ -4855,6 +4902,7 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "get_many_mut", since = "1.86.0")]
     #[inline]
+    #[cfg_attr(rapx, rapx::verify)]
     pub fn get_disjoint_mut<I, const N: usize>(
         &mut self,
         indices: [I; N],
@@ -5068,6 +5116,8 @@ impl<T, const N: usize> [[T; N]] {
     /// ```
     #[stable(feature = "slice_flatten", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_slice_flatten", since = "1.87.0")]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(ValidTransmute([T; N], T)))]
     pub const fn as_flattened(&self) -> &[T] {
         let len = if T::IS_ZST {
             self.len().checked_mul(N).expect("slice len overflow")
@@ -5110,6 +5160,8 @@ impl<T, const N: usize> [[T; N]] {
     /// ```
     #[stable(feature = "slice_flatten", since = "1.80.0")]
     #[rustc_const_stable(feature = "const_slice_flatten", since = "1.87.0")]
+    #[cfg_attr(rapx, rapx::verify)]
+    #[cfg_attr(rapx, rapx::requires(ValidTransmute([T; N], T)))]
     pub const fn as_flattened_mut(&mut self) -> &mut [T] {
         let len = if T::IS_ZST {
             self.len().checked_mul(N).expect("slice len overflow")
@@ -5184,6 +5236,8 @@ impl [f64] {
 /// # Safety
 /// `T` must implement one of `Copy` or `TrivialClone`.
 #[track_caller]
+#[cfg_attr(rapx, rapx::verify)]
+#[cfg_attr(rapx, rapx::requires(any(Trait(T, Copy), Trait(T, TrivialClone))))]
 const unsafe fn copy_from_slice_impl<T: Clone>(dest: &mut [T], src: &[T]) {
     // The panic code path was put into a cold function to not bloat the
     // call site.
@@ -5301,6 +5355,7 @@ impl<T, const N: usize> SlicePattern for [T; N] {
 /// This will do `binomial(N + 1, 2) = N * (N + 1) / 2 = 0, 1, 3, 6, 10, ..`
 /// comparison operations.
 #[inline]
+#[cfg_attr(rapx, rapx::verify)]
 fn get_disjoint_check_valid<I: GetDisjointMutIndex, const N: usize>(
     indices: &[I; N],
     len: usize,

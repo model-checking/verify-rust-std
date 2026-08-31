@@ -693,7 +693,10 @@ impl<T: PointeeSized> NonNull<T> {
     #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some()
         && count * core::mem::size_of::<T>() <= isize::MAX as usize
         && (self.pointer as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some() // check wrapping add
-        && core::ub_checks::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize)))]
+        // Zero-sized offsets (`count * size_of::<T>() == 0`) are always
+        // permitted, including on dangling pointers, per the documentation.
+        && (count == 0 || core::mem::size_of::<T>() == 0
+            || core::ub_checks::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize))))]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
@@ -784,7 +787,10 @@ impl<T: PointeeSized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>()).is_some() &&
         count * core::mem::size_of::<T>() <= isize::MAX as usize &&
-        core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
+        // Zero-sized offsets (`count * size_of::<T>() == 0`) are always
+        // permitted, including on dangling pointers, per the documentation.
+        (count == 0 || core::mem::size_of::<T>() == 0 ||
+            core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count)))
     )]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
@@ -1032,7 +1038,11 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "1.87.0")]
     #[requires(
         self.as_ptr().addr().checked_sub(subtracted.as_ptr().addr()).is_some() &&
-        core::ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
+        // Pointers with equal addresses trivially satisfy the
+        // same-allocation requirement (a zero-sized span), including
+        // dangling pointers such as those of empty slices.
+        (self.as_ptr().addr() == subtracted.as_ptr().addr() ||
+            core::ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr())) &&
         (self.as_ptr().addr()) >= (subtracted.as_ptr().addr()) &&
         (self.as_ptr().addr() - subtracted.as_ptr().addr()) % core::mem::size_of::<T>() == 0
     )]
@@ -1590,9 +1600,14 @@ impl<T> NonNull<[T]> {
     #[rustc_const_stable(feature = "const_slice_from_raw_parts_mut", since = "1.83.0")]
     #[must_use]
     #[inline]
+    // `result.len()` reads the length from the wide-pointer metadata without
+    // creating a reference: `slice_from_raw_parts` is a safe function with no
+    // validity requirements on `data`, so the postcondition must not
+    // dereference the resulting pointer (`unsafe { result.as_ref() }.len()`,
+    // as used previously, is UB for dangling or misaligned `data`).
     #[ensures(|result| !result.pointer.is_null()
         && result.pointer as *const T == data.pointer
-        && unsafe { result.as_ref() }.len() == len)]
+        && result.len() == len)]
     pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self {
         // SAFETY: `data` is a `NonNull` pointer which is necessarily non-null
         unsafe { Self::new_unchecked(super::slice_from_raw_parts_mut(data.as_ptr(), len)) }

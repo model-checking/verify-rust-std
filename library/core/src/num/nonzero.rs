@@ -442,21 +442,16 @@ where
     #[must_use]
     #[inline]
     #[track_caller]
-    #[requires({
-        let size = core::mem::size_of::<T>();
-        let ptr = &n as *const T as *const u8;
-        let slice = unsafe { core::slice::from_raw_parts(ptr, size) };
-        !slice.iter().all(|&byte| byte == 0)
-    })]
-    #[ensures(|result: &Self|{
-        let size = core::mem::size_of::<T>();
-        let n_ptr: *const T = &n;
-        let result_inner: T = result.get();
-        let result_ptr: *const T = &result_inner;
-        let n_slice = unsafe { core::slice::from_raw_parts(n_ptr as *const u8, size) };
-        let result_slice = unsafe { core::slice::from_raw_parts(result_ptr as *const u8, size) };
-        n_slice == result_slice
-    })]
+    // `NonZero::new` performs the canonical zero test via the niche layout
+    // (`Option<NonZero<T>>` has the same layout as `T`, with 0 as `None`),
+    // and `raw_eq` compares the object representations directly. Both are
+    // single operations for the verifier. Spelling these clauses as raw
+    // byte-slice inspections instead (as done previously) makes every
+    // asserted occurrence of this contract pay for symbolic pointer
+    // indirection and iterator reasoning, which dominated verification time
+    // of harnesses whose call graph contains NonZero constructions.
+    #[requires(NonZero::new(n).is_some())]
+    #[ensures(|result: &Self| unsafe { core::intrinsics::raw_eq(&result.get(), &n) })]
     pub const unsafe fn new_unchecked(n: T) -> Self {
         match Self::new(n) {
             Some(n) => n,
@@ -498,12 +493,9 @@ where
     #[must_use]
     #[inline]
     #[track_caller]
-    #[requires({
-        let size = core::mem::size_of::<T>();
-        let ptr = n as *const T as *const u8;
-        let slice = unsafe { core::slice::from_raw_parts(ptr, size) };
-        !slice.iter().all(|&byte| byte == 0)
-    })]
+    // See new_unchecked: the niche-layout zero test is much cheaper for the
+    // verifier than inspecting the object representation byte by byte.
+    #[requires(NonZero::new(*n).is_some())]
     pub unsafe fn from_mut_unchecked(n: &mut T) -> &mut Self {
         match Self::from_mut(n) {
             Some(n) => n,

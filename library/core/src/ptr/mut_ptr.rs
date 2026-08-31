@@ -364,12 +364,12 @@ impl<T: PointeeSized> *mut T {
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_offset(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
-        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_offset(count))))
+        (count == 0 || (core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_offset(count))))
     )]
     // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
-    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
+    #[ensures(|result| count == 0 || (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
     pub const unsafe fn offset(self, count: isize) -> *mut T
     where
         T: Sized,
@@ -988,12 +988,12 @@ impl<T: PointeeSized> *mut T {
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_add(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
-        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_add(count))))
+        (count == 0 || (core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_add(count))))
     )]
     // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
-    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
+    #[ensures(|result| count == 0 || (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
         T: Sized,
@@ -1128,12 +1128,12 @@ impl<T: PointeeSized> *mut T {
         // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_sub(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
-        ((core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_sub(count))))
+        (count == 0 || (core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_sub(count))))
     )]
     // Postcondition: If `T` is a unit type (`size_of::<T>() == 0`), no allocation check is needed.
     // Otherwise, for non-unit types, ensure that `self` and `result` point to the same allocated object,
     // verifying that the result remains within the same allocation as `self`.
-    #[ensures(|result| (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
+    #[ensures(|result| count == 0 || (core::mem::size_of::<T>() == 0) || core::ub_checks::same_allocation(self as *const T, *result as *const T))]
     pub const unsafe fn sub(self, count: usize) -> Self
     where
         T: Sized,
