@@ -146,14 +146,28 @@ jobs:
       uses: peter-evans/create-pull-request@v7
       with:
         title: 'Update subtree/library to ${{ env.NEXT_TOOLCHAIN_DATE }}'
-        body: >
-          This is an automated PR to update the subtree/library branch to the changes
+        body: |
+          This is an automated PR to update the `subtree/library` branch to the changes
           from ${{ env.CURRENT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.CURRENT_COMMIT_HASH }})
           to ${{ env.NEXT_TOOLCHAIN_DATE }} (rust-lang/rust@${{ env.NEXT_COMMIT_HASH }}), inclusive.
 
-          **Review this PR as usual, but do not merge this PR using the GitHub web interface.
-          Instead, once it is approved, use `git push` to literally push the changes to `subtree/library`
-          without any rebase or merge.**
+          > [!IMPORTANT]
+          > **Do NOT use the GitHub "Merge pull request", "Squash and merge", or "Rebase and merge"
+          > buttons on this PR.** `subtree/library` must stay a verbatim, linear mirror of upstream's
+          > `library/` directory, regenerated deterministically by `splitsh-lite`. Any web-UI merge
+          > creates a synthetic commit that is not part of that extraction, which permanently diverges
+          > the branch and makes *every* future subtree-update PR conflict (and the daily job then keeps
+          > opening duplicate PRs).
+          >
+          > **To land this PR:** review it as usual, and once approved push its commits *literally* to
+          > `subtree/library` with no rebase and no merge:
+          >
+          > ```
+          > git fetch origin update-subtree/library
+          > git push origin origin/update-subtree/library:subtree/library
+          > ```
+          >
+          > This PR will close automatically once its commits are on `subtree/library`.
         branch: update-subtree/library
         delete-branch: true
         base: subtree/library
