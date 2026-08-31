@@ -2,10 +2,14 @@ use core::any::Any;
 #[cfg(not(no_global_oom_handling))]
 use core::clone::TrivialClone;
 use core::error::Error;
+#[cfg(kani)]
+use core::kani;
 use core::mem;
 use core::pin::Pin;
 #[cfg(not(no_global_oom_handling))]
 use core::{fmt, ptr};
+
+use safety::{ensures, requires};
 
 use crate::alloc::Allocator;
 #[cfg(not(no_global_oom_handling))]
@@ -395,6 +399,11 @@ impl<A: Allocator> Box<dyn Any, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires((*self).is::<T>())]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -454,6 +463,11 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires((*self).is::<T>())]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -513,6 +527,11 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires((*self).is::<T>())]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -779,5 +798,326 @@ impl dyn Error + Send + Sync {
             // Reapply the `Send + Sync` markers.
             mem::transmute::<Box<dyn Error>, Box<dyn Error + Send + Sync>>(s)
         })
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use super::*;
+    use crate::alloc::Layout;
+
+    // `proof_for_contract` resolves none of the three same-named `dyn`-self
+    // downcast_unchecked impls at this kani version (their impl blocks live in
+    // this module while `Box` lives in `boxed`, so the resolver renders them in
+    // an `<impl ...>` path form no spelling can match); the contract is
+    // exercised by construction below. Once the resolver handles that form,
+    // this attribute becomes `proof_for_contract` and this note is deleted. The constructed space is every possible u32 payload
+    // behind the erased type; the precondition (contained value is a u32)
+    // admits no other erased type, and TypeId equality fixes the metadata.
+    #[kani::proof]
+    fn check_downcast_unchecked_any_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Any> = Box::new(v);
+        let addr = &raw const *b as *const u32;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let d: Box<u32> = unsafe { b.downcast_unchecked::<u32>() };
+        assert_eq!(*d, v);
+        assert!(core::ptr::addr_eq(&raw const *d, addr));
+    }
+
+    // `proof_for_contract` resolves none of the three same-named `dyn`-self
+    // downcast_unchecked impls at this kani version (their impl blocks live in
+    // this module while `Box` lives in `boxed`, so the resolver renders them in
+    // an `<impl ...>` path form no spelling can match); the contract is
+    // exercised by construction below. Once the resolver handles that form,
+    // this attribute becomes `proof_for_contract` and this note is deleted. The constructed space is every possible u32 payload
+    // behind the erased type; the precondition (contained value is a u32)
+    // admits no other erased type, and TypeId equality fixes the metadata.
+    #[kani::proof]
+    fn check_downcast_unchecked_any_send_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Any + Send> = Box::new(v);
+        let addr = &raw const *b as *const u32;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let d: Box<u32> = unsafe { b.downcast_unchecked::<u32>() };
+        assert_eq!(*d, v);
+        assert!(core::ptr::addr_eq(&raw const *d, addr));
+    }
+
+    // `proof_for_contract` resolves none of the three same-named `dyn`-self
+    // downcast_unchecked impls at this kani version (their impl blocks live in
+    // this module while `Box` lives in `boxed`, so the resolver renders them in
+    // an `<impl ...>` path form no spelling can match); the contract is
+    // exercised by construction below. Once the resolver handles that form,
+    // this attribute becomes `proof_for_contract` and this note is deleted. The constructed space is every possible u32 payload
+    // behind the erased type; the precondition (contained value is a u32)
+    // admits no other erased type, and TypeId equality fixes the metadata.
+    #[kani::proof]
+    fn check_downcast_unchecked_any_send_sync_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Any + Send + Sync> = Box::new(v);
+        let addr = &raw const *b as *const u32;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let d: Box<u32> = unsafe { b.downcast_unchecked::<u32>() };
+        assert_eq!(*d, v);
+        assert!(core::ptr::addr_eq(&raw const *d, addr));
+    }
+
+    #[kani::proof]
+    fn check_from_slice_u8() {
+        let arr: [u8; 8] = kani::any();
+        // n <= 8 mirrors the fixed 8-element source array, not a tractability cap.
+        let n = kani::any_where(|n: &usize| *n <= 8);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "empty slice");
+        kani::cover(n > 0, "non-empty slice");
+        let b: Box<[u8]> = Box::from(&arr[..n]);
+        assert_eq!(b.len(), n);
+        // A whole-slice `assert_eq!` compiles to a memcmp-style comparison that
+        // CBMC unwinds far past this n<=8 bound; a symbolic-index single read
+        // gives the same per-element guarantee without the unbounded unwind.
+        if n > 0 {
+            let i: usize = kani::any_where(|i: &usize| *i < n);
+            assert_eq!(b[i], arr[i]);
+        }
+    }
+
+    #[kani::proof]
+    fn check_from_slice_u32() {
+        let arr: [u32; 8] = kani::any();
+        // n <= 8 mirrors the fixed 8-element source array, not a tractability cap.
+        let n = kani::any_where(|n: &usize| *n <= 8);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "empty slice");
+        kani::cover(n > 0, "non-empty slice");
+        let b: Box<[u32]> = Box::from(&arr[..n]);
+        assert_eq!(b.len(), n);
+        // A whole-slice `assert_eq!` compiles to a memcmp-style comparison that
+        // CBMC unwinds far past this n<=8 bound; a symbolic-index single read
+        // gives the same per-element guarantee without the unbounded unwind.
+        if n > 0 {
+            let i: usize = kani::any_where(|i: &usize| *i < n);
+            assert_eq!(b[i], arr[i]);
+        }
+    }
+
+    #[kani::proof]
+    fn check_from_str() {
+        let mut src: [u8; 8] = kani::any();
+        src[0] &= 0x7f;
+        src[1] &= 0x7f;
+        src[2] &= 0x7f;
+        src[3] &= 0x7f;
+        src[4] &= 0x7f;
+        src[5] &= 0x7f;
+        src[6] &= 0x7f;
+        src[7] &= 0x7f;
+        // Symbolic ASCII content (masked to 0x7f): every byte is a valid 1-byte char, so every n <= len is a char boundary.
+        let s = core::str::from_utf8(&src).unwrap();
+        // n <= 8: the symbolic source array is 8 bytes; length stays fixed, content is symbolic (above).
+        let n = kani::any_where(|n: &usize| *n <= 8);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        // `.get()` (Option) rather than `&s[..n]` (Index): the Index panic
+        // path unconditionally builds an error message via
+        // `floor_char_boundary`, whose loop CBMC cannot cheaply bound even
+        // though the panic itself is unreachable here.
+        let b: Box<str> = Box::from(s.get(..n).unwrap());
+        assert_eq!(b.len(), n);
+        let addr = &raw const *b as *const u8;
+        let bytes: Box<[u8]> = Box::from(b);
+        assert_eq!(bytes.len(), n);
+        assert!(core::ptr::addr_eq(&raw const *bytes as *const u8, addr));
+        // Symbolic-index single-byte read (see check_from_slice_u8) stands in
+        // for a whole-slice equality assert. `bytes` is the end of the
+        // from(&str)->from(Box<str>) pipeline, so comparing it directly to the
+        // original source covers both conversions transitively.
+        if n > 0 {
+            let i: usize = kani::any_where(|i: &usize| *i < n);
+            assert_eq!(bytes[i], s.as_bytes()[i]);
+        }
+    }
+
+    // No `TryFrom<Box<T>>` (single-value) impl exists; this harnesses the real
+    // sibling conversion, `TryFrom<Vec<T>>`.
+    #[kani::proof]
+    fn check_try_from_vec_u32() {
+        // N = 4: a small concrete arm size; n itself stays symbolic and both
+        // n == N and n != N arms are covered.
+        const N: usize = 4;
+        let n: usize = kani::any_where(|n: &usize| Layout::array::<u32>(*n).is_ok());
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        // Built via new_zeroed_slice + assume_init (verified above) rather
+        // than an unbounded push loop, whose symbolic unrolling exceeds the
+        // object-bits budget.
+        let zeroed: Box<[u32]> = unsafe { Box::new_zeroed_slice(n).assume_init() };
+        let vec: Vec<u32> = zeroed.into_vec();
+        kani::cover(n == N, "len == N arm reached");
+        kani::cover(n != N, "len != N arm reached");
+        let r: Result<Box<[u32; N]>, _> = vec.try_into();
+        assert_eq!(r.is_ok(), n == N);
+        if let Ok(arr) = r {
+            let i: usize = kani::any_where(|i: &usize| *i < N);
+            assert_eq!(arr[i], 0);
+        }
+    }
+
+    // Single width (u32): payload bytes unread beyond TypeId dispatch; widths
+    // exercised in the unsafe-fn families.
+    // Every downcast harness below re-downcasts the Err arm's returned box to
+    // its real type instead of letting it reach scope-end drop as a trait
+    // object. Isolated by direct experiment: a lone `Box<dyn Any>` dropped
+    // as-is (regardless of downcast's outcome) hits a kani limitation
+    // ("Reached unstable vtable comparison 'Eq'" at
+    // NonNull::<dyn Any>::as_ptr); the raw-pointer extraction inside
+    // downcast_unchecked (used by both the success arm and this recovery
+    // step) is unaffected. This also checks the doc's "Err(self)" claim: the
+    // original value comes back unchanged.
+    #[kani::proof]
+    fn check_downcast_any_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Any> = Box::new(v);
+        let addr = &raw const *b as *const u32;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let ok: Result<Box<u32>, Box<dyn Any>> = b.downcast();
+        kani::cover(ok.is_ok(), "success arm reached");
+        let ok_value = ok.unwrap();
+        assert_eq!(*ok_value, v);
+        assert!(core::ptr::addr_eq(&raw const *ok_value, addr));
+
+        let w: u8 = kani::any();
+        let b2: Box<dyn Any> = Box::new(w);
+        let err: Result<Box<u32>, Box<dyn Any>> = b2.downcast();
+        kani::cover(err.is_err(), "failure arm reached");
+        let recovered: Result<Box<u8>, _> = err.unwrap_err().downcast();
+        assert_eq!(*recovered.unwrap(), w);
+    }
+
+    #[kani::proof]
+    fn check_downcast_any_send_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Any + Send> = Box::new(v);
+        let addr = &raw const *b as *const u32;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let ok: Result<Box<u32>, Box<dyn Any + Send>> = b.downcast();
+        kani::cover(ok.is_ok(), "success arm reached");
+        let ok_value = ok.unwrap();
+        assert_eq!(*ok_value, v);
+        assert!(core::ptr::addr_eq(&raw const *ok_value, addr));
+
+        let w: u8 = kani::any();
+        let b2: Box<dyn Any + Send> = Box::new(w);
+        let err: Result<Box<u32>, Box<dyn Any + Send>> = b2.downcast();
+        kani::cover(err.is_err(), "failure arm reached");
+        let recovered: Result<Box<u8>, _> = err.unwrap_err().downcast();
+        assert_eq!(*recovered.unwrap(), w);
+    }
+
+    #[kani::proof]
+    fn check_downcast_any_send_sync_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Any + Send + Sync> = Box::new(v);
+        let addr = &raw const *b as *const u32;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let ok: Result<Box<u32>, Box<dyn Any + Send + Sync>> = b.downcast();
+        kani::cover(ok.is_ok(), "success arm reached");
+        let ok_value = ok.unwrap();
+        assert_eq!(*ok_value, v);
+        assert!(core::ptr::addr_eq(&raw const *ok_value, addr));
+
+        let w: u8 = kani::any();
+        let b2: Box<dyn Any + Send + Sync> = Box::new(w);
+        let err: Result<Box<u32>, Box<dyn Any + Send + Sync>> = b2.downcast();
+        kani::cover(err.is_err(), "failure arm reached");
+        let recovered: Result<Box<u8>, _> = err.unwrap_err().downcast();
+        assert_eq!(*recovered.unwrap(), w);
+    }
+
+    // Error-path sentinel for the `dyn Error` downcast family below. `Error:
+    // Debug + Display` is the only bound; a static-string `Display` impl needs
+    // no formatter machinery on the verified path.
+    #[derive(Debug)]
+    struct SentinelError(u32);
+    impl core::fmt::Display for SentinelError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.write_str("sentinel")
+        }
+    }
+    impl Error for SentinelError {}
+
+    #[kani::proof]
+    fn check_downcast_error_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Error> = Box::new(SentinelError(v));
+        let addr = &raw const *b as *const SentinelError;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let ok = b.downcast::<SentinelError>();
+        kani::cover(ok.is_ok(), "success arm reached");
+        let ok_value = ok.unwrap();
+        // `.0` on a bare `Box<SentinelError>` would hit `Box`'s own private
+        // tuple field (visible from inside this crate) instead of
+        // `SentinelError`'s; deref through `Box` first.
+        assert_eq!((*ok_value).0, v);
+        assert!(core::ptr::addr_eq(&raw const *ok_value, addr));
+
+        // `core::fmt::Error: Error` holds at this toolchain (core/src/error.rs);
+        // it stands in as the "wrong type" for the Err arm.
+        let w: u32 = kani::any();
+        let b2: Box<dyn Error> = Box::new(SentinelError(w));
+        let err = b2.downcast::<core::fmt::Error>();
+        kani::cover(err.is_err(), "failure arm reached");
+        // See check_downcast_any_u32: re-downcast the Err arm's returned box
+        // to its real type rather than letting it drop as a `dyn Error`
+        // (same kani vtable-comparison limitation).
+        let recovered = err.unwrap_err().downcast::<SentinelError>();
+        assert_eq!((*recovered.unwrap()).0, w);
+    }
+
+    #[kani::proof]
+    fn check_downcast_error_send_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Error + Send> = Box::new(SentinelError(v));
+        let addr = &raw const *b as *const SentinelError;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let ok = b.downcast::<SentinelError>();
+        kani::cover(ok.is_ok(), "success arm reached");
+        let ok_value = ok.unwrap();
+        // `.0` on a bare `Box<SentinelError>` would hit `Box`'s own private
+        // tuple field (visible from inside this crate) instead of
+        // `SentinelError`'s; deref through `Box` first.
+        assert_eq!((*ok_value).0, v);
+        assert!(core::ptr::addr_eq(&raw const *ok_value, addr));
+
+        let w: u32 = kani::any();
+        let b2: Box<dyn Error + Send> = Box::new(SentinelError(w));
+        let err = b2.downcast::<core::fmt::Error>();
+        kani::cover(err.is_err(), "failure arm reached");
+        let recovered = err.unwrap_err().downcast::<SentinelError>();
+        assert_eq!((*recovered.unwrap()).0, w);
+    }
+
+    #[kani::proof]
+    fn check_downcast_error_send_sync_u32() {
+        let v: u32 = kani::any();
+        let b: Box<dyn Error + Send + Sync> = Box::new(SentinelError(v));
+        let addr = &raw const *b as *const SentinelError;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let ok = b.downcast::<SentinelError>();
+        kani::cover(ok.is_ok(), "success arm reached");
+        let ok_value = ok.unwrap();
+        // `.0` on a bare `Box<SentinelError>` would hit `Box`'s own private
+        // tuple field (visible from inside this crate) instead of
+        // `SentinelError`'s; deref through `Box` first.
+        assert_eq!((*ok_value).0, v);
+        assert!(core::ptr::addr_eq(&raw const *ok_value, addr));
+
+        let w: u32 = kani::any();
+        let b2: Box<dyn Error + Send + Sync> = Box::new(SentinelError(w));
+        let err = b2.downcast::<core::fmt::Error>();
+        kani::cover(err.is_err(), "failure arm reached");
+        let recovered = err.unwrap_err().downcast::<SentinelError>();
+        assert_eq!((*recovered.unwrap()).0, w);
     }
 }
