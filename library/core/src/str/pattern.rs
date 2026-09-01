@@ -41,6 +41,8 @@
 #[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
 use safety::{loop_invariant, requires};
 
+#[cfg(kani)]
+use crate::char::MAX_LEN_UTF8;
 use crate::cmp::Ordering;
 use crate::convert::TryInto as _;
 #[cfg(kani)]
@@ -1130,15 +1132,60 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
                 let is_match = searcher.is_match_fw;
                 searcher.is_match_fw = !searcher.is_match_fw;
                 let pos = searcher.position;
-                match self.haystack[pos..].chars().next() {
-                    _ if is_match => SearchStep::Match(pos, pos),
-                    None => {
-                        searcher.is_finished = true;
-                        SearchStep::Done
+
+                #[cfg(kani)]
+                {
+                    if is_match {
+                        return SearchStep::Match(pos, pos);
                     }
-                    Some(ch) => {
-                        searcher.position += ch.len_utf8();
-                        SearchStep::Reject(pos, searcher.position)
+
+                    match self.haystack.get(pos..) {
+                        Some(_) => {
+                            if pos == self.haystack.len() {
+                                searcher.is_finished = true;
+                                SearchStep::Done
+                            } else {
+                                // Include the real decoded width by allowing any in-bounds
+                                // UTF-8 boundary within one maximum-width character.
+                                let width: usize = kani::any();
+                                let remaining = self.haystack.len() - pos;
+
+                                kani::assume(1 <= width && width <= MAX_LEN_UTF8);
+                                kani::assume(width <= remaining);
+
+                                let new_position = pos + width;
+
+                                // Challenge 21 allows assuming UTF-8 decoding correctness:
+                                // consuming one character ends at another character boundary.
+                                kani::assume(self.haystack.is_char_boundary(new_position));
+
+                                searcher.position = new_position;
+                                SearchStep::Reject(pos, new_position)
+                            }
+                        }
+                        None => {
+                            kani::assert(
+                                false,
+                                "empty-needle position must be a valid haystack boundary",
+                            );
+                            kani::assume(false);
+                            SearchStep::Done
+                        }
+                    }
+                }
+
+                #[cfg(not(kani))]
+                {
+                    match self.haystack[pos..].chars().next() {
+                        _ if is_match => SearchStep::Match(pos, pos),
+                        None => {
+                            searcher.is_finished = true;
+                            SearchStep::Done
+                        }
+                        Some(ch) => {
+                            searcher.position += ch.len_utf8();
+                            SearchStep::Reject(pos, searcher.position)
+                        }
                     }
                 }
             }
@@ -1152,20 +1199,52 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
                     return SearchStep::Done;
                 }
                 let is_long = searcher.memory == usize::MAX;
-                match searcher.next::<RejectAndMatch>(
-                    self.haystack.as_bytes(),
-                    self.needle.as_bytes(),
-                    is_long,
-                ) {
-                    SearchStep::Reject(a, mut b) => {
-                        // skip to next char boundary
-                        while !self.haystack.is_char_boundary(b) {
-                            b += 1;
+                #[cfg(not(kani))]
+                {
+                    match searcher.next::<RejectAndMatch>(
+                        self.haystack.as_bytes(),
+                        self.needle.as_bytes(),
+                        is_long,
+                    ) {
+                        SearchStep::Reject(a, mut b) => {
+                            // skip to next char boundary
+                            while !self.haystack.is_char_boundary(b) {
+                                b += 1;
+                            }
+                            searcher.position = cmp::max(b, searcher.position);
+                            SearchStep::Reject(a, b)
                         }
-                        searcher.position = cmp::max(b, searcher.position);
-                        SearchStep::Reject(a, b)
+                        otherwise => otherwise,
                     }
-                    otherwise => otherwise,
+                }
+
+                #[cfg(kani)]
+                {
+                    match searcher.next::<RejectAndMatch>(
+                        self.haystack.as_bytes(),
+                        self.needle.as_bytes(),
+                        is_long,
+                    ) {
+                        SearchStep::Reject(a, mut b) => {
+                            assert!(
+                                b <= self.haystack.len(),
+                                "Two-Way forward reject cursor must remain in the haystack",
+                            );
+                            kani::assume(
+                                kani_pattern_harness_helpers::valid_utf8_forward_boundary_reachability(
+                                    self.haystack,
+                                    b,
+                                ),
+                            );
+                            b = kani_pattern_harness_helpers::stub_utf8_forward_boundary_repair(
+                                self.haystack,
+                                b,
+                            );
+                            searcher.position = cmp::max(b, searcher.position);
+                            SearchStep::Reject(a, b)
+                        }
+                        otherwise => otherwise,
+                    }
                 }
             }
         }
@@ -1174,13 +1253,34 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
     #[inline]
     fn next_match(&mut self) -> Option<(usize, usize)> {
         match self.searcher {
-            StrSearcherImpl::Empty(..) => loop {
-                match self.next() {
-                    SearchStep::Match(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    SearchStep::Reject(..) => {}
+            StrSearcherImpl::Empty(..) => {
+                #[cfg(kani)]
+                {
+                    match self.next() {
+                        SearchStep::Match(a, b) => Some((a, b)),
+                        SearchStep::Done => None,
+                        SearchStep::Reject(..) => match self.next() {
+                            SearchStep::Match(a, b) => Some((a, b)),
+                            SearchStep::Done => None,
+                            SearchStep::Reject(..) => {
+                                kani::assert(
+                                    false,
+                                    "empty-needle next_match cannot skip two rejects",
+                                );
+                                None
+                            }
+                        },
+                    }
                 }
-            },
+                #[cfg(not(kani))]
+                loop {
+                    match self.next() {
+                        SearchStep::Match(a, b) => return Some((a, b)),
+                        SearchStep::Done => return None,
+                        SearchStep::Reject(..) => {}
+                    }
+                }
+            }
             StrSearcherImpl::TwoWay(ref mut searcher) => {
                 let is_long = searcher.memory == usize::MAX;
                 // write out `true` and `false` cases to encourage the compiler
@@ -1201,6 +1301,91 @@ unsafe impl<'a, 'b> Searcher<'a> for StrSearcher<'a, 'b> {
             }
         }
     }
+
+    // Kani uses a concrete override to verify the finite EmptyNeedle filter
+    // without relying on the trait default loop. Non-Kani builds use the default.
+    #[cfg(kani)]
+    #[inline]
+    fn next_reject(&mut self) -> Option<(usize, usize)> {
+        match self.searcher {
+            StrSearcherImpl::Empty(..) => match self.next() {
+                SearchStep::Reject(a, b) => Some((a, b)),
+                SearchStep::Done => None,
+                SearchStep::Match(..) => match self.next() {
+                    SearchStep::Reject(a, b) => Some((a, b)),
+                    SearchStep::Done => None,
+                    SearchStep::Match(..) => {
+                        kani::assert(false, "empty-needle next_reject cannot skip two matches");
+                        None
+                    }
+                },
+            },
+            StrSearcherImpl::TwoWay(..) => {
+                let (old_position, long_period) = match &self.searcher {
+                    StrSearcherImpl::TwoWay(searcher) => {
+                        (searcher.position, searcher.memory == usize::MAX)
+                    }
+                    StrSearcherImpl::Empty(_) => unreachable!(),
+                };
+
+                let representative_position = {
+                    let searcher = match &mut self.searcher {
+                        StrSearcherImpl::TwoWay(searcher) => searcher,
+                        StrSearcherImpl::Empty(_) => unreachable!(),
+                    };
+                    assert!(kani_pattern_harness_helpers::valid_two_way_next_reject_loop_state(
+                        searcher,
+                        self.haystack,
+                        self.needle,
+                        old_position,
+                        long_period,
+                    ));
+
+                    // Choose an arbitrary loop head after zero or more Match
+                    // steps, then execute one `StrSearcher::next` iteration.
+                    searcher.position = kani::any();
+                    searcher.memory = kani::any();
+                    kani::assume(
+                        kani_pattern_harness_helpers::valid_two_way_next_reject_loop_state(
+                            searcher,
+                            self.haystack,
+                            self.needle,
+                            old_position,
+                            long_period,
+                        ),
+                    );
+                    searcher.position
+                };
+
+                match self.next() {
+                    SearchStep::Reject(a, b) => Some((a, b)),
+                    SearchStep::Done => None,
+                    SearchStep::Match(..) => {
+                        let searcher = match &self.searcher {
+                            StrSearcherImpl::TwoWay(searcher) => searcher,
+                            StrSearcherImpl::Empty(_) => unreachable!(),
+                        };
+                        assert!(representative_position < searcher.position);
+                        assert!(
+                            kani_pattern_harness_helpers::valid_two_way_next_reject_loop_state(
+                                searcher,
+                                self.haystack,
+                                self.needle,
+                                old_position,
+                                long_period,
+                            )
+                        );
+
+                        // This arbitrary iteration continues the loop. Every
+                        // concrete exit is covered by choosing the symbolic
+                        // prefix to end immediately before its Reject or Done.
+                        kani::assume(false);
+                        None
+                    }
+                }
+            }
+        }
+    }
 }
 
 unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
@@ -1214,15 +1399,59 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
                 let is_match = searcher.is_match_bw;
                 searcher.is_match_bw = !searcher.is_match_bw;
                 let end = searcher.end;
-                match self.haystack[..end].chars().next_back() {
-                    _ if is_match => SearchStep::Match(end, end),
-                    None => {
-                        searcher.is_finished = true;
-                        SearchStep::Done
+
+                #[cfg(kani)]
+                {
+                    match self.haystack.get(..end) {
+                        Some(_) => {
+                            if is_match {
+                                return SearchStep::Match(end, end);
+                            }
+
+                            if end == 0 {
+                                searcher.is_finished = true;
+                                SearchStep::Done
+                            } else {
+                                // Include the real decoded width by allowing any in-bounds
+                                // UTF-8 boundary within one maximum-width character.
+                                let width: usize = kani::any();
+
+                                kani::assume(1 <= width && width <= MAX_LEN_UTF8);
+                                kani::assume(width <= end);
+
+                                let new_end = end - width;
+
+                                // Challenge 21 allows assuming UTF-8 decoding correctness:
+                                // consuming one character starts at another character boundary.
+                                kani::assume(self.haystack.is_char_boundary(new_end));
+
+                                searcher.end = new_end;
+                                SearchStep::Reject(new_end, end)
+                            }
+                        }
+                        None => {
+                            kani::assert(
+                                false,
+                                "empty-needle end must be a valid haystack boundary",
+                            );
+                            kani::assume(false);
+                            SearchStep::Done
+                        }
                     }
-                    Some(ch) => {
-                        searcher.end -= ch.len_utf8();
-                        SearchStep::Reject(searcher.end, end)
+                }
+
+                #[cfg(not(kani))]
+                {
+                    match self.haystack[..end].chars().next_back() {
+                        _ if is_match => SearchStep::Match(end, end),
+                        None => {
+                            searcher.is_finished = true;
+                            SearchStep::Done
+                        }
+                        Some(ch) => {
+                            searcher.end -= ch.len_utf8();
+                            SearchStep::Reject(searcher.end, end)
+                        }
                     }
                 }
             }
@@ -1231,20 +1460,52 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
                     return SearchStep::Done;
                 }
                 let is_long = searcher.memory == usize::MAX;
-                match searcher.next_back::<RejectAndMatch>(
-                    self.haystack.as_bytes(),
-                    self.needle.as_bytes(),
-                    is_long,
-                ) {
-                    SearchStep::Reject(mut a, b) => {
-                        // skip to next char boundary
-                        while !self.haystack.is_char_boundary(a) {
-                            a -= 1;
+                #[cfg(not(kani))]
+                {
+                    match searcher.next_back::<RejectAndMatch>(
+                        self.haystack.as_bytes(),
+                        self.needle.as_bytes(),
+                        is_long,
+                    ) {
+                        SearchStep::Reject(mut a, b) => {
+                            // skip to next char boundary
+                            while !self.haystack.is_char_boundary(a) {
+                                a -= 1;
+                            }
+                            searcher.end = cmp::min(a, searcher.end);
+                            SearchStep::Reject(a, b)
                         }
-                        searcher.end = cmp::min(a, searcher.end);
-                        SearchStep::Reject(a, b)
+                        otherwise => otherwise,
                     }
-                    otherwise => otherwise,
+                }
+
+                #[cfg(kani)]
+                {
+                    match searcher.next_back::<RejectAndMatch>(
+                        self.haystack.as_bytes(),
+                        self.needle.as_bytes(),
+                        is_long,
+                    ) {
+                        SearchStep::Reject(mut a, b) => {
+                            assert!(
+                                a <= self.haystack.len(),
+                                "Two-Way reverse reject cursor must remain in the haystack",
+                            );
+                            kani::assume(
+                                kani_pattern_harness_helpers::valid_utf8_reverse_boundary_reachability(
+                                    self.haystack,
+                                    a,
+                                ),
+                            );
+                            a = kani_pattern_harness_helpers::stub_utf8_reverse_boundary_repair(
+                                self.haystack,
+                                a,
+                            );
+                            searcher.end = cmp::min(a, searcher.end);
+                            SearchStep::Reject(a, b)
+                        }
+                        otherwise => otherwise,
+                    }
                 }
             }
         }
@@ -1253,15 +1514,37 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
     #[inline]
     fn next_match_back(&mut self) -> Option<(usize, usize)> {
         match self.searcher {
-            StrSearcherImpl::Empty(..) => loop {
-                match self.next_back() {
-                    SearchStep::Match(a, b) => return Some((a, b)),
-                    SearchStep::Done => return None,
-                    SearchStep::Reject(..) => {}
+            StrSearcherImpl::Empty(..) => {
+                #[cfg(kani)]
+                {
+                    match self.next_back() {
+                        SearchStep::Match(a, b) => Some((a, b)),
+                        SearchStep::Done => None,
+                        SearchStep::Reject(..) => match self.next_back() {
+                            SearchStep::Match(a, b) => Some((a, b)),
+                            SearchStep::Done => None,
+                            SearchStep::Reject(..) => {
+                                kani::assert(
+                                    false,
+                                    "empty-needle next_match_back cannot skip two rejects",
+                                );
+                                None
+                            }
+                        },
+                    }
                 }
-            },
+                #[cfg(not(kani))]
+                loop {
+                    match self.next_back() {
+                        SearchStep::Match(a, b) => return Some((a, b)),
+                        SearchStep::Done => return None,
+                        SearchStep::Reject(..) => {}
+                    }
+                }
+            }
             StrSearcherImpl::TwoWay(ref mut searcher) => {
                 let is_long = searcher.memory == usize::MAX;
+
                 // write out `true` and `false`, like `next_match`
                 if is_long {
                     searcher.next_back::<MatchOnly>(
@@ -1275,6 +1558,95 @@ unsafe impl<'a, 'b> ReverseSearcher<'a> for StrSearcher<'a, 'b> {
                         self.needle.as_bytes(),
                         false,
                     )
+                }
+            }
+        }
+    }
+
+    // Kani uses a concrete override to verify the finite EmptyNeedle filter
+    // without relying on the trait default loop. Non-Kani builds use the default.
+    #[cfg(kani)]
+    #[inline]
+    fn next_reject_back(&mut self) -> Option<(usize, usize)> {
+        match self.searcher {
+            StrSearcherImpl::Empty(..) => match self.next_back() {
+                SearchStep::Reject(a, b) => Some((a, b)),
+                SearchStep::Done => None,
+                SearchStep::Match(..) => match self.next_back() {
+                    SearchStep::Reject(a, b) => Some((a, b)),
+                    SearchStep::Done => None,
+                    SearchStep::Match(..) => {
+                        kani::assert(
+                            false,
+                            "empty-needle next_reject_back cannot skip two matches",
+                        );
+                        None
+                    }
+                },
+            },
+            StrSearcherImpl::TwoWay(..) => {
+                let (old_end, long_period) = match &self.searcher {
+                    StrSearcherImpl::TwoWay(searcher) => {
+                        (searcher.end, searcher.memory == usize::MAX)
+                    }
+                    StrSearcherImpl::Empty(_) => unreachable!(),
+                };
+
+                let representative_end = {
+                    let searcher = match &mut self.searcher {
+                        StrSearcherImpl::TwoWay(searcher) => searcher,
+                        StrSearcherImpl::Empty(_) => unreachable!(),
+                    };
+                    assert!(
+                        kani_pattern_harness_helpers::valid_two_way_next_reject_back_loop_state(
+                            searcher,
+                            self.haystack,
+                            self.needle,
+                            old_end,
+                            long_period,
+                        )
+                    );
+
+                    // Choose an arbitrary loop head after zero or more Match
+                    // steps, then execute one `StrSearcher::next_back` iteration.
+                    searcher.end = kani::any();
+                    searcher.memory_back = kani::any();
+                    kani::assume(
+                        kani_pattern_harness_helpers::valid_two_way_next_reject_back_loop_state(
+                            searcher,
+                            self.haystack,
+                            self.needle,
+                            old_end,
+                            long_period,
+                        ),
+                    );
+                    searcher.end
+                };
+
+                match self.next_back() {
+                    SearchStep::Reject(a, b) => Some((a, b)),
+                    SearchStep::Done => None,
+                    SearchStep::Match(..) => {
+                        let searcher = match &self.searcher {
+                            StrSearcherImpl::TwoWay(searcher) => searcher,
+                            StrSearcherImpl::Empty(_) => unreachable!(),
+                        };
+                        assert!(searcher.end < representative_end);
+                        assert!(
+                            kani_pattern_harness_helpers::valid_two_way_next_reject_back_loop_state(
+                                searcher,
+                                self.haystack,
+                                self.needle,
+                                old_end,
+                                long_period,
+                            )
+                        );
+
+                        // Every concrete exit after this Match is covered by
+                        // choosing the symbolic prefix to end immediately before it.
+                        kani::assume(false);
+                        None
+                    }
                 }
             }
         }
@@ -1302,6 +1674,15 @@ struct TwoWaySearcher {
     memory: usize,
     /// index into needle after which we have already matched
     memory_back: usize,
+}
+
+#[cfg(kani)]
+#[derive(Clone, Copy, kani::Arbitrary)]
+struct KaniTwoWayScan {
+    mismatch: Option<usize>,
+    matched_first_bytes: u8,
+    matched_last_bytes: u8,
+    matched_probe: bool,
 }
 
 /*
@@ -1456,6 +1837,187 @@ impl TwoWaySearcher {
         (self.byteset >> ((byte & 0x3f) as usize)) & 1 != 0
     }
 
+    #[cfg(kani)]
+    fn kani_scan_forward(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        start: usize,
+        end: usize,
+        probe_index: usize,
+    ) -> KaniTwoWayScan {
+        assert!(start <= end);
+        assert!(end <= needle.len());
+        assert!(position.checked_add(end).is_some_and(|index| index <= haystack.len()));
+
+        // A nondeterministic index represents every loop iteration, so the
+        // accesses below establish safety for the complete scan range. The
+        // result then conservatively summarizes mismatch or completion.
+        if start < end {
+            let index: usize = kani::any();
+            kani::assume(start <= index && index < end);
+            assert!(index < needle.len());
+            let haystack_index = position.checked_add(index).unwrap();
+            assert!(haystack_index < haystack.len());
+            let _ = needle[index];
+            let _ = haystack[haystack_index];
+        }
+
+        let result: KaniTwoWayScan = kani::any();
+        kani::assume(kani_pattern_harness_helpers::valid_two_way_scan_result(
+            haystack,
+            needle,
+            position,
+            start,
+            end,
+            probe_index,
+            &result,
+        ));
+        result
+    }
+
+    #[cfg(kani)]
+    fn kani_scan_reverse(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        start: usize,
+        end: usize,
+        probe_index: usize,
+    ) -> KaniTwoWayScan {
+        assert!(start <= end);
+        assert!(end <= needle.len());
+        assert!(position.checked_add(end).is_some_and(|index| index <= haystack.len()));
+
+        // Reverse scanning visits the same index set in the opposite order.
+        if start < end {
+            let index: usize = kani::any();
+            kani::assume(start <= index && index < end);
+            assert!(index < needle.len());
+            let haystack_index = position.checked_add(index).unwrap();
+            assert!(haystack_index < haystack.len());
+            let _ = needle[index];
+            let _ = haystack[haystack_index];
+        }
+
+        let result: KaniTwoWayScan = kani::any();
+        kani::assume(kani_pattern_harness_helpers::valid_two_way_scan_result(
+            haystack,
+            needle,
+            position,
+            start,
+            end,
+            probe_index,
+            &result,
+        ));
+        result
+    }
+
+    #[cfg(kani)]
+    fn kani_stub_match_only_remaining<S>(
+        &mut self,
+        haystack: &[u8],
+        needle: &[u8],
+        old_position: usize,
+        remaining_position: usize,
+        long_period: bool,
+    ) -> S::Output
+    where
+        S: TwoWayStrategy,
+    {
+        assert!(!S::use_early_reject());
+        assert_eq!(self.position, remaining_position);
+        assert!(old_position < remaining_position);
+        assert!(kani_pattern_harness_helpers::valid_two_way_match_only_loop_state(
+            self,
+            haystack,
+            needle,
+            old_position,
+            long_period,
+            false,
+        ));
+
+        let has_room = self
+            .position
+            .checked_add(needle.len())
+            .is_some_and(|candidate_end| candidate_end <= haystack.len());
+        if !has_room {
+            self.position = haystack.len();
+            return S::rejecting(old_position, self.position);
+        }
+
+        // UnsafeCop-style suffix summary: the concrete failed candidate above
+        // checked the loop's memory operations. Havoc only the loop-carried
+        // state to cover any number of subsequent failed candidates and either
+        // a later Match or exhaustion of the haystack.
+        self.position = kani::any();
+        self.memory = kani::any();
+        let matched: bool = kani::any();
+        kani::assume(
+            kani_pattern_harness_helpers::valid_two_way_match_only_loop_state(
+                self,
+                haystack,
+                needle,
+                old_position,
+                long_period,
+                matched,
+            ) && if matched {
+                self.position
+                    .checked_sub(needle.len())
+                    .is_some_and(|match_position| match_position >= remaining_position)
+            } else {
+                self.position >= remaining_position
+            },
+        );
+
+        if matched {
+            let match_end = self.position;
+            assert!(needle.len() <= match_end);
+            let match_position = match_end - needle.len();
+            S::matching(match_position, match_end)
+        } else {
+            self.position = haystack.len();
+            S::rejecting(old_position, self.position)
+        }
+    }
+
+    #[cfg(kani)]
+    fn kani_stub_after_failed_forward_candidate<S>(
+        &mut self,
+        haystack: &[u8],
+        needle: &[u8],
+        old_position: usize,
+        remaining_position: usize,
+        long_period: bool,
+    ) -> S::Output
+    where
+        S: TwoWayStrategy,
+    {
+        assert_eq!(self.position, remaining_position);
+        assert!(old_position < remaining_position);
+
+        if !S::use_early_reject() {
+            return self.kani_stub_match_only_remaining::<S>(
+                haystack,
+                needle,
+                old_position,
+                remaining_position,
+                long_period,
+            );
+        }
+
+        // UnsafeCop-style suffix stub for `RejectAndMatch`. The failed
+        // candidate above is the representative real loop iteration. At the
+        // next loop head, the production code first checks whether another
+        // candidate fits, then necessarily rejects because `position` moved.
+        assert!(!needle.is_empty());
+        let needle_last = needle.len() - 1;
+        if haystack.get(self.position + needle_last).is_none() {
+            self.position = haystack.len();
+        }
+        S::rejecting(old_position, self.position)
+    }
+
     // One of the main ideas of Two-Way is that we factorize the needle into
     // two halves, (u, v), and begin trying to find v in the haystack by scanning
     // left to right. If v matches, we try to match u by scanning right to left.
@@ -1468,6 +2030,33 @@ impl TwoWaySearcher {
     {
         // `next()` uses `self.position` as its cursor
         let old_pos = self.position;
+
+        #[cfg(kani)]
+        if !S::use_early_reject() {
+            assert!(kani_pattern_harness_helpers::valid_two_way_match_only_loop_state(
+                self,
+                haystack,
+                needle,
+                old_pos,
+                long_period,
+                false,
+            ));
+
+            // Choose an arbitrary loop head after zero or more failed
+            // candidates. The following candidate retains production control
+            // flow and arithmetic; its two scan loops use the summaries above.
+            self.position = kani::any();
+            self.memory = kani::any();
+            kani::assume(kani_pattern_harness_helpers::valid_two_way_match_only_loop_state(
+                self,
+                haystack,
+                needle,
+                old_pos,
+                long_period,
+                false,
+            ));
+        }
+
         let needle_last = needle.len() - 1;
         'search: loop {
             // Check that we have room to search in
@@ -1491,13 +2080,30 @@ impl TwoWaySearcher {
                 if !long_period {
                     self.memory = 0;
                 }
+                #[cfg(kani)]
+                {
+                    let remaining_position = self.position;
+                    return self.kani_stub_after_failed_forward_candidate::<S>(
+                        haystack,
+                        needle,
+                        old_pos,
+                        remaining_position,
+                        long_period,
+                    );
+                }
+                #[cfg(not(kani))]
                 continue 'search;
             }
 
             // See if the right part of the needle matches
-            let start =
+            let right_start =
                 if long_period { self.crit_pos } else { cmp::max(self.crit_pos, self.memory) };
-            for i in start..needle.len() {
+
+            #[cfg(kani)]
+            let matched_from = if long_period { 0 } else { self.memory };
+
+            #[cfg(not(kani))]
+            for i in right_start..needle.len() {
                 if needle[i] != haystack[self.position + i] {
                     self.position += i - self.crit_pos + 1;
                     if !long_period {
@@ -1507,9 +2113,36 @@ impl TwoWaySearcher {
                 }
             }
 
+            #[cfg(kani)]
+            let right_scan = Self::kani_scan_forward(
+                haystack,
+                needle,
+                self.position,
+                right_start,
+                needle.len(),
+                self.period,
+            );
+            #[cfg(kani)]
+            if let Some(i) = right_scan.mismatch {
+                self.position += i - self.crit_pos + 1;
+                if !long_period {
+                    self.memory = 0;
+                }
+                let remaining_position = self.position;
+                return self.kani_stub_after_failed_forward_candidate::<S>(
+                    haystack,
+                    needle,
+                    old_pos,
+                    remaining_position,
+                    long_period,
+                );
+            }
+
             // See if the left part of the needle matches
-            let start = if long_period { 0 } else { self.memory };
-            for i in (start..self.crit_pos).rev() {
+            let left_start = if long_period { 0 } else { self.memory };
+
+            #[cfg(not(kani))]
+            for i in (left_start..self.crit_pos).rev() {
                 if needle[i] != haystack[self.position + i] {
                     self.position += self.period;
                     if !long_period {
@@ -1518,6 +2151,63 @@ impl TwoWaySearcher {
                     continue 'search;
                 }
             }
+
+            #[cfg(kani)]
+            let left_scan = if left_start < self.crit_pos {
+                Self::kani_scan_reverse(
+                    haystack,
+                    needle,
+                    self.position,
+                    left_start,
+                    self.crit_pos,
+                    needle.len(),
+                )
+            } else {
+                KaniTwoWayScan {
+                    mismatch: None,
+                    matched_first_bytes: 0,
+                    matched_last_bytes: 0,
+                    matched_probe: false,
+                }
+            };
+            #[cfg(kani)]
+            if let Some(_i) = left_scan.mismatch {
+                if !long_period && needle.len() - self.period != 0 {
+                    assert!(left_start < self.crit_pos);
+                    assert!(self.crit_pos < self.period);
+                    assert!(self.period < needle.len());
+                    assert_eq!(right_start, self.crit_pos);
+                    assert!(right_scan.matched_probe);
+                    assert!(needle[self.period] == haystack[self.position + self.period]);
+                    assert!(kani_pattern_harness_helpers::byte_index_is_utf8_boundary(
+                        haystack,
+                        self.position + self.period,
+                    ));
+                }
+
+                self.position += self.period;
+                if !long_period {
+                    self.memory = needle.len() - self.period;
+                }
+                let remaining_position = self.position;
+                return self.kani_stub_after_failed_forward_candidate::<S>(
+                    haystack,
+                    needle,
+                    old_pos,
+                    remaining_position,
+                    long_period,
+                );
+            }
+
+            #[cfg(kani)]
+            kani_pattern_harness_helpers::assume_valid_utf8_two_way_match_boundaries(
+                haystack,
+                needle,
+                self.position,
+                matched_from,
+                right_scan.matched_first_bytes | left_scan.matched_first_bytes,
+                right_scan.matched_last_bytes | left_scan.matched_last_bytes,
+            );
 
             // We have found a match!
             let match_pos = self.position;
@@ -1530,6 +2220,110 @@ impl TwoWaySearcher {
 
             return S::matching(match_pos, match_pos + needle.len());
         }
+    }
+
+    #[cfg(kani)]
+    fn kani_stub_match_back_only_remaining<S>(
+        &mut self,
+        haystack: &[u8],
+        needle: &[u8],
+        old_end: usize,
+        representative_end: usize,
+        remaining_end: usize,
+        long_period: bool,
+    ) -> S::Output
+    where
+        S: TwoWayStrategy,
+    {
+        assert!(!S::use_early_reject());
+        assert_eq!(self.end, remaining_end);
+        assert!(remaining_end < representative_end);
+        assert!(representative_end <= old_end);
+        assert!(kani_pattern_harness_helpers::valid_two_way_match_back_only_loop_state(
+            self,
+            haystack,
+            needle,
+            old_end,
+            long_period,
+            false,
+        ));
+
+        if self.end < needle.len() {
+            self.end = 0;
+            return S::rejecting(0, old_end);
+        }
+
+        // UnsafeCop-style suffix summary: the concrete failed candidate above
+        // checked the loop's memory operations. Havoc only the loop-carried
+        // state to cover any number of later candidates and either a Match or
+        // exhaustion of the reverse search.
+        self.end = kani::any();
+        self.memory_back = kani::any();
+        let matched: bool = kani::any();
+        kani::assume(
+            kani_pattern_harness_helpers::valid_two_way_match_back_only_loop_state(
+                self,
+                haystack,
+                needle,
+                old_end,
+                long_period,
+                matched,
+            ) && if matched {
+                self.end
+                    .checked_add(needle.len())
+                    .is_some_and(|match_end| match_end <= remaining_end)
+            } else {
+                self.end <= remaining_end
+            },
+        );
+
+        if matched {
+            let match_position = self.end;
+            assert!(match_position.checked_add(needle.len()).is_some());
+            let match_end = match_position + needle.len();
+            S::matching(match_position, match_end)
+        } else {
+            self.end = 0;
+            S::rejecting(0, old_end)
+        }
+    }
+
+    #[cfg(kani)]
+    fn kani_stub_after_failed_reverse_candidate<S>(
+        &mut self,
+        haystack: &[u8],
+        needle: &[u8],
+        old_end: usize,
+        representative_end: usize,
+        remaining_end: usize,
+        long_period: bool,
+    ) -> S::Output
+    where
+        S: TwoWayStrategy,
+    {
+        assert_eq!(self.end, remaining_end);
+        assert!(remaining_end < representative_end);
+        assert!(representative_end <= old_end);
+
+        if !S::use_early_reject() {
+            return self.kani_stub_match_back_only_remaining::<S>(
+                haystack,
+                needle,
+                old_end,
+                representative_end,
+                remaining_end,
+                long_period,
+            );
+        }
+
+        // UnsafeCop-style suffix stub for `RejectAndMatch`. At the next loop
+        // head the production code checks whether another reverse candidate
+        // fits, then necessarily rejects because `end` has moved.
+        assert!(!needle.is_empty());
+        if haystack.get(self.end.wrapping_sub(needle.len())).is_none() {
+            self.end = 0;
+        }
+        S::rejecting(self.end, old_end)
     }
 
     // Follows the ideas in `next()`.
@@ -1552,7 +2346,37 @@ impl TwoWaySearcher {
         // `next_back()` uses `self.end` as its cursor -- so that `next()` and `next_back()`
         // are independent.
         let old_end = self.end;
+
+        #[cfg(kani)]
+        if !S::use_early_reject() {
+            assert!(kani_pattern_harness_helpers::valid_two_way_match_back_only_loop_state(
+                self,
+                haystack,
+                needle,
+                old_end,
+                long_period,
+                false,
+            ));
+
+            // Choose an arbitrary loop head after zero or more failed reverse
+            // candidates. The following candidate retains production control
+            // flow and arithmetic; its scan loops use the summaries above.
+            self.end = kani::any();
+            self.memory_back = kani::any();
+            kani::assume(kani_pattern_harness_helpers::valid_two_way_match_back_only_loop_state(
+                self,
+                haystack,
+                needle,
+                old_end,
+                long_period,
+                false,
+            ));
+        }
+
         'search: loop {
+            #[cfg(kani)]
+            let representative_end = self.end;
+
             // Check that we have room to search in
             // end - needle.len() will wrap around when there is no more room,
             // but due to slice length limits it can never wrap all the way back
@@ -1575,6 +2399,19 @@ impl TwoWaySearcher {
                 if !long_period {
                     self.memory_back = needle.len();
                 }
+                #[cfg(kani)]
+                {
+                    let remaining_end = self.end;
+                    return self.kani_stub_after_failed_reverse_candidate::<S>(
+                        haystack,
+                        needle,
+                        old_end,
+                        representative_end,
+                        remaining_end,
+                        long_period,
+                    );
+                }
+                #[cfg(not(kani))]
                 continue 'search;
             }
 
@@ -1584,6 +2421,7 @@ impl TwoWaySearcher {
             } else {
                 cmp::min(self.crit_pos_back, self.memory_back)
             };
+            #[cfg(not(kani))]
             for i in (0..crit).rev() {
                 if needle[i] != haystack[self.end - needle.len() + i] {
                     self.end -= self.crit_pos_back - i;
@@ -1594,8 +2432,50 @@ impl TwoWaySearcher {
                 }
             }
 
+            #[cfg(kani)]
+            let candidate_position = self.end - needle.len();
+            #[cfg(kani)]
+            let left_scan = if crit == 0 {
+                KaniTwoWayScan {
+                    mismatch: None,
+                    matched_first_bytes: 0,
+                    matched_last_bytes: 0,
+                    matched_probe: false,
+                }
+            } else {
+                Self::kani_scan_reverse(
+                    haystack,
+                    needle,
+                    candidate_position,
+                    0,
+                    crit,
+                    if long_period { needle.len() } else { needle.len() - self.period },
+                )
+            };
+            #[cfg(kani)]
+            if let Some(i) = left_scan.mismatch {
+                assert!(i < crit);
+                assert!(crit <= self.crit_pos_back);
+                let shift = self.crit_pos_back - i;
+                assert!(0 < shift && shift <= needle.len());
+                self.end -= shift;
+                if !long_period {
+                    self.memory_back = needle.len();
+                }
+                let remaining_end = self.end;
+                return self.kani_stub_after_failed_reverse_candidate::<S>(
+                    haystack,
+                    needle,
+                    old_end,
+                    representative_end,
+                    remaining_end,
+                    long_period,
+                );
+            }
+
             // See if the right part of the needle matches
             let needle_end = if long_period { needle.len() } else { self.memory_back };
+            #[cfg(not(kani))]
             for i in self.crit_pos_back..needle_end {
                 if needle[i] != haystack[self.end - needle.len() + i] {
                     self.end -= self.period;
@@ -1603,6 +2483,92 @@ impl TwoWaySearcher {
                         self.memory_back = self.period;
                     }
                     continue 'search;
+                }
+            }
+
+            #[cfg(kani)]
+            let right_scan = if self.crit_pos_back < needle_end {
+                Self::kani_scan_forward(
+                    haystack,
+                    needle,
+                    candidate_position,
+                    self.crit_pos_back,
+                    needle_end,
+                    needle.len(),
+                )
+            } else {
+                KaniTwoWayScan {
+                    mismatch: None,
+                    matched_first_bytes: 0,
+                    matched_last_bytes: 0,
+                    matched_probe: false,
+                }
+            };
+            #[cfg(kani)]
+            if right_scan.mismatch.is_some() {
+                if !long_period {
+                    let boundary_probe = needle.len() - self.period;
+                    assert!(boundary_probe < self.crit_pos_back);
+                    assert!(self.crit_pos_back < needle_end);
+                    assert_eq!(crit, self.crit_pos_back);
+                    assert!(left_scan.matched_probe);
+                    assert!(
+                        needle[boundary_probe] == haystack[candidate_position + boundary_probe]
+                    );
+                    assert!(candidate_position + boundary_probe == self.end - self.period);
+                    assert!(kani_pattern_harness_helpers::byte_index_is_utf8_boundary(
+                        needle,
+                        boundary_probe,
+                    ));
+
+                    // Equality transfers the non-continuation-byte boundary
+                    // from the needle to this haystack position.
+                    assert!(kani_pattern_harness_helpers::byte_index_is_utf8_boundary(
+                        haystack,
+                        self.end - self.period,
+                    ));
+                }
+
+                self.end -= self.period;
+                if !long_period {
+                    self.memory_back = self.period;
+                }
+                let remaining_end = self.end;
+                return self.kani_stub_after_failed_reverse_candidate::<S>(
+                    haystack,
+                    needle,
+                    old_end,
+                    representative_end,
+                    remaining_end,
+                    long_period,
+                );
+            }
+
+            #[cfg(kani)]
+            {
+                let matched_first_bytes =
+                    left_scan.matched_first_bytes | right_scan.matched_first_bytes;
+                let matched_last_bytes =
+                    left_scan.matched_last_bytes | right_scan.matched_last_bytes;
+                if long_period || self.memory_back == needle.len() {
+                    kani_pattern_harness_helpers::assume_valid_utf8_two_way_match_boundaries(
+                        haystack,
+                        needle,
+                        candidate_position,
+                        0,
+                        matched_first_bytes,
+                        matched_last_bytes,
+                    );
+                } else {
+                    kani_pattern_harness_helpers::assume_valid_utf8_two_way_reverse_match_start(
+                        haystack,
+                        needle,
+                        candidate_position,
+                        matched_first_bytes,
+                    );
+                    assert!(kani_pattern_harness_helpers::byte_index_is_utf8_boundary(
+                        haystack, self.end,
+                    ));
                 }
             }
 
@@ -1992,6 +2958,1225 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
+mod kani_pattern_harness_helpers {
+    use super::*;
+
+    pub(super) const MAX_UTF8_BYTES: usize = 16;
+
+    pub(super) fn any_valid_utf8_str<'a, const MAX: usize>(bytes: &'a [u8; MAX]) -> &'a str {
+        let xs: &[u8] = kani::slice::any_slice_of_array(bytes);
+        match crate::str::from_utf8(xs) {
+            Ok(s) => s,
+            Err(_) => {
+                kani::assume(false);
+                ""
+            }
+        }
+    }
+
+    pub(super) fn byte_index_is_utf8_boundary(bytes: &[u8], index: usize) -> bool {
+        index == 0
+            || index == bytes.len()
+            || bytes.get(index).is_some_and(|byte| (*byte as i8) >= -0x40)
+    }
+
+    // `run_utf8_validation` is itself abstracted by loop contracts in Kani, so
+    // constructing an `&str` does not retain this semantic UTF-8 fact. Import
+    // the fact permitted by Challenge 21 for the boundary-repair loop stub: a
+    // character has at most three continuation bytes.
+    pub(super) fn valid_utf8_forward_boundary_reachability(haystack: &str, index: usize) -> bool {
+        haystack.is_char_boundary(index)
+            || index.checked_add(1).is_some_and(|next| haystack.is_char_boundary(next))
+            || index.checked_add(2).is_some_and(|next| haystack.is_char_boundary(next))
+            || index
+                .checked_add(MAX_LEN_UTF8 - 1)
+                .is_some_and(|next| haystack.is_char_boundary(next))
+    }
+
+    pub(super) fn stub_utf8_forward_boundary_repair(haystack: &str, index: usize) -> usize {
+        assert!(index <= haystack.len());
+        assert!(valid_utf8_forward_boundary_reachability(haystack, index));
+        if haystack.is_char_boundary(index) {
+            return index;
+        }
+
+        // Check the real loop body at an arbitrary potential non-boundary head
+        // within the imported UTF-8 bound. This over-approximates the heads
+        // production can reach before incrementing to the first boundary.
+        let representative_head: usize = kani::any();
+        kani::assume(index <= representative_head && representative_head < haystack.len());
+        kani::assume(
+            representative_head
+                .checked_sub(index)
+                .is_some_and(|distance| distance < MAX_LEN_UTF8 - 1),
+        );
+        kani::assume(!haystack.is_char_boundary(representative_head));
+        let representative_next = representative_head + 1;
+        assert!(representative_next <= haystack.len());
+
+        // Suffix summary: production returns the first boundary; allowing any
+        // boundary within the same UTF-8-width bound is a safe over-approximation.
+        let repaired: usize = kani::any();
+        kani::assume(
+            repaired
+                .checked_sub(index)
+                .is_some_and(|distance| 0 < distance && distance < MAX_LEN_UTF8),
+        );
+        kani::assume(repaired <= haystack.len() && haystack.is_char_boundary(repaired));
+        repaired
+    }
+
+    pub(super) fn valid_utf8_reverse_boundary_reachability(haystack: &str, index: usize) -> bool {
+        haystack.is_char_boundary(index)
+            || index.checked_sub(1).is_some_and(|previous| haystack.is_char_boundary(previous))
+            || index.checked_sub(2).is_some_and(|previous| haystack.is_char_boundary(previous))
+            || index
+                .checked_sub(MAX_LEN_UTF8 - 1)
+                .is_some_and(|previous| haystack.is_char_boundary(previous))
+    }
+
+    pub(super) fn stub_utf8_reverse_boundary_repair(haystack: &str, index: usize) -> usize {
+        assert!(index <= haystack.len());
+        assert!(valid_utf8_reverse_boundary_reachability(haystack, index));
+        if haystack.is_char_boundary(index) {
+            return index;
+        }
+
+        // Check the real loop body at an arbitrary non-boundary head that the
+        // production loop can visit before reaching the preceding boundary.
+        let representative_head: usize = kani::any();
+        kani::assume(representative_head <= index && representative_head < haystack.len());
+        kani::assume(
+            index
+                .checked_sub(representative_head)
+                .is_some_and(|distance| distance < MAX_LEN_UTF8 - 1),
+        );
+        kani::assume(!haystack.is_char_boundary(representative_head));
+        assert!(representative_head > 0);
+        let representative_next = representative_head - 1;
+        assert!(representative_next < haystack.len());
+
+        // Suffix summary: allow any preceding boundary within one UTF-8 width.
+        let repaired: usize = kani::any();
+        kani::assume(
+            index
+                .checked_sub(repaired)
+                .is_some_and(|distance| 0 < distance && distance < MAX_LEN_UTF8),
+        );
+        kani::assume(repaired <= haystack.len() && haystack.is_char_boundary(repaired));
+        repaired
+    }
+
+    pub(super) fn valid_forward_short_period_boundary_summary(
+        bytes: &[u8],
+        crit_pos: usize,
+        period: usize,
+    ) -> bool {
+        period > 0
+            && period <= bytes.len()
+            && crit_pos < period
+            && byte_index_is_utf8_boundary(bytes, period)
+            && byte_index_is_utf8_boundary(bytes, bytes.len() - period)
+    }
+
+    pub(super) fn valid_short_period_boundary_summary(
+        bytes: &[u8],
+        crit_pos: usize,
+        crit_pos_back: usize,
+        period: usize,
+    ) -> bool {
+        valid_forward_short_period_boundary_summary(bytes, crit_pos, period)
+            && crit_pos_back <= bytes.len()
+            && bytes.len() - crit_pos_back < period
+    }
+
+    fn two_way_tracked_first_byte_recorded(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        processed_start: usize,
+        processed_end: usize,
+        matched_first_bytes: u8,
+        needle_index: usize,
+    ) -> bool {
+        if needle_index >= needle.len()
+            || needle_index < processed_start
+            || needle_index >= processed_end
+        {
+            return true;
+        }
+
+        let Some(haystack_index) = position.checked_add(needle_index) else {
+            return false;
+        };
+        if haystack_index >= haystack.len() {
+            return false;
+        }
+
+        matched_first_bytes & (1 << needle_index) != 0
+            && needle[needle_index] == haystack[haystack_index]
+    }
+
+    fn valid_two_way_tracked_first_bytes(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        processed_start: usize,
+        processed_end: usize,
+        matched_first_bytes: u8,
+    ) -> bool {
+        two_way_tracked_first_byte_recorded(
+            haystack,
+            needle,
+            position,
+            processed_start,
+            processed_end,
+            matched_first_bytes,
+            0,
+        ) && two_way_tracked_first_byte_recorded(
+            haystack,
+            needle,
+            position,
+            processed_start,
+            processed_end,
+            matched_first_bytes,
+            1,
+        ) && two_way_tracked_first_byte_recorded(
+            haystack,
+            needle,
+            position,
+            processed_start,
+            processed_end,
+            matched_first_bytes,
+            2,
+        ) && two_way_tracked_first_byte_recorded(
+            haystack,
+            needle,
+            position,
+            processed_start,
+            processed_end,
+            matched_first_bytes,
+            3,
+        )
+    }
+
+    fn valid_two_way_tracked_first_character(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        matched_first_bytes: u8,
+    ) -> bool {
+        if needle.is_empty() {
+            return false;
+        }
+
+        // The first byte of a valid UTF-8 string is never a continuation byte.
+        // Equality of that one byte is sufficient to transfer the boundary to
+        // the candidate position in the valid haystack.
+        two_way_tracked_first_byte_recorded(
+            haystack,
+            needle,
+            position,
+            0,
+            needle.len(),
+            matched_first_bytes,
+            0,
+        )
+    }
+
+    fn two_way_tracked_last_byte_recorded(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        processed_start: usize,
+        processed_end: usize,
+        matched_last_bytes: u8,
+        distance_from_end: usize,
+    ) -> bool {
+        if needle.len() < distance_from_end {
+            return true;
+        }
+
+        let needle_index = needle.len() - distance_from_end;
+        if needle_index < processed_start || needle_index >= processed_end {
+            return true;
+        }
+
+        let Some(haystack_index) = position.checked_add(needle_index) else {
+            return false;
+        };
+        if haystack_index >= haystack.len() {
+            return false;
+        }
+
+        matched_last_bytes & (1 << (distance_from_end - 1)) != 0
+            && needle[needle_index] == haystack[haystack_index]
+    }
+
+    fn valid_two_way_tracked_last_bytes(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        processed_start: usize,
+        processed_end: usize,
+        matched_last_bytes: u8,
+    ) -> bool {
+        processed_start <= processed_end
+            && processed_end <= needle.len()
+            && position
+                .checked_add(processed_end)
+                .is_some_and(|candidate_end| candidate_end <= haystack.len())
+            && two_way_tracked_last_byte_recorded(
+                haystack,
+                needle,
+                position,
+                processed_start,
+                processed_end,
+                matched_last_bytes,
+                1,
+            )
+            && two_way_tracked_last_byte_recorded(
+                haystack,
+                needle,
+                position,
+                processed_start,
+                processed_end,
+                matched_last_bytes,
+                2,
+            )
+            && two_way_tracked_last_byte_recorded(
+                haystack,
+                needle,
+                position,
+                processed_start,
+                processed_end,
+                matched_last_bytes,
+                3,
+            )
+            && two_way_tracked_last_byte_recorded(
+                haystack,
+                needle,
+                position,
+                processed_start,
+                processed_end,
+                matched_last_bytes,
+                4,
+            )
+    }
+
+    fn two_way_tracked_probe_recorded(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        processed_start: usize,
+        processed_end: usize,
+        probe_index: usize,
+        matched_probe: bool,
+    ) -> bool {
+        if probe_index < processed_start || probe_index >= processed_end {
+            return true;
+        }
+        if probe_index >= needle.len() {
+            return false;
+        }
+
+        let Some(haystack_index) = position.checked_add(probe_index) else {
+            return false;
+        };
+        if haystack_index >= haystack.len() {
+            return false;
+        }
+
+        matched_probe && needle[probe_index] == haystack[haystack_index]
+    }
+
+    pub(super) fn valid_two_way_scan_result(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        start: usize,
+        end: usize,
+        probe_index: usize,
+        result: &KaniTwoWayScan,
+    ) -> bool {
+        match result.mismatch {
+            Some(mismatch_index) => start <= mismatch_index && mismatch_index < end,
+            None => {
+                valid_two_way_tracked_first_bytes(
+                    haystack,
+                    needle,
+                    position,
+                    start,
+                    end,
+                    result.matched_first_bytes,
+                ) && valid_two_way_tracked_last_bytes(
+                    haystack,
+                    needle,
+                    position,
+                    start,
+                    end,
+                    result.matched_last_bytes,
+                ) && two_way_tracked_probe_recorded(
+                    haystack,
+                    needle,
+                    position,
+                    start,
+                    end,
+                    probe_index,
+                    result.matched_probe,
+                )
+            }
+        }
+    }
+
+    pub(super) fn valid_two_way_forward_search_loop_state(
+        searcher: &TwoWaySearcher,
+        haystack: &[u8],
+        needle: &[u8],
+        old_position: usize,
+        long_period: bool,
+    ) -> bool {
+        let needle_len = needle.len();
+
+        // The full stable-state invariant retains the unchanged UTF-8 and
+        // short-period metadata; this loop only needs its mutable numeric state.
+        if needle_len == 0
+            || old_position > searcher.position
+            || searcher.position > haystack.len()
+            || searcher.position.checked_add(needle_len).is_none()
+            || haystack.len().checked_add(needle_len).is_none()
+            || searcher.period == 0
+            || searcher.period > needle_len
+            || searcher.crit_pos > needle_len
+        {
+            return false;
+        }
+
+        if long_period {
+            searcher.memory == usize::MAX
+        } else {
+            valid_forward_short_period_boundary_summary(needle, searcher.crit_pos, searcher.period)
+                && (searcher.memory == 0 || searcher.memory == needle_len - searcher.period)
+        }
+    }
+
+    pub(super) fn valid_two_way_reverse_search_state(
+        searcher: &TwoWaySearcher,
+        haystack: &[u8],
+        needle: &[u8],
+        old_end: usize,
+        long_period: bool,
+    ) -> bool {
+        let needle_len = needle.len();
+
+        if needle_len == 0
+            || searcher.end > old_end
+            || old_end > haystack.len()
+            || !byte_index_is_utf8_boundary(haystack, old_end)
+            || searcher.period == 0
+            || searcher.period > needle_len
+            || searcher.crit_pos_back > needle_len
+        {
+            return false;
+        }
+
+        if long_period {
+            searcher.memory_back == usize::MAX
+        } else {
+            valid_short_period_boundary_summary(
+                needle,
+                searcher.crit_pos,
+                searcher.crit_pos_back,
+                searcher.period,
+            ) && (searcher.memory_back == searcher.period || searcher.memory_back == needle_len)
+        }
+    }
+
+    pub(super) fn valid_two_way_match_back_only_loop_state(
+        searcher: &TwoWaySearcher,
+        haystack: &[u8],
+        needle: &[u8],
+        old_end: usize,
+        long_period: bool,
+        matched: bool,
+    ) -> bool {
+        if !valid_two_way_reverse_search_state(searcher, haystack, needle, old_end, long_period) {
+            return false;
+        }
+
+        let valid_search_state = long_period
+            || searcher.memory_back == needle.len()
+            || byte_index_is_utf8_boundary(haystack, searcher.end);
+        if !valid_search_state || !matched {
+            return valid_search_state;
+        }
+        if !long_period && searcher.memory_back != needle.len() {
+            return false;
+        }
+
+        match searcher.end.checked_add(needle.len()) {
+            Some(match_end) => {
+                searcher.end < match_end
+                    && match_end <= old_end
+                    && byte_index_is_utf8_boundary(haystack, searcher.end)
+                    && byte_index_is_utf8_boundary(haystack, match_end)
+            }
+            None => false,
+        }
+    }
+
+    pub(super) fn valid_two_way_match_only_loop_state(
+        searcher: &TwoWaySearcher,
+        haystack: &[u8],
+        needle: &[u8],
+        old_position: usize,
+        long_period: bool,
+        matched: bool,
+    ) -> bool {
+        if !valid_two_way_forward_search_loop_state(
+            searcher,
+            haystack,
+            needle,
+            old_position,
+            long_period,
+        ) {
+            return false;
+        }
+
+        let valid_search_state = long_period
+            || searcher.memory == 0
+            || byte_index_is_utf8_boundary(haystack, searcher.position);
+        if !valid_search_state || !matched {
+            return valid_search_state;
+        }
+        if !long_period && searcher.memory != 0 {
+            return false;
+        }
+
+        match searcher.position.checked_sub(needle.len()) {
+            Some(match_position) => {
+                old_position <= match_position
+                    && match_position < searcher.position
+                    && searcher.position <= haystack.len()
+                    && byte_index_is_utf8_boundary(haystack, match_position)
+                    && byte_index_is_utf8_boundary(haystack, searcher.position)
+            }
+            None => false,
+        }
+    }
+
+    pub(super) fn valid_two_way_next_reject_loop_state(
+        searcher: &TwoWaySearcher,
+        haystack: &str,
+        needle: &str,
+        old_position: usize,
+        long_period: bool,
+    ) -> bool {
+        type_invariant_two_way_searcher(searcher, haystack, needle)
+            && old_position <= searcher.position
+            && (searcher.position == old_position || long_period || searcher.memory == 0)
+    }
+
+    pub(super) fn valid_two_way_next_reject_back_loop_state(
+        searcher: &TwoWaySearcher,
+        haystack: &str,
+        needle: &str,
+        old_end: usize,
+        long_period: bool,
+    ) -> bool {
+        type_invariant_two_way_searcher(searcher, haystack, needle)
+            && searcher.end <= old_end
+            && (searcher.end == old_end || long_period || searcher.memory_back == needle.len())
+    }
+
+    // UTF-8 proof cut for a successful Two-Way candidate. The concrete Kani
+    // scans establish equality for every byte of the final needle character.
+    // A UTF-8 character is at most four bytes, so the mask is sufficient even
+    // when short-period memory skips an earlier needle prefix. Challenge 21
+    // permits importing the resulting UTF-8 fact: that complete character ends
+    // at a boundary in the valid haystack.
+    pub(super) fn assume_valid_utf8_two_way_match_boundaries(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        matched_from: usize,
+        matched_first_bytes: u8,
+        matched_last_bytes: u8,
+    ) {
+        assert!(!needle.is_empty());
+        assert!(matched_from < needle.len());
+        assert!(byte_index_is_utf8_boundary(needle, matched_from));
+        assert!(valid_two_way_tracked_first_bytes(
+            haystack,
+            needle,
+            position,
+            matched_from,
+            needle.len(),
+            matched_first_bytes,
+        ));
+        assert!(valid_two_way_tracked_last_bytes(
+            haystack,
+            needle,
+            position,
+            matched_from,
+            needle.len(),
+            matched_last_bytes,
+        ));
+
+        let match_end = position + needle.len();
+        assert!(match_end <= haystack.len());
+        if matched_from == 0 {
+            kani::assume(byte_index_is_utf8_boundary(haystack, position));
+        }
+        kani::assume(byte_index_is_utf8_boundary(haystack, match_end));
+    }
+
+    pub(super) fn assume_valid_utf8_two_way_reverse_match_start(
+        haystack: &[u8],
+        needle: &[u8],
+        position: usize,
+        matched_first_bytes: u8,
+    ) {
+        assert!(!needle.is_empty());
+        assert!(
+            position.checked_add(needle.len()).is_some_and(|match_end| match_end <= haystack.len())
+        );
+        assert!(valid_two_way_tracked_first_character(
+            haystack,
+            needle,
+            position,
+            matched_first_bytes,
+        ));
+
+        // Challenge 21 permits importing UTF-8 decoding facts. Equality of the
+        // complete first needle character makes the candidate start a boundary.
+        kani::assume(byte_index_is_utf8_boundary(haystack, position));
+    }
+
+    // Safety condition for any range returned by `Searcher::next`.
+    //
+    // The unsafe `Searcher` contract requires returned indices to be valid
+    // UTF-8 boundaries in the same haystack. The range must also be ordered
+    // and in bounds so consumers can safely slice `haystack[a..b]`.
+    pub(super) fn valid_range_on_haystack(haystack: &str, a: usize, b: usize) -> bool {
+        a <= b
+            && b <= haystack.len()
+            && haystack.is_char_boundary(a)
+            && haystack.is_char_boundary(b)
+    }
+
+    // Challenge 21
+
+    // Type invariant for the empty-needle implementation of `StrSearcher`.
+    //
+    // `position` and `end` are independent forward and reverse cursors. They
+    // need not be ordered because `StrSearcher` is not a DoubleEndedSearcher,
+    // but each cursor must remain a valid boundary for the slicing performed
+    // by `next` and `next_back`. The boolean fields need no extra validity
+    // constraints.
+    pub(super) fn type_invariant_empty_needle(
+        s: &EmptyNeedle,
+        haystack: &str,
+        needle: &str,
+    ) -> bool {
+        needle.is_empty()
+            && s.position <= haystack.len()
+            && s.end <= haystack.len()
+            && haystack.is_char_boundary(s.position)
+            && haystack.is_char_boundary(s.end)
+    }
+
+    // Snapshot of the state used by the empty-needle implementation. The
+    // forward and reverse cursors and match toggles are independent, while
+    // `is_finished` is shared by both directions.
+    #[derive(Eq, PartialEq)]
+    pub(super) struct EmptyNeedleState {
+        pub(super) position: usize,
+        pub(super) end: usize,
+        pub(super) is_match_fw: bool,
+        pub(super) is_match_bw: bool,
+        pub(super) is_finished: bool,
+    }
+
+    pub(super) fn empty_needle_state(s: &StrSearcher<'_, '_>) -> EmptyNeedleState {
+        let StrSearcherImpl::Empty(searcher) = &s.searcher else {
+            unreachable!("expected the empty-needle implementation");
+        };
+
+        EmptyNeedleState {
+            position: searcher.position,
+            end: searcher.end,
+            is_match_fw: searcher.is_match_fw,
+            is_match_bw: searcher.is_match_bw,
+            is_finished: searcher.is_finished,
+        }
+    }
+
+    // Check state-field effects and returned-range safety for one modeled
+    // forward empty-needle step.
+    pub(super) fn assert_valid_empty_needle_next_transition(
+        haystack: &str,
+        old: EmptyNeedleState,
+        new: EmptyNeedleState,
+        step: SearchStep,
+    ) {
+        if old.is_finished {
+            assert_eq!(step, SearchStep::Done);
+            assert!(new == old);
+            return;
+        }
+
+        assert_eq!(new.end, old.end);
+        assert_eq!(new.is_match_bw, old.is_match_bw);
+        assert_eq!(new.is_match_fw, !old.is_match_fw);
+
+        match step {
+            SearchStep::Match(a, b) => {
+                assert!(old.is_match_fw);
+                assert_eq!(a, old.position);
+                assert_eq!(b, old.position);
+                assert_eq!(new.position, old.position);
+                assert!(!new.is_finished);
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            SearchStep::Reject(a, b) => {
+                assert!(!old.is_match_fw);
+                assert_eq!(a, old.position);
+                assert_eq!(b, new.position);
+                assert!(old.position < new.position);
+                assert!(b - a <= MAX_LEN_UTF8);
+                assert!(!new.is_finished);
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            SearchStep::Done => {
+                assert!(!old.is_match_fw);
+                assert_eq!(old.position, haystack.len());
+                assert_eq!(new.position, old.position);
+                assert!(new.is_finished);
+            }
+        }
+    }
+
+    // Check state-field effects and returned-range safety for one modeled
+    // forward empty-needle `next_match` call.
+    pub(super) fn assert_valid_empty_needle_next_match_transition(
+        haystack: &str,
+        old: EmptyNeedleState,
+        new: EmptyNeedleState,
+        result: Option<(usize, usize)>,
+    ) {
+        if old.is_finished {
+            assert_eq!(result, None);
+            assert!(new == old);
+            return;
+        }
+
+        assert_eq!(new.end, old.end);
+        assert_eq!(new.is_match_bw, old.is_match_bw);
+
+        if old.is_match_fw {
+            assert_eq!(result, Some((old.position, old.position)));
+            assert_eq!(new.position, old.position);
+            assert!(!new.is_match_fw);
+            assert!(!new.is_finished);
+            assert!(valid_range_on_haystack(haystack, old.position, old.position,));
+        } else if old.position == haystack.len() {
+            assert_eq!(result, None);
+            assert_eq!(new.position, old.position);
+            assert!(new.is_match_fw);
+            assert!(new.is_finished);
+        } else {
+            assert!(old.position < haystack.len());
+            assert_eq!(result, Some((new.position, new.position)));
+            assert!(old.position < new.position);
+            assert!(new.position - old.position <= MAX_LEN_UTF8);
+            assert!(!new.is_match_fw);
+            assert!(!new.is_finished);
+            assert!(valid_range_on_haystack(haystack, old.position, new.position,));
+        }
+    }
+
+    // Check state-field effects and returned-range safety for one modeled
+    // forward empty-needle `next_reject` call.
+    pub(super) fn assert_valid_empty_needle_next_reject_transition(
+        haystack: &str,
+        old: EmptyNeedleState,
+        new: EmptyNeedleState,
+        result: Option<(usize, usize)>,
+    ) {
+        if old.is_finished {
+            assert_eq!(result, None);
+            assert!(new == old);
+            return;
+        }
+
+        assert_eq!(new.end, old.end);
+        assert_eq!(new.is_match_bw, old.is_match_bw);
+
+        if old.position == haystack.len() {
+            assert_eq!(result, None);
+            assert_eq!(new.position, old.position);
+            assert!(new.is_match_fw);
+            assert!(new.is_finished);
+        } else {
+            assert!(old.position < haystack.len());
+            assert_eq!(result, Some((old.position, new.position)));
+            assert!(old.position < new.position);
+            assert!(new.position - old.position <= MAX_LEN_UTF8);
+            assert!(new.is_match_fw);
+            assert!(!new.is_finished);
+            assert!(valid_range_on_haystack(haystack, old.position, new.position,));
+        }
+    }
+
+    // Check state-field effects and returned-range safety for one modeled
+    // reverse empty-needle step.
+    pub(super) fn assert_valid_empty_needle_next_back_transition(
+        haystack: &str,
+        old: EmptyNeedleState,
+        new: EmptyNeedleState,
+        step: SearchStep,
+    ) {
+        if old.is_finished {
+            assert_eq!(step, SearchStep::Done);
+            assert!(new == old);
+            return;
+        }
+
+        assert_eq!(new.position, old.position);
+        assert_eq!(new.is_match_fw, old.is_match_fw);
+        assert_eq!(new.is_match_bw, !old.is_match_bw);
+
+        match step {
+            SearchStep::Match(a, b) => {
+                assert!(old.is_match_bw);
+                assert_eq!(a, old.end);
+                assert_eq!(b, old.end);
+                assert_eq!(new.end, old.end);
+                assert!(!new.is_finished);
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            SearchStep::Reject(a, b) => {
+                assert!(!old.is_match_bw);
+                assert_eq!(a, new.end);
+                assert_eq!(b, old.end);
+                assert!(new.end < old.end);
+                assert!(b - a <= MAX_LEN_UTF8);
+                assert!(!new.is_finished);
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            SearchStep::Done => {
+                assert!(!old.is_match_bw);
+                assert_eq!(old.end, 0);
+                assert_eq!(new.end, old.end);
+                assert!(new.is_finished);
+            }
+        }
+    }
+
+    // Check state-field effects and returned-range safety for one modeled
+    // reverse empty-needle `next_match_back` call.
+    pub(super) fn assert_valid_empty_needle_next_match_back_transition(
+        haystack: &str,
+        old: EmptyNeedleState,
+        new: EmptyNeedleState,
+        result: Option<(usize, usize)>,
+    ) {
+        if old.is_finished {
+            assert_eq!(result, None);
+            assert!(new == old);
+            return;
+        }
+
+        assert_eq!(new.position, old.position);
+        assert_eq!(new.is_match_fw, old.is_match_fw);
+
+        if old.is_match_bw {
+            assert_eq!(result, Some((old.end, old.end)));
+            assert_eq!(new.end, old.end);
+            assert!(!new.is_match_bw);
+            assert!(!new.is_finished);
+            assert!(valid_range_on_haystack(haystack, old.end, old.end));
+        } else if old.end == 0 {
+            assert_eq!(result, None);
+            assert_eq!(new.end, old.end);
+            assert!(new.is_match_bw);
+            assert!(new.is_finished);
+        } else {
+            assert!(old.end > 0);
+            assert_eq!(result, Some((new.end, new.end)));
+            assert!(new.end < old.end);
+            assert!(old.end - new.end <= MAX_LEN_UTF8);
+            assert!(!new.is_match_bw);
+            assert!(!new.is_finished);
+            assert!(valid_range_on_haystack(haystack, new.end, old.end));
+        }
+    }
+
+    // Check state-field effects and returned-range safety for one modeled
+    // reverse empty-needle `next_reject_back` call.
+    pub(super) fn assert_valid_empty_needle_next_reject_back_transition(
+        haystack: &str,
+        old: EmptyNeedleState,
+        new: EmptyNeedleState,
+        result: Option<(usize, usize)>,
+    ) {
+        if old.is_finished {
+            assert_eq!(result, None);
+            assert!(new == old);
+            return;
+        }
+
+        assert_eq!(new.position, old.position);
+        assert_eq!(new.is_match_fw, old.is_match_fw);
+
+        if old.end == 0 {
+            assert_eq!(result, None);
+            assert_eq!(new.end, old.end);
+            assert!(new.is_match_bw);
+            assert!(new.is_finished);
+        } else {
+            assert!(old.end > 0);
+            assert_eq!(result, Some((new.end, old.end)));
+            assert!(new.end < old.end);
+            assert!(old.end - new.end <= MAX_LEN_UTF8);
+            assert!(new.is_match_bw);
+            assert!(!new.is_finished);
+            assert!(valid_range_on_haystack(haystack, new.end, old.end));
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    pub(super) struct TwoWayState {
+        pub(super) crit_pos: usize,
+        pub(super) crit_pos_back: usize,
+        pub(super) period: usize,
+        pub(super) byteset: u64,
+        pub(super) position: usize,
+        pub(super) end: usize,
+        pub(super) memory: usize,
+        pub(super) memory_back: usize,
+    }
+
+    pub(super) fn two_way_state(searcher: &TwoWaySearcher) -> TwoWayState {
+        TwoWayState {
+            crit_pos: searcher.crit_pos,
+            crit_pos_back: searcher.crit_pos_back,
+            period: searcher.period,
+            byteset: searcher.byteset,
+            position: searcher.position,
+            end: searcher.end,
+            memory: searcher.memory,
+            memory_back: searcher.memory_back,
+        }
+    }
+
+    pub(super) fn assert_valid_two_way_next_transition(
+        haystack: &str,
+        needle: &str,
+        old: TwoWayState,
+        new: TwoWayState,
+        step: SearchStep,
+    ) {
+        assert_eq!(new.crit_pos, old.crit_pos);
+        assert_eq!(new.crit_pos_back, old.crit_pos_back);
+        assert_eq!(new.period, old.period);
+        assert_eq!(new.byteset, old.byteset);
+        assert_eq!(new.end, old.end);
+        assert_eq!(new.memory_back, old.memory_back);
+
+        let long_period = old.memory == usize::MAX;
+        if long_period {
+            assert_eq!(new.memory, usize::MAX);
+        } else {
+            let overlap = needle.len() - old.period;
+            assert!(new.memory == 0 || new.memory == overlap);
+        }
+
+        match step {
+            SearchStep::Match(a, b) => {
+                assert_eq!(a, old.position);
+                assert_eq!(b, new.position);
+                assert!(old.position < new.position);
+                assert_eq!(b - a, needle.len());
+                if !long_period {
+                    assert_eq!(new.memory, 0);
+                }
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            SearchStep::Reject(a, b) => {
+                assert_eq!(a, old.position);
+                assert_eq!(b, new.position);
+                assert!(old.position < new.position);
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            SearchStep::Done => {
+                assert_eq!(old.position, haystack.len());
+                assert_eq!(new.position, old.position);
+                assert_eq!(new.memory, old.memory);
+            }
+        }
+    }
+
+    fn assert_two_way_constant_state_preserved(old: TwoWayState, new: TwoWayState) {
+        assert_eq!(new.crit_pos, old.crit_pos);
+        assert_eq!(new.crit_pos_back, old.crit_pos_back);
+        assert_eq!(new.period, old.period);
+        assert_eq!(new.byteset, old.byteset);
+        assert_eq!(new.end, old.end);
+        assert_eq!(new.memory_back, old.memory_back);
+    }
+
+    pub(super) fn assert_valid_two_way_next_match_transition(
+        haystack: &str,
+        needle: &str,
+        old: TwoWayState,
+        new: TwoWayState,
+        result: Option<(usize, usize)>,
+    ) {
+        assert_two_way_constant_state_preserved(old, new);
+        assert!(old.position <= new.position);
+
+        let long_period = old.memory == usize::MAX;
+        if long_period {
+            assert_eq!(new.memory, usize::MAX);
+        } else {
+            let overlap = needle.len() - old.period;
+            assert!(new.memory == 0 || new.memory == overlap);
+        }
+
+        match result {
+            Some((a, b)) => {
+                assert!(old.position <= a);
+                assert_eq!(b, new.position);
+                assert!(a < b);
+                assert_eq!(b - a, needle.len());
+                if !long_period {
+                    assert_eq!(new.memory, 0);
+                }
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            None => {
+                assert_eq!(new.position, haystack.len());
+            }
+        }
+    }
+
+    pub(super) fn assert_valid_two_way_next_reject_transition(
+        haystack: &str,
+        needle: &str,
+        old: TwoWayState,
+        new: TwoWayState,
+        result: Option<(usize, usize)>,
+    ) {
+        assert_two_way_constant_state_preserved(old, new);
+        assert!(old.position <= new.position);
+
+        let long_period = old.memory == usize::MAX;
+        if long_period {
+            assert_eq!(new.memory, usize::MAX);
+        } else {
+            let overlap = needle.len() - old.period;
+            assert!(new.memory == 0 || new.memory == overlap);
+        }
+
+        match result {
+            Some((a, b)) => {
+                assert!(old.position <= a);
+                assert_eq!(b, new.position);
+                assert!(a < b);
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            None => {
+                assert_eq!(new.position, haystack.len());
+            }
+        }
+    }
+
+    fn assert_two_way_reverse_constant_state_preserved(old: TwoWayState, new: TwoWayState) {
+        assert_eq!(new.crit_pos, old.crit_pos);
+        assert_eq!(new.crit_pos_back, old.crit_pos_back);
+        assert_eq!(new.period, old.period);
+        assert_eq!(new.byteset, old.byteset);
+        assert_eq!(new.position, old.position);
+        assert_eq!(new.memory, old.memory);
+    }
+
+    fn assert_valid_two_way_reverse_memory(needle: &str, old: TwoWayState, new: TwoWayState) {
+        if old.memory == usize::MAX {
+            assert_eq!(new.memory_back, usize::MAX);
+        } else {
+            assert!(new.memory_back == old.period || new.memory_back == needle.len());
+        }
+    }
+
+    pub(super) fn assert_valid_two_way_next_back_transition(
+        haystack: &str,
+        needle: &str,
+        old: TwoWayState,
+        new: TwoWayState,
+        step: SearchStep,
+    ) {
+        assert_two_way_reverse_constant_state_preserved(old, new);
+        assert_valid_two_way_reverse_memory(needle, old, new);
+        assert!(new.end <= old.end);
+
+        match step {
+            SearchStep::Match(a, b) => {
+                assert_eq!(a, new.end);
+                assert_eq!(b, old.end);
+                assert!(a < b);
+                assert_eq!(b - a, needle.len());
+                if old.memory != usize::MAX {
+                    assert_eq!(new.memory_back, needle.len());
+                }
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            SearchStep::Reject(a, b) => {
+                assert_eq!(a, new.end);
+                assert_eq!(b, old.end);
+                assert!(a < b);
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            SearchStep::Done => {
+                assert_eq!(old.end, 0);
+                assert_eq!(new.end, old.end);
+                assert_eq!(new.memory_back, old.memory_back);
+            }
+        }
+    }
+
+    pub(super) fn assert_valid_two_way_next_match_back_transition(
+        haystack: &str,
+        needle: &str,
+        old: TwoWayState,
+        new: TwoWayState,
+        result: Option<(usize, usize)>,
+    ) {
+        assert_two_way_reverse_constant_state_preserved(old, new);
+        assert_valid_two_way_reverse_memory(needle, old, new);
+        assert!(new.end <= old.end);
+
+        match result {
+            Some((a, b)) => {
+                assert_eq!(a, new.end);
+                assert!(b <= old.end);
+                assert!(a < b);
+                assert_eq!(b - a, needle.len());
+                if old.memory != usize::MAX {
+                    assert_eq!(new.memory_back, needle.len());
+                }
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            None => assert_eq!(new.end, 0),
+        }
+    }
+
+    pub(super) fn assert_valid_two_way_next_reject_back_transition(
+        haystack: &str,
+        needle: &str,
+        old: TwoWayState,
+        new: TwoWayState,
+        result: Option<(usize, usize)>,
+    ) {
+        assert_two_way_reverse_constant_state_preserved(old, new);
+        assert_valid_two_way_reverse_memory(needle, old, new);
+        assert!(new.end <= old.end);
+
+        match result {
+            Some((a, b)) => {
+                assert_eq!(a, new.end);
+                assert!(b <= old.end);
+                assert!(a < b);
+                assert!(valid_range_on_haystack(haystack, a, b));
+            }
+            None => assert_eq!(new.end, 0),
+        }
+    }
+
+    // Type invariant for the stable states of the non-empty Two-Way
+    // implementation at the boundary of `StrSearcher`'s public methods. The
+    // internal RejectAndMatch strategy may temporarily stop at a non-character
+    // boundary; `StrSearcher::next` and `next_back` repair that cursor before
+    // returning to their caller.
+    //
+    // Besides cursor and index bounds, short-period states retain only the
+    // safety-facing summary of preprocessing: both period cuts are UTF-8
+    // boundaries, and each critical factor lies within its period. Method loop
+    // contracts use these facts to justify skipped-comparison Match endpoints.
+    pub(super) fn type_invariant_two_way_searcher(
+        s: &TwoWaySearcher,
+        haystack: &str,
+        needle: &str,
+    ) -> bool {
+        let haystack_bytes = haystack.as_bytes();
+        let needle_bytes = needle.as_bytes();
+        let needle_len = needle_bytes.len();
+
+        if needle_len == 0
+            || s.position > haystack_bytes.len()
+            || s.end > haystack_bytes.len()
+            || !haystack.is_char_boundary(s.position)
+            || !haystack.is_char_boundary(s.end)
+            || s.period == 0
+            || s.period > needle_len
+            || s.crit_pos > needle_len
+            || s.crit_pos_back > needle_len
+            || haystack_bytes.len().checked_add(needle_len).is_none()
+        {
+            return false;
+        }
+
+        // The forward algorithm evaluates `position + needle.len() - 1`
+        // before checking whether the complete candidate is in the haystack.
+        let Some(_) = s.position.checked_add(needle_len) else {
+            return false;
+        };
+
+        let long_period = s.memory == usize::MAX;
+        if long_period {
+            // Both directions use the same sentinel to disable memorization.
+            return s.memory_back == usize::MAX;
+        }
+
+        if s.memory_back == usize::MAX {
+            return false;
+        }
+
+        if !valid_short_period_boundary_summary(needle_bytes, s.crit_pos, s.crit_pos_back, s.period)
+        {
+            return false;
+        }
+
+        let overlap = needle_len - s.period;
+        if (s.memory != 0 && s.memory != overlap)
+            || (s.memory_back != s.period && s.memory_back != needle_len)
+        {
+            return false;
+        }
+
+        true
+    }
+
+    // Type invariant for `StrSearcher` at public method boundaries.
+    //
+    // Dispatching on the implementation variant ties the inner state to this
+    // searcher's own haystack and needle. The delegated invariants also enforce
+    // that Empty is paired with an empty needle and TwoWay with a non-empty one.
+    pub(super) fn type_invariant_str_searcher(s: &StrSearcher<'_, '_>) -> bool {
+        match &s.searcher {
+            StrSearcherImpl::Empty(searcher) => {
+                type_invariant_empty_needle(searcher, s.haystack, s.needle)
+            }
+            StrSearcherImpl::TwoWay(searcher) => {
+                type_invariant_two_way_searcher(searcher, s.haystack, s.needle)
+            }
+        }
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 pub mod verify {
     use super::*;
 
@@ -2029,5 +4214,509 @@ pub mod verify {
             },
             true
         );
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify_str_searcher {
+    use super::kani_pattern_harness_helpers::*;
+    use super::*;
+
+    // Keep the constructor proof small enough for CBMC to enumerate while
+    // still covering empty, ASCII, and all UTF-8 character widths. The
+    // resulting proof is bounded to these buffers; the step harnesses below
+    // separately quantify over every state satisfying the invariant.
+    const TWO_WAY_HAYSTACK_BYTES: usize = 4;
+    const TWO_WAY_NEEDLE_BYTES: usize = 3;
+
+    fn symbolic_two_way_str<const N: usize>(buf: &mut [u8; N]) -> &str {
+        let mut len = 0usize;
+        let mut append = || {
+            if kani::any() {
+                let c: char = kani::any();
+                if let Some(next) = len.checked_add(c.len_utf8()) {
+                    if next <= N {
+                        c.encode_utf8(&mut buf[len..]);
+                        len = next;
+                    }
+                }
+            }
+        };
+
+        // Four steps are enough for every string fitting either constructor
+        // buffer: each appended character contributes at least one byte.
+        append();
+        append();
+        append();
+        append();
+
+        // SAFETY: the buffer is built only from valid UTF-8 char encodings.
+        unsafe { crate::str::from_utf8_unchecked(&buf[..len]) }
+    }
+
+    //===============================================================================
+    // Challenge 21: Verify the safety of substring-related functions in str::pattern
+    //===============================================================================
+
+    // EmptyNeedle Harnesses
+
+    // Harness for `StrSearcher::into_searcher` with an empty needle.
+    #[kani::proof]
+    fn harness_str_searcher_empty_into_searcher() {
+        let haystack_bytes: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&haystack_bytes);
+        let needle = "";
+
+        let searcher: StrSearcher<'_, '_> = needle.into_searcher(haystack);
+
+        assert!(type_invariant_str_searcher(&searcher));
+    }
+
+    // Harness for `StrSearcher::next` with an empty needle.
+    #[kani::proof]
+    fn harness_str_searcher_empty_next() {
+        let bytes: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&bytes);
+        let mut searcher = StrSearcher {
+            haystack,
+            needle: "",
+            searcher: StrSearcherImpl::Empty(EmptyNeedle {
+                position: kani::any(),
+                end: kani::any(),
+                is_match_fw: kani::any(),
+                is_match_bw: kani::any(),
+                is_finished: kani::any(),
+            }),
+        };
+
+        // The constructor harness establishes this invariant initially. This
+        // harness proves that `next` preserves it from every state satisfying C.
+        kani::assume(type_invariant_str_searcher(&searcher));
+
+        let old_state = empty_needle_state(&searcher);
+        let step = searcher.next();
+        let new_state = empty_needle_state(&searcher);
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_empty_needle_next_transition(haystack, old_state, new_state, step);
+    }
+
+    // Harness for `StrSearcher::next_match` with an empty needle.
+    #[kani::proof]
+    fn harness_str_searcher_empty_next_match() {
+        let bytes: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&bytes);
+        let mut searcher = StrSearcher {
+            haystack,
+            needle: "",
+            searcher: StrSearcherImpl::Empty(EmptyNeedle {
+                position: kani::any(),
+                end: kani::any(),
+                is_match_fw: kani::any(),
+                is_match_bw: kani::any(),
+                is_finished: kani::any(),
+            }),
+        };
+
+        // The constructor harness establishes this invariant initially. This
+        // harness proves that `next_match` preserves it from every state satisfying C.
+        kani::assume(type_invariant_str_searcher(&searcher));
+
+        let old_state = empty_needle_state(&searcher);
+        let result = searcher.next_match();
+        let new_state = empty_needle_state(&searcher);
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_empty_needle_next_match_transition(haystack, old_state, new_state, result);
+    }
+
+    // Harness for `StrSearcher::next_reject` with an empty needle.
+    #[kani::proof]
+    fn harness_str_searcher_empty_next_reject() {
+        let bytes: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&bytes);
+        let mut searcher = StrSearcher {
+            haystack,
+            needle: "",
+            searcher: StrSearcherImpl::Empty(EmptyNeedle {
+                position: kani::any(),
+                end: kani::any(),
+                is_match_fw: kani::any(),
+                is_match_bw: kani::any(),
+                is_finished: kani::any(),
+            }),
+        };
+
+        // The constructor harness establishes this invariant initially. This
+        // harness proves that `next_reject` preserves it from every state satisfying C.
+        kani::assume(type_invariant_str_searcher(&searcher));
+
+        let old_state = empty_needle_state(&searcher);
+        let result = searcher.next_reject();
+        let new_state = empty_needle_state(&searcher);
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_empty_needle_next_reject_transition(haystack, old_state, new_state, result);
+    }
+
+    // Harness for `StrSearcher::next_back` with an empty needle.
+    #[kani::proof]
+    fn harness_str_searcher_empty_next_back() {
+        let bytes: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&bytes);
+        let mut searcher = StrSearcher {
+            haystack,
+            needle: "",
+            searcher: StrSearcherImpl::Empty(EmptyNeedle {
+                position: kani::any(),
+                end: kani::any(),
+                is_match_fw: kani::any(),
+                is_match_bw: kani::any(),
+                is_finished: kani::any(),
+            }),
+        };
+
+        // The constructor harness establishes this invariant initially. This
+        // harness proves that `next_back` preserves it from every state satisfying C.
+        kani::assume(type_invariant_str_searcher(&searcher));
+
+        let old_state = empty_needle_state(&searcher);
+        let step = searcher.next_back();
+        let new_state = empty_needle_state(&searcher);
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_empty_needle_next_back_transition(haystack, old_state, new_state, step);
+    }
+
+    // Harness for `StrSearcher::next_match_back` with an empty needle.
+    #[kani::proof]
+    fn harness_str_searcher_empty_next_match_back() {
+        let bytes: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&bytes);
+        let mut searcher = StrSearcher {
+            haystack,
+            needle: "",
+            searcher: StrSearcherImpl::Empty(EmptyNeedle {
+                position: kani::any(),
+                end: kani::any(),
+                is_match_fw: kani::any(),
+                is_match_bw: kani::any(),
+                is_finished: kani::any(),
+            }),
+        };
+
+        // The constructor harness establishes this invariant initially. This
+        // harness proves that `next_match_back` preserves it from every state satisfying C.
+        kani::assume(type_invariant_str_searcher(&searcher));
+
+        let old_state = empty_needle_state(&searcher);
+        let result = searcher.next_match_back();
+        let new_state = empty_needle_state(&searcher);
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_empty_needle_next_match_back_transition(
+            haystack, old_state, new_state, result,
+        );
+    }
+
+    // Harness for `StrSearcher::next_reject_back` with an empty needle.
+    #[kani::proof]
+    fn harness_str_searcher_empty_next_reject_back() {
+        let bytes: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&bytes);
+        let mut searcher = StrSearcher {
+            haystack,
+            needle: "",
+            searcher: StrSearcherImpl::Empty(EmptyNeedle {
+                position: kani::any(),
+                end: kani::any(),
+                is_match_fw: kani::any(),
+                is_match_bw: kani::any(),
+                is_finished: kani::any(),
+            }),
+        };
+
+        // The constructor harness establishes this invariant initially. This
+        // harness proves that `next_reject_back` preserves it from every state satisfying C.
+        kani::assume(type_invariant_str_searcher(&searcher));
+
+        let old_state = empty_needle_state(&searcher);
+        let result = searcher.next_reject_back();
+        let new_state = empty_needle_state(&searcher);
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_empty_needle_next_reject_back_transition(
+            haystack, old_state, new_state, result,
+        );
+    }
+
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn harness_str_searcher_two_way_into_searcher() {
+        let mut haystack_storage = [0u8; TWO_WAY_HAYSTACK_BYTES];
+        let mut needle_storage = [0u8; TWO_WAY_NEEDLE_BYTES];
+        let haystack = symbolic_two_way_str(&mut haystack_storage);
+        let needle = symbolic_two_way_str(&mut needle_storage);
+
+        // The empty constructor has its own harness; this proof targets the
+        // production Two-Way path for every non-empty bounded UTF-8 needle.
+        kani::assume(!needle.is_empty());
+
+        // Pattern::into_searcher -> StrSearcher::new -> TwoWaySearcher::new
+        let searcher: StrSearcher<'_, '_> = needle.into_searcher(haystack);
+
+        let two_way = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way,
+            StrSearcherImpl::Empty(_) => {
+                kani::assert(false, "non-empty needle must create a TwoWay searcher");
+                return;
+            }
+        };
+
+        assert!(type_invariant_two_way_searcher(two_way, haystack, needle));
+        assert_eq!(two_way.position, 0);
+        assert_eq!(two_way.end, haystack.len());
+        kani::cover(two_way.memory == usize::MAX, "long-period constructor branch");
+        kani::cover(two_way.memory != usize::MAX, "short-period constructor branch");
+        assert!(type_invariant_str_searcher(&searcher));
+    }
+
+    // Two-Way method harnesses are conditional on the type invariant established
+    // by the constructor harness above.
+    #[kani::proof]
+    fn harness_str_searcher_two_way_next() {
+        let haystack_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let needle_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&haystack_storage);
+        let needle = any_valid_utf8_str(&needle_storage);
+
+        let mut searcher = StrSearcher {
+            haystack,
+            needle,
+            searcher: StrSearcherImpl::TwoWay(TwoWaySearcher {
+                crit_pos: kani::any(),
+                crit_pos_back: kani::any(),
+                period: kani::any(),
+                byteset: kani::any(),
+                position: kani::any(),
+                end: kani::any(),
+                memory: kani::any(),
+                memory_back: kani::any(),
+            }),
+        };
+
+        kani::assume(type_invariant_str_searcher(&searcher));
+        let old = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+        let step = searcher.next();
+
+        let new = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_two_way_next_transition(haystack, needle, old, new, step);
+    }
+
+    // One symbolic state covers the long-period sentinel and both short-period
+    // memory states admitted by the public type invariant.
+    #[kani::proof]
+    fn harness_str_searcher_two_way_next_match() {
+        let haystack_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let needle_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&haystack_storage);
+        let needle = any_valid_utf8_str(&needle_storage);
+
+        let mut searcher = StrSearcher {
+            haystack,
+            needle,
+            searcher: StrSearcherImpl::TwoWay(TwoWaySearcher {
+                crit_pos: kani::any(),
+                crit_pos_back: kani::any(),
+                period: kani::any(),
+                byteset: kani::any(),
+                position: kani::any(),
+                end: kani::any(),
+                memory: kani::any(),
+                memory_back: kani::any(),
+            }),
+        };
+
+        kani::assume(type_invariant_str_searcher(&searcher));
+        let old = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+
+        let result = searcher.next_match();
+
+        let new = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_two_way_next_match_transition(haystack, needle, old, new, result);
+    }
+
+    // One symbolic state covers the long-period sentinel and both short-period
+    // memory states admitted by the public type invariant.
+    #[kani::proof]
+    fn harness_str_searcher_two_way_next_reject() {
+        let haystack_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let needle_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&haystack_storage);
+        let needle = any_valid_utf8_str(&needle_storage);
+
+        let mut searcher = StrSearcher {
+            haystack,
+            needle,
+            searcher: StrSearcherImpl::TwoWay(TwoWaySearcher {
+                crit_pos: kani::any(),
+                crit_pos_back: kani::any(),
+                period: kani::any(),
+                byteset: kani::any(),
+                position: kani::any(),
+                end: kani::any(),
+                memory: kani::any(),
+                memory_back: kani::any(),
+            }),
+        };
+
+        kani::assume(type_invariant_str_searcher(&searcher));
+        let old = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+        let result = searcher.next_reject();
+
+        let new = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_two_way_next_reject_transition(haystack, needle, old, new, result);
+    }
+
+    // Harness for `StrSearcher::next_back` from every stable Two-Way state satisfying C.
+    #[kani::proof]
+    fn harness_str_searcher_two_way_next_back() {
+        let haystack_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let needle_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&haystack_storage);
+        let needle = any_valid_utf8_str(&needle_storage);
+
+        let mut searcher = StrSearcher {
+            haystack,
+            needle,
+            searcher: StrSearcherImpl::TwoWay(TwoWaySearcher {
+                crit_pos: kani::any(),
+                crit_pos_back: kani::any(),
+                period: kani::any(),
+                byteset: kani::any(),
+                position: kani::any(),
+                end: kani::any(),
+                memory: kani::any(),
+                memory_back: kani::any(),
+            }),
+        };
+
+        kani::assume(type_invariant_str_searcher(&searcher));
+        let old = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+
+        let step = searcher.next_back();
+
+        let new = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_two_way_next_back_transition(haystack, needle, old, new, step);
+    }
+
+    // Harness for `StrSearcher::next_match_back` from every stable Two-Way state satisfying C.
+    #[kani::proof]
+    fn harness_str_searcher_two_way_next_match_back() {
+        let haystack_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let needle_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&haystack_storage);
+        let needle = any_valid_utf8_str(&needle_storage);
+
+        let mut searcher = StrSearcher {
+            haystack,
+            needle,
+            searcher: StrSearcherImpl::TwoWay(TwoWaySearcher {
+                crit_pos: kani::any(),
+                crit_pos_back: kani::any(),
+                period: kani::any(),
+                byteset: kani::any(),
+                position: kani::any(),
+                end: kani::any(),
+                memory: kani::any(),
+                memory_back: kani::any(),
+            }),
+        };
+
+        kani::assume(type_invariant_str_searcher(&searcher));
+        let old = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+
+        let result = searcher.next_match_back();
+
+        let new = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_two_way_next_match_back_transition(haystack, needle, old, new, result);
+    }
+
+    // Harness for `StrSearcher::next_reject_back` from every stable Two-Way state satisfying C.
+    #[kani::proof]
+    fn harness_str_searcher_two_way_next_reject_back() {
+        let haystack_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let needle_storage: [u8; MAX_UTF8_BYTES] = kani::any();
+        let haystack = any_valid_utf8_str(&haystack_storage);
+        let needle = any_valid_utf8_str(&needle_storage);
+
+        let mut searcher = StrSearcher {
+            haystack,
+            needle,
+            searcher: StrSearcherImpl::TwoWay(TwoWaySearcher {
+                crit_pos: kani::any(),
+                crit_pos_back: kani::any(),
+                period: kani::any(),
+                byteset: kani::any(),
+                position: kani::any(),
+                end: kani::any(),
+                memory: kani::any(),
+                memory_back: kani::any(),
+            }),
+        };
+
+        kani::assume(type_invariant_str_searcher(&searcher));
+        let old = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+
+        let result = searcher.next_reject_back();
+
+        let new = match &searcher.searcher {
+            StrSearcherImpl::TwoWay(two_way) => two_way_state(two_way),
+            StrSearcherImpl::Empty(_) => unreachable!(),
+        };
+        assert!(type_invariant_str_searcher(&searcher));
+        assert_valid_two_way_next_reject_back_transition(haystack, needle, old, new, result);
     }
 }
