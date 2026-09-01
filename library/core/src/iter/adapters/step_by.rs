@@ -589,3 +589,22 @@ spec_int_ranges_r!(u8 u16 u32 usize);
 spec_int_ranges!(u8 u16 usize);
 #[cfg(target_pointer_width = "16")]
 spec_int_ranges_r!(u8 u16 usize);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harness for `original_step` for StepBy.
+    #[kani::proof]
+    fn harness_step_by_original_step() {
+        // StepBy::new requires a nonzero step.
+        let step = kani::any_where(|step: &usize| *step != 0);
+
+        // The inner iterator is irrelevant to original_step.
+        let step_by = StepBy::new((), step);
+
+        // Call the safe function under test.
+        let _ = step_by.original_step();
+    }
+}
