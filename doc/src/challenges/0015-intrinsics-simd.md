@@ -1,11 +1,11 @@
 # Challenge 15: Contracts and Tests for SIMD Intrinsics
 
-- **Status:** Open
-- **Solution:** 
+- **Status:** Resolved
+- **Solution:** [#423](https://github.com/model-checking/verify-rust-std/pull/423)
 - **Tracking Issue:** [#173](https://github.com/model-checking/verify-rust-std/issues/173)
 - **Start date:** 2025/02/01
-- **End date:** 2025/08/01
 - **Reward:** *20000 USD*
+- **Contributors:** [Karthik Bhargavan](https://github.com/karthikbhargavan), [Maxime Buyse](https://github.com/maximebuyse)
 
 -------------------
 

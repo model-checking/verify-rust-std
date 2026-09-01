@@ -3,7 +3,6 @@
 - **Status:** Resolved
 - **Tracking Issue:** [#283](https://github.com/model-checking/verify-rust-std/issues/283)
 - **Start date:** *2025-03-07*
-- **End date:** *2025-08-12*
 - **Reward:** *10000 USD*
 - **Contributors:** [Bart Jacobs](https://github.com/btj)
 
