@@ -1,0 +1,10 @@
+[package]
+name = "unsafe-finder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+csv = "1.1"
+serde = { version = "1.0.55", features = ["derive"] }
+regex = "1.11.2"
+itertools = "0.14.0"
