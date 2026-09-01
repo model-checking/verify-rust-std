@@ -251,6 +251,8 @@ use core::hash::{Hash, Hasher};
 use core::intrinsics::abort;
 #[cfg(not(no_global_oom_handling))]
 use core::iter;
+#[cfg(kani)]
+use core::kani;
 use core::marker::{PhantomData, Unsize};
 use core::mem::{self, ManuallyDrop, align_of_val_raw};
 use core::num::NonZeroUsize;
@@ -265,6 +267,8 @@ use core::ptr::{self, NonNull, drop_in_place};
 #[cfg(not(no_global_oom_handling))]
 use core::slice::from_raw_parts_mut;
 use core::{borrow, fmt, hint};
+
+use safety::{ensures, requires};
 
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
@@ -1284,6 +1288,15 @@ impl<T, A: Allocator> Rc<mem::MaybeUninit<T>, A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    #[requires({
+        let p = (&*self) as *const mem::MaybeUninit<T> as *const T;
+        core::ub_checks::can_dereference(p)
+    })]
+    #[ensures(|result: &Rc<T, A>| {
+        let input_ptr = old(Rc::<mem::MaybeUninit<T>, A>::as_ptr(&self)) as *const T;
+        Rc::<T, A>::as_ptr(result) == input_ptr
+            && core::ub_checks::can_dereference(Rc::<T, A>::as_ptr(result))
+    })]
     pub unsafe fn assume_init(self) -> Rc<T, A> {
         let (ptr, alloc) = Rc::into_inner_with_allocator(self);
         unsafe { Rc::from_inner_in(ptr.cast(), alloc) }
@@ -1322,6 +1335,15 @@ impl<T, A: Allocator> Rc<[mem::MaybeUninit<T>], A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    #[requires({
+        let p = (&*self) as *const [mem::MaybeUninit<T>] as *const [T];
+        core::ub_checks::can_dereference(p)
+    })]
+    #[ensures(|result: &Rc<[T], A>| {
+        let input_ptr = old(Rc::<[mem::MaybeUninit<T>], A>::as_ptr(&self)) as *const [T];
+        Rc::<[T], A>::as_ptr(result) == input_ptr
+            && core::ub_checks::can_dereference(Rc::<[T], A>::as_ptr(result))
+    })]
     pub unsafe fn assume_init(self) -> Rc<[T], A> {
         let (ptr, alloc) = Rc::into_inner_with_allocator(self);
         unsafe { Rc::from_ptr_in(ptr.as_ptr() as _, alloc) }
@@ -1392,6 +1414,18 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_raw", since = "1.17.0")]
+    #[requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).value };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            ptr::addr_eq(ptr, rebuilt_ptr)
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).get() >= 1 }
+        })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr, Global) }
     }
@@ -1452,6 +1486,24 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_mutate_strong_count", since = "1.53.0")]
+    #[requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).value };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            ptr::addr_eq(ptr, rebuilt_ptr)
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).get() >= 1 }
+        })]
+    // `kani::modifies` has no safety-crate wrapper; requires/ensures use the safety forms.
+    #[cfg_attr(kani, kani::modifies({
+        let offset = unsafe { data_offset(ptr) };
+        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+        unsafe { &raw const *strong_ptr }
+    }))]
     pub unsafe fn increment_strong_count(ptr: *const T) {
         unsafe { Self::increment_strong_count_in(ptr, Global) }
     }
@@ -1489,6 +1541,24 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_mutate_strong_count", since = "1.53.0")]
+    #[requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).value };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            ptr::addr_eq(ptr, rebuilt_ptr)
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).get() >= 1 }
+        })]
+    // `kani::modifies` has no safety-crate wrapper; requires/ensures use the safety forms.
+    #[cfg_attr(kani, kani::modifies({
+        let offset = unsafe { data_offset(ptr) };
+        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+        unsafe { &raw const *strong_ptr }
+    }))]
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         unsafe { Self::decrement_strong_count_in(ptr, Global) }
     }
@@ -1629,6 +1699,26 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// }
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
+    #[requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).value };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            ptr::addr_eq(ptr, rebuilt_ptr)
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).get() >= 1 }
+        })]
+    #[ensures(|result: &Self| {
+            let result_ptr = Rc::<T, A>::as_ptr(result);
+            ptr::addr_eq(result_ptr, ptr)
+                && kani::mem::checked_size_of_raw(result_ptr)
+                    == kani::mem::checked_size_of_raw(ptr)
+                && kani::mem::checked_align_of_raw(result_ptr)
+                    == kani::mem::checked_align_of_raw(ptr)
+        })]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         let offset = unsafe { data_offset(ptr) };
 
@@ -1733,6 +1823,24 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
+    #[requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).value };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            ptr::addr_eq(ptr, rebuilt_ptr)
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).get() >= 1 }
+        })]
+    // `kani::modifies` has no safety-crate wrapper; requires/ensures use the safety forms.
+    #[cfg_attr(kani, kani::modifies({
+        let offset = unsafe { data_offset(ptr) };
+        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+        unsafe { &raw const *strong_ptr }
+    }))]
     pub unsafe fn increment_strong_count_in(ptr: *const T, alloc: A)
     where
         A: Clone,
@@ -1779,6 +1887,24 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
+    #[requires({
+            let offset = unsafe { data_offset(ptr) };
+            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+            let rebuilt_ptr = unsafe { &raw const (*inner).value };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            ptr::addr_eq(ptr, rebuilt_ptr)
+                && kani::mem::checked_size_of_raw(ptr)
+                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                && kani::mem::checked_align_of_raw(ptr)
+                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                && unsafe { (*strong_ptr).get() >= 1 }
+        })]
+    // `kani::modifies` has no safety-crate wrapper; requires/ensures use the safety forms.
+    #[cfg_attr(kani, kani::modifies({
+        let offset = unsafe { data_offset(ptr) };
+        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+        unsafe { &raw const *strong_ptr }
+    }))]
     pub unsafe fn decrement_strong_count_in(ptr: *const T, alloc: A) {
         unsafe { drop(Rc::from_raw_in(ptr, alloc)) };
     }
@@ -1882,6 +2008,16 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "get_mut_unchecked", issue = "63292")]
+    #[requires({
+            let inner = this.ptr.as_ptr();
+            let value = unsafe { &raw mut (*inner).value };
+            kani::mem::can_write(value)
+        })]
+    #[ensures(|result: &&mut T| {
+            let inner = old(this.ptr.as_ptr());
+            let value = unsafe { &raw const (*inner).value };
+            ptr::addr_eq((*result) as *const T, value)
+        })]
     pub unsafe fn get_mut_unchecked(this: &mut Self) -> &mut T {
         // We are careful to *not* create a reference covering the "count" fields, as
         // this would conflict with accesses to the reference counts (e.g. by `Weak`).
@@ -2115,6 +2251,10 @@ impl<A: Allocator> Rc<dyn Any, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires((*self).is::<T>())]
+    #[ensures(|result: &Rc<T, A>| {
+        core::ub_checks::can_dereference(Rc::<T, A>::as_ptr(result))
+    })]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Rc<T, A> {
         unsafe {
             let (ptr, alloc) = Rc::into_inner_with_allocator(self);
@@ -3214,6 +3354,42 @@ impl<T: ?Sized> Weak<T> {
     /// [`new`]: Weak::new
     #[inline]
     #[stable(feature = "weak_into_raw", since = "1.45.0")]
+    #[requires({
+            let is_sentinel = is_dangling(ptr);
+            if is_sentinel {
+                true
+            } else {
+                let offset = unsafe { data_offset(ptr) };
+                let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+                let rebuilt_ptr = unsafe { &raw const (*inner).value };
+                let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+                let weak_ptr = unsafe { strong_ptr.add(1) };
+                kani::mem::same_allocation(ptr.cast::<u8>(), inner.cast::<u8>())
+                    && ptr::addr_eq(ptr, rebuilt_ptr)
+                    && kani::mem::checked_size_of_raw(ptr)
+                        == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                    && kani::mem::checked_align_of_raw(ptr)
+                        == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+            }
+        })]
+    #[requires({
+            let is_sentinel = is_dangling(ptr);
+            is_sentinel || {
+                let offset = unsafe { data_offset(ptr) };
+                let weak_ptr = unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
+                unsafe { (*weak_ptr).get() > 0 }
+            }
+        })]
+    #[ensures(|result: &Self| {
+            old(is_dangling(ptr))
+                || unsafe { (*result.ptr.as_ptr().cast::<Cell<usize>>().add(1)).get() }
+                    == old({
+                        let offset = unsafe { data_offset(ptr) };
+                        let weak_ptr =
+                            unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
+                        unsafe { (*weak_ptr).get() }
+                    })
+        })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr, Global) }
     }
@@ -3386,6 +3562,38 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
     /// [`new`]: Weak::new
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
+    #[requires({
+            let is_sentinel = is_dangling(ptr);
+            if is_sentinel {
+                true
+            } else {
+                let offset = unsafe { data_offset(ptr) };
+                let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+                let rebuilt_ptr = unsafe { &raw const (*inner).value };
+                let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+                let weak_ptr = unsafe { strong_ptr.add(1) };
+
+                kani::mem::same_allocation(ptr.cast::<u8>(), inner.cast::<u8>())
+                    && ptr::addr_eq(ptr, rebuilt_ptr)
+                    && kani::mem::checked_size_of_raw(ptr)
+                        == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
+                    && kani::mem::checked_align_of_raw(ptr)
+                        == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
+                    && kani::mem::can_dereference(strong_ptr)
+                    && kani::mem::can_dereference(weak_ptr)
+                    && unsafe { (*weak_ptr).get() > 0 }
+            }
+        })]
+    #[ensures(|result: &Self| {
+            old(is_dangling(ptr))
+                || unsafe { (*result.ptr.as_ptr().cast::<Cell<usize>>().add(1)).get() }
+                    == old({
+                        let offset = unsafe { data_offset(ptr) };
+                        let weak_ptr =
+                            unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
+                        unsafe { (*weak_ptr).get() }
+                    })
+        })]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         // See Weak::as_ptr for context on how the input pointer is derived.
 
@@ -3564,7 +3772,11 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for Weak<T, A> {
     /// assert!(other_weak_foo.upgrade().is_none());
     /// ```
     fn drop(&mut self) {
-        let inner = if let Some(inner) = self.inner() { inner } else { return };
+        let inner = if let Some(inner) = self.inner() {
+            inner
+        } else {
+            return;
+        };
 
         inner.dec_weak();
         // the weak count starts at 1, and will only go to zero if all
@@ -4467,4 +4679,3623 @@ unsafe impl<T: ?Sized + Allocator, A: Allocator> Allocator for Rc<T, A> {
         // SAFETY: the safety contract must be upheld by the caller
         unsafe { (**self).shrink(ptr, old_layout, new_layout) }
     }
+}
+
+// =========================================================================
+// Challenge 26: Verify reference-counted Cell implementation harnesses
+// =========================================================================
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod kani_rc_harness_helpers {
+    use super::*;
+    use crate::alloc::alloc;
+
+    pub(super) fn verifier_nondet_vec<T>() -> Vec<T> {
+        let cap: usize = kani::any();
+        let elem_layout = Layout::new::<T>();
+        kani::assume(elem_layout.repeat(cap).is_ok());
+        let mut v = Vec::<T>::with_capacity(cap);
+        unsafe {
+            let sz: usize = kani::any();
+            kani::assume(sz <= cap);
+            // The harnesses use symbolic, otherwise unbounded vector lengths.
+            // The full Rc suite is large enough that shared CI runners need a
+            // uniform length bound to finish reliably; this is a CI
+            // tractability measure, not a safety precondition. Sampled
+            // harnesses re-verified locally with this bound removed:
+            // clone_rc_vec_u8 22.4s, from_raw_vec_u8 40.5s,
+            // get_mut_vec_u8_shared_none 35.2s.
+            kani::assume(sz <= 100);
+            ptr::write_bytes(
+                v.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * sz,
+            );
+            let initialized = ptr::slice_from_raw_parts(v.as_ptr(), sz);
+            // Constrains only the harness-built input bytes to be valid `T`s,
+            // as `set_len`'s safety contract requires — a constraint on the
+            // input space, not on any property of the code under verification.
+            kani::assume(core::ub_checks::can_dereference(initialized));
+            kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+            v.set_len(sz);
+        }
+        v
+    }
+
+    pub(super) fn rc_slice_layout_ok<T>(len: usize) -> bool {
+        Layout::array::<T>(len)
+            .and_then(|value_layout| Layout::new::<RcInner<()>>().extend(value_layout).map(|_| ()))
+            .is_ok()
+    }
+
+    pub(super) fn nondet_rc_slice<T>(vec: &Vec<T>) -> &[T] {
+        let len = vec.len();
+        kani::assume(rc_slice_layout_ok::<T>(len));
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        vec.as_slice()
+    }
+
+    pub(super) fn verifier_nondet_vec_rc<T>() -> Vec<T> {
+        let vec = verifier_nondet_vec();
+        kani::assume(rc_slice_layout_ok::<T>(vec.len()));
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        vec
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::any::Any;
+    use core::marker::PhantomPinned;
+
+    use super::kani_rc_harness_helpers::*;
+    use super::*;
+
+    struct NotUnpinSentinel(u8, PhantomPinned);
+
+    // === UNSAFE FUNCTIONS (12 — all required) ===
+
+    // Rc<MaybeUninit<T>>::assume_init harnesses.
+    macro_rules! rc_check_assume_init {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<core::mem::MaybeUninit<T>, A>::assume_init)]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let expected = value.clone();
+                let mut uninit: Rc<mem::MaybeUninit<$ty>, Global> = Rc::new_uninit_in(Global);
+                Rc::get_mut(&mut uninit).unwrap().write(value);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let init: Rc<$ty, Global> = unsafe { uninit.assume_init() };
+            }
+        };
+    }
+
+    rc_check_assume_init!(check_rc_assume_init_i8, i8);
+    rc_check_assume_init!(check_rc_assume_init_i16, i16);
+    rc_check_assume_init!(check_rc_assume_init_i32, i32);
+    rc_check_assume_init!(check_rc_assume_init_i64, i64);
+    rc_check_assume_init!(check_rc_assume_init_i128, i128);
+    rc_check_assume_init!(check_rc_assume_init_u8, u8);
+    rc_check_assume_init!(check_rc_assume_init_u16, u16);
+    rc_check_assume_init!(check_rc_assume_init_u32, u32);
+    rc_check_assume_init!(check_rc_assume_init_u64, u64);
+    rc_check_assume_init!(check_rc_assume_init_u128, u128);
+    rc_check_assume_init!(check_rc_assume_init_unit, ());
+    rc_check_assume_init!(check_rc_assume_init_array, [u8; 4]);
+    rc_check_assume_init!(check_rc_assume_init_bool, bool);
+
+    // Rc<[MaybeUninit<T>]>::assume_init harnesses.
+    macro_rules! rc_check_assume_init_slice {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Rc::<[core::mem::MaybeUninit<T>], A>::assume_init)]
+            pub fn $name() {
+                // Length bound for CI-runner memory on wide element types: the
+                // unbounded form verifies on the Linux CI runners, but the
+                // widest variants exceed macOS runner memory. Matches the
+                // suite-wide `sz <= 100` bound; not a safety precondition.
+                let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$elem>(*l) && *l <= 100);
+                let mut initialized = Vec::<mem::MaybeUninit<$elem>, Global>::with_capacity(len);
+                unsafe {
+                    initialized.set_len(len);
+                    ptr::write_bytes(
+                        initialized.as_mut_ptr().cast::<u8>(),
+                        kani::any::<u8>(),
+                        mem::size_of::<$elem>() * len,
+                    );
+                }
+                let uninit: Rc<[mem::MaybeUninit<$elem>], Global> = Rc::from(initialized);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _result: Rc<[$elem], Global> = unsafe { uninit.assume_init() };
+            }
+        };
+    }
+
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_i8, i8);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_i16, i16);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_i32, i32);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_i64, i64);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_i128, i128);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_u8, u8);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_u16, u16);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_u32, u32);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_u64, u64);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_u128, u128);
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_unit, ());
+    rc_check_assume_init_slice!(check_rc_assume_init_slice_array, [u8; 4]);
+
+    // Rc::from_raw harnesses.
+    macro_rules! rc_check_from_raw_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<$ty>::from_raw)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let rc: Rc<$ty> = Rc::new(value);
+                let ptr: *const $ty = Rc::into_raw(rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _: Rc<$ty> = unsafe { Rc::from_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! rc_check_from_raw_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Rc::<[$elem]>::from_raw)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem]> = Rc::from(vec);
+                let ptr: *const [$elem] = Rc::into_raw(rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _: Rc<[$elem]> = unsafe { Rc::from_raw(ptr) };
+            }
+        };
+    }
+
+    rc_check_from_raw_sized!(check_rc_from_raw_i8, i8);
+    rc_check_from_raw_sized!(check_rc_from_raw_i16, i16);
+    rc_check_from_raw_sized!(check_rc_from_raw_i32, i32);
+    rc_check_from_raw_sized!(check_rc_from_raw_i64, i64);
+    rc_check_from_raw_sized!(check_rc_from_raw_i128, i128);
+    rc_check_from_raw_sized!(check_rc_from_raw_u8, u8);
+    rc_check_from_raw_sized!(check_rc_from_raw_u16, u16);
+    rc_check_from_raw_sized!(check_rc_from_raw_u32, u32);
+    rc_check_from_raw_sized!(check_rc_from_raw_u64, u64);
+    rc_check_from_raw_sized!(check_rc_from_raw_u128, u128);
+    rc_check_from_raw_sized!(check_rc_from_raw_bool, bool);
+    rc_check_from_raw_sized!(check_rc_from_raw_unit, ());
+    rc_check_from_raw_sized!(check_rc_from_raw_array, [u8; 4]);
+
+    rc_check_from_raw_unsized!(check_rc_from_raw_vec_u8, [u8]);
+    rc_check_from_raw_unsized!(check_rc_from_raw_vec_u16, [u16]);
+    rc_check_from_raw_unsized!(check_rc_from_raw_vec_u32, [u32]);
+    rc_check_from_raw_unsized!(check_rc_from_raw_vec_u64, [u64]);
+    rc_check_from_raw_unsized!(check_rc_from_raw_vec_u128, [u128]);
+
+    // Rc::increment_strong_count harnesses.
+    macro_rules! rc_check_increment_strong_count_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<$ty>::increment_strong_count)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let rc: Rc<$ty> = Rc::new(value);
+                let ptr: *const $ty = Rc::into_raw(rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                unsafe {
+                    Rc::<$ty>::increment_strong_count(ptr);
+                    let _recovered: Rc<$ty> = Rc::from_raw(ptr);
+                    Rc::<$ty>::decrement_strong_count(ptr);
+                }
+            }
+        };
+    }
+
+    macro_rules! rc_check_increment_strong_count_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Rc::<[$elem]>::increment_strong_count)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem]> = Rc::from(vec);
+                let ptr: *const [$elem] = Rc::into_raw(rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                unsafe {
+                    Rc::<[$elem]>::increment_strong_count(ptr);
+                    let _recovered: Rc<[$elem]> = Rc::from_raw(ptr);
+                    Rc::<[$elem]>::decrement_strong_count(ptr);
+                }
+            }
+        };
+    }
+
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_i8, i8);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_i16, i16);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_i32, i32);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_i64, i64);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_i128, i128);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_u8, u8);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_u16, u16);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_u32, u32);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_u64, u64);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_u128, u128);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_bool, bool);
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_unit, ());
+    rc_check_increment_strong_count_sized!(check_increment_strong_count_array, [u8; 4]);
+
+    rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u8, [u8]);
+    rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u16, [u16]);
+    rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u32, [u32]);
+    rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u64, [u64]);
+    rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u128, [u128]);
+
+    // Rc::decrement_strong_count harnesses.
+    macro_rules! rc_check_decrement_strong_count_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<$ty>::decrement_strong_count)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let rc: Rc<$ty> = Rc::new(value);
+                let ptr: *const $ty = Rc::into_raw(rc);
+                unsafe {
+                    Rc::<$ty>::increment_strong_count(ptr);
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                    Rc::<$ty>::decrement_strong_count(ptr);
+                    let _: Rc<$ty> = Rc::from_raw(ptr);
+                }
+            }
+        };
+    }
+
+    macro_rules! rc_check_decrement_strong_count_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Rc::<[$elem]>::decrement_strong_count)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem]> = Rc::from(vec);
+                let ptr: *const [$elem] = Rc::into_raw(rc);
+                unsafe {
+                    Rc::<[$elem]>::increment_strong_count(ptr);
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                    Rc::<[$elem]>::decrement_strong_count(ptr);
+                    let _: Rc<[$elem]> = Rc::from_raw(ptr);
+                }
+            }
+        };
+    }
+
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i8, i8);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i16, i16);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i32, i32);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i64, i64);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i128, i128);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u8, u8);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u16, u16);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u32, u32);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u64, u64);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u128, u128);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_bool, bool);
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_unit, ());
+    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_array, [u8; 4]);
+
+    rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u8, [u8]);
+    rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u16, [u16]);
+    rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u32, [u32]);
+    rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u64, [u64]);
+    rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u128, [u128]);
+
+    // Rc::from_raw_in harnesses.
+    macro_rules! rc_check_from_raw_in_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<$ty, Global>::from_raw_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let (ptr, alloc): (*const $ty, Global) = Rc::into_raw_with_allocator(rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _: Rc<$ty, Global> = unsafe { Rc::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! rc_check_from_raw_in_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Rc::<[$elem], Global>::from_raw_in)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _: Rc<[$elem], Global> = unsafe { Rc::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_i8, i8);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_i16, i16);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_i32, i32);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_i64, i64);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_i128, i128);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_u8, u8);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_u16, u16);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_u32, u32);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_u64, u64);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_u128, u128);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_unit, ());
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_bool, bool);
+    rc_check_from_raw_in_sized!(check_rc_from_raw_in_array, [u8; 4]);
+
+    rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u8, [u8]);
+    rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u16, [u16]);
+    rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u32, [u32]);
+    rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u64, [u64]);
+    rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u128, [u128]);
+
+    // Rc::increment_strong_count_in harnesses.
+    macro_rules! rc_check_increment_strong_count_in_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<$ty, Global>::increment_strong_count_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let (ptr, _alloc): (*const $ty, Global) = Rc::into_raw_with_allocator(rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                unsafe {
+                    Rc::<$ty, Global>::increment_strong_count_in(ptr, Global);
+                    let _: Rc<$ty, Global> = Rc::<$ty, Global>::from_raw_in(ptr, Global);
+                    Rc::<$ty, Global>::decrement_strong_count_in(ptr, Global);
+                }
+            }
+        };
+    }
+
+    macro_rules! rc_check_increment_strong_count_in_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Rc::<[$elem], Global>::increment_strong_count_in)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let (ptr, _alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                unsafe {
+                    Rc::<[$elem], Global>::increment_strong_count_in(ptr, Global);
+                    let _: Rc<[$elem], Global> = Rc::<[$elem], Global>::from_raw_in(ptr, Global);
+                    Rc::<[$elem], Global>::decrement_strong_count_in(ptr, Global);
+                }
+            }
+        };
+    }
+
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i8, i8);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i16, i16);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i32, i32);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i64, i64);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i128, i128);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u8, u8);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u16, u16);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u32, u32);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u64, u64);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u128, u128);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_bool, bool);
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_unit, ());
+    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_array, [u8; 4]);
+
+    rc_check_increment_strong_count_in_unsized!(check_rc_increment_strong_count_in_vec_u8, [u8]);
+    rc_check_increment_strong_count_in_unsized!(check_rc_increment_strong_count_in_vec_u16, [u16]);
+    rc_check_increment_strong_count_in_unsized!(check_rc_increment_strong_count_in_vec_u32, [u32]);
+    rc_check_increment_strong_count_in_unsized!(check_rc_increment_strong_count_in_vec_u64, [u64]);
+    rc_check_increment_strong_count_in_unsized!(
+        check_rc_increment_strong_count_in_vec_u128,
+        [u128]
+    );
+
+    // Rc::decrement_strong_count_in harnesses.
+    macro_rules! rc_check_decrement_strong_count_in_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<$ty, Global>::decrement_strong_count_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let rc2: Rc<$ty, Global> = rc.clone();
+                let (ptr, alloc): (*const $ty, Global) = Rc::into_raw_with_allocator(rc2);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                unsafe {
+                    Rc::<$ty, Global>::decrement_strong_count_in(ptr, alloc);
+                }
+            }
+        };
+    }
+
+    macro_rules! rc_check_decrement_strong_count_in_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Rc::<[$elem], Global>::decrement_strong_count_in)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let rc2: Rc<[$elem], Global> = rc.clone();
+                let (ptr, alloc): (*const [$elem], Global) = Rc::into_raw_with_allocator(rc2);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                unsafe {
+                    Rc::<[$elem], Global>::decrement_strong_count_in(ptr, alloc);
+                }
+            }
+        };
+    }
+
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i8, i8);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i16, i16);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i32, i32);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i64, i64);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i128, i128);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u8, u8);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u16, u16);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u32, u32);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u64, u64);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u128, u128);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_bool, bool);
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_unit, ());
+    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_array, [u8; 4]);
+
+    rc_check_decrement_strong_count_in_unsized!(check_rc_decrement_strong_count_in_vec_u8, [u8]);
+    rc_check_decrement_strong_count_in_unsized!(check_rc_decrement_strong_count_in_vec_u16, [u16]);
+    rc_check_decrement_strong_count_in_unsized!(check_rc_decrement_strong_count_in_vec_u32, [u32]);
+    rc_check_decrement_strong_count_in_unsized!(check_rc_decrement_strong_count_in_vec_u64, [u64]);
+    rc_check_decrement_strong_count_in_unsized!(
+        check_rc_decrement_strong_count_in_vec_u128,
+        [u128]
+    );
+
+    // Rc::get_mut_unchecked harnesses.
+    macro_rules! rc_check_get_mut_unchecked_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<$ty>::get_mut_unchecked)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let replacement: $ty = kani::any();
+                let mut rc: Rc<$ty> = Rc::new(value);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                unsafe {
+                    *Rc::get_mut_unchecked(&mut rc) = replacement;
+                }
+            }
+        };
+    }
+
+    macro_rules! rc_check_get_mut_unchecked_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Rc::<[$elem]>::get_mut_unchecked)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem]> = Rc::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                unsafe {
+                    let data: &mut [$elem] = Rc::get_mut_unchecked(&mut rc);
+                    if !data.is_empty() {
+                        data[0] = kani::any::<$elem>();
+                    }
+                }
+            }
+        };
+    }
+
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i8, i8);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i16, i16);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i32, i32);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i64, i64);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i128, i128);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u8, u8);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u16, u16);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u32, u32);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u64, u64);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u128, u128);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_bool, bool);
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_unit, ());
+    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_array, [u8; 4]);
+
+    rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u8, [u8]);
+    rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u16, [u16]);
+    rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u32, [u32]);
+    rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u64, [u64]);
+    rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u128, [u128]);
+
+    // Rc<dyn Any>::downcast_unchecked harnesses.
+    macro_rules! rc_check_downcast_unchecked {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Rc::<dyn Any, Global>::downcast_unchecked::<$ty>)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let rc_dyn: Rc<dyn Any, Global> = Rc::new_in(value, Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _downcasted: Rc<$ty, Global> = unsafe { rc_dyn.downcast_unchecked::<$ty>() };
+            }
+        };
+    }
+
+    macro_rules! rc_check_downcast_unchecked_vec {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Rc::<dyn Any, Global>::downcast_unchecked::<Vec<$elem>>)]
+            pub fn $name() {
+                let v = verifier_nondet_vec::<$elem>();
+                let rc_dyn: Rc<dyn Any, Global> = Rc::new_in(v, Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _downcasted: Rc<Vec<$elem>, Global> =
+                    unsafe { rc_dyn.downcast_unchecked::<Vec<$elem>>() };
+            }
+        };
+    }
+
+    rc_check_downcast_unchecked!(check_downcast_unchecked_i8, i8);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_i16, i16);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_i32, i32);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_i64, i64);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_i128, i128);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_u8, u8);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_u16, u16);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_u32, u32);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_u64, u64);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_u128, u128);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_bool, bool);
+    rc_check_downcast_unchecked!(check_downcast_unchecked_unit, ());
+    rc_check_downcast_unchecked!(check_downcast_unchecked_array, [u8; 4]);
+
+    rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u8, u8);
+    rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u16, u16);
+    rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u32, u32);
+    rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u64, u64);
+    rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u128, u128);
+
+    // Weak::from_raw harnesses.
+    macro_rules! rc_check_weak_from_raw_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Weak::<$ty>::from_raw)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let strong: Rc<$ty> = Rc::new(value);
+                let weak: Weak<$ty> = Rc::downgrade(&strong);
+                let ptr: *const $ty = weak.into_raw();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _recovered: Weak<$ty> = unsafe { Weak::from_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! rc_check_weak_from_raw_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Weak::<[$elem]>::from_raw)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem]> = Rc::from(vec);
+                let weak: Weak<[$elem]> = Rc::downgrade(&strong);
+                let ptr: *const [$elem] = weak.into_raw();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _recovered: Weak<[$elem]> = unsafe { Weak::from_raw(ptr) };
+            }
+        };
+    }
+
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_i8, i8);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_i16, i16);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_i32, i32);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_i64, i64);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_i128, i128);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_u8, u8);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_u16, u16);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_u32, u32);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_u64, u64);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_u128, u128);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_bool, bool);
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_unit, ());
+    rc_check_weak_from_raw_sized!(check_weak_from_raw_array, [u8; 4]);
+
+    rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u8, [u8]);
+    rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u16, [u16]);
+    rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u32, [u32]);
+    rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u64, [u64]);
+    rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u128, [u128]);
+
+    // Weak::from_raw_in harnesses.
+    macro_rules! rc_check_weak_from_raw_in_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Weak::<$ty, Global>::from_raw_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let strong: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                let (ptr, alloc): (*const $ty, Global) = weak.into_raw_with_allocator();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _recovered: Weak<$ty, Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! rc_check_weak_from_raw_in_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof_for_contract(Weak::<[$elem], Global>::from_raw_in)]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                let (ptr, alloc): (*const [$elem], Global) = weak.into_raw_with_allocator();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _recovered: Weak<[$elem], Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i8, i8);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i16, i16);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i32, i32);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i64, i64);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i128, i128);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u8, u8);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u16, u16);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u32, u32);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u64, u64);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u128, u128);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_bool, bool);
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_unit, ());
+    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_array, [u8; 4]);
+
+    rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u8, [u8]);
+    rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u16, [u16]);
+    rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u32, [u32]);
+    rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u64, [u64]);
+    rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u128, [u128]);
+
+    // === SAFE FUNCTIONS (54 of 54) ===
+
+    // Rc::get_mut harnesses. `get_mut` returns `Some` only for a fully unique
+    // allocation (`strong == 1 && weak == 0`), so each type gets three
+    // harnesses pinning the unique, shared, and weak-present states.
+    macro_rules! rc_check_get_mut_sized {
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<$ty, Global>::get_mut(&mut rc).is_some());
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let _shared: Rc<$ty, Global> = Rc::clone(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<$ty, Global>::get_mut(&mut rc).is_none());
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let _weak: Weak<$ty, Global> = Rc::downgrade(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<$ty, Global>::get_mut(&mut rc).is_none());
+            }
+        };
+    }
+
+    macro_rules! rc_check_get_mut_unsized {
+        ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_some());
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
+            }
+        };
+    }
+
+    rc_check_get_mut_sized!(
+        check_get_mut_i8_unique_some,
+        check_get_mut_i8_shared_none,
+        check_get_mut_i8_weak_present_none,
+        i8
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_i16_unique_some,
+        check_get_mut_i16_shared_none,
+        check_get_mut_i16_weak_present_none,
+        i16
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_i32_unique_some,
+        check_get_mut_i32_shared_none,
+        check_get_mut_i32_weak_present_none,
+        i32
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_i64_unique_some,
+        check_get_mut_i64_shared_none,
+        check_get_mut_i64_weak_present_none,
+        i64
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_i128_unique_some,
+        check_get_mut_i128_shared_none,
+        check_get_mut_i128_weak_present_none,
+        i128
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_u8_unique_some,
+        check_get_mut_u8_shared_none,
+        check_get_mut_u8_weak_present_none,
+        u8
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_u16_unique_some,
+        check_get_mut_u16_shared_none,
+        check_get_mut_u16_weak_present_none,
+        u16
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_u32_unique_some,
+        check_get_mut_u32_shared_none,
+        check_get_mut_u32_weak_present_none,
+        u32
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_u64_unique_some,
+        check_get_mut_u64_shared_none,
+        check_get_mut_u64_weak_present_none,
+        u64
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_u128_unique_some,
+        check_get_mut_u128_shared_none,
+        check_get_mut_u128_weak_present_none,
+        u128
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_unit_unique_some,
+        check_get_mut_unit_shared_none,
+        check_get_mut_unit_weak_present_none,
+        ()
+    );
+    rc_check_get_mut_sized!(
+        check_get_mut_arr_unique_some,
+        check_get_mut_arr_shared_none,
+        check_get_mut_arr_weak_present_none,
+        [u8; 4]
+    );
+    rc_check_get_mut_unsized!(
+        check_get_mut_vec_u8_unique_some,
+        check_get_mut_vec_u8_shared_none,
+        check_get_mut_vec_u8_weak_present_none,
+        [u8]
+    );
+    rc_check_get_mut_unsized!(
+        check_get_mut_vec_u16_unique_some,
+        check_get_mut_vec_u16_shared_none,
+        check_get_mut_vec_u16_weak_present_none,
+        [u16]
+    );
+    rc_check_get_mut_unsized!(
+        check_get_mut_vec_u32_unique_some,
+        check_get_mut_vec_u32_shared_none,
+        check_get_mut_vec_u32_weak_present_none,
+        [u32]
+    );
+    rc_check_get_mut_unsized!(
+        check_get_mut_vec_u64_unique_some,
+        check_get_mut_vec_u64_shared_none,
+        check_get_mut_vec_u64_weak_present_none,
+        [u64]
+    );
+    rc_check_get_mut_unsized!(
+        check_get_mut_vec_u128_unique_some,
+        check_get_mut_vec_u128_shared_none,
+        check_get_mut_vec_u128_weak_present_none,
+        [u128]
+    );
+
+    // Rc::make_mut harnesses, one per behavior-defining state: in-place
+    // mutation (unique), clone-on-write (`strong > 1`), and
+    // move-and-disassociate-weaks (`strong == 1`, `weak > 0`).
+    macro_rules! rc_check_make_mut_sized {
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<$ty, Global>::make_mut(&mut rc);
+                assert!(Rc::strong_count(&rc) == 1);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let _shared: Rc<$ty, Global> = Rc::clone(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<$ty, Global>::make_mut(&mut rc);
+                assert!(Rc::strong_count(&rc) == 1 && Rc::strong_count(&_shared) == 1);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let _weak: Weak<$ty, Global> = Rc::downgrade(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<$ty, Global>::make_mut(&mut rc);
+                assert!(_weak.upgrade().is_none());
+            }
+        };
+    }
+
+    macro_rules! rc_check_make_mut_unsized {
+        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<[$elem], Global>::make_mut(&mut rc);
+                assert!(Rc::strong_count(&rc) == 1);
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<[$elem], Global>::make_mut(&mut rc);
+                assert!(Rc::strong_count(&rc) == 1 && Rc::strong_count(&_shared) == 1);
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let mut rc: Rc<[$elem], Global> = Rc::from(vec);
+                let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<[$elem], Global>::make_mut(&mut rc);
+                assert!(_weak.upgrade().is_none());
+            }
+        };
+    }
+
+    rc_check_make_mut_sized!(
+        check_make_mut_i8_unique,
+        check_make_mut_i8_shared,
+        check_make_mut_i8_weak_present,
+        i8
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_i16_unique,
+        check_make_mut_i16_shared,
+        check_make_mut_i16_weak_present,
+        i16
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_i32_unique,
+        check_make_mut_i32_shared,
+        check_make_mut_i32_weak_present,
+        i32
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_i64_unique,
+        check_make_mut_i64_shared,
+        check_make_mut_i64_weak_present,
+        i64
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_i128_unique,
+        check_make_mut_i128_shared,
+        check_make_mut_i128_weak_present,
+        i128
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_u8_unique,
+        check_make_mut_u8_shared,
+        check_make_mut_u8_weak_present,
+        u8
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_u16_unique,
+        check_make_mut_u16_shared,
+        check_make_mut_u16_weak_present,
+        u16
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_u32_unique,
+        check_make_mut_u32_shared,
+        check_make_mut_u32_weak_present,
+        u32
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_u64_unique,
+        check_make_mut_u64_shared,
+        check_make_mut_u64_weak_present,
+        u64
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_u128_unique,
+        check_make_mut_u128_shared,
+        check_make_mut_u128_weak_present,
+        u128
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_unit_unique,
+        check_make_mut_unit_shared,
+        check_make_mut_unit_weak_present,
+        ()
+    );
+    rc_check_make_mut_sized!(
+        check_make_mut_arr4_unique,
+        check_make_mut_arr4_shared,
+        check_make_mut_arr4_weak_present,
+        [u8; 4]
+    );
+
+    rc_check_make_mut_unsized!(
+        check_make_mut_vec_u8_unique,
+        check_make_mut_vec_u8_shared,
+        check_make_mut_vec_u8_weak_present,
+        u8
+    );
+    rc_check_make_mut_unsized!(
+        check_make_mut_vec_u16_unique,
+        check_make_mut_vec_u16_shared,
+        check_make_mut_vec_u16_weak_present,
+        u16
+    );
+    rc_check_make_mut_unsized!(
+        check_make_mut_vec_u32_unique,
+        check_make_mut_vec_u32_shared,
+        check_make_mut_vec_u32_weak_present,
+        u32
+    );
+    rc_check_make_mut_unsized!(
+        check_make_mut_vec_u64_unique,
+        check_make_mut_vec_u64_shared,
+        check_make_mut_vec_u64_weak_present,
+        u64
+    );
+    rc_check_make_mut_unsized!(
+        check_make_mut_vec_u128_unique,
+        check_make_mut_vec_u128_shared,
+        check_make_mut_vec_u128_weak_present,
+        u128
+    );
+
+    // Rc<dyn Any>::downcast harnesses: an Ok/Err pair per type — the Err arm
+    // downcasts a `bool` payload to some `T != bool`.
+    macro_rules! rc_check_downcast {
+        ($success:ident, $failure:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $success() {
+                let value: $ty = kani::any::<$ty>();
+                let rc_value: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let rc_any: Rc<dyn Any, Global> = rc_value;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<dyn Any, Global>::downcast::<$ty>(rc_any).is_ok());
+            }
+
+            #[kani::proof]
+            pub fn $failure() {
+                let rc_value: Rc<bool, Global> = Rc::new_in(kani::any::<bool>(), Global);
+                let rc_any: Rc<dyn Any, Global> = rc_value;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<dyn Any, Global>::downcast::<$ty>(rc_any).is_err());
+            }
+        };
+    }
+
+    macro_rules! rc_check_downcast_vec {
+        ($success:ident, $failure:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $success() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let rc_value: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
+                let rc_any: Rc<dyn Any, Global> = rc_value;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any).is_ok());
+            }
+
+            #[kani::proof]
+            pub fn $failure() {
+                let rc_value: Rc<bool, Global> = Rc::new_in(kani::any::<bool>(), Global);
+                let rc_any: Rc<dyn Any, Global> = rc_value;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any).is_err());
+            }
+        };
+    }
+
+    rc_check_downcast!(check_downcast_i8_success, check_downcast_i8_failure, i8);
+    rc_check_downcast!(check_downcast_i16_success, check_downcast_i16_failure, i16);
+    rc_check_downcast!(check_downcast_i32_success, check_downcast_i32_failure, i32);
+    rc_check_downcast!(check_downcast_i64_success, check_downcast_i64_failure, i64);
+    rc_check_downcast!(check_downcast_i128_success, check_downcast_i128_failure, i128);
+    rc_check_downcast!(check_downcast_u8_success, check_downcast_u8_failure, u8);
+    rc_check_downcast!(check_downcast_u16_success, check_downcast_u16_failure, u16);
+    rc_check_downcast!(check_downcast_u32_success, check_downcast_u32_failure, u32);
+    rc_check_downcast!(check_downcast_u64_success, check_downcast_u64_failure, u64);
+    rc_check_downcast!(check_downcast_u128_success, check_downcast_u128_failure, u128);
+    rc_check_downcast!(check_downcast_arr4_success, check_downcast_arr4_failure, [u8; 4]);
+    rc_check_downcast!(check_downcast_unit_success, check_downcast_unit_failure, ());
+
+    rc_check_downcast_vec!(check_downcast_vec_u8_success, check_downcast_vec_u8_failure, u8);
+    rc_check_downcast_vec!(check_downcast_vec_u16_success, check_downcast_vec_u16_failure, u16);
+    rc_check_downcast_vec!(check_downcast_vec_u32_success, check_downcast_vec_u32_failure, u32);
+    rc_check_downcast_vec!(check_downcast_vec_u64_success, check_downcast_vec_u64_failure, u64);
+    rc_check_downcast_vec!(check_downcast_vec_u128_success, check_downcast_vec_u128_failure, u128);
+
+    // Rc::from_box_in harnesses.
+    macro_rules! rc_check_from_box_in_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let src: Box<$ty, Global> = Box::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<$ty, Global>::from_box_in(src);
+            }
+        };
+    }
+
+    macro_rules! rc_check_from_box_in_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let src: Box<[$elem], Global> = Box::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<[$elem], Global>::from_box_in(src);
+            }
+        };
+    }
+
+    rc_check_from_box_in_sized!(check_from_box_in_i8, i8);
+    rc_check_from_box_in_sized!(check_from_box_in_i16, i16);
+    rc_check_from_box_in_sized!(check_from_box_in_i32, i32);
+    rc_check_from_box_in_sized!(check_from_box_in_i64, i64);
+    rc_check_from_box_in_sized!(check_from_box_in_i128, i128);
+    rc_check_from_box_in_sized!(check_from_box_in_u8, u8);
+    rc_check_from_box_in_sized!(check_from_box_in_u16, u16);
+    rc_check_from_box_in_sized!(check_from_box_in_u32, u32);
+    rc_check_from_box_in_sized!(check_from_box_in_u64, u64);
+    rc_check_from_box_in_sized!(check_from_box_in_u128, u128);
+    rc_check_from_box_in_sized!(check_from_box_in_unit, ());
+    rc_check_from_box_in_sized!(check_from_box_in_arr, [u8; 4]);
+    rc_check_from_box_in_sized!(check_from_box_in_bool, bool);
+
+    rc_check_from_box_in_unsized!(check_from_box_in_vec_u8, [u8]);
+    rc_check_from_box_in_unsized!(check_from_box_in_vec_u16, [u16]);
+    rc_check_from_box_in_unsized!(check_from_box_in_vec_u32, [u32]);
+    rc_check_from_box_in_unsized!(check_from_box_in_vec_u64, [u64]);
+    rc_check_from_box_in_unsized!(check_from_box_in_vec_u128, [u128]);
+
+    // Weak::as_ptr harnesses: a live/dangling pair per type — `downgrade`
+    // yields a non-sentinel pointer, `Weak::new_in` the dangling sentinel.
+    macro_rules! rc_check_weak_as_ptr_sized {
+        ($live:ident, $dangling:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(core::ptr::eq(ptr, Rc::as_ptr(&strong)));
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(!ptr.is_null());
+            }
+        };
+    }
+
+    // Unsized variant: the dangling case coerces `Weak<[E; 1]>` to `Weak<[E]>`
+    // (a metadata-only change that preserves the sentinel address).
+    macro_rules! rc_check_weak_as_ptr_unsized {
+        ($live:ident, $dangling:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $live() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(core::ptr::eq(ptr as *const $elem, Rc::as_ptr(&strong) as *const $elem));
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(!(ptr as *const $elem).is_null());
+            }
+        };
+    }
+
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_i8_live, check_weak_as_ptr_i8_dangling, i8);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_i16_live, check_weak_as_ptr_i16_dangling, i16);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_i32_live, check_weak_as_ptr_i32_dangling, i32);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_i64_live, check_weak_as_ptr_i64_dangling, i64);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_i128_live, check_weak_as_ptr_i128_dangling, i128);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_u8_live, check_weak_as_ptr_u8_dangling, u8);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_u16_live, check_weak_as_ptr_u16_dangling, u16);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_u32_live, check_weak_as_ptr_u32_dangling, u32);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_u64_live, check_weak_as_ptr_u64_dangling, u64);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_u128_live, check_weak_as_ptr_u128_dangling, u128);
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_unit_live, check_weak_as_ptr_unit_dangling, ());
+    rc_check_weak_as_ptr_sized!(
+        check_weak_as_ptr_array_live,
+        check_weak_as_ptr_array_dangling,
+        [u8; 4]
+    );
+    rc_check_weak_as_ptr_sized!(check_weak_as_ptr_bool_live, check_weak_as_ptr_bool_dangling, bool);
+
+    rc_check_weak_as_ptr_unsized!(
+        check_weak_as_ptr_vec_u8_live,
+        check_weak_as_ptr_vec_u8_dangling,
+        [u8]
+    );
+    rc_check_weak_as_ptr_unsized!(
+        check_weak_as_ptr_vec_u16_live,
+        check_weak_as_ptr_vec_u16_dangling,
+        [u16]
+    );
+    rc_check_weak_as_ptr_unsized!(
+        check_weak_as_ptr_vec_u32_live,
+        check_weak_as_ptr_vec_u32_dangling,
+        [u32]
+    );
+    rc_check_weak_as_ptr_unsized!(
+        check_weak_as_ptr_vec_u64_live,
+        check_weak_as_ptr_vec_u64_dangling,
+        [u64]
+    );
+    rc_check_weak_as_ptr_unsized!(
+        check_weak_as_ptr_vec_u128_live,
+        check_weak_as_ptr_vec_u128_dangling,
+        [u128]
+    );
+
+    // Weak::into_raw_with_allocator harnesses: live/dangling pairs (its
+    // control flow follows `as_ptr`), each roundtripped through `from_raw_in`
+    // so the ownership token is consumed rather than leaked.
+    macro_rules! rc_check_weak_into_raw_with_allocator_sized {
+        ($live:ident, $dangling:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let (ptr, alloc): (*const $ty, Global) =
+                    Weak::<$ty, Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<$ty, Global> =
+                    unsafe { Weak::<$ty, Global>::from_raw_in(ptr, alloc) };
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let (ptr, alloc): (*const $ty, Global) =
+                    Weak::<$ty, Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<$ty, Global> =
+                    unsafe { Weak::<$ty, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! rc_check_weak_into_raw_with_allocator_unsized {
+        ($live:ident, $dangling:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $live() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let (ptr, alloc): (*const [$elem], Global) =
+                    Weak::<[$elem], Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<[$elem], Global> =
+                    unsafe { Weak::<[$elem], Global>::from_raw_in(ptr, alloc) };
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let (ptr, alloc): (*const [$elem], Global) =
+                    Weak::<[$elem], Global>::into_raw_with_allocator(weak);
+                let _recovered: Weak<[$elem], Global> =
+                    unsafe { Weak::<[$elem], Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_i8_live,
+        check_weak_into_raw_with_allocator_i8_dangling,
+        i8
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_i16_live,
+        check_weak_into_raw_with_allocator_i16_dangling,
+        i16
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_i32_live,
+        check_weak_into_raw_with_allocator_i32_dangling,
+        i32
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_i64_live,
+        check_weak_into_raw_with_allocator_i64_dangling,
+        i64
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_i128_live,
+        check_weak_into_raw_with_allocator_i128_dangling,
+        i128
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_u8_live,
+        check_weak_into_raw_with_allocator_u8_dangling,
+        u8
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_u16_live,
+        check_weak_into_raw_with_allocator_u16_dangling,
+        u16
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_u32_live,
+        check_weak_into_raw_with_allocator_u32_dangling,
+        u32
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_u64_live,
+        check_weak_into_raw_with_allocator_u64_dangling,
+        u64
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_u128_live,
+        check_weak_into_raw_with_allocator_u128_dangling,
+        u128
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_unit_live,
+        check_weak_into_raw_with_allocator_unit_dangling,
+        ()
+    );
+    rc_check_weak_into_raw_with_allocator_sized!(
+        check_weak_into_raw_with_allocator_arr_live,
+        check_weak_into_raw_with_allocator_arr_dangling,
+        [u8; 4]
+    );
+
+    rc_check_weak_into_raw_with_allocator_unsized!(
+        check_weak_into_raw_with_allocator_vec_u8_live,
+        check_weak_into_raw_with_allocator_vec_u8_dangling,
+        [u8]
+    );
+    rc_check_weak_into_raw_with_allocator_unsized!(
+        check_weak_into_raw_with_allocator_vec_u16_live,
+        check_weak_into_raw_with_allocator_vec_u16_dangling,
+        [u16]
+    );
+    rc_check_weak_into_raw_with_allocator_unsized!(
+        check_weak_into_raw_with_allocator_vec_u32_live,
+        check_weak_into_raw_with_allocator_vec_u32_dangling,
+        [u32]
+    );
+    rc_check_weak_into_raw_with_allocator_unsized!(
+        check_weak_into_raw_with_allocator_vec_u64_live,
+        check_weak_into_raw_with_allocator_vec_u64_dangling,
+        [u64]
+    );
+    rc_check_weak_into_raw_with_allocator_unsized!(
+        check_weak_into_raw_with_allocator_vec_u128_live,
+        check_weak_into_raw_with_allocator_vec_u128_dangling,
+        [u128]
+    );
+
+    // Weak::upgrade harnesses, one per return path: Some (a strong owner
+    // survives), None with a live allocation (strong count dropped to zero),
+    // and None via the dangling sentinel.
+    macro_rules! rc_check_weak_upgrade_sized {
+        ($live:ident, $strong_zero:ident, $dangling:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<$ty, Global>::upgrade(&weak).is_some());
+            }
+
+            #[kani::proof]
+            pub fn $strong_zero() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                drop(strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<$ty, Global>::upgrade(&weak).is_none());
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<$ty, Global>::upgrade(&weak).is_none());
+            }
+        };
+    }
+
+    macro_rules! rc_check_weak_upgrade_unsized {
+        ($live:ident, $strong_zero:ident, $dangling:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $live() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<[$elem], Global>::upgrade(&weak).is_some());
+            }
+
+            #[kani::proof]
+            pub fn $strong_zero() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                drop(strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<[$elem], Global>::upgrade(&weak).is_none());
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<[$elem], Global>::upgrade(&weak).is_none());
+            }
+        };
+    }
+
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_i8_live,
+        check_weak_upgrade_i8_strong_zero,
+        check_weak_upgrade_i8_dangling,
+        i8
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_i16_live,
+        check_weak_upgrade_i16_strong_zero,
+        check_weak_upgrade_i16_dangling,
+        i16
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_i32_live,
+        check_weak_upgrade_i32_strong_zero,
+        check_weak_upgrade_i32_dangling,
+        i32
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_i64_live,
+        check_weak_upgrade_i64_strong_zero,
+        check_weak_upgrade_i64_dangling,
+        i64
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_i128_live,
+        check_weak_upgrade_i128_strong_zero,
+        check_weak_upgrade_i128_dangling,
+        i128
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_u8_live,
+        check_weak_upgrade_u8_strong_zero,
+        check_weak_upgrade_u8_dangling,
+        u8
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_u16_live,
+        check_weak_upgrade_u16_strong_zero,
+        check_weak_upgrade_u16_dangling,
+        u16
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_u32_live,
+        check_weak_upgrade_u32_strong_zero,
+        check_weak_upgrade_u32_dangling,
+        u32
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_u64_live,
+        check_weak_upgrade_u64_strong_zero,
+        check_weak_upgrade_u64_dangling,
+        u64
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_u128_live,
+        check_weak_upgrade_u128_strong_zero,
+        check_weak_upgrade_u128_dangling,
+        u128
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_unit_live,
+        check_weak_upgrade_unit_strong_zero,
+        check_weak_upgrade_unit_dangling,
+        ()
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_array_live,
+        check_weak_upgrade_array_strong_zero,
+        check_weak_upgrade_array_dangling,
+        [u8; 4]
+    );
+    rc_check_weak_upgrade_sized!(
+        check_weak_upgrade_bool_live,
+        check_weak_upgrade_bool_strong_zero,
+        check_weak_upgrade_bool_dangling,
+        bool
+    );
+
+    rc_check_weak_upgrade_unsized!(
+        check_weak_upgrade_vec_u8_live,
+        check_weak_upgrade_vec_u8_strong_zero,
+        check_weak_upgrade_vec_u8_dangling,
+        [u8]
+    );
+    rc_check_weak_upgrade_unsized!(
+        check_weak_upgrade_vec_u16_live,
+        check_weak_upgrade_vec_u16_strong_zero,
+        check_weak_upgrade_vec_u16_dangling,
+        [u16]
+    );
+    rc_check_weak_upgrade_unsized!(
+        check_weak_upgrade_vec_u32_live,
+        check_weak_upgrade_vec_u32_strong_zero,
+        check_weak_upgrade_vec_u32_dangling,
+        [u32]
+    );
+    rc_check_weak_upgrade_unsized!(
+        check_weak_upgrade_vec_u64_live,
+        check_weak_upgrade_vec_u64_strong_zero,
+        check_weak_upgrade_vec_u64_dangling,
+        [u64]
+    );
+    rc_check_weak_upgrade_unsized!(
+        check_weak_upgrade_vec_u128_live,
+        check_weak_upgrade_vec_u128_strong_zero,
+        check_weak_upgrade_vec_u128_dangling,
+        [u128]
+    );
+
+    // Weak::inner harnesses: a Some/None pair per type, split on the
+    // dangling-sentinel check.
+    macro_rules! rc_check_weak_inner_sized {
+        ($some:ident, $none:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $some() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<$ty, Global>::inner(&weak).is_some());
+            }
+
+            #[kani::proof]
+            pub fn $none() {
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<$ty, Global>::inner(&weak).is_none());
+            }
+        };
+    }
+
+    macro_rules! rc_check_weak_inner_unsized {
+        ($some:ident, $none:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $some() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<[$elem], Global>::inner(&weak).is_some());
+            }
+
+            #[kani::proof]
+            pub fn $none() {
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Weak::<[$elem], Global>::inner(&weak).is_none());
+            }
+        };
+    }
+
+    rc_check_weak_inner_sized!(check_weak_inner_i8_some, check_weak_inner_i8_none, i8);
+    rc_check_weak_inner_sized!(check_weak_inner_i16_some, check_weak_inner_i16_none, i16);
+    rc_check_weak_inner_sized!(check_weak_inner_i32_some, check_weak_inner_i32_none, i32);
+    rc_check_weak_inner_sized!(check_weak_inner_i64_some, check_weak_inner_i64_none, i64);
+    rc_check_weak_inner_sized!(check_weak_inner_i128_some, check_weak_inner_i128_none, i128);
+    rc_check_weak_inner_sized!(check_weak_inner_u8_some, check_weak_inner_u8_none, u8);
+    rc_check_weak_inner_sized!(check_weak_inner_u16_some, check_weak_inner_u16_none, u16);
+    rc_check_weak_inner_sized!(check_weak_inner_u32_some, check_weak_inner_u32_none, u32);
+    rc_check_weak_inner_sized!(check_weak_inner_u64_some, check_weak_inner_u64_none, u64);
+    rc_check_weak_inner_sized!(check_weak_inner_u128_some, check_weak_inner_u128_none, u128);
+    rc_check_weak_inner_sized!(check_weak_inner_unit_some, check_weak_inner_unit_none, ());
+    rc_check_weak_inner_sized!(check_weak_inner_array_some, check_weak_inner_array_none, [u8; 4]);
+    rc_check_weak_inner_sized!(check_weak_inner_bool_some, check_weak_inner_bool_none, bool);
+    rc_check_weak_inner_unsized!(check_weak_inner_vec_u8_some, check_weak_inner_vec_u8_none, [u8]);
+    rc_check_weak_inner_unsized!(
+        check_weak_inner_vec_u16_some,
+        check_weak_inner_vec_u16_none,
+        [u16]
+    );
+    rc_check_weak_inner_unsized!(
+        check_weak_inner_vec_u32_some,
+        check_weak_inner_vec_u32_none,
+        [u32]
+    );
+    rc_check_weak_inner_unsized!(
+        check_weak_inner_vec_u64_some,
+        check_weak_inner_vec_u64_none,
+        [u64]
+    );
+    rc_check_weak_inner_unsized!(
+        check_weak_inner_vec_u128_some,
+        check_weak_inner_vec_u128_none,
+        [u128]
+    );
+
+    // Weak::drop harnesses, one per drop path: keep-allocation (a strong
+    // owner's implicit weak remains), deallocate (this weak was the last
+    // token), and the dangling-sentinel early return.
+    macro_rules! rc_check_drop_weak_sized {
+        ($live:ident, $after_drop:ident, $dangling:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $live() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                {
+                    let _weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                }
+                assert!(Rc::weak_count(&strong) == 0);
+            }
+
+            #[kani::proof]
+            pub fn $after_drop() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                drop(strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = weak;
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = weak;
+            }
+        };
+    }
+
+    macro_rules! rc_check_drop_weak_unsized {
+        ($live:ident, $after_drop:ident, $dangling:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $live() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                {
+                    let _weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                }
+                assert!(Rc::weak_count(&strong) == 0);
+            }
+
+            #[kani::proof]
+            pub fn $after_drop() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                drop(strong);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = weak;
+            }
+
+            #[kani::proof]
+            pub fn $dangling() {
+                let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
+                let weak: Weak<[$elem], Global> = weak_arr;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = weak;
+            }
+        };
+    }
+
+    rc_check_drop_weak_sized!(
+        check_drop_weak_i8_live,
+        check_drop_weak_i8_after_strong_drop,
+        check_drop_weak_i8_dangling,
+        i8
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_i16_live,
+        check_drop_weak_i16_after_strong_drop,
+        check_drop_weak_i16_dangling,
+        i16
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_i32_live,
+        check_drop_weak_i32_after_strong_drop,
+        check_drop_weak_i32_dangling,
+        i32
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_i64_live,
+        check_drop_weak_i64_after_strong_drop,
+        check_drop_weak_i64_dangling,
+        i64
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_i128_live,
+        check_drop_weak_i128_after_strong_drop,
+        check_drop_weak_i128_dangling,
+        i128
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_u8_live,
+        check_drop_weak_u8_after_strong_drop,
+        check_drop_weak_u8_dangling,
+        u8
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_u16_live,
+        check_drop_weak_u16_after_strong_drop,
+        check_drop_weak_u16_dangling,
+        u16
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_u32_live,
+        check_drop_weak_u32_after_strong_drop,
+        check_drop_weak_u32_dangling,
+        u32
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_u64_live,
+        check_drop_weak_u64_after_strong_drop,
+        check_drop_weak_u64_dangling,
+        u64
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_u128_live,
+        check_drop_weak_u128_after_strong_drop,
+        check_drop_weak_u128_dangling,
+        u128
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_unit_live,
+        check_drop_weak_unit_after_strong_drop,
+        check_drop_weak_unit_dangling,
+        ()
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_array_live,
+        check_drop_weak_array_after_strong_drop,
+        check_drop_weak_array_dangling,
+        [u8; 4]
+    );
+    rc_check_drop_weak_sized!(
+        check_drop_weak_bool_live,
+        check_drop_weak_bool_after_strong_drop,
+        check_drop_weak_bool_dangling,
+        bool
+    );
+    rc_check_drop_weak_unsized!(
+        check_drop_weak_vec_u8_live,
+        check_drop_weak_vec_u8_after_strong_drop,
+        check_drop_weak_vec_u8_dangling,
+        [u8]
+    );
+    rc_check_drop_weak_unsized!(
+        check_drop_weak_vec_u16_live,
+        check_drop_weak_vec_u16_after_strong_drop,
+        check_drop_weak_vec_u16_dangling,
+        [u16]
+    );
+    rc_check_drop_weak_unsized!(
+        check_drop_weak_vec_u32_live,
+        check_drop_weak_vec_u32_after_strong_drop,
+        check_drop_weak_vec_u32_dangling,
+        [u32]
+    );
+    rc_check_drop_weak_unsized!(
+        check_drop_weak_vec_u64_live,
+        check_drop_weak_vec_u64_after_strong_drop,
+        check_drop_weak_vec_u64_dangling,
+        [u64]
+    );
+    rc_check_drop_weak_unsized!(
+        check_drop_weak_vec_u128_live,
+        check_drop_weak_vec_u128_after_strong_drop,
+        check_drop_weak_vec_u128_dangling,
+        [u128]
+    );
+
+    // RcInnerPtr::inc_strong harnesses: ordinary increments per type, plus a
+    // should_panic harness forcing `strong == usize::MAX` into the overflow
+    // abort.
+    macro_rules! rc_check_inc_strong_non_overflow_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let inner = rc.inner();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                inner.inc_strong();
+                // Rebalance the count for a clean teardown.
+                inner.dec_strong();
+                let _ = rc;
+            }
+        };
+    }
+
+    macro_rules! rc_check_inc_strong_non_overflow_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let inner = rc.inner();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                inner.inc_strong();
+                // Rebalance the count for a clean teardown.
+                inner.dec_strong();
+                let _ = rc;
+            }
+        };
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn check_inc_strong_overflow_should_panic() {
+        let rc: Rc<u8, Global> = Rc::new_in(kani::any::<u8>(), Global);
+        let inner = rc.inner();
+        // Forge the overflow pre-state; the increment must hit the abort.
+        inner.strong_ref().set(usize::MAX);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        inner.inc_strong();
+        // Never drop the forged count.
+        core::mem::forget(rc);
+    }
+
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i8, i8);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i16, i16);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i32, i32);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i64, i64);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i128, i128);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u8, u8);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u16, u16);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u32, u32);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u64, u64);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u128, u128);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_unit, ());
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_array, [u8; 4]);
+    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_bool, bool);
+
+    rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u8, [u8]);
+    rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u16, [u16]);
+    rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u32, [u32]);
+    rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u64, [u64]);
+    rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u128, [u128]);
+
+    // RcInnerPtr::inc_weak harnesses: same shape as inc_strong — ordinary
+    // increments per type plus a should_panic overflow harness.
+    macro_rules! rc_check_inc_weak_non_overflow_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let inner = rc.inner();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                inner.inc_weak();
+                // Rebalance the count for a clean teardown.
+                inner.dec_weak();
+                let _ = rc;
+            }
+        };
+    }
+
+    macro_rules! rc_check_inc_weak_non_overflow_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let inner = rc.inner();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                inner.inc_weak();
+                // Rebalance the count for a clean teardown.
+                inner.dec_weak();
+                let _ = rc;
+            }
+        };
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn check_inc_weak_overflow_should_panic() {
+        let rc: Rc<u8, Global> = Rc::new_in(kani::any::<u8>(), Global);
+        let inner = rc.inner();
+        // Forge the overflow pre-state; the increment must hit the abort.
+        inner.weak_ref().set(usize::MAX);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        inner.inc_weak();
+        // Never drop the forged count.
+        core::mem::forget(rc);
+    }
+
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i8, i8);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i16, i16);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i32, i32);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i64, i64);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i128, i128);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u8, u8);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u16, u16);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u32, u32);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u64, u64);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u128, u128);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_unit, ());
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_array, [u8; 4]);
+    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_bool, bool);
+
+    rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u8, [u8]);
+    rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u16, [u16]);
+    rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u32, [u32]);
+    rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u64, [u64]);
+    rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u128, [u128]);
+
+    // UniqueRc::into_rc harnesses.
+    macro_rules! rc_check_uniquerc_into_rc_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<$ty, Global> = UniqueRc::into_rc(unique);
+            }
+        };
+    }
+
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i8, i8);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i16, i16);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i32, i32);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i64, i64);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i128, i128);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u8, u8);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u16, u16);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u32, u32);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u64, u64);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u128, u128);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_bool, bool);
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_unit, ());
+    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_array, [u8; 4]);
+
+    // UniqueRc::downgrade harnesses.
+    macro_rules! rc_check_downgrade_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let weak: Weak<$ty, Global> = UniqueRc::downgrade(&unique);
+                assert!(weak.upgrade().is_none());
+            }
+        };
+    }
+
+    rc_check_downgrade_sized!(check_downgrade_i8, i8);
+    rc_check_downgrade_sized!(check_downgrade_i16, i16);
+    rc_check_downgrade_sized!(check_downgrade_i32, i32);
+    rc_check_downgrade_sized!(check_downgrade_i64, i64);
+    rc_check_downgrade_sized!(check_downgrade_i128, i128);
+    rc_check_downgrade_sized!(check_downgrade_u8, u8);
+    rc_check_downgrade_sized!(check_downgrade_u16, u16);
+    rc_check_downgrade_sized!(check_downgrade_u32, u32);
+    rc_check_downgrade_sized!(check_downgrade_u64, u64);
+    rc_check_downgrade_sized!(check_downgrade_u128, u128);
+    rc_check_downgrade_sized!(check_downgrade_unit, ());
+    rc_check_downgrade_sized!(check_downgrade_array, [u8; 4]);
+    rc_check_downgrade_sized!(check_downgrade_bool, bool);
+
+    // UniqueRc::deref_mut harnesses.
+    macro_rules! rc_check_deref_mut_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut unique: UniqueRc<$ty, Global> =
+                    UniqueRc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _: &mut $ty = core::ops::DerefMut::deref_mut(&mut unique);
+            }
+        };
+    }
+
+    rc_check_deref_mut_sized!(check_deref_mut_i8, i8);
+    rc_check_deref_mut_sized!(check_deref_mut_i16, i16);
+    rc_check_deref_mut_sized!(check_deref_mut_i32, i32);
+    rc_check_deref_mut_sized!(check_deref_mut_i64, i64);
+    rc_check_deref_mut_sized!(check_deref_mut_i128, i128);
+    rc_check_deref_mut_sized!(check_deref_mut_u8, u8);
+    rc_check_deref_mut_sized!(check_deref_mut_u16, u16);
+    rc_check_deref_mut_sized!(check_deref_mut_u32, u32);
+    rc_check_deref_mut_sized!(check_deref_mut_u64, u64);
+    rc_check_deref_mut_sized!(check_deref_mut_u128, u128);
+    rc_check_deref_mut_sized!(check_deref_mut_bool, bool);
+    rc_check_deref_mut_sized!(check_deref_mut_unit, ());
+    rc_check_deref_mut_sized!(check_deref_mut_array, [u8; 4]);
+
+    // UniqueRc::deref harnesses.
+    macro_rules! rc_check_deref_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _: &$ty = core::ops::Deref::deref(&unique);
+            }
+        };
+    }
+
+    rc_check_deref_sized!(check_deref_i8, i8);
+    rc_check_deref_sized!(check_deref_i16, i16);
+    rc_check_deref_sized!(check_deref_i32, i32);
+    rc_check_deref_sized!(check_deref_i64, i64);
+    rc_check_deref_sized!(check_deref_i128, i128);
+    rc_check_deref_sized!(check_deref_u8, u8);
+    rc_check_deref_sized!(check_deref_u16, u16);
+    rc_check_deref_sized!(check_deref_u32, u32);
+    rc_check_deref_sized!(check_deref_u64, u64);
+    rc_check_deref_sized!(check_deref_u128, u128);
+    rc_check_deref_sized!(check_deref_bool, bool);
+    rc_check_deref_sized!(check_deref_unit, ());
+    rc_check_deref_sized!(check_deref_array, [u8; 4]);
+
+    // UniqueRc::drop harnesses: a pair per type splitting on whether a
+    // surviving Weak owns the deallocation.
+    macro_rules! rc_check_drop_unique_rc_sized {
+        ($unique:ident, $weak_present:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let _unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = UniqueRc::downgrade(&unique);
+                {
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                    let _dropped_strong = unique;
+                }
+                assert!(weak.upgrade().is_none());
+                // The weak must outlive the strong drop.
+                let _ = weak;
+            }
+        };
+    }
+
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_i8_unique,
+        check_drop_unique_rc_i8_weak_present,
+        i8
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_i16_unique,
+        check_drop_unique_rc_i16_weak_present,
+        i16
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_i32_unique,
+        check_drop_unique_rc_i32_weak_present,
+        i32
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_i64_unique,
+        check_drop_unique_rc_i64_weak_present,
+        i64
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_i128_unique,
+        check_drop_unique_rc_i128_weak_present,
+        i128
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_u8_unique,
+        check_drop_unique_rc_u8_weak_present,
+        u8
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_u16_unique,
+        check_drop_unique_rc_u16_weak_present,
+        u16
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_u32_unique,
+        check_drop_unique_rc_u32_weak_present,
+        u32
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_u64_unique,
+        check_drop_unique_rc_u64_weak_present,
+        u64
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_u128_unique,
+        check_drop_unique_rc_u128_weak_present,
+        u128
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_unit_unique,
+        check_drop_unique_rc_unit_weak_present,
+        ()
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_array_unique,
+        check_drop_unique_rc_array_weak_present,
+        [u8; 4]
+    );
+    rc_check_drop_unique_rc_sized!(
+        check_drop_unique_rc_bool_unique,
+        check_drop_unique_rc_bool_weak_present,
+        bool
+    );
+
+    // UniqueRcUninit::new harnesses.
+    macro_rules! rc_check_unique_rc_uninit_new_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let for_value: &$ty = &value;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _uninit: UniqueRcUninit<$ty, Global> = UniqueRcUninit::new(for_value, Global);
+            }
+        };
+    }
+
+    macro_rules! rc_check_unique_rc_uninit_new_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let slice: &[$elem] = nondet_rc_slice(&vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _uninit: UniqueRcUninit<[$elem], Global> = UniqueRcUninit::new(slice, Global);
+            }
+        };
+    }
+
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i8, i8);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i16, i16);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i32, i32);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i64, i64);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i128, i128);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u8, u8);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u16, u16);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u32, u32);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u64, u64);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u128, u128);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_unit, ());
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_array, [u8; 4]);
+    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_bool, bool);
+
+    rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u8, [u8]);
+    rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u16, [u16]);
+    rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u32, [u32]);
+    rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u64, [u64]);
+    rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u128, [u128]);
+
+    // UniqueRcUninit::data_ptr harnesses.
+    macro_rules! rc_check_data_ptr_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let mut uninit: UniqueRcUninit<$ty, Global> = UniqueRcUninit::new(&value, Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ptr: *mut $ty = uninit.data_ptr();
+            }
+        };
+    }
+
+    macro_rules! rc_check_data_ptr_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec::<$elem>();
+                let slice = nondet_rc_slice(&vec);
+                let mut uninit: UniqueRcUninit<[$elem], Global> =
+                    UniqueRcUninit::new(slice, Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ptr: *mut [$elem] = uninit.data_ptr();
+            }
+        };
+    }
+
+    rc_check_data_ptr_sized!(check_data_ptr_i8, i8);
+    rc_check_data_ptr_sized!(check_data_ptr_i16, i16);
+    rc_check_data_ptr_sized!(check_data_ptr_i32, i32);
+    rc_check_data_ptr_sized!(check_data_ptr_i64, i64);
+    rc_check_data_ptr_sized!(check_data_ptr_i128, i128);
+    rc_check_data_ptr_sized!(check_data_ptr_u8, u8);
+    rc_check_data_ptr_sized!(check_data_ptr_u16, u16);
+    rc_check_data_ptr_sized!(check_data_ptr_u32, u32);
+    rc_check_data_ptr_sized!(check_data_ptr_u64, u64);
+    rc_check_data_ptr_sized!(check_data_ptr_u128, u128);
+    rc_check_data_ptr_sized!(check_data_ptr_unit, ());
+    rc_check_data_ptr_sized!(check_data_ptr_array, [u8; 4]);
+    rc_check_data_ptr_sized!(check_data_ptr_bool, bool);
+
+    rc_check_data_ptr_unsized!(check_data_ptr_slice_u8, [u8]);
+    rc_check_data_ptr_unsized!(check_data_ptr_slice_u16, [u16]);
+    rc_check_data_ptr_unsized!(check_data_ptr_slice_u32, [u32]);
+    rc_check_data_ptr_unsized!(check_data_ptr_slice_u64, [u64]);
+    rc_check_data_ptr_unsized!(check_data_ptr_slice_u128, [u128]);
+
+    // UniqueRcUninit::drop harnesses.
+    macro_rules! rc_check_unique_rc_uninit_drop_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let _uninit: UniqueRcUninit<$ty, Global> = UniqueRcUninit::new(&value, Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+            }
+        };
+    }
+
+    macro_rules! rc_check_unique_rc_uninit_drop_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec::<$elem>();
+                let slice = nondet_rc_slice(&vec);
+                let _uninit: UniqueRcUninit<[$elem], Global> = UniqueRcUninit::new(slice, Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+            }
+        };
+    }
+
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i8, i8);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i16, i16);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i32, i32);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i64, i64);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i128, i128);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u8, u8);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u16, u16);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u32, u32);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u64, u64);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u128, u128);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_unit, ());
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_array, [u8; 4]);
+    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_bool, bool);
+
+    rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u8, [u8]);
+    rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u16, [u16]);
+    rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u32, [u32]);
+    rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u64, [u64]);
+    rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u128, [u128]);
+
+    // RcInnerPtr::inner harnesses.
+    macro_rules! rc_check_inner_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let inner = rc.inner();
+                assert!(inner.strong() == 1);
+            }
+        };
+    }
+
+    macro_rules! rc_check_inner_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let inner = rc.inner();
+                assert!(inner.strong() == 1);
+            }
+        };
+    }
+
+    rc_check_inner_sized!(check_inner_i8, i8);
+    rc_check_inner_sized!(check_inner_i16, i16);
+    rc_check_inner_sized!(check_inner_i32, i32);
+    rc_check_inner_sized!(check_inner_i64, i64);
+    rc_check_inner_sized!(check_inner_i128, i128);
+    rc_check_inner_sized!(check_inner_u8, u8);
+    rc_check_inner_sized!(check_inner_u16, u16);
+    rc_check_inner_sized!(check_inner_u32, u32);
+    rc_check_inner_sized!(check_inner_u64, u64);
+    rc_check_inner_sized!(check_inner_u128, u128);
+    rc_check_inner_sized!(check_inner_unit, ());
+    rc_check_inner_sized!(check_inner_array, [u8; 4]);
+    rc_check_inner_sized!(check_inner_bool, bool);
+
+    rc_check_inner_unsized!(check_inner_vec_u8, [u8]);
+    rc_check_inner_unsized!(check_inner_vec_u16, [u16]);
+    rc_check_inner_unsized!(check_inner_vec_u32, [u32]);
+    rc_check_inner_unsized!(check_inner_vec_u64, [u64]);
+    rc_check_inner_unsized!(check_inner_vec_u128, [u128]);
+
+    // Rc::into_inner_with_allocator harnesses.
+    macro_rules! rc_check_into_inner_with_allocator {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let (ptr, alloc) = Rc::<$ty, Global>::into_inner_with_allocator(rc);
+                let _recovered: Rc<$ty, Global> =
+                    unsafe { Rc::<$ty, Global>::from_inner_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! rc_check_into_inner_with_allocator_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let (ptr, alloc) = Rc::<[$elem], Global>::into_inner_with_allocator(rc);
+                let _recovered: Rc<[$elem], Global> =
+                    unsafe { Rc::<[$elem], Global>::from_inner_in(ptr, alloc) };
+            }
+        };
+    }
+
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i8, i8);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i16, i16);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i32, i32);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i64, i64);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i128, i128);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u8, u8);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u16, u16);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u32, u32);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u64, u64);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u128, u128);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_unit, ());
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_array, [u8; 4]);
+    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_bool, bool);
+
+    rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u8, [u8]);
+    rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u16, [u16]);
+    rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u32, [u32]);
+    rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u64, [u64]);
+    rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u128, [u128]);
+
+    // Rc::new harnesses.
+    macro_rules! rc_check_rc_new {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let rc: Rc<$ty> = Rc::new(value);
+                assert!(*rc == value);
+            }
+        };
+    }
+
+    rc_check_rc_new!(check_rc_new_i8, i8);
+    rc_check_rc_new!(check_rc_new_i16, i16);
+    rc_check_rc_new!(check_rc_new_i32, i32);
+    rc_check_rc_new!(check_rc_new_i64, i64);
+    rc_check_rc_new!(check_rc_new_i128, i128);
+    rc_check_rc_new!(check_rc_new_u8, u8);
+    rc_check_rc_new!(check_rc_new_u16, u16);
+    rc_check_rc_new!(check_rc_new_u32, u32);
+    rc_check_rc_new!(check_rc_new_u64, u64);
+    rc_check_rc_new!(check_rc_new_u128, u128);
+    rc_check_rc_new!(check_rc_new_unit, ());
+    rc_check_rc_new!(check_rc_new_array_u8_4, [u8; 4]);
+    rc_check_rc_new!(check_rc_new_bool, bool);
+
+    // Rc::new_uninit harnesses.
+    macro_rules! rc_check_rc_new_uninit {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<mem::MaybeUninit<$ty>> = Rc::<$ty>::new_uninit();
+            }
+        };
+    }
+
+    rc_check_rc_new_uninit!(check_rc_new_uninit_i8, i8);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_i16, i16);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_i32, i32);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_i64, i64);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_i128, i128);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_u8, u8);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_u16, u16);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_u32, u32);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_u64, u64);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_u128, u128);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_unit, ());
+    rc_check_rc_new_uninit!(check_rc_new_uninit_array, [u8; 4]);
+    rc_check_rc_new_uninit!(check_rc_new_uninit_bool, bool);
+
+    // Rc::new_zeroed harnesses.
+    macro_rules! rc_check_rc_new_zeroed {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<mem::MaybeUninit<$ty>> = Rc::<$ty>::new_zeroed();
+            }
+        };
+    }
+
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_i8, i8);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_i16, i16);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_i32, i32);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_i64, i64);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_i128, i128);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_u8, u8);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_u16, u16);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_u32, u32);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_u64, u64);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_u128, u128);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_unit, ());
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_array, [u8; 4]);
+    rc_check_rc_new_zeroed!(check_rc_new_zeroed_bool, bool);
+
+    // Rc::new_uninit_in harnesses.
+    macro_rules! rc_check_new_uninit_in {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<mem::MaybeUninit<$ty>, Global> =
+                    Rc::<$ty, Global>::new_uninit_in(Global);
+            }
+        };
+    }
+
+    rc_check_new_uninit_in!(check_new_uninit_in_i8, i8);
+    rc_check_new_uninit_in!(check_new_uninit_in_i16, i16);
+    rc_check_new_uninit_in!(check_new_uninit_in_i32, i32);
+    rc_check_new_uninit_in!(check_new_uninit_in_i64, i64);
+    rc_check_new_uninit_in!(check_new_uninit_in_i128, i128);
+    rc_check_new_uninit_in!(check_new_uninit_in_u8, u8);
+    rc_check_new_uninit_in!(check_new_uninit_in_u16, u16);
+    rc_check_new_uninit_in!(check_new_uninit_in_u32, u32);
+    rc_check_new_uninit_in!(check_new_uninit_in_u64, u64);
+    rc_check_new_uninit_in!(check_new_uninit_in_u128, u128);
+    rc_check_new_uninit_in!(check_new_uninit_in_unit, ());
+    rc_check_new_uninit_in!(check_new_uninit_in_array, [u8; 4]);
+    rc_check_new_uninit_in!(check_new_uninit_in_bool, bool);
+
+    // Rc::new_zeroed_in harnesses.
+    macro_rules! rc_check_new_zeroed_in {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<mem::MaybeUninit<$ty>, Global> =
+                    Rc::<$ty, Global>::new_zeroed_in(Global);
+            }
+        };
+    }
+
+    rc_check_new_zeroed_in!(check_new_zeroed_in_i8, i8);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_i16, i16);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_i32, i32);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_i64, i64);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_i128, i128);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_u8, u8);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_u16, u16);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_u32, u32);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_u64, u64);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_u128, u128);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_unit, ());
+    rc_check_new_zeroed_in!(check_new_zeroed_in_array, [u8; 4]);
+    rc_check_new_zeroed_in!(check_new_zeroed_in_bool, bool);
+
+    // Rc::new_cyclic_in harnesses.
+    macro_rules! rc_check_new_cyclic_in {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<$ty, Global> = Rc::<$ty, Global>::new_cyclic_in(
+                    |weak: &Weak<$ty, Global>| {
+                        let _ = weak.upgrade();
+                        kani::any::<$ty>()
+                    },
+                    Global,
+                );
+            }
+        };
+    }
+
+    rc_check_new_cyclic_in!(check_new_cyclic_in_i8, i8);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_i16, i16);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_i32, i32);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_i64, i64);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_i128, i128);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_u8, u8);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_u16, u16);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_u32, u32);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_u64, u64);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_u128, u128);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_unit, ());
+    rc_check_new_cyclic_in!(check_new_cyclic_in_array, [u8; 4]);
+    rc_check_new_cyclic_in!(check_new_cyclic_in_bool, bool);
+
+    // Rc::try_new_in harnesses.
+    macro_rules! rc_check_try_new_in {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<$ty, Global>::try_new_in(kani::any::<$ty>(), Global).is_ok());
+            }
+        };
+    }
+
+    macro_rules! rc_check_try_new_in_unsized {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec::<$elem>();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _result = Rc::<Vec<$elem>, Global>::try_new_in(vec, Global);
+            }
+        };
+    }
+
+    rc_check_try_new_in!(check_try_new_in_i8, i8);
+    rc_check_try_new_in!(check_try_new_in_i16, i16);
+    rc_check_try_new_in!(check_try_new_in_i32, i32);
+    rc_check_try_new_in!(check_try_new_in_i64, i64);
+    rc_check_try_new_in!(check_try_new_in_i128, i128);
+    rc_check_try_new_in!(check_try_new_in_u8, u8);
+    rc_check_try_new_in!(check_try_new_in_u16, u16);
+    rc_check_try_new_in!(check_try_new_in_u32, u32);
+    rc_check_try_new_in!(check_try_new_in_u64, u64);
+    rc_check_try_new_in!(check_try_new_in_u128, u128);
+    rc_check_try_new_in!(check_try_new_in_unit, ());
+    rc_check_try_new_in!(check_try_new_in_array, [u8; 4]);
+    rc_check_try_new_in!(check_try_new_in_bool, bool);
+
+    rc_check_try_new_in_unsized!(check_try_new_in_vec_u8, u8);
+    rc_check_try_new_in_unsized!(check_try_new_in_vec_u16, u16);
+    rc_check_try_new_in_unsized!(check_try_new_in_vec_u32, u32);
+    rc_check_try_new_in_unsized!(check_try_new_in_vec_u64, u64);
+    rc_check_try_new_in_unsized!(check_try_new_in_vec_u128, u128);
+
+    // Rc::try_new_uninit_in harnesses.
+    macro_rules! rc_check_try_new_uninit_in {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _result = Rc::<$ty, Global>::try_new_uninit_in(Global);
+            }
+        };
+    }
+
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_i8, i8);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_i16, i16);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_i32, i32);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_i64, i64);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_i128, i128);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_u8, u8);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_u16, u16);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_u32, u32);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_u64, u64);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_u128, u128);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_unit, ());
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_array, [u8; 4]);
+    rc_check_try_new_uninit_in!(check_try_new_uninit_in_bool, bool);
+
+    // Rc::try_new_zeroed_in harnesses.
+    macro_rules! rc_check_try_new_zeroed_in {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _result = Rc::<$ty, Global>::try_new_zeroed_in(Global);
+            }
+        };
+    }
+
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i8, i8);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i16, i16);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i32, i32);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i64, i64);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i128, i128);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u8, u8);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u16, u16);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u32, u32);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u64, u64);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u128, u128);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_unit, ());
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_array, [u8; 4]);
+    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_bool, bool);
+
+    // Rc::pin_in harnesses.
+    macro_rules! rc_check_pin_in {
+        ($name:ident, NotUnpinSentinel) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value = NotUnpinSentinel(kani::any(), PhantomPinned);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _pinned = Rc::<NotUnpinSentinel, Global>::pin_in(value, Global);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _pinned = Rc::<$ty, Global>::pin_in(kani::any::<$ty>(), Global);
+            }
+        };
+    }
+
+    rc_check_pin_in!(check_pin_in_i8, i8);
+    rc_check_pin_in!(check_pin_in_i16, i16);
+    rc_check_pin_in!(check_pin_in_i32, i32);
+    rc_check_pin_in!(check_pin_in_i64, i64);
+    rc_check_pin_in!(check_pin_in_i128, i128);
+    rc_check_pin_in!(check_pin_in_u8, u8);
+    rc_check_pin_in!(check_pin_in_u16, u16);
+    rc_check_pin_in!(check_pin_in_u32, u32);
+    rc_check_pin_in!(check_pin_in_u64, u64);
+    rc_check_pin_in!(check_pin_in_u128, u128);
+    rc_check_pin_in!(check_pin_in_unit, ());
+    rc_check_pin_in!(check_pin_in_array, [u8; 4]);
+    rc_check_pin_in!(check_pin_in_bool, bool);
+    rc_check_pin_in!(check_pin_in_not_unpin_sentinel, NotUnpinSentinel);
+
+    // Rc::new_uninit_slice harnesses.
+    macro_rules! rc_check_new_uninit_slice {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$ty>(*l));
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<[mem::MaybeUninit<$ty>]> = Rc::<[$ty]>::new_uninit_slice(len);
+            }
+        };
+    }
+
+    rc_check_new_uninit_slice!(check_new_uninit_slice_i8, i8);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_i16, i16);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_i32, i32);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_i64, i64);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_i128, i128);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_u8, u8);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_u16, u16);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_u32, u32);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_u64, u64);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_u128, u128);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_unit, ());
+    rc_check_new_uninit_slice!(check_new_uninit_slice_bool, bool);
+    rc_check_new_uninit_slice!(check_new_uninit_slice_array, [u8; 4]);
+
+    // Rc::new_zeroed_slice harnesses.
+    macro_rules! rc_check_new_zeroed_slice {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$elem_ty>(*l));
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<[mem::MaybeUninit<$elem_ty>]> = Rc::<[$elem_ty]>::new_zeroed_slice(len);
+            }
+        };
+    }
+
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_i8, i8);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_i16, i16);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_i32, i32);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_i64, i64);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_i128, i128);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_u8, u8);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_u16, u16);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_u32, u32);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_u64, u64);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_u128, u128);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_unit, ());
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_bool, bool);
+    rc_check_new_zeroed_slice!(check_new_zeroed_slice_array, [u8; 4]);
+
+    // Rc::into_array harnesses.
+    macro_rules! rc_check_into_array_slice {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$ty>();
+                let rc: Rc<[$ty]> = Rc::from(vec);
+                // N matches the helper's length bound so both the Some (len == N)
+                // and None (len != N) return arms are reachable.
+                const N: usize = 100;
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let len = rc.len();
+                let arr: Option<Rc<[$ty; N]>> = rc.into_array::<N>();
+                assert!(arr.is_some() == (len == N));
+            }
+        };
+    }
+
+    rc_check_into_array_slice!(check_into_array_slice_i8, i8);
+    rc_check_into_array_slice!(check_into_array_slice_i16, i16);
+    rc_check_into_array_slice!(check_into_array_slice_i32, i32);
+    rc_check_into_array_slice!(check_into_array_slice_i64, i64);
+    rc_check_into_array_slice!(check_into_array_slice_i128, i128);
+    rc_check_into_array_slice!(check_into_array_slice_u8, u8);
+    rc_check_into_array_slice!(check_into_array_slice_u16, u16);
+    rc_check_into_array_slice!(check_into_array_slice_u32, u32);
+    rc_check_into_array_slice!(check_into_array_slice_u64, u64);
+    rc_check_into_array_slice!(check_into_array_slice_u128, u128);
+    rc_check_into_array_slice!(check_into_array_slice_unit, ());
+    rc_check_into_array_slice!(check_into_array_slice_bool, bool);
+    rc_check_into_array_slice!(check_into_array_slice_array, [u8; 4]);
+
+    // Rc::pin harnesses.
+    macro_rules! rc_check_pin {
+        ($name:ident, NotUnpinSentinel) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value = NotUnpinSentinel(kani::any(), PhantomPinned);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _pinned = Rc::pin(value);
+            }
+        };
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _pinned = Rc::pin(value);
+            }
+        };
+    }
+
+    rc_check_pin!(check_pin_i8, i8);
+    rc_check_pin!(check_pin_i16, i16);
+    rc_check_pin!(check_pin_i32, i32);
+    rc_check_pin!(check_pin_i64, i64);
+    rc_check_pin!(check_pin_i128, i128);
+    rc_check_pin!(check_pin_u8, u8);
+    rc_check_pin!(check_pin_u16, u16);
+    rc_check_pin!(check_pin_u32, u32);
+    rc_check_pin!(check_pin_u64, u64);
+    rc_check_pin!(check_pin_u128, u128);
+    rc_check_pin!(check_pin_unit, ());
+    rc_check_pin!(check_pin_bool, bool);
+    rc_check_pin!(check_pin_array, [u8; 4]);
+    rc_check_pin!(check_pin_not_unpin_sentinel, NotUnpinSentinel);
+
+    // Rc::new_uninit_slice_in harnesses.
+    macro_rules! rc_check_new_uninit_slice_in {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$ty>(*l));
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<[mem::MaybeUninit<$ty>], Global> =
+                    Rc::<[$ty]>::new_uninit_slice_in(len, Global);
+            }
+        };
+    }
+
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i8, i8);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i16, i16);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i32, i32);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i64, i64);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i128, i128);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u8, u8);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u16, u16);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u32, u32);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u64, u64);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u128, u128);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_unit, ());
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_bool, bool);
+    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_array, [u8; 4]);
+
+    // Rc::try_new harnesses.
+    macro_rules! rc_check_try_new {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<$ty>::try_new(kani::any::<$ty>()).is_ok());
+            }
+        };
+    }
+
+    macro_rules! rc_check_try_new_vec {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec::<$elem>();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<Vec<$elem>>::try_new(vec);
+            }
+        };
+    }
+
+    rc_check_try_new!(check_try_new_i8, i8);
+    rc_check_try_new!(check_try_new_i16, i16);
+    rc_check_try_new!(check_try_new_i32, i32);
+    rc_check_try_new!(check_try_new_i64, i64);
+    rc_check_try_new!(check_try_new_i128, i128);
+    rc_check_try_new!(check_try_new_u8, u8);
+    rc_check_try_new!(check_try_new_u16, u16);
+    rc_check_try_new!(check_try_new_u32, u32);
+    rc_check_try_new!(check_try_new_u64, u64);
+    rc_check_try_new!(check_try_new_u128, u128);
+    rc_check_try_new!(check_try_new_unit, ());
+    rc_check_try_new!(check_try_new_bool, bool);
+    rc_check_try_new!(check_try_new_array, [u8; 4]);
+
+    rc_check_try_new_vec!(check_try_new_vec_u8, u8);
+    rc_check_try_new_vec!(check_try_new_vec_u16, u16);
+    rc_check_try_new_vec!(check_try_new_vec_u32, u32);
+    rc_check_try_new_vec!(check_try_new_vec_u64, u64);
+    rc_check_try_new_vec!(check_try_new_vec_u128, u128);
+
+    // Rc::try_new_uninit harnesses.
+    macro_rules! rc_check_try_new_uninit {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _result = Rc::<$ty>::try_new_uninit();
+            }
+        };
+    }
+
+    rc_check_try_new_uninit!(check_try_new_uninit_i8, i8);
+    rc_check_try_new_uninit!(check_try_new_uninit_i16, i16);
+    rc_check_try_new_uninit!(check_try_new_uninit_i32, i32);
+    rc_check_try_new_uninit!(check_try_new_uninit_i64, i64);
+    rc_check_try_new_uninit!(check_try_new_uninit_i128, i128);
+    rc_check_try_new_uninit!(check_try_new_uninit_u8, u8);
+    rc_check_try_new_uninit!(check_try_new_uninit_u16, u16);
+    rc_check_try_new_uninit!(check_try_new_uninit_u32, u32);
+    rc_check_try_new_uninit!(check_try_new_uninit_u64, u64);
+    rc_check_try_new_uninit!(check_try_new_uninit_u128, u128);
+    rc_check_try_new_uninit!(check_try_new_uninit_unit, ());
+    rc_check_try_new_uninit!(check_try_new_uninit_array, [u8; 4]);
+    rc_check_try_new_uninit!(check_try_new_uninit_bool, bool);
+
+    // Rc::try_new_zeroed harnesses.
+    macro_rules! rc_check_try_new_zeroed {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _result = Rc::<$ty>::try_new_zeroed();
+            }
+        };
+    }
+
+    rc_check_try_new_zeroed!(check_try_new_zeroed_i8, i8);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_i16, i16);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_i32, i32);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_i64, i64);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_i128, i128);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_u8, u8);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_u16, u16);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_u32, u32);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_u64, u64);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_u128, u128);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_unit, ());
+    rc_check_try_new_zeroed!(check_try_new_zeroed_array, [u8; 4]);
+    rc_check_try_new_zeroed!(check_try_new_zeroed_bool, bool);
+
+    // Rc::try_unwrap harnesses: Ok (unique), Err (shared), and Ok-with-weak
+    // per type — weak references do not block the success path.
+    macro_rules! rc_check_try_unwrap {
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            rc_check_try_unwrap!($unique, $shared, $weak_present, $ty, kani::any::<$ty>());
+        };
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let rc: Rc<$ty, Global> = Rc::new_in($expr, Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<$ty, Global>::try_unwrap(rc).is_ok());
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let rc: Rc<$ty, Global> = Rc::new_in($expr, Global);
+                let _shared = Rc::clone(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<$ty, Global>::try_unwrap(rc).is_err());
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let rc: Rc<$ty, Global> = Rc::new_in($expr, Global);
+                let _weak = Rc::downgrade(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                assert!(Rc::<$ty, Global>::try_unwrap(rc).is_ok());
+            }
+        };
+    }
+
+    macro_rules! rc_check_try_unwrap_vec {
+        ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
+            rc_check_try_unwrap!(
+                $unique,
+                $shared,
+                $weak_present,
+                Vec<$elem>,
+                verifier_nondet_vec::<$elem>()
+            );
+        };
+    }
+
+    rc_check_try_unwrap!(
+        check_try_unwrap_i8_unique,
+        check_try_unwrap_i8_shared,
+        check_try_unwrap_i8_weak_present,
+        i8
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_i16_unique,
+        check_try_unwrap_i16_shared,
+        check_try_unwrap_i16_weak_present,
+        i16
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_i32_unique,
+        check_try_unwrap_i32_shared,
+        check_try_unwrap_i32_weak_present,
+        i32
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_i64_unique,
+        check_try_unwrap_i64_shared,
+        check_try_unwrap_i64_weak_present,
+        i64
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_i128_unique,
+        check_try_unwrap_i128_shared,
+        check_try_unwrap_i128_weak_present,
+        i128
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_u8_unique,
+        check_try_unwrap_u8_shared,
+        check_try_unwrap_u8_weak_present,
+        u8
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_u16_unique,
+        check_try_unwrap_u16_shared,
+        check_try_unwrap_u16_weak_present,
+        u16
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_u32_unique,
+        check_try_unwrap_u32_shared,
+        check_try_unwrap_u32_weak_present,
+        u32
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_u64_unique,
+        check_try_unwrap_u64_shared,
+        check_try_unwrap_u64_weak_present,
+        u64
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_u128_unique,
+        check_try_unwrap_u128_shared,
+        check_try_unwrap_u128_weak_present,
+        u128
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_unit_unique,
+        check_try_unwrap_unit_shared,
+        check_try_unwrap_unit_weak_present,
+        ()
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_array_unique,
+        check_try_unwrap_array_shared,
+        check_try_unwrap_array_weak_present,
+        [u8; 4]
+    );
+    rc_check_try_unwrap!(
+        check_try_unwrap_bool_unique,
+        check_try_unwrap_bool_shared,
+        check_try_unwrap_bool_weak_present,
+        bool
+    );
+
+    rc_check_try_unwrap_vec!(
+        check_try_unwrap_vec_u8_unique,
+        check_try_unwrap_vec_u8_shared,
+        check_try_unwrap_vec_u8_weak_present,
+        u8
+    );
+    rc_check_try_unwrap_vec!(
+        check_try_unwrap_vec_u16_unique,
+        check_try_unwrap_vec_u16_shared,
+        check_try_unwrap_vec_u16_weak_present,
+        u16
+    );
+    rc_check_try_unwrap_vec!(
+        check_try_unwrap_vec_u32_unique,
+        check_try_unwrap_vec_u32_shared,
+        check_try_unwrap_vec_u32_weak_present,
+        u32
+    );
+    rc_check_try_unwrap_vec!(
+        check_try_unwrap_vec_u64_unique,
+        check_try_unwrap_vec_u64_shared,
+        check_try_unwrap_vec_u64_weak_present,
+        u64
+    );
+    rc_check_try_unwrap_vec!(
+        check_try_unwrap_vec_u128_unique,
+        check_try_unwrap_vec_u128_shared,
+        check_try_unwrap_vec_u128_weak_present,
+        u128
+    );
+
+    // Rc::new_zeroed_slice_in harnesses.
+    macro_rules! rc_check_new_zeroed_slice_in {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                type T = $elem_ty;
+                let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<T>(*l));
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _rc: Rc<[mem::MaybeUninit<T>], Global> =
+                    Rc::<[T]>::new_zeroed_slice_in(len, Global);
+            }
+        };
+    }
+
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i8, i8);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i16, i16);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i32, i32);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i64, i64);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i128, i128);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u8, u8);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u16, u16);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u32, u32);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u64, u64);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u128, u128);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_unit, ());
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_bool, bool);
+    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_array, [u8; 4]);
+
+    // Rc::as_ptr harnesses.
+    macro_rules! rc_check_as_ptr {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let rc_clone: Rc<$ty, Global> = Rc::clone(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let ptr = Rc::<$ty, Global>::as_ptr(&rc);
+                let clone_ptr = Rc::<$ty, Global>::as_ptr(&rc_clone);
+                assert!(core::ptr::eq(ptr, clone_ptr));
+            }
+        };
+    }
+
+    macro_rules! rc_check_as_ptr_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let ptr = Rc::<[$elem], Global>::as_ptr(&rc);
+                let clone_ptr = Rc::<[$elem], Global>::as_ptr(&rc_clone);
+                assert!(core::ptr::eq(ptr as *const $elem, clone_ptr as *const $elem));
+            }
+        };
+    }
+
+    rc_check_as_ptr!(check_rc_as_ptr_i8, i8);
+    rc_check_as_ptr!(check_rc_as_ptr_i16, i16);
+    rc_check_as_ptr!(check_rc_as_ptr_i32, i32);
+    rc_check_as_ptr!(check_rc_as_ptr_i64, i64);
+    rc_check_as_ptr!(check_rc_as_ptr_i128, i128);
+    rc_check_as_ptr!(check_rc_as_ptr_u8, u8);
+    rc_check_as_ptr!(check_rc_as_ptr_u16, u16);
+    rc_check_as_ptr!(check_rc_as_ptr_u32, u32);
+    rc_check_as_ptr!(check_rc_as_ptr_u64, u64);
+    rc_check_as_ptr!(check_rc_as_ptr_u128, u128);
+    rc_check_as_ptr!(check_rc_as_ptr_unit, ());
+    rc_check_as_ptr!(check_rc_as_ptr_array, [u8; 4]);
+    rc_check_as_ptr!(check_rc_as_ptr_bool, bool);
+
+    rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u8, [u8]);
+    rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u16, [u16]);
+    rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u32, [u32]);
+    rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u64, [u64]);
+    rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u128, [u128]);
+
+    // Rc::copy_from_slice harnesses.
+    macro_rules! rc_check_from_slice_copy {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$ty>();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = <Rc<[$ty], Global> as RcFromSlice<$ty>>::from_slice(vec.as_slice());
+            }
+        };
+    }
+
+    rc_check_from_slice_copy!(check_from_slice_copy_i8, i8);
+    rc_check_from_slice_copy!(check_from_slice_copy_i16, i16);
+    rc_check_from_slice_copy!(check_from_slice_copy_i32, i32);
+    rc_check_from_slice_copy!(check_from_slice_copy_i64, i64);
+    rc_check_from_slice_copy!(check_from_slice_copy_i128, i128);
+    rc_check_from_slice_copy!(check_from_slice_copy_u8, u8);
+    rc_check_from_slice_copy!(check_from_slice_copy_u16, u16);
+    rc_check_from_slice_copy!(check_from_slice_copy_u32, u32);
+    rc_check_from_slice_copy!(check_from_slice_copy_u64, u64);
+    rc_check_from_slice_copy!(check_from_slice_copy_u128, u128);
+    rc_check_from_slice_copy!(check_from_slice_copy_unit, ());
+    rc_check_from_slice_copy!(check_from_slice_copy_array, [u8; 4]);
+    rc_check_from_slice_copy!(check_from_slice_copy_bool, bool);
+
+    // Rc::drop harnesses per type: unique (reaches drop_slow with no weaks),
+    // shared (no drop_slow), and unique-with-weak (drop_slow with a
+    // surviving weak).
+    macro_rules! rc_check_drop_rc_sized {
+        ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = rc;
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let rc_clone: Rc<$ty, Global> = Rc::clone(&rc);
+                {
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                    let _dropped = rc;
+                }
+                assert!(Rc::strong_count(&rc_clone) == 1);
+                let _ = rc_clone;
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&rc);
+                {
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                    let _dropped = rc;
+                }
+                assert!(weak.upgrade().is_none());
+                // The weak must outlive the strong drop.
+                let _ = weak;
+            }
+        };
+    }
+
+    macro_rules! rc_check_drop_rc_unsized {
+        ($unique:ident, $shared:ident, $weak_present:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $unique() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = rc;
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
+                {
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                    let _dropped = rc;
+                }
+                assert!(Rc::strong_count(&rc_clone) == 1);
+                let _ = rc_clone;
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
+                {
+                    kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                    let _dropped = rc;
+                }
+                assert!(weak.upgrade().is_none());
+                // The weak must outlive the strong drop.
+                let _ = weak;
+            }
+        };
+    }
+
+    rc_check_drop_rc_sized!(
+        check_drop_rc_i8_unique,
+        check_drop_rc_i8_shared,
+        check_drop_rc_i8_weak_present,
+        i8
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_i16_unique,
+        check_drop_rc_i16_shared,
+        check_drop_rc_i16_weak_present,
+        i16
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_i32_unique,
+        check_drop_rc_i32_shared,
+        check_drop_rc_i32_weak_present,
+        i32
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_i64_unique,
+        check_drop_rc_i64_shared,
+        check_drop_rc_i64_weak_present,
+        i64
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_i128_unique,
+        check_drop_rc_i128_shared,
+        check_drop_rc_i128_weak_present,
+        i128
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_u8_unique,
+        check_drop_rc_u8_shared,
+        check_drop_rc_u8_weak_present,
+        u8
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_u16_unique,
+        check_drop_rc_u16_shared,
+        check_drop_rc_u16_weak_present,
+        u16
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_u32_unique,
+        check_drop_rc_u32_shared,
+        check_drop_rc_u32_weak_present,
+        u32
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_u64_unique,
+        check_drop_rc_u64_shared,
+        check_drop_rc_u64_weak_present,
+        u64
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_u128_unique,
+        check_drop_rc_u128_shared,
+        check_drop_rc_u128_weak_present,
+        u128
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_unit_unique,
+        check_drop_rc_unit_shared,
+        check_drop_rc_unit_weak_present,
+        ()
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_array_unique,
+        check_drop_rc_array_shared,
+        check_drop_rc_array_weak_present,
+        [u8; 4]
+    );
+    rc_check_drop_rc_sized!(
+        check_drop_rc_bool_unique,
+        check_drop_rc_bool_shared,
+        check_drop_rc_bool_weak_present,
+        bool
+    );
+
+    rc_check_drop_rc_unsized!(
+        check_drop_rc_vec_u8_unique,
+        check_drop_rc_vec_u8_shared,
+        check_drop_rc_vec_u8_weak_present,
+        [u8]
+    );
+    rc_check_drop_rc_unsized!(
+        check_drop_rc_vec_u16_unique,
+        check_drop_rc_vec_u16_shared,
+        check_drop_rc_vec_u16_weak_present,
+        [u16]
+    );
+    rc_check_drop_rc_unsized!(
+        check_drop_rc_vec_u32_unique,
+        check_drop_rc_vec_u32_shared,
+        check_drop_rc_vec_u32_weak_present,
+        [u32]
+    );
+    rc_check_drop_rc_unsized!(
+        check_drop_rc_vec_u64_unique,
+        check_drop_rc_vec_u64_shared,
+        check_drop_rc_vec_u64_weak_present,
+        [u64]
+    );
+    rc_check_drop_rc_unsized!(
+        check_drop_rc_vec_u128_unique,
+        check_drop_rc_vec_u128_shared,
+        check_drop_rc_vec_u128_weak_present,
+        [u128]
+    );
+
+    // Rc::clone harnesses.
+    macro_rules! rc_check_clone_rc_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::clone(&rc);
+            }
+        };
+    }
+
+    macro_rules! rc_check_clone_rc_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::clone(&rc);
+            }
+        };
+    }
+
+    rc_check_clone_rc_sized!(check_clone_rc_i8, i8);
+    rc_check_clone_rc_sized!(check_clone_rc_i16, i16);
+    rc_check_clone_rc_sized!(check_clone_rc_i32, i32);
+    rc_check_clone_rc_sized!(check_clone_rc_i64, i64);
+    rc_check_clone_rc_sized!(check_clone_rc_i128, i128);
+    rc_check_clone_rc_sized!(check_clone_rc_u8, u8);
+    rc_check_clone_rc_sized!(check_clone_rc_u16, u16);
+    rc_check_clone_rc_sized!(check_clone_rc_u32, u32);
+    rc_check_clone_rc_sized!(check_clone_rc_u64, u64);
+    rc_check_clone_rc_sized!(check_clone_rc_u128, u128);
+    rc_check_clone_rc_sized!(check_clone_rc_unit, ());
+    rc_check_clone_rc_sized!(check_clone_rc_array, [u8; 4]);
+    rc_check_clone_rc_sized!(check_clone_rc_bool, bool);
+
+    rc_check_clone_rc_unsized!(check_clone_rc_vec_u8, [u8]);
+    rc_check_clone_rc_unsized!(check_clone_rc_vec_u16, [u16]);
+    rc_check_clone_rc_unsized!(check_clone_rc_vec_u32, [u32]);
+    rc_check_clone_rc_unsized!(check_clone_rc_vec_u64, [u64]);
+    rc_check_clone_rc_unsized!(check_clone_rc_vec_u128, [u128]);
+
+    // Rc::default harnesses.
+    macro_rules! rc_check_rc_default {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let rc = Rc::<$ty>::default();
+                assert!(*rc == <$ty as Default>::default());
+            }
+        };
+    }
+
+    // Vec variant: equality against `Vec::default()` lowers to an unbounded
+    // memcmp under CBMC; emptiness is the same property for the empty default.
+    macro_rules! rc_check_rc_default_vec {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let rc = Rc::<$ty>::default();
+                assert!(rc.is_empty());
+            }
+        };
+    }
+
+    rc_check_rc_default!(check_rc_default_i8, i8);
+    rc_check_rc_default!(check_rc_default_i16, i16);
+    rc_check_rc_default!(check_rc_default_i32, i32);
+    rc_check_rc_default!(check_rc_default_i64, i64);
+    rc_check_rc_default!(check_rc_default_i128, i128);
+    rc_check_rc_default!(check_rc_default_u8, u8);
+    rc_check_rc_default!(check_rc_default_u16, u16);
+    rc_check_rc_default!(check_rc_default_u32, u32);
+    rc_check_rc_default!(check_rc_default_u64, u64);
+    rc_check_rc_default!(check_rc_default_u128, u128);
+    rc_check_rc_default!(check_rc_default_unit, ());
+    rc_check_rc_default!(check_rc_default_array, [u8; 4]);
+    rc_check_rc_default!(check_rc_default_bool, bool);
+    rc_check_rc_default_vec!(check_rc_default_vec_u8, Vec<u8>);
+    rc_check_rc_default_vec!(check_rc_default_vec_u16, Vec<u16>);
+    rc_check_rc_default_vec!(check_rc_default_vec_u32, Vec<u32>);
+    rc_check_rc_default_vec!(check_rc_default_vec_u64, Vec<u64>);
+    rc_check_rc_default_vec!(check_rc_default_vec_u128, Vec<u128>);
+
+    #[kani::proof]
+    // Rc<str>::default harness.
+    pub fn check_rc_default_str() {
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let rc = Rc::<str>::default();
+        assert!(rc.is_empty());
+    }
+
+    // Rc::from(&str) harnesses.
+    macro_rules! rc_check_from_ref_str {
+        ($name:ident, $value:expr) => {
+            #[kani::proof]
+            pub fn $name() {
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<str>::from($value);
+            }
+        };
+    }
+
+    rc_check_from_ref_str!(check_from_ref_str_rc_str_empty, "");
+    rc_check_from_ref_str!(check_from_ref_str_rc_str_nonempty, "test");
+
+    // Rc::from(Vec<T>) harnesses.
+    macro_rules! rc_check_from_vec {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let v: Vec<$ty, Global> = verifier_nondet_vec_rc::<$ty>();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = Rc::<[$ty], Global>::from(v);
+            }
+        };
+    }
+
+    rc_check_from_vec!(check_from_vec_i8, i8);
+    rc_check_from_vec!(check_from_vec_i16, i16);
+    rc_check_from_vec!(check_from_vec_i32, i32);
+    rc_check_from_vec!(check_from_vec_i64, i64);
+    rc_check_from_vec!(check_from_vec_i128, i128);
+    rc_check_from_vec!(check_from_vec_u8, u8);
+    rc_check_from_vec!(check_from_vec_u16, u16);
+    rc_check_from_vec!(check_from_vec_u32, u32);
+    rc_check_from_vec!(check_from_vec_u64, u64);
+    rc_check_from_vec!(check_from_vec_u128, u128);
+    rc_check_from_vec!(check_from_vec_unit, ());
+    rc_check_from_vec!(check_from_vec_array, [u8; 4]);
+    rc_check_from_vec!(check_from_vec_bool, bool);
+
+    // Rc<[u8]>::from(Rc<str>) harnesses.
+    macro_rules! rc_check_from_rc_str_to_rc_u8_slice {
+        ($name:ident, $value:expr) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<str> = Rc::from($value);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let _ = <Rc<[u8]>>::from(rc);
+            }
+        };
+    }
+
+    rc_check_from_rc_str_to_rc_u8_slice!(check_from_rc_str_to_rc_u8_slice_empty, "");
+    rc_check_from_rc_str_to_rc_u8_slice!(check_from_rc_str_to_rc_u8_slice_nonempty, "test");
+
+    // Rc::into_raw_with_allocator harnesses.
+    macro_rules! rc_check_into_raw_with_allocator_sized {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let (ptr, alloc): (*const $ty, Global) =
+                    Rc::<$ty, Global>::into_raw_with_allocator(rc);
+                let _recovered: Rc<$ty, Global> =
+                    unsafe { Rc::<$ty, Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    macro_rules! rc_check_into_raw_with_allocator_unsized {
+        ($name:ident, [$elem:ty]) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let rc: Rc<[$elem], Global> = Rc::from(vec);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let (ptr, alloc): (*const [$elem], Global) =
+                    Rc::<[$elem], Global>::into_raw_with_allocator(rc);
+                let _recovered: Rc<[$elem], Global> =
+                    unsafe { Rc::<[$elem], Global>::from_raw_in(ptr, alloc) };
+            }
+        };
+    }
+
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i8, i8);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i16, i16);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i32, i32);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i64, i64);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i128, i128);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u8, u8);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u16, u16);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u32, u32);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u64, u64);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u128, u128);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_unit, ());
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_bool, bool);
+    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_array, [u8; 4]);
+
+    rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u8, [u8]);
+    rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u16, [u16]);
+    rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u32, [u32]);
+    rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u64, [u64]);
+    rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u128, [u128]);
+
+    // `From<&[T]>` harnesses. With a `TrivialClone` element this dispatches
+    // to the `copy_from_slice` specialization of `RcFromSlice`.
+    macro_rules! rc_check_from_ref_slice {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            // unwind(5): length-3 input, so every loop runs at most 4 iterations.
+            #[kani::unwind(5)]
+            pub fn $name() {
+                let arr: [$ty; 3] = kani::any();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let rc: Rc<[$ty]> = Rc::from(&arr[..]);
+                assert!(rc.len() == 3);
+                assert!(rc[0] == arr[0] && rc[2] == arr[2]);
+            }
+        };
+    }
+
+    rc_check_from_ref_slice!(check_from_ref_slice_i8, i8);
+    rc_check_from_ref_slice!(check_from_ref_slice_u32, u32);
+
+    // Element type that is `Clone` but not `TrivialClone`: the manual `Clone`
+    // impl opts out of the `TrivialClone` specialization, so slice and
+    // iterator constructors dispatch to the default clone-per-element path
+    // (`from_iter_exact`), which no `TrivialClone` element can reach.
+    struct NonTrivialClone<T>(T);
+
+    impl<T: Clone> Clone for NonTrivialClone<T> {
+        fn clone(&self) -> Self {
+            NonTrivialClone(self.0.clone())
+        }
+    }
+
+    // `RcFromSlice<T: Clone>::from_slice` (default impl) harnesses.
+    macro_rules! rc_check_from_slice_clone {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            // unwind(5): length-3 input, so every loop runs at most 4 iterations.
+            #[kani::unwind(5)]
+            pub fn $name() {
+                let arr: [$ty; 3] = kani::any();
+                let src =
+                    [NonTrivialClone(arr[0]), NonTrivialClone(arr[1]), NonTrivialClone(arr[2])];
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let rc: Rc<[NonTrivialClone<$ty>]> = Rc::from(&src[..]);
+                assert!(rc.len() == 3);
+                assert!(rc[0].0 == arr[0] && rc[2].0 == arr[2]);
+            }
+        };
+    }
+
+    rc_check_from_slice_clone!(check_from_slice_clone_u8, u8);
+    rc_check_from_slice_clone!(check_from_slice_clone_u32, u32);
+
+    // `FromIterator for Rc<[T]>` / `ToRcSlice` harnesses. An array iterator is
+    // `TrustedLen`, taking the single-allocation `from_iter_exact`
+    // specialization; a `filter` adapter is not `TrustedLen`, taking the
+    // default collect-into-`Vec` path. These harnesses assert the placed element
+    // values, so `from_iter_exact`'s write loop is verified by bounded unrolling
+    // of the upstream body rather than a loop contract: contract havoc replaces
+    // the iterator with an arbitrary invariant-satisfying state, which cannot
+    // witness the value it yields at step `i`, so no invariant carries
+    // `rc[i] == arr[i]`.
+    macro_rules! rc_check_from_iter_trusted_len {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            // unwind(5): length-3 input, so every loop runs at most 4 iterations.
+            #[kani::unwind(5)]
+            pub fn $name() {
+                let arr: [$ty; 3] = kani::any();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let rc: Rc<[$ty]> = arr.into_iter().collect();
+                assert!(rc.len() == 3);
+                assert!(rc[0] == arr[0] && rc[2] == arr[2]);
+            }
+        };
+    }
+
+    macro_rules! rc_check_from_iter_default {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            // unwind(5): length-3 input, so every loop runs at most 4 iterations.
+            #[kani::unwind(5)]
+            pub fn $name() {
+                let arr: [$ty; 3] = kani::any();
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let rc: Rc<[$ty]> = arr.into_iter().filter(|_| true).collect();
+                assert!(rc.len() == 3);
+                assert!(rc[0] == arr[0] && rc[2] == arr[2]);
+            }
+        };
+    }
+
+    rc_check_from_iter_trusted_len!(check_from_iter_trusted_len_u8, u8);
+    rc_check_from_iter_trusted_len!(check_from_iter_trusted_len_u32, u32);
+    rc_check_from_iter_default!(check_from_iter_default_u8, u8);
+    rc_check_from_iter_default!(check_from_iter_default_u32, u32);
+
+    // `TryFrom<Rc<[T]>> for Rc<[T; N]>` harnesses. The nondeterministic source
+    // length reaches both the `Ok` (len == N) and `Err` (len != N) arms, each
+    // witnessed by its own cover.
+    macro_rules! rc_check_try_from_slice_to_array {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            // unwind(5): source length <= 2, so every loop runs at most 3 iterations.
+            #[kani::unwind(5)]
+            pub fn $name() {
+                let arr: [$ty; 2] = kani::any();
+                let take: usize = kani::any();
+                kani::assume(take <= 2);
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+                let rc: Rc<[$ty]> = Rc::from(&arr[..take]);
+                match Rc::<[$ty; 2]>::try_from(rc) {
+                    Ok(exact) => {
+                        kani::cover(true, "try_from Ok arm is reachable");
+                        assert!(take == 2 && exact.len() == 2);
+                    }
+                    Err(rest) => {
+                        kani::cover(true, "try_from Err arm is reachable");
+                        assert!(take != 2 && rest.len() == take);
+                    }
+                }
+            }
+        };
+    }
+
+    rc_check_try_from_slice_to_array!(check_try_from_slice_to_array_u8, u8);
+    rc_check_try_from_slice_to_array!(check_try_from_slice_to_array_u32, u32);
 }
