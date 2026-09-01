@@ -696,6 +696,29 @@ pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_write_bytes"]
+#[safety::requires(
+    count
+        .checked_mul(mem::size_of::<T>())
+        .map_or_else(|| false, |size| size <= isize::MAX as usize)
+)]
+#[safety::requires(ub_checks::can_write(slice_from_raw_parts_mut(dst, count)))]
+#[safety::requires(ub_checks::maybe_is_aligned_and_not_null(
+    dst as *const (),
+    mem::align_of::<T>(),
+    mem::size_of::<T>() == 0 || count == 0,
+))]
+#[safety::ensures(|_| ub_checks::can_dereference(slice_from_raw_parts(
+    dst.cast::<u8>(),
+    count * mem::size_of::<T>(),
+)))]
+#[cfg_attr(kani, kani::modifies({
+    let size = mem::size_of::<T>();
+    if size == 0 {
+        slice_from_raw_parts(crate::ptr::null::<u8>(), 0)
+    } else {
+        slice_from_raw_parts(dst.cast::<u8>(), count * size)
+    }
+}))]
 pub const unsafe fn write_bytes<T>(dst: *mut T, val: u8, count: usize) {
     // SAFETY: the safety contract for `write_bytes` must be upheld by the caller.
     unsafe {
@@ -1296,6 +1319,20 @@ pub const fn slice_from_raw_parts_mut<T>(data: *mut T, len: usize) -> *mut [T] {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_stable(feature = "const_swap", since = "1.85.0")]
 #[rustc_diagnostic_item = "ptr_swap"]
+#[safety::requires(
+    ub_checks::can_dereference(x.cast::<MaybeUninit<T>>())
+        && ub_checks::can_write(x.cast::<MaybeUninit<T>>())
+)]
+#[safety::requires(
+    ub_checks::can_dereference(y.cast::<MaybeUninit<T>>())
+        && ub_checks::can_write(y.cast::<MaybeUninit<T>>())
+)]
+#[safety::ensures(|_| {
+    ub_checks::can_dereference(x.cast::<MaybeUninit<T>>())
+        && ub_checks::can_dereference(y.cast::<MaybeUninit<T>>())
+})]
+#[cfg_attr(kani, kani::modifies(x))]
+#[cfg_attr(kani, kani::modifies(y))]
 pub const unsafe fn swap<T>(x: *mut T, y: *mut T) {
     // Give ourselves some scratch space to work with.
     // We do not have to worry about drops: `MaybeUninit` does nothing when dropped.
@@ -2854,4 +2891,150 @@ mod verify {
         let p = kani::any::<usize>() as *const [char; 5];
         check_align_offset(p);
     }
+
+    // Challenge 2, part 3
+
+    // Harnesses for `swap`
+    macro_rules! gen_ptr_swap_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(swap)]
+            fn $name() {
+                let mut x = MaybeUninit::<$ty>::uninit();
+                let mut y = MaybeUninit::<$ty>::uninit();
+                unsafe { swap(x.as_mut_ptr(), y.as_mut_ptr()) };
+            }
+        };
+    }
+
+    gen_ptr_swap_harness!(harness_ptr_swap_i8, i8);
+    gen_ptr_swap_harness!(harness_ptr_swap_i16, i16);
+    gen_ptr_swap_harness!(harness_ptr_swap_i32, i32);
+    gen_ptr_swap_harness!(harness_ptr_swap_i64, i64);
+    gen_ptr_swap_harness!(harness_ptr_swap_i128, i128);
+    gen_ptr_swap_harness!(harness_ptr_swap_isize, isize);
+    gen_ptr_swap_harness!(harness_ptr_swap_u8, u8);
+    gen_ptr_swap_harness!(harness_ptr_swap_u16, u16);
+    gen_ptr_swap_harness!(harness_ptr_swap_u32, u32);
+    gen_ptr_swap_harness!(harness_ptr_swap_u64, u64);
+    gen_ptr_swap_harness!(harness_ptr_swap_u128, u128);
+    gen_ptr_swap_harness!(harness_ptr_swap_usize, usize);
+    gen_ptr_swap_harness!(harness_ptr_swap_bool, bool);
+    gen_ptr_swap_harness!(harness_ptr_swap_char, char);
+    gen_ptr_swap_harness!(harness_ptr_swap_array, [u8; 4]);
+    gen_ptr_swap_harness!(harness_ptr_swap_unit, ());
+    gen_ptr_swap_harness!(harness_ptr_swap_non_zero, crate::num::NonZeroI32);
+
+    // Harnesses for `write_bytes`
+    macro_rules! gen_ptr_write_bytes_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(write_bytes)]
+            fn $name() {
+                const N: usize = 100;
+                let mut buffer = [MaybeUninit::<$ty>::uninit(); N];
+                let base = buffer.as_mut_ptr() as *mut u8;
+                let byte_offset = if core::mem::size_of::<$ty>() == 0 {
+                    0
+                } else {
+                    kani::any_where(|offset: &usize| *offset < N * core::mem::size_of::<$ty>())
+                };
+                let dst = base.wrapping_add(byte_offset) as *mut $ty;
+                let count = kani::any_where(|count: &usize| *count <= N);
+                unsafe { write_bytes(dst, kani::any::<u8>(), count) };
+            }
+        };
+    }
+
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_i8, i8);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_i16, i16);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_i32, i32);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_i64, i64);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_i128, i128);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_isize, isize);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_u8, u8);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_u16, u16);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_u32, u32);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_u64, u64);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_u128, u128);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_usize, usize);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_bool, bool);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_char, char);
+    gen_ptr_write_bytes_harness!(harness_ptr_write_bytes_array, [u8; 4]);
+
+    // A `[MaybeUninit<()>; N]` has no backing bytes at all. Kani's memset model still checks a
+    // writable destination region for a symbolic `count`, so that representation spuriously
+    // fails even though `write_bytes::<()>` is a zero-byte operation. Use an aligned pointer into
+    // a real byte allocation; the cast is valid for the unit type and gives the model a region to
+    // track. This is a Kani harness workaround, not an additional production precondition.
+    #[kani::proof_for_contract(write_bytes)]
+    fn harness_ptr_write_bytes_unit() {
+        const N: usize = 100;
+        let mut backing = [0u8; N];
+        let dst = backing.as_mut_ptr() as *mut ();
+        let count = kani::any_where(|count: &usize| *count <= N);
+        unsafe { write_bytes(dst, kani::any::<u8>(), count) };
+    }
+
+    // Harnesses for `align_of_val_raw`
+    macro_rules! gen_align_of_val_raw_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(crate::mem::align_of_val_raw)]
+            fn $name() {
+                let ptr = kani::any::<usize>() as *const $ty;
+                unsafe { crate::mem::align_of_val_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_align_of_val_raw_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(crate::mem::align_of_val_raw)]
+            fn $name() {
+                const N: usize = 100;
+                let values: [$ty; N] = kani::any();
+                let len = kani::any_where(|len: &usize| *len <= N);
+                let ptr = crate::ptr::slice_from_raw_parts(values.as_ptr(), len);
+                unsafe { crate::mem::align_of_val_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_align_of_val_raw_dyn_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(crate::mem::align_of_val_raw)]
+            fn $name() {
+                let value: $ty = kani::any();
+                let ptr: *const dyn crate::fmt::Debug = &value;
+                unsafe { crate::mem::align_of_val_raw(ptr) };
+            }
+        };
+    }
+
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i8, i8);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i16, i16);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i32, i32);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i64, i64);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i128, i128);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_isize, isize);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u8, u8);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u16, u16);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u32, u32);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u64, u64);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u128, u128);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_usize, usize);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_bool, bool);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_char, char);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_array, [u8; 4]);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_unit, ());
+
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u8, u8);
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u16, u16);
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u32, u32);
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u64, u64);
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u128, u128);
+
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u8, u8);
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u16, u16);
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u32, u32);
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u64, u64);
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u128, u128);
 }
