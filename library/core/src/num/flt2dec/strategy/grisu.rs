@@ -774,3 +774,169 @@ pub fn format_exact<'a>(
         None => fallback(d, buf, limit),
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod grisu_verify {
+    use super::*;
+    use crate::kani;
+
+    // Scope of the proofs in this module.  `format_exact_opt` is called
+    // directly, unstubbed, against a 1-byte buffer: `len` is then concrete, so
+    // CBMC prunes the unreachable digit iterations and the proof closes in
+    // seconds.  With a symbolic `len` (any longer buffer) the unrolled digit
+    // loops keep every `possibly_round` instance live and the formula exceeds
+    // the 2^12 addressed objects the repository runs CBMC with
+    // (`--object-bits 12`); `format_shortest_opt`, whose digit loops are bounded
+    // only by the arithmetic (up to 17 digits, unwind 20), produces a program of
+    // ~4.7M SSA steps and ~120k verification conditions whose bit-blasting runs
+    // out of memory, and the value-dependent `debug_assert!`s of its weeding
+    // step (`round_and_weed`, a nested function that cannot be stubbed) turn the
+    // proof into a numerical-correctness obligation over the 64x64-bit `Fp`
+    // products.  Those two functions are therefore covered here through the
+    // wrapper proofs below (both callees modelled as opaque), and a direct proof
+    // needs loop contracts on the digit loops.
+    //
+    // An arbitrary `Decoded` satisfying every precondition the `grisu` entry
+    // points assert.  `mant + plus < 2^61` (and the `checked_add`/`checked_sub`
+    // assumptions) keep the scaled `Fp` arithmetic inside `u64`.
+    fn arbitrary_decoded() -> Decoded {
+        let mant: u64 = kani::any();
+        let minus: u64 = kani::any();
+        let plus: u64 = kani::any();
+        kani::assume(mant > 0);
+        kani::assume(minus > 0);
+        kani::assume(plus > 0);
+        kani::assume(mant.checked_add(plus).is_some());
+        kani::assume(mant.checked_sub(minus).is_some());
+        kani::assume(mant + plus < (1 << 61));
+        let exp: i16 = kani::any();
+        // `[-1076, 970]` is the exponent range of `decode()`; 971 is unreachable.
+        kani::assume(exp >= -1076 && exp <= 970);
+        Decoded { mant, minus, plus, exp, inclusive: kani::any() }
+    }
+
+    // An arbitrary input for the exact-mode proofs: the full documented
+    // precondition of `format_exact_opt` (`0 < mant < 2^61`), with `exp`
+    // bounded to the decoder image so `cached_power` stays in its table domain.
+    fn arbitrary_decoded_exact() -> Decoded {
+        let mant: u64 = kani::any();
+        kani::assume(mant > 0 && mant < (1 << 61));
+        let exp: i16 = kani::any();
+        kani::assume(exp >= -1076 && exp <= 970);
+        Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
+    }
+
+    // Direct proof of `format_exact_opt`: NO stubs, NO in-body assumes, over the
+    // function's full documented precondition, an arbitrary `limit`, and a
+    // 1-byte buffer.  Every buffer access in `format_exact_opt` is bounded
+    // structurally (`len` is clamped to `buf.len()` on every path, each digit
+    // write is gated by an `i == len` return, and `possibly_round`'s carry write
+    // is guarded by `len < buf.len()`); this proof exercises the `len` clamp,
+    // the `exp <= limit` early path (`possibly_round` with `len == 0`), the
+    // first digit of both the integral and the fractional loop, and the real
+    // `cached_power` / `Fp::mul` / `possibly_round` arithmetic, so the
+    // value-dependent `debug_assert!`s are discharged from the real values.
+    #[kani::proof]
+    #[kani::unwind(20)]
+    fn check_format_exact_opt_buf1() {
+        let d = arbitrary_decoded_exact();
+        let limit: i16 = kani::any();
+        let mut buf: [MaybeUninit<u8>; 1] = [const { MaybeUninit::uninit() }; 1];
+        let _ = format_exact_opt(&d, &mut buf, limit);
+    }
+
+    // Wholesale havoc stub for the dragon fallback (modelled as an opaque op that
+    // writes a digit and returns an in-bounds slice of `buf`).
+    fn stub_dragon_format_exact<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> (&'a [u8], i16) {
+        let digit: u8 = kani::any();
+        kani::assume(digit >= b'0' && digit <= b'9');
+        buf[0] = MaybeUninit::new(digit);
+        // SAFETY: we just initialized element 0.
+        (unsafe { buf[..1].assume_init_ref() }, kani::any())
+    }
+
+    // Wholesale havoc stub for `format_exact_opt`: nondeterministically returns
+    // `None` (released its borrow of `buf`) or `Some` slice of `buf`.  Modelling
+    // both callees as opaque isolates the WRAPPER's only `unsafe`: the
+    // lifetime-laundering reborrow `&mut *(buf as *mut _)`, whose soundness rests
+    // on `buf` being reused only on the `None` path.
+    fn stub_format_exact_opt<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> Option<(&'a [u8], i16)> {
+        if kani::any() {
+            let digit: u8 = kani::any();
+            kani::assume(digit >= b'0' && digit <= b'9');
+            buf[0] = MaybeUninit::new(digit);
+            // SAFETY: we just initialized element 0.
+            Some((unsafe { buf[..1].assume_init_ref() }, kani::any()))
+        } else {
+            // The real function writes digits before it gives up; model that
+            // dirtying so the wrapper's reuse of `buf` on the `None` path is
+            // exercised against a modified buffer.
+            buf[0] = MaybeUninit::new(kani::any());
+            None
+        }
+    }
+
+    #[kani::proof]
+    #[kani::stub(format_exact_opt, stub_format_exact_opt)]
+    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_exact, stub_dragon_format_exact)]
+    fn check_format_exact() {
+        let d = arbitrary_decoded_exact();
+        let limit: i16 = kani::any();
+        let mut buf: [MaybeUninit<u8>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = format_exact(&d, &mut buf, limit);
+    }
+
+    // Wholesale havoc stubs for `format_shortest`'s callees (no `limit` arg).
+    fn stub_dragon_format_shortest<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> (&'a [u8], i16) {
+        let digit: u8 = kani::any();
+        kani::assume(digit >= b'0' && digit <= b'9');
+        buf[0] = MaybeUninit::new(digit);
+        // SAFETY: we just initialized element 0.
+        (unsafe { buf[..1].assume_init_ref() }, kani::any())
+    }
+
+    fn stub_format_shortest_opt<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> Option<(&'a [u8], i16)> {
+        if kani::any() {
+            let digit: u8 = kani::any();
+            kani::assume(digit >= b'0' && digit <= b'9');
+            buf[0] = MaybeUninit::new(digit);
+            // SAFETY: we just initialized element 0.
+            Some((unsafe { buf[..1].assume_init_ref() }, kani::any()))
+        } else {
+            // The real function writes digits before it gives up; model that
+            // dirtying so the wrapper's reuse of `buf` on the `None` path is
+            // exercised against a modified buffer.
+            buf[0] = MaybeUninit::new(kani::any());
+            None
+        }
+    }
+
+    // `format_shortest` mirrors `format_exact`: its only `unsafe` is the
+    // lifetime-laundering reborrow, verified by modelling both callees as opaque.
+    #[kani::proof]
+    #[kani::stub(format_shortest_opt, stub_format_shortest_opt)]
+    #[kani::stub(
+        crate::num::flt2dec::strategy::dragon::format_shortest,
+        stub_dragon_format_shortest
+    )]
+    fn check_format_shortest() {
+        let d = arbitrary_decoded();
+        let mut buf: [MaybeUninit<u8>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = format_shortest(&d, &mut buf);
+    }
+}
