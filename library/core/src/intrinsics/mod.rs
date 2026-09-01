@@ -2555,6 +2555,16 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
     false
 }
 
+/// Shared fallback body of [`typed_swap_nonoverlapping`].
+///
+/// Keeping the fallback in one ordinary function lets verification execute the same
+/// implementation used when a codegen backend does not replace the intrinsic.
+#[rustc_const_stable_indirect]
+const unsafe fn typed_swap_nonoverlapping_fallback<T>(x: *mut T, y: *mut T) {
+    // SAFETY: The caller guarantees that both pointers are valid, aligned, and non-overlapping.
+    unsafe { ptr::swap_nonoverlapping(x, y, 1) };
+}
+
 /// Non-overlapping *typed* swap of a single value.
 ///
 /// The codegen backends will replace this with a better implementation when
@@ -2587,9 +2597,8 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), size_of::<T>(), 1))]
 #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
 pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
-    // SAFETY: The caller provided single non-overlapping items behind
-    // pointers, so swapping them with `count: 1` is fine.
-    unsafe { ptr::swap_nonoverlapping(x, y, 1) };
+    // SAFETY: The caller upholds the requirements documented above.
+    unsafe { typed_swap_nonoverlapping_fallback(x, y) };
 }
 
 /// Returns whether we should perform some UB-checking at runtime. This eventually evaluates to
@@ -2953,14 +2962,16 @@ pub const fn ptr_metadata<P: ptr::Pointee<Metadata = M> + PointeeSized, M>(ptr: 
 #[allow(unused_variables)]
 fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
     #[cfg(kani)]
-    if count > 0 {
+    if count > 0 && size_of::<T>() > 0 {
         // Inspect a non-deterministically chosen byte in the copy.
         let byte = kani::any_where(|sz: &usize| *sz < size_of::<T>());
         // Instead of checking each of the `count`-many copies, non-deterministically pick one of
         // them and check it. Using quantifiers would not add value as we can rely on the solver to
         // pick an uninitialized element if such an element exists.
         let elem = kani::any_where(|val: &usize| *val < count);
-        let src_data = src as *const u8;
+        // Apply the same element offset to both regions so the check compares corresponding bytes.
+        // Omitting the source offset would compare `dst[elem]` against `src[0]`.
+        let src_data = unsafe { src.add(elem) } as *const u8;
         let dst_data = unsafe { dst.add(elem) } as *const u8;
         ub_checks::can_dereference(unsafe { src_data.add(byte) })
             == ub_checks::can_dereference(unsafe { dst_data.add(byte) })
@@ -3496,6 +3507,118 @@ mod verify {
             typed_swap_nonoverlapping(x, y)
         });
     }
+
+    // typed_swap_nonoverlapping fallback
+    // Kani models the intrinsic directly, so the proofs above do not enter its Rust fallback.
+    // This wrapper calls the helper shared with the production fallback and carries the intrinsic's
+    // contract verbatim, preventing the verified implementation and production code from drifting.
+    #[allow(dead_code)]
+    #[cfg_attr(kani, kani::modifies(x))]
+    #[cfg_attr(kani, kani::modifies(y))]
+    #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
+    #[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
+    #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
+    #[requires(ub_checks::maybe_is_nonoverlapping(
+        x as *const (),
+        y as *const (),
+        size_of::<T>(),
+        1,
+    ))]
+    #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
+    unsafe fn typed_swap_fallback_wrapper<T>(x: *mut T, y: *mut T) {
+        unsafe { typed_swap_nonoverlapping_fallback(x, y) }
+    }
+
+    macro_rules! gen_typed_swap_fallback_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(typed_swap_fallback_wrapper::<$ty>)]
+            fn $harness() {
+                run_with_arbitrary_ptrs::<$ty>(|x, y| unsafe { typed_swap_fallback_wrapper(x, y) });
+            }
+        };
+    }
+
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_i8, i8);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_i16, i16);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_i32, i32);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_i64, i64);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_i128, i128);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_isize, isize);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_u8, u8);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_u16, u16);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_u32, u32);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_u64, u64);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_u128, u128);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_usize, usize);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_bool, bool);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_char, char);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_f16, f16);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_f32, f32);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_f64, f64);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_array, [u8; 4]);
+    gen_typed_swap_fallback_harness!(harness_typed_swap_fallback_unit, ());
+    gen_typed_swap_fallback_harness!(
+        harness_typed_swap_fallback_non_zero_i32,
+        core::num::NonZeroI32
+    );
+
+    // The contract above establishes memory safety. These plain proofs independently pin the
+    // fallback's value semantics, so a no-op implementation cannot satisfy the verification suite.
+    macro_rules! gen_typed_swap_fallback_value_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $harness() {
+                let mut x: $ty = kani::any();
+                let mut y: $ty = kani::any();
+                let old_x = x;
+                let old_y = y;
+                unsafe { typed_swap_nonoverlapping_fallback(&mut x, &mut y) };
+                assert!(x == old_y && y == old_x, "fallback must exchange both values");
+            }
+        };
+    }
+
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_i8, i8);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_i16, i16);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_i32, i32);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_i64, i64);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_i128, i128);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_isize, isize);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_u8, u8);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_u16, u16);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_u32, u32);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_u64, u64);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_u128, u128);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_usize, usize);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_bool, bool);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_char, char);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_array, [u8; 4]);
+    gen_typed_swap_fallback_value_harness!(harness_typed_swap_fallback_value_unit, ());
+    gen_typed_swap_fallback_value_harness!(
+        harness_typed_swap_fallback_value_non_zero_i32,
+        core::num::NonZeroI32
+    );
+
+    macro_rules! gen_typed_swap_fallback_float_value_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $harness() {
+                let mut x: $ty = kani::any();
+                let mut y: $ty = kani::any();
+                let old_x = x.to_bits();
+                let old_y = y.to_bits();
+                unsafe { typed_swap_nonoverlapping_fallback(&mut x, &mut y) };
+                assert!(
+                    x.to_bits() == old_y && y.to_bits() == old_x,
+                    "fallback must preserve and exchange floating-point bit patterns",
+                );
+            }
+        };
+    }
+
+    gen_typed_swap_fallback_float_value_harness!(harness_typed_swap_fallback_value_f16, f16);
+    gen_typed_swap_fallback_float_value_harness!(harness_typed_swap_fallback_value_f32, f32);
+    gen_typed_swap_fallback_float_value_harness!(harness_typed_swap_fallback_value_f64, f64);
 
     // #[kani::proof_for_contract(copy)]
     // fn check_copy() {
@@ -4141,6 +4264,9 @@ mod verify {
         kani::assume(supported_status(src_status));
         kani::assume(supported_status(dst_status));
         harness(src, dst);
+        // This is after the contracted call, so it is reachable only when the generated pointers
+        // satisfy the callee's requirements and the function body is actually exercised.
+        kani::cover(true, "two-pointer contract has a non-vacuous input");
     }
 
     /// Return whether the current status is supported by Kani's contract.
@@ -4150,4 +4276,977 @@ mod verify {
     fn supported_status(status: AllocationStatus) -> bool {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
+
+    const VERIFY_LEN: usize = 100;
+
+    // General vtable_size contract. The wrapper constructs the vtable by unsizing `*const T`, so
+    // the documented vtable-validity condition is established internally and is not a caller
+    // precondition. The data pointer itself is never dereferenced and may be arbitrary.
+    //
+    // Residuals: verification instantiates a finite set of types and one trait (`Debug`). Also,
+    // rustc's layout model contributes to both the vtable entry and `size_of::<T>()`.
+    #[allow(dead_code)]
+    #[ensures(|result: &usize| *result == crate::mem::size_of::<T>())]
+    unsafe fn vtable_size_wrapper<T: core::fmt::Debug + 'static>(ptr: *const T) -> usize {
+        // The raw-pointer unsizing coercion constructs a vtable for `T`; it does not
+        // dereference the data pointer.
+        let vtable_ptr = vtable_ptr_for(ptr);
+        unsafe { vtable_size(vtable_ptr) }
+    }
+
+    #[allow(dead_code)]
+    fn vtable_ptr_for<T: core::fmt::Debug + 'static>(ptr: *const T) -> *const () {
+        let dyn_ptr: *const dyn core::fmt::Debug = ptr;
+        vtable_ptr_of(crate::ptr::metadata(dyn_ptr))
+    }
+
+    // This mirrors the private `DynMetadata::vtable_ptr` operation used by the
+    // standard library. The layout is compiler-defined and guaranteed to match.
+    #[allow(dead_code)]
+    fn vtable_ptr_of(metadata: crate::ptr::DynMetadata<dyn core::fmt::Debug>) -> *const () {
+        // SAFETY: `DynMetadata` is the type-erased vtable pointer for this trait object.
+        unsafe { crate::mem::transmute(metadata) }
+    }
+
+    #[derive(kani::Arbitrary)]
+    #[repr(C)]
+    struct VtableMixedAlign {
+        byte: u8,
+        word: u64,
+    }
+
+    impl core::fmt::Debug for VtableMixedAlign {
+        fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            Ok(())
+        }
+    }
+
+    #[derive(kani::Arbitrary)]
+    #[repr(C, align(16))]
+    struct VtableOverAligned {
+        byte: u8,
+    }
+
+    impl core::fmt::Debug for VtableOverAligned {
+        fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            Ok(())
+        }
+    }
+
+    // Harnesses for vtable_size
+    macro_rules! gen_vtable_size_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(vtable_size_wrapper)]
+            fn $harness() {
+                let value: $ty = kani::any();
+                let real: bool = kani::any();
+                let ptr: *const $ty = if real {
+                    &value
+                } else {
+                    // Raw-pointer unsizing only consumes `T`'s type metadata, so
+                    // this branch need not point to a live `T` allocation.
+                    kani::any::<usize>() as *const $ty
+                };
+                kani::cover(real, concat!("real data pointer for ", stringify!($ty)));
+                kani::cover(!real, concat!("arbitrary data pointer for ", stringify!($ty)));
+                unsafe { vtable_size_wrapper(ptr) };
+            }
+        };
+    }
+
+    gen_vtable_size_harness!(harness_vtable_size_i8, i8);
+    gen_vtable_size_harness!(harness_vtable_size_i16, i16);
+    gen_vtable_size_harness!(harness_vtable_size_i32, i32);
+    gen_vtable_size_harness!(harness_vtable_size_i64, i64);
+    gen_vtable_size_harness!(harness_vtable_size_i128, i128);
+    gen_vtable_size_harness!(harness_vtable_size_isize, isize);
+    gen_vtable_size_harness!(harness_vtable_size_u8, u8);
+    gen_vtable_size_harness!(harness_vtable_size_u16, u16);
+    gen_vtable_size_harness!(harness_vtable_size_u32, u32);
+    gen_vtable_size_harness!(harness_vtable_size_u64, u64);
+    gen_vtable_size_harness!(harness_vtable_size_u128, u128);
+    gen_vtable_size_harness!(harness_vtable_size_usize, usize);
+    // Size 8 with alignment 1 distinguishes the size and alignment vtable slots.
+    gen_vtable_size_harness!(harness_vtable_size_array, [u8; 8]);
+    gen_vtable_size_harness!(harness_vtable_size_mixed_align, VtableMixedAlign);
+    gen_vtable_size_harness!(harness_vtable_size_over_aligned, VtableOverAligned);
+    gen_vtable_size_harness!(harness_vtable_size_unit, ());
+
+    // General vtable_align contract, with the vtable-validity condition established by the same
+    // internal unsizing coercion as `vtable_size_wrapper`.
+    #[allow(dead_code)]
+    #[ensures(|result: &usize| *result == crate::mem::align_of::<T>())]
+    unsafe fn vtable_align_wrapper<T: core::fmt::Debug + 'static>(ptr: *const T) -> usize {
+        // The raw-pointer unsizing coercion constructs a vtable for `T`; it does not
+        // dereference the data pointer.
+        let vtable_ptr = vtable_ptr_for(ptr);
+        unsafe { vtable_align(vtable_ptr) }
+    }
+
+    // Harnesses for vtable_align
+    macro_rules! gen_vtable_align_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(vtable_align_wrapper)]
+            fn $harness() {
+                let value: $ty = kani::any();
+                let real: bool = kani::any();
+                let ptr: *const $ty = if real {
+                    &value
+                } else {
+                    // Raw-pointer unsizing only consumes `T`'s type metadata, so
+                    // this branch need not point to a live `T` allocation.
+                    kani::any::<usize>() as *const $ty
+                };
+                kani::cover(real, concat!("real data pointer for ", stringify!($ty)));
+                kani::cover(!real, concat!("arbitrary data pointer for ", stringify!($ty)));
+                unsafe { vtable_align_wrapper(ptr) };
+            }
+        };
+    }
+
+    gen_vtable_align_harness!(harness_vtable_align_i8, i8);
+    gen_vtable_align_harness!(harness_vtable_align_i16, i16);
+    gen_vtable_align_harness!(harness_vtable_align_i32, i32);
+    gen_vtable_align_harness!(harness_vtable_align_i64, i64);
+    gen_vtable_align_harness!(harness_vtable_align_i128, i128);
+    gen_vtable_align_harness!(harness_vtable_align_isize, isize);
+    gen_vtable_align_harness!(harness_vtable_align_u8, u8);
+    gen_vtable_align_harness!(harness_vtable_align_u16, u16);
+    gen_vtable_align_harness!(harness_vtable_align_u32, u32);
+    gen_vtable_align_harness!(harness_vtable_align_u64, u64);
+    gen_vtable_align_harness!(harness_vtable_align_u128, u128);
+    gen_vtable_align_harness!(harness_vtable_align_usize, usize);
+    gen_vtable_align_harness!(harness_vtable_align_bool, bool);
+    gen_vtable_align_harness!(harness_vtable_align_char, char);
+    gen_vtable_align_harness!(harness_vtable_align_f16, f16);
+    gen_vtable_align_harness!(harness_vtable_align_f32, f32);
+    gen_vtable_align_harness!(harness_vtable_align_f64, f64);
+    gen_vtable_align_harness!(harness_vtable_align_array, [u8; 8]);
+    gen_vtable_align_harness!(harness_vtable_align_mixed_align, VtableMixedAlign);
+    gen_vtable_align_harness!(harness_vtable_align_over_aligned, VtableOverAligned);
+    gen_vtable_align_harness!(harness_vtable_align_unit, ());
+
+    // copy_nonoverlapping
+    #[allow(dead_code)]
+    #[requires(count.checked_mul(crate::mem::size_of::<T>()).is_some())]
+    #[requires(crate::ub_checks::can_dereference(
+        crate::ptr::slice_from_raw_parts(
+            src.cast::<crate::mem::MaybeUninit<T>>(),
+            count,
+        ),
+    ))]
+    #[requires(crate::ub_checks::can_write(crate::ptr::slice_from_raw_parts_mut(dst, count),))]
+    #[requires(crate::ub_checks::maybe_is_nonoverlapping(
+        src as *const (),
+        dst as *const (),
+        crate::mem::size_of::<T>(),
+        count,
+    ))]
+    #[ensures(|_| crate::intrinsics::check_copy_untyped(src, dst, count))]
+    #[kani::modifies({
+        let size = crate::mem::size_of::<T>();
+        if size == 0 {
+            crate::ptr::slice_from_raw_parts(crate::ptr::null::<u8>(), 0)
+        } else {
+            crate::ptr::slice_from_raw_parts(
+                dst.cast::<u8>(),
+                count * size,
+            )
+        }
+    })]
+    unsafe fn copy_nonoverlapping_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
+        unsafe { copy_nonoverlapping(src, dst, count) }
+    }
+
+    // Harnesses for copy_nonoverlapping
+    macro_rules! gen_copy_nonoverlapping_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(copy_nonoverlapping_wrapper::<$ty>)]
+            fn $harness() {
+                let src: [$ty; VERIFY_LEN] = kani::any();
+                let mut dst: [$ty; VERIFY_LEN] = kani::any();
+                let count = kani::any_where(|count: &usize| *count <= VERIFY_LEN);
+                unsafe { copy_nonoverlapping_wrapper(src.as_ptr(), dst.as_mut_ptr(), count) };
+                kani::cover(count > 0, "copy_nonoverlapping accepts a non-empty range");
+            }
+        };
+    }
+
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_i8, i8);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_i16, i16);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_i32, i32);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_i64, i64);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_i128, i128);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_isize, isize);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_u8, u8);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_u16, u16);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_u32, u32);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_u64, u64);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_u128, u128);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_usize, usize);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_bool, bool);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_char, char);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_f16, f16);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_f32, f32);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_f64, f64);
+    gen_copy_nonoverlapping_harness!(harness_copy_nonoverlapping_array, [u8; 4]);
+
+    #[kani::proof_for_contract(copy_nonoverlapping_wrapper::<()>)]
+    fn harness_copy_nonoverlapping_unit() {
+        let mut value = ();
+        let ptr = &mut value as *mut ();
+        unsafe { copy_nonoverlapping_wrapper(ptr, ptr, kani::any()) };
+        kani::cover(true, "copy_nonoverlapping accepts a ZST input");
+    }
+
+    // copy
+    #[allow(dead_code)]
+    #[requires(
+        count
+            .checked_mul(crate::mem::size_of::<T>())
+            .map_or_else(|| false, |size| size <= isize::MAX as usize)
+    )]
+    #[requires(crate::ub_checks::can_dereference(
+        crate::ptr::slice_from_raw_parts(src.cast::<crate::mem::MaybeUninit<T>>(), count),
+    ))]
+    #[requires(crate::ub_checks::can_write(crate::ptr::slice_from_raw_parts_mut(dst, count),))]
+    #[ensures(|_| crate::intrinsics::check_copy_untyped(src, dst, count))]
+    #[kani::modifies({
+        let size = crate::mem::size_of::<T>();
+        if size == 0 {
+            crate::ptr::slice_from_raw_parts(crate::ptr::null::<u8>(), 0)
+        } else {
+            crate::ptr::slice_from_raw_parts(
+                dst.cast::<u8>(),
+                count * size,
+            )
+        }
+    })]
+    unsafe fn copy_wrapper<T>(src: *const T, dst: *mut T, count: usize) {
+        unsafe { copy(src, dst, count) }
+    }
+
+    fn copy_count() -> usize {
+        kani::any_where(|copy_count: &usize| *copy_count <= VERIFY_LEN)
+    }
+
+    fn copy_shifted_count() -> usize {
+        kani::any_where(|copy_count: &usize| *copy_count < VERIFY_LEN)
+    }
+
+    // Harnesses for copy
+    macro_rules! gen_copy_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(copy_wrapper::<$ty>)]
+            fn $harness() {
+                let src: [$ty; VERIFY_LEN] = kani::any();
+                let mut dst: [$ty; VERIFY_LEN] = kani::any();
+                let count = kani::any_where(|count: &usize| *count <= VERIFY_LEN);
+                unsafe { copy_wrapper(src.as_ptr(), dst.as_mut_ptr(), count) };
+                kani::cover(count > 0, "copy accepts a non-empty distinct range");
+            }
+        };
+    }
+
+    gen_copy_harness!(harness_copy_distinct_i8, i8);
+    gen_copy_harness!(harness_copy_distinct_i16, i16);
+    gen_copy_harness!(harness_copy_distinct_i32, i32);
+    gen_copy_harness!(harness_copy_distinct_i64, i64);
+    gen_copy_harness!(harness_copy_distinct_i128, i128);
+    gen_copy_harness!(harness_copy_distinct_isize, isize);
+    gen_copy_harness!(harness_copy_distinct_u8, u8);
+    gen_copy_harness!(harness_copy_distinct_u16, u16);
+    gen_copy_harness!(harness_copy_distinct_u32, u32);
+    gen_copy_harness!(harness_copy_distinct_u64, u64);
+    gen_copy_harness!(harness_copy_distinct_u128, u128);
+    gen_copy_harness!(harness_copy_distinct_usize, usize);
+    gen_copy_harness!(harness_copy_distinct_bool, bool);
+    gen_copy_harness!(harness_copy_distinct_char, char);
+    gen_copy_harness!(harness_copy_distinct_f16, f16);
+    gen_copy_harness!(harness_copy_distinct_f32, f32);
+    gen_copy_harness!(harness_copy_distinct_f64, f64);
+    gen_copy_harness!(harness_copy_distinct_array, [u8; 4]);
+
+    macro_rules! gen_copy_overlap_harness {
+        ($harness:ident, $src_offset:expr, $dst_offset:expr, $count:ident) => {
+            #[kani::proof_for_contract(copy_wrapper::<u8>)]
+            fn $harness() {
+                let mut buffer: [u8; VERIFY_LEN] = kani::any();
+                let ptr = buffer.as_mut_ptr();
+                let count = $count();
+                unsafe { copy_wrapper(ptr.add($src_offset), ptr.add($dst_offset), count) };
+                kani::cover(count > 0, "copy accepts a non-empty overlapping range");
+            }
+        };
+    }
+
+    gen_copy_overlap_harness!(harness_copy_exact_overlap, 0, 0, copy_count);
+    gen_copy_overlap_harness!(harness_copy_forward_overlap, 0, 1, copy_shifted_count);
+    gen_copy_overlap_harness!(harness_copy_backward_overlap, 1, 0, copy_shifted_count);
+
+    #[kani::proof_for_contract(copy_wrapper::<()>)]
+    fn harness_copy_unit() {
+        let mut value = ();
+        let ptr = &mut value as *mut ();
+        unsafe { copy_wrapper(ptr, ptr, kani::any()) };
+        kani::cover(true, "copy accepts a ZST input");
+    }
+
+    // write_bytes
+    #[allow(dead_code)]
+    #[requires(
+        count
+            .checked_mul(crate::mem::size_of::<T>())
+            .map_or_else(|| false, |size| size <= isize::MAX as usize)
+    )]
+    #[requires(crate::ub_checks::can_write(crate::ptr::slice_from_raw_parts_mut(dst, count),))]
+    #[requires(crate::ub_checks::maybe_is_aligned_and_not_null(
+        dst as *const (),
+        crate::mem::align_of::<T>(),
+        crate::mem::size_of::<T>() == 0 || count == 0,
+    ))]
+    #[ensures(|_| crate::ub_checks::can_dereference(
+        crate::ptr::slice_from_raw_parts(
+            dst.cast::<u8>(),
+            count * crate::mem::size_of::<T>(),
+        ),
+    ))]
+    #[kani::modifies({
+        let size = crate::mem::size_of::<T>();
+        if size == 0 {
+            crate::ptr::slice_from_raw_parts(crate::ptr::null::<u8>(), 0)
+        } else {
+            crate::ptr::slice_from_raw_parts(
+                dst.cast::<u8>(),
+                count * size,
+            )
+        }
+    })]
+    unsafe fn write_bytes_wrapper<T>(dst: *mut T, val: u8, count: usize) {
+        unsafe { write_bytes(dst, val, count) }
+    }
+
+    // Harnesses for write_bytes
+    macro_rules! gen_write_bytes_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(write_bytes_wrapper::<$ty>)]
+            fn $harness() {
+                let mut dst: [MaybeUninit<$ty>; VERIFY_LEN] = kani::any();
+                let count = kani::any_where(|count: &usize| *count <= VERIFY_LEN);
+                unsafe {
+                    write_bytes_wrapper(dst.as_mut_ptr().cast::<$ty>(), kani::any::<u8>(), count)
+                };
+                kani::cover(count > 0, "write_bytes accepts a non-empty range");
+            }
+        };
+    }
+
+    gen_write_bytes_harness!(harness_write_bytes_u8, u8);
+    gen_write_bytes_harness!(harness_write_bytes_i8, i8);
+    gen_write_bytes_harness!(harness_write_bytes_i16, i16);
+    gen_write_bytes_harness!(harness_write_bytes_i32, i32);
+    gen_write_bytes_harness!(harness_write_bytes_i64, i64);
+    gen_write_bytes_harness!(harness_write_bytes_i128, i128);
+    gen_write_bytes_harness!(harness_write_bytes_isize, isize);
+    gen_write_bytes_harness!(harness_write_bytes_u16, u16);
+    gen_write_bytes_harness!(harness_write_bytes_u32, u32);
+    gen_write_bytes_harness!(harness_write_bytes_u64, u64);
+    gen_write_bytes_harness!(harness_write_bytes_u128, u128);
+    gen_write_bytes_harness!(harness_write_bytes_usize, usize);
+    gen_write_bytes_harness!(harness_write_bytes_bool, bool);
+    gen_write_bytes_harness!(harness_write_bytes_char, char);
+    gen_write_bytes_harness!(harness_write_bytes_f16, f16);
+    gen_write_bytes_harness!(harness_write_bytes_f32, f32);
+    gen_write_bytes_harness!(harness_write_bytes_f64, f64);
+    gen_write_bytes_harness!(harness_write_bytes_array, [u8; 4]);
+
+    // size_of_val
+    #[allow(dead_code)]
+    #[requires(kani::mem::checked_size_of_raw(ptr).is_some())]
+    #[ensures(|result: &usize| {
+        kani::mem::checked_size_of_raw(ptr) == Some(*result)
+    })]
+    unsafe fn size_of_val_wrapper<T: ?Sized>(ptr: *const T) -> usize {
+        unsafe { size_of_val(ptr) }
+    }
+
+    // Harnesses for size_of_val
+    // Sized T
+    macro_rules! gen_size_of_val_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_wrapper::<$ty>)]
+            fn $harness() {
+                let ptr = crate::ptr::without_provenance::<$ty>(kani::any());
+                unsafe { size_of_val_wrapper(ptr) };
+                kani::cover(true, "size_of_val accepts a Sized pointer");
+            }
+        };
+    }
+
+    gen_size_of_val_harness!(harness_size_of_val_i8, i8);
+    gen_size_of_val_harness!(harness_size_of_val_i16, i16);
+    gen_size_of_val_harness!(harness_size_of_val_i32, i32);
+    gen_size_of_val_harness!(harness_size_of_val_i64, i64);
+    gen_size_of_val_harness!(harness_size_of_val_i128, i128);
+    gen_size_of_val_harness!(harness_size_of_val_isize, isize);
+    gen_size_of_val_harness!(harness_size_of_val_u8, u8);
+    gen_size_of_val_harness!(harness_size_of_val_u16, u16);
+    gen_size_of_val_harness!(harness_size_of_val_u32, u32);
+    gen_size_of_val_harness!(harness_size_of_val_u64, u64);
+    gen_size_of_val_harness!(harness_size_of_val_u128, u128);
+    gen_size_of_val_harness!(harness_size_of_val_usize, usize);
+    gen_size_of_val_harness!(harness_size_of_val_bool, bool);
+    gen_size_of_val_harness!(harness_size_of_val_char, char);
+    gen_size_of_val_harness!(harness_size_of_val_f16, f16);
+    gen_size_of_val_harness!(harness_size_of_val_f32, f32);
+    gen_size_of_val_harness!(harness_size_of_val_f64, f64);
+    gen_size_of_val_harness!(harness_size_of_val_array, [u8; 4]);
+    gen_size_of_val_harness!(harness_size_of_val_unit, ());
+
+    // unisized T (slice)
+    macro_rules! gen_size_of_val_slice_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_wrapper::<[$ty]>)]
+            fn $harness() {
+                let value: $ty = kani::any();
+                let len = kani::any();
+                let ptr = crate::ptr::slice_from_raw_parts(&value, len);
+                unsafe { size_of_val_wrapper(ptr) };
+                kani::cover(len > 0, "size_of_val accepts non-empty slice metadata");
+            }
+        };
+    }
+
+    gen_size_of_val_slice_harness!(harness_size_of_val_slice_u8, u8);
+    gen_size_of_val_slice_harness!(harness_size_of_val_slice_u16, u16);
+    gen_size_of_val_slice_harness!(harness_size_of_val_slice_u32, u32);
+    gen_size_of_val_slice_harness!(harness_size_of_val_slice_u64, u64);
+    gen_size_of_val_slice_harness!(harness_size_of_val_slice_u128, u128);
+    gen_size_of_val_slice_harness!(harness_size_of_val_slice_unit, ());
+
+    // Trait-object T
+    macro_rules! gen_size_of_val_dyn_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(size_of_val_wrapper::<dyn core::fmt::Debug>)]
+            fn $harness() {
+                let ptr = crate::ptr::without_provenance::<$ty>(kani::any());
+                let dyn_ptr: *const dyn core::fmt::Debug = ptr;
+                unsafe { size_of_val_wrapper(dyn_ptr) };
+                kani::cover(true, "size_of_val accepts compiler-generated trait metadata");
+            }
+        };
+    }
+
+    gen_size_of_val_dyn_harness!(harness_size_of_val_dyn_u8, u8);
+    gen_size_of_val_dyn_harness!(harness_size_of_val_dyn_u16, u16);
+    gen_size_of_val_dyn_harness!(harness_size_of_val_dyn_u32, u32);
+    gen_size_of_val_dyn_harness!(harness_size_of_val_dyn_u64, u64);
+    gen_size_of_val_dyn_harness!(harness_size_of_val_dyn_u128, u128);
+    gen_size_of_val_dyn_harness!(harness_size_of_val_dyn_unit, ());
+
+    // arith_offset
+    #[allow(dead_code)]
+    #[ensures(|result: &*const T| {
+        let byte_offset = offset.wrapping_mul(crate::mem::size_of::<T>() as isize);
+        *result == dst.wrapping_byte_offset(byte_offset)
+    })]
+    #[ensures(|result: &*const T| {
+        (*result).wrapping_offset(offset.wrapping_neg()) == dst
+    })]
+    unsafe fn arith_offset_wrapper<T>(dst: *const T, offset: isize) -> *const T {
+        unsafe { arith_offset(dst, offset) }
+    }
+
+    // Harnesses for arith_offset
+    macro_rules! gen_arith_offset_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(arith_offset_wrapper::<$ty>)]
+            fn $harness() {
+                let dst = crate::ptr::without_provenance::<$ty>(kani::any());
+                unsafe { arith_offset_wrapper(dst, kani::any()) };
+            }
+        };
+    }
+
+    gen_arith_offset_harness!(harness_arith_offset_i8, i8);
+    gen_arith_offset_harness!(harness_arith_offset_i16, i16);
+    gen_arith_offset_harness!(harness_arith_offset_i32, i32);
+    gen_arith_offset_harness!(harness_arith_offset_i64, i64);
+    gen_arith_offset_harness!(harness_arith_offset_i128, i128);
+    gen_arith_offset_harness!(harness_arith_offset_isize, isize);
+    gen_arith_offset_harness!(harness_arith_offset_u8, u8);
+    gen_arith_offset_harness!(harness_arith_offset_u16, u16);
+    gen_arith_offset_harness!(harness_arith_offset_u32, u32);
+    gen_arith_offset_harness!(harness_arith_offset_u64, u64);
+    gen_arith_offset_harness!(harness_arith_offset_u128, u128);
+    gen_arith_offset_harness!(harness_arith_offset_usize, usize);
+    gen_arith_offset_harness!(harness_arith_offset_array, [u8; 4]);
+    gen_arith_offset_harness!(harness_arith_offset_unit, ());
+
+    // These volatile contracts cover only ordinary Rust-allocation-backed memory. Kani's memory
+    // predicates cannot represent the documented MMIO case: an aligned, non-trapping access to an
+    // address outside every Rust allocation. That case remains an explicit unverified residual, so
+    // these harnesses must not be presented as full coverage of the volatile intrinsics.
+    // volatile_load
+    #[allow(dead_code)]
+    #[requires(crate::ub_checks::can_dereference(src))]
+    #[ensures(|_| crate::ub_checks::can_dereference(src))]
+    unsafe fn volatile_load_wrapper<T>(src: *const T) -> T {
+        unsafe { volatile_load(src) }
+    }
+
+    // Harnesses for volatile_load
+    macro_rules! gen_volatile_load_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_load_wrapper::<$ty>)]
+            fn $harness() {
+                let value: $ty = kani::any();
+                unsafe { volatile_load_wrapper(&value) };
+                kani::cover(true, "volatile_load accepts Rust-backed memory");
+            }
+        };
+    }
+
+    gen_volatile_load_harness!(harness_volatile_load_i8, i8);
+    gen_volatile_load_harness!(harness_volatile_load_i16, i16);
+    gen_volatile_load_harness!(harness_volatile_load_i32, i32);
+    gen_volatile_load_harness!(harness_volatile_load_i64, i64);
+    gen_volatile_load_harness!(harness_volatile_load_i128, i128);
+    gen_volatile_load_harness!(harness_volatile_load_isize, isize);
+    gen_volatile_load_harness!(harness_volatile_load_u8, u8);
+    gen_volatile_load_harness!(harness_volatile_load_u16, u16);
+    gen_volatile_load_harness!(harness_volatile_load_u32, u32);
+    gen_volatile_load_harness!(harness_volatile_load_u64, u64);
+    gen_volatile_load_harness!(harness_volatile_load_u128, u128);
+    gen_volatile_load_harness!(harness_volatile_load_usize, usize);
+    gen_volatile_load_harness!(harness_volatile_load_bool, bool);
+    gen_volatile_load_harness!(harness_volatile_load_char, char);
+    gen_volatile_load_harness!(harness_volatile_load_f16, f16);
+    gen_volatile_load_harness!(harness_volatile_load_f32, f32);
+    gen_volatile_load_harness!(harness_volatile_load_f64, f64);
+    gen_volatile_load_harness!(harness_volatile_load_array, [u8; 4]);
+    // FIXME: Re-enable once Kani's `volatile_load` lowering treats ZST loads as
+    // no-ops instead of dereferencing a pointer with no backing memory object.
+    // gen_volatile_load_harness!(harness_volatile_load_unit, ());
+
+    // volatile_store has the same Rust-allocation-only limitation described above.
+    #[allow(dead_code)]
+    #[requires(crate::ub_checks::can_write(dst))]
+    #[ensures(|_| crate::ub_checks::can_dereference(dst as *const T))]
+    #[kani::modifies(dst)]
+    unsafe fn volatile_store_wrapper<T>(dst: *mut T, val: T) {
+        unsafe { volatile_store(dst, val) }
+    }
+
+    // Harnesses for volatile_store
+    macro_rules! gen_volatile_store_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(volatile_store_wrapper::<$ty>)]
+            fn $harness() {
+                let mut dst = MaybeUninit::<$ty>::uninit();
+                unsafe { volatile_store_wrapper(dst.as_mut_ptr(), kani::any()) };
+                kani::cover(true, "volatile_store accepts writable Rust-backed memory");
+            }
+        };
+    }
+
+    gen_volatile_store_harness!(harness_volatile_store_i8, i8);
+    gen_volatile_store_harness!(harness_volatile_store_i16, i16);
+    gen_volatile_store_harness!(harness_volatile_store_i32, i32);
+    gen_volatile_store_harness!(harness_volatile_store_i64, i64);
+    gen_volatile_store_harness!(harness_volatile_store_i128, i128);
+    gen_volatile_store_harness!(harness_volatile_store_isize, isize);
+    gen_volatile_store_harness!(harness_volatile_store_u8, u8);
+    gen_volatile_store_harness!(harness_volatile_store_u16, u16);
+    gen_volatile_store_harness!(harness_volatile_store_u32, u32);
+    gen_volatile_store_harness!(harness_volatile_store_u64, u64);
+    gen_volatile_store_harness!(harness_volatile_store_u128, u128);
+    gen_volatile_store_harness!(harness_volatile_store_usize, usize);
+    gen_volatile_store_harness!(harness_volatile_store_bool, bool);
+    gen_volatile_store_harness!(harness_volatile_store_char, char);
+    gen_volatile_store_harness!(harness_volatile_store_f16, f16);
+    gen_volatile_store_harness!(harness_volatile_store_f32, f32);
+    gen_volatile_store_harness!(harness_volatile_store_f64, f64);
+    gen_volatile_store_harness!(harness_volatile_store_array, [u8; 4]);
+    gen_volatile_store_harness!(harness_volatile_store_unit, ());
+
+    // compare_bytes
+    #[allow(dead_code)]
+    #[requires(crate::ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(left, bytes),))]
+    #[requires(crate::ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(right, bytes),))]
+    unsafe fn compare_bytes_wrapper(left: *const u8, right: *const u8, bytes: usize) -> i32 {
+        unsafe { compare_bytes(left, right, bytes) }
+    }
+
+    // Harness for compare_bytes
+    #[kani::proof_for_contract(compare_bytes_wrapper)]
+    #[kani::unwind(101)] // VERIFY_LEN + 1
+    fn harness_compare_bytes() {
+        let left: [u8; VERIFY_LEN] = kani::any();
+        let right: [u8; VERIFY_LEN] = kani::any();
+        let bytes = kani::any();
+        unsafe { compare_bytes_wrapper(left.as_ptr(), right.as_ptr(), bytes) };
+        kani::cover(bytes > 0, "compare_bytes accepts a non-empty readable range");
+    }
+
+    // align_of_val
+    #[allow(dead_code)]
+    #[requires(kani::mem::checked_size_of_raw(ptr).is_some())]
+    #[requires(kani::mem::checked_align_of_raw(ptr).is_some())]
+    #[ensures(|result: &usize| {
+        kani::mem::checked_align_of_raw(ptr) == Some(*result)
+    })]
+    unsafe fn align_of_val_wrapper<T: ?Sized>(ptr: *const T) -> usize {
+        unsafe { align_of_val(ptr) }
+    }
+
+    // Harnesses for align_of_val
+    // Sized T
+    macro_rules! gen_align_of_val_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_wrapper::<$ty>)]
+            fn $harness() {
+                let ptr = crate::ptr::without_provenance::<$ty>(kani::any());
+                unsafe { align_of_val_wrapper(ptr) };
+                kani::cover(true, "align_of_val accepts a Sized pointer");
+            }
+        };
+    }
+
+    gen_align_of_val_harness!(harness_align_of_val_i8, i8);
+    gen_align_of_val_harness!(harness_align_of_val_i16, i16);
+    gen_align_of_val_harness!(harness_align_of_val_i32, i32);
+    gen_align_of_val_harness!(harness_align_of_val_i64, i64);
+    gen_align_of_val_harness!(harness_align_of_val_i128, i128);
+    gen_align_of_val_harness!(harness_align_of_val_isize, isize);
+    gen_align_of_val_harness!(harness_align_of_val_u8, u8);
+    gen_align_of_val_harness!(harness_align_of_val_u16, u16);
+    gen_align_of_val_harness!(harness_align_of_val_u32, u32);
+    gen_align_of_val_harness!(harness_align_of_val_u64, u64);
+    gen_align_of_val_harness!(harness_align_of_val_u128, u128);
+    gen_align_of_val_harness!(harness_align_of_val_usize, usize);
+    gen_align_of_val_harness!(harness_align_of_val_bool, bool);
+    gen_align_of_val_harness!(harness_align_of_val_char, char);
+    gen_align_of_val_harness!(harness_align_of_val_f16, f16);
+    gen_align_of_val_harness!(harness_align_of_val_f32, f32);
+    gen_align_of_val_harness!(harness_align_of_val_f64, f64);
+    gen_align_of_val_harness!(harness_align_of_val_array, [u8; 4]);
+    gen_align_of_val_harness!(harness_align_of_val_unit, ());
+
+    // Unsized T (slice)
+    macro_rules! gen_align_of_val_slice_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_wrapper::<[$ty]>)]
+            fn $harness() {
+                let value: $ty = kani::any();
+                let len = kani::any();
+                let ptr = crate::ptr::slice_from_raw_parts(&value, len);
+                unsafe { align_of_val_wrapper(ptr) };
+                kani::cover(len > 0, "align_of_val accepts non-empty slice metadata");
+            }
+        };
+    }
+
+    gen_align_of_val_slice_harness!(harness_align_of_val_slice_u8, u8);
+    gen_align_of_val_slice_harness!(harness_align_of_val_slice_u16, u16);
+    gen_align_of_val_slice_harness!(harness_align_of_val_slice_u32, u32);
+    gen_align_of_val_slice_harness!(harness_align_of_val_slice_u64, u64);
+    gen_align_of_val_slice_harness!(harness_align_of_val_slice_u128, u128);
+    gen_align_of_val_slice_harness!(harness_align_of_val_slice_unit, ());
+
+    // Trait-object T
+    macro_rules! gen_align_of_val_dyn_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_wrapper::<dyn core::fmt::Debug>)]
+            fn $harness() {
+                let ptr = crate::ptr::without_provenance::<$ty>(kani::any());
+                let dyn_ptr: *const dyn core::fmt::Debug = ptr;
+                unsafe { align_of_val_wrapper(dyn_ptr) };
+                kani::cover(true, "align_of_val accepts compiler-generated trait metadata");
+            }
+        };
+    }
+
+    gen_align_of_val_dyn_harness!(harness_align_of_val_dyn_u8, u8);
+    gen_align_of_val_dyn_harness!(harness_align_of_val_dyn_u16, u16);
+    gen_align_of_val_dyn_harness!(harness_align_of_val_dyn_u32, u32);
+    gen_align_of_val_dyn_harness!(harness_align_of_val_dyn_u64, u64);
+    gen_align_of_val_dyn_harness!(harness_align_of_val_dyn_u128, u128);
+    gen_align_of_val_dyn_harness!(harness_align_of_val_dyn_unit, ());
+
+    // ptr_offset_from
+    // Keep the documented pointer-distance conditions in one predicate so the contract and the
+    // negative-path audit below cannot silently drift apart. Integer addresses are used only to
+    // check representability and element divisibility; the intrinsic is called only after the
+    // allocation/provenance condition has been established by the contract.
+    fn ptr_offset_from_precondition<T>(ptr: *const T, base: *const T) -> bool {
+        let size = crate::mem::size_of::<T>();
+        if size == 0 || size > isize::MAX as usize {
+            return false;
+        }
+        let distance = ptr.addr().abs_diff(base.addr());
+        distance <= isize::MAX as usize
+            && distance % size == 0
+            && (ptr.addr() == base.addr() || crate::ub_checks::same_allocation(ptr, base))
+    }
+
+    fn ptr_offset_from_unsigned_precondition<T>(ptr: *const T, base: *const T) -> bool {
+        let size = crate::mem::size_of::<T>();
+        if size == 0 {
+            return false;
+        }
+        let distance = ptr.addr().saturating_sub(base.addr());
+        ptr.addr() >= base.addr()
+            && distance % size == 0
+            && (ptr.addr() == base.addr() || crate::ub_checks::same_allocation(ptr, base))
+    }
+
+    #[allow(dead_code)]
+    #[requires(ptr_offset_from_precondition(ptr, base))]
+    #[ensures(|result: &isize| {
+        let distance = ptr.addr().abs_diff(base.addr()) / crate::mem::size_of::<T>();
+        *result
+            == if ptr.addr() >= base.addr() { distance as isize } else { -(distance as isize) }
+    })]
+    unsafe fn ptr_offset_from_wrapper<T>(ptr: *const T, base: *const T) -> isize {
+        unsafe { ptr_offset_from(ptr, base) }
+    }
+
+    // Harnesses for ptr_offset_from
+    macro_rules! gen_ptr_offset_from_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(ptr_offset_from_wrapper::<$ty>)]
+            fn $harness() {
+                let values_a: [$ty; VERIFY_LEN] = kani::any();
+                let values_b: [$ty; VERIFY_LEN] = kani::any();
+                let ptr_index = kani::any_where(|index: &usize| *index <= VERIFY_LEN);
+                let base_index = kani::any_where(|index: &usize| *index <= VERIFY_LEN);
+                let ptr = if kani::any() {
+                    unsafe { values_a.as_ptr().add(ptr_index) }
+                } else {
+                    unsafe { values_b.as_ptr().add(ptr_index) }
+                };
+                let base = if kani::any() {
+                    unsafe { values_a.as_ptr().add(base_index) }
+                } else {
+                    unsafe { values_b.as_ptr().add(base_index) }
+                };
+                unsafe { ptr_offset_from_wrapper(ptr, base) };
+                kani::cover(ptr.addr() == base.addr(), "ptr_offset_from accepts zero distance");
+                kani::cover(ptr.addr() > base.addr(), "ptr_offset_from accepts forward distance");
+                kani::cover(ptr.addr() < base.addr(), "ptr_offset_from accepts backward distance");
+            }
+        };
+    }
+
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_i8, i8);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_i16, i16);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_i32, i32);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_i64, i64);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_i128, i128);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_isize, isize);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_u8, u8);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_u16, u16);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_u32, u32);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_u64, u64);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_u128, u128);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_usize, usize);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_bool, bool);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_char, char);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_f16, f16);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_f32, f32);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_f64, f64);
+    gen_ptr_offset_from_harness!(harness_ptr_offset_from_array, [u8; 4]);
+
+    // ZST is not an undefined call: the documented behavior is a panic.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_ptr_offset_from_unit_panics() {
+        let value = ();
+        unsafe { ptr_offset_from(&value, &value) };
+    }
+
+    // ptr_offset_from_unsigned
+    #[allow(dead_code)]
+    #[requires(ptr_offset_from_unsigned_precondition(ptr, base))]
+    #[ensures(|result: &usize| {
+        *result == (ptr.addr() - base.addr()) / crate::mem::size_of::<T>()
+    })]
+    unsafe fn ptr_offset_from_unsigned_wrapper<T>(ptr: *const T, base: *const T) -> usize {
+        unsafe { ptr_offset_from_unsigned(ptr, base) }
+    }
+
+    // Harnesses for ptr_offset_from_unsigned
+    macro_rules! gen_ptr_offset_from_unsigned_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(ptr_offset_from_unsigned_wrapper::<$ty>)]
+            fn $harness() {
+                let values_a: [$ty; VERIFY_LEN] = kani::any();
+                let values_b: [$ty; VERIFY_LEN] = kani::any();
+                let base_index = kani::any_where(|index: &usize| *index <= VERIFY_LEN);
+                let ptr_index = kani::any_where(|index: &usize| *index <= VERIFY_LEN);
+                let ptr = if kani::any() {
+                    unsafe { values_a.as_ptr().add(ptr_index) }
+                } else {
+                    unsafe { values_b.as_ptr().add(ptr_index) }
+                };
+                let base = if kani::any() {
+                    unsafe { values_a.as_ptr().add(base_index) }
+                } else {
+                    unsafe { values_b.as_ptr().add(base_index) }
+                };
+                unsafe { ptr_offset_from_unsigned_wrapper(ptr, base) };
+                kani::cover(
+                    ptr.addr() == base.addr(),
+                    "ptr_offset_from_unsigned accepts zero distance",
+                );
+                kani::cover(
+                    ptr.addr() > base.addr(),
+                    "ptr_offset_from_unsigned accepts forward distance",
+                );
+            }
+        };
+    }
+
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_i8, i8);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_i16, i16);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_i32, i32);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_i64, i64);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_i128, i128);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_isize, isize);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_u8, u8);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_u16, u16);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_u32, u32);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_u64, u64);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_u128, u128);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_usize, usize);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_bool, bool);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_char, char);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_f16, f16);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_f32, f32);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_f64, f64);
+    gen_ptr_offset_from_unsigned_harness!(harness_ptr_offset_from_unsigned_array, [u8; 4]);
+
+    // ZST is not an undefined call: the documented behavior is a panic.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_ptr_offset_from_unsigned_unit_panics() {
+        let value = ();
+        unsafe { ptr_offset_from_unsigned(&value, &value) };
+    }
+
+    // Predicate-only audit: invalid candidates must never be passed to the unsafe intrinsic.
+    #[kani::proof]
+    fn harness_ptr_offset_predicate_rejects_cross_allocation() {
+        let a = [0u8; 2];
+        let b = [0u8; 2];
+        assert!(!ptr_offset_from_precondition(a.as_ptr(), b.as_ptr()));
+        assert!(!ptr_offset_from_unsigned_precondition(a.as_ptr(), b.as_ptr()));
+    }
+
+    #[kani::proof]
+    fn harness_ptr_offset_predicate_rejects_non_element_distance() {
+        let bytes = [0u8; 8];
+        let base = bytes.as_ptr() as *const u32;
+        let ptr = unsafe { bytes.as_ptr().add(1) as *const u32 };
+        assert!(!ptr_offset_from_precondition(ptr, base));
+        assert!(!ptr_offset_from_unsigned_precondition(ptr, base));
+    }
+
+    #[kani::proof]
+    fn harness_ptr_offset_predicate_rejects_unsigned_reverse() {
+        let values = [0u32; 2];
+        let ptr = values.as_ptr();
+        let base = unsafe { values.as_ptr().add(1) };
+        assert!(ptr_offset_from_precondition(ptr, base));
+        assert!(!ptr_offset_from_unsigned_precondition(ptr, base));
+    }
+
+    #[kani::proof]
+    fn harness_ptr_offset_predicate_accepts_valid_distance() {
+        let values = [0u32; 2];
+        let base = values.as_ptr();
+        let ptr = unsafe { base.add(1) };
+        assert!(ptr_offset_from_precondition(ptr, base));
+        assert!(ptr_offset_from_unsigned_precondition(ptr, base));
+    }
+
+    // read_via_copy
+    #[allow(dead_code)]
+    #[requires(crate::ub_checks::can_dereference(ptr))]
+    unsafe fn read_via_copy_wrapper<T>(ptr: *const T) -> T {
+        unsafe { read_via_copy(ptr) }
+    }
+
+    // Harnesses for read_via_copy
+    macro_rules! gen_read_via_copy_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(read_via_copy_wrapper::<$ty>)]
+            fn $harness() {
+                let value: $ty = kani::any();
+                unsafe { read_via_copy_wrapper(&value) };
+                kani::cover(true, "read_via_copy accepts a readable pointer");
+            }
+        };
+    }
+
+    gen_read_via_copy_harness!(harness_read_via_copy_i8, i8);
+    gen_read_via_copy_harness!(harness_read_via_copy_i16, i16);
+    gen_read_via_copy_harness!(harness_read_via_copy_i32, i32);
+    gen_read_via_copy_harness!(harness_read_via_copy_i64, i64);
+    gen_read_via_copy_harness!(harness_read_via_copy_i128, i128);
+    gen_read_via_copy_harness!(harness_read_via_copy_isize, isize);
+    gen_read_via_copy_harness!(harness_read_via_copy_u8, u8);
+    gen_read_via_copy_harness!(harness_read_via_copy_u16, u16);
+    gen_read_via_copy_harness!(harness_read_via_copy_u32, u32);
+    gen_read_via_copy_harness!(harness_read_via_copy_u64, u64);
+    gen_read_via_copy_harness!(harness_read_via_copy_u128, u128);
+    gen_read_via_copy_harness!(harness_read_via_copy_usize, usize);
+    gen_read_via_copy_harness!(harness_read_via_copy_bool, bool);
+    gen_read_via_copy_harness!(harness_read_via_copy_char, char);
+    gen_read_via_copy_harness!(harness_read_via_copy_f16, f16);
+    gen_read_via_copy_harness!(harness_read_via_copy_f32, f32);
+    gen_read_via_copy_harness!(harness_read_via_copy_f64, f64);
+    gen_read_via_copy_harness!(harness_read_via_copy_array, [u8; 4]);
+    gen_read_via_copy_harness!(harness_read_via_copy_unit, ());
+
+    // write_via_move
+    #[allow(dead_code)]
+    #[requires(crate::ub_checks::can_write(ptr))]
+    #[kani::modifies(ptr)]
+    unsafe fn write_via_move_wrapper<T>(ptr: *mut T, value: T) {
+        unsafe { write_via_move(ptr, value) }
+    }
+
+    macro_rules! gen_write_via_move_harness {
+        ($harness:ident, $ty:ty) => {
+            #[kani::proof_for_contract(write_via_move_wrapper::<$ty>)]
+            fn $harness() {
+                let mut dst = MaybeUninit::<$ty>::uninit();
+                let value: $ty = kani::any();
+                unsafe { write_via_move_wrapper(dst.as_mut_ptr(), value) };
+                kani::cover(true, "write_via_move accepts a writable pointer");
+            }
+        };
+    }
+
+    gen_write_via_move_harness!(harness_write_via_move_i8, i8);
+    gen_write_via_move_harness!(harness_write_via_move_i16, i16);
+    gen_write_via_move_harness!(harness_write_via_move_i32, i32);
+    gen_write_via_move_harness!(harness_write_via_move_i64, i64);
+    gen_write_via_move_harness!(harness_write_via_move_i128, i128);
+    gen_write_via_move_harness!(harness_write_via_move_isize, isize);
+    gen_write_via_move_harness!(harness_write_via_move_u8, u8);
+    gen_write_via_move_harness!(harness_write_via_move_u16, u16);
+    gen_write_via_move_harness!(harness_write_via_move_u32, u32);
+    gen_write_via_move_harness!(harness_write_via_move_u64, u64);
+    gen_write_via_move_harness!(harness_write_via_move_u128, u128);
+    gen_write_via_move_harness!(harness_write_via_move_usize, usize);
+    gen_write_via_move_harness!(harness_write_via_move_bool, bool);
+    gen_write_via_move_harness!(harness_write_via_move_char, char);
+    gen_write_via_move_harness!(harness_write_via_move_f16, f16);
+    gen_write_via_move_harness!(harness_write_via_move_f32, f32);
+    gen_write_via_move_harness!(harness_write_via_move_f64, f64);
+    gen_write_via_move_harness!(harness_write_via_move_array, [u8; 4]);
+    gen_write_via_move_harness!(harness_write_via_move_unit, ());
 }

@@ -5611,4 +5611,35 @@ mod verify {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
     }
+
+    // Harnesses for `copy_from_slice` usage
+    macro_rules! generate_copy_from_slice_usage_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                let mut dst_arr: [$ty; 100] = kani::any();
+                let src_arr: [$ty; 100] = kani::any();
+                let len: usize = kani::any_where(|len: &usize| *len <= 100);
+                let dst = &mut dst_arr[..len];
+                let src = &src_arr[..len];
+                dst.copy_from_slice(src);
+                kani::cover(len > 0, "copy_from_slice accepts a non-empty slice");
+            }
+        };
+    }
+
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_i8, i8);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_i16, i16);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_i32, i32);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_i64, i64);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_i128, i128);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_u8, u8);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_u16, u16);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_u32, u32);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_u64, u64);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_u128, u128);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_bool, bool);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_char, char);
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_unit, ());
+    generate_copy_from_slice_usage_harness!(harness_copy_from_slice_usage_array, [u8; 4]);
 }

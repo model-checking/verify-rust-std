@@ -1614,3 +1614,47 @@ impl<T: TrivialClone> SpecFill<T> for [MaybeUninit<T>] {
         self.fill_with(|| MaybeUninit::new(unsafe { ptr::read(&value) }));
     }
 }
+
+#[cfg(kani)]
+mod verify {
+    use super::MaybeUninit;
+    use crate::kani;
+
+    // Keep this family to padding-free types: returning `MaybeUninit<T>` is not specified to
+    // preserve the contents of padding bytes.
+    macro_rules! gen_zeroed_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value = MaybeUninit::<$ty>::zeroed();
+                let bytes = value.as_bytes();
+                if !bytes.is_empty() {
+                    let index = kani::any_where(|index: &usize| *index < bytes.len());
+                    // SAFETY: `MaybeUninit::zeroed` initializes every backing byte. Reading the
+                    // representation as `u8` does not require the all-zero pattern to be valid for
+                    // `$ty`, so this also covers types such as references without constructing one.
+                    let byte = unsafe { *bytes[index].assume_init_ref() };
+                    assert!(byte == 0, "zeroed must initialize every observable byte to zero");
+                }
+            }
+        };
+    }
+
+    gen_zeroed_harness!(harness_zeroed_i8, i8);
+    gen_zeroed_harness!(harness_zeroed_i16, i16);
+    gen_zeroed_harness!(harness_zeroed_i32, i32);
+    gen_zeroed_harness!(harness_zeroed_i64, i64);
+    gen_zeroed_harness!(harness_zeroed_i128, i128);
+    gen_zeroed_harness!(harness_zeroed_isize, isize);
+    gen_zeroed_harness!(harness_zeroed_u8, u8);
+    gen_zeroed_harness!(harness_zeroed_u16, u16);
+    gen_zeroed_harness!(harness_zeroed_u32, u32);
+    gen_zeroed_harness!(harness_zeroed_u64, u64);
+    gen_zeroed_harness!(harness_zeroed_u128, u128);
+    gen_zeroed_harness!(harness_zeroed_usize, usize);
+    gen_zeroed_harness!(harness_zeroed_array, [u8; 4]);
+    gen_zeroed_harness!(harness_zeroed_bool, bool);
+    gen_zeroed_harness!(harness_zeroed_char, char);
+    // `MaybeUninit` may contain an invalid `T` representation; do not assume it is initialized.
+    gen_zeroed_harness!(harness_zeroed_reference, &'static u8);
+}

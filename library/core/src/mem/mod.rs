@@ -557,6 +557,9 @@ pub const fn align_of_val<T: ?Sized>(val: &T) -> usize {
 #[inline]
 #[must_use]
 #[unstable(feature = "layout_for_ptr", issue = "69835")]
+#[safety::requires(kani::mem::checked_size_of_raw(val).is_some())]
+#[safety::requires(kani::mem::checked_align_of_raw(val).is_some())]
+#[safety::ensures(|result: &usize| kani::mem::checked_align_of_raw(val) == Some(*result))]
 pub const unsafe fn align_of_val_raw<T: ?Sized>(val: *const T) -> usize {
     // SAFETY: the caller must provide a valid raw pointer
     unsafe { intrinsics::align_of_val(val) }
@@ -672,6 +675,13 @@ pub const fn needs_drop<T: ?Sized>() -> bool {
 #[rustc_diagnostic_item = "mem_zeroed"]
 #[track_caller]
 #[rustc_const_stable(feature = "const_mem_zeroed", since = "1.75.0")]
+// A zeroed value is only valid when the all-zero bit pattern satisfies `T`'s validity invariants.
+// Kani has no standalone `is_zero_valid::<T>` predicate, so the contract checks a zeroed
+// `MaybeUninit<T>` through `can_dereference`: this observes initialization and validity without
+// constructing an invalid `T`.
+#[safety::requires(crate::ub_checks::can_dereference(
+    MaybeUninit::<T>::zeroed().as_ptr()
+))]
 pub const unsafe fn zeroed<T>() -> T {
     // SAFETY: the caller must guarantee that an all-zero value is valid for `T`.
     unsafe {
@@ -1514,12 +1524,40 @@ mod verify {
         }
     }
 
-    #[kani::proof_for_contract(swap)]
-    pub fn check_swap_primitive() {
-        let mut x: u8 = kani::any();
-        let mut y: u8 = kani::any();
-        swap(&mut x, &mut y)
+    // Harnesses for swap
+    macro_rules! gen_swap_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut x: $ty = kani::any();
+                let mut y: $ty = kani::any();
+                let old_x = x;
+                let old_y = y;
+
+                swap(&mut x, &mut y);
+
+                assert!(x == old_y);
+                assert!(y == old_x);
+            }
+        };
     }
+
+    gen_swap_harness!(harness_swap_u8, u8);
+    gen_swap_harness!(harness_swap_u16, u16);
+    gen_swap_harness!(harness_swap_u32, u32);
+    gen_swap_harness!(harness_swap_u64, u64);
+    gen_swap_harness!(harness_swap_u128, u128);
+    gen_swap_harness!(harness_swap_usize, usize);
+    gen_swap_harness!(harness_swap_i8, i8);
+    gen_swap_harness!(harness_swap_i16, i16);
+    gen_swap_harness!(harness_swap_i32, i32);
+    gen_swap_harness!(harness_swap_i64, i64);
+    gen_swap_harness!(harness_swap_i128, i128);
+    gen_swap_harness!(harness_swap_isize, isize);
+    gen_swap_harness!(harness_swap_array, [u8; 4]);
+    gen_swap_harness!(harness_swap_bool, bool);
+    gen_swap_harness!(harness_swap_char, char);
+    gen_swap_harness!(harness_swap_unit, ());
 
     #[kani::proof_for_contract(swap)]
     pub fn check_swap_adt_no_drop() {
@@ -1529,4 +1567,139 @@ mod verify {
         forget(x);
         forget(y);
     }
+
+    // Harnesses for align_of_val
+    macro_rules! gen_align_of_val_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                assert!(align_of_val(&value) == align_of::<$ty>());
+            }
+        };
+    }
+
+    macro_rules! gen_align_of_val_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let values: [$ty; 100] = kani::any();
+                let slice: &[$ty] = &values;
+                assert!(align_of_val(slice) == align_of::<$ty>());
+            }
+        };
+    }
+
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_u8, u8);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_u16, u16);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_u32, u32);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_u64, u64);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_u128, u128);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_usize, usize);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_i8, i8);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_i16, i16);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_i32, i32);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_i64, i64);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_i128, i128);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_isize, isize);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_bool, bool);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_char, char);
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_unit, ());
+    gen_align_of_val_sized_harness!(harness_align_of_val_usage_array, [u8; 4]);
+
+    gen_align_of_val_slice_harness!(harness_align_of_val_usage_slice_u8, u8);
+    gen_align_of_val_slice_harness!(harness_align_of_val_usage_slice_u16, u16);
+    gen_align_of_val_slice_harness!(harness_align_of_val_usage_slice_u32, u32);
+    gen_align_of_val_slice_harness!(harness_align_of_val_usage_slice_u64, u64);
+    gen_align_of_val_slice_harness!(harness_align_of_val_usage_slice_u128, u128);
+
+    // Harnesses for the `align_of_val_raw`
+    macro_rules! gen_align_of_val_raw_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $name() {
+                let ptr = crate::ptr::without_provenance::<$ty>(kani::any());
+                unsafe { align_of_val_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_align_of_val_raw_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $name() {
+                const N: usize = 4;
+                let values: [$ty; N] = kani::any();
+                let len = kani::any::<usize>() % (N + 1);
+                let ptr = crate::ptr::slice_from_raw_parts(values.as_ptr(), len);
+                unsafe { align_of_val_raw(ptr) };
+            }
+        };
+    }
+
+    macro_rules! gen_align_of_val_raw_dyn_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(align_of_val_raw)]
+            fn $name() {
+                let value: $ty = kani::any();
+                let ptr: *const dyn crate::fmt::Debug = &value;
+                unsafe { align_of_val_raw(ptr) };
+            }
+        };
+    }
+
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i8, i8);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i16, i16);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i32, i32);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i64, i64);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_i128, i128);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_isize, isize);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u8, u8);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u16, u16);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u32, u32);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u64, u64);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_u128, u128);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_usize, usize);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_bool, bool);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_char, char);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_array, [u8; 4]);
+    gen_align_of_val_raw_sized_harness!(harness_align_of_val_raw_unit, ());
+
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u8, u8);
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u16, u16);
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u32, u32);
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u64, u64);
+    gen_align_of_val_raw_slice_harness!(harness_align_of_val_raw_slice_u128, u128);
+
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u8, u8);
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u16, u16);
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u32, u32);
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u64, u64);
+    gen_align_of_val_raw_dyn_harness!(harness_align_of_val_raw_dyn_u128, u128);
+
+    // Harnesses for `zeroed`
+    macro_rules! gen_mem_zeroed_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(zeroed::<$ty>)]
+            fn $name() {
+                unsafe { zeroed::<$ty>() };
+            }
+        };
+    }
+
+    gen_mem_zeroed_harness!(harness_mem_zeroed_i8, i8);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_i16, i16);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_i32, i32);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_i64, i64);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_i128, i128);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_isize, isize);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_u8, u8);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_u16, u16);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_u32, u32);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_u64, u64);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_u128, u128);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_usize, usize);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_bool, bool);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_char, char);
+    gen_mem_zeroed_harness!(harness_mem_zeroed_array, [u8; 4]);
 }
