@@ -1879,5 +1879,2386 @@ fn move_to_slice<T>(src: &mut [MaybeUninit<T>], dst: &mut [MaybeUninit<T>]) {
     }
 }
 
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    //! Bounded Kani PROBEs on a subset of `btree::node`'s internal helpers: either a
+    //! symbolic-trip-count relink loop (`correct_childrens_parent_links` /
+    //! `correct_all_childrens_parent_links`, and internal `insert_fit` via its ranged relink), or
+    //! a symbolic-length `ptr::copy`/`move_to_slice` bulk shift with no source-level loop of its
+    //! own (leaf `insert_fit`, leaf `Handle::remove`, and leaf-height `Handle::move_suffix`).
+    //!
+    //! **Honest scope: these are PROBEs, not CONTRACTs.** Each harness drives the real, unmodified
+    //! function over a bounded fixture (`K = V = i32`, node lengths restricted to a small
+    //! representative set such as `{0, 1, CAPACITY}` or `{0, 1, CAPACITY - 1}`) whose lengths,
+    //! indices, and ranges are symbolic but whose populated key/value content is deterministic and
+    //! position-derived (`(i, 1000 + i)`), not itself symbolic, so a misplaced write after a shift
+    //! is observable. Each `#[kani::unwind(n)]` is set above the fixture's own maximum explicit
+    //! loop trip count, not pinned equal to it. None of these harnesses claims to discharge
+    //! Challenge #4's success criteria in general (arbitrary length, arbitrary height, or the full
+    //! recursive insert/remove/balancing call graph) — they are complementary, bounded
+    //! safety-and-functional-correctness probes on the specific helpers listed above. Replay-greens
+    //! are defeated per harness: parent links are perturbed to a sentinel before the relink
+    //! harnesses run; the content harnesses use position-derived values and out-of-range sentinel
+    //! inserts so any misplaced write is observable.
+    //!
+    //! Construction recipe: `NodeRef::new_leaf(Global)` (Owned, empty) then
+    //! `root.borrow_mut().push(k, v)` (safe, up to `CAPACITY` times) for leaves;
+    //! `NodeRef::new_internal(child, Global)` plus `internal.borrow_mut().push(k, v, child)` for
+    //! internal nodes. `Handle::new_kv` / `new_edge` are `pub(super) unsafe` and used directly
+    //! in-crate with a chosen valid idx once a node is populated. Content and parent-link
+    //! post-state reads go through already-verified-safe API paths (`into_kv`, `descend`/
+    //! `ascend`); length checks use `NodeRef::len()`, the established-safe idiom for this
+    //! readback, not a raw field read on a freshly-written node.
+
+    use core::kani;
+
+    use super::*;
+    use crate::alloc::Global;
+
+    const CAP: usize = CAPACITY; // 11 (B=6)
+
+    /// Builds an Owned leaf `NodeRef` with `len` (0..=CAP) (k, v) = (i32, i32) pairs pushed via the
+    /// safe `push` recipe; when `len > 0` the pushed keys/values are unconstrained symbolic i32
+    /// (no ordering invariant is relied upon by any fn under test here). In THIS module, every
+    /// call site passes `len == 0` — it is used only to build empty height-0 leaf children for
+    /// `symbolic_internal`, so the symbolic-content code path (the `for` loop body) never actually
+    /// executes with nonzero content anywhere in this harness set; the harnesses that need
+    /// populated leaf content build it inline with deterministic, position-derived values instead.
+    fn symbolic_leaf(len: usize) -> NodeRef<marker::Owned, i32, i32, marker::Leaf> {
+        let mut root: NodeRef<marker::Owned, i32, i32, marker::Leaf> = NodeRef::new_leaf(Global);
+        for _ in 0..len {
+            let k: i32 = kani::any();
+            let v: i32 = kani::any();
+            root.borrow_mut().push(k, v);
+        }
+        root
+    }
+
+    /// Builds an Owned internal `NodeRef` with `len` (0..=CAP) symbolic i32 keys/values and
+    /// `len + 1` height-0 empty-leaf children, correctly parent-linked by construction (each safe
+    /// `push` call maintains its own child's parent link).
+    fn symbolic_internal(len: usize) -> NodeRef<marker::Owned, i32, i32, marker::Internal> {
+        let first_child = symbolic_leaf(0);
+        let mut internal: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(first_child.forget_type(), Global);
+        for i in 0..len {
+            let child = symbolic_leaf(0);
+            internal.borrow_mut().push(i as i32, 1000 + i as i32, child.forget_type());
+        }
+        internal
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: len in {0, 1, CAPACITY} (1/2/12 edges); every child is an empty (len-0)
+    // height-0 leaf; all parent links are PERTURBED to a garbage-but-valid `NonNull` before the
+    // call, so the post-call check is a genuine fix, not a replay of already-correct state; only
+    // ONE symbolic child index (`check_i`) is read back per run. Proves: after
+    // `correct_all_childrens_parent_links()`, the checked child's (parent ptr, parent_idx)
+    // round-trips correctly via `ascend()`. Does NOT prove the property for ALL children
+    // simultaneously in one run (no all-quantified assertion) — the covers below establish that
+    // different runs reach check_i == 0, check_i > 0 (multi-iteration witness), and check_i ==
+    // last edge of a maximal node.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_correct_all_childrens_parent_links_no_ub() {
+        let len: usize = kani::any();
+        kani::assume(len == 0 || len == 1 || len == CAP);
+
+        let mut internal = symbolic_internal(len);
+        let internal_addr = internal.reborrow().node.as_ptr() as usize;
+
+        // Perturb every child's parent link to a garbage-but-valid (never dereferenced)
+        // NonNull, so the fix below is genuine, not a no-op on already-correct state.
+        let garbage = NonNull::<InternalNode<i32, i32>>::dangling();
+        for i in 0..=len {
+            let mut_ref = internal.borrow_mut();
+            let edge = unsafe { Handle::new_edge(mut_ref, i) };
+            let mut child = edge.descend();
+            child.set_parent_link(garbage, 9999);
+        }
+
+        let check_i: usize = kani::any();
+        kani::assume(check_i <= len);
+
+        internal.borrow_mut().correct_all_childrens_parent_links();
+
+        let mut_ref = internal.borrow_mut();
+        let edge = unsafe { Handle::new_edge(mut_ref, check_i) };
+        let descended = edge.descend();
+        let ascended = descended.ascend();
+        assert!(
+            ascended.is_ok(),
+            "correct_all_childrens_parent_links: child at check_i lost its parent link"
+        );
+        let parent_edge = ascended.ok().unwrap();
+        assert_eq!(
+            parent_edge.idx(),
+            check_i,
+            "correct_all_childrens_parent_links: wrong parent_idx"
+        );
+        let parent_addr = NodeRef::as_internal_ptr(&parent_edge.into_node()) as usize;
+        assert_eq!(
+            parent_addr, internal_addr,
+            "correct_all_childrens_parent_links: wrong parent pointer"
+        );
+
+        kani::cover(check_i == 0, "checked edge 0 after the fix");
+        kani::cover(
+            check_i > 0 && len > 0,
+            "checked an edge > 0 after the fix -- genuine multi-iteration loop witness",
+        );
+        kani::cover(
+            check_i == len && len == CAP,
+            "checked the LAST edge of a maximal (CAPACITY+1-edge) internal node",
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: old_len in {0, 1, CAPACITY - 1} (leaf, must be < CAPACITY per
+    // insert_fit's own debug_assert); idx symbolic in 0..=old_len (unconstrained within that
+    // bound). Proves ONLY structural/metadata safety: new_len == old_len + 1 (read via
+    // `NodeRef::len()`, the proven-safe raw-pointer path), and the returned KV handle's own idx
+    // == the insertion idx. Does NOT check content placement or the shift itself — see
+    // `check_leaf_insert_fit_content` for that, kept as a separate, strongly-asserting companion
+    // harness below.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_leaf_insert_fit_no_ub() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP - 1);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let mut root: NodeRef<marker::Owned, i32, i32, marker::Leaf> = NodeRef::new_leaf(Global);
+        for i in 0..old_len {
+            root.borrow_mut().push(i as i32, 1000 + i as i32);
+        }
+
+        let node_mut = root.borrow_mut();
+        let edge = unsafe { Handle::new_edge(node_mut, idx) };
+        // SAFETY: old_len < CAPACITY (this harness's own kani::assume), matching insert_fit's
+        // debug_assert precondition -- there is room for one more element.
+        let kv_handle = unsafe { edge.insert_fit(9000_i32, 9500_i32) };
+        let inserted_idx = kv_handle.idx();
+        drop(kv_handle);
+
+        let new_len = root.borrow_mut().len();
+        assert_eq!(new_len, old_len + 1, "insert_fit: len did not grow by exactly 1");
+        assert_eq!(inserted_idx, idx, "insert_fit: returned KV handle idx != insertion idx");
+
+        kani::cover(idx < old_len, "insert_fit: interior insertion (shift branch)");
+        kani::cover(idx == old_len, "insert_fit: append insertion (no-shift branch)");
+    }
+
+    /// Every post-state quantity `check_leaf_insert_fit_content` needs, computed once by a shared,
+    /// byte-identical construction (fixture -> insert_fit call -> readback). `old_len` pushes are
+    /// position-derived ((i, 1000 + i)) so a misplacement after the shift is observable; the
+    /// inserted (key, val) is a sentinel pair (9000, 9500) chosen far outside the pushed content's
+    /// range (the push loop runs `0..old_len`, so the max pushed key/val at
+    /// old_len <= CAPACITY - 1 == 10 is (9, 1009), not (10, 1010)).
+    struct LeafInsertFitResult {
+        /// Readback at `idx` — must be the inserted sentinel.
+        at_idx: (i32, i32),
+        /// `Some(readback at 0)` when `idx > 0` — head untouched by the shift.
+        head0: Option<(i32, i32)>,
+        /// `Some(readback at idx + 1)` when `idx < old_len` — the element originally AT `idx`
+        /// must now sit one position to the right (the shift's direct witness).
+        shifted_from_idx: Option<(i32, i32)>,
+        /// `Some(readback at old_len)` when `idx < old_len` (interior insert; on append, `idx ==
+        /// old_len`, the original last element never moves) — the original LAST element must
+        /// have shifted all the way to the new last position.
+        shifted_last: Option<(i32, i32)>,
+    }
+
+    fn leaf_insert_fit_content_setup(old_len: usize, idx: usize) -> LeafInsertFitResult {
+        let mut root: NodeRef<marker::Owned, i32, i32, marker::Leaf> = NodeRef::new_leaf(Global);
+        for i in 0..old_len {
+            root.borrow_mut().push(i as i32, 1000 + i as i32);
+        }
+
+        let node_mut = root.borrow_mut();
+        let edge = unsafe { Handle::new_edge(node_mut, idx) };
+        let kv_handle = unsafe { edge.insert_fit(9000_i32, 9500_i32) };
+        drop(kv_handle);
+
+        let at_idx = {
+            let readback = unsafe { Handle::new_kv(root.reborrow(), idx) };
+            let (k, v) = readback.into_kv();
+            (*k, *v)
+        };
+        let head0 = if idx > 0 {
+            let readback = unsafe { Handle::new_kv(root.reborrow(), 0) };
+            let (k, v) = readback.into_kv();
+            Some((*k, *v))
+        } else {
+            None
+        };
+        let shifted_from_idx = if idx < old_len {
+            let readback = unsafe { Handle::new_kv(root.reborrow(), idx + 1) };
+            let (k, v) = readback.into_kv();
+            Some((*k, *v))
+        } else {
+            None
+        };
+        let shifted_last = if idx < old_len {
+            let readback = unsafe { Handle::new_kv(root.reborrow(), old_len) };
+            let (k, v) = readback.into_kv();
+            Some((*k, *v))
+        } else {
+            None
+        };
+
+        LeafInsertFitResult { at_idx, head0, shifted_from_idx, shifted_last }
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: SEPARATE, functional-content companion to `check_leaf_insert_fit_no_ub`
+    // (strong post-state content equalities isolated in their own harness). Same old_len/idx
+    // domain. All 4 checks read back via fresh `Handle::new_kv(root.reborrow(), pos).into_kv()`
+    // calls — the same proven-safe Immut-readback path used throughout this module, never a raw
+    // new-node field read. Proves the shift-by-one moved the right elements to the right places
+    // and left the head alone; does not prove it for every element simultaneously (spot-checks
+    // only: idx, 0, idx + 1, old_len).
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_leaf_insert_fit_content() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP - 1);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let r = leaf_insert_fit_content_setup(old_len, idx);
+
+        assert!(r.at_idx == (9000, 9500), "inserted sentinel not found at idx");
+        if let Some(h0) = r.head0 {
+            assert!(h0 == (0, 1000), "head (position 0) mutated by the shift");
+        }
+        if let Some(sfi) = r.shifted_from_idx {
+            assert!(
+                sfi == (idx as i32, 1000 + idx as i32),
+                "element originally at idx did not shift to idx + 1"
+            );
+        }
+        if let Some(sl) = r.shifted_last {
+            assert!(
+                sl == ((old_len - 1) as i32, 1000 + (old_len - 1) as i32),
+                "original last element did not shift to the new last position"
+            );
+        }
+
+        kani::cover(
+            idx < old_len,
+            "leaf insert_fit content: genuine interior shift verified end-to-end",
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: old_len in {0, 1, CAPACITY - 1} (internal, must be < CAPACITY per
+    // insert_fit's own debug_assert); idx symbolic in 0..=old_len. Fixture:
+    // `symbolic_internal(old_len)` (already fully, correctly parent-linked). Proves ONLY
+    // structural safety: new_len == old_len + 1, read via `NodeRef::len()` (proven-safe
+    // raw-pointer path). Does NOT check content placement, the new edge's identity/link, or the
+    // shift of existing edges — see `check_internal_insert_fit_content` for those, kept as a
+    // separate, strongly-asserting companion harness below.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_internal_insert_fit_no_ub() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP - 1);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let mut internal = symbolic_internal(old_len);
+        let new_child = symbolic_leaf(0);
+        let new_edge_root: Root<i32, i32> = new_child.forget_type();
+
+        let mut_ref = internal.borrow_mut();
+        let mut handle = unsafe { Handle::new_edge(mut_ref, idx) };
+        handle.insert_fit(9000_i32, 9500_i32, new_edge_root);
+        drop(handle);
+
+        let new_len = internal.borrow_mut().len();
+        assert_eq!(new_len, old_len + 1, "internal insert_fit: len did not grow by exactly 1");
+
+        kani::cover(idx < old_len, "internal insert_fit: interior insertion (shift branch)");
+        kani::cover(idx == old_len, "internal insert_fit: append insertion (no-shift branch)");
+    }
+
+    /// Every post-state quantity `check_internal_insert_fit_content` needs, computed once.
+    /// `old_len` KV pairs (position-derived, (i, 1000 + i)) and `old_len + 1` height-0 children,
+    /// all already correctly parent-linked (via `symbolic_internal`); the inserted KV is the
+    /// sentinel pair (9000, 9500); the inserted edge's child is a fresh, distinguishable (by
+    /// pointer) empty leaf.
+    struct InternalInsertFitResult {
+        /// Readback at `idx` — must be the inserted sentinel.
+        at_idx: (i32, i32),
+        /// The new edge's child (at idx + 1, post-insert) is the EXACT child NodeRef we passed
+        /// in (pointer-identity, not just "some" child).
+        new_edge_child_addr_matches: bool,
+        /// The new edge's (idx + 1) parent link round-trips (ascend -> idx == idx + 1, parent
+        /// ptr == this internal node) — the direct witness that the ranged relink fixed the
+        /// newly-inserted edge.
+        new_edge_parent_link_ok: bool,
+        /// `Some(...)` when `idx < old_len` (interior insert): the edge that was originally at
+        /// `idx + 1` (now at `idx + 2`, since the new edge itself landed at `idx + 1` and
+        /// `slice_insert` shifts everything from `idx + 1` rightward) ALSO has its parent link
+        /// correctly updated (ascend -> idx == idx + 2) — a second-iteration witness that the
+        /// ranged relink loop did more than fix just the one new edge.
+        shifted_edge_parent_link_ok: Option<bool>,
+    }
+
+    fn internal_insert_fit_content_setup(old_len: usize, idx: usize) -> InternalInsertFitResult {
+        let mut internal = symbolic_internal(old_len);
+        let internal_addr = internal.reborrow().node.as_ptr() as usize;
+
+        let new_child = symbolic_leaf(0);
+        let new_child_addr = new_child.reborrow().node.as_ptr() as usize;
+        let new_edge_root: Root<i32, i32> = new_child.forget_type();
+
+        let mut_ref = internal.borrow_mut();
+        let mut handle = unsafe { Handle::new_edge(mut_ref, idx) };
+        handle.insert_fit(9000_i32, 9500_i32, new_edge_root);
+        drop(handle);
+
+        let at_idx = {
+            let readback = unsafe { Handle::new_kv(internal.reborrow(), idx) };
+            let (k, v) = readback.into_kv();
+            (*k, *v)
+        };
+
+        let new_edge_child_addr_matches = {
+            let mut_ref2 = internal.borrow_mut();
+            let edge2 = unsafe { Handle::new_edge(mut_ref2, idx + 1) };
+            let descended = edge2.descend();
+            descended.reborrow().node.as_ptr() as usize == new_child_addr
+        };
+
+        let new_edge_parent_link_ok = {
+            let mut_ref3 = internal.borrow_mut();
+            let edge3 = unsafe { Handle::new_edge(mut_ref3, idx + 1) };
+            let descended = edge3.descend();
+            match descended.ascend() {
+                Ok(parent_edge) => {
+                    let idx_ok = parent_edge.idx() == idx + 1;
+                    let addr_ok = NodeRef::as_internal_ptr(&parent_edge.into_node()) as usize
+                        == internal_addr;
+                    idx_ok && addr_ok
+                }
+                Err(_) => false,
+            }
+        };
+
+        let shifted_edge_parent_link_ok = if idx < old_len {
+            let mut_ref4 = internal.borrow_mut();
+            let edge4 = unsafe { Handle::new_edge(mut_ref4, idx + 2) };
+            let descended = edge4.descend();
+            match descended.ascend() {
+                Ok(parent_edge) => {
+                    let idx_ok = parent_edge.idx() == idx + 2;
+                    let addr_ok = NodeRef::as_internal_ptr(&parent_edge.into_node()) as usize
+                        == internal_addr;
+                    Some(idx_ok && addr_ok)
+                }
+                Err(_) => Some(false),
+            }
+        } else {
+            None
+        };
+
+        InternalInsertFitResult {
+            at_idx,
+            new_edge_child_addr_matches,
+            new_edge_parent_link_ok,
+            shifted_edge_parent_link_ok,
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: SEPARATE, functional-content companion to
+    // `check_internal_insert_fit_no_ub`. Same old_len/idx domain. Proves the sentinel KV landed
+    // at idx, the new edge's child landed at idx + 1 by POINTER IDENTITY, its parent link was
+    // corrected, AND (on interior inserts) the immediately-following pre-existing edge's parent
+    // link was ALSO corrected — a genuine multi-iteration witness for the ranged relink AS
+    // CALLED FROM insert_fit (distinct from, and in addition to, the standalone full-range
+    // coverage in `check_correct_all_childrens_parent_links_no_ub`). This harness descends three
+    // times and ascends twice against a node that was just mutated by a 3-way shift plus a
+    // ranged relink — the highest-risk pointer-aliasing shape in this file's fixture family.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_internal_insert_fit_content() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP - 1);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let r = internal_insert_fit_content_setup(old_len, idx);
+
+        assert!(r.at_idx == (9000, 9500), "inserted sentinel KV not found at idx");
+        assert!(r.new_edge_child_addr_matches, "new edge's child != the child we passed in");
+        assert!(r.new_edge_parent_link_ok, "new edge's parent link not corrected");
+        if let Some(ok) = r.shifted_edge_parent_link_ok {
+            assert!(ok, "pre-existing edge just past the new one has a stale parent link");
+        }
+
+        kani::cover(
+            idx < old_len,
+            "internal insert_fit content: interior insertion, multi-edge relink witnessed",
+        );
+        kani::cover(
+            idx == old_len,
+            "internal insert_fit content: append insertion (single relink)",
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: old_len in {1, CAPACITY} (leaf; remove's own implicit precondition is
+    // old_len >= 1); idx symbolic in 0..old_len (unconstrained within that bound). Proves ONLY
+    // structural/metadata safety: new_len == old_len - 1 (read via `NodeRef::len()`, the
+    // proven-safe raw-pointer path), and the returned edge handle's own idx == the removal idx
+    // (the edge the KV pair "collapsed into", per the fn's own doc comment). Does NOT check the
+    // extracted (k, v) value or the shift itself — see `check_leaf_remove_content` for those,
+    // kept as a separate, strongly-asserting companion harness below.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_leaf_remove_no_ub() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx < old_len);
+
+        let mut root: NodeRef<marker::Owned, i32, i32, marker::Leaf> = NodeRef::new_leaf(Global);
+        for i in 0..old_len {
+            root.borrow_mut().push(i as i32, 1000 + i as i32);
+        }
+
+        let node_mut = root.borrow_mut();
+        let kv_handle = unsafe { Handle::new_kv(node_mut, idx) };
+        let (_removed, edge_handle) = kv_handle.remove();
+        let returned_idx = edge_handle.idx();
+        drop(edge_handle);
+
+        let new_len = root.borrow_mut().len();
+        assert_eq!(new_len, old_len - 1, "remove: len did not shrink by exactly 1");
+        assert_eq!(returned_idx, idx, "remove: returned edge idx != removal idx");
+
+        kani::cover(idx + 1 < old_len, "remove: interior removal (shift branch)");
+        kani::cover(idx + 1 == old_len, "remove: tail removal (no-shift branch)");
+        kani::cover(old_len == 1, "remove: last-element removal (leaf becomes empty)");
+    }
+
+    /// Every post-state quantity `check_leaf_remove_content` needs, computed once by a shared,
+    /// byte-identical construction (fixture -> remove call -> readback). `old_len` pushes are
+    /// position-derived ((i, 1000 + i)) so a misplacement after the shift-left is observable.
+    struct LeafRemoveContentResult {
+        /// The (k, v) `remove` returned -- must be the original element at `idx`.
+        removed: (i32, i32),
+        /// `Some(readback at 0)` when `idx > 0` -- head untouched by the shift.
+        head0: Option<(i32, i32)>,
+        /// `Some(readback at idx)` when `idx < new_len` (new_len = old_len - 1) -- the element
+        /// originally at `idx + 1` must now sit at `idx` (the shift's direct witness).
+        shifted_first: Option<(i32, i32)>,
+        /// `Some(readback at new_len - 1)` when `idx < new_len` -- the original LAST element must
+        /// have shifted all the way down to the new last position.
+        shifted_last: Option<(i32, i32)>,
+    }
+
+    fn leaf_remove_content_setup(old_len: usize, idx: usize) -> LeafRemoveContentResult {
+        let mut root: NodeRef<marker::Owned, i32, i32, marker::Leaf> = NodeRef::new_leaf(Global);
+        for i in 0..old_len {
+            root.borrow_mut().push(i as i32, 1000 + i as i32);
+        }
+
+        let node_mut = root.borrow_mut();
+        let kv_handle = unsafe { Handle::new_kv(node_mut, idx) };
+        let ((k, v), edge_handle) = kv_handle.remove();
+        drop(edge_handle);
+
+        let new_len = old_len - 1;
+
+        let head0 = if idx > 0 {
+            let readback = unsafe { Handle::new_kv(root.reborrow(), 0) };
+            let (k2, v2) = readback.into_kv();
+            Some((*k2, *v2))
+        } else {
+            None
+        };
+        let shifted_first = if idx < new_len {
+            let readback = unsafe { Handle::new_kv(root.reborrow(), idx) };
+            let (k2, v2) = readback.into_kv();
+            Some((*k2, *v2))
+        } else {
+            None
+        };
+        let shifted_last = if idx < new_len {
+            let readback = unsafe { Handle::new_kv(root.reborrow(), new_len - 1) };
+            let (k2, v2) = readback.into_kv();
+            Some((*k2, *v2))
+        } else {
+            None
+        };
+
+        LeafRemoveContentResult { removed: (k, v), head0, shifted_first, shifted_last }
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: SEPARATE, functional-content companion to `check_leaf_remove_no_ub`.
+    // Same old_len/idx domain. All reads back via fresh `Handle::new_kv(root.reborrow(),
+    // pos).into_kv()` calls -- the same proven-safe Immut-readback path used throughout this
+    // module, never a raw new-node field read. Proves the extracted (k, v) matches what was at
+    // idx, the head (position 0) is untouched when idx > 0, and the shift-left moved the right
+    // elements to the right places (spot-checks at the shift's first and last landing positions
+    // only); does not prove it for every element simultaneously.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_leaf_remove_content() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx < old_len);
+
+        let r = leaf_remove_content_setup(old_len, idx);
+
+        assert!(
+            r.removed == (idx as i32, 1000 + idx as i32),
+            "removed (k, v) != original (k, v) at idx"
+        );
+        if let Some(h0) = r.head0 {
+            assert!(h0 == (0, 1000), "head (position 0) mutated by the shift");
+        }
+        if let Some(sf) = r.shifted_first {
+            assert!(
+                sf == ((idx + 1) as i32, 1000 + (idx + 1) as i32),
+                "element originally at idx + 1 did not shift to idx"
+            );
+        }
+        if let Some(sl) = r.shifted_last {
+            assert!(
+                sl == ((old_len - 1) as i32, 1000 + (old_len - 1) as i32),
+                "original last element did not shift to the new last position"
+            );
+        }
+
+        kani::cover(
+            idx + 1 < old_len,
+            "leaf remove content: genuine interior shift verified end-to-end",
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: old_len in {0, 1, CAPACITY} (source leaf); idx symbolic in 0..=old_len
+    // (the split point). Fixture: a populated source Leaf NodeRef (position-derived content, same
+    // push recipe as every harness above) plus a FRESH, EMPTY sibling Leaf NodeRef of the same
+    // height (0) -- `move_suffix`'s own asserted preconditions (`right_node.len() == 0`,
+    // `left_node.height == right_node.height`) are met by construction, so no panic branch is
+    // exercised. This harness asserts memory safety only (no post-state `len`/content equality —
+    // that is a disclosed residual for this contribution, not shipped here). It drives the real,
+    // unmodified `move_suffix` over the fixture above and covers three structurally distinct split
+    // shapes: a genuine interior split, the no-op split (right stays empty), and the
+    // everything-moves split (left becomes empty). This is the highest-risk harness in this file's
+    // fixture family: a bounded-copy shape spanning two live leaf nodes instead of one, a
+    // `forget_type`/`forget_node_type` type-erasure round-trip through `marker::LeafOrInternal`,
+    // and a `&mut` passed across two separately-owned nodes.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_move_suffix_leaf_no_ub() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let mut left_root: NodeRef<marker::Owned, i32, i32, marker::Leaf> =
+            NodeRef::new_leaf(Global);
+        for i in 0..old_len {
+            left_root.borrow_mut().push(i as i32, 1000 + i as i32);
+        }
+        let mut right_root: NodeRef<marker::Owned, i32, i32, marker::Leaf> =
+            NodeRef::new_leaf(Global);
+
+        let left_mut = left_root.borrow_mut();
+        let edge = unsafe { Handle::new_edge(left_mut, idx) };
+        let mut split_edge = edge.forget_node_type();
+
+        let mut right_lofi: NodeRef<marker::Mut<'_>, i32, i32, marker::LeafOrInternal> =
+            right_root.borrow_mut().forget_type();
+        split_edge.move_suffix(&mut right_lofi);
+        drop(split_edge);
+        drop(right_lofi);
+
+        // No post-state assertions here -- see the label comment above: this harness proves
+        // memory safety of `move_suffix` itself; a functional length/content companion is not
+        // part of this submission.
+
+        kani::cover(
+            idx > 0 && idx < old_len,
+            "move_suffix: genuine interior split (both sides non-empty)",
+        );
+        kani::cover(idx == old_len, "move_suffix: no-op split (right stays empty)");
+        kani::cover(
+            idx == 0 && old_len > 0,
+            "move_suffix: everything moves to the right (left becomes empty)",
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // PROBE — residual: len in {1, CAPACITY}; `lo..hi` is constructed so it is ALWAYS a valid
+    // edge-index range per the fn's own safety contract ("every item returned by range is a
+    // valid edge index"). Calls `correct_childrens_parent_links` DIRECTLY (not via the
+    // `correct_all_...` wrapper) with this arbitrary sub-range, then reads back ONE symbolic
+    // `check_i` edge via the same proven-safe `descend().ascend()` round-trip the full-range
+    // harness above uses. Two branches, both asserted, both covered: `check_i` INSIDE `[lo, hi)`
+    // must be genuinely relinked (`idx == check_i`, parent pointer == this node, via the
+    // deref-free `as_internal_ptr` projection); `check_i` OUTSIDE `[lo, hi)` must be UNTOUCHED
+    // (`idx` still reads back as the 9999 sentinel — proves the fn is genuinely range-SCOPED, not
+    // a disguised full pass). The out-of-range branch never dereferences the dangling parent
+    // pointer itself (only `Handle::idx()`, a plain field read, and — for the in-range branch
+    // only — `NodeRef::as_internal_ptr`, a pointer cast with no deref). Does NOT assert the
+    // property for every edge simultaneously (no all-quantified check) — the cover set below
+    // witnesses both branches plus the empty-range and full-range-via-direct-call corners across
+    // a genuine multi-edge node. It also covers a proper subrange that may start at 0 (not only a
+    // strictly-interior sub-range), and a single in-range `check_i` check on a maximal-occupancy
+    // node (`hi - lo` may be 1, so this does not by itself witness more than one relink iteration).
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_correct_childrens_parent_links_subrange_no_ub() {
+        let len: usize = kani::any();
+        kani::assume(len == 1 || len == CAP);
+
+        let mut internal = symbolic_internal(len);
+        let internal_addr = internal.reborrow().node.as_ptr() as usize;
+
+        // Perturb every child's parent link to a garbage-but-valid (never dereferenced)
+        // NonNull with a sentinel parent_idx no genuine relink could ever produce.
+        let garbage = NonNull::<InternalNode<i32, i32>>::dangling();
+        for i in 0..=len {
+            let mut_ref = internal.borrow_mut();
+            let edge = unsafe { Handle::new_edge(mut_ref, i) };
+            let mut child = edge.descend();
+            child.set_parent_link(garbage, 9999);
+        }
+
+        let lo: usize = kani::any();
+        let hi: usize = kani::any();
+        kani::assume(lo <= hi && hi <= len + 1);
+
+        let check_i: usize = kani::any();
+        kani::assume(check_i <= len);
+
+        unsafe { internal.borrow_mut().correct_childrens_parent_links(lo..hi) };
+
+        let mut_ref = internal.borrow_mut();
+        let edge = unsafe { Handle::new_edge(mut_ref, check_i) };
+        let descended = edge.descend();
+        let ascended = descended.ascend();
+        assert!(
+            ascended.is_ok(),
+            "correct_childrens_parent_links: child lost its parent link entirely"
+        );
+        let parent_edge = ascended.ok().unwrap();
+
+        if check_i >= lo && check_i < hi {
+            assert_eq!(
+                parent_edge.idx(),
+                check_i,
+                "in-range child: wrong parent_idx after sub-range relink"
+            );
+            let parent_addr = NodeRef::as_internal_ptr(&parent_edge.into_node()) as usize;
+            assert_eq!(
+                parent_addr, internal_addr,
+                "in-range child: wrong parent pointer after sub-range relink"
+            );
+        } else {
+            assert_eq!(
+                parent_edge.idx(),
+                9999,
+                "out-of-range child: parent link was touched but the sub-range should not have covered it"
+            );
+        }
+
+        kani::cover(
+            check_i >= lo && check_i < hi,
+            "checked an edge INSIDE the sub-range (expect fixed)",
+        );
+        kani::cover(
+            check_i < lo || check_i >= hi,
+            "checked an edge OUTSIDE the sub-range (expect untouched)",
+        );
+        kani::cover(
+            lo < hi && hi < len + 1,
+            "a proper subrange not extending to the end (may start at 0)",
+        );
+        kani::cover(lo == hi, "empty range: zero-iteration call, nothing relinked");
+        kani::cover(
+            lo == 0 && hi == len + 1,
+            "full range via DIRECT call (mirrors correct_all_... behavior)",
+        );
+        kani::cover(
+            check_i >= lo && check_i < hi && len == CAP,
+            "an in-range index is checked on a maximal-occupancy node",
+        );
+    }
+
+    // =======================================================================
+    // BALANCING-OPERATION TIER
+    //
+    // The helpers named in the challenge's second success-criteria list -- `NodeRef::new_internal`,
+    // `BalancingContext::{do_merge, merge_tracking_child_edge, steal_left, steal_right,
+    // bulk_steal_left, bulk_steal_right}` -- plus `Handle::split` and the functional-content
+    // companions for `Handle::move_suffix`.
+    //
+    // These carry the same PROBE framing as the block above: bounded fixtures, `K = V = i32`, and
+    // every residual named. Where a node's occupancy is left symbolic over `0..=CAPACITY`, note
+    // that `CAPACITY` is a compile-time constant and a `LeafNode` stores
+    // `[MaybeUninit<K>; CAPACITY]`, so that range is the node type's COMPLETE occupancy domain
+    // rather than a harness-chosen bound; the bounds that ARE harness-chosen are called out
+    // individually below.
+    // =======================================================================
+    /// Reads a `(key, value)` pair out of a mutable node by index. Both are `i32` (`Copy`), so
+    /// nothing is moved out of the node and the node stays fully initialized.
+    ///
+    /// # Safety-relevant precondition
+    /// `idx < node.len()` — every call site below guards on the node's length.
+    fn kv_at(
+        node: NodeRef<marker::Mut<'_>, i32, i32, marker::LeafOrInternal>,
+        idx: usize,
+    ) -> (i32, i32) {
+        let mut h = unsafe { Handle::new_kv(node, idx) };
+        let (k, v) = h.kv_mut();
+        (*k, *v)
+    }
+    /// Builds the standard balancing fixture: a height-1 internal parent of length 1 whose edge 0
+    /// is a leaf of `left_len` symbolic pairs and whose edge 1 is a leaf of `right_len` symbolic
+    /// pairs, with the parent's own separating pair `(pk, pv)`. Returns the raw node pointers so
+    /// post-state reads on a COPY DESTINATION can go through the raw projection rather than
+    /// `Handle::new_kv` (whose `debug_assert!(idx < node.len())` consults a field that may itself
+    /// be the quantity under test).
+    #[allow(dead_code)]
+    struct BalanceFixture {
+        parent: NodeRef<marker::Owned, i32, i32, marker::Internal>,
+        parent_nn: NonNull<LeafNode<i32, i32>>,
+        left_nn: NonNull<LeafNode<i32, i32>>,
+        right_nn: NonNull<LeafNode<i32, i32>>,
+        pk: i32,
+        pv: i32,
+    }
+    fn balance_fixture(left_len: usize, right_len: usize) -> BalanceFixture {
+        let left = symbolic_leaf(left_len);
+        let left_nn = left.reborrow().node;
+        let right = symbolic_leaf(right_len);
+        let right_nn = right.reborrow().node;
+
+        let mut parent: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(left.forget_type(), Global);
+        let parent_nn = parent.reborrow().node;
+        let pk: i32 = kani::any();
+        let pv: i32 = kani::any();
+        parent.borrow_mut().push(pk, pv, right.forget_type());
+
+        BalanceFixture { parent, parent_nn, left_nn, right_nn, pk, pv }
+    }
+    /// Frees the three leaf/internal allocations a `BalanceFixture` owns. No drop glue (i32 K/V).
+    unsafe fn balance_teardown(f: &BalanceFixture) {
+        unsafe {
+            Global.deallocate(f.parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(f.left_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(f.right_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+        }
+    }
+    /// Builds a height-1 internal node with `len` symbolic pairs and `len + 1` empty leaf children,
+    /// choosing from `IB + 1` pre-built leaves. Returns the node plus the raw pointers of every
+    /// leaf allocated, so the caller can free exactly what it made.
+    #[allow(dead_code)]
+    struct InternalSide {
+        node: NodeRef<marker::Owned, i32, i32, marker::Internal>,
+        node_nn: NonNull<LeafNode<i32, i32>>,
+        leaves: [NonNull<LeafNode<i32, i32>>; 3],
+    }
+    /// `IB == 2`: three grandchild leaves per side, so occupancy 0..=2.
+    fn internal_side_ib2(len: usize) -> InternalSide {
+        let g0 = symbolic_leaf(0);
+        let g0_nn = g0.reborrow().node;
+        let g1 = symbolic_leaf(0);
+        let g1_nn = g1.reborrow().node;
+        let g2 = symbolic_leaf(0);
+        let g2_nn = g2.reborrow().node;
+
+        let mut node: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(g0.forget_type(), Global);
+        let node_nn = node.reborrow().node;
+        let k0: i32 = kani::any();
+        let v0: i32 = kani::any();
+        let k1: i32 = kani::any();
+        let v1: i32 = kani::any();
+        if len >= 1 {
+            node.borrow_mut().push(k0, v0, g1.forget_type());
+        }
+        if len >= 2 {
+            node.borrow_mut().push(k1, v1, g2.forget_type());
+        }
+
+        InternalSide { node, node_nn, leaves: [g0_nn, g1_nn, g2_nn] }
+    }
+    /// Frees one side's internal node and its three grandchild leaves. Takes the raw pointers by
+    /// value rather than a `&InternalSide`, because the caller moves the struct's `node` field out
+    /// (via `forget_type()`) to build the parent, which partially moves the struct and would make
+    /// any later borrow of it ill-formed.
+    unsafe fn free_internal_side(
+        node_nn: NonNull<LeafNode<i32, i32>>,
+        leaves: [NonNull<LeafNode<i32, i32>>; 3],
+    ) {
+        unsafe {
+            Global.deallocate(node_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            let mut i = 0;
+            while i < 3 {
+                Global.deallocate(leaves[i].cast(), Layout::new::<LeafNode<i32, i32>>());
+                i += 1;
+            }
+        }
+    }
+    /// Builds a height-1 internal node with `len` symbolic pairs, drawing children from exactly
+    /// `N` freshly allocated empty leaves. Every leaf is allocated regardless of `len` so the
+    /// caller's teardown is a constant shape; unpushed leaves are simply never linked.
+    fn internal_side_n<const N: usize>(
+        len: usize,
+    ) -> (
+        NodeRef<marker::Owned, i32, i32, marker::Internal>,
+        NonNull<LeafNode<i32, i32>>,
+        [NonNull<LeafNode<i32, i32>>; N],
+    ) {
+        let first = symbolic_leaf(0);
+        let mut leaves = [NonNull::<LeafNode<i32, i32>>::dangling(); N];
+        leaves[0] = first.reborrow().node;
+
+        let mut node: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(first.forget_type(), Global);
+        let node_nn = node.reborrow().node;
+
+        let mut i = 0;
+        while i + 1 < N {
+            let child = symbolic_leaf(0);
+            leaves[i + 1] = child.reborrow().node;
+            if len >= i + 1 {
+                let k: i32 = kani::any();
+                let v: i32 = kani::any();
+                node.borrow_mut().push(k, v, child.forget_type());
+            }
+            i += 1;
+        }
+
+        (node, node_nn, leaves)
+    }
+    unsafe fn free_side_n<const N: usize>(
+        node_nn: NonNull<LeafNode<i32, i32>>,
+        leaves: [NonNull<LeafNode<i32, i32>>; N],
+    ) {
+        unsafe {
+            Global.deallocate(node_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            let mut i = 0;
+            while i < N {
+                Global.deallocate(leaves[i].cast(), Layout::new::<LeafNode<i32, i32>>());
+                i += 1;
+            }
+        }
+    }
+    /// `N` = `IB + 1` grandchildren per side; `IB` bounds each internal child's occupancy.
+    fn do_merge_internal_occupancy_body<const N: usize>() {
+        let ib: usize = N - 1;
+        let old_left_len: usize = kani::any();
+        let right_len: usize = kani::any();
+        kani::assume(old_left_len <= ib);
+        kani::assume(right_len <= ib);
+        kani::assume(old_left_len + 1 + right_len <= CAP);
+
+        let (left, left_nn, left_leaves) = internal_side_n::<N>(old_left_len);
+        let (right, right_nn, right_leaves) = internal_side_n::<N>(right_len);
+        let spare = symbolic_leaf(0);
+        let spare_nn = spare.reborrow().node;
+        let third: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(spare.forget_type(), Global);
+        let third_nn = third.reborrow().node;
+
+        let mut parent: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(left.forget_type(), Global);
+        let parent_nn = parent.reborrow().node;
+        let k0: i32 = kani::any();
+        let v0: i32 = kani::any();
+        let k1: i32 = kani::any();
+        let v1: i32 = kani::any();
+        parent.borrow_mut().push(k0, v0, right.forget_type());
+        parent.borrow_mut().push(k1, v1, third.forget_type());
+        assert!(parent.height() == 2, "IS0: the fixture is a height-2 tree");
+
+        {
+            let kv = unsafe { Handle::new_kv(parent.borrow_mut(), 0) };
+            let bc = kv.consider_for_balancing();
+            let _shrunk = bc.merge_tracking_parent(Global);
+        }
+
+        kani::cover(right_len == 0, "NV1: an EMPTY right child is merged in");
+        // NOTE: a cover of the form `right_len == ib` would be UNSATISFIABLE at ib == CAPACITY,
+        // because do_merge's own precondition (asserted in the function) caps
+        // old_left_len + 1 + right_len at CAPACITY -- so no single child can hold CAPACITY pairs
+        // before the merge. The reachable extremes are one child empty and the other as large as
+        // that precondition admits.
+        kani::cover(
+            old_left_len == 0 && right_len + 1 == CAP,
+            "NV2: the largest right child the merge precondition admits, with an empty left child",
+        );
+        kani::cover(
+            right_len == 0 && old_left_len + 1 == CAP,
+            "NV3: the largest left child the merge precondition admits, with an empty right child",
+        );
+        kani::cover(
+            old_left_len + 1 + right_len == CAP,
+            "NV4: the merge fills the surviving child to CAPACITY",
+        );
+
+        // `do_merge` frees the RIGHT internal node itself; freeing it here would be a double free.
+        // Its grandchild leaves are NOT freed by it and remain ours.
+        unsafe {
+            Global.deallocate(parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            free_side_n::<N>(left_nn, left_leaves);
+            Global.deallocate(third_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(spare_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            let mut i = 0;
+            while i < N {
+                Global.deallocate(right_leaves[i].cast(), Layout::new::<LeafNode<i32, i32>>());
+                i += 1;
+            }
+        }
+    }
+    /// Every post-state quantity `check_move_suffix_leaf_content` needs, computed once by a
+    /// shared, byte-identical construction (fixture -> move_suffix call -> readback), mirroring
+    /// `LeafRemoveContentResult` / `leaf_remove_content_setup`'s shape (the removal-side twin of
+    /// this same fixture idiom). `old_len` pushes are position-derived ((i, 1000 + i)) so a
+    /// misplacement across the split is observable. All reads happen via fresh, freestanding
+    /// `Handle::new_kv(root.reborrow(), pos).into_kv()` calls -- the same proven-safe Immut
+    /// readback path used throughout this file (`check_handle_into_kv_no_ub`,
+    /// `check_leaf_remove_content`) -- never a raw `NodeRef::len()` or field read on the
+    /// freshly-written `right_root` sibling.
+    struct MoveSuffixLeafContentResult {
+        /// `Some(readback at 0)` when `idx > 0` -- left's head, untouched by the move.
+        left_head0: Option<(i32, i32)>,
+        /// `Some(readback at idx - 1)` when `idx > 0` -- left's new last element, the original
+        /// element that stayed at position `idx - 1` (the boundary just before the split).
+        left_last: Option<(i32, i32)>,
+        /// `Some(readback at 0)` when `idx < old_len` -- the first moved element, originally at
+        /// `idx` in `left`, must now sit at position 0 in `right`.
+        right_head0: Option<(i32, i32)>,
+        /// `Some(readback at old_len - idx - 1)` when `idx < old_len` -- the last moved element,
+        /// originally the LAST element of `left`, must now sit at the new last position of
+        /// `right`.
+        right_last: Option<(i32, i32)>,
+    }
+    fn move_suffix_leaf_content_setup(old_len: usize, idx: usize) -> MoveSuffixLeafContentResult {
+        let mut left_root: NodeRef<marker::Owned, i32, i32, marker::Leaf> =
+            NodeRef::new_leaf(Global);
+        for i in 0..old_len {
+            left_root.borrow_mut().push(i as i32, 1000 + i as i32);
+        }
+        let mut right_root: NodeRef<marker::Owned, i32, i32, marker::Leaf> =
+            NodeRef::new_leaf(Global);
+
+        let left_mut = left_root.borrow_mut();
+        let edge = unsafe { Handle::new_edge(left_mut, idx) };
+        let mut split_edge = edge.forget_node_type();
+
+        let mut right_lofi: NodeRef<marker::Mut<'_>, i32, i32, marker::LeafOrInternal> =
+            right_root.borrow_mut().forget_type();
+        split_edge.move_suffix(&mut right_lofi);
+        drop(split_edge);
+        drop(right_lofi);
+
+        let new_right_len = old_len - idx;
+
+        let left_head0 = if idx > 0 {
+            let readback = unsafe { Handle::new_kv(left_root.reborrow(), 0) };
+            let (k, v) = readback.into_kv();
+            Some((*k, *v))
+        } else {
+            None
+        };
+        let left_last = if idx > 0 {
+            let readback = unsafe { Handle::new_kv(left_root.reborrow(), idx - 1) };
+            let (k, v) = readback.into_kv();
+            Some((*k, *v))
+        } else {
+            None
+        };
+        let right_head0 = if new_right_len > 0 {
+            let readback = unsafe { Handle::new_kv(right_root.reborrow(), 0) };
+            let (k, v) = readback.into_kv();
+            Some((*k, *v))
+        } else {
+            None
+        };
+        let right_last = if new_right_len > 0 {
+            let readback = unsafe { Handle::new_kv(right_root.reborrow(), new_right_len - 1) };
+            let (k, v) = readback.into_kv();
+            Some((*k, *v))
+        } else {
+            None
+        };
+
+        MoveSuffixLeafContentResult { left_head0, left_last, right_head0, right_last }
+    }
+    // ---------------------------------------------------------------------
+    // DIAGNOSTIC — `move_suffix`, raw post-state stored lengths on BOTH nodes.
+    //
+    // `check_move_suffix_leaf_no_ub` (shipped) deliberately carries no post-state length
+    // assertion. This
+    // harness re-measures that exact dropped claim at the current pin, in isolation, through the
+    // raw `LeafNode` projection (not `NodeRef::len()`, not `Handle::new_kv`), so a RED cannot be
+    // blamed on the readback wrapper.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_move_suffix_leaf_raw_len() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let mut left_root: NodeRef<marker::Owned, i32, i32, marker::Leaf> =
+            NodeRef::new_leaf(Global);
+        for i in 0..old_len {
+            left_root.borrow_mut().push(i as i32, 1000 + i as i32);
+        }
+        let left_ptr = left_root.reborrow().node.as_ptr();
+        let mut right_root: NodeRef<marker::Owned, i32, i32, marker::Leaf> =
+            NodeRef::new_leaf(Global);
+        let right_ptr = right_root.reborrow().node.as_ptr();
+
+        let left_mut = left_root.borrow_mut();
+        let edge = unsafe { Handle::new_edge(left_mut, idx) };
+        let mut split_edge = edge.forget_node_type();
+
+        let mut right_lofi: NodeRef<marker::Mut<'_>, i32, i32, marker::LeafOrInternal> =
+            right_root.borrow_mut().forget_type();
+        split_edge.move_suffix(&mut right_lofi);
+        drop(split_edge);
+        drop(right_lofi);
+
+        // `move_suffix` writes both lengths only when `new_right_len > 0`; when idx == old_len it
+        // returns without touching either, so the expected values below are the fixture's own.
+        let expect_left = idx;
+        let expect_right = old_len - idx;
+
+        assert!(
+            unsafe { usize::from((*left_ptr).len) } == expect_left,
+            "ML1: left's stored len == idx after the split"
+        );
+        assert!(
+            unsafe { usize::from((*right_ptr).len) } == expect_right,
+            "ML2: right's stored len == old_len - idx after the split"
+        );
+
+        kani::cover(idx > 0 && idx < old_len, "NV1: genuine interior split");
+        kani::cover(idx == old_len, "NV2: no-op split (right stays empty)");
+        kani::cover(idx == 0 && old_len > 0, "NV3: everything moves right");
+    }
+    // ---------------------------------------------------------------------
+    // LABEL: PROBE — residual: SEPARATE, functional-content companion to
+    // `check_move_suffix_leaf_no_ub` (per the split_leaf_data / leaf_remove lesson: strong
+    // post-state content equalities isolated in their own harness, read back exclusively
+    // through the proven-safe Immut `Handle::new_kv(...).into_kv()` path -- never the raw
+    // `NodeRef::len()`/field read on the fresh sibling that failed in the no_ub harness's
+    // earlier revision). Same old_len/idx domain. Proves: left's head and new-last elements are
+    // untouched/correctly bounded when idx > 0, and the first and last moved elements land at
+    // the expected positions in `right` when idx < old_len (spot-checks at the split's boundary
+    // positions only, the move_suffix-side mirror of `check_leaf_remove_content`'s checks);
+    // does not prove it for every element simultaneously, and does not re-derive `len` itself
+    // (that quantity is exactly the one the no_ub harness dropped).
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_move_suffix_leaf_content_all() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let r = move_suffix_leaf_content_setup(old_len, idx);
+
+        if let Some(h0) = r.left_head0 {
+            assert!(h0 == (0, 1000), "CHECK_A: left head (position 0) mutated by the move");
+        }
+        if let Some(ll) = r.left_last {
+            assert!(
+                ll == ((idx - 1) as i32, 1000 + (idx - 1) as i32),
+                "CHECK_B: left's new-last element != original element at idx - 1"
+            );
+        }
+        if let Some(rh0) = r.right_head0 {
+            assert!(
+                rh0 == (idx as i32, 1000 + idx as i32),
+                "CHECK_C: right's first element != original element at idx"
+            );
+        }
+        if let Some(rl) = r.right_last {
+            assert!(
+                rl == ((old_len - 1) as i32, 1000 + (old_len - 1) as i32),
+                "CHECK_D: right's new-last element != original last element of left"
+            );
+        }
+
+        kani::cover(
+            idx > 0 && idx < old_len,
+            "move_suffix content: genuine interior split verified end-to-end",
+        );
+    }
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_move_suffix_leaf_content_check_a() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let r = move_suffix_leaf_content_setup(old_len, idx);
+
+        if let Some(h0) = r.left_head0 {
+            assert!(h0 == (0, 1000), "CHECK_A: left head (position 0) mutated by the move");
+        }
+
+        kani::cover(
+            idx > 0 && idx < old_len,
+            "move_suffix CHECK_A: genuine interior split (both sides non-empty)",
+        );
+    }
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_move_suffix_leaf_content_check_b() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let r = move_suffix_leaf_content_setup(old_len, idx);
+
+        if let Some(ll) = r.left_last {
+            assert!(
+                ll == ((idx - 1) as i32, 1000 + (idx - 1) as i32),
+                "CHECK_B: left's new-last element != original element at idx - 1"
+            );
+        }
+
+        kani::cover(
+            idx > 0 && idx < old_len,
+            "move_suffix CHECK_B: genuine interior split (both sides non-empty)",
+        );
+    }
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_move_suffix_leaf_content_check_c() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let r = move_suffix_leaf_content_setup(old_len, idx);
+
+        if let Some(rh0) = r.right_head0 {
+            assert!(
+                rh0 == (idx as i32, 1000 + idx as i32),
+                "CHECK_C: right's first element != original element at idx"
+            );
+        }
+
+        kani::cover(
+            idx > 0 && idx < old_len,
+            "move_suffix CHECK_C: genuine interior split (both sides non-empty)",
+        );
+    }
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn check_move_suffix_leaf_content_check_d() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 0 || old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx <= old_len);
+
+        let r = move_suffix_leaf_content_setup(old_len, idx);
+
+        if let Some(rl) = r.right_last {
+            assert!(
+                rl == ((old_len - 1) as i32, 1000 + (old_len - 1) as i32),
+                "CHECK_D: right's new-last element != original last element of left"
+            );
+        }
+
+        kani::cover(
+            idx > 0 && idx < old_len,
+            "move_suffix CHECK_D: genuine interior split (both sides non-empty)",
+        );
+    }
+    // ---------------------------------------------------------------------
+    // PROBE — `Handle::<_, KV>::split` on a LEAF (the leaf arm of the pub(super) function).
+    //
+    // Drives the real `split`, which allocates the new right node itself and returns a
+    // `SplitResult`, rather than only its private helper `split_leaf_data`. Residual: monomorphic
+    // at i32, and `old_len` is SAMPLED at {1, CAPACITY}, not left symbolic across the range. This drives the real `split`, which allocates the new right node
+    // itself and returns a `SplitResult`, and checks the returned kv plus both sides' stored
+    // lengths and their boundary content.
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_leaf_split_no_ub() {
+        let old_len: usize = kani::any();
+        kani::assume(old_len == 1 || old_len == CAP);
+        let idx: usize = kani::any();
+        kani::assume(idx < old_len);
+
+        let mut root: NodeRef<marker::Owned, i32, i32, marker::Leaf> = NodeRef::new_leaf(Global);
+        for i in 0..old_len {
+            root.borrow_mut().push(i as i32, 1000 + i as i32);
+        }
+        let left_ptr = root.reborrow().node.as_ptr();
+
+        // Destructure the `SplitResult` immediately and drop its `left` field: that field is a
+        // `Mut` borrow of `root`, and holding it would keep `root` mutably borrowed past the
+        // `into_dying()` teardown below. Every post-state read on either node goes through the
+        // raw `LeafNode` projection instead, so nothing here depends on that borrow surviving.
+        let (split_kv, mut right_owned) = {
+            let handle = unsafe { Handle::new_kv(root.borrow_mut(), idx) };
+            let SplitResult { left: _left, kv, right } = handle.split(Global);
+            (kv, right)
+        };
+
+        let new_right_len = old_len - idx - 1;
+        let right_ptr = right_owned.reborrow().node.as_ptr();
+
+        assert!(
+            split_kv == (idx as i32, 1000 + idx as i32),
+            "SP1: the split-off kv is the pair at idx"
+        );
+        assert!(
+            unsafe { usize::from((*left_ptr).len) } == idx,
+            "SP2: the source node's stored len == idx"
+        );
+        assert!(
+            unsafe { usize::from((*right_ptr).len) } == new_right_len,
+            "SP3: the new node's stored len == old_len - idx - 1"
+        );
+        if new_right_len > 0 {
+            assert!(
+                unsafe { (*right_ptr).keys[0].assume_init_read() } == (idx + 1) as i32,
+                "SP4: the new node's first key is the source key at idx + 1"
+            );
+            assert!(
+                unsafe { (*right_ptr).vals[0].assume_init_read() } == 1000 + (idx + 1) as i32,
+                "SP5: the new node's first val is the source val at idx + 1"
+            );
+            assert!(
+                unsafe { (*right_ptr).keys[new_right_len - 1].assume_init_read() }
+                    == (old_len - 1) as i32,
+                "SP6: the new node's last key is the source's original last key"
+            );
+            assert!(
+                unsafe { (*right_ptr).vals[new_right_len - 1].assume_init_read() }
+                    == 1000 + (old_len - 1) as i32,
+                "SP6v: the new node's last val is the source's original last val"
+            );
+        }
+        if idx > 0 {
+            assert!(
+                unsafe { (*left_ptr).keys[0].assume_init_read() } == 0,
+                "SP7: the source node's head key is untouched by the split"
+            );
+            assert!(
+                unsafe { (*left_ptr).vals[0].assume_init_read() } == 1000,
+                "SP7v: the source node's head val is untouched by the split"
+            );
+        }
+
+        kani::cover(
+            old_len == CAP && idx == MIN_LEN_AFTER_SPLIT,
+            "NV1: a real call-site shape (full node, split at B - 1)",
+        );
+        kani::cover(new_right_len == 0, "NV2: the split produced an empty right node");
+        kani::cover(idx == 0, "NV3: the split point is the very first pair");
+
+        let mut dying_left: NodeRef<marker::Dying, i32, i32, marker::Leaf> = root.into_dying();
+        let dying_left_ptr = dying_left.node;
+        unsafe {
+            dying_left.as_leaf_dying();
+            Global.deallocate(dying_left_ptr.cast(), Layout::new::<LeafNode<i32, i32>>());
+        }
+        let mut dying_right: NodeRef<marker::Dying, i32, i32, marker::Leaf> =
+            right_owned.into_dying();
+        let dying_right_ptr = dying_right.node;
+        unsafe {
+            dying_right.as_leaf_dying();
+            Global.deallocate(dying_right_ptr.cast(), Layout::new::<LeafNode<i32, i32>>());
+        }
+    }
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_new_internal_no_ub() {
+        // Two shapes: a height-0 leaf child (producing a height-1 internal node) and a height-1
+        // internal child (producing a height-2 node), which is the shape `push_internal_level`
+        // and the split path actually build.
+        let deep: bool = kani::any();
+
+        let (built_nn, child_nn, expected_height) = if deep {
+            let grandchild = symbolic_leaf(0);
+            let grandchild_nn = grandchild.reborrow().node;
+            let child: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+                NodeRef::new_internal(grandchild.forget_type(), Global);
+            let child_nn = child.reborrow().node;
+            let built: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+                NodeRef::new_internal(child.forget_type(), Global);
+            let built_nn = built.reborrow().node;
+            assert!(built.height() == 2, "NI1: an internal child yields a height-2 node");
+            unsafe {
+                Global.deallocate(grandchild_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            }
+            (built_nn, child_nn, 2usize)
+        } else {
+            let child = symbolic_leaf(0);
+            let child_nn = child.reborrow().node;
+            let built: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+                NodeRef::new_internal(child.forget_type(), Global);
+            let built_nn = built.reborrow().node;
+            assert!(built.height() == 1, "NI2: a leaf child yields a height-1 node");
+            (built_nn, child_nn, 1usize)
+        };
+
+        // The child's parent link must have been written by the constructor's own relink.
+        assert!(
+            unsafe { usize::from((*child_nn.as_ptr()).parent_idx.assume_init_read()) } == 0,
+            "NI3: the child was linked at edge 0"
+        );
+        assert!(
+            unsafe { (*child_nn.as_ptr()).parent }
+                == Some(built_nn.cast::<InternalNode<i32, i32>>()),
+            "NI4: the child points back at the node just built"
+        );
+        // The backlink alone would be satisfied by a node that does not actually hold the child
+        // at edge 0, so check the forward direction too.
+        assert!(
+            unsafe {
+                (*built_nn.cast::<InternalNode<i32, i32>>().as_ptr()).edges[0].assume_init_read()
+            } == child_nn,
+            "NI5: the built node's edge 0 IS the child"
+        );
+
+        kani::cover(expected_height == 1, "NV1: built over a leaf child");
+        kani::cover(expected_height == 2, "NV2: built over an internal child");
+
+        unsafe {
+            Global.deallocate(built_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            if deep {
+                Global.deallocate(child_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            } else {
+                Global.deallocate(child_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            }
+        }
+    }
+    // ---------------------------------------------------------------------
+    // `correct_all_childrens_parent_links` over the COMPLETE occupancy domain.
+    //
+    // The counterpart harness in the shipped probe set samples `len` at {0, 1, CAPACITY}. This one
+    // leaves `len` fully symbolic in `0..=CAPACITY`, which for this node type is every reachable
+    // occupancy — so a green here is a genuinely domain-complete memory-safety result for the
+    // relink loop, not a three-point sample. Same perturb-then-fix design, same single symbolic
+    // read-back index (the functional claim stays per-index; the MEMORY-SAFETY checks Kani emits
+    // are all-paths regardless, which is what the challenge's criterion actually asks for).
+    // ---------------------------------------------------------------------
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_correct_all_childrens_parent_links_full_domain() {
+        let len: usize = kani::any();
+        kani::assume(len <= CAP);
+
+        let mut internal = symbolic_internal(len);
+        let internal_addr = NodeRef::as_internal_ptr(&internal.borrow_mut()) as usize;
+
+        let garbage = NonNull::<InternalNode<i32, i32>>::dangling();
+        for i in 0..=len {
+            let mut_ref = internal.borrow_mut();
+            let edge = unsafe { Handle::new_edge(mut_ref, i) };
+            let mut child = edge.descend();
+            child.set_parent_link(garbage, 9999);
+        }
+
+        let check_i: usize = kani::any();
+        kani::assume(check_i <= len);
+
+        internal.borrow_mut().correct_all_childrens_parent_links();
+
+        let mut_ref = internal.borrow_mut();
+        let edge = unsafe { Handle::new_edge(mut_ref, check_i) };
+        let descended = edge.descend();
+        let ascended = descended.ascend();
+        assert!(ascended.is_ok(), "CA2: a relinked child failed to ascend to its parent");
+        let parent_edge = ascended.ok().unwrap();
+        assert!(parent_edge.idx() == check_i, "CA1: the child ascends to its own edge index");
+        // Checking only the index would be satisfied by a child still carrying the perturbed
+        // (dangling) parent pointer, so check the node the ascent actually landed on.
+        let reached = NodeRef::as_internal_ptr(&parent_edge.into_node()) as usize;
+        assert!(
+            reached == internal_addr,
+            "CA3: the child ascends to THIS node, not a stale pointer"
+        );
+
+        kani::cover(len == 0, "NV1: a childless (single-edge) node");
+        kani::cover(len > 1 && len < CAP, "NV2: a strictly intermediate occupancy");
+        kani::cover(len == CAP, "NV3: a maximal-occupancy node");
+        kani::cover(check_i == len && len > 0, "NV4: the last edge is the one checked");
+    }
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_steal_left_leaf_no_ub() {
+        let old_left_len: usize = kani::any();
+        let old_right_len: usize = kani::any();
+        kani::assume(old_left_len <= CAP);
+        kani::assume(old_right_len <= CAP);
+        // `bulk_steal_left(1)`'s own preconditions, specialised to count == 1.
+        kani::assume(old_left_len >= 1);
+        kani::assume(old_right_len + 1 <= CAP);
+        // The caller contract `steal_left` documents for its tracked edge.
+        let track: usize = kani::any();
+        kani::assume(track <= old_right_len);
+
+        let mut f = balance_fixture(old_left_len, old_right_len);
+        {
+            let kv = unsafe { Handle::new_kv(f.parent.borrow_mut(), 0) };
+            let bc = kv.consider_for_balancing();
+            let edge = bc.steal_left(track);
+            assert!(edge.idx == 1 + track, "SL1: the tracked right edge shifted up by exactly one");
+        }
+
+        kani::cover(track == 0, "NV1: the tracked edge was the first one");
+        kani::cover(
+            track == old_right_len && old_right_len > 0,
+            "NV2: the tracked edge was the last one on a non-empty right child",
+        );
+        kani::cover(old_right_len + 1 == CAP, "NV3: the steal filled the right child to CAPACITY");
+
+        unsafe { balance_teardown(&f) };
+    }
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_steal_right_leaf_no_ub() {
+        let old_left_len: usize = kani::any();
+        let old_right_len: usize = kani::any();
+        kani::assume(old_left_len <= CAP);
+        kani::assume(old_right_len <= CAP);
+        // `bulk_steal_right(1)`'s own preconditions, specialised to count == 1.
+        kani::assume(old_right_len >= 1);
+        kani::assume(old_left_len + 1 <= CAP);
+        // `steal_right`'s doc describes the tracked edge as one in the LEFT child "which didn't
+        // move" -- an ORIGINAL edge, i.e. `0..=old_left_len`. The range assumed here is a
+        // deliberate SUPERSET: `old_left_len + 1` is not an original edge, but it is still within
+        // `Handle::new_edge`'s post-steal bound, so admitting it widens the domain without
+        // asserting anything the doc does not support.
+        let track: usize = kani::any();
+        kani::assume(track <= old_left_len + 1);
+
+        let mut f = balance_fixture(old_left_len, old_right_len);
+        {
+            let kv = unsafe { Handle::new_kv(f.parent.borrow_mut(), 0) };
+            let bc = kv.consider_for_balancing();
+            let edge = bc.steal_right(track);
+            assert!(edge.idx == track, "SR1: the tracked left edge did not move");
+        }
+
+        kani::cover(track == 0, "NV1: the tracked edge was the first one");
+        kani::cover(
+            track == old_left_len + 1,
+            "NV2: the post-steal-valid index just past the original edges (outside the doc's range)",
+        );
+        kani::cover(old_left_len + 1 == CAP, "NV3: the steal filled the left child to CAPACITY");
+
+        unsafe { balance_teardown(&f) };
+    }
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_merge_tracking_child_edge_leaf_no_ub() {
+        let old_left_len: usize = kani::any();
+        let right_len: usize = kani::any();
+        kani::assume(old_left_len <= CAP);
+        kani::assume(right_len <= CAP);
+        // `do_merge`'s own precondition (it asserts, and a violating caller is specified to panic).
+        kani::assume(old_left_len + 1 + right_len <= CAP);
+
+        // Track an edge on either side. The fn asserts this bound itself; assuming it keeps the
+        // harness on the no-panic path, which is the one whose memory safety is in question.
+        let side: bool = kani::any();
+        let raw: usize = kani::any();
+        let track = if side {
+            kani::assume(raw <= old_left_len);
+            LeftOrRight::Left(raw)
+        } else {
+            kani::assume(raw <= right_len);
+            LeftOrRight::Right(raw)
+        };
+        let expected = if side { raw } else { old_left_len + 1 + raw };
+
+        let mut f = balance_fixture(old_left_len, right_len);
+        // `merge_tracking_child_edge` frees the RIGHT child itself, so the teardown below must
+        // not touch it — this harness therefore does its own two-allocation teardown rather than
+        // calling `balance_teardown`.
+        {
+            let kv = unsafe { Handle::new_kv(f.parent.borrow_mut(), 0) };
+            let bc = kv.consider_for_balancing();
+            let edge = bc.merge_tracking_child_edge(track, Global);
+            assert!(edge.idx == expected, "MT1: the tracked edge landed at its documented index");
+        }
+
+        kani::cover(side, "NV1: an edge in the LEFT child was tracked");
+        kani::cover(!side, "NV2: an edge in the RIGHT child was tracked");
+        kani::cover(
+            old_left_len + 1 + right_len == CAP,
+            "NV3: the merge filled the surviving child to CAPACITY",
+        );
+
+        unsafe {
+            Global.deallocate(f.parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(f.left_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+        }
+    }
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_do_merge_leaf_no_ub() {
+        let old_left_len: usize = kani::any();
+        let right_len: usize = kani::any();
+        kani::assume(old_left_len <= CAP);
+        kani::assume(right_len <= CAP);
+        // The fn's own precondition (node.rs:1419), ASSUMED rather than asserted: a caller that
+        // violates it is specified to panic, which is not UB and is not this harness's subject.
+        kani::assume(old_left_len + 1 + right_len <= CAP);
+        let new_left_len = old_left_len + 1 + right_len;
+
+        let left = symbolic_leaf(old_left_len);
+        let left_nn = left.reborrow().node;
+        let left_ptr = left_nn.as_ptr();
+        let right = symbolic_leaf(right_len);
+        let right_nn = right.reborrow().node;
+        let right_ptr = right_nn.as_ptr();
+        let third = symbolic_leaf(1);
+        let third_nn = third.reborrow().node;
+        let third_ptr = third_nn.as_ptr();
+
+        let mut parent: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(left.forget_type(), Global);
+        let parent_nn = parent.reborrow().node;
+        let parent_ptr = parent_nn.as_ptr();
+        let parent_int_nn = parent_nn.cast::<InternalNode<i32, i32>>();
+        let parent_int_ptr = parent_int_nn.as_ptr();
+        let k0: i32 = kani::any();
+        let v0: i32 = kani::any();
+        let k1: i32 = kani::any();
+        let v1: i32 = kani::any();
+        parent.borrow_mut().push(k0, v0, right.forget_type());
+        parent.borrow_mut().push(k1, v1, third.forget_type());
+
+        // Pre-state snapshot. The right child is read HERE and nowhere else — the call frees it.
+        let mut left_k_before = [0i32; CAP];
+        let mut left_v_before = [0i32; CAP];
+        let mut right_k_before = [0i32; CAP];
+        let mut right_v_before = [0i32; CAP];
+        for i in 0..CAP {
+            if i < old_left_len {
+                left_k_before[i] = unsafe { (*left_ptr).keys[i].assume_init_read() };
+                left_v_before[i] = unsafe { (*left_ptr).vals[i].assume_init_read() };
+            }
+            if i < right_len {
+                right_k_before[i] = unsafe { (*right_ptr).keys[i].assume_init_read() };
+                right_v_before[i] = unsafe { (*right_ptr).vals[i].assume_init_read() };
+            }
+        }
+        assert!(
+            unsafe { usize::from((*left_ptr).len) } == old_left_len,
+            "G0: fixture — left's stored len before the call"
+        );
+        assert!(
+            unsafe { usize::from((*right_ptr).len) } == right_len,
+            "G1: fixture — right's stored len before the call"
+        );
+        assert!(
+            unsafe { usize::from((*parent_ptr).len) } == 2,
+            "G2: fixture — the parent holds two pairs and three edges before the call"
+        );
+        assert!(
+            unsafe { usize::from((*third_ptr).parent_idx.assume_init_read()) } == 2,
+            "G3: fixture — the spare child sits at edge 2 before the call"
+        );
+
+        // ---------------- THE TARGET CALL ----------------
+        {
+            let kv = unsafe { Handle::new_kv(parent.borrow_mut(), 0) };
+            let bc = kv.consider_for_balancing();
+            let _shrunk = bc.merge_tracking_parent(Global);
+        }
+
+        // -------- CLAIM 1: the merged child's new length. --------
+        // ⚠ This is the exact fact `bulk_steal_left`'s proof could NOT make about ITS destination
+        // child, on an object written by the same helper at a symbolic offset.
+        assert!(
+            unsafe { usize::from((*left_ptr).len) } == new_left_len,
+            "S1: left's stored len == old_left_len + 1 + right_len"
+        );
+
+        // -------- CLAIM 2: the merged child's pre-existing prefix is untouched. -------- (M2/M2v)
+        for i in 0..CAP {
+            if i < old_left_len {
+                assert!(
+                    unsafe { (*left_ptr).keys[i].assume_init_read() } == left_k_before[i],
+                    "S2: left's pre-existing key prefix is untouched"
+                );
+                assert!(
+                    unsafe { (*left_ptr).vals[i].assume_init_read() } == left_v_before[i],
+                    "S3: left's pre-existing val prefix is untouched"
+                );
+            }
+        }
+
+        // -------- CLAIM 3: the parent's pair was pulled down into the gap. -------- (M3/M3v)
+        assert!(
+            unsafe { (*left_ptr).keys[old_left_len].assume_init_read() } == k0,
+            "D1: left[old_left_len] key := the parent's separating key"
+        );
+        assert!(
+            unsafe { (*left_ptr).vals[old_left_len].assume_init_read() } == v0,
+            "D2: left[old_left_len] val := the parent's separating val"
+        );
+
+        // -------- CLAIM 4: the whole right child landed after it. -------- (M4/M4v)
+        // `move_to_slice(right[..right_len], left[old_left_len+1..new_left_len])`, both arrays.
+        for i in 0..CAP {
+            if i < right_len {
+                assert!(
+                    unsafe { (*left_ptr).keys[old_left_len + 1 + i].assume_init_read() }
+                        == right_k_before[i],
+                    "D3: left[old_left_len+1..] keys := the whole right child"
+                );
+                assert!(
+                    unsafe { (*left_ptr).vals[old_left_len + 1 + i].assume_init_read() }
+                        == right_v_before[i],
+                    "D4: left[old_left_len+1..] vals := the whole right child"
+                );
+            }
+        }
+
+        // -------- CLAIM 5: the parent shrank correctly. -------- (Q1/Q2/Q2v)
+        // The parent is a copy DESTINATION here (three `slice_remove`s) — the first time in this
+        // family that a copy destination's own fields are claimed rather than covered.
+        assert!(
+            unsafe { usize::from((*parent_ptr).len) } == 1,
+            "D5: the parent's stored len dropped to 1"
+        );
+        assert!(
+            unsafe { (*parent_ptr).keys[0].assume_init_read() } == k1,
+            "D6: the parent's surviving key shifted down into slot 0"
+        );
+        assert!(
+            unsafe { (*parent_ptr).vals[0].assume_init_read() } == v1,
+            "D7: the parent's surviving val shifted down into slot 0"
+        );
+
+        // -------- CLAIM 6: the edge array closed the gap and the links were repaired. --------
+        // (Q3/Q4/Q5) `slice_remove(edge_area(..3), 1)` then
+        // `correct_childrens_parent_links(1..2)` — the repair runs, at a constant trip count.
+        assert!(
+            unsafe { (*parent_int_ptr).edges[1].assume_init_read() } == third_nn,
+            "D8: the parent's edge 1 is now the spare child"
+        );
+        assert!(
+            unsafe { usize::from((*third_ptr).parent_idx.assume_init_read()) } == 1,
+            "D9: the spare child's parent_idx was corrected 2 -> 1"
+        );
+        assert!(
+            unsafe { (*third_ptr).parent } == Some(parent_int_nn),
+            "D10: the spare child still points at the parent"
+        );
+
+        // ---------------- Non-vacuity. ----------------
+        kani::cover(right_len == 0, "NV1: an EMPTY right child is merged in");
+        kani::cover(right_len > 1, "NV2: a multi-pair right child is merged in");
+        kani::cover(old_left_len == 0, "NV3: the left child was empty before the merge");
+        kani::cover(old_left_len > 0, "NV4: a non-empty left prefix is preserved across the merge");
+        kani::cover(new_left_len == CAP, "NV5: the merge fills the left child to CAPACITY");
+        kani::cover(
+            old_left_len > 0 && right_len > 1,
+            "NV6: a non-empty prefix and a multi-pair move happen together",
+        );
+
+        // Teardown: THREE live allocations, not four — `do_merge` freed the right child itself
+        // (node.rs:1456), and this harness proves that free is not UB. Freeing it again here
+        // would be a double free.
+        unsafe {
+            Global.deallocate(parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(left_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(third_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+        }
+    }
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn check_do_merge_internal_no_ub() {
+        const IB: usize = 2;
+
+        let old_left_len: usize = kani::any();
+        let right_len: usize = kani::any();
+        kani::assume(old_left_len <= IB);
+        kani::assume(right_len <= IB);
+        let new_left_len = old_left_len + 1 + right_len;
+
+        let lg0 = symbolic_leaf(0);
+        let lg0_nn = lg0.reborrow().node;
+        let lg1 = symbolic_leaf(0);
+        let lg1_nn = lg1.reborrow().node;
+        let lg2 = symbolic_leaf(0);
+        let lg2_nn = lg2.reborrow().node;
+        let rg0 = symbolic_leaf(0);
+        let rg0_nn = rg0.reborrow().node;
+        let rg1 = symbolic_leaf(0);
+        let rg1_nn = rg1.reborrow().node;
+        let rg2 = symbolic_leaf(0);
+        let rg2_nn = rg2.reborrow().node;
+        let tg = symbolic_leaf(0);
+        let tg_nn = tg.reborrow().node;
+        let lg = [lg0_nn, lg1_nn, lg2_nn];
+        let rg = [rg0_nn, rg1_nn, rg2_nn];
+
+        let mut left: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(lg0.forget_type(), Global);
+        let left_nn = left.reborrow().node;
+        let left_ptr = left_nn.as_ptr();
+        let left_int_nn = left_nn.cast::<InternalNode<i32, i32>>();
+        let left_int_ptr = left_int_nn.as_ptr();
+        let lk0: i32 = kani::any();
+        let lv0: i32 = kani::any();
+        let lk1: i32 = kani::any();
+        let lv1: i32 = kani::any();
+        if old_left_len >= 1 {
+            left.borrow_mut().push(lk0, lv0, lg1.forget_type());
+        }
+        if old_left_len >= 2 {
+            left.borrow_mut().push(lk1, lv1, lg2.forget_type());
+        }
+
+        let mut right: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(rg0.forget_type(), Global);
+        let right_nn = right.reborrow().node;
+        let right_ptr = right_nn.as_ptr();
+        let right_int_nn = right_nn.cast::<InternalNode<i32, i32>>();
+        let rk0: i32 = kani::any();
+        let rv0: i32 = kani::any();
+        let rk1: i32 = kani::any();
+        let rv1: i32 = kani::any();
+        if right_len >= 1 {
+            right.borrow_mut().push(rk0, rv0, rg1.forget_type());
+        }
+        if right_len >= 2 {
+            right.borrow_mut().push(rk1, rv1, rg2.forget_type());
+        }
+
+        let third: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(tg.forget_type(), Global);
+        let third_nn = third.reborrow().node;
+        let third_ptr = third_nn.as_ptr();
+
+        let mut parent: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(left.forget_type(), Global);
+        let parent_nn = parent.reborrow().node;
+        let parent_ptr = parent_nn.as_ptr();
+        let parent_int_nn = parent_nn.cast::<InternalNode<i32, i32>>();
+        let parent_int_ptr = parent_int_nn.as_ptr();
+        let k0: i32 = kani::any();
+        let v0: i32 = kani::any();
+        let k1: i32 = kani::any();
+        let v1: i32 = kani::any();
+        parent.borrow_mut().push(k0, v0, right.forget_type());
+        parent.borrow_mut().push(k1, v1, third.forget_type());
+
+        let mut left_k_before = [0i32; IB + 1];
+        let mut left_v_before = [0i32; IB + 1];
+        let mut right_k_before = [0i32; IB + 1];
+        let mut right_v_before = [0i32; IB + 1];
+        for i in 0..=IB {
+            if i < old_left_len {
+                left_k_before[i] = unsafe { (*left_ptr).keys[i].assume_init_read() };
+                left_v_before[i] = unsafe { (*left_ptr).vals[i].assume_init_read() };
+            }
+            if i < right_len {
+                right_k_before[i] = unsafe { (*right_ptr).keys[i].assume_init_read() };
+                right_v_before[i] = unsafe { (*right_ptr).vals[i].assume_init_read() };
+            }
+        }
+
+        // ---- the fixture, ASSERTED (17a measured every one of these UNSATISFIABLE) ----
+        assert!(unsafe { usize::from((*left_ptr).len) } == old_left_len);
+        assert!(unsafe { usize::from((*right_ptr).len) } == right_len);
+        assert!(unsafe { usize::from((*parent_ptr).len) } == 2);
+        let mut g_rlink = true;
+        for i in 0..=IB {
+            if i <= right_len {
+                let g = rg[i].as_ptr();
+                if usize::from(unsafe { (*g).parent_idx.assume_init_read() }) != i {
+                    g_rlink = false;
+                }
+                if unsafe { (*g).parent } != Some(right_int_nn) {
+                    g_rlink = false;
+                }
+            }
+        }
+        assert!(g_rlink);
+        assert!(unsafe { usize::from((*third_ptr).parent_idx.assume_init_read()) } == 2);
+
+        // ---------------- THE TARGET CALL ----------------
+        {
+            let kv = unsafe { Handle::new_kv(parent.borrow_mut(), 0) };
+            let bc = kv.consider_for_balancing();
+            let _shrunk = bc.merge_tracking_parent(Global);
+        }
+
+        // ---- the merged child's leaf-prefix fields ----
+        assert!(unsafe { usize::from((*left_ptr).len) } == new_left_len);
+        let mut m_prefix = true;
+        let mut m_moved = true;
+        for i in 0..=IB {
+            if i < old_left_len {
+                if unsafe { (*left_ptr).keys[i].assume_init_read() } != left_k_before[i] {
+                    m_prefix = false;
+                }
+                if unsafe { (*left_ptr).vals[i].assume_init_read() } != left_v_before[i] {
+                    m_prefix = false;
+                }
+            }
+            if i < right_len {
+                if unsafe { (*left_ptr).keys[old_left_len + 1 + i].assume_init_read() }
+                    != right_k_before[i]
+                {
+                    m_moved = false;
+                }
+                if unsafe { (*left_ptr).vals[old_left_len + 1 + i].assume_init_read() }
+                    != right_v_before[i]
+                {
+                    m_moved = false;
+                }
+            }
+        }
+        assert!(m_prefix);
+        assert!(unsafe { (*left_ptr).keys[old_left_len].assume_init_read() } == k0);
+        assert!(unsafe { (*left_ptr).vals[old_left_len].assume_init_read() } == v0);
+        assert!(m_moved);
+
+        // ---- the merged child's EDGE array: the copy this arm alone performs ----
+        let mut e_prefix = true;
+        let mut e_moved = true;
+        for i in 0..=IB {
+            if i <= old_left_len {
+                if unsafe { (*left_int_ptr).edges[i].assume_init_read() } != lg[i] {
+                    e_prefix = false;
+                }
+            }
+            if i <= right_len {
+                if unsafe { (*left_int_ptr).edges[old_left_len + 1 + i].assume_init_read() }
+                    != rg[i]
+                {
+                    e_moved = false;
+                }
+            }
+        }
+        assert!(e_prefix);
+        assert!(e_moved);
+
+        // ---- the SYMBOLIC-TRIP-COUNT parent-link repair, and its non-effect on the rest ----
+        let mut e_links = true;
+        let mut e_own = true;
+        for i in 0..=IB {
+            if i <= right_len {
+                let g = rg[i].as_ptr();
+                if usize::from(unsafe { (*g).parent_idx.assume_init_read() })
+                    != old_left_len + 1 + i
+                {
+                    e_links = false;
+                }
+                if unsafe { (*g).parent } != Some(left_int_nn) {
+                    e_links = false;
+                }
+            }
+            if i <= old_left_len {
+                let g = lg[i].as_ptr();
+                if usize::from(unsafe { (*g).parent_idx.assume_init_read() }) != i {
+                    e_own = false;
+                }
+                if unsafe { (*g).parent } != Some(left_int_nn) {
+                    e_own = false;
+                }
+            }
+        }
+        assert!(e_links);
+        assert!(e_own);
+
+        // ---- the shrunk parent, and its own repair ----
+        assert!(unsafe { usize::from((*parent_ptr).len) } == 1);
+        assert!(unsafe { (*parent_ptr).keys[0].assume_init_read() } == k1);
+        assert!(unsafe { (*parent_ptr).vals[0].assume_init_read() } == v1);
+        assert!(unsafe { (*parent_int_ptr).edges[1].assume_init_read() } == third_nn);
+        assert!(unsafe { usize::from((*third_ptr).parent_idx.assume_init_read()) } == 1);
+        assert!(unsafe { (*third_ptr).parent } == Some(parent_int_nn));
+
+        // ---- non-vacuity: the admitted space is not a single degenerate shape ----
+        kani::cover(right_len == 0, "NV1: a length-0 right child is merged");
+        kani::cover(right_len == IB, "NV2: a multi-edge move happens");
+        kani::cover(old_left_len > 0, "NV3: a non-empty left prefix survives the merge");
+        kani::cover(
+            old_left_len > 0 && right_len > 1,
+            "NV4: a non-empty prefix and a multi-edge move happen together",
+        );
+        kani::cover(new_left_len == 2 * IB + 1, "NV5: the widest admitted merge is reached");
+
+        unsafe {
+            Global.deallocate(parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(left_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(third_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(lg0_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(lg1_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(lg2_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(rg0_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(rg1_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(rg2_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(tg_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+        }
+    }
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_bulk_steal_left_leaf_scoped_no_ub() {
+        let old_left_len: usize = kani::any();
+        let old_right_len: usize = kani::any();
+        let count: usize = kani::any();
+        kani::assume(old_left_len <= CAP);
+        kani::assume(old_right_len <= CAP);
+        // The fn's own three preconditions, ASSUMED rather than asserted: a caller that violates
+        // them is specified to panic, which is not UB and is not this harness's subject.
+        kani::assume(count > 0);
+        kani::assume(old_left_len >= count);
+        kani::assume(old_right_len + count <= CAP);
+
+        let new_left_len = old_left_len - count;
+        let new_right_len = old_right_len + count;
+
+        let left = symbolic_leaf(old_left_len);
+        let left_nn = left.reborrow().node;
+        let left_ptr = left_nn.as_ptr();
+        let right = symbolic_leaf(old_right_len);
+        let right_nn = right.reborrow().node;
+        let right_ptr = right_nn.as_ptr();
+
+        let mut parent: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(left.forget_type(), Global);
+        let parent_nn = parent.reborrow().node;
+        let pk: i32 = kani::any();
+        let pv: i32 = kani::any();
+        parent.borrow_mut().push(pk, pv, right.forget_type());
+
+        // Pre-state snapshot, taken through the SAME raw path used after the call, so a difference
+        // between the two cannot be an artifact of two different read routes.
+        let mut left_k_before = [0i32; CAP];
+        let mut left_v_before = [0i32; CAP];
+        let mut right_k_before = [0i32; CAP];
+        let mut right_v_before = [0i32; CAP];
+        for i in 0..CAP {
+            if i < old_left_len {
+                left_k_before[i] = unsafe { (*left_ptr).keys[i].assume_init_read() };
+                left_v_before[i] = unsafe { (*left_ptr).vals[i].assume_init_read() };
+            }
+            if i < old_right_len {
+                right_v_before[i] = unsafe { (*right_ptr).vals[i].assume_init_read() };
+                right_k_before[i] = unsafe { (*right_ptr).keys[i].assume_init_read() };
+            }
+        }
+        // The fixture is sound before the call. These are ASSERTIONS, not covers: if either fails
+        // the harness is measuring against a pre-state that was already wrong.
+        assert!(
+            unsafe { usize::from((*left_ptr).len) } == old_left_len,
+            "G0: fixture — left stored len before the call"
+        );
+        assert!(
+            unsafe { usize::from((*right_ptr).len) } == old_right_len,
+            "G1: fixture — right stored len before the call"
+        );
+
+        // ---------------- THE TARGET CALL ----------------
+        {
+            let kv = unsafe { Handle::new_kv(parent.borrow_mut(), 0) };
+            let mut bc = kv.consider_for_balancing();
+            bc.bulk_steal_left(count);
+        }
+
+        // ---------------- CLAIM 1: the copy SOURCE side is intact. ----------------
+        // The left child is only ever read out of, never written into, so nothing here is
+        // exposed to the destination-offset imprecision.
+        assert!(
+            unsafe { usize::from((*left_ptr).len) } == new_left_len,
+            "S1: left stored len == old_left_len - count"
+        );
+        for i in 0..CAP {
+            if i < new_left_len {
+                assert!(
+                    unsafe { (*left_ptr).keys[i].assume_init_read() } == left_k_before[i],
+                    "S2: left's retained key prefix is untouched"
+                );
+                assert!(
+                    unsafe { (*left_ptr).vals[i].assume_init_read() } == left_v_before[i],
+                    "S3: left's retained val prefix is untouched"
+                );
+            }
+        }
+
+        // ---------------- CLAIM 2: the stolen block landed at the front of `right`. ----------
+        // `move_to_slice(left[new_left_len+1..old_left_len], right[..count-1])`, both arrays.
+        for i in 0..CAP {
+            if i + 1 < count {
+                assert!(
+                    unsafe { (*right_ptr).keys[i].assume_init_read() }
+                        == left_k_before[new_left_len + 1 + i],
+                    "D1: right[..count-1] keys := the stolen left block"
+                );
+                assert!(
+                    unsafe { (*right_ptr).vals[i].assume_init_read() }
+                        == left_v_before[new_left_len + 1 + i],
+                    "D2: right[..count-1] vals := the stolen left block"
+                );
+            }
+        }
+
+        // ---------------- CLAIM 3: the pair rotation through the parent. ----------------
+        // The parent's OLD kv is written into `right[count-1]` by two single-element `.write()`s,
+        // and the parent takes `left[new_left_len]` via `replace_kv`.
+        assert!(
+            unsafe { (*right_ptr).keys[count - 1].assume_init_read() } == pk,
+            "D3: right[count-1] key := the parent's OLD key"
+        );
+        assert!(
+            unsafe { (*right_ptr).vals[count - 1].assume_init_read() } == pv,
+            "D4: right[count-1] val := the parent's OLD val"
+        );
+        let parent_after = kv_at(parent.borrow_mut().forget_type(), 0);
+        assert!(
+            parent_after == (left_k_before[new_left_len], left_v_before[new_left_len]),
+            "D5: the parent now holds left[new_left_len]"
+        );
+
+        // -------- CLAIM 4: the destination child's own state. --------
+        // Asserted, not covered: the destination's stored length after the steal, and the shift-up
+        // of its pre-existing pairs in BOTH the key and the value array.
+        assert!(
+            unsafe { usize::from((*right_ptr).len) } == new_right_len,
+            "D6: right's stored len == old_right_len + count"
+        );
+        for i in 0..CAP {
+            if i < old_right_len {
+                assert!(
+                    unsafe { (*right_ptr).keys[count + i].assume_init_read() } == right_k_before[i],
+                    "D7: right's own keys are shifted up by count"
+                );
+                assert!(
+                    unsafe { (*right_ptr).vals[count + i].assume_init_read() } == right_v_before[i],
+                    "D8: right's own vals are shifted up by count"
+                );
+            }
+        }
+
+        // ---------------- Non-vacuity. ----------------
+        kani::cover(count == 1, "NV1: count == 1 — the `steal_left` specialization");
+        kani::cover(count > 1, "NV2: count > 1 — a genuine bulk steal of several pairs");
+        kani::cover(new_left_len == 0, "NV3: the left child was emptied by the steal");
+        kani::cover(new_right_len == CAP, "NV4: the right child was filled to CAPACITY");
+        kani::cover(
+            old_right_len > 0 && count > 1,
+            "NV5: shift-up and a multi-pair move happen together",
+        );
+
+        // Teardown: three live allocations, no drop glue (i32 K/V).
+        unsafe {
+            Global.deallocate(parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(left_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(right_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+        }
+    }
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn check_bulk_steal_right_leaf_scoped_no_ub() {
+        let old_left_len: usize = kani::any();
+        let old_right_len: usize = kani::any();
+        let count: usize = kani::any();
+        kani::assume(old_left_len <= CAP);
+        kani::assume(old_right_len <= CAP);
+        // The fn's own three preconditions, ASSUMED rather than asserted: a caller that violates
+        // them is specified to panic, which is not UB and is not this harness's subject.
+        kani::assume(count > 0);
+        kani::assume(old_right_len >= count);
+        kani::assume(old_left_len + count <= CAP);
+
+        let new_left_len = old_left_len + count;
+        let new_right_len = old_right_len - count;
+
+        let left = symbolic_leaf(old_left_len);
+        let left_nn = left.reborrow().node;
+        let left_ptr = left_nn.as_ptr();
+        let right = symbolic_leaf(old_right_len);
+        let right_nn = right.reborrow().node;
+        let right_ptr = right_nn.as_ptr();
+
+        let mut parent: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(left.forget_type(), Global);
+        let parent_nn = parent.reborrow().node;
+        let pk: i32 = kani::any();
+        let pv: i32 = kani::any();
+        parent.borrow_mut().push(pk, pv, right.forget_type());
+
+        // Pre-state snapshot through the SAME raw path used after the call.
+        let mut left_k_before = [0i32; CAP];
+        let mut left_v_before = [0i32; CAP];
+        let mut right_k_before = [0i32; CAP];
+        let mut right_v_before = [0i32; CAP];
+        for i in 0..CAP {
+            if i < old_left_len {
+                left_k_before[i] = unsafe { (*left_ptr).keys[i].assume_init_read() };
+                left_v_before[i] = unsafe { (*left_ptr).vals[i].assume_init_read() };
+            }
+            if i < old_right_len {
+                right_k_before[i] = unsafe { (*right_ptr).keys[i].assume_init_read() };
+                right_v_before[i] = unsafe { (*right_ptr).vals[i].assume_init_read() };
+            }
+        }
+        assert!(
+            unsafe { usize::from((*left_ptr).len) } == old_left_len,
+            "G0: fixture — left stored len before the call"
+        );
+        assert!(
+            unsafe { usize::from((*right_ptr).len) } == old_right_len,
+            "G1: fixture — right stored len before the call"
+        );
+
+        // ---------------- THE TARGET CALL ----------------
+        {
+            let kv = unsafe { Handle::new_kv(parent.borrow_mut(), 0) };
+            let mut bc = kv.consider_for_balancing();
+            bc.bulk_steal_right(count);
+        }
+
+        // -------- CLAIM 1: the DESTINATION child (left) is fully provable. --------
+        // The destination child's own pre-existing prefix is untouched by the steal.
+        assert!(
+            unsafe { usize::from((*left_ptr).len) } == new_left_len,
+            "S1: left stored len == old_left_len + count"
+        );
+        for i in 0..CAP {
+            if i < old_left_len {
+                assert!(
+                    unsafe { (*left_ptr).keys[i].assume_init_read() } == left_k_before[i],
+                    "S2: left's pre-existing key prefix is untouched"
+                );
+                assert!(
+                    unsafe { (*left_ptr).vals[i].assume_init_read() } == left_v_before[i],
+                    "S3: left's pre-existing val prefix is untouched"
+                );
+            }
+        }
+
+        // -------- CLAIM 2: the parent's OLD kv landed at left[old_left_len]. --------
+        assert!(
+            unsafe { (*left_ptr).keys[old_left_len].assume_init_read() } == pk,
+            "D1: left[old_left_len] key := the parent's OLD key"
+        );
+        assert!(
+            unsafe { (*left_ptr).vals[old_left_len].assume_init_read() } == pv,
+            "D2: left[old_left_len] val := the parent's OLD val"
+        );
+
+        // -------- CLAIM 3: the stolen block landed after it. --------
+        // `move_to_slice(right[..count-1], left[old_left_len+1..new_left_len])`, both arrays.
+        for i in 0..CAP {
+            if i + 1 < count {
+                assert!(
+                    unsafe { (*left_ptr).keys[old_left_len + 1 + i].assume_init_read() }
+                        == right_k_before[i],
+                    "D3: left[old_left_len+1..] keys := the stolen right block"
+                );
+                assert!(
+                    unsafe { (*left_ptr).vals[old_left_len + 1 + i].assume_init_read() }
+                        == right_v_before[i],
+                    "D4: left[old_left_len+1..] vals := the stolen right block"
+                );
+            }
+        }
+
+        // -------- CLAIM 4: right's KEYS closed the gap. --------
+        // `slice_shl(right.key_area_mut(..old_right_len), count)`. The value analogue is asserted
+        // separately in CLAIM 6 below rather than folded in here, because the two arrays sit at
+        // different object offsets and are worth stating as distinct claims.
+        for i in 0..CAP {
+            if i < new_right_len {
+                assert!(
+                    unsafe { (*right_ptr).keys[i].assume_init_read() } == right_k_before[count + i],
+                    "D5: right's keys are shifted DOWN by count"
+                );
+            }
+        }
+
+        // -------- CLAIM 5: the pair rotation through the parent. --------
+        let parent_after = kv_at(parent.borrow_mut().forget_type(), 0);
+        assert!(
+            parent_after == (right_k_before[count - 1], right_v_before[count - 1]),
+            "D6: the parent now holds right's OLD [count-1] pair"
+        );
+
+        // -------- CLAIM 6: the source child's own state. --------
+        // Asserted, not covered: the source's stored length after the steal, and the shift-DOWN of
+        // its surviving pairs in the value array (the key side is CLAIM 4 above).
+        assert!(
+            unsafe { usize::from((*right_ptr).len) } == new_right_len,
+            "D7: right's stored len == old_right_len - count"
+        );
+        for i in 0..CAP {
+            if i < new_right_len {
+                assert!(
+                    unsafe { (*right_ptr).vals[i].assume_init_read() } == right_v_before[count + i],
+                    "D8: right's vals are shifted DOWN by count"
+                );
+            }
+        }
+
+        // ---------------- Non-vacuity. ----------------
+        kani::cover(count == 1, "NV1: count == 1 — the `steal_right` specialization");
+        kani::cover(count > 1, "NV2: count > 1 — a genuine bulk steal of several pairs");
+        kani::cover(new_right_len == 0, "NV3: the right child was emptied by the steal");
+        kani::cover(new_left_len == CAP, "NV4: the left child was filled to CAPACITY");
+        kani::cover(
+            new_right_len > 0 && count > 1,
+            "NV5: a non-empty shift-down and a multi-pair move happen together",
+        );
+        kani::cover(old_left_len > 0, "NV6: a non-empty pre-existing left prefix is exercised");
+
+        // Teardown: three live allocations, no drop glue (i32 K/V).
+        unsafe {
+            Global.deallocate(parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            Global.deallocate(left_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+            Global.deallocate(right_nn.cast(), Layout::new::<LeafNode<i32, i32>>());
+        }
+    }
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn check_bulk_steal_left_internal_no_ub() {
+        const IB: usize = 2;
+
+        let old_left_len: usize = kani::any();
+        let old_right_len: usize = kani::any();
+        let count: usize = kani::any();
+        kani::assume(old_left_len <= IB);
+        kani::assume(old_right_len <= IB);
+        // The function's own three preconditions, ASSUMED: a caller that violates them is
+        // specified to panic, which is not UB and is not this harness's subject.
+        kani::assume(count > 0);
+        kani::assume(old_left_len >= count);
+        kani::assume(old_right_len + count <= CAP);
+
+        let left = internal_side_ib2(old_left_len);
+        let right = internal_side_ib2(old_right_len);
+        // Capture the (Copy) raw pointers BEFORE moving each side's `node` field into the parent.
+        let left_nn = left.node_nn;
+        let left_leaves = left.leaves;
+        let right_nn = right.node_nn;
+        let right_leaves = right.leaves;
+
+        let mut parent: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(left.node.forget_type(), Global);
+        let parent_nn = parent.reborrow().node;
+        let pk: i32 = kani::any();
+        let pv: i32 = kani::any();
+        parent.borrow_mut().push(pk, pv, right.node.forget_type());
+        assert!(parent.height() == 2, "BSLI0: the fixture is a height-2 tree");
+
+        {
+            let kv = unsafe { Handle::new_kv(parent.borrow_mut(), 0) };
+            let mut bc = kv.consider_for_balancing();
+            bc.bulk_steal_left(count);
+        }
+
+        kani::cover(count == 1, "NV1: count == 1 — the `steal_left` specialization, internal arm");
+        kani::cover(count > 1, "NV2: count > 1 — a genuine bulk steal of several edges");
+        kani::cover(old_left_len - count == 0, "NV3: the left child was emptied of pairs");
+        kani::cover(
+            old_right_len > 0 && count > 0,
+            "NV4: a non-empty edge shift-up and an edge move happen together",
+        );
+
+        unsafe {
+            Global.deallocate(parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            free_internal_side(left_nn, left_leaves);
+            free_internal_side(right_nn, right_leaves);
+        }
+    }
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn check_bulk_steal_right_internal_no_ub() {
+        const IB: usize = 2;
+
+        let old_left_len: usize = kani::any();
+        let old_right_len: usize = kani::any();
+        let count: usize = kani::any();
+        kani::assume(old_left_len <= IB);
+        kani::assume(old_right_len <= IB);
+        kani::assume(count > 0);
+        kani::assume(old_right_len >= count);
+        kani::assume(old_left_len + count <= CAP);
+
+        let left = internal_side_ib2(old_left_len);
+        let right = internal_side_ib2(old_right_len);
+        // Capture the (Copy) raw pointers BEFORE moving each side's `node` field into the parent.
+        let left_nn = left.node_nn;
+        let left_leaves = left.leaves;
+        let right_nn = right.node_nn;
+        let right_leaves = right.leaves;
+
+        let mut parent: NodeRef<marker::Owned, i32, i32, marker::Internal> =
+            NodeRef::new_internal(left.node.forget_type(), Global);
+        let parent_nn = parent.reborrow().node;
+        let pk: i32 = kani::any();
+        let pv: i32 = kani::any();
+        parent.borrow_mut().push(pk, pv, right.node.forget_type());
+        assert!(parent.height() == 2, "BSRI0: the fixture is a height-2 tree");
+
+        {
+            let kv = unsafe { Handle::new_kv(parent.borrow_mut(), 0) };
+            let mut bc = kv.consider_for_balancing();
+            bc.bulk_steal_right(count);
+        }
+
+        kani::cover(count == 1, "NV1: count == 1 — the `steal_right` specialization, internal arm");
+        kani::cover(count > 1, "NV2: count > 1 — a genuine bulk steal of several edges");
+        kani::cover(old_right_len - count == 0, "NV3: the right child was emptied of pairs");
+        kani::cover(
+            old_left_len > 0 && count > 0,
+            "NV4: a non-empty left prefix and an edge move happen together",
+        );
+
+        unsafe {
+            Global.deallocate(parent_nn.cast(), Layout::new::<InternalNode<i32, i32>>());
+            free_internal_side(left_nn, left_leaves);
+            free_internal_side(right_nn, right_leaves);
+        }
+    }
+    #[kani::proof]
+    #[kani::unwind(15)]
+    fn check_do_merge_internal_full_occupancy_no_ub() {
+        do_merge_internal_occupancy_body::<12>();
+    }
+}
+
 #[cfg(test)]
 mod tests;
