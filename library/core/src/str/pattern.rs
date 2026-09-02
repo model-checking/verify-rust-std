@@ -2523,10 +2523,36 @@ pub mod verify {
     // Two-Way searchers).
     //
     // Same methodology as the Challenge 20 section above: real method
-    // bodies, symbolic multibyte inputs, base-case harnesses proving the
-    // constructor establishes the type invariant `C`, from-creation
-    // harnesses running full call sequences, and inductive-step
-    // harnesses that admit an arbitrary `C`-satisfying state.
+    // bodies, a base-case harness proving the constructor establishes the
+    // type invariant `C`, and inductive-step harnesses that admit an
+    // arbitrary `C`-satisfying state, run one real method and re-assert
+    // `C` and the boundary property on whatever it returned.
+    //
+    // Inputs are *symbolic-length* byte slices (`any_utf8`), constrained
+    // to be valid UTF-8 by the byte-table predicate `utf8_local` instead
+    // of being built char by char, so no proof depends on a haystack
+    // length: the only size parameter is the backing-array size
+    // (`HAY_MAX`/`NDL_MAX`), the same CBMC memory-model limitation as
+    // `ARR_SIZE` in `str::validations::verify::check_run_utf8_validation`.
+    //
+    // Loop bounds. The real `'search` loops are not unwound to the
+    // haystack length:
+    // - `StrSearcher::next`/`next_back` instantiate them with
+    //   `RejectAndMatch`, whose `use_early_reject()` makes the loop
+    //   return as soon as the cursor has moved, and every `continue
+    //   'search` moves the cursor by at least one byte -- so the loop
+    //   runs at most two iterations for any haystack. Only the inner
+    //   byte-compare loops scale, with the needle length.
+    // - `next_match`/`next_match_back` instantiate them with `MatchOnly`,
+    //   whose loop body is the *same code* minus that early exit. The
+    //   `verify_twoway_search_step_*` harnesses run one real iteration
+    //   (the `RejectAndMatch` instantiation) from an *arbitrary* state
+    //   satisfying the loop's invariant `S` and prove it preserves `S`
+    //   and that any Match it reports is byte-exact and boundary-valid;
+    //   that is the inductive step of the unbounded `MatchOnly` loop,
+    //   machine-checked through the real code. The direct
+    //   `verify_twoway_step_next_match*` harnesses add end-to-end
+    //   coverage of the real `MatchOnly` loop up to the array size.
     //
     // The Two-Way invariant is content-coupled: boundary validity of a
     // returned Match hinges on the match being byte-exact (a byte-exact
@@ -2534,12 +2560,184 @@ pub mod verify {
     // which in short-period mode depends on the memorized prefix really
     // matching the haystack and `period` being an exact period of the
     // needle. Those are clauses of `C`, established by `new()` and
-    // preserved by the search steps — not assumptions about the result.
+    // preserved by the search steps -- not assumptions about the result.
+    // Content clauses are stated with `crate::forall!` over the backing
+    // array (constant bounds, guarded by the real lengths), which is the
+    // form CBMC's SAT backend can instantiate.
+    //
+    // Loop contracts (`-Z loop-contracts`) on the real `'search` loops
+    // were tried and are not usable with the pinned Kani without
+    // rewriting the loops themselves: CBMC requires a contract on every
+    // nested loop, Kani's `for`-loop contract support hoists the inner
+    // range construction to the outer loop head (where `start` is not
+    // yet computed) and computes `end - start` for legitimately empty
+    // reversed ranges, and Kani's compiler panics on `let start = if ..
+    // { .. } else { cmp::max(..) }` inside a contracted loop. Keeping the
+    // shipped code byte-identical was preferred.
     // ==================================================================
 
-    /// Maximum needle size in bytes: covers needle lengths 1..=3, both
-    /// short- and long-period factorization branches.
-    const NEEDLE_BYTES: usize = 3;
+    /// Backing-array size for haystacks: haystack lengths range over
+    /// `0..=HAY_MAX`. No loop is unwound to this size (see the module
+    /// comment), so it is cheap to raise; it is the CBMC memory-model
+    /// parameter, not a proof bound.
+    const HAY_MAX: usize = 64;
+    /// Backing-array size for the direct `next_match`/`next_match_back`
+    /// harnesses, which do unwind the real `MatchOnly` loop to the
+    /// haystack length (their unbounded inductive step is
+    /// `verify_twoway_search_step_*`).
+    const MATCH_HAY_MAX: usize = 8;
+    /// Backing-array size for needles in the inductive-step harnesses:
+    /// needle lengths range over `1..=NDL_MAX`.
+    const NDL_MAX: usize = 8;
+    /// Needle bound for the base case `verify_str_searcher_new`, which
+    /// runs the real `maximal_suffix`/`reverse_maximal_suffix` (unwound;
+    /// see the harness comment).
+    const NEW_NDL_MAX: usize = 8;
+    /// Extra bytes past the maximum length so the byte-table predicates
+    /// may read up to four bytes after any index `< MAX` without leaving
+    /// the backing array.
+    const PAD: usize = 4;
+    const _: () = assert!(NEW_NDL_MAX <= NDL_MAX);
+
+    // ------------------------------------------------------------------
+    // Symbolic-length UTF-8 inputs
+    // ------------------------------------------------------------------
+
+    /// The byte-table definition of "`arr[..len]` is valid UTF-8", as two
+    /// facts local to a 4-byte window and quantified over every index of
+    /// the backing array (`i >= len` positions are vacuous):
+    ///
+    /// - U-lead: every non-continuation byte at `i` is a valid leading
+    ///   byte (`<0x80`, `0xC2..=0xDF`, `0xE0..=0xEF`, `0xF0..=0xF4`) of
+    ///   width `w`, its `w - 1` continuation bytes are present (with the
+    ///   second-byte restrictions for `E0`/`ED`/`F0`/`F4`: no overlong
+    ///   forms, no surrogates, nothing above U+10FFFF), `i + w <= len`,
+    ///   and the byte at `i + w` is a leading byte or the end of the
+    ///   string.
+    /// - U-cover: every byte lies within three bytes after a
+    ///   non-continuation byte (at `i = 0`: the first byte leads).
+    ///
+    /// Both are properties of every valid UTF-8 string, so assuming them
+    /// is sound; together they are equivalent to `from_utf8(..).is_ok()`
+    /// (U-cover at 0 starts the parse on a leading byte, U-lead makes
+    /// each step a valid sequence that lands on the next leading byte or
+    /// exactly on `len`), which justifies `from_utf8_unchecked` in
+    /// `any_utf8`. `from_utf8` itself is not used as the filter because
+    /// under CI's `-Z loop-contracts` the invariants in
+    /// `run_utf8_validation` abstract its loops and its result no longer
+    /// constrains the bytes.
+    ///
+    /// The quantifier bodies are deliberately branch-free (bitwise `&`/`|`,
+    /// indicator arithmetic, no helper calls, no nested closures): CBMC
+    /// instantiates a quantifier body as one expression, and control flow
+    /// or statement expressions inside it are rejected or blow up
+    /// instrumentation. Every read stays inside the backing array because
+    /// of `PAD`.
+    fn utf8_local<const N: usize>(arr: &[u8; N], len: usize) -> bool {
+        let p = arr.as_ptr();
+        let lead = crate::forall!(|i in (0, N - PAD)| unsafe {
+            let i: usize = i;
+            let b0 = *p.wrapping_add(i);
+            let b1 = *p.wrapping_add(i.wrapping_add(1));
+            let b2 = *p.wrapping_add(i.wrapping_add(2));
+            let b3 = *p.wrapping_add(i.wrapping_add(3));
+            let c0 = (b0 as i8) < -64;
+            let c1 = (b1 as i8) < -64;
+            let c2 = (b2 as i8) < -64;
+            let c3 = (b3 as i8) < -64;
+            // width of the sequence led by b0 (0: not a valid leading byte)
+            let w: usize = (b0 < 0x80) as usize
+                + (((b0 >= 0xC2) & (b0 < 0xE0)) as usize) * 2
+                + (((b0 >= 0xE0) & (b0 < 0xF0)) as usize) * 3
+                + (((b0 >= 0xF0) & (b0 < 0xF5)) as usize) * 4;
+            let cw = (*p.wrapping_add(i.wrapping_add(w)) as i8) < -64;
+            let sec = ((b0 != 0xE0) | (b1 >= 0xA0))
+                & ((b0 != 0xED) | (b1 < 0xA0))
+                & ((b0 != 0xF0) | (b1 >= 0x90))
+                & ((b0 != 0xF4) | (b1 < 0x90));
+            (i >= len)
+                | c0
+                | ((w != 0)
+                    & (i.wrapping_add(w) <= len)
+                    & ((w < 2) | (c1 & sec))
+                    & ((w < 3) | c2)
+                    & ((w < 4) | c3)
+                    & ((i.wrapping_add(w) == len) | !cw))
+        });
+        let cover = crate::forall!(|i in (0, N - PAD)| unsafe {
+            let i: usize = i;
+            (i >= len)
+                | ((*p.wrapping_add(i) as i8) >= -64)
+                | ((i >= 1) & ((*p.wrapping_add(i.saturating_sub(1)) as i8) >= -64))
+                | ((i >= 2) & ((*p.wrapping_add(i.saturating_sub(2)) as i8) >= -64))
+                | ((i >= 3) & ((*p.wrapping_add(i.saturating_sub(3)) as i8) >= -64))
+        });
+        lead && cover
+    }
+
+    /// An arbitrary valid UTF-8 string of symbolic length `0..=N - PAD`
+    /// backed by a caller-owned array of arbitrary content.
+    fn any_utf8<const N: usize>(arr: &[u8; N]) -> &str {
+        let len: usize = kani::any();
+        kani::assume(len <= N - PAD);
+        kani::assume(utf8_local(arr, len));
+        // SAFETY: `utf8_local` is the byte-table definition of UTF-8
+        // validity (see its documentation).
+        unsafe { crate::str::from_utf8_unchecked(&arr[..len]) }
+    }
+
+    // ------------------------------------------------------------------
+    // Content predicates of the Two-Way invariant (constant-bound
+    // quantifiers; every read is guarded by the real lengths and stays
+    // inside the backing arrays).
+    // ------------------------------------------------------------------
+
+    /// `h[pos + j] == nb[j]` for every `j < k`. Callers establish
+    /// `k <= nb.len()` and `pos + k <= h.len()`. Out-of-range `j` are
+    /// vacuous; their read index is clamped to 0 so every read stays in
+    /// bounds (the quantifier body must be branch-free, see `utf8_local`).
+    fn prefix_eq(h: &[u8], nb: &[u8], pos: usize, k: usize) -> bool {
+        let hp = h.as_ptr();
+        let np = nb.as_ptr();
+        crate::forall!(|j in (0, NDL_MAX)| unsafe {
+            let j: usize = j;
+            let jj = j * ((j < k) as usize);
+            (j >= k) | (*hp.wrapping_add(pos.wrapping_add(jj)) == *np.wrapping_add(jj))
+        })
+    }
+
+    /// `h[start + j] == nb[j]` for every `j` in `m..nb.len()`. Callers
+    /// establish `m <= nb.len()` and `start + nb.len() <= h.len()`.
+    /// Out-of-range `j` are vacuous; their read index is clamped to `m`.
+    fn suffix_eq(h: &[u8], nb: &[u8], start: usize, m: usize) -> bool {
+        let n = nb.len();
+        let hp = h.as_ptr();
+        let np = nb.as_ptr();
+        crate::forall!(|j in (0, NDL_MAX)| unsafe {
+            let j: usize = j;
+            let inr = (j >= m) & (j < n);
+            let jj = m.wrapping_add(j.wrapping_sub(m) * (inr as usize));
+            !inr | (*hp.wrapping_add(start.wrapping_add(jj)) == *np.wrapping_add(jj))
+        })
+    }
+
+    /// `period` is a period of `nb`: `nb[j] == nb[j + period]` whenever
+    /// `j + period < nb.len()`. Callers establish `period <= nb.len()`.
+    /// Out-of-range `j` are vacuous; their read index is clamped to 0.
+    fn has_period(nb: &[u8], period: usize) -> bool {
+        let n = nb.len();
+        let np = nb.as_ptr();
+        crate::forall!(|j in (0, NDL_MAX)| unsafe {
+            let j: usize = j;
+            let inr = j.wrapping_add(period) < n;
+            let jj = j * (inr as usize);
+            !inr | (*np.wrapping_add(jj) == *np.wrapping_add(jj.wrapping_add(period)))
+        })
+    }
+
+    // ------------------------------------------------------------------
+    // Type invariant `C`
+    // ------------------------------------------------------------------
 
     fn type_invariant_empty_needle(en: &EmptyNeedle, haystack: &str) -> bool {
         en.position <= haystack.len()
@@ -2548,24 +2746,27 @@ pub mod verify {
             && haystack.is_char_boundary(en.end)
     }
 
-    /// Two-Way invariant `C`.
-    /// - Clauses 1-4: cursors in-bounds on char boundaries (cursor
-    ///   safety; `position <= end` is deliberately NOT required — the
-    ///   two cursors evolve independently).
+    /// Search-state invariant `S` of the Two-Way searcher: everything in
+    /// `C` except the char-boundary clauses on the cursors. `S` is what
+    /// the real `'search` loops maintain at *every* iteration (the
+    /// cursors move by algorithmic shifts and may sit inside a character
+    /// between iterations); `C` adds the boundary clauses that hold
+    /// between public calls.
+    /// - Clauses 1-2: cursors in-bounds (`position <= end` is
+    ///   deliberately NOT required -- the two cursors evolve
+    ///   independently).
     /// - Clauses 5-9: constructor-established well-formedness the search
     ///   loops need for panic-freedom and strict cursor progress.
     /// - Clauses 10-11 (short-period mode only): `period` is an exact
     ///   period of the needle, and the memorized bytes really match the
-    ///   haystack at the current alignment — the content coupling that
+    ///   haystack at the current alignment -- the content coupling that
     ///   makes a Match byte-exact and hence boundary-valid.
-    fn type_invariant_two_way(tw: &TwoWaySearcher, haystack: &str, needle: &str) -> bool {
+    fn search_state_two_way(tw: &TwoWaySearcher, haystack: &str, needle: &str) -> bool {
         let n = needle.len();
         let h = haystack.as_bytes();
         let nb = needle.as_bytes();
         tw.position <= haystack.len()                       // 1
             && tw.end <= haystack.len()                     // 2
-            && haystack.is_char_boundary(tw.position)       // 3
-            && haystack.is_char_boundary(tw.end)            // 4
             && n >= 1                                       // 5
             && tw.crit_pos <= n                             // 6
             && tw.crit_pos_back <= n                        // 7
@@ -2596,28 +2797,33 @@ pub mod verify {
                     && tw.memory <= n
                     && tw.memory_back <= n
                     // 10: period is an exact period of the needle
-                    && nb[..n - tw.period] == nb[tw.period..]
+                    && has_period(nb, tw.period)
                     // 11: memorized prefix matches at current alignment
                     // (only meaningful while a candidate window fits)
                     && (tw.position + n > h.len()
-                        || h[tw.position..tw.position + tw.memory] == nb[..tw.memory])
+                        || prefix_eq(h, nb, tw.position, tw.memory))
                     // 11b: memorized suffix matches at the back alignment
-                    && (tw.end < n
-                        || h[tw.end - n + tw.memory_back..tw.end] == nb[tw.memory_back..])
+                    && (tw.end < n || suffix_eq(h, nb, tw.end - n, tw.memory_back))
             })
     }
 
-    /// Per-clause assertion version of `type_invariant_two_way`, used by
+    /// Two-Way invariant `C` = `S` plus clauses 3-4: both cursors lie on
+    /// char boundaries of the haystack.
+    fn type_invariant_two_way(tw: &TwoWaySearcher, haystack: &str, needle: &str) -> bool {
+        search_state_two_way(tw, haystack, needle)
+            && haystack.is_char_boundary(tw.position)       // 3
+            && haystack.is_char_boundary(tw.end)            // 4
+    }
+
+    /// Per-clause assertion version of `search_state_two_way`, used by
     /// the inductive-step harnesses so a counterexample names the exact
     /// clause it violates.
-    fn assert_two_way_c(tw: &TwoWaySearcher, haystack: &str, needle: &str) {
+    fn assert_two_way_s(tw: &TwoWaySearcher, haystack: &str, needle: &str) {
         let n = needle.len();
         let h = haystack.as_bytes();
         let nb = needle.as_bytes();
         assert!(tw.position <= haystack.len(), "c1 position bound");
         assert!(tw.end <= haystack.len(), "c2 end bound");
-        assert!(haystack.is_char_boundary(tw.position), "c3 position boundary");
-        assert!(haystack.is_char_boundary(tw.end), "c4 end boundary");
         assert!(n >= 1, "c5 needle nonempty");
         assert!(tw.crit_pos <= n, "c6 crit_pos bound");
         assert!(tw.crit_pos_back <= n, "c7 crit_pos_back bound");
@@ -2631,17 +2837,23 @@ pub mod verify {
             assert!(tw.period <= n, "c10a short period bound");
             assert!(tw.memory <= n, "c10b memory bound");
             assert!(tw.memory_back <= n, "c10c memory_back bound");
-            assert!(nb[..n - tw.period] == nb[tw.period..], "c10 exact period");
+            assert!(has_period(nb, tw.period), "c10 exact period");
             assert!(
-                tw.position + n > h.len()
-                    || h[tw.position..tw.position + tw.memory] == nb[..tw.memory],
+                tw.position + n > h.len() || prefix_eq(h, nb, tw.position, tw.memory),
                 "c11 memory matches"
             );
             assert!(
-                tw.end < n || h[tw.end - n + tw.memory_back..tw.end] == nb[tw.memory_back..],
+                tw.end < n || suffix_eq(h, nb, tw.end - n, tw.memory_back),
                 "c11b memory_back matches"
             );
         }
+    }
+
+    /// Per-clause assertion version of `type_invariant_two_way`.
+    fn assert_two_way_c(tw: &TwoWaySearcher, haystack: &str, needle: &str) {
+        assert_two_way_s(tw, haystack, needle);
+        assert!(haystack.is_char_boundary(tw.position), "c3 position boundary");
+        assert!(haystack.is_char_boundary(tw.end), "c4 end boundary");
     }
 
     fn type_invariant_str_searcher(s: &StrSearcher<'_, '_>) -> bool {
@@ -2655,16 +2867,29 @@ pub mod verify {
         }
     }
 
-    /// Criterion 1: `StrSearcher::new` establishes `C` for both the
-    /// empty-needle and Two-Way variants (this is also the base case for
-    /// the inductive-step harnesses below).
+    // ------------------------------------------------------------------
+    // Criterion 1: creation establishes `C`
+    // ------------------------------------------------------------------
+
+    /// `StrSearcher::new` establishes `C` for both the empty-needle and
+    /// Two-Way variants (this is also the base case for the
+    /// inductive-step harnesses below). The haystack has symbolic length
+    /// (only its length reaches `new`). The needle is bounded by
+    /// `NEW_NDL_MAX`: `new` runs the real `maximal_suffix` /
+    /// `reverse_maximal_suffix`, whose `while let` loops are unwound
+    /// here (at most 2n+2 iterations each, hence the unwind bound), and the clauses `C` takes
+    /// from them (`crit_pos < period`, `period <= n`, exactness of the
+    /// short-mode period) are consequences of the critical factorization
+    /// theorem rather than of a loop-local invariant. The inductive steps
+    /// assume nothing but `C`, so this bound is confined to the pure
+    /// function of the needle.
     #[kani::proof]
-    #[kani::unwind(10)]
+    #[kani::unwind(20)]
     pub fn verify_str_searcher_new() {
-        let mut hbuf = [0u8; HAYSTACK_BYTES];
-        let mut nbuf = [0u8; NEEDLE_BYTES];
-        let haystack = symbolic_str(&mut hbuf);
-        let needle = symbolic_str(&mut nbuf);
+        let hbuf: [u8; HAY_MAX + PAD] = kani::any();
+        let nbuf: [u8; NEW_NDL_MAX + PAD] = kani::any();
+        let haystack = any_utf8(&hbuf);
+        let needle = any_utf8(&nbuf);
         let s = StrSearcher::new(haystack, needle);
         assert!(type_invariant_str_searcher(&s));
         match &s.searcher {
@@ -2677,16 +2902,10 @@ pub mod verify {
         }
     }
 
-    /// Haystack bound for the from-creation harnesses. These compose the
-    /// real `new()` with the real search loops, which is the hardest SAT
-    /// shape here (the reachable-state constraint threads through the
-    /// whole maximal_suffix computation); 3 bytes keeps them tractable
-    /// while still reaching both factorization branches and multibyte
-    /// haystacks. The load-bearing proofs of the challenge criteria are
-    /// the base-case + inductive-step harnesses (which cover every
-    /// C-satisfying state, a superset of the reachable states exercised
-    /// here); these harnesses add end-to-end coverage of reachable
-    /// call sequences.
+    // ------------------------------------------------------------------
+    // Criteria 2+3: inductive steps
+    // ------------------------------------------------------------------
+
     // No Two-Way-arm "from creation" harnesses: composing the real
     // `new()` (whose reachable-state constraint threads through the whole
     // maximal_suffix computation) with the real search loops overflows
@@ -2695,11 +2914,13 @@ pub mod verify {
     // that creation establishes `C`, and the `verify_twoway_step_*`
     // harnesses machine-check that from EVERY `C`-satisfying state (a
     // superset of all reachable states) the real methods return
-    // boundary-valid ranges and preserve `C` — so any call sequence from
+    // boundary-valid ranges and preserve `C` -- so any call sequence from
     // creation is covered by induction. The same composition argument
-    // covers the `next_reject`/`next_reject_back` trait defaults, which
-    // are safe straight-line loops over `next`/`next_back`; their
-    // empty-needle variants are machine-checked below
+    // covers the `next_reject`/`next_reject_back` trait defaults on the
+    // Two-Way arm: they are `Searcher`-generic loops over `next`/
+    // `next_back` that cannot carry a `StrSearcher`-specific loop
+    // invariant, and each iteration is one of the steps proven here.
+    // Their empty-needle variants are machine-checked below
     // (`verify_empty_step_next_reject`/`_back`).
 
     /// An arbitrary `C`-satisfying empty-needle searcher (induction
@@ -2724,7 +2945,9 @@ pub mod verify {
     }
 
     /// An arbitrary `C`-satisfying Two-Way searcher (induction
-    /// hypothesis; base case in `verify_str_searcher_new`).
+    /// hypothesis; base case in `verify_str_searcher_new`). All eight
+    /// fields are symbolic; `byteset` is unconstrained, so the proofs
+    /// also show memory safety does not depend on the fingerprint.
     fn any_twoway_searcher<'a, 'b>(haystack: &'a str, needle: &'b str) -> StrSearcher<'a, 'b> {
         let tw = TwoWaySearcher {
             crit_pos: kani::any(),
@@ -2741,35 +2964,61 @@ pub mod verify {
         s
     }
 
+    /// An arbitrary `S`-satisfying Two-Way search state -- the induction
+    /// hypothesis for the single-iteration lemmas below (a superset of
+    /// the `C`-states, since `S` drops the boundary clauses).
+    fn any_twoway_search_state(haystack: &str, needle: &str) -> TwoWaySearcher {
+        let tw = TwoWaySearcher {
+            crit_pos: kani::any(),
+            crit_pos_back: kani::any(),
+            period: kani::any(),
+            byteset: kani::any(),
+            position: kani::any(),
+            end: kani::any(),
+            memory: kani::any(),
+            memory_back: kani::any(),
+        };
+        kani::assume(search_state_two_way(&tw, haystack, needle));
+        tw
+    }
+
     /// Inductive step for the empty-needle variant: from any
     /// `C`-satisfying state, each real method returns boundary-valid
-    /// ranges and preserves `C`.
+    /// ranges and preserves `C`. Unbounded in the haystack: the arm is
+    /// loop-free per call (`Chars::next`/`next_back` decode one scalar
+    /// straight-line) and alternates Match/Reject, so the `next_match`/
+    /// `next_reject` default loops run at most two iterations.
     macro_rules! empty_needle_step {
         ($name:ident, $call:ident, step) => {
             #[kani::proof]
-            #[kani::unwind(4)]
+            #[kani::unwind(3)]
             pub fn $name() {
-                let mut hbuf = [0u8; HAYSTACK_BYTES];
-                let haystack = symbolic_str(&mut hbuf);
+                let hbuf: [u8; HAY_MAX + PAD] = kani::any();
+                let haystack = any_utf8(&hbuf);
                 let mut s = any_empty_searcher(haystack);
                 match s.$call() {
                     SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
-                        assert_valid_range(haystack, a, b)
+                        assert_valid_range(haystack, a, b);
+                        kani::cover(true, "empty-needle step returned a range");
                     }
-                    SearchStep::Done => {}
+                    SearchStep::Done => kani::cover(true, "empty-needle step returned Done"),
                 }
                 assert!(type_invariant_str_searcher(&s));
             }
         };
         ($name:ident, $call:ident, opt) => {
             #[kani::proof]
-            #[kani::unwind(4)]
+            #[kani::unwind(3)]
             pub fn $name() {
-                let mut hbuf = [0u8; HAYSTACK_BYTES];
-                let haystack = symbolic_str(&mut hbuf);
+                let hbuf: [u8; HAY_MAX + PAD] = kani::any();
+                let haystack = any_utf8(&hbuf);
                 let mut s = any_empty_searcher(haystack);
-                if let Some((a, b)) = s.$call() {
-                    assert_valid_range(haystack, a, b);
+                match s.$call() {
+                    Some((a, b)) => {
+                        assert_valid_range(haystack, a, b);
+                        kani::cover(true, "empty-needle step returned a range");
+                    }
+                    None => kani::cover(true, "empty-needle step returned None"),
                 }
                 assert!(type_invariant_str_searcher(&s));
             }
@@ -2783,59 +3032,73 @@ pub mod verify {
     empty_needle_step!(verify_empty_step_next_reject, next_reject, opt);
     empty_needle_step!(verify_empty_step_next_reject_back, next_reject_back, opt);
 
-    /// Haystack bound for the Two-Way inductive-step harnesses: these are
-    /// the most expensive proofs in this module (arbitrary C-state x the
-    /// full 'search loop); 4 bytes still covers every UTF-8 width class.
-    const TWOWAY_STEP_BYTES: usize = 4;
-
-    /// Inductive step for the Two-Way variant, for the four single-call
-    /// methods (`next`, `next_back`, `next_match`, `next_match_back`).
-    /// The `next_reject`/`next_reject_back` trait defaults are plain
-    /// loops over `next`/`next_back`, whose single-step preservation of
-    /// `C` is proven here; inductive variants of the full reject loops
-    /// are cost-prohibitive for CBMC (>1h each), so those two methods
-    /// are exercised end-to-end by the from-creation harnesses above
-    /// instead.
+    /// Inductive step for the Two-Way variant through the public methods
+    /// (`next`, `next_back`, `next_match`, `next_match_back`): from any
+    /// `C`-satisfying state the real method returns boundary-valid ranges
+    /// and re-establishes `C`.
+    ///
+    /// Unwind bounds. For `next`/`next_back` the `'search` loop runs at
+    /// most two iterations for *any* haystack (see the module comment),
+    /// the inner byte-compare loops at most `NDL_MAX`, and the
+    /// char-boundary walks in `StrSearcher::next`/`next_back` at most 3
+    /// (U-cover); the bound covers all of them, and the haystack length
+    /// is unconstrained up to the array size. For `next_match`/
+    /// `next_match_back` the `MatchOnly` loop advances the cursor by at
+    /// least one byte per iteration, so with the smaller `MATCH_HAY_MAX`
+    /// array the bound covers every iteration up to the array size;
+    /// their unbounded inductive step is `verify_twoway_search_step_*`
+    /// below.
     macro_rules! twoway_step {
         ($name:ident, $call:ident, step) => {
             #[kani::proof]
-            #[kani::unwind(14)]
+            #[kani::unwind(10)]
             pub fn $name() {
-                let mut hbuf = [0u8; TWOWAY_STEP_BYTES];
-                let mut nbuf = [0u8; NEEDLE_BYTES];
-                let haystack = symbolic_str(&mut hbuf);
-                let needle = symbolic_str(&mut nbuf);
+                let hbuf: [u8; HAY_MAX + PAD] = kani::any();
+                let nbuf: [u8; NDL_MAX + PAD] = kani::any();
+                let haystack = any_utf8(&hbuf);
+                let needle = any_utf8(&nbuf);
                 kani::assume(!needle.is_empty());
                 let mut s = any_twoway_searcher(haystack, needle);
                 match s.$call() {
-                    SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
-                        assert_valid_range(haystack, a, b)
+                    SearchStep::Match(a, b) => {
+                        assert_valid_range(haystack, a, b);
+                        kani::cover(true, "two-way step returned Match");
                     }
-                    SearchStep::Done => {}
+                    SearchStep::Reject(a, b) => {
+                        assert_valid_range(haystack, a, b);
+                        kani::cover(true, "two-way step returned Reject");
+                    }
+                    SearchStep::Done => kani::cover(true, "two-way step returned Done"),
                 }
                 if let StrSearcherImpl::TwoWay(ref tw) = s.searcher {
                     assert_two_way_c(tw, haystack, needle);
+                } else {
+                    unreachable!();
                 }
-                assert!(type_invariant_str_searcher(&s));
             }
         };
         ($name:ident, $call:ident, opt) => {
             #[kani::proof]
-            #[kani::unwind(14)]
+            #[kani::unwind(10)]
             pub fn $name() {
-                let mut hbuf = [0u8; TWOWAY_STEP_BYTES];
-                let mut nbuf = [0u8; NEEDLE_BYTES];
-                let haystack = symbolic_str(&mut hbuf);
-                let needle = symbolic_str(&mut nbuf);
+                let hbuf: [u8; MATCH_HAY_MAX + PAD] = kani::any();
+                let nbuf: [u8; NDL_MAX + PAD] = kani::any();
+                let haystack = any_utf8(&hbuf);
+                let needle = any_utf8(&nbuf);
                 kani::assume(!needle.is_empty());
                 let mut s = any_twoway_searcher(haystack, needle);
-                if let Some((a, b)) = s.$call() {
-                    assert_valid_range(haystack, a, b);
+                match s.$call() {
+                    Some((a, b)) => {
+                        assert_valid_range(haystack, a, b);
+                        kani::cover(true, "two-way step found a match");
+                    }
+                    None => kani::cover(true, "two-way step found nothing"),
                 }
                 if let StrSearcherImpl::TwoWay(ref tw) = s.searcher {
                     assert_two_way_c(tw, haystack, needle);
+                } else {
+                    unreachable!();
                 }
-                assert!(type_invariant_str_searcher(&s));
             }
         };
     }
@@ -2844,4 +3107,75 @@ pub mod verify {
     twoway_step!(verify_twoway_step_next_back, next_back, step);
     twoway_step!(verify_twoway_step_next_match, next_match, opt);
     twoway_step!(verify_twoway_step_next_match_back, next_match_back, opt);
+
+    /// One real iteration of the forward `'search` loop, from an arbitrary
+    /// `S`-state: `TwoWaySearcher::next::<RejectAndMatch>` returns as soon
+    /// as the cursor moves (or on the first iteration), so it *is* the
+    /// loop body shared with `MatchOnly` (whose only difference is not
+    /// taking that early exit). Proves: `S` is preserved; a `Match(a, b)`
+    /// is byte-exact (`haystack[a..b] == needle`), hence `a` and `b` lie
+    /// on char boundaries (U-lead on the needle's last leading byte and
+    /// on the haystack); a `Reject(a, b)` spans `old_position..position`
+    /// in bounds. Together with `verify_str_searcher_new` this is the
+    /// induction proving `next_match` safe for haystacks of any length.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    pub fn verify_twoway_search_step_fwd() {
+        let hbuf: [u8; HAY_MAX + PAD] = kani::any();
+        let nbuf: [u8; NDL_MAX + PAD] = kani::any();
+        let haystack = any_utf8(&hbuf);
+        let needle = any_utf8(&nbuf);
+        kani::assume(!needle.is_empty());
+        let mut tw = any_twoway_search_state(haystack, needle);
+        let old_pos = tw.position;
+        let is_long = tw.memory == usize::MAX;
+        match tw.next::<RejectAndMatch>(haystack.as_bytes(), needle.as_bytes(), is_long) {
+            SearchStep::Match(a, b) => {
+                assert!(b == a + needle.len() && b <= haystack.len(), "match window in bounds");
+                assert!(haystack.as_bytes()[a..b] == *needle.as_bytes(), "match is byte-exact");
+                assert_valid_range(haystack, a, b);
+                assert!(tw.position == b, "cursor moved past the match");
+                kani::cover(true, "forward search step: Match");
+            }
+            SearchStep::Reject(a, b) => {
+                assert!(a == old_pos && a <= b && b <= haystack.len(), "reject window");
+                assert!(tw.position == b, "cursor at reject end");
+                kani::cover(true, "forward search step: Reject");
+            }
+            SearchStep::Done => unreachable!("RejectAndMatch never yields Done"),
+        }
+        assert_two_way_s(&tw, haystack, needle);
+    }
+
+    /// Mirror of `verify_twoway_search_step_fwd` for the reverse `'search`
+    /// loop (`next_back::<RejectAndMatch>`, the loop body shared with
+    /// `next_match_back`).
+    #[kani::proof]
+    #[kani::unwind(10)]
+    pub fn verify_twoway_search_step_bwd() {
+        let hbuf: [u8; HAY_MAX + PAD] = kani::any();
+        let nbuf: [u8; NDL_MAX + PAD] = kani::any();
+        let haystack = any_utf8(&hbuf);
+        let needle = any_utf8(&nbuf);
+        kani::assume(!needle.is_empty());
+        let mut tw = any_twoway_search_state(haystack, needle);
+        let old_end = tw.end;
+        let is_long = tw.memory == usize::MAX;
+        match tw.next_back::<RejectAndMatch>(haystack.as_bytes(), needle.as_bytes(), is_long) {
+            SearchStep::Match(a, b) => {
+                assert!(b == a + needle.len() && b <= haystack.len(), "match window in bounds");
+                assert!(haystack.as_bytes()[a..b] == *needle.as_bytes(), "match is byte-exact");
+                assert_valid_range(haystack, a, b);
+                assert!(tw.end == a, "cursor moved before the match");
+                kani::cover(true, "backward search step: Match");
+            }
+            SearchStep::Reject(a, b) => {
+                assert!(b == old_end && a <= b, "reject window");
+                assert!(tw.end == a, "cursor at reject start");
+                kani::cover(true, "backward search step: Reject");
+            }
+            SearchStep::Done => unreachable!("RejectAndMatch never yields Done"),
+        }
+        assert_two_way_s(&tw, haystack, needle);
+    }
 }
