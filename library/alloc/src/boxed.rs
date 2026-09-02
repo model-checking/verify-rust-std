@@ -191,6 +191,8 @@ use core::error::{self, Error};
 use core::fmt;
 use core::future::Future;
 use core::hash::{Hash, Hasher};
+#[cfg(kani)]
+use core::kani;
 use core::marker::{Tuple, Unsize};
 #[cfg(not(no_global_oom_handling))]
 use core::mem::MaybeUninit;
@@ -204,6 +206,8 @@ use core::ops::{Residual, Try};
 use core::pin::{Pin, PinCoerceUnsized};
 use core::ptr::{self, NonNull, Unique};
 use core::task::{Context, Poll};
+
+use safety::{ensures, requires};
 
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
@@ -1022,6 +1026,13 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    // can_dereference checks the pointer is non-null, aligned, and points to
+    // readable memory of the right size; that the bytes are INITIALIZED remains the caller's obligation (MaybeUninit -> T).
+    #[requires(core::ub_checks::can_dereference(&raw const *self as *const T))]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn assume_init(self) -> Box<T, A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut T, alloc) }
@@ -1089,6 +1100,12 @@ impl<T, A: Allocator> Box<[mem::MaybeUninit<T>], A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    // can_dereference checks the slice's pointer is non-null, aligned, and
+    // points to readable memory of the right size; that each element's bytes are INITIALIZED remains the caller's obligation (MaybeUninit -> T).
+    #[requires(self.is_empty() || core::ub_checks::can_dereference(
+        core::ptr::slice_from_raw_parts(&raw const (*self)[0] as *const T, self.len())
+    ))]
+    #[ensures(|result: &Box<[T], A>| result.len() == old(self.len()))]
     pub unsafe fn assume_init(self) -> Box<[T], A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut [T], alloc) }
@@ -1141,6 +1158,8 @@ impl<T: ?Sized> Box<T> {
     #[stable(feature = "box_raw", since = "1.4.0")]
     #[inline]
     #[must_use = "call `drop(Box::from_raw(ptr))` if you intend to drop the `Box`"]
+    #[requires(core::ub_checks::can_dereference(raw))]
+    #[ensures(|result: &Self| core::ptr::addr_eq(&raw const **result, old(raw)))]
     pub unsafe fn from_raw(raw: *mut T) -> Self {
         unsafe { Self::from_raw_in(raw, Global) }
     }
@@ -1195,6 +1214,8 @@ impl<T: ?Sized> Box<T> {
     #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
     #[must_use = "call `drop(Box::from_non_null(ptr))` if you intend to drop the `Box`"]
+    #[requires(core::ub_checks::can_dereference(ptr.as_ptr()))]
+    #[ensures(|result: &Self| core::ptr::addr_eq(&raw const **result, old(ptr.as_ptr())))]
     pub unsafe fn from_non_null(ptr: NonNull<T>) -> Self {
         unsafe { Self::from_raw(ptr.as_ptr()) }
     }
@@ -1368,6 +1389,8 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// [memory layout]: self#memory-layout
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
+    #[requires(core::ub_checks::can_dereference(raw))]
+    #[ensures(|result: &Self| core::ptr::addr_eq(&raw const **result, old(raw)))]
     pub unsafe fn from_raw_in(raw: *mut T, alloc: A) -> Self {
         Box(unsafe { Unique::new_unchecked(raw) }, alloc)
     }
@@ -1421,6 +1444,8 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", reason = "new API", issue = "130364")]
     #[inline]
+    #[requires(core::ub_checks::can_dereference(raw.as_ptr()))]
+    #[ensures(|result: &Self| core::ptr::addr_eq(&raw const **result, old(raw.as_ptr())))]
     pub unsafe fn from_non_null_in(raw: NonNull<T>, alloc: A) -> Self {
         // SAFETY: guaranteed by the caller.
         unsafe { Box::from_raw_in(raw.as_ptr(), alloc) }
@@ -2291,5 +2316,701 @@ unsafe impl<T: ?Sized + Allocator, A: Allocator> Allocator for Box<T, A> {
     ) -> Result<NonNull<[u8]>, AllocError> {
         // SAFETY: the safety contract must be upheld by the caller
         unsafe { (**self).shrink(ptr, old_layout, new_layout) }
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+
+    use super::*;
+
+    #[kani::proof_for_contract(Box::<u8>::from_raw)]
+    fn check_pfc_from_raw_u8() {
+        let v: u8 = kani::any();
+        let raw = Box::into_raw(Box::new(v));
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let back = unsafe { Box::from_raw(raw) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof_for_contract(Box::<u32>::from_raw)]
+    fn check_pfc_from_raw_u32() {
+        let v: u32 = kani::any();
+        let raw = Box::into_raw(Box::new(v));
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let back = unsafe { Box::from_raw(raw) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof_for_contract(Box::<u64>::from_raw)]
+    fn check_pfc_from_raw_u64() {
+        let v: u64 = kani::any();
+        let raw = Box::into_raw(Box::new(v));
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let back = unsafe { Box::from_raw(raw) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof_for_contract(Box::<u32>::from_non_null)]
+    fn check_pfc_from_non_null_u32() {
+        let v: u32 = kani::any();
+        let raw = Box::into_raw(Box::new(v));
+        let non_null = unsafe { NonNull::new_unchecked(raw) };
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let back = unsafe { Box::from_non_null(non_null) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof_for_contract(Box::<u32, Global>::from_raw_in)]
+    fn check_pfc_from_raw_in_u32() {
+        let v: u32 = kani::any();
+        // `Box::new_in` would route through `assume_init` -> `from_raw_in`,
+        // giving proof_for_contract a second call to the target function; use
+        // the intrinsic-backed `Box::new` instead to keep exactly one call.
+        let (raw, alloc) = Box::into_raw_with_allocator(Box::new(v));
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let back = unsafe { Box::from_raw_in(raw, alloc) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof_for_contract(Box::<[u8], Global>::from_raw_in)]
+    fn check_pfc_from_raw_in_u8_slice() {
+        let arr: [u8; 4] = kani::any();
+        let b: Box<[u8]> = Box::new(arr);
+        let (raw, alloc) = Box::into_raw_with_allocator(b);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let back = unsafe { Box::from_raw_in(raw, alloc) };
+        assert_eq!(&*back, &arr[..]);
+    }
+
+    #[kani::proof_for_contract(Box::<u32, Global>::from_non_null_in)]
+    fn check_pfc_from_non_null_in_u32() {
+        let v: u32 = kani::any();
+        let (raw, alloc) = Box::into_raw_with_allocator(Box::new(v));
+        let non_null = unsafe { NonNull::new_unchecked(raw) };
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let back = unsafe { Box::from_non_null_in(non_null, alloc) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof_for_contract(Box::<[u8], Global>::from_non_null_in)]
+    fn check_pfc_from_non_null_in_u8_slice() {
+        let arr: [u8; 4] = kani::any();
+        let b: Box<[u8]> = Box::new(arr);
+        let (raw, alloc) = Box::into_raw_with_allocator(b);
+        let non_null = unsafe { NonNull::new_unchecked(raw) };
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let back = unsafe { Box::from_non_null_in(non_null, alloc) };
+        assert_eq!(&*back, &arr[..]);
+    }
+
+    // The `proof_for_contract` target is spelled with the impl's own generic
+    // parameters (`MaybeUninit<T>`, `A`) — concrete turbofish arguments do not
+    // resolve against this impl's structured self-type at this kani version.
+    // The constructed space is every possible u32 value (v is symbolic) in a
+    // fresh Global allocation — the documented precondition (an initialized
+    // box) admits nothing else; the allocation address is abstracted by Kani.
+    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+    fn check_assume_init_u32() {
+        let v: u32 = kani::any();
+        let mut u: Box<core::mem::MaybeUninit<u32>> = Box::new_uninit();
+        u.write(v);
+        let addr = &raw const *u;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let init: Box<u32> = unsafe { u.assume_init() };
+        assert_eq!(*init, v);
+        assert!(core::ptr::addr_eq(&raw const *init, addr));
+    }
+
+    // The `proof_for_contract` target is spelled with the impl's own generic
+    // parameters (`MaybeUninit<T>`, `A`) — concrete turbofish arguments do not
+    // resolve against this impl's structured self-type at this kani version.
+    // The constructed space is every possible u64 value (v is symbolic) in a
+    // fresh Global allocation — the documented precondition (an initialized
+    // box) admits nothing else; the allocation address is abstracted by Kani.
+    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+    fn check_assume_init_u64() {
+        let v: u64 = kani::any();
+        let mut u: Box<core::mem::MaybeUninit<u64>> = Box::new_uninit();
+        u.write(v);
+        let addr = &raw const *u;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let init: Box<u64> = unsafe { u.assume_init() };
+        assert_eq!(*init, v);
+        assert!(core::ptr::addr_eq(&raw const *init, addr));
+    }
+
+    // The `proof_for_contract` target is spelled with the impl's own generic
+    // parameters (`MaybeUninit<T>`, `A`) — concrete turbofish arguments do not
+    // resolve against this impl's structured self-type at this kani version.
+    // Symbolic length is uncapped (layout-validity predicate only). Content
+    // space: all-zero baseline plus an arbitrary value at an arbitrary index —
+    // a symbolic-index write/read-back, loop-free at the uncapped symbolic
+    // length.
+    #[kani::proof_for_contract(Box::<[core::mem::MaybeUninit<T>], A>::assume_init)]
+    fn check_assume_init_slice_u8() {
+        let n: usize = kani::any_where(|n: &usize| Layout::array::<u8>(*n).is_ok());
+        let mut s: Box<[core::mem::MaybeUninit<u8>]> = Box::new_zeroed_slice(n);
+        let mut i: usize = 0;
+        let mut v: u8 = 0;
+        if n > 0 {
+            i = kani::any_where(|i: &usize| *i < n);
+            v = kani::any();
+            s[i].write(v);
+        }
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let init: Box<[u8]> = unsafe { s.assume_init() };
+        assert_eq!(init.len(), n);
+        if n > 0 {
+            assert_eq!(init[i], v);
+        }
+    }
+
+    // Symbolic length, uncapped: layout-validity is the only bound (measured
+    // tractable at --object-bits 12: 33s, zero failures).
+    fn symbolic_len<T>() -> usize {
+        kani::any_where(|n: &usize| Layout::array::<T>(*n).is_ok())
+    }
+
+    #[kani::proof]
+    fn check_new_in_u32() {
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let b = Box::new_in(v, Global);
+        assert_eq!(*b, v);
+    }
+
+    #[kani::proof]
+    fn check_new_uninit_slice_u8() {
+        let n = symbolic_len::<u8>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let b: Box<[core::mem::MaybeUninit<u8>]> = Box::new_uninit_slice(n);
+        assert_eq!(b.len(), n);
+    }
+
+    #[kani::proof]
+    fn check_try_new_in_u32() {
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let r = Box::try_new_in(v, Global);
+        kani::cover(r.is_ok(), "alloc-success arm reached");
+        // Allocation is modeled as always succeeding at this kani pin; the Err arm
+        // is model-unreachable — no cover placed.
+        if let Ok(b) = r {
+            assert_eq!(*b, v);
+        }
+    }
+
+    #[kani::proof]
+    fn check_try_new_uninit_in_u32() {
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let r: Result<Box<core::mem::MaybeUninit<u32>, Global>, _> = Box::try_new_uninit_in(Global);
+        kani::cover(r.is_ok(), "alloc-success arm reached");
+        // Allocation is modeled as always succeeding at this kani pin; the Err arm
+        // is model-unreachable — no cover placed.
+        if let Ok(mut u) = r {
+            let v: u32 = kani::any();
+            u.write(v);
+            let b = unsafe { u.assume_init() };
+            assert_eq!(*b, v);
+        }
+    }
+
+    #[kani::proof]
+    fn check_try_new_zeroed_in_u32() {
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let r: Result<Box<core::mem::MaybeUninit<u32>, Global>, _> = Box::try_new_zeroed_in(Global);
+        kani::cover(r.is_ok(), "alloc-success arm reached");
+        // Allocation is modeled as always succeeding at this kani pin; the Err arm
+        // is model-unreachable — no cover placed.
+        if let Ok(u) = r {
+            let b = unsafe { u.assume_init() };
+            assert_eq!(*b, 0);
+        }
+    }
+
+    #[kani::proof]
+    fn check_into_boxed_slice_u32() {
+        let v: u32 = kani::any();
+        let b = Box::new(v);
+        let addr = &raw const *b;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let s: Box<[u32]> = Box::into_boxed_slice(b);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0], v);
+        assert!(core::ptr::addr_eq(s.as_ptr(), addr));
+    }
+
+    #[kani::proof]
+    fn check_new_uninit_slice_u32() {
+        let n = symbolic_len::<u32>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let b: Box<[core::mem::MaybeUninit<u32>]> = Box::new_uninit_slice(n);
+        assert_eq!(b.len(), n);
+    }
+
+    #[kani::proof]
+    fn check_new_zeroed_slice_u8() {
+        let n = symbolic_len::<u8>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let s: Box<[core::mem::MaybeUninit<u8>]> = Box::new_zeroed_slice(n);
+        let init: Box<[u8]> = unsafe { s.assume_init() };
+        assert_eq!(init.len(), n);
+        // Single symbolic-index read stands in for a full-content loop, which
+        // would be unbounded at this uncapped length.
+        if n > 0 {
+            let i: usize = kani::any_where(|i: &usize| *i < n);
+            assert_eq!(init[i], 0);
+        }
+    }
+
+    #[kani::proof]
+    fn check_try_new_uninit_slice_u8() {
+        let n = symbolic_len::<u8>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let r: Result<Box<[core::mem::MaybeUninit<u8>]>, _> = Box::try_new_uninit_slice(n);
+        kani::cover(r.is_ok(), "alloc-success arm reached");
+        // Allocation is modeled as always succeeding at this kani pin; the Err arm
+        // is model-unreachable — no cover placed.
+        if let Ok(b) = r {
+            assert_eq!(b.len(), n);
+        }
+    }
+
+    #[kani::proof]
+    fn check_try_new_zeroed_slice_u8() {
+        let n = symbolic_len::<u8>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let r: Result<Box<[core::mem::MaybeUninit<u8>]>, _> = Box::try_new_zeroed_slice(n);
+        kani::cover(r.is_ok(), "alloc-success arm reached");
+        // Allocation is modeled as always succeeding at this kani pin; the Err arm
+        // is model-unreachable — no cover placed.
+        if let Ok(s) = r {
+            let init: Box<[u8]> = unsafe { s.assume_init() };
+            assert_eq!(init.len(), n);
+            if n > 0 {
+                let i: usize = kani::any_where(|i: &usize| *i < n);
+                assert_eq!(init[i], 0);
+            }
+        }
+    }
+
+    #[kani::proof]
+    fn check_into_array_u32() {
+        // N = 4: a small concrete arm size; n itself stays symbolic and both
+        // n == N and n != N arms are covered.
+        const N: usize = 4;
+        let n = symbolic_len::<u32>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        // Built via new_zeroed_slice + assume_init (verified above) rather
+        // than an iterator collect, whose symbolic unrolling exceeds the
+        // object-bits budget.
+        let v: Box<[u32]> = unsafe { Box::new_zeroed_slice(n).assume_init() };
+        let addr = &raw const *v as *const u32;
+        kani::cover(n == N, "len == N arm reached");
+        kani::cover(n != N, "len != N arm reached");
+        let r = v.into_array::<N>();
+        assert_eq!(r.is_some(), n == N);
+        if let Some(arr) = r {
+            assert!(core::ptr::addr_eq(&raw const *arr as *const u32, addr));
+        }
+    }
+
+    #[kani::proof]
+    fn check_into_array_n0_u32() {
+        // N = 0: the zero-length const-generic arm; n itself stays symbolic and both
+        // n == 0 and n != 0 arms are covered.
+        let n: usize = kani::any_where(|n: &usize| *n <= 4);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let v: Box<[u32]> = unsafe { Box::new_zeroed_slice(n).assume_init() };
+        let r: Option<Box<[u32; 0]>> = v.into_array();
+        kani::cover(n == 0, "len == 0 arm reached");
+        kani::cover(n != 0, "len != 0 arm reached");
+        assert_eq!(r.is_some(), n == 0);
+    }
+
+    #[kani::proof]
+    fn check_try_from_boxed_slice_u32() {
+        // N = 4: a small concrete arm size; n itself stays symbolic and both
+        // n == N and n != N arms are covered.
+        const N: usize = 4;
+        let n = symbolic_len::<u32>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        // Built via new_zeroed_slice + assume_init (verified above) rather
+        // than an iterator collect, whose symbolic unrolling exceeds the
+        // object-bits budget.
+        let v: Box<[u32]> = unsafe { Box::new_zeroed_slice(n).assume_init() };
+        let addr = &raw const *v as *const u32;
+        kani::cover(n == N, "len == N arm reached");
+        kani::cover(n != N, "len != N arm reached");
+        let r: Result<Box<[u32; N]>, _> = v.try_into();
+        assert_eq!(r.is_ok(), n == N);
+        if let Ok(arr) = r {
+            assert!(core::ptr::addr_eq(&raw const *arr as *const u32, addr));
+        }
+    }
+
+    #[kani::proof]
+    fn check_new_uninit_slice_in_u8() {
+        let n = symbolic_len::<u8>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let b: Box<[core::mem::MaybeUninit<u8>], Global> = Box::new_uninit_slice_in(n, Global);
+        assert_eq!(b.len(), n);
+    }
+
+    #[kani::proof]
+    fn check_new_zeroed_slice_in_u8() {
+        let n = symbolic_len::<u8>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let s: Box<[core::mem::MaybeUninit<u8>], Global> = Box::new_zeroed_slice_in(n, Global);
+        let init: Box<[u8], Global> = unsafe { s.assume_init() };
+        assert_eq!(init.len(), n);
+        if n > 0 {
+            let i: usize = kani::any_where(|i: &usize| *i < n);
+            assert_eq!(init[i], 0);
+        }
+    }
+
+    #[kani::proof]
+    fn check_try_new_uninit_slice_in_u8() {
+        let n = symbolic_len::<u8>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let r: Result<Box<[core::mem::MaybeUninit<u8>], Global>, _> =
+            Box::try_new_uninit_slice_in(n, Global);
+        kani::cover(r.is_ok(), "alloc-success arm reached");
+        // Allocation is modeled as always succeeding at this kani pin; the Err arm
+        // is model-unreachable — no cover placed.
+        if let Ok(b) = r {
+            assert_eq!(b.len(), n);
+        }
+    }
+
+    #[kani::proof]
+    fn check_try_new_zeroed_slice_in_u8() {
+        let n = symbolic_len::<u8>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let r: Result<Box<[core::mem::MaybeUninit<u8>], Global>, _> =
+            Box::try_new_zeroed_slice_in(n, Global);
+        kani::cover(r.is_ok(), "alloc-success arm reached");
+        // Allocation is modeled as always succeeding at this kani pin; the Err arm
+        // is model-unreachable — no cover placed.
+        if let Ok(s) = r {
+            let init: Box<[u8], Global> = unsafe { s.assume_init() };
+            assert_eq!(init.len(), n);
+            if n > 0 {
+                let i: usize = kani::any_where(|i: &usize| *i < n);
+                assert_eq!(init[i], 0);
+            }
+        }
+    }
+
+    #[kani::proof]
+    fn check_write_u32() {
+        let v: u32 = kani::any();
+        let u: Box<core::mem::MaybeUninit<u32>> = Box::new_uninit();
+        let addr = &raw const *u;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let b = Box::write(u, v);
+        assert_eq!(*b, v);
+        assert!(core::ptr::addr_eq(&raw const *b, addr));
+    }
+
+    #[kani::proof]
+    fn check_write_u64() {
+        let v: u64 = kani::any();
+        let u: Box<core::mem::MaybeUninit<u64>> = Box::new_uninit();
+        let addr = &raw const *u;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let b = Box::write(u, v);
+        assert_eq!(*b, v);
+        assert!(core::ptr::addr_eq(&raw const *b, addr));
+    }
+
+    #[kani::proof]
+    fn check_into_non_null_u32() {
+        let v: u32 = kani::any();
+        let b = Box::new(v);
+        let addr = &raw const *b;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let nn: NonNull<u32> = Box::into_non_null(b);
+        assert!(core::ptr::addr_eq(nn.as_ptr() as *const u32, addr));
+        assert_eq!(unsafe { *nn.as_ptr() }, v);
+        let back = unsafe { Box::from_raw(nn.as_ptr()) }; // reclaim so no leak-check trip
+        assert_eq!(*back, v);
+    }
+
+    // Single width: these fns move the allocation and pointer without reading
+    // payload bytes; width-sensitive layout is exercised by the from_raw pfc
+    // family (u8/u32/u64) and the ThinBox width trio.
+    #[kani::proof]
+    fn check_into_raw_with_allocator_u32() {
+        let v: u32 = kani::any();
+        let b = Box::new(v);
+        let addr = &raw const *b;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let (raw, a) = Box::into_raw_with_allocator(b);
+        assert!(core::ptr::addr_eq(raw as *const u32, addr));
+        assert_eq!(unsafe { *raw }, v);
+        let back = unsafe { Box::from_raw_in(raw, a) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof]
+    fn check_into_non_null_with_allocator_u32() {
+        let v: u32 = kani::any();
+        let b = Box::new(v);
+        let addr = &raw const *b;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let (nn, a) = Box::into_non_null_with_allocator(b);
+        assert!(core::ptr::addr_eq(nn.as_ptr() as *const u32, addr));
+        assert_eq!(unsafe { *nn.as_ptr() }, v);
+        let back = unsafe { Box::from_non_null_in(nn, a) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof]
+    fn check_into_unique_u32() {
+        let v: u32 = kani::any();
+        let b = Box::new(v);
+        let addr = &raw const *b;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let (unique, a) = Box::into_unique(b);
+        assert!(core::ptr::addr_eq(unique.as_ptr() as *const u32, addr));
+        assert_eq!(unsafe { *unique.as_ptr() }, v);
+        let back = unsafe { Box::from_raw_in(unique.as_ptr(), a) };
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof]
+    fn check_leak_u32() {
+        let v: u32 = kani::any();
+        let b = Box::new(v);
+        let addr = &raw const *b;
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let r: &'static mut u32 = Box::leak(b);
+        assert_eq!(*r, v);
+        assert!(core::ptr::addr_eq(r as *const u32, addr));
+        let back = unsafe { Box::from_raw(r) }; // reclaim so no leak-check trip
+        assert_eq!(*back, v);
+    }
+
+    #[kani::proof]
+    fn check_into_pin_u32() {
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let p: core::pin::Pin<Box<u32>> = Box::into_pin(Box::new(v));
+        assert_eq!(*p.as_ref().get_ref(), v); // u32: Unpin, get_ref is safe
+    }
+
+    #[kani::proof]
+    fn check_into_pin_notunpin_sentinel() {
+        // !Unpin payload: construction + drop through the pinned box. The read
+        // uses the same `Pin<&T>::get_ref` as the Unpin case above — that impl
+        // has no `Unpin` bound (only the generic `Deref<Target: Unpin>` blanket
+        // impl does), so it's safe here too; the property under test is
+        // `into_pin`'s soundness for a genuinely `!Unpin` payload, not the getter.
+        struct NotUnpin(u32, core::marker::PhantomPinned);
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let p = Box::into_pin(Box::new(NotUnpin(v, core::marker::PhantomPinned)));
+        assert_eq!(p.as_ref().get_ref().0, v);
+        drop(p);
+    }
+
+    #[kani::proof]
+    fn check_drop_u32() {
+        let v: u32 = kani::any();
+        let b = Box::new(v);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        assert_eq!(*b, v);
+        drop(b);
+    }
+
+    #[kani::proof]
+    fn check_drop_boxed_slice_u32() {
+        let n = symbolic_len::<u32>();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        // Drop's own dealloc guard branches on `layout.size() != 0`; n==0 (a
+        // dangling, never-allocated slice) and n>0 exercise its two arms.
+        kani::cover(n == 0, "zero-length slice constructed");
+        kani::cover(n > 0, "non-empty slice constructed");
+        let b: Box<[u32]> = unsafe { Box::new_zeroed_slice(n).assume_init() };
+        assert_eq!(b.len(), n);
+        drop(b);
+    }
+
+    #[kani::proof]
+    fn check_default_box_u32() {
+        // No symbolic input (u32::default() is deterministic) — no non-vacuity
+        // cover per doctrine (nothing is assumed).
+        let b: Box<u32> = Default::default();
+        assert_eq!(*b, 0);
+    }
+
+    #[kani::proof]
+    fn check_default_box_str_empty() {
+        let b: Box<str> = Default::default();
+        assert_eq!(b.len(), 0);
+    }
+
+    #[kani::proof]
+    fn check_clone_u32() {
+        let v: u32 = kani::any();
+        let b = Box::new(v);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let c = b.clone();
+        assert_eq!(*c, v);
+        assert_eq!(*b, v);
+        // Doc's own example (`assert_ne!(&*x as *const i32, &*y as *const i32)`):
+        // clone allocates a new box, so the addresses must differ.
+        assert!(!core::ptr::addr_eq(&raw const *c, &raw const *b));
+    }
+
+    #[kani::proof]
+    fn check_clone_str() {
+        let mut src: [u8; 4] = kani::any();
+        src[0] &= 0x7f;
+        src[1] &= 0x7f;
+        src[2] &= 0x7f;
+        src[3] &= 0x7f;
+        // Symbolic ASCII content (masked to 0x7f): every byte is a valid 1-byte char, so every n <= len is a char boundary.
+        let s = core::str::from_utf8(&src).unwrap();
+        // n <= 4: the symbolic source array is 4 bytes; length stays fixed, content is symbolic (above).
+        let n = kani::any_where(|n: &usize| *n <= 4);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        kani::cover(n == 0, "empty string cloned");
+        kani::cover(n > 0, "non-empty string cloned");
+        // `.get()` (Option), not `&s[..n]` (Index): the Index panic path's
+        // message-building loop is expensive to bound at symbolic n.
+        let b: Box<str> = Box::from(s.get(..n).unwrap());
+        let addr = &raw const *b as *const u8;
+        let c = b.clone();
+        assert_eq!(b.len(), n);
+        assert_eq!(c.len(), n);
+        // Clone allocates a new box (comment: "this makes a copy of the data") —
+        // except at n==0, where neither box allocates and both hold the same
+        // canonical dangling pointer for the alignment (kani counterexample
+        // caught the unconditional `!addr_eq` claim; this is the precise fix).
+        assert_eq!(core::ptr::addr_eq(&raw const *c as *const u8, addr), n == 0);
+        // Symbolic-index single-byte read stands in for a whole-slice equality
+        // assert, which compiles to a memcmp-style comparison that CBMC
+        // unwinds unboundedly at symbolic n.
+        if n > 0 {
+            let i: usize = kani::any_where(|i: &usize| *i < n);
+            assert_eq!(c.as_bytes()[i], b.as_bytes()[i]);
+        }
+    }
+
+    // Drop-glue verification via a deliberately panicking sentinel: exercises
+    // both a normal drop and a drop that panics through Box's own drop glue.
+    struct PanicOnDrop(bool);
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            if self.0 {
+                panic!("deliberate drop panic")
+            }
+        }
+    }
+
+    #[kani::proof]
+    fn check_drop_glue_runs() {
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        // Disarmed sentinel; the armed twin below (check_drop_glue_panics)
+        // proves the panic is reached.
+        drop(Box::new(PanicOnDrop(false)));
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drop_glue_panics() {
+        drop(Box::new(PanicOnDrop(true)));
+    }
+
+    // Slice drop-glue: same sentinel through Box<[T]>'s drop glue, one
+    // element armed in the panicking variant.
+    #[kani::proof]
+    fn check_drop_glue_slice_runs() {
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        // Disarmed sentinels; the armed twin below (check_drop_glue_slice_panics)
+        // proves the panic is reached.
+        let arr = [PanicOnDrop(false), PanicOnDrop(false)];
+        let b: Box<[PanicOnDrop]> = Box::new(arr);
+        drop(b);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_drop_glue_slice_panics() {
+        let arr = [PanicOnDrop(true), PanicOnDrop(false)];
+        let b: Box<[PanicOnDrop]> = Box::new(arr);
+        drop(b);
+    }
+
+    // should_panic pairs on the reachable layout-overflow guards. All 4
+    // slice constructors below route through RawVec::with_capacity(_in),
+    // whose length-arithmetic check panics via `raw_vec::capacity_overflow`
+    // — not `handle_alloc_error` (that's the allocation-failure arm,
+    // model-unreachable under kani's Global allocator). u32 (not u8, unlike
+    // most harnesses in this module) is required: at this n, `n * 4` exceeds
+    // isize::MAX, while `n * 1` would land exactly on the boundary and not
+    // overflow.
+    // Property under test: an over-isize::MAX request panics rather than
+    // allocating; the specific panic site (capacity_overflow via RawVec) is
+    // the current routing, not the contract.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_new_uninit_slice_layout_overflow() {
+        let n: usize = usize::MAX / 2; // Layout::array::<u32>(n) overflows isize::MAX
+        let _b: Box<[core::mem::MaybeUninit<u32>]> = Box::new_uninit_slice(n);
+    }
+
+    // Property under test: an over-isize::MAX request panics rather than
+    // allocating; the specific panic site (capacity_overflow via RawVec) is
+    // the current routing, not the contract.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_new_zeroed_slice_layout_overflow() {
+        let n: usize = usize::MAX / 2; // Layout::array::<u32>(n) overflows isize::MAX
+        let _b: Box<[core::mem::MaybeUninit<u32>]> = Box::new_zeroed_slice(n);
+    }
+
+    // Property under test: an over-isize::MAX request panics rather than
+    // allocating; the specific panic site (capacity_overflow via RawVec) is
+    // the current routing, not the contract.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_new_uninit_slice_in_layout_overflow() {
+        let n: usize = usize::MAX / 2; // Layout::array::<u32>(n) overflows isize::MAX
+        let _b: Box<[core::mem::MaybeUninit<u32>], Global> = Box::new_uninit_slice_in(n, Global);
+    }
+
+    // Property under test: an over-isize::MAX request panics rather than
+    // allocating; the specific panic site (capacity_overflow via RawVec) is
+    // the current routing, not the contract.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_new_zeroed_slice_in_layout_overflow() {
+        let n: usize = usize::MAX / 2; // Layout::array::<u32>(n) overflows isize::MAX
+        let _b: Box<[core::mem::MaybeUninit<u32>], Global> = Box::new_zeroed_slice_in(n, Global);
     }
 }
