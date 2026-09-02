@@ -5378,21 +5378,24 @@ mod verify {
             #[kani::proof]
             pub fn $unique() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let _ = Rc::<$ty, Global>::get_mut(&mut rc);
+                assert!(Rc::<$ty, Global>::get_mut(&mut rc).is_some());
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
             #[kani::proof]
             pub fn $shared() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let _shared: Rc<$ty, Global> = Rc::clone(&rc);
-                let _ = Rc::<$ty, Global>::get_mut(&mut rc);
+                assert!(Rc::<$ty, Global>::get_mut(&mut rc).is_none());
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
             #[kani::proof]
             pub fn $weak_present() {
                 let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let _weak: Weak<$ty, Global> = Rc::downgrade(&rc);
-                let _ = Rc::<$ty, Global>::get_mut(&mut rc);
+                assert!(Rc::<$ty, Global>::get_mut(&mut rc).is_none());
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
         };
     }
@@ -5403,7 +5406,8 @@ mod verify {
             pub fn $unique() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
-                let _ = Rc::<[$elem], Global>::get_mut(&mut rc);
+                assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_some());
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
             #[kani::proof]
@@ -5411,7 +5415,8 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
-                let _ = Rc::<[$elem], Global>::get_mut(&mut rc);
+                assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
 
             #[kani::proof]
@@ -5419,7 +5424,8 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
-                let _ = Rc::<[$elem], Global>::get_mut(&mut rc);
+                assert!(Rc::<[$elem], Global>::get_mut(&mut rc).is_none());
+                kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
             }
         };
     }
@@ -5541,22 +5547,37 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $unique() {
-                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let _ = Rc::<$ty, Global>::make_mut(&mut rc);
+                let value: $ty = kani::any::<$ty>();
+                let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let result = Rc::<$ty, Global>::make_mut(&mut rc);
+                assert!(*result == value);
+                kani::cover(true, "make_mut unique result preserves the value");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "make_mut unique ownership is reachable");
             }
 
             #[kani::proof]
             pub fn $shared() {
-                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let value: $ty = kani::any::<$ty>();
+                let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
                 let _shared: Rc<$ty, Global> = Rc::clone(&rc);
-                let _ = Rc::<$ty, Global>::make_mut(&mut rc);
+                let result = Rc::<$ty, Global>::make_mut(&mut rc);
+                assert!(*result == value);
+                kani::cover(true, "make_mut shared result preserves the value");
+                assert!(Rc::strong_count(&rc) == 1 && Rc::strong_count(&_shared) == 1);
+                kani::cover(true, "make_mut shared ownership is reachable");
             }
 
             #[kani::proof]
             pub fn $weak_present() {
-                let mut rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let value: $ty = kani::any::<$ty>();
+                let mut rc: Rc<$ty, Global> = Rc::new_in(value, Global);
                 let _weak: Weak<$ty, Global> = Rc::downgrade(&rc);
-                let _ = Rc::<$ty, Global>::make_mut(&mut rc);
+                let result = Rc::<$ty, Global>::make_mut(&mut rc);
+                assert!(*result == value);
+                kani::cover(true, "make_mut weak-present result preserves the value");
+                assert!(_weak.upgrade().is_none());
+                kani::cover(true, "make_mut disassociates the weak reference");
             }
         };
     }
@@ -5567,7 +5588,12 @@ mod verify {
             pub fn $unique() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
-                let _ = Rc::<[$elem], Global>::make_mut(&mut rc);
+                let len = rc.len();
+                let result = Rc::<[$elem], Global>::make_mut(&mut rc);
+                assert!(result.len() == len);
+                kani::cover(true, "make_mut unique slice preserves length");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "make_mut unique slice ownership is reachable");
             }
 
             #[kani::proof]
@@ -5575,7 +5601,12 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _shared: Rc<[$elem], Global> = Rc::clone(&rc);
-                let _ = Rc::<[$elem], Global>::make_mut(&mut rc);
+                let len = rc.len();
+                let result = Rc::<[$elem], Global>::make_mut(&mut rc);
+                assert!(result.len() == len);
+                kani::cover(true, "make_mut shared slice preserves length");
+                assert!(Rc::strong_count(&rc) == 1 && Rc::strong_count(&_shared) == 1);
+                kani::cover(true, "make_mut shared slice ownership is reachable");
             }
 
             #[kani::proof]
@@ -5583,7 +5614,12 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let mut rc: Rc<[$elem], Global> = Rc::from(vec);
                 let _weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
-                let _ = Rc::<[$elem], Global>::make_mut(&mut rc);
+                let len = rc.len();
+                let result = Rc::<[$elem], Global>::make_mut(&mut rc);
+                assert!(result.len() == len);
+                kani::cover(true, "make_mut weak-present slice preserves length");
+                assert!(_weak.upgrade().is_none());
+                kani::cover(true, "make_mut disassociates the slice weak reference");
             }
         };
     }
@@ -5706,14 +5742,18 @@ mod verify {
                 let value: $ty = kani::any::<$ty>();
                 let rc_value: Rc<$ty, Global> = Rc::new_in(value, Global);
                 let rc_any: Rc<dyn Any, Global> = rc_value;
-                let _ = Rc::<dyn Any, Global>::downcast::<$ty>(rc_any);
+                let result = Rc::<dyn Any, Global>::downcast::<$ty>(rc_any);
+                assert!(result.is_ok());
+                kani::cover(true, "downcast success branch is reachable");
             }
 
             #[kani::proof]
             pub fn $failure() {
                 let rc_value: Rc<bool, Global> = Rc::new_in(kani::any::<bool>(), Global);
                 let rc_any: Rc<dyn Any, Global> = rc_value;
-                let _ = Rc::<dyn Any, Global>::downcast::<$ty>(rc_any);
+                let result = Rc::<dyn Any, Global>::downcast::<$ty>(rc_any);
+                assert!(result.is_err());
+                kani::cover(true, "downcast failure branch is reachable");
             }
         };
     }
@@ -5725,14 +5765,18 @@ mod verify {
                 let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
                 let rc_value: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
                 let rc_any: Rc<dyn Any, Global> = rc_value;
-                let _ = Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any);
+                let result = Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any);
+                assert!(result.is_ok());
+                kani::cover(true, "downcast Vec success branch is reachable");
             }
 
             #[kani::proof]
             pub fn $failure() {
                 let rc_value: Rc<bool, Global> = Rc::new_in(kani::any::<bool>(), Global);
                 let rc_any: Rc<dyn Any, Global> = rc_value;
-                let _ = Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any);
+                let result = Rc::<dyn Any, Global>::downcast::<Vec<$elem>>(rc_any);
+                assert!(result.is_err());
+                kani::cover(true, "downcast Vec failure branch is reachable");
             }
         };
     }
@@ -5777,8 +5821,15 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let src: Box<$ty, Global> = Box::new_in(kani::any::<$ty>(), Global);
-                let _ = Rc::<$ty, Global>::from_box_in(src);
+                let value: $ty = kani::any::<$ty>();
+                let src: Box<$ty, Global> = Box::new_in(value, Global);
+                let rc = Rc::<$ty, Global>::from_box_in(src);
+                assert!(*rc == value);
+                kani::cover(true, "from_box_in preserves the value");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "from_box_in creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "from_box_in creates no weak owners");
             }
         };
     }
@@ -5788,8 +5839,15 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
+                let len = vec.len();
                 let src: Box<[$elem], Global> = Box::from(vec);
-                let _ = Rc::<[$elem], Global>::from_box_in(src);
+                let rc = Rc::<[$elem], Global>::from_box_in(src);
+                assert!(rc.len() == len);
+                kani::cover(true, "from_box_in preserves the slice length");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "from_box_in creates one strong slice owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "from_box_in creates no weak slice owners");
             }
         };
     }
@@ -5826,19 +5884,25 @@ mod verify {
         ($live:ident, $dangling:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $live() {
+                // Live path trigger: downgrade from a live strong Rc.
                 // `strong` is alive; downgrade yields a weak to the same live allocation.
                 // This pointer is not the sentinel, so `is_dangling` is false.
                 let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
-                let _ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+                let ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(core::ptr::eq(ptr, Rc::as_ptr(&strong)));
+                kani::cover(true, "Weak::as_ptr returns the allocation payload pointer");
             }
 
             #[kani::proof]
             pub fn $dangling() {
+                // Dangling path trigger: sentinel weak from `new_in`.
                 // `Weak::new_in(Global)` contains only the sentinel and no backing `RcInner`.
                 // Therefore `is_dangling` is true by construction.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let _ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+                let ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(is_dangling(ptr));
+                kani::cover(true, "Weak::as_ptr returns the dangling sentinel");
             }
         };
     }
@@ -5850,23 +5914,51 @@ mod verify {
         ($live:ident, $dangling:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $live() {
+                // Live unsized path: weak points into a real slice allocation.
                 // `Rc::from(vec)` creates a real slice allocation.
                 // `downgrade` references that allocation while `strong` is alive.
                 // So this executes the non-dangling branch.
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
-                let _ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
+                let ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(core::ptr::eq(ptr, Rc::as_ptr(&strong)));
+                kani::cover(true, "Weak::as_ptr returns the slice payload pointer");
             }
 
             #[kani::proof]
             pub fn $dangling() {
+                // Dangling unsized path: sentinel survives coercion array -> slice.
                 // Start from sentinel `Weak<[E; 1]>::new_in(Global)`.
                 // Coercion to `Weak<[E]>` changes metadata only; sentinel address is unchanged.
                 // So `is_dangling` remains true.
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
-                let _ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
+                let ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(is_dangling(ptr));
+                kani::cover(true, "Weak::as_ptr returns the dangling slice sentinel");
+            }
+        };
+    }
+
+    // An expired weak pointer is different from `Weak::new_in`: it still points to
+    // a real allocation, but its last strong `Rc` has been dropped. This harness
+    // covers the non-dangling `as_ptr` branch after the payload has been destroyed,
+    // and checks pointer identity without dereferencing the invalid payload pointer.
+    macro_rules! gen_weak_as_ptr_expired_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let expected = Rc::as_ptr(&strong);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                drop(strong);
+
+                let ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "Weak::as_ptr keeps the expired allocation pointer");
+                assert!(core::ptr::addr_eq(ptr, expected));
+                kani::cover(true, "Weak::as_ptr preserves expired allocation identity");
             }
         };
     }
@@ -5962,6 +6054,19 @@ mod verify {
         harness_weak_as_ptr_vec_u128_dangling,
         [u128]
     );
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_i8_expired, i8);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_i16_expired, i16);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_i32_expired, i32);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_i64_expired, i64);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_i128_expired, i128);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u8_expired, u8);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u16_expired, u16);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u32_expired, u32);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u64_expired, u64);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_u128_expired, u128);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_unit_expired, ());
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_array_expired, [u8; 4]);
+    gen_weak_as_ptr_expired_harness!(harness_weak_as_ptr_bool_expired, bool);
 
     // `Weak::into_raw_with_allocator` itself has no explicit `if/else`,
     // but it calls `Weak::as_ptr()`, whose control flow depends on weak state:
@@ -5980,20 +6085,36 @@ mod verify {
                 // Live path trigger: downgrade from a live strong Rc.
                 let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                let expected = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 1);
+                kani::cover(true, "live weak ownership exists before the raw roundtrip");
                 let (ptr, alloc): (*const $ty, Global) =
                     Weak::<$ty, Global>::into_raw_with_allocator(weak);
-                let _recovered: Weak<$ty, Global> =
+                let recovered: Weak<$ty, Global> =
                     unsafe { Weak::<$ty, Global>::from_raw_in(ptr, alloc) };
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(true, "weak raw pointer roundtrip is reachable");
+                assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 1);
+                kani::cover(true, "raw roundtrip preserves live reference counts");
+                drop(recovered);
+                assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 0);
+                kani::cover(true, "dropping the recovered weak releases its ownership token");
             }
 
             #[kani::proof]
             pub fn $dangling() {
                 // Dangling path trigger: sentinel weak from `new_in`.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
+                let expected = Weak::<$ty, Global>::as_ptr(&weak);
                 let (ptr, alloc): (*const $ty, Global) =
                     Weak::<$ty, Global>::into_raw_with_allocator(weak);
-                let _recovered: Weak<$ty, Global> =
+                let recovered: Weak<$ty, Global> =
                     unsafe { Weak::<$ty, Global>::from_raw_in(ptr, alloc) };
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(true, "dangling weak raw pointer roundtrip is reachable");
+                assert!(is_dangling(ptr));
+                kani::cover(true, "dangling weak raw pointer is the sentinel");
+                drop(recovered);
             }
         };
     }
@@ -6006,24 +6127,72 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 // Live unsized path: weak points into a real slice allocation.
+                // `Rc::from(vec)` creates a real slice allocation.
+                // `downgrade` references that allocation while `strong` is alive.
+                // So this executes the non-dangling branch.
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                let expected = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 1);
+                kani::cover(true, "live weak slice ownership exists before the raw roundtrip");
                 let (ptr, alloc): (*const [$elem], Global) =
                     Weak::<[$elem], Global>::into_raw_with_allocator(weak);
-                let _recovered: Weak<[$elem], Global> =
+                let recovered: Weak<[$elem], Global> =
                     unsafe { Weak::<[$elem], Global>::from_raw_in(ptr, alloc) };
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(true, "weak slice raw pointer roundtrip is reachable");
+                assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 1);
+                kani::cover(true, "raw roundtrip preserves live slice reference counts");
+                drop(recovered);
+                assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 0);
+                kani::cover(true, "dropping the recovered weak slice releases its ownership token");
             }
 
             #[kani::proof]
             pub fn $dangling() {
                 // Dangling unsized path: sentinel survives coercion array -> slice.
+                // Start from sentinel `Weak<[E; 1]>::new_in(Global)`.
+                // Coercion to `Weak<[E]>` changes metadata only; sentinel address is unchanged.
+                // So `is_dangling` remains true.
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
+                let expected = Weak::<[$elem], Global>::as_ptr(&weak);
                 let (ptr, alloc): (*const [$elem], Global) =
                     Weak::<[$elem], Global>::into_raw_with_allocator(weak);
-                let _recovered: Weak<[$elem], Global> =
+                let recovered: Weak<[$elem], Global> =
                     unsafe { Weak::<[$elem], Global>::from_raw_in(ptr, alloc) };
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(true, "dangling weak slice raw pointer roundtrip is reachable");
+                assert!(is_dangling(ptr));
+                kani::cover(true, "dangling weak slice raw pointer is the sentinel");
+                drop(recovered);
+            }
+        };
+    }
+
+    // An expired weak pointer still refers to a real allocation after its last strong
+    // `Rc` is dropped, unlike the sentinel produced by `Weak::new_in`. These harnesses
+    // cover the allocation-backed `as_ptr` path after expiration and round-trip the raw
+    // weak ownership token without dereferencing the destroyed payload.
+    macro_rules! gen_weak_into_raw_with_allocator_expired_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let expected = Rc::<$ty, Global>::as_ptr(&strong);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                drop(strong);
+
+                let (ptr, alloc): (*const $ty, Global) =
+                    Weak::<$ty, Global>::into_raw_with_allocator(weak);
+                let recovered: Weak<$ty, Global> =
+                    unsafe { Weak::<$ty, Global>::from_raw_in(ptr, alloc) };
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "expired weak raw pointer uses the allocation-backed path");
+                assert!(core::ptr::addr_eq(ptr, expected));
+                kani::cover(true, "expired weak raw pointer preserves allocation identity");
+                drop(recovered);
             }
         };
     }
@@ -6114,6 +6283,58 @@ mod verify {
         harness_weak_into_raw_with_allocator_vec_u128_dangling,
         [u128]
     );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_i8_expired,
+        i8
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_i16_expired,
+        i16
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_i32_expired,
+        i32
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_i64_expired,
+        i64
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_i128_expired,
+        i128
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_u8_expired,
+        u8
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_u16_expired,
+        u16
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_u32_expired,
+        u32
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_u64_expired,
+        u64
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_u128_expired,
+        u128
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_unit_expired,
+        ()
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_arr_expired,
+        [u8; 4]
+    );
+    gen_weak_into_raw_with_allocator_expired_harness!(
+        harness_weak_into_raw_with_allocator_bool_expired,
+        bool
+    );
 
     // `Weak::upgrade` has three behavior paths:
     // 1) `self.inner()?` returns `None` (dangling sentinel weak): returns `None`.
@@ -6132,7 +6353,24 @@ mod verify {
                 // Path (3): live strong owner is still in scope.
                 let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
-                let _ = Weak::<$ty, Global>::upgrade(&weak);
+                let upgraded = Weak::<$ty, Global>::upgrade(&weak);
+                assert!(upgraded.is_some());
+                kani::cover(true, "Weak::upgrade live path is reachable");
+
+                let upgraded = upgraded.unwrap();
+                assert!(
+                    Rc::ptr_eq(&strong, &upgraded)
+                        && Rc::strong_count(&strong) == 2
+                        && Rc::weak_count(&strong) == 1
+                );
+                kani::cover(
+                    true,
+                    "Weak::upgrade returns the same allocation and increments strong count",
+                );
+
+                drop(upgraded);
+                assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 1);
+                kani::cover(true, "dropping the upgraded Rc restores the strong count");
             }
 
             #[kani::proof]
@@ -6140,15 +6378,30 @@ mod verify {
                 // Path (2): drop all strong owners after creating weak.
                 let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                let expected = Rc::<$ty, Global>::as_ptr(&strong);
                 drop(strong);
-                let _ = Weak::<$ty, Global>::upgrade(&weak);
+                let weak_ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(!is_dangling(weak_ptr) && core::ptr::addr_eq(weak_ptr, expected));
+                kani::cover(true, "expired weak points to a real allocation");
+
+                let result = Weak::<$ty, Global>::upgrade(&weak);
+                assert!(result.is_none());
+                kani::cover(true, "Weak::upgrade expired path is reachable");
+                assert!(weak.strong_count() == 0);
+                kani::cover(true, "expired weak observes zero strong references");
             }
 
             #[kani::proof]
             pub fn $dangling() {
                 // Path (1): sentinel weak from `new_in`.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let _ = Weak::<$ty, Global>::upgrade(&weak);
+                let ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(is_dangling(ptr));
+                kani::cover(true, "sentinel weak has a dangling pointer");
+
+                let result = Weak::<$ty, Global>::upgrade(&weak);
+                assert!(result.is_none());
+                kani::cover(true, "Weak::upgrade sentinel path is reachable");
             }
         };
     }
@@ -6162,7 +6415,22 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
-                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+                let upgraded = Weak::<[$elem], Global>::upgrade(&weak);
+                assert!(upgraded.is_some());
+                kani::cover(true, "Weak::upgrade live slice path is reachable");
+
+                let upgraded = upgraded.unwrap();
+                assert!(
+                    Rc::ptr_eq(&strong, &upgraded)
+                        && upgraded.len() == strong.len()
+                        && Rc::strong_count(&strong) == 2
+                        && Rc::weak_count(&strong) == 1
+                );
+                kani::cover(true, "Weak::upgrade preserves slice allocation and metadata");
+
+                drop(upgraded);
+                assert!(Rc::strong_count(&strong) == 1 && Rc::weak_count(&strong) == 1);
+                kani::cover(true, "dropping the upgraded slice Rc restores the strong count");
             }
 
             #[kani::proof]
@@ -6171,8 +6439,17 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                let expected = Rc::<[$elem], Global>::as_ptr(&strong);
                 drop(strong);
-                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+                let weak_ptr = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(!is_dangling(weak_ptr) && core::ptr::addr_eq(weak_ptr, expected));
+                kani::cover(true, "expired weak slice points to a real allocation");
+
+                let result = Weak::<[$elem], Global>::upgrade(&weak);
+                assert!(result.is_none());
+                kani::cover(true, "Weak::upgrade expired slice path is reachable");
+                assert!(weak.strong_count() == 0);
+                kani::cover(true, "expired weak slice observes zero strong references");
             }
 
             #[kani::proof]
@@ -6180,7 +6457,13 @@ mod verify {
                 // Path (1): sentinel weak coerced from `[E; 1]` to `[E]`.
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
-                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+                let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(is_dangling(ptr));
+                kani::cover(true, "sentinel weak slice has a dangling pointer");
+
+                let result = Weak::<[$elem], Global>::upgrade(&weak);
+                assert!(result.is_none());
+                kani::cover(true, "Weak::upgrade sentinel slice path is reachable");
             }
         };
     }
@@ -6302,36 +6585,70 @@ mod verify {
     // Coverage strategy:
     // - `*_some`: create a live weak via `Rc::downgrade(&strong)` so pointer is non-sentinel.
     // - `*_none`: create a sentinel weak via `Weak::new_in(Global)` so pointer is dangling.
+    // - `*_expired`: drop the last strong owner while retaining a weak pointer, so the
+    //   allocation remains real but its strong count is zero.
     // Weak::inner harnesses.
     macro_rules! gen_weak_inner_sized_harness {
-        ($some:ident, $none:ident, $ty:ty) => {
+        ($some:ident, $none:ident, $expired:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $some() {
                 // Branch (2): downgrade from a live strong Rc.
                 let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
-                let _inner = Weak::<$ty, Global>::inner(&weak);
+                let inner = Weak::<$ty, Global>::inner(&weak);
+                assert!(inner.is_some());
+                kani::cover(true, "Weak::inner returns Some for a live allocation");
+                let inner = inner.unwrap();
+                assert!(inner.strong.get() == 1 && inner.weak.get() == 2);
+                kani::cover(true, "Weak::inner exposes live strong and weak counts");
             }
 
             #[kani::proof]
             pub fn $none() {
                 // Branch (1): sentinel weak created directly.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let _inner = Weak::<$ty, Global>::inner(&weak);
+                let ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(is_dangling(ptr));
+                kani::cover(true, "Weak::new_in creates the dangling sentinel");
+                assert!(Weak::<$ty, Global>::inner(&weak).is_none());
+                kani::cover(true, "Weak::inner returns None for the dangling sentinel");
+            }
+
+            #[kani::proof]
+            pub fn $expired() {
+                // The allocation remains valid for the weak control block after the last
+                // strong owner is dropped, so this must not be mistaken for the sentinel.
+                let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                drop(strong);
+                let ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "expired weak retains a real allocation");
+                let inner = Weak::<$ty, Global>::inner(&weak);
+                assert!(inner.is_some());
+                kani::cover(true, "Weak::inner returns Some for an expired allocation");
+                let inner = inner.unwrap();
+                assert!(inner.strong.get() == 0 && inner.weak.get() == 1);
+                kani::cover(true, "Weak::inner exposes expired strong and weak counts");
             }
         };
     }
 
     // Unsized (`T = [E]`) with the same two-branch coverage.
     macro_rules! gen_weak_inner_unsized_harness {
-        ($some:ident, $none:ident, [$elem:ty]) => {
+        ($some:ident, $none:ident, $expired:ident, [$elem:ty]) => {
             #[kani::proof]
             pub fn $some() {
                 // Branch (2): non-dangling unsized weak from live `Rc<[E]>`.
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let strong: Rc<[$elem], Global> = Rc::from(vec);
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
-                let _inner = Weak::<[$elem], Global>::inner(&weak);
+                let inner = Weak::<[$elem], Global>::inner(&weak);
+                assert!(inner.is_some());
+                kani::cover(true, "Weak::inner returns Some for a live slice allocation");
+                let inner = inner.unwrap();
+                assert!(inner.strong.get() == 1 && inner.weak.get() == 2);
+                kani::cover(true, "Weak::inner exposes live slice strong and weak counts");
             }
 
             #[kani::proof]
@@ -6339,51 +6656,140 @@ mod verify {
                 // Branch (1): sentinel weak remains dangling after array->slice coercion.
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
-                let _inner = Weak::<[$elem], Global>::inner(&weak);
+                let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(is_dangling(ptr));
+                kani::cover(true, "Weak::new_in creates the dangling slice sentinel");
+                assert!(Weak::<[$elem], Global>::inner(&weak).is_none());
+                kani::cover(true, "Weak::inner returns None for the dangling slice sentinel");
+            }
+
+            #[kani::proof]
+            pub fn $expired() {
+                // The allocation remains valid for the weak control block after the last
+                // strong owner is dropped, so this must not be mistaken for the sentinel.
+                let vec = verifier_nondet_vec_rc::<$elem>();
+                let strong: Rc<[$elem], Global> = Rc::from(vec);
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                drop(strong);
+                let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "expired weak slice retains a real allocation");
+                let inner = Weak::<[$elem], Global>::inner(&weak);
+                assert!(inner.is_some());
+                kani::cover(true, "Weak::inner returns Some for an expired slice allocation");
+                let inner = inner.unwrap();
+                assert!(inner.strong.get() == 0 && inner.weak.get() == 1);
+                kani::cover(true, "Weak::inner exposes expired slice strong and weak counts");
             }
         };
     }
 
-    gen_weak_inner_sized_harness!(harness_weak_inner_i8_some, harness_weak_inner_i8_none, i8);
-    gen_weak_inner_sized_harness!(harness_weak_inner_i16_some, harness_weak_inner_i16_none, i16);
-    gen_weak_inner_sized_harness!(harness_weak_inner_i32_some, harness_weak_inner_i32_none, i32);
-    gen_weak_inner_sized_harness!(harness_weak_inner_i64_some, harness_weak_inner_i64_none, i64);
-    gen_weak_inner_sized_harness!(harness_weak_inner_i128_some, harness_weak_inner_i128_none, i128);
-    gen_weak_inner_sized_harness!(harness_weak_inner_u8_some, harness_weak_inner_u8_none, u8);
-    gen_weak_inner_sized_harness!(harness_weak_inner_u16_some, harness_weak_inner_u16_none, u16);
-    gen_weak_inner_sized_harness!(harness_weak_inner_u32_some, harness_weak_inner_u32_none, u32);
-    gen_weak_inner_sized_harness!(harness_weak_inner_u64_some, harness_weak_inner_u64_none, u64);
-    gen_weak_inner_sized_harness!(harness_weak_inner_u128_some, harness_weak_inner_u128_none, u128);
-    gen_weak_inner_sized_harness!(harness_weak_inner_unit_some, harness_weak_inner_unit_none, ());
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_i8_some,
+        harness_weak_inner_i8_none,
+        harness_weak_inner_i8_expired,
+        i8
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_i16_some,
+        harness_weak_inner_i16_none,
+        harness_weak_inner_i16_expired,
+        i16
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_i32_some,
+        harness_weak_inner_i32_none,
+        harness_weak_inner_i32_expired,
+        i32
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_i64_some,
+        harness_weak_inner_i64_none,
+        harness_weak_inner_i64_expired,
+        i64
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_i128_some,
+        harness_weak_inner_i128_none,
+        harness_weak_inner_i128_expired,
+        i128
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_u8_some,
+        harness_weak_inner_u8_none,
+        harness_weak_inner_u8_expired,
+        u8
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_u16_some,
+        harness_weak_inner_u16_none,
+        harness_weak_inner_u16_expired,
+        u16
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_u32_some,
+        harness_weak_inner_u32_none,
+        harness_weak_inner_u32_expired,
+        u32
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_u64_some,
+        harness_weak_inner_u64_none,
+        harness_weak_inner_u64_expired,
+        u64
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_u128_some,
+        harness_weak_inner_u128_none,
+        harness_weak_inner_u128_expired,
+        u128
+    );
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_unit_some,
+        harness_weak_inner_unit_none,
+        harness_weak_inner_unit_expired,
+        ()
+    );
     gen_weak_inner_sized_harness!(
         harness_weak_inner_array_some,
         harness_weak_inner_array_none,
+        harness_weak_inner_array_expired,
         [u8; 4]
     );
-    gen_weak_inner_sized_harness!(harness_weak_inner_bool_some, harness_weak_inner_bool_none, bool);
+    gen_weak_inner_sized_harness!(
+        harness_weak_inner_bool_some,
+        harness_weak_inner_bool_none,
+        harness_weak_inner_bool_expired,
+        bool
+    );
     gen_weak_inner_unsized_harness!(
         harness_weak_inner_vec_u8_some,
         harness_weak_inner_vec_u8_none,
+        harness_weak_inner_vec_u8_expired,
         [u8]
     );
     gen_weak_inner_unsized_harness!(
         harness_weak_inner_vec_u16_some,
         harness_weak_inner_vec_u16_none,
+        harness_weak_inner_vec_u16_expired,
         [u16]
     );
     gen_weak_inner_unsized_harness!(
         harness_weak_inner_vec_u32_some,
         harness_weak_inner_vec_u32_none,
+        harness_weak_inner_vec_u32_expired,
         [u32]
     );
     gen_weak_inner_unsized_harness!(
         harness_weak_inner_vec_u64_some,
         harness_weak_inner_vec_u64_none,
+        harness_weak_inner_vec_u64_expired,
         [u64]
     );
     gen_weak_inner_unsized_harness!(
         harness_weak_inner_vec_u128_some,
         harness_weak_inner_vec_u128_none,
+        harness_weak_inner_vec_u128_expired,
         [u128]
     );
 
@@ -6411,11 +6817,27 @@ mod verify {
             pub fn $live() {
                 // Keep one strong owner alive.
                 let strong: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                // Create an explicit weak while the strong owner remains alive.
+                let weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                let ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "Weak::drop live path points to a real allocation");
                 {
-                    // Create explicit weak and let it drop at block end.
-                    let _weak: Weak<$ty, Global> = Rc::downgrade(&strong);
+                    let inner = Weak::<$ty, Global>::inner(&weak).unwrap();
+                    assert!(inner.strong.get() == 1 && inner.weak.get() == 2);
+                    kani::cover(
+                        true,
+                        "Weak::drop live path starts with one strong and two weak references",
+                    );
                 }
-                // Step C: strong owner still exists, so drop follows non-zero weak branch.
+
+                // Strong owner still exists, so drop follows non-zero weak branch.
+                drop(weak);
+                let inner = strong.inner();
+                assert!(inner.strong.get() == 1 && inner.weak.get() == 1);
+                kani::cover(true, "Weak::drop removes only the explicit weak reference");
+                assert!(Rc::weak_count(&strong) == 0);
+                kani::cover(true, "Weak::drop keeps the implicit weak count balanced");
             }
 
             #[kani::proof]
@@ -6426,7 +6848,22 @@ mod verify {
                 // Remove all strong owners first.
                 drop(strong);
                 // Explicit weak is now last weak => drop deallocates.
-                let _ = weak;
+                let ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "expired weak still points to a real allocation");
+                {
+                    let inner = Weak::<$ty, Global>::inner(&weak).unwrap();
+                    assert!(inner.strong.get() == 0 && inner.weak.get() == 1);
+                    kani::cover(
+                        true,
+                        "Weak::drop expired path has one final explicit weak reference",
+                    );
+                }
+                drop(weak);
+                kani::cover(
+                    true,
+                    "Weak::drop deallocates after the final weak reference is dropped",
+                );
             }
 
             #[kani::proof]
@@ -6434,7 +6871,11 @@ mod verify {
                 // Create sentinel weak with no allocation behind it.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
                 // Dropping it triggers early-return path (`inner() == None`).
-                let _ = weak;
+                let ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(is_dangling(ptr));
+                kani::cover(true, "Weak::drop dangling path receives the sentinel weak");
+                drop(weak);
+                kani::cover(true, "Weak::drop returns immediately for the dangling sentinel");
             }
         };
     }
@@ -6450,11 +6891,27 @@ mod verify {
                 // Build live slice allocation and keep strong owner alive.
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let strong: Rc<[$elem], Global> = Rc::from(vec);
+                // Create an explicit weak while the strong owner remains alive.
+                let weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "Weak::drop live slice path points to a real allocation");
                 {
-                    // Create explicit weak and let it drop immediately.
-                    let _weak: Weak<[$elem], Global> = Rc::downgrade(&strong);
+                    let inner = Weak::<[$elem], Global>::inner(&weak).unwrap();
+                    assert!(inner.strong.get() == 1 && inner.weak.get() == 2);
+                    kani::cover(
+                        true,
+                        "Weak::drop live slice starts with one strong and two weak references",
+                    );
                 }
+
                 // Implicit weak still exists via strong owner => non-zero weak branch.
+                drop(weak);
+                let inner = strong.inner();
+                assert!(inner.strong.get() == 1 && inner.weak.get() == 1);
+                kani::cover(true, "Weak::drop removes the explicit slice weak reference");
+                assert!(Rc::weak_count(&strong) == 0);
+                kani::cover(true, "Weak::drop keeps the slice implicit weak count balanced");
             }
 
             #[kani::proof]
@@ -6466,7 +6923,16 @@ mod verify {
                 // Drop strong owner first.
                 drop(strong);
                 // Explicit weak is last weak => drop reaches deallocate branch.
-                let _ = weak;
+                let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "expired weak slice still points to a real allocation");
+                {
+                    let inner = Weak::<[$elem], Global>::inner(&weak).unwrap();
+                    assert!(inner.strong.get() == 0 && inner.weak.get() == 1);
+                    kani::cover(true, "Weak::drop expired slice has one final weak reference");
+                }
+                drop(weak);
+                kani::cover(true, "Weak::drop deallocates the final slice weak allocation");
             }
 
             #[kani::proof]
@@ -6476,7 +6942,11 @@ mod verify {
                 // Coerce metadata to slice form; pointer remains sentinel.
                 let weak: Weak<[$elem], Global> = weak_arr;
                 // Dropping weak triggers early-return (`inner() == None`).
-                let _ = weak;
+                let ptr = Weak::<[$elem], Global>::as_ptr(&weak);
+                assert!(is_dangling(ptr));
+                kani::cover(true, "Weak::drop dangling slice path receives the sentinel weak");
+                drop(weak);
+                kani::cover(true, "Weak::drop returns immediately for the dangling slice sentinel");
             }
         };
     }
@@ -6607,8 +7077,11 @@ mod verify {
                 // Build a valid live Rc. This guarantees the precondition `strong != 0`.
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let inner = rc.inner();
+                let before = inner.strong();
                 // Call under ordinary refcount state to cover the non-overflow return path.
                 inner.inc_strong();
+                assert!(inner.strong() == before + 1);
+                kani::cover(true, "inc_strong increments the strong count");
                 // Revert the temporary increment so drop logic remains balanced.
                 inner.dec_strong();
                 let _ = rc;
@@ -6624,8 +7097,11 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let inner = rc.inner();
+                let before = inner.strong();
                 // Same branch target as sized: ordinary increment without overflow.
                 inner.inc_strong();
+                assert!(inner.strong() == before + 1);
+                kani::cover(true, "inc_strong increments the slice strong count");
                 // Keep the strong count balanced for teardown.
                 inner.dec_strong();
                 let _ = rc;
@@ -6642,6 +7118,8 @@ mod verify {
         // Force `strong == usize::MAX`, so `wrapping_add(1)` becomes 0.
         inner.strong_ref().set(usize::MAX);
         // This must hit the overflow check and abort.
+        assert!(inner.strong() == usize::MAX);
+        kani::cover(true, "inc_strong overflow starts from usize::MAX");
         inner.inc_strong();
         // If execution reaches here, overflow branch was not taken as expected.
         core::mem::forget(rc);
@@ -6687,8 +7165,11 @@ mod verify {
                 // Build a live `Rc<T>` so the precondition `weak != 0` holds.
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let inner = rc.inner();
+                let before = inner.weak();
                 // Trigger path (1): ordinary increment that does not wrap to zero.
                 inner.inc_weak();
+                assert!(inner.weak() == before + 1);
+                kani::cover(true, "inc_weak increments the weak count");
                 // Balance the temporary increment to keep teardown behavior stable.
                 inner.dec_weak();
                 let _ = rc;
@@ -6704,8 +7185,11 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let inner = rc.inner();
+                let before = inner.weak();
                 // Trigger path (1) on an unsized payload.
                 inner.inc_weak();
+                assert!(inner.weak() == before + 1);
+                kani::cover(true, "inc_weak increments the slice weak count");
                 // Restore the weak count.
                 inner.dec_weak();
                 let _ = rc;
@@ -6722,6 +7206,8 @@ mod verify {
         // Force `weak == usize::MAX` so `wrapping_add(1)` becomes zero.
         inner.weak_ref().set(usize::MAX);
         // Trigger path (2): overflow should abort.
+        assert!(inner.weak() == usize::MAX);
+        kani::cover(true, "inc_weak overflow starts from usize::MAX");
         inner.inc_weak();
         // Avoid dropping forged state if panic handling changes.
         core::mem::forget(rc);
@@ -6752,8 +7238,42 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
-                let _rc: Rc<$ty, Global> = UniqueRc::into_rc(unique);
+                let value: $ty = kani::any::<$ty>();
+                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(value, Global);
+                // Keep a weak reference across the conversion to check the documented upgrade behavior.
+                let weak: Weak<$ty, Global> = UniqueRc::downgrade(&unique);
+                assert!(weak.upgrade().is_none());
+                kani::cover(true, "weak cannot upgrade before UniqueRc::into_rc");
+
+                // Call `UniqueRc::into_rc`.
+                let rc: Rc<$ty, Global> = UniqueRc::into_rc(unique);
+                assert!(*rc == value);
+                kani::cover(true, "UniqueRc::into_rc preserves the value");
+                assert!(Rc::strong_count(&rc) == 1 && Rc::weak_count(&rc) == 1);
+                kani::cover(true, "UniqueRc::into_rc enables one strong and one weak owner");
+
+                // The weak created before conversion must now observe the new strong owner.
+                let upgraded = weak.upgrade();
+                assert!(upgraded.is_some());
+                kani::cover(true, "weak created before UniqueRc::into_rc can upgrade afterward");
+
+                let upgraded = upgraded.unwrap();
+                assert!(
+                    Rc::ptr_eq(&rc, &upgraded)
+                        && Rc::strong_count(&rc) == 2
+                        && Rc::weak_count(&rc) == 1
+                );
+                kani::cover(true, "upgraded weak points to the converted Rc allocation");
+
+                // Releasing the temporary upgrade must restore the converted Rc's counts.
+                drop(upgraded);
+                assert!(Rc::strong_count(&rc) == 1 && Rc::weak_count(&rc) == 1);
+                kani::cover(true, "dropping the upgraded Rc restores the converted Rc counts");
+
+                // Finally release the original explicit weak reference.
+                drop(weak);
+                assert!(Rc::strong_count(&rc) == 1 && Rc::weak_count(&rc) == 0);
+                kani::cover(true, "dropping the original weak removes the explicit weak count");
             }
         };
     }
@@ -6777,8 +7297,26 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
+                // A new UniqueRc has no explicit weak references.
                 let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
-                let _weak: Weak<$ty, Global> = UniqueRc::downgrade(&unique);
+                assert!(UniqueRc::weak_count(&unique) == 0);
+                kani::cover(true, "UniqueRc starts without explicit weak references");
+
+                // Save the value pointer so the returned Weak cannot pass as a sentinel by mistake.
+                let expected = UniqueRc::<$ty, Global>::as_ptr(&unique);
+                // Call the target function: this harness verifies `UniqueRc::downgrade`.
+                let weak: Weak<$ty, Global> = UniqueRc::downgrade(&unique);
+                // The new Weak must point to the same allocation as the UniqueRc.
+                let ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(true, "UniqueRc::downgrade preserves the allocation pointer");
+
+                // `downgrade` adds exactly one explicit weak reference.
+                assert!(UniqueRc::weak_count(&unique) == 1);
+                kani::cover(true, "UniqueRc::downgrade increments the explicit weak count");
+                // The documented behavior forbids upgrading before conversion with `into_rc`.
+                assert!(weak.upgrade().is_none());
+                kani::cover(true, "UniqueRc::downgrade weak cannot upgrade before into_rc");
             }
         };
     }
@@ -6802,9 +7340,30 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let mut unique: UniqueRc<$ty, Global> =
-                    UniqueRc::new_in(kani::any::<$ty>(), Global);
-                let _: &mut $ty = core::ops::DerefMut::deref_mut(&mut unique);
+                // Generate the value stored in the uniquely owned allocation.
+                let value: $ty = kani::any::<$ty>();
+                let replacement: $ty = kani::any::<$ty>();
+                // A UniqueRc has exclusive access to its value, so it can yield a mutable reference.
+                let mut unique: UniqueRc<$ty, Global> = UniqueRc::new_in(value, Global);
+                let expected = UniqueRc::<$ty, Global>::as_ptr(&unique);
+
+                {
+                    // Call the target function: this harness verifies `UniqueRc::deref_mut`.
+                    let result: &mut $ty = core::ops::DerefMut::deref_mut(&mut unique);
+                    // The returned mutable reference must point to the allocation's value field.
+                    assert!(core::ptr::eq(result as *const $ty, expected));
+                    kani::cover(true, "UniqueRc::deref_mut points to the stored value");
+                    // It must also read the value originally stored in the UniqueRc.
+                    assert!(*result == value);
+                    kani::cover(true, "UniqueRc::deref_mut returns the stored value");
+
+                    // Write through the mutable reference to exercise its mutation semantics.
+                    *result = replacement;
+                }
+
+                // After the mutable borrow ends, the UniqueRc must observe the written value.
+                assert!(*unique == replacement);
+                kani::cover(true, "UniqueRc observes writes through deref_mut");
             }
         };
     }
@@ -6828,8 +7387,19 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
-                let _: &$ty = core::ops::Deref::deref(&unique);
+                // Generate the value stored in the uniquely owned allocation.
+                let value: $ty = kani::any::<$ty>();
+                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(value, Global);
+                let expected = UniqueRc::<$ty, Global>::as_ptr(&unique);
+
+                // Call the target function: this harness verifies `UniqueRc::deref`.
+                let result: &$ty = core::ops::Deref::deref(&unique);
+                // The shared reference must point to the allocation's value field.
+                assert!(core::ptr::eq(result as *const $ty, expected));
+                kani::cover(true, "UniqueRc::deref points to the stored value");
+                // It must also read the value originally stored in the UniqueRc.
+                assert!(*result == value);
+                kani::cover(true, "UniqueRc::deref returns the stored value");
             }
         };
     }
@@ -6862,7 +7432,19 @@ mod verify {
             #[kani::proof]
             pub fn $unique() {
                 // No external weak: dropping `unique` should follow the `weak()==0` branch.
-                let _unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
+                let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
+                {
+                    let inner = unique.inner();
+                    assert!(inner.strong() == 0 && inner.weak() == 1);
+                    kani::cover(
+                        true,
+                        "UniqueRc::drop unique path starts with one implicit weak reference",
+                    );
+                }
+
+                // With no external weak, `dec_weak()` reaches zero and this drop deallocates.
+                drop(unique);
+                kani::cover(true, "UniqueRc::drop deallocates when no explicit weak remains");
             }
 
             #[kani::proof]
@@ -6871,11 +7453,35 @@ mod verify {
                 let unique: UniqueRc<$ty, Global> = UniqueRc::new_in(kani::any::<$ty>(), Global);
                 let weak: Weak<$ty, Global> = UniqueRc::downgrade(&unique);
                 {
-                    // Drop strong owner now; `UniqueRc::drop` takes the `weak()!=0` branch.
-                    let _dropped_strong = unique;
+                    let inner = unique.inner();
+                    assert!(inner.strong() == 0 && inner.weak() == 2);
+                    kani::cover(
+                        true,
+                        "UniqueRc::drop weak-present path starts with two weak references",
+                    );
                 }
+
+                // Drop strong owner now; `UniqueRc::drop` takes the `weak()!=0` branch.
+                // The UniqueRc drops its value and removes only the implicit weak.
+                drop(unique);
+
+                let ptr = Weak::<$ty, Global>::as_ptr(&weak);
+                assert!(!is_dangling(ptr));
+                kani::cover(true, "UniqueRc::drop keeps the allocation for an explicit weak");
+                {
+                    let inner = Weak::<$ty, Global>::inner(&weak).unwrap();
+                    assert!(inner.strong() == 0 && inner.weak() == 1);
+                    kani::cover(true, "UniqueRc::drop leaves one explicit weak reference");
+                }
+
+                // The weak must outlive the strong drop.
                 // Keep weak alive across the strong drop to preserve the branch condition.
-                let _ = weak;
+                assert!(weak.upgrade().is_none());
+                kani::cover(true, "UniqueRc::drop invalidates the weak upgrade");
+
+                // The final explicit weak now performs the eventual deallocation.
+                drop(weak);
+                kani::cover(true, "the final weak releases the allocation after UniqueRc::drop");
             }
         };
     }
@@ -6953,7 +7559,15 @@ mod verify {
             pub fn $name() {
                 let value: $ty = kani::any::<$ty>();
                 let for_value: &$ty = &value;
-                let _uninit: UniqueRcUninit<$ty, Global> = UniqueRcUninit::new(for_value, Global);
+                // Call the target function: this harness verifies `UniqueRcUninit::new`.
+                let mut uninit: UniqueRcUninit<$ty, Global> =
+                    UniqueRcUninit::new(for_value, Global);
+                let ptr = uninit.data_ptr();
+                assert!(!ptr.is_null());
+                kani::cover(true, "UniqueRcUninit::new returns a non-null data pointer");
+                // The allocation is intentionally uninitialized, so verify writability only.
+                assert!(core::ub_checks::can_write(ptr));
+                kani::cover(true, "UniqueRcUninit::new allocates writable storage");
             }
         };
     }
@@ -6964,7 +7578,15 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let slice: &[$elem] = nondet_rc_slice(&vec);
-                let _uninit: UniqueRcUninit<[$elem], Global> = UniqueRcUninit::new(slice, Global);
+                // Call the target function: this harness verifies `UniqueRcUninit::new` for a slice.
+                let mut uninit: UniqueRcUninit<[$elem], Global> =
+                    UniqueRcUninit::new(slice, Global);
+                let ptr = uninit.data_ptr();
+                assert!(!(ptr as *mut $elem).is_null());
+                kani::cover(true, "UniqueRcUninit::new returns a non-null slice data pointer");
+                // Check the full slice region and metadata without reading uninitialized elements.
+                assert!(core::ub_checks::can_write(ptr));
+                kani::cover(true, "UniqueRcUninit::new allocates writable slice storage");
             }
         };
     }
@@ -6996,7 +7618,16 @@ mod verify {
             pub fn $name() {
                 let value: $ty = kani::any::<$ty>();
                 let mut uninit: UniqueRcUninit<$ty, Global> = UniqueRcUninit::new(&value, Global);
-                let _ptr: *mut $ty = uninit.data_ptr();
+                // Compare against the raw value-field pointer without reading the uninitialized value.
+                let expected: *mut $ty = unsafe { &raw mut (*uninit.ptr.as_ptr()).value };
+                // Call the target function: this harness verifies `UniqueRcUninit::data_ptr`.
+                let ptr: *mut $ty = uninit.data_ptr();
+                assert!(!ptr.is_null());
+                kani::cover(true, "UniqueRcUninit::data_ptr returns a non-null pointer");
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(true, "UniqueRcUninit::data_ptr points to the value field");
+                assert!(core::ub_checks::can_write(ptr));
+                kani::cover(true, "UniqueRcUninit::data_ptr returns writable storage");
             }
         };
     }
@@ -7009,7 +7640,19 @@ mod verify {
                 let slice = nondet_rc_slice(&vec);
                 let mut uninit: UniqueRcUninit<[$elem], Global> =
                     UniqueRcUninit::new(slice, Global);
-                let _ptr: *mut [$elem] = uninit.data_ptr();
+                // Compare the complete raw value-field pointer, including slice metadata.
+                let expected: *mut [$elem] = unsafe { &raw mut (*uninit.ptr.as_ptr()).value };
+                // Call the target function: this harness verifies `UniqueRcUninit::data_ptr` for a slice.
+                let ptr: *mut [$elem] = uninit.data_ptr();
+                assert!(!(ptr as *mut $elem).is_null());
+                kani::cover(true, "UniqueRcUninit::data_ptr returns a non-null slice pointer");
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(
+                    true,
+                    "UniqueRcUninit::data_ptr preserves the slice data pointer and metadata",
+                );
+                assert!(core::ub_checks::can_write(ptr));
+                kani::cover(true, "UniqueRcUninit::data_ptr returns writable slice storage");
             }
         };
     }
@@ -7040,7 +7683,13 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let value: $ty = kani::any::<$ty>();
-                let _uninit: UniqueRcUninit<$ty, Global> = UniqueRcUninit::new(&value, Global);
+                let uninit: UniqueRcUninit<$ty, Global> = UniqueRcUninit::new(&value, Global);
+                // `drop` must have ownership of the allocator token in order to deallocate.
+                assert!(uninit.alloc.is_some());
+                kani::cover(true, "UniqueRcUninit::drop starts with allocator ownership");
+                // Call the target function: this harness verifies `UniqueRcUninit::drop`.
+                drop(uninit);
+                kani::cover(true, "UniqueRcUninit::drop releases the uninitialized allocation");
             }
         };
     }
@@ -7051,7 +7700,16 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec::<$elem>();
                 let slice = nondet_rc_slice(&vec);
-                let _uninit: UniqueRcUninit<[$elem], Global> = UniqueRcUninit::new(slice, Global);
+                let uninit: UniqueRcUninit<[$elem], Global> = UniqueRcUninit::new(slice, Global);
+                // `drop` must have ownership of the allocator token in order to deallocate.
+                assert!(uninit.alloc.is_some());
+                kani::cover(true, "UniqueRcUninit::drop starts with allocator ownership");
+                // Call the target function: this harness verifies `UniqueRcUninit::drop` for a slice.
+                drop(uninit);
+                kani::cover(
+                    true,
+                    "UniqueRcUninit::drop releases the uninitialized slice allocation",
+                );
             }
         };
     }
@@ -7076,13 +7734,17 @@ mod verify {
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u64, [u64]);
     gen_unique_rc_uninit_drop_unsized_harness!(harness_unique_rc_uninit_drop_slice_u128, [u128]);
 
-    // RcInnerPtr::inner harnesses.
+    // Rc::inner harnesses.
     macro_rules! gen_inner_sized_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let _ = rc.inner();
+                // Call the target function: this harness verifies `Rc::inner`.
+                let inner = rc.inner();
+                assert!(inner.strong() == 1);
+                assert!(inner.weak() == 1);
+                kani::cover(true, "Rc::inner observes the initial strong count");
             }
         };
     }
@@ -7093,7 +7755,11 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let _ = rc.inner();
+                // Call the target function: this harness verifies `Rc::inner` for a slice.
+                let inner = rc.inner();
+                assert!(inner.strong() == 1);
+                assert!(inner.weak() == 1);
+                kani::cover(true, "Rc::inner observes the initial slice strong count");
             }
         };
     }
@@ -7123,10 +7789,29 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let value: $ty = kani::any::<$ty>();
+                let rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let expected_ptr = Rc::as_ptr(&rc);
+
+                // Call the target function: this harness verifies
+                // `Rc::into_inner_with_allocator`.
                 let (ptr, alloc) = Rc::<$ty, Global>::into_inner_with_allocator(rc);
-                let _recovered: Rc<$ty, Global> =
+                let recovered: Rc<$ty, Global> =
                     unsafe { Rc::<$ty, Global>::from_inner_in(ptr, alloc) };
+
+                assert!(core::ptr::eq(Rc::as_ptr(&recovered), expected_ptr));
+                kani::cover(
+                    true,
+                    "into_inner_with_allocator preserves the sized allocation pointer",
+                );
+                assert!(*recovered == value);
+                kani::cover(true, "into_inner_with_allocator preserves the sized payload");
+                assert!(Rc::strong_count(&recovered) == 1);
+                assert!(Rc::weak_count(&recovered) == 0);
+                kani::cover(
+                    true,
+                    "into_inner_with_allocator preserves the initial reference counts",
+                );
             }
         };
     }
@@ -7137,9 +7822,22 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let expected_ptr = Rc::as_ptr(&rc);
+
+                // Call the target function: this harness verifies
+                // `Rc::into_inner_with_allocator` for a slice.
                 let (ptr, alloc) = Rc::<[$elem], Global>::into_inner_with_allocator(rc);
-                let _recovered: Rc<[$elem], Global> =
+                let recovered: Rc<[$elem], Global> =
                     unsafe { Rc::<[$elem], Global>::from_inner_in(ptr, alloc) };
+
+                assert!(core::ptr::eq(Rc::as_ptr(&recovered), expected_ptr));
+                kani::cover(true, "into_inner_with_allocator preserves the complete slice pointer");
+                assert!(Rc::strong_count(&recovered) == 1);
+                assert!(Rc::weak_count(&recovered) == 0);
+                kani::cover(
+                    true,
+                    "into_inner_with_allocator preserves the initial slice reference counts",
+                );
             }
         };
     }
@@ -7182,7 +7880,15 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let value: $ty = kani::any::<$ty>();
-                let _rc: Rc<$ty> = Rc::new(value);
+                let rc: Rc<$ty> = Rc::new(value);
+                // Call the target function: this harness verifies `Rc::new`.
+                let rc: Rc<$ty> = Rc::new(value);
+                assert!(*rc == value);
+                kani::cover(true, "Rc::new stores the supplied value");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new starts without explicit weak owners");
             }
         };
     }
@@ -7206,7 +7912,15 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _rc: Rc<mem::MaybeUninit<$ty>> = Rc::<$ty>::new_uninit();
+                // Call the target function: this harness verifies `Rc::new_uninit`.
+                let rc: Rc<mem::MaybeUninit<$ty>> = Rc::<$ty>::new_uninit();
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::new_uninit returns a non-null allocation pointer");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_uninit creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_uninit starts without explicit weak owners");
             }
         };
     }
@@ -7230,7 +7944,18 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _rc: Rc<mem::MaybeUninit<$ty>> = Rc::<$ty>::new_zeroed();
+                // Call the target function: this harness verifies `Rc::new_zeroed`.
+                let rc: Rc<mem::MaybeUninit<$ty>> = Rc::<$ty>::new_zeroed();
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::new_zeroed returns a non-null allocation pointer");
+
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_zeroed creates one strong owner");
+
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_zeroed starts without explicit weak owners");
             }
         };
     }
@@ -7254,8 +7979,19 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _rc: Rc<mem::MaybeUninit<$ty>, Global> =
+                // Call the target function: this harness verifies `Rc::new_uninit_in`.
+                let rc: Rc<mem::MaybeUninit<$ty>, Global> =
                     Rc::<$ty, Global>::new_uninit_in(Global);
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::new_uninit_in returns a non-null allocation pointer");
+
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_uninit_in creates one strong owner");
+
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_uninit_in starts without explicit weak owners");
             }
         };
     }
@@ -7279,8 +8015,19 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _rc: Rc<mem::MaybeUninit<$ty>, Global> =
+                // Call the target function: this harness verifies `Rc::new_zeroed_in`.
+                let rc: Rc<mem::MaybeUninit<$ty>, Global> =
                     Rc::<$ty, Global>::new_zeroed_in(Global);
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::new_zeroed_in returns a non-null allocation pointer");
+
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_zeroed_in creates one strong owner");
+
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_zeroed_in starts without explicit weak owners");
             }
         };
     }
@@ -7304,13 +8051,30 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _rc: Rc<$ty, Global> = Rc::<$ty, Global>::new_cyclic_in(
+                let expected: $ty = kani::any::<$ty>();
+
+                // Call the target function: this harness verifies `Rc::new_cyclic_in`.
+                let rc: Rc<$ty, Global> = Rc::<$ty, Global>::new_cyclic_in(
                     |weak: &Weak<$ty, Global>| {
-                        let _ = weak.upgrade();
-                        kani::any::<$ty>()
+                        // The allocation has no strong owner while the closure is running.
+                        assert!(weak.upgrade().is_none());
+                        kani::cover(
+                            true,
+                            "new_cyclic_in closure observes an unavailable strong owner",
+                        );
+                        expected
                     },
                     Global,
                 );
+
+                assert!(*rc == expected);
+                kani::cover(true, "Rc::new_cyclic_in stores the closure result");
+
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_cyclic_in creates one strong owner");
+
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_cyclic_in leaves no explicit weak owners");
             }
         };
     }
@@ -7334,17 +8098,55 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _result = Rc::<$ty, Global>::try_new_in(kani::any::<$ty>(), Global);
+                let value: $ty = kani::any::<$ty>();
+
+                // Call the target function: this harness verifies `Rc::try_new_in`.
+                match Rc::<$ty, Global>::try_new_in(value, Global) {
+                    Ok(rc) => {
+                        assert!(*rc == value);
+                        kani::cover(true, "try_new_in success preserves the value");
+
+                        assert!(Rc::strong_count(&rc) == 1);
+                        kani::cover(true, "try_new_in success creates one strong owner");
+
+                        assert!(Rc::weak_count(&rc) == 0);
+                        kani::cover(true, "try_new_in success starts without explicit weak owners");
+                    }
+                    // With `Global` and these fixed-size layouts, allocation failure is not
+                    // reachable in this harness, so this cover is expected to be unreachable.
+                    Err(_) => kani::cover(true, "try_new_in allocation failure is reachable"),
+                }
             }
         };
     }
 
-    macro_rules! gen_try_new_in_unsized_harness {
+    macro_rules! gen_try_new_in_vec_harness {
         ($name:ident, $elem:ty) => {
             #[kani::proof]
             pub fn $name() {
                 let vec = verifier_nondet_vec::<$elem>();
-                let _result = Rc::<Vec<$elem>, Global>::try_new_in(vec, Global);
+                let expected_len = vec.len();
+
+                // `try_new_in` receives a sized `Vec<$elem>` payload here; this is not an
+                // `Rc<[$elem]>` slice allocation path.
+                match Rc::<Vec<$elem>, Global>::try_new_in(vec, Global) {
+                    Ok(rc) => {
+                        assert!(rc.len() == expected_len);
+                        kani::cover(true, "try_new_in Vec success preserves length");
+
+                        assert!(Rc::strong_count(&rc) == 1);
+                        kani::cover(true, "try_new_in Vec success creates one strong owner");
+
+                        assert!(Rc::weak_count(&rc) == 0);
+                        kani::cover(
+                            true,
+                            "try_new_in Vec success starts without explicit weak owners",
+                        );
+                    }
+                    // The `Rc<Vec<_>>` allocation has a fixed layout here, so `Global` failure is
+                    // not reachable, so this cover is expected to be unreachable.
+                    Err(_) => kani::cover(true, "try_new_in Vec allocation failure is reachable"),
+                }
             }
         };
     }
@@ -7363,18 +8165,41 @@ mod verify {
     gen_try_new_in_harness!(harness_try_new_in_array, [u8; 4]);
     gen_try_new_in_harness!(harness_try_new_in_bool, bool);
 
-    gen_try_new_in_unsized_harness!(harness_try_new_in_vec_u8, u8);
-    gen_try_new_in_unsized_harness!(harness_try_new_in_vec_u16, u16);
-    gen_try_new_in_unsized_harness!(harness_try_new_in_vec_u32, u32);
-    gen_try_new_in_unsized_harness!(harness_try_new_in_vec_u64, u64);
-    gen_try_new_in_unsized_harness!(harness_try_new_in_vec_u128, u128);
+    gen_try_new_in_vec_harness!(harness_try_new_in_vec_u8, u8);
+    gen_try_new_in_vec_harness!(harness_try_new_in_vec_u16, u16);
+    gen_try_new_in_vec_harness!(harness_try_new_in_vec_u32, u32);
+    gen_try_new_in_vec_harness!(harness_try_new_in_vec_u64, u64);
+    gen_try_new_in_vec_harness!(harness_try_new_in_vec_u128, u128);
 
     // Rc::try_new_uninit_in harnesses.
     macro_rules! gen_try_new_uninit_in_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _result = Rc::<$ty, Global>::try_new_uninit_in(Global);
+                // Call the target function: this harness verifies `Rc::try_new_uninit_in`.
+                match Rc::<$ty, Global>::try_new_uninit_in(Global) {
+                    Ok(rc) => {
+                        assert!(!Rc::as_ptr(&rc).is_null());
+                        kani::cover(
+                            true,
+                            "try_new_uninit_in success returns a non-null allocation",
+                        );
+
+                        assert!(Rc::strong_count(&rc) == 1);
+                        kani::cover(true, "try_new_uninit_in success creates one strong owner");
+
+                        assert!(Rc::weak_count(&rc) == 0);
+                        kani::cover(
+                            true,
+                            "try_new_uninit_in success starts without explicit weak owners",
+                        );
+                    }
+                    // With `Global` and these fixed-size layouts, allocation failure is not
+                    // reachable in this harness, so this cover is expected to be unreachable.
+                    Err(_) => {
+                        kani::cover(true, "try_new_uninit_in allocation failure is reachable")
+                    }
+                }
             }
         };
     }
@@ -7398,7 +8223,30 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _result = Rc::<$ty, Global>::try_new_zeroed_in(Global);
+                // Call the target function: this harness verifies `Rc::try_new_zeroed_in`.
+                match Rc::<$ty, Global>::try_new_zeroed_in(Global) {
+                    Ok(rc) => {
+                        assert!(!Rc::as_ptr(&rc).is_null());
+                        kani::cover(
+                            true,
+                            "try_new_zeroed_in success returns a non-null allocation",
+                        );
+
+                        assert!(Rc::strong_count(&rc) == 1);
+                        kani::cover(true, "try_new_zeroed_in success creates one strong owner");
+
+                        assert!(Rc::weak_count(&rc) == 0);
+                        kani::cover(
+                            true,
+                            "try_new_zeroed_in success starts without explicit weak owners",
+                        );
+                    }
+                    // With `Global` and these fixed-size layouts, allocation failure is not
+                    // reachable in this harness, so this cover is expected to be unreachable.
+                    Err(_) => {
+                        kani::cover(true, "try_new_zeroed_in allocation failure is reachable")
+                    }
+                }
             }
         };
     }
@@ -7423,13 +8271,34 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let value = NotUnpinSentinel(kani::any(), PhantomPinned);
-                let _pinned = Rc::<NotUnpinSentinel, Global>::pin_in(value, Global);
+                // Call the target function: this harness verifies `Rc::pin_in`.
+                let pinned = Rc::<NotUnpinSentinel, Global>::pin_in(value, Global);
+
+                let before = core::ptr::from_ref(Pin::as_ref(&pinned).get_ref());
+                assert!(!before.is_null());
+                kani::cover(true, "Rc::pin_in supports !Unpin values");
+
+                let moved = pinned;
+                let after = core::ptr::from_ref(Pin::as_ref(&moved).get_ref());
+                assert!(core::ptr::eq(before, after));
+                kani::cover(true, "Rc::pin_in keeps the !Unpin pointee address stable");
             }
         };
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _pinned = Rc::<$ty, Global>::pin_in(kani::any::<$ty>(), Global);
+                let value: $ty = kani::any::<$ty>();
+                // Call the target function: this harness verifies `Rc::pin_in`.
+                let pinned = Rc::<$ty, Global>::pin_in(value, Global);
+
+                assert!(*Pin::as_ref(&pinned).get_ref() == value);
+                kani::cover(true, "Rc::pin_in preserves the value");
+
+                let before = core::ptr::from_ref(Pin::as_ref(&pinned).get_ref());
+                let moved = pinned;
+                let after = core::ptr::from_ref(Pin::as_ref(&moved).get_ref());
+                assert!(core::ptr::eq(before, after));
+                kani::cover(true, "Rc::pin_in keeps the pointee address stable");
             }
         };
     }
@@ -7455,7 +8324,22 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$ty>(*l));
-                let _rc: Rc<[mem::MaybeUninit<$ty>]> = Rc::<[$ty]>::new_uninit_slice(len);
+
+                // Call the target function: this harness verifies `Rc::new_uninit_slice`.
+                let rc: Rc<[mem::MaybeUninit<$ty>]> = Rc::<[$ty]>::new_uninit_slice(len);
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::new_uninit_slice returns a non-null allocation pointer");
+
+                assert!(rc.len() == len);
+                kani::cover(true, "Rc::new_uninit_slice preserves the requested length");
+
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_uninit_slice creates one strong owner");
+
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_uninit_slice starts without explicit weak owners");
             }
         };
     }
@@ -7480,7 +8364,22 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$elem_ty>(*l));
-                let _rc: Rc<[mem::MaybeUninit<$elem_ty>]> = Rc::<[$elem_ty]>::new_zeroed_slice(len);
+
+                // Call the target function: this harness verifies `Rc::new_zeroed_slice`.
+                let rc: Rc<[mem::MaybeUninit<$elem_ty>]> = Rc::<[$elem_ty]>::new_zeroed_slice(len);
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::new_zeroed_slice returns a non-null allocation pointer");
+
+                assert!(rc.len() == len);
+                kani::cover(true, "Rc::new_zeroed_slice preserves the requested length");
+
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_zeroed_slice creates one strong owner");
+
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_zeroed_slice starts without explicit weak owners");
             }
         };
     }
@@ -7506,8 +8405,35 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$ty>();
                 let rc: Rc<[$ty]> = Rc::from(vec);
-                const N: usize = 100;
-                let _: Option<Rc<[$ty; N]>> = rc.into_array::<N>();
+                // N matches the helper's length bound so both the Some (len == N)
+                // and None (len != N) return arms are reachable.
+                const N: usize = 50;
+                let len = rc.len();
+                let expected_data = Rc::as_ptr(&rc) as *const $ty;
+
+                // Call the target function: this harness verifies `Rc::into_array`.
+                let arr: Option<Rc<[$ty; N]>> = rc.into_array::<N>();
+
+                match arr {
+                    Some(arr) => {
+                        assert!(len == N);
+                        kani::cover(true, "Rc::into_array returns Some when lengths match");
+
+                        // The conversion must reinterpret the existing allocation without reallocating.
+                        assert!(core::ptr::eq(expected_data, Rc::as_ptr(&arr) as *const $ty));
+                        kani::cover(true, "Rc::into_array preserves allocation identity");
+
+                        assert!(Rc::strong_count(&arr) == 1);
+                        kani::cover(true, "Rc::into_array preserves the strong reference count");
+
+                        assert!(Rc::weak_count(&arr) == 0);
+                        kani::cover(true, "Rc::into_array preserves the weak reference count");
+                    }
+                    None => {
+                        assert!(len != N);
+                        kani::cover(true, "Rc::into_array returns None when lengths differ");
+                    }
+                }
             }
         };
     }
@@ -7532,14 +8458,34 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let value = NotUnpinSentinel(kani::any(), PhantomPinned);
-                let _pinned = Rc::pin(value);
+                // Call the target function: this harness verifies `Rc::pin`.
+                let pinned = Rc::pin(value);
+
+                let before = core::ptr::from_ref(Pin::as_ref(&pinned).get_ref());
+                assert!(!before.is_null());
+                kani::cover(true, "Rc::pin supports !Unpin values");
+
+                let moved = pinned;
+                let after = core::ptr::from_ref(Pin::as_ref(&moved).get_ref());
+                assert!(core::ptr::eq(before, after));
+                kani::cover(true, "Rc::pin keeps the !Unpin pointee address stable");
             }
         };
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
                 let value: $ty = kani::any();
-                let _pinned = Rc::pin(value);
+                // Call the target function: this harness verifies `Rc::pin`.
+                let pinned = Rc::pin(value);
+
+                assert!(*Pin::as_ref(&pinned).get_ref() == value);
+                kani::cover(true, "Rc::pin preserves the value");
+
+                let before = core::ptr::from_ref(Pin::as_ref(&pinned).get_ref());
+                let moved = pinned;
+                let after = core::ptr::from_ref(Pin::as_ref(&moved).get_ref());
+                assert!(core::ptr::eq(before, after));
+                kani::cover(true, "Rc::pin keeps the pointee address stable");
             }
         };
     }
@@ -7565,8 +8511,23 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<$ty>(*l));
-                let _rc: Rc<[mem::MaybeUninit<$ty>], Global> =
+
+                // Call the target function: this harness verifies `Rc::new_uninit_slice_in`.
+                let rc: Rc<[mem::MaybeUninit<$ty>], Global> =
                     Rc::<[$ty]>::new_uninit_slice_in(len, Global);
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::new_uninit_slice_in returns a non-null allocation pointer");
+
+                assert!(rc.len() == len);
+                kani::cover(true, "Rc::new_uninit_slice_in preserves the requested length");
+
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_uninit_slice_in creates one strong owner");
+
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_uninit_slice_in starts without explicit weak owners");
             }
         };
     }
@@ -7590,7 +8551,28 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _result = Rc::<$ty>::try_new(kani::any::<$ty>());
+                let value: $ty = kani::any::<$ty>();
+
+                // Call the target function: this harness verifies `Rc::try_new`.
+                match Rc::<$ty>::try_new(value) {
+                    Ok(rc) => {
+                        let ptr = Rc::as_ptr(&rc);
+                        assert!(!ptr.is_null());
+                        kani::cover(true, "try_new success returns a non-null allocation");
+
+                        assert!(*rc == value);
+                        kani::cover(true, "try_new success preserves the value");
+
+                        assert!(Rc::strong_count(&rc) == 1);
+                        kani::cover(true, "try_new success creates one strong owner");
+
+                        assert!(Rc::weak_count(&rc) == 0);
+                        kani::cover(true, "try_new success starts without explicit weak owners");
+                    }
+                    // With `Global` and these fixed-size layouts, allocation failure is not
+                    // reachable in this harness, so this cover is expected to be unreachable.
+                    Err(_) => kani::cover(true, "try_new allocation failure is reachable"),
+                }
             }
         };
     }
@@ -7600,7 +8582,31 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let vec = verifier_nondet_vec::<$elem>();
-                let _ = Rc::<Vec<$elem>>::try_new(vec);
+                let expected_len = vec.len();
+
+                // Call the target function: this harness verifies `Rc::try_new` for `Vec`.
+                match Rc::<Vec<$elem>>::try_new(vec) {
+                    Ok(rc) => {
+                        let ptr = Rc::as_ptr(&rc);
+                        assert!(!ptr.is_null());
+                        kani::cover(true, "try_new Vec success returns a non-null allocation");
+
+                        assert!(rc.len() == expected_len);
+                        kani::cover(true, "try_new Vec success preserves length");
+
+                        assert!(Rc::strong_count(&rc) == 1);
+                        kani::cover(true, "try_new Vec success creates one strong owner");
+
+                        assert!(Rc::weak_count(&rc) == 0);
+                        kani::cover(
+                            true,
+                            "try_new Vec success starts without explicit weak owners",
+                        );
+                    }
+                    // `Rc<Vec<_>>` has a fixed outer layout, so `Global` allocation failure
+                    // is not reachable in this harness and this cover is expected to be unreachable.
+                    Err(_) => kani::cover(true, "try_new Vec allocation failure is reachable"),
+                }
             }
         };
     }
@@ -7630,7 +8636,26 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _result = Rc::<$ty>::try_new_uninit();
+                // Call the target function: this harness verifies `Rc::try_new_uninit`.
+                match Rc::<$ty>::try_new_uninit() {
+                    Ok(rc) => {
+                        let ptr = Rc::as_ptr(&rc);
+                        assert!(!ptr.is_null());
+                        kani::cover(true, "try_new_uninit success returns a non-null allocation");
+
+                        assert!(Rc::strong_count(&rc) == 1);
+                        kani::cover(true, "try_new_uninit success creates one strong owner");
+
+                        assert!(Rc::weak_count(&rc) == 0);
+                        kani::cover(
+                            true,
+                            "try_new_uninit success starts without explicit weak owners",
+                        );
+                    }
+                    // With `Global` and these fixed-size layouts, allocation failure is not
+                    // reachable in this harness, so this cover is expected to be unreachable.
+                    Err(_) => kani::cover(true, "try_new_uninit allocation failure is reachable"),
+                }
             }
         };
     }
@@ -7654,7 +8679,26 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _result = Rc::<$ty>::try_new_zeroed();
+                // Call the target function: this harness verifies `Rc::try_new_zeroed`.
+                match Rc::<$ty>::try_new_zeroed() {
+                    Ok(rc) => {
+                        let ptr = Rc::as_ptr(&rc);
+                        assert!(!ptr.is_null());
+                        kani::cover(true, "try_new_zeroed success returns a non-null allocation");
+
+                        assert!(Rc::strong_count(&rc) == 1);
+                        kani::cover(true, "try_new_zeroed success creates one strong owner");
+
+                        assert!(Rc::weak_count(&rc) == 0);
+                        kani::cover(
+                            true,
+                            "try_new_zeroed success starts without explicit weak owners",
+                        );
+                    }
+                    // With `Global` and these fixed-size layouts, allocation failure is not
+                    // reachable in this harness, so this cover is expected to be unreachable.
+                    Err(_) => kani::cover(true, "try_new_zeroed allocation failure is reachable"),
+                }
             }
         };
     }
@@ -7689,35 +8733,189 @@ mod verify {
         ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty, $expr:expr) => {
             #[kani::proof]
             pub fn $unique() {
-                let rc: Rc<$ty, Global> = Rc::new_in($expr, Global);
-                let _ = Rc::<$ty, Global>::try_unwrap(rc);
+                let value: $ty = $expr;
+                let expected = value.clone();
+                let rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+
+                // Call the target function: this harness verifies `Rc::try_unwrap`
+                // with exactly one strong owner.
+                match Rc::<$ty, Global>::try_unwrap(rc) {
+                    Ok(value) => {
+                        assert!(value == expected);
+                        kani::cover(true, "try_unwrap unique returns the stored value");
+                    }
+                    // The setup creates exactly one strong owner, so this branch is unreachable.
+                    Err(rest) => {
+                        assert!(*rest == expected);
+                        kani::cover(true, "try_unwrap unique error branch is unreachable");
+                    }
+                }
             }
 
             #[kani::proof]
             pub fn $shared() {
-                let rc: Rc<$ty, Global> = Rc::new_in($expr, Global);
+                let value: $ty = $expr;
+                let expected = value.clone();
+                let rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let expected_ptr = Rc::as_ptr(&rc);
                 let _shared = Rc::clone(&rc);
-                let _ = Rc::<$ty, Global>::try_unwrap(rc);
+
+                // Call the target function: this harness verifies `Rc::try_unwrap`
+                // with multiple strong owners.
+                match Rc::<$ty, Global>::try_unwrap(rc) {
+                    // Two strong owners make the success branch unreachable.
+                    Ok(value) => {
+                        assert!(value == expected);
+                        kani::cover(true, "try_unwrap shared success branch is unreachable");
+                    }
+                    Err(rest) => {
+                        assert!(
+                            core::ptr::eq(Rc::as_ptr(&rest), expected_ptr)
+                                && *rest == expected
+                                && Rc::strong_count(&rest) == 2
+                                && Rc::weak_count(&rest) == 0
+                        );
+                        kani::cover(true, "try_unwrap shared returns the original Rc");
+                    }
+                }
             }
 
             #[kani::proof]
             pub fn $weak_present() {
-                let rc: Rc<$ty, Global> = Rc::new_in($expr, Global);
-                let _weak = Rc::downgrade(&rc);
-                let _ = Rc::<$ty, Global>::try_unwrap(rc);
+                let value: $ty = $expr;
+                let expected = value.clone();
+                let rc: Rc<$ty, Global> = Rc::new_in(value, Global);
+                let expected_ptr = Rc::as_ptr(&rc);
+                let weak = Rc::downgrade(&rc);
+
+                // Call the target function: this harness verifies `Rc::try_unwrap`
+                // with one strong owner and an outstanding weak owner.
+                match Rc::<$ty, Global>::try_unwrap(rc) {
+                    Ok(value) => {
+                        assert!(value == expected);
+                        kani::cover(true, "try_unwrap with weak returns the stored value");
+
+                        assert!(weak.strong_count() == 0);
+                        kani::cover(true, "try_unwrap with weak drops the final strong owner");
+
+                        assert!(weak.upgrade().is_none());
+                        kani::cover(true, "try_unwrap with weak leaves an expired weak reference");
+
+                        assert!(core::ptr::eq(weak.as_ptr(), expected_ptr));
+                        kani::cover(true, "try_unwrap with weak preserves the allocation");
+                    }
+                    // The setup creates exactly one strong owner, so this branch is unreachable.
+                    Err(rest) => {
+                        assert!(*rest == expected);
+                        kani::cover(true, "try_unwrap with weak error branch is unreachable");
+                    }
+                }
             }
         };
     }
 
     macro_rules! gen_try_unwrap_vec_harness {
         ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
-            gen_try_unwrap_harness!(
-                $unique,
-                $shared,
-                $weak_present,
-                Vec<$elem>,
-                verifier_nondet_vec::<$elem>()
-            );
+            #[kani::proof]
+            pub fn $unique() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let expected_len = value.len();
+                let expected_capacity = value.capacity();
+                let expected_data = value.as_ptr();
+                let rc: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
+
+                // Call the target function: this harness verifies `Rc::try_unwrap` for `Vec`.
+                match Rc::<Vec<$elem>, Global>::try_unwrap(rc) {
+                    Ok(value) => {
+                        assert!(
+                            value.len() == expected_len
+                                && value.capacity() == expected_capacity
+                                && core::ptr::eq(value.as_ptr(), expected_data)
+                        );
+                        kani::cover(true, "try_unwrap Vec unique preserves Vec metadata");
+                    }
+                    // The setup creates exactly one strong owner, so this branch is unreachable.
+                    Err(rest) => {
+                        assert!(rest.len() == expected_len && rest.capacity() == expected_capacity);
+                        kani::cover(true, "try_unwrap Vec unique error branch is unreachable");
+                    }
+                }
+            }
+
+            #[kani::proof]
+            pub fn $shared() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let expected_len = value.len();
+                let expected_capacity = value.capacity();
+                let expected_data = value.as_ptr();
+                let rc: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
+                let expected_rc_ptr = Rc::as_ptr(&rc);
+                let _shared = Rc::clone(&rc);
+
+                // Call the target function: this harness verifies `Rc::try_unwrap` for `Vec`
+                // with multiple strong owners.
+                match Rc::<Vec<$elem>, Global>::try_unwrap(rc) {
+                    // Two strong owners make the success branch unreachable.
+                    Ok(value) => {
+                        assert!(
+                            value.len() == expected_len && value.capacity() == expected_capacity
+                        );
+                        kani::cover(true, "try_unwrap Vec shared success branch is unreachable");
+                    }
+                    Err(rest) => {
+                        assert!(
+                            core::ptr::eq(Rc::as_ptr(&rest), expected_rc_ptr)
+                                && rest.len() == expected_len
+                                && rest.capacity() == expected_capacity
+                                && core::ptr::eq(rest.as_ptr(), expected_data)
+                                && Rc::strong_count(&rest) == 2
+                                && Rc::weak_count(&rest) == 0
+                        );
+                        kani::cover(true, "try_unwrap Vec shared returns the original Rc");
+                    }
+                }
+            }
+
+            #[kani::proof]
+            pub fn $weak_present() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let expected_len = value.len();
+                let expected_capacity = value.capacity();
+                let expected_data = value.as_ptr();
+                let rc: Rc<Vec<$elem>, Global> = Rc::new_in(value, Global);
+                let expected_rc_ptr = Rc::as_ptr(&rc);
+                let weak = Rc::downgrade(&rc);
+
+                // Call the target function: this harness verifies `Rc::try_unwrap` for `Vec`
+                // with one strong owner and an outstanding weak owner.
+                match Rc::<Vec<$elem>, Global>::try_unwrap(rc) {
+                    Ok(value) => {
+                        assert!(
+                            value.len() == expected_len
+                                && value.capacity() == expected_capacity
+                                && core::ptr::eq(value.as_ptr(), expected_data)
+                        );
+                        kani::cover(true, "try_unwrap Vec with weak preserves Vec metadata");
+
+                        assert!(weak.strong_count() == 0);
+                        kani::cover(true, "try_unwrap Vec with weak drops the final strong owner");
+
+                        assert!(weak.upgrade().is_none());
+                        kani::cover(
+                            true,
+                            "try_unwrap Vec with weak leaves an expired weak reference",
+                        );
+
+                        assert!(core::ptr::eq(weak.as_ptr(), expected_rc_ptr));
+                        kani::cover(true, "try_unwrap Vec with weak preserves the allocation");
+                    }
+                    // The setup creates exactly one strong owner, so this branch is unreachable.
+                    Err(rest) => {
+                        assert!(rest.len() == expected_len && rest.capacity() == expected_capacity);
+                        kani::cover(true, "try_unwrap Vec with weak error branch is unreachable");
+                    }
+                }
+            }
         };
     }
 
@@ -7838,8 +9036,19 @@ mod verify {
             pub fn $name() {
                 type T = $elem_ty;
                 let len = kani::any_where(|l: &usize| rc_slice_layout_ok::<T>(*l));
-                let _rc: Rc<[mem::MaybeUninit<T>], Global> =
+
+                // Call the target function: this harness verifies `Rc::new_zeroed_slice_in`.
+                let rc: Rc<[mem::MaybeUninit<T>], Global> =
                     Rc::<[T]>::new_zeroed_slice_in(len, Global);
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::new_zeroed_slice_in returns a non-null allocation pointer");
+                assert!(rc.len() == len);
+                kani::cover(true, "Rc::new_zeroed_slice_in preserves the requested length");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::new_zeroed_slice_in creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::new_zeroed_slice_in starts without explicit weak owners");
             }
         };
     }
@@ -7865,8 +9074,19 @@ mod verify {
             pub fn $name() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
                 let rc_clone: Rc<$ty, Global> = Rc::clone(&rc);
-                let _ptr = Rc::<$ty, Global>::as_ptr(&rc);
-                let _clone_ptr = Rc::<$ty, Global>::as_ptr(&rc_clone);
+                let strong_before = Rc::strong_count(&rc);
+                let weak_before = Rc::weak_count(&rc);
+                // Call the target function: this harness verifies `Rc::as_ptr`.
+                let ptr = Rc::<$ty, Global>::as_ptr(&rc);
+                let clone_ptr = Rc::<$ty, Global>::as_ptr(&rc_clone);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::as_ptr returns a non-null data pointer");
+                assert!(core::ptr::eq(ptr, clone_ptr));
+                kani::cover(true, "Rc::as_ptr preserves allocation identity");
+                assert!(
+                    Rc::strong_count(&rc) == strong_before && Rc::weak_count(&rc) == weak_before
+                );
+                kani::cover(true, "Rc::as_ptr does not change reference counts");
             }
         };
     }
@@ -7878,8 +9098,20 @@ mod verify {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
-                let _ptr = Rc::<[$elem], Global>::as_ptr(&rc);
-                let _clone_ptr = Rc::<[$elem], Global>::as_ptr(&rc_clone);
+                let strong_before = Rc::strong_count(&rc);
+                let weak_before = Rc::weak_count(&rc);
+                // Call the target function: this harness verifies `Rc::as_ptr` for a slice.
+                let ptr = Rc::<[$elem], Global>::as_ptr(&rc);
+                let clone_ptr = Rc::<[$elem], Global>::as_ptr(&rc_clone);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::as_ptr returns a non-null slice data pointer");
+                // Compare the complete fat pointer, including slice length metadata.
+                assert!(core::ptr::eq(ptr, clone_ptr));
+                kani::cover(true, "Rc::as_ptr preserves the complete slice pointer");
+                assert!(
+                    Rc::strong_count(&rc) == strong_before && Rc::weak_count(&rc) == weak_before
+                );
+                kani::cover(true, "Rc::as_ptr does not change slice reference counts");
             }
         };
     }
@@ -7910,7 +9142,24 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$ty>();
-                let _ = <Rc<[$ty], Global> as RcFromSlice<$ty>>::from_slice(vec.as_slice());
+                let source_len = vec.len();
+
+                // For these TrivialClone types, this dispatches to `Rc::copy_from_slice`.
+                // Call the target function through the RcFromSlice specialization.
+                let rc = <Rc<[$ty], Global> as RcFromSlice<$ty>>::from_slice(vec.as_slice());
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::copy_from_slice returns a non-null allocation");
+
+                assert!(rc.len() == source_len);
+                kani::cover(true, "Rc::copy_from_slice preserves the source length");
+
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::copy_from_slice creates one strong owner");
+
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::copy_from_slice starts without explicit weak owners");
             }
         };
     }
@@ -7937,21 +9186,43 @@ mod verify {
                 let values = verifier_nondet_vec_rc::<$ty>();
                 let rc: Rc<[$ty]> = Rc::from(values);
                 let source_len = rc.len();
+                let expected_ptr = Rc::as_ptr(&rc);
                 // `N` is a const generic and cannot be symbolic, so each harness
                 // uses a fixed target length (`N = 2`).
-                let result =
-                    <Rc<[$ty; 2], Global> as core::convert::TryFrom<Rc<[$ty], Global>>>::try_from(
-                        rc,
-                    );
-
+                // Call the target function: this harness verifies `Rc::try_from`
+                // from an `Rc` slice to an `Rc` array.
+                let result = <Rc<[$ty; 2]> as core::convert::TryFrom<Rc<[$ty]>>>::try_from(rc);
                 match result {
-                    Ok(exact) => {
+                    Ok(array) => {
                         assert!(source_len == 2);
-                        assert!(exact.len() == 2);
+                        kani::cover(true, "TryFrom Rc slice returns Ok for the matching length");
+                        assert!(array.len() == 2);
+                        kani::cover(true, "TryFrom Rc slice preserves the array length");
+                        // The conversion must reuse the original allocation.
+                        assert!(core::ptr::eq(
+                            expected_ptr as *const $ty,
+                            Rc::as_ptr(&array) as *const $ty
+                        ));
+                        kani::cover(true, "TryFrom Rc slice preserves allocation identity");
+                        assert!(Rc::strong_count(&array) == 1);
+                        kani::cover(true, "TryFrom Rc slice preserves the strong reference count");
+                        assert!(Rc::weak_count(&array) == 0);
+                        kani::cover(true, "TryFrom Rc slice preserves the weak reference count");
                     }
                     Err(rest) => {
                         assert!(source_len != 2);
+                        kani::cover(true, "TryFrom Rc slice returns Err for a mismatched length");
                         assert!(rest.len() == source_len);
+                        kani::cover(true, "TryFrom Rc slice preserves the source length on Err");
+                        assert!(core::ptr::eq(Rc::as_ptr(&rest), expected_ptr));
+                        kani::cover(
+                            true,
+                            "TryFrom Rc slice returns the original allocation on Err",
+                        );
+                        assert!(Rc::strong_count(&rest) == 1);
+                        kani::cover(true, "TryFrom Rc slice preserves the strong count on Err");
+                        assert!(Rc::weak_count(&rest) == 0);
+                        kani::cover(true, "TryFrom Rc slice preserves the weak count on Err");
                     }
                 }
             }
@@ -7975,43 +9246,59 @@ mod verify {
     // `Rc::drop` has two direct control-flow branches:
     // 1) after `dec_strong`, `strong() != 0`: return without calling `drop_slow`;
     // 2) after `dec_strong`, `strong() == 0`: call `drop_slow`.
-    // We cover it with three ownership scenarios:
-    // - unique strong (`strong == 1`, no weak): dropping enters branch (2) with no weaks;
-    // - shared strong (`strong > 1`): dropping enters branch (1);
-    // - unique strong + weak present (`strong == 1`, `weak > 0`): dropping enters branch (2)
-    //   while weaks still exist, which exercises a distinct drop_slow path.
+    // `RcInner::weak` includes the implicit weak owned by the strong references.
+    // The harnesses cover the shared path, the final-strong path without explicit weaks,
+    // and the final-strong path with an explicit weak keeping the allocation alive.
     // Rc::drop harnesses.
     macro_rules! gen_drop_rc_sized {
         ($unique:ident, $shared:ident, $weak_present:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $unique() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                // Unique drop scenario: strong == 1, weak == 0.
-                let _ = rc;
+                // Only the implicit weak exists while the sole strong owner is alive.
+                assert!(rc.inner().strong() == 1 && rc.inner().weak() == 1);
+                kani::cover(
+                    true,
+                    "Rc::drop unique path starts with one strong and one implicit weak",
+                );
+                // Call the target function: this harness verifies the final-strong path.
+                drop(rc);
+                kani::cover(true, "Rc::drop unique path reaches drop_slow");
             }
 
             #[kani::proof]
             pub fn $shared() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                // Keep another strong owner alive so dropping `rc` sees strong > 1.
                 let rc_clone: Rc<$ty, Global> = Rc::clone(&rc);
-                {
-                    let _dropped = rc;
-                }
-                // Final drop happens when this last strong ref leaves scope.
-                let _ = rc_clone;
+                // Two strong owners make the first drop take the non-final branch.
+                assert!(rc.inner().strong() == 2 && rc.inner().weak() == 1);
+                kani::cover(true, "Rc::drop shared path starts with two strong owners");
+                // Call the target function while another strong owner remains alive.
+                drop(rc);
+                assert!(rc_clone.inner().strong() == 1 && rc_clone.inner().weak() == 1);
+                kani::cover(true, "Rc::drop shared branch preserves the remaining owner");
+                // Drop the remaining owner to release the allocation after the checked transition.
+                drop(rc_clone);
             }
 
             #[kani::proof]
             pub fn $weak_present() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                // Keep a weak owner so dropping `rc` sees strong == 0 with weak > 0.
                 let weak: Weak<$ty, Global> = Rc::downgrade(&rc);
-                {
-                    let _dropped = rc;
-                }
-                // Keep weak alive through the drop point.
-                let _ = weak;
+                // The explicit weak adds to the implicit weak count.
+                assert!(rc.inner().strong() == 1 && rc.inner().weak() == 2);
+                kani::cover(
+                    true,
+                    "Rc::drop weak-present path starts with one strong and one explicit weak",
+                );
+                // Call the target function while the explicit weak keeps the allocation alive.
+                drop(rc);
+                let inner = weak.inner().unwrap();
+                assert!(inner.strong.get() == 0 && inner.weak.get() == 1);
+                kani::cover(true, "Rc::drop weak-present path leaves one expired weak reference");
+                assert!(weak.strong_count() == 0 && weak.upgrade().is_none());
+                kani::cover(true, "Rc::drop weak-present path makes the weak expired");
+                drop(weak);
             }
         };
     }
@@ -8022,34 +9309,55 @@ mod verify {
             pub fn $unique() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
-                // Unique drop scenario: strong == 1, weak == 0.
-                let _ = rc;
+                // Only the implicit weak exists while the sole strong slice owner is alive.
+                assert!(rc.inner().strong() == 1 && rc.inner().weak() == 1);
+                kani::cover(
+                    true,
+                    "Rc::drop unique slice path starts with one strong and one implicit weak",
+                );
+                // Call the target function: this harness verifies the final-strong slice path.
+                drop(rc);
+                kani::cover(true, "Rc::drop unique slice path reaches drop_slow");
             }
 
             #[kani::proof]
             pub fn $shared() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
-                // Keep another strong owner alive so dropping `rc` sees strong > 1.
                 let rc_clone: Rc<[$elem], Global> = Rc::clone(&rc);
-                {
-                    let _dropped = rc;
-                }
-                // Final drop happens when this last strong ref leaves scope.
-                let _ = rc_clone;
+                // Two strong owners make the first drop take the non-final branch.
+                assert!(rc.inner().strong() == 2 && rc.inner().weak() == 1);
+                kani::cover(true, "Rc::drop shared slice path starts with two strong owners");
+                // Call the target function while another strong owner remains alive.
+                drop(rc);
+                assert!(rc_clone.inner().strong() == 1 && rc_clone.inner().weak() == 1);
+                kani::cover(true, "Rc::drop shared slice branch preserves the remaining owner");
+                // Drop the remaining owner to release the allocation after the checked transition.
+                drop(rc_clone);
             }
 
             #[kani::proof]
             pub fn $weak_present() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
-                // Keep a weak owner so dropping `rc` sees strong == 0 with weak > 0.
                 let weak: Weak<[$elem], Global> = Rc::downgrade(&rc);
-                {
-                    let _dropped = rc;
-                }
-                // Keep weak alive through the drop point.
-                let _ = weak;
+                // The explicit weak adds to the implicit weak count.
+                assert!(rc.inner().strong() == 1 && rc.inner().weak() == 2);
+                kani::cover(
+                    true,
+                    "Rc::drop weak-present slice path starts with one strong and one explicit weak",
+                );
+                // Call the target function while the explicit weak keeps the slice allocation alive.
+                drop(rc);
+                let inner = weak.inner().unwrap();
+                assert!(inner.strong.get() == 0 && inner.weak.get() == 1);
+                kani::cover(
+                    true,
+                    "Rc::drop weak-present slice path leaves one expired weak reference",
+                );
+                assert!(weak.strong_count() == 0 && weak.upgrade().is_none());
+                kani::cover(true, "Rc::drop weak-present slice path makes the weak expired");
+                drop(weak);
             }
         };
     }
@@ -8170,7 +9478,23 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
-                let _ = Rc::clone(&rc);
+                let ptr = Rc::as_ptr(&rc);
+                let strong_before = Rc::strong_count(&rc);
+                let weak_before = Rc::weak_count(&rc);
+                assert!(strong_before == 1 && weak_before == 0);
+                kani::cover(
+                    true,
+                    "Rc::clone starts with one strong owner and no explicit weak owners",
+                );
+
+                // Call the target function: this harness verifies `Rc::clone`.
+                let clone = Rc::clone(&rc);
+                assert!(core::ptr::eq(ptr, Rc::as_ptr(&clone)));
+                kani::cover(true, "Rc::clone preserves allocation identity");
+                assert!(Rc::strong_count(&clone) == strong_before + 1);
+                kani::cover(true, "Rc::clone increments the strong reference count");
+                assert!(Rc::weak_count(&clone) == weak_before);
+                kani::cover(true, "Rc::clone leaves the weak reference count unchanged");
             }
         };
     }
@@ -8181,7 +9505,23 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
-                let _ = Rc::clone(&rc);
+                let ptr = Rc::as_ptr(&rc);
+                let strong_before = Rc::strong_count(&rc);
+                let weak_before = Rc::weak_count(&rc);
+                assert!(strong_before == 1 && weak_before == 0);
+                kani::cover(
+                    true,
+                    "Rc::clone starts with one strong slice owner and no explicit weak owners",
+                );
+
+                // Call the target function: this harness verifies `Rc::clone` for a slice.
+                let clone = Rc::clone(&rc);
+                assert!(core::ptr::eq(ptr, Rc::as_ptr(&clone)));
+                kani::cover(true, "Rc::clone preserves the complete slice pointer");
+                assert!(Rc::strong_count(&clone) == strong_before + 1);
+                kani::cover(true, "Rc::clone increments the slice strong reference count");
+                assert!(Rc::weak_count(&clone) == weak_before);
+                kani::cover(true, "Rc::clone leaves the slice weak reference count unchanged");
             }
         };
     }
@@ -8211,7 +9551,32 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _ = Rc::<$ty>::default();
+                let expected = <$ty as Default>::default();
+
+                // Call the target function: this harness verifies `Rc<T>::default`.
+                let rc = Rc::<$ty>::default();
+                assert!(*rc == expected);
+                kani::cover(true, "Rc::default returns the type's default value");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::default creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::default starts without explicit weak owners");
+            }
+        };
+    }
+
+    macro_rules! gen_rc_default_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Call the target function: this harness verifies `Rc<Vec<T>>::default`.
+                let rc: Rc<Vec<$elem>> = Rc::<Vec<$elem>>::default();
+                assert!(rc.is_empty());
+                kani::cover(true, "Rc<Vec<T>>::default returns an empty vector");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc<Vec<T>>::default creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc<Vec<T>>::default starts without explicit weak owners");
             }
         };
     }
@@ -8229,16 +9594,24 @@ mod verify {
     gen_rc_default_harness!(harness_rc_default_unit, ());
     gen_rc_default_harness!(harness_rc_default_array, [u8; 4]);
     gen_rc_default_harness!(harness_rc_default_bool, bool);
-    gen_rc_default_harness!(harness_rc_default_vec_u8, Vec<u8>);
-    gen_rc_default_harness!(harness_rc_default_vec_u16, Vec<u16>);
-    gen_rc_default_harness!(harness_rc_default_vec_u32, Vec<u32>);
-    gen_rc_default_harness!(harness_rc_default_vec_u64, Vec<u64>);
-    gen_rc_default_harness!(harness_rc_default_vec_u128, Vec<u128>);
+
+    gen_rc_default_vec_harness!(harness_rc_default_vec_u8, u8);
+    gen_rc_default_vec_harness!(harness_rc_default_vec_u16, u16);
+    gen_rc_default_vec_harness!(harness_rc_default_vec_u32, u32);
+    gen_rc_default_vec_harness!(harness_rc_default_vec_u64, u64);
+    gen_rc_default_vec_harness!(harness_rc_default_vec_u128, u128);
 
     #[kani::proof]
     // Rc<str>::default harness.
     pub fn harness_rc_default_str() {
-        let _ = Rc::<str>::default();
+        // Call the target function: this harness verifies `Rc<str>::default`.
+        let rc = Rc::<str>::default();
+        assert!(rc.is_empty());
+        kani::cover(true, "Rc<str>::default returns an empty string");
+        assert!(Rc::strong_count(&rc) == 1);
+        kani::cover(true, "Rc<str>::default creates one strong owner");
+        assert!(Rc::weak_count(&rc) == 0);
+        kani::cover(true, "Rc<str>::default starts without explicit weak owners");
     }
 
     // Rc::from(&str) harnesses.
@@ -8246,7 +9619,19 @@ mod verify {
         ($name:ident, $value:expr) => {
             #[kani::proof]
             pub fn $name() {
-                let _ = Rc::<str>::from($value);
+                let source: &str = $value;
+
+                // Call the target function: this harness verifies `From<&str> for Rc<str>`.
+                let rc = Rc::<str>::from(source);
+
+                assert!(rc.len() == source.len());
+                kani::cover(true, "Rc::from(&str) preserves the string length");
+                assert!(rc.as_ref() == source);
+                kani::cover(true, "Rc::from(&str) preserves the string contents");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::from(&str) creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::from(&str) starts without explicit weak owners");
             }
         };
     }
@@ -8260,7 +9645,19 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let v: Vec<$ty, Global> = verifier_nondet_vec_rc::<$ty>();
-                let _ = Rc::<[$ty], Global>::from(v);
+                let expected_len = v.len();
+                // Call the target function: this harness verifies `From<Vec<T>> for Rc<[T]>`.
+                let rc = Rc::<[$ty], Global>::from(v);
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "Rc::from(Vec) returns a non-null slice allocation");
+                assert!(rc.len() == expected_len);
+                kani::cover(true, "Rc::from(Vec) preserves the slice length");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "Rc::from(Vec) creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "Rc::from(Vec) starts without explicit weak owners");
             }
         };
     }
@@ -8284,8 +9681,29 @@ mod verify {
         ($name:ident, $value:expr) => {
             #[kani::proof]
             pub fn $name() {
-                let rc: Rc<str> = Rc::from($value);
-                let _ = <Rc<[u8]>>::from(rc);
+                let source: &str = $value;
+                let rc: Rc<str> = Rc::from(source);
+                let expected_ptr = Rc::as_ptr(&rc) as *const [u8];
+                let strong_before = Rc::strong_count(&rc);
+                let weak_before = Rc::weak_count(&rc);
+
+                assert!(strong_before == 1 && weak_before == 0);
+                kani::cover(true, "Rc<[u8]>::from(Rc<str>) starts with one strong owner");
+
+                // Call the target function: this harness verifies
+                // `From<Rc<str>> for Rc<[u8]>`.
+                let bytes: Rc<[u8]> = Rc::from(rc);
+
+                assert!(core::ptr::eq(expected_ptr, Rc::as_ptr(&bytes)));
+                kani::cover(true, "Rc<[u8]>::from(Rc<str>) preserves allocation identity");
+                assert!(bytes.len() == source.len());
+                kani::cover(true, "Rc<[u8]>::from(Rc<str>) preserves slice length");
+                assert!(bytes.as_ref() == source.as_bytes());
+                kani::cover(true, "Rc<[u8]>::from(Rc<str>) preserves UTF-8 bytes");
+                assert!(Rc::strong_count(&bytes) == strong_before);
+                kani::cover(true, "Rc<[u8]>::from(Rc<str>) preserves the strong count");
+                assert!(Rc::weak_count(&bytes) == weak_before);
+                kani::cover(true, "Rc<[u8]>::from(Rc<str>) preserves the weak count");
             }
         };
     }
@@ -8299,10 +9717,27 @@ mod verify {
             #[kani::proof]
             pub fn $name() {
                 let rc: Rc<$ty, Global> = Rc::new_in(kani::any::<$ty>(), Global);
+                let expected = Rc::as_ptr(&rc);
+                let strong_before = Rc::strong_count(&rc);
+                let weak_before = Rc::weak_count(&rc);
+                assert!(strong_before == 1 && weak_before == 0);
+                kani::cover(true, "Rc::into_raw_with_allocator starts with one strong owner");
+
+                // Call the target function: this harness verifies `Rc::into_raw_with_allocator`.
                 let (ptr, alloc): (*const $ty, Global) =
                     Rc::<$ty, Global>::into_raw_with_allocator(rc);
-                let _recovered: Rc<$ty, Global> =
+                let recovered: Rc<$ty, Global> =
                     unsafe { Rc::<$ty, Global>::from_raw_in(ptr, alloc) };
+
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(true, "Rc::into_raw_with_allocator preserves the data pointer");
+                assert!(Rc::strong_count(&recovered) == strong_before);
+                kani::cover(true, "Rc::into_raw_with_allocator preserves the strong count");
+                assert!(Rc::weak_count(&recovered) == weak_before);
+                kani::cover(true, "Rc::into_raw_with_allocator preserves the weak count");
+
+                // Reclaim the raw ownership token to avoid leaking the allocation.
+                drop(recovered);
             }
         };
     }
@@ -8313,10 +9748,31 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$elem>();
                 let rc: Rc<[$elem], Global> = Rc::from(vec);
+                let expected = Rc::as_ptr(&rc);
+                let strong_before = Rc::strong_count(&rc);
+                let weak_before = Rc::weak_count(&rc);
+                assert!(strong_before == 1 && weak_before == 0);
+                kani::cover(true, "Rc::into_raw_with_allocator starts with one strong slice owner");
+
+                // Call the target function: this harness verifies
+                // `Rc::into_raw_with_allocator` for a slice.
                 let (ptr, alloc): (*const [$elem], Global) =
                     Rc::<[$elem], Global>::into_raw_with_allocator(rc);
-                let _recovered: Rc<[$elem], Global> =
+                let recovered: Rc<[$elem], Global> =
                     unsafe { Rc::<[$elem], Global>::from_raw_in(ptr, alloc) };
+
+                assert!(core::ptr::eq(ptr, expected));
+                kani::cover(
+                    true,
+                    "Rc::into_raw_with_allocator preserves the complete slice pointer",
+                );
+                assert!(Rc::strong_count(&recovered) == strong_before);
+                kani::cover(true, "Rc::into_raw_with_allocator preserves the slice strong count");
+                assert!(Rc::weak_count(&recovered) == weak_before);
+                kani::cover(true, "Rc::into_raw_with_allocator preserves the slice weak count");
+
+                // Reclaim the raw ownership token to avoid leaking the slice allocation.
+                drop(recovered);
             }
         };
     }
