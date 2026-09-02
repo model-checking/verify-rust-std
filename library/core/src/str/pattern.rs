@@ -2812,7 +2812,7 @@ pub mod verify {
     fn type_invariant_two_way(tw: &TwoWaySearcher, haystack: &str, needle: &str) -> bool {
         search_state_two_way(tw, haystack, needle)
             && haystack.is_char_boundary(tw.position)       // 3
-            && haystack.is_char_boundary(tw.end)            // 4
+            && haystack.is_char_boundary(tw.end) // 4
     }
 
     /// Per-clause assertion version of `search_state_two_way`, used by
