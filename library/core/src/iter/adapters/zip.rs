@@ -28,6 +28,12 @@ impl<A: Iterator, B: Iterator> Zip<A, B> {
         ZipImpl::new(a, b)
     }
     fn super_nth(&mut self, mut n: usize) -> Option<(A::Item, B::Item)> {
+        // Kani: this loop stays bounded. The blocking construct is the
+        // `while let` over the generic `Iterator::next`: for a general `Zip`
+        // no size relation is available to a loop invariant. When the
+        // specialized `nth` calls this function, its contracted loop has
+        // already consumed `delta = min(n, len - index)` items, so this loop
+        // runs at most one iteration for any source length.
         while let Some(x) = Iterator::next(self) {
             if n == 0 {
                 return Some(x);
@@ -285,6 +291,11 @@ where
     {
         let mut accum = init;
         let len = ZipImpl::size_hint(&self).0;
+        // Kani: the loop writes only `accum` and its counter, so `len`,
+        // `self.index`, `self.a` and `self.b` keep their entry values and
+        // `self.index + len == self.len <= min(a.size(), b.size())` stays
+        // available to the body; the invariant only has to bound the counter.
+        #[safety::loop_invariant(kani::index <= len)]
         for i in 0..len {
             // SAFETY: since Self: TrustedRandomAccessNoCoerce we can trust the size-hint to
             // calculate the length and then use that to do unchecked iteration.
@@ -334,6 +345,11 @@ where
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let delta = cmp::min(n, self.len - self.index);
         let end = self.index + delta;
+        // Kani: the loop writes only `self.index`, so `end`, `self.len`,
+        // `self.a` and `self.b` keep their entry values and
+        // `end <= self.len <= min(a.size(), b.size())` stays available to the
+        // body; the invariant only has to bound `self.index`.
+        #[safety::loop_invariant(self.index <= end)]
         while self.index < end {
             let i = self.index;
             // since get_unchecked executes code which can panic we increment the counters beforehand
@@ -386,6 +402,13 @@ where
                 // This condition can and must only be true on the first `next_back` call,
                 // otherwise we will break the restriction on calls to `self.next_back()`
                 // after calling `get_unchecked()`.
+                // Kani: the two adjust loops below stay bounded. The blocking
+                // construct is `next_back` on the generic inner iterators. It
+                // moves their private pointer state, and no public interface
+                // lets a loop invariant pin that state to its allocation, so
+                // a loop contract would havoc it into an unverifiable read.
+                // Harnesses that reach these loops keep a small MAX_LEN and
+                // an unwind bound sized to it.
                 if sz_a != sz_b && (old_len == sz_a || old_len == sz_b) {
                     if A::MAY_HAVE_SIDE_EFFECT && sz_a > old_len {
                         for _ in 0..sz_a - old_len {
@@ -655,6 +678,10 @@ impl<A: Iterator, B: Iterator> SpecFold for Zip<A, B> {
         F: FnMut(Acc, Self::Item) -> Acc,
     {
         let mut accum = init;
+        // Kani: this loop stays bounded. The blocking construct is the
+        // `while let` over the generic `ZipImpl::next`: for a general `Zip`
+        // no size relation is available to a loop invariant, and the generic
+        // `FnMut` closure state gives the havoc no expressible frame.
         while let Some(x) = ZipImpl::next(&mut self) {
             accum = f(accum, x);
         }
@@ -669,6 +696,10 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
         F: FnMut(Acc, Self::Item) -> Acc,
     {
         let mut accum = init;
+        // Kani: the outer loop stays bounded. It runs one iteration for each
+        // `usize::MAX` chunk of a `TrustedLen` source. Every harnessed source
+        // reports an exact `Some` upper bound, so the loop body runs exactly
+        // once and a small unwind bound covers it.
         loop {
             let (upper, more) = if let Some(upper) = ZipImpl::size_hint(&self).1 {
                 (upper, false)
@@ -677,6 +708,12 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
                 (usize::MAX, true)
             };
 
+            // Kani: this loop stays bounded. The blocking construct is
+            // `next` on the generic inner iterators: it moves their private
+            // pointer state, and no public interface lets a loop invariant
+            // pin that state to its allocation, so a loop contract would
+            // havoc it into an unverifiable read. Harnesses that reach this
+            // loop keep a small MAX_LEN and an unwind bound sized to it.
             for _ in 0..upper {
                 let pair =
                     // SAFETY: TrustedLen guarantees that at least `upper` many items are available
@@ -691,4 +728,295 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
         }
         accum
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig_slice: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    fn any_zip_iter<'a, T, U>(
+        orig_slice_a: &'a [T],
+        orig_slice_b: &'a [U],
+    ) -> Zip<crate::slice::Iter<'a, T>, crate::slice::Iter<'a, U>> {
+        Zip::new(any_slice(orig_slice_a).iter(), any_slice(orig_slice_b).iter())
+    }
+
+    macro_rules! check_zip_get_unchecked {
+        ($harness:ident, $elem_ty_a:ty, $elem_ty_b:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array_a: [$elem_ty_a; MAX_LEN] = kani::any();
+                let array_b: [$elem_ty_b; MAX_LEN] = kani::any();
+                let mut it = any_zip_iter::<$elem_ty_a, $elem_ty_b>(&array_a, &array_b);
+                let idx = kani::any_where(|i: &usize| *i < crate::iter::Iterator::size_hint(&it).0);
+                let _ = unsafe { it.__iterator_get_unchecked(idx) };
+            }
+        };
+    }
+
+    check_zip_get_unchecked!(check_zip_get_unchecked_unit_unit, (), (), 50);
+    check_zip_get_unchecked!(check_zip_get_unchecked_u8_u8, u8, u8, u32::MAX as usize);
+    check_zip_get_unchecked!(check_zip_get_unchecked_char_u8, char, u8, 50);
+    check_zip_get_unchecked!(check_zip_get_unchecked_u8_char, u8, char, 50);
+    check_zip_get_unchecked!(check_zip_get_unchecked_tup_tup, (char, u8), (u32, i16), 50);
+
+    // Direct proof for the separately listed `ZipImpl::get_unchecked` target,
+    // over an arbitrary valid `Zip` state instead of only a freshly built one.
+    // The `TrustedRandomAccess` specialization establishes `index == 0` and
+    // `len == min(a.size(), b.size())` at construction; `next` only increments
+    // `index` and `next_back` only decrements `len`, so every reachable state
+    // satisfies `index <= len <= min(a.size(), b.size())`.  The caller
+    // contract for `get_unchecked(idx)` is `idx < size_hint().0`, that is
+    // `idx < len - index`.  The body then computes `self.index + idx`, which
+    // this proof shows stays in bounds of both sources (and cannot overflow).
+    macro_rules! check_zip_get_unchecked_direct {
+        ($harness:ident, $elem_ty_a:ty, $elem_ty_b:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array_a: [$elem_ty_a; MAX_LEN] = kani::any();
+                let array_b: [$elem_ty_b; MAX_LEN] = kani::any();
+                let slice_a = any_slice(&array_a);
+                let slice_b = any_slice(&array_b);
+                let bound = cmp::min(slice_a.len(), slice_b.len());
+                let len = kani::any_where(|l: &usize| *l <= bound);
+                let index = kani::any_where(|i: &usize| *i <= len);
+                let mut it = Zip { a: slice_a.iter(), b: slice_b.iter(), index, len };
+                let idx = kani::any_where(|i: &usize| *i < len - index);
+                let _ = unsafe { ZipImpl::get_unchecked(&mut it, idx) };
+            }
+        };
+    }
+
+    check_zip_get_unchecked_direct!(check_zip_get_unchecked_direct_unit_unit, (), (), 50);
+    check_zip_get_unchecked_direct!(
+        check_zip_get_unchecked_direct_u8_u8,
+        u8,
+        u8,
+        u32::MAX as usize
+    );
+    check_zip_get_unchecked_direct!(check_zip_get_unchecked_direct_char_u8, char, u8, 50);
+    check_zip_get_unchecked_direct!(check_zip_get_unchecked_direct_u8_char, u8, char, 50);
+    check_zip_get_unchecked_direct!(
+        check_zip_get_unchecked_direct_tup_tup,
+        (char, u8),
+        (u32, i16),
+        50
+    );
+
+    // Safe `Zip` methods on `TrustedRandomAccess` sources drive the same
+    // `get_unchecked`-based machinery as `__iterator_get_unchecked`; these prove
+    // `next` / `nth` / `next_back` / `fold` / `spec_fold` keep their internal
+    // indexes in bounds. The iteration loops in the specialized `nth`, the
+    // specialized `fold` and the `TrustedLen` `spec_fold` carry loop
+    // contracts, so `MAX_LEN` follows the accessor menu above instead of a
+    // bound the unwind limit must cover. The remaining unwind attributes
+    // cover only the loops that stay bounded: `super_nth` runs at most one
+    // iteration after the contracted `nth` loop, and the `spec_fold` outer
+    // loop runs exactly once for these sources. Both counts do not depend on
+    // `MAX_LEN`.
+    macro_rules! check_zip_safe {
+        ($a:ty, $b:ty, $max_len:expr, $spec_max_len:expr, $nth_unwind:literal, $next:ident,
+         $nth:ident, $back:ident, $fold:ident, $spec:ident) => {
+            #[kani::proof]
+            fn $next() {
+                const MAX_LEN: usize = $max_len;
+                let array_a: [$a; MAX_LEN] = kani::any();
+                let array_b: [$b; MAX_LEN] = kani::any();
+                let mut it = any_zip_iter::<$a, $b>(&array_a, &array_b);
+                let _ = crate::iter::Iterator::next(&mut it);
+            }
+            // `nth` drives the contracted `while self.index < end` loop, so
+            // `$nth_unwind` only has to cover `super_nth` (at most one
+            // iteration) and the element-wise `kani::any` array construction
+            // of `MAX_LEN` items for the wider element types.
+            #[kani::proof]
+            #[kani::unwind($nth_unwind)]
+            fn $nth() {
+                const MAX_LEN: usize = $max_len;
+                let array_a: [$a; MAX_LEN] = kani::any();
+                let array_b: [$b; MAX_LEN] = kani::any();
+                let mut it = any_zip_iter::<$a, $b>(&array_a, &array_b);
+                let n = kani::any_where(|x: &usize| *x <= MAX_LEN);
+                let _ = crate::iter::Iterator::nth(&mut it, n);
+            }
+            #[kani::proof]
+            fn $back() {
+                const MAX_LEN: usize = $max_len;
+                let array_a: [$a; MAX_LEN] = kani::any();
+                let array_b: [$b; MAX_LEN] = kani::any();
+                let mut it = any_zip_iter::<$a, $b>(&array_a, &array_b);
+                let _ = crate::iter::DoubleEndedIterator::next_back(&mut it);
+            }
+            #[kani::proof]
+            fn $fold() {
+                const MAX_LEN: usize = $max_len;
+                let array_a: [$a; MAX_LEN] = kani::any();
+                let array_b: [$b; MAX_LEN] = kani::any();
+                let it = any_zip_iter::<$a, $b>(&array_a, &array_b);
+                let _ = crate::iter::Iterator::fold(it, 0usize, |acc, _| acc.wrapping_add(1));
+            }
+            #[kani::proof]
+            #[kani::unwind(7)]
+            fn $spec() {
+                const MAX_LEN: usize = $spec_max_len;
+                let array_a: [$a; MAX_LEN] = kani::any();
+                let array_b: [$b; MAX_LEN] = kani::any();
+                let it = any_zip_iter::<$a, $b>(&array_a, &array_b);
+                let _ = SpecFold::spec_fold(it, 0usize, |acc, _| acc.wrapping_add(1));
+            }
+        };
+    }
+    check_zip_safe!(
+        (),
+        (),
+        50,
+        5,
+        3,
+        check_zip_next_unit,
+        check_zip_nth_unit,
+        check_zip_next_back_unit,
+        check_zip_fold_unit,
+        check_zip_spec_fold_unit
+    );
+    check_zip_safe!(
+        u8,
+        u8,
+        u32::MAX as usize,
+        5,
+        3,
+        check_zip_next_u8,
+        check_zip_nth_u8,
+        check_zip_next_back_u8,
+        check_zip_fold_u8,
+        check_zip_spec_fold_u8
+    );
+    check_zip_safe!(
+        char,
+        u8,
+        10,
+        5,
+        12,
+        check_zip_next_char_u8,
+        check_zip_nth_char_u8,
+        check_zip_next_back_char_u8,
+        check_zip_fold_char_u8,
+        check_zip_spec_fold_char_u8
+    );
+    check_zip_safe!(
+        (char, u8),
+        (u32, i16),
+        10,
+        5,
+        12,
+        check_zip_next_tup,
+        check_zip_nth_tup,
+        check_zip_next_back_tup,
+        check_zip_fold_tup,
+        check_zip_spec_fold_tup
+    );
+
+    // `Map<slice::Iter, fn>` is a `TrustedRandomAccess` source with
+    // `MAY_HAVE_SIDE_EFFECT = true` (map.rs pins the constant to `true` for
+    // every `Map`).  Zipping one or both sides through `Map` compiles in the
+    // `A::MAY_HAVE_SIDE_EFFECT` / `B::MAY_HAVE_SIDE_EFFECT` branches of the
+    // specialized `nth` and `next_back` (including next_back's length-adjust
+    // loop), which the plain `slice::Iter` harnesses compile out.  The two
+    // `any_slice` lengths are independent, so the `sz_a != sz_b` adjust path
+    // is reachable.
+    fn bump(x: &u8) -> u8 {
+        x.wrapping_add(1)
+    }
+
+    fn side_effect_iter<'a>(
+        slice: &'a [u8],
+    ) -> crate::iter::Map<crate::slice::Iter<'a, u8>, fn(&u8) -> u8> {
+        slice.iter().map(bump as fn(&u8) -> u8)
+    }
+
+    fn plain_iter<'a>(slice: &'a [u8]) -> crate::slice::Iter<'a, u8> {
+        slice.iter()
+    }
+
+    macro_rules! check_zip_side_effect {
+        ($nth:ident, $back:ident, $mk_a:ident, $mk_b:ident, $back_shape:expr) => {
+            // The contracted `nth` loop covers arbitrary lengths; the unwind
+            // bound covers only `super_nth`, which runs at most one
+            // iteration.
+            #[kani::proof]
+            #[kani::unwind(3)]
+            fn $nth() {
+                const MAX_LEN: usize = u32::MAX as usize;
+                let array_a: [u8; MAX_LEN] = kani::any();
+                let array_b: [u8; MAX_LEN] = kani::any();
+                let mut it = Zip::new($mk_a(any_slice(&array_a)), $mk_b(any_slice(&array_b)));
+                let n = kani::any_where(|x: &usize| *x <= MAX_LEN);
+                let _ = crate::iter::Iterator::nth(&mut it, n);
+            }
+
+            // `next_back` reaches the bounded adjust loops in the
+            // specialized `next_back`, so this harness keeps a small
+            // `MAX_LEN` with an unwind bound sized to it.
+            //
+            // `$back_shape` restricts the source lengths. With exactly one
+            // side-effect side, a plain longer side is never trimmed (the
+            // trim loops guard on `MAY_HAVE_SIDE_EFFECT`), so upstream's
+            // `debug_assert_eq!(self.a.size(), self.b.size())` after the
+            // trim fires with debug assertions on: a debug-only false
+            // assertion in std, out of scope for this PR (upstream issue
+            // pending). The excluded shape is "the side-effect side is
+            // shorter than a plain side"; the `both` variant excludes
+            // nothing.
+            #[kani::proof]
+            #[kani::unwind(7)]
+            fn $back() {
+                const MAX_LEN: usize = 5;
+                let array_a: [u8; MAX_LEN] = kani::any();
+                let array_b: [u8; MAX_LEN] = kani::any();
+                let slice_a = any_slice(&array_a);
+                let slice_b = any_slice(&array_b);
+                let shape: fn(usize, usize) -> bool = $back_shape;
+                kani::assume(shape(slice_a.len(), slice_b.len()));
+                let mut it = Zip::new($mk_a(slice_a), $mk_b(slice_b));
+                let _ = crate::iter::DoubleEndedIterator::next_back(&mut it);
+            }
+        };
+    }
+
+    check_zip_side_effect!(
+        check_zip_nth_side_effect_a,
+        check_zip_next_back_side_effect_a,
+        side_effect_iter,
+        plain_iter,
+        |len_a, len_b| len_a >= len_b
+    );
+    check_zip_side_effect!(
+        check_zip_nth_side_effect_b,
+        check_zip_next_back_side_effect_b,
+        plain_iter,
+        side_effect_iter,
+        |len_a, len_b| len_b >= len_a
+    );
+    check_zip_side_effect!(
+        check_zip_nth_side_effect_both,
+        check_zip_next_back_side_effect_both,
+        side_effect_iter,
+        side_effect_iter,
+        |_, _| true
+    );
 }

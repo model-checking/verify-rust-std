@@ -284,3 +284,69 @@ unsafe impl<I: InPlaceIterable> InPlaceIterable for Copied<I> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig_slice: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    fn any_adapter_iter<'a, T>(orig_slice: &'a [T]) -> Copied<crate::slice::Iter<'a, T>> {
+        Copied::new(any_slice(orig_slice).iter())
+    }
+
+    macro_rules! check_get_unchecked {
+        ($harness:ident, $elem_ty:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = any_adapter_iter::<$elem_ty>(&array);
+                let idx = kani::any_where(|i: &usize| *i < it.it.size_hint().0);
+                let _ = unsafe { it.__iterator_get_unchecked(idx) };
+            }
+        };
+    }
+    check_get_unchecked!(check_copied_get_unchecked_unit, (), isize::MAX as usize);
+    check_get_unchecked!(check_copied_get_unchecked_u8, u8, u32::MAX as usize);
+    check_get_unchecked!(check_copied_get_unchecked_char, char, 50);
+    check_get_unchecked!(check_copied_get_unchecked_tup, (char, u8), 50);
+
+    // `spec_next_chunk` on the `slice::Iter` specialization bulk-copies `N` (or
+    // `len`) elements into a `MaybeUninit<[T; N]>` and then either
+    // `array_assume_init`s the full array or returns a `0..len` `IntoIter`; this
+    // proves the `copy_nonoverlapping` lengths and the init range stay in bounds.
+    // `N` is a trait generic, so it is pinned via the result type annotation.
+    // The `MAX_LEN` menu mirrors `check_get_unchecked` above: the `u8`/ZST
+    // harnesses raise the bound very high (there is no per-iteration loop, only
+    // a bulk copy, so the cost stays flat), the wider types use a moderate one.
+    macro_rules! check_spec_next_chunk {
+        ($harness:ident, $elem_ty:ty, $n:expr, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const N: usize = $n;
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = any_slice(&array).iter();
+                let _result: Result<[$elem_ty; N], crate::array::IntoIter<$elem_ty, N>> =
+                    it.spec_next_chunk();
+            }
+        };
+    }
+    check_spec_next_chunk!(check_copied_spec_next_chunk_unit, (), 2, isize::MAX as usize);
+    check_spec_next_chunk!(check_copied_spec_next_chunk_u8, u8, 3, u32::MAX as usize);
+    check_spec_next_chunk!(check_copied_spec_next_chunk_char, char, 2, 50);
+    check_spec_next_chunk!(check_copied_spec_next_chunk_tup, (char, u8), 2, 50);
+}

@@ -297,3 +297,96 @@ impl<T, const N: usize> Invariant for Buffer<T, N> {
         self.start + N <= 2 * N
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    // Build a `Buffer<T, N>` in a valid state: `start` in `[0, N]` (the type
+    // invariant) and the live window `[start, start + N)` fully initialized with
+    // arbitrary values; the remaining `N` slots stay uninitialized, exactly as
+    // the real buffer maintains them.
+    fn any_buffer<T: kani::Arbitrary, const N: usize>() -> Buffer<T, N> {
+        let start = kani::any_where(|s: &usize| *s <= N);
+        let mut buffer = Buffer {
+            buffer: [[const { MaybeUninit::uninit() }; N], [const { MaybeUninit::uninit() }; N]],
+            start,
+        };
+        let items: [T; N] = kani::any();
+        let base = buffer.buffer_mut_ptr();
+        items.into_iter().enumerate().for_each(|(i, item)| {
+            // SAFETY: `start + i < start + N <= 2 * N`, in bounds of the `2 * N` buffer.
+            unsafe { (*base.add(start + i)).write(item) };
+        });
+        buffer
+    }
+
+    // `as_array_ref` / `as_uninit_array_mut` reinterpret the live window as an
+    // array reference; `push` rotates the window (and wraps + compacts when
+    // `start == N`); `drop` drops the live window. Each must respect the
+    // initialized-window invariant and stay in bounds of the `2 * N` storage.
+    macro_rules! check_buffer {
+        ($module:ident, $elem_ty:ty, $n:expr) => {
+            mod $module {
+                use super::*;
+                const N: usize = $n;
+
+                #[kani::proof]
+                fn check_as_array_ref() {
+                    let buf = any_buffer::<$elem_ty, N>();
+                    let _ = buf.as_array_ref();
+                    kani::assert(buf.is_safe(), "buffer invariant holds");
+                }
+
+                #[kani::proof]
+                fn check_as_uninit_array_mut() {
+                    let mut buf = any_buffer::<$elem_ty, N>();
+                    let _ = buf.as_uninit_array_mut();
+                    kani::assert(buf.is_safe(), "buffer invariant holds");
+                }
+
+                #[kani::proof]
+                fn check_push() {
+                    let mut buf = any_buffer::<$elem_ty, N>();
+                    buf.push(kani::any());
+                    kani::assert(buf.is_safe(), "buffer invariant holds after push");
+                }
+
+                #[kani::proof]
+                fn check_drop() {
+                    let buf = any_buffer::<$elem_ty, N>();
+                    drop(buf);
+                }
+            }
+        };
+    }
+    check_buffer!(verify_map_windows_unit, (), 3);
+    check_buffer!(verify_map_windows_u8, u8, 3);
+    check_buffer!(verify_map_windows_char, char, 2);
+    check_buffer!(verify_map_windows_tup, (char, u8), 2);
+
+    // A drop-requiring element type: `needs_drop::<DropToken>()` is true, so
+    // `push`'s `drop_in_place` and the `Buffer` `Drop` impl execute real drop
+    // glue instead of compiling to no-ops, and the destructor reads the
+    // payload, so the dropped element must be an in-bounds, live slot.  Kani
+    // models a panic as a verification failure and has no unwinding, so the
+    // panic-during-drop path itself is not expressible in a passing harness;
+    // the coverage this type adds is the non-trivial drop-glue code path.
+    struct DropToken(u8);
+
+    impl Drop for DropToken {
+        fn drop(&mut self) {
+            let _ = crate::hint::black_box(self.0);
+        }
+    }
+
+    impl kani::Arbitrary for DropToken {
+        fn any() -> Self {
+            DropToken(kani::any())
+        }
+    }
+
+    check_buffer!(verify_map_windows_drop, DropToken, 2);
+}

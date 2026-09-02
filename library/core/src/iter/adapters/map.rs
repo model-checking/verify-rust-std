@@ -245,3 +245,69 @@ unsafe impl<I: InPlaceIterable, F> InPlaceIterable for Map<I, F> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig_slice: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    // The mapping closure is irrelevant to buffer/UB safety; a simple
+    // `&T -> usize` fn pointer (nameable, unlike a closure) keeps the harness
+    // type concrete.  `slice::Iter<T>` yields `&T`, so `F: FnMut(&T) -> usize`.
+    fn map_fn<T>(_: &T) -> usize {
+        0
+    }
+
+    fn any_map_iter<'a, T>(orig_slice: &'a [T]) -> Map<crate::slice::Iter<'a, T>, fn(&T) -> usize> {
+        Map::new(any_slice(orig_slice).iter(), map_fn::<T> as fn(&T) -> usize)
+    }
+
+    macro_rules! check_map_get_unchecked {
+        ($harness:ident, $elem_ty:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = any_map_iter::<$elem_ty>(&array);
+                let idx = kani::any_where(|i: &usize| *i < it.iter.size_hint().0);
+                let _ = unsafe { it.__iterator_get_unchecked(idx) };
+            }
+        };
+    }
+
+    macro_rules! check_map_next_unchecked {
+        ($harness:ident, $elem_ty:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = any_map_iter::<$elem_ty>(&array);
+                kani::assume(it.iter.size_hint().0 > 0);
+                let _ = unsafe { it.next_unchecked() };
+            }
+        };
+    }
+
+    check_map_get_unchecked!(check_map_get_unchecked_unit, (), isize::MAX as usize);
+    check_map_get_unchecked!(check_map_get_unchecked_u8, u8, u32::MAX as usize);
+    check_map_get_unchecked!(check_map_get_unchecked_char, char, 50);
+    check_map_get_unchecked!(check_map_get_unchecked_tup, (char, u8), 50);
+
+    check_map_next_unchecked!(check_map_next_unchecked_unit, (), isize::MAX as usize);
+    check_map_next_unchecked!(check_map_next_unchecked_u8, u8, u32::MAX as usize);
+    check_map_next_unchecked!(check_map_next_unchecked_char, char, 50);
+    check_map_next_unchecked!(check_map_next_unchecked_tup, (char, u8), 50);
+}
