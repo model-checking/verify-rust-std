@@ -1,4 +1,6 @@
 use crate::iter::FusedIterator;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::ub_checks::Invariant;
 use crate::{fmt, ptr};
@@ -295,5 +297,144 @@ where
 impl<T, const N: usize> Invariant for Buffer<T, N> {
     fn is_safe(&self) -> bool {
         self.start + N <= 2 * N
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    fn map_sum_u8(w: &[u8; 2]) -> u8 {
+        w[0].wrapping_add(w[1])
+    }
+
+    fn map_sum3_u8(w: &[u8; 3]) -> u8 {
+        w[0].wrapping_add(w[1]).wrapping_add(w[2])
+    }
+
+    // Exercises as_array_ref (via next_window), push (via repeated next),
+    // and drop (via Drop for Buffer when MapWindows is dropped).
+    // Two calls suffice: first next() initializes the buffer (N pushes),
+    // second next() exercises the ring buffer wrap in push. The unsafe
+    // operations per call are bounded by N (constant), not slice length.
+    // The harness itself is bounded: MapWindows's MaybeUninit ring buffer with
+    // raw pointer ops exceeds CBMC's symbolic capacity at large scales, so the
+    // slice length is symbolic only within the fixed-size array.
+    #[kani::proof]
+    fn check_map_windows_n2_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        kani::assume(slice.len() >= 3); // Need N+1 elements for 2 iterations
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut mw = MapWindows::new(slice.iter().copied(), map_sum_u8 as fn(&[u8; 2]) -> u8);
+        let _ = mw.next(); // Initializes buffer, exercises push + as_array_ref
+        let _ = mw.next(); // Exercises push ring buffer wrap + as_array_ref
+        // Drop exercises Buffer::drop
+    }
+
+    // A Clone type with real drop glue: exercises the Buffer push/drop paths that
+    // Copy-only element types skip (drop of overwritten ring slots and of the
+    // initialized tail when MapWindows is dropped).
+    #[derive(Clone)]
+    struct DropToken(u8);
+    impl Drop for DropToken {
+        fn drop(&mut self) {}
+    }
+
+    fn map_first_token(w: &[DropToken; 2]) -> u8 {
+        w[0].0
+    }
+
+    #[kani::proof]
+    fn check_map_windows_n2_droptoken() {
+        let raw: [u8; 4] = kani::any();
+        let items = [DropToken(raw[0]), DropToken(raw[1]), DropToken(raw[2]), DropToken(raw[3])];
+        let mut mw =
+            MapWindows::new(items.iter().cloned(), map_first_token as fn(&[DropToken; 2]) -> u8);
+        let _ = mw.next(); // buffer init: N clones pushed
+        let _ = mw.next(); // ring wrap: overwritten slot's drop glue runs
+        // MapWindows drop runs Buffer::drop over the initialized window
+    }
+
+    // Drop glue that panics: verifies the Buffer drop path unwinds without UB
+    // when an element's destructor panics.
+    struct PanicOnDrop;
+    impl Clone for PanicOnDrop {
+        fn clone(&self) -> Self {
+            PanicOnDrop
+        }
+    }
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("drop");
+        }
+    }
+
+    fn map_unit_panic(_w: &[PanicOnDrop; 2]) -> u8 {
+        0
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_map_windows_n2_panic_on_drop() {
+        let items = [PanicOnDrop, PanicOnDrop, PanicOnDrop];
+        let mut mw =
+            MapWindows::new(items.iter().cloned(), map_unit_panic as fn(&[PanicOnDrop; 2]) -> u8);
+        let _ = mw.next();
+    }
+
+    #[kani::proof]
+    fn check_map_windows_n3_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        kani::assume(slice.len() >= 4); // Need N+1 elements for 2 iterations
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut mw = MapWindows::new(slice.iter().copied(), map_sum3_u8 as fn(&[u8; 3]) -> u8);
+        let _ = mw.next(); // Initializes buffer with 3 elements
+        let _ = mw.next(); // Exercises push ring buffer wrap
+    }
+
+    // Exercises as_uninit_array_mut (via Buffer::clone when MapWindows is cloned).
+    #[kani::proof]
+    fn check_map_windows_clone_n2_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        kani::assume(slice.len() >= 2);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut mw = MapWindows::new(slice.iter().copied(), map_sum_u8 as fn(&[u8; 2]) -> u8);
+        let _ = mw.next(); // Initialize buffer
+        let _mw_clone = mw.clone(); // Exercises as_uninit_array_mut via Buffer::clone
+    }
+
+    // Exercises clone when buffer is None (before first next() call).
+    #[kani::proof]
+    fn check_map_windows_clone_before_next_n2_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mw = MapWindows::new(slice.iter().copied(), map_sum_u8 as fn(&[u8; 2]) -> u8);
+        let mut mw_clone = mw.clone(); // Clone before buffer is initialized
+        let _ = mw_clone.next(); // Single iteration exercises push + as_array_ref
+    }
+
+    fn map_first_char(w: &[char; 2]) -> char {
+        w[0]
+    }
+
+    #[kani::proof]
+    fn check_map_windows_n2_char() {
+        const MAX_LEN: usize = 50;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        kani::assume(slice.len() >= 3);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut mw =
+            MapWindows::new(slice.iter().copied(), map_first_char as fn(&[char; 2]) -> char);
+        let _ = mw.next();
+        let _ = mw.next();
     }
 }

@@ -164,6 +164,11 @@ where
 
     #[rustc_inherit_overflow_checks]
     #[inline]
+    // Contract note: Kani's `proof_for_contract` cannot target trait-impl
+    // methods, so this `#[requires]` is not checked as a contract; it is
+    // normative documentation of the precondition. Verification happens in the
+    // `verify::check_*` harness below, which `kani::assume`s this same
+    // expression before the call. Keep the two in sync when editing either.
     #[requires(idx < self.iter.size_hint().0)]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item
@@ -319,5 +324,77 @@ impl<I: Default> Default for Enumerate<I> {
     /// ```
     fn default() -> Self {
         Enumerate::new(Default::default())
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    #[kani::proof]
+    fn check_enumerate_get_unchecked_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Enumerate::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let (i, val) = unsafe { iter.__iterator_get_unchecked(idx) };
+        assert_eq!(i, idx);
+        assert_eq!(*val, slice[idx]);
+    }
+
+    // UB-coverage companion at MAX_LEN = u32::MAX. Without the functional assert
+    // the array is never bit-blasted (asserted variants hit CBMC's "array too
+    // large for flattening"), so the unchecked access verifies at this length;
+    // functional equality stays in the bounded harness above.
+    #[kani::proof]
+    fn check_enumerate_get_unchecked_u8_u32max() {
+        const MAX_LEN: usize = u32::MAX as usize;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Enumerate::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    fn check_enumerate_get_unchecked_unit() {
+        const MAX_LEN: usize = isize::MAX as usize;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Enumerate::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    fn check_enumerate_get_unchecked_char() {
+        const MAX_LEN: usize = 50;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Enumerate::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
+    }
+
+    #[kani::proof]
+    fn check_enumerate_get_unchecked_tup() {
+        const MAX_LEN: usize = 50;
+        let array: [(char, u8); MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let mut iter = Enumerate::new(slice.iter());
+        let idx: usize = kani::any();
+        kani::assume(idx < iter.size_hint().0);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = unsafe { iter.__iterator_get_unchecked(idx) };
     }
 }
