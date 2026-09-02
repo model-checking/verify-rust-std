@@ -13,6 +13,8 @@ use crate::marker::PhantomData;
 use crate::ptr::NonNull;
 use crate::slice::memchr;
 use crate::ub_checks::Invariant;
+// Used only in contract attributes and cfg(kani) code, which compile away
+// in normal builds; the allow keeps the non-kani build warning-free.
 #[allow(unused_imports)]
 use crate::ub_checks::can_dereference;
 use crate::{fmt, ops, slice, str};
@@ -339,6 +341,8 @@ impl CStr {
     ///
     #[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
     #[rustc_const_stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
+    // Postcondition: on success the returned CStr satisfies the safety invariant.
+    #[ensures(|result| result.as_ref().map_or(true, |c| c.is_safe()))]
     pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError> {
         let nul_pos = memchr::memchr(0, bytes);
         match nul_pos {
@@ -392,6 +396,8 @@ impl CStr {
     /// ```
     #[stable(feature = "cstr_from_bytes", since = "1.10.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    // Postcondition: on success the returned CStr satisfies the safety invariant.
+    #[ensures(|result| result.as_ref().map_or(true, |c| c.is_safe()))]
     pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError> {
         let nul_pos = memchr::memchr(0, bytes);
         match nul_pos {
@@ -528,6 +534,12 @@ impl CStr {
     #[rustc_const_stable(feature = "const_str_as_ptr", since = "1.32.0")]
     #[rustc_as_ptr]
     #[rustc_never_returns_null_ptr]
+    // The returned pointer addresses the string's full NUL-terminated
+    // contents, `self.inner.len()` bytes ending in the terminator; `inner`
+    // is nonempty by the type's safety invariant, so the index below
+    // cannot underflow.
+    #[ensures(|&result| can_dereference(crate::ptr::slice_from_raw_parts(result, self.inner.len())))]
+    #[ensures(|&result| unsafe { *result.add(self.inner.len() - 1) } == 0)]
     pub const fn as_ptr(&self) -> *const c_char {
         self.inner.as_ptr()
     }
@@ -559,6 +571,10 @@ impl CStr {
     #[doc(alias("len", "strlen"))]
     #[stable(feature = "cstr_count_bytes", since = "1.79.0")]
     #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
+    // Cross-accessor consistency: the count excludes the terminating NUL that
+    // `to_bytes_with_nul` includes; `result + 1` cannot overflow since
+    // `result == self.inner.len() - 1`.
+    #[ensures(|&result| result + 1 == self.to_bytes_with_nul().len())]
     pub const fn count_bytes(&self) -> usize {
         self.inner.len() - 1
     }
@@ -574,6 +590,8 @@ impl CStr {
     #[inline]
     #[stable(feature = "cstr_is_empty", since = "1.71.0")]
     #[rustc_const_stable(feature = "cstr_is_empty", since = "1.71.0")]
+    // Empty means exactly zero content bytes before the NUL.
+    #[ensures(|&result| result == (self.count_bytes() == 0))]
     pub const fn is_empty(&self) -> bool {
         // SAFETY: We know there is at least one byte; for empty strings it
         // is the NUL terminator.
@@ -600,6 +618,10 @@ impl CStr {
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    // The content bytes contain no NUL and exclude the terminator;
+    // `result.len() + 1` cannot overflow since the full view includes the NUL.
+    #[ensures(|result| !result.contains(&0))]
+    #[ensures(|result| result.len() + 1 == self.to_bytes_with_nul().len())]
     pub const fn to_bytes(&self) -> &[u8] {
         let bytes = self.to_bytes_with_nul();
         // FIXME(const-hack) replace with range index
@@ -626,6 +648,9 @@ impl CStr {
                   without modifying the original"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    // The full byte view is the invariant shape: NUL-terminated, no interior NUL.
+    #[ensures(|result| result.len() > 0 && result[result.len() - 1] == 0
+        && !result[..result.len() - 1].contains(&0))]
     pub const fn to_bytes_with_nul(&self) -> &[u8] {
         // SAFETY: Transmuting a slice of `c_char`s to a slice of `u8`s
         // is safe on all supported targets.
@@ -646,6 +671,8 @@ impl CStr {
     /// ```
     #[inline]
     #[unstable(feature = "cstr_bytes", issue = "112115")]
+    // Deliberately uncontracted: the iterator's invariant-relevant behavior is
+    // proven by the `check_bytes` harness.
     pub fn bytes(&self) -> Bytes<'_> {
         Bytes::new(self)
     }
@@ -665,6 +692,8 @@ impl CStr {
     /// ```
     #[stable(feature = "cstr_to_str", since = "1.4.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
+    // Deliberately uncontracted: UTF-8/round-trip behavior is proven by the
+    // `check_to_str` harness.
     pub const fn to_str(&self) -> Result<&str, str::Utf8Error> {
         // N.B., when `CStr` is changed to perform the length check in `.to_bytes()`
         // instead of in `from_ptr()`, it may be worth considering if this should
@@ -735,6 +764,11 @@ impl ops::Index<ops::RangeFrom<usize>> for CStr {
     type Output = CStr;
 
     #[inline]
+    // The tail of a valid `CStr` is itself a valid `CStr`; the postcondition
+    // binds on normal return only — the out-of-bounds panic path is proven
+    // separately by the `check_index_range_from_out_of_bounds` harness.
+    #[ensures(|result: &&CStr| result.is_safe())]
+    #[ensures(|result: &&CStr| result.to_bytes_with_nul() == &self.to_bytes_with_nul()[index.start..])]
     fn index(&self, index: ops::RangeFrom<usize>) -> &CStr {
         let bytes = self.to_bytes_with_nul();
         // we need to manually check the starting index to account for the null
@@ -880,6 +914,7 @@ mod verify {
     fn arbitrary_cstr(slice: &[u8]) -> &CStr {
         // At a minimum, the slice has a null terminator to form a valid CStr.
         kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
+        kani::cover(true, "arbitrary_cstr admitted a nul-terminated slice");
         let result = CStr::from_bytes_until_nul(&slice);
         // Given the assumption, from_bytes_until_nul should never fail
         assert!(result.is_ok());
@@ -900,7 +935,10 @@ mod verify {
 
         let result = CStr::from_bytes_until_nul(slice);
         if let Ok(c_str) = result {
+            kani::cover(true, "from_bytes_until_nul constructed a CStr");
             assert!(c_str.is_safe());
+        } else {
+            kani::cover(true, "from_bytes_until_nul rejected a nul-free slice");
         }
     }
 
@@ -953,7 +991,10 @@ mod verify {
         // a double conversion here and assertion, if the bytes are still the same, function is valid
         let str_result = c_str.to_str();
         if let Ok(s) = str_result {
+            kani::cover(true, "to_str produced a valid str");
             assert_eq!(s.as_bytes(), c_str.to_bytes());
+        } else {
+            kani::cover(true, "to_str rejected non-UTF-8 contents");
         }
         assert!(c_str.is_safe());
     }
@@ -995,7 +1036,10 @@ mod verify {
 
         let result = CStr::from_bytes_with_nul(slice);
         if let Ok(c_str) = result {
+            kani::cover(true, "from_bytes_with_nul accepted a well-formed slice");
             assert!(c_str.is_safe());
+        } else {
+            kani::cover(true, "from_bytes_with_nul rejected a malformed slice");
         }
     }
 
@@ -1095,5 +1139,155 @@ mod verify {
         let expected_is_empty = bytes.len() == 0;
         assert_eq!(expected_is_empty, c_str.is_empty());
         assert!(c_str.is_safe());
+    }
+
+    // impl ops::Index<ops::RangeFrom<usize>> for CStr — in-bounds tail slicing
+    #[kani::proof_for_contract(<CStr as ops::Index<ops::RangeFrom<usize>>>::index)]
+    #[kani::unwind(17)] // bounded at 16: at 32 this harness took 263s.
+    fn check_index_range_from_contract() {
+        const MAX_SIZE: usize = 16;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+        let len = c_str.to_bytes_with_nul().len();
+        let start: usize = kani::any_where(|&s: &usize| s < len);
+        kani::cover(true, "in-bounds start index admitted");
+
+        let tail: &CStr = &c_str[start..];
+        // Semantic: the tail is exactly the byte suffix, still NUL-terminated.
+        assert_eq!(tail.to_bytes_with_nul(), &c_str.to_bytes_with_nul()[start..]);
+        assert!(tail.is_safe());
+        kani::cover(true, "tail CStr produced and validated");
+    }
+
+    // The documented out-of-bounds branch of RangeFrom indexing panics.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(17)] // bounded at 16: at 32 this harness took 30s.
+    fn check_index_range_from_out_of_bounds() {
+        const MAX_SIZE: usize = 16;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+        let len = c_str.to_bytes_with_nul().len();
+        let start: usize = kani::any_where(|&s: &usize| s >= len);
+        kani::cover(true, "out-of-bounds start index admitted");
+        let _ = &c_str[start..];
+    }
+
+    // The postcondition on from_bytes_until_nul: success implies the safety invariant.
+    #[kani::proof_for_contract(CStr::from_bytes_until_nul)]
+    #[kani::unwind(33)]
+    fn check_from_bytes_until_nul_contract() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        match CStr::from_bytes_until_nul(slice) {
+            Ok(c_str) => {
+                kani::cover(true, "until_nul constructed a CStr");
+                assert!(c_str.is_safe());
+            }
+            Err(_) => kani::cover(true, "until_nul rejected a nul-free slice"),
+        }
+    }
+
+    // The postcondition on from_bytes_with_nul: success implies the safety invariant.
+    #[kani::proof_for_contract(CStr::from_bytes_with_nul)]
+    // Bounded at 8: at 16 this proof runs 269-328s locally and exceeded CI's
+    // 10-minute harness timeout; at 8 it verifies in under a minute.
+    #[kani::unwind(9)]
+    fn check_from_bytes_with_nul_contract() {
+        const MAX_SIZE: usize = 8;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        match CStr::from_bytes_with_nul(slice) {
+            Ok(c_str) => {
+                kani::cover(true, "with_nul accepted a well-formed slice");
+                assert!(c_str.is_safe());
+            }
+            Err(_) => kani::cover(true, "with_nul rejected a malformed slice"),
+        }
+    }
+
+    #[kani::proof_for_contract(CStr::count_bytes)]
+    #[kani::unwind(33)]
+    fn check_count_bytes_contract() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+        let n = c_str.count_bytes();
+        kani::cover(true, "count_bytes returned");
+        assert_eq!(n + 1, c_str.to_bytes_with_nul().len());
+    }
+
+    #[kani::proof_for_contract(CStr::is_empty)]
+    #[kani::unwind(33)]
+    fn check_is_empty_contract() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+        let e = c_str.is_empty();
+        kani::cover(e, "empty CStr reached");
+        kani::cover(!e, "non-empty CStr reached");
+        assert_eq!(e, c_str.count_bytes() == 0);
+    }
+
+    #[kani::proof_for_contract(CStr::to_bytes)]
+    #[kani::unwind(33)]
+    fn check_to_bytes_contract() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+        let b = c_str.to_bytes();
+        kani::cover(true, "to_bytes returned");
+        assert!(!b.contains(&0));
+        assert_eq!(b.len() + 1, c_str.to_bytes_with_nul().len());
+    }
+
+    #[kani::proof_for_contract(CStr::to_bytes_with_nul)]
+    #[kani::unwind(33)]
+    fn check_to_bytes_with_nul_contract() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+        let b = c_str.to_bytes_with_nul();
+        kani::cover(true, "to_bytes_with_nul returned");
+        assert!(b.len() > 0 && b[b.len() - 1] == 0 && !b[..b.len() - 1].contains(&0));
+    }
+
+    #[kani::proof_for_contract(CStr::as_ptr)]
+    #[kani::unwind(33)]
+    fn check_as_ptr_contract() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+        kani::cover(true, "as_ptr contract exercised");
+        let _ = c_str.as_ptr();
+    }
+
+    // `is_safe` matches the conditions documented on the `Invariant` impl —
+    // nonempty, NUL-terminated, no interior NUL — checked from both sides
+    // on arbitrary bytes. `is_safe` is itself the specification, so it is
+    // checked directly rather than through a contract.
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_invariant_fidelity() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let well_formed = !slice.is_empty()
+            && slice[slice.len() - 1] == 0
+            && !slice[..slice.len() - 1].contains(&0);
+        // SAFETY: the same layout cast `from_bytes_with_nul_unchecked` uses;
+        // the reference is only passed to `is_safe`, which handles any shape.
+        let c_str: &CStr = unsafe { &*(slice as *const [u8] as *const CStr) };
+        assert_eq!(c_str.is_safe(), well_formed);
+        kani::cover(well_formed, "well-formed shape reached");
+        kani::cover(!well_formed, "malformed shape reached");
     }
 }
