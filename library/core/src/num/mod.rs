@@ -48,6 +48,7 @@ mod int_macros; // import int_impl!
 mod uint_macros; // import uint_impl!
 
 mod error;
+mod int_bits;
 mod int_log10;
 mod int_sqrt;
 pub(crate) mod libm;
@@ -2174,8 +2175,6 @@ mod verify {
         checked_f128_to_int_unchecked_i32,
         i64,
         checked_f128_to_int_unchecked_i64,
-        i128,
-        checked_f128_to_int_unchecked_i128,
         isize,
         checked_f128_to_int_unchecked_isize,
         u8,
@@ -2191,4 +2190,25 @@ mod verify {
         usize,
         checked_f128_to_int_unchecked_usize
     );
+
+    // FIXME(kani): this harness is hand-written (instead of being generated via
+    // generate_to_int_unchecked_harness! above) because Kani's f128 -> i128 lower bound in
+    // float_to_int_in_range is unsound (-2^128 instead of -(2^127 + 2^15)), so the contract
+    // instrumentation admits out-of-range values; see
+    // https://github.com/model-checking/kani/issues/4662. Until the fix
+    // (https://github.com/model-checking/kani/pull/4663) is part of the Kani version pinned
+    // here, constrain the input to the sound range explicitly.
+    #[kani::proof_for_contract(f128::to_int_unchecked)]
+    pub fn checked_f128_to_int_unchecked_i128() {
+        let num1: f128 = kani::any_where(|f: &f128| {
+            // -(2^127 + 2^15) is the largest f128 whose truncation is below i128::MIN;
+            // require the value to be strictly above it (and below i128::MAX + 1 = 2^127).
+            f.is_finite()
+                && *f > -170141183460469231731687303715884138496.0
+                && *f < 170141183460469231731687303715884105728.0
+        });
+        let result = unsafe { num1.to_int_unchecked::<i128>() };
+
+        assert_eq!(result, num1 as i128);
+    }
 }

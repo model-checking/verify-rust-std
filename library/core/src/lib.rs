@@ -97,7 +97,6 @@
 // tidy-alphabetical-start
 #![feature(array_ptr_get)]
 #![feature(asm_experimental_arch)]
-#![feature(bigint_helper_methods)]
 #![feature(bstr)]
 #![feature(bstr_internals)]
 #![feature(cfg_select)]
@@ -107,13 +106,13 @@
 #![feature(const_destruct)]
 #![feature(const_eval_select)]
 #![feature(const_select_unpredictable)]
+#![feature(const_unsigned_bigint_helpers)]
 #![feature(core_intrinsics)]
 #![feature(coverage_attribute)]
 #![feature(disjoint_bitor)]
 #![feature(internal_impls_macro)]
 #![feature(ip)]
 #![feature(is_ascii_octdigit)]
-#![feature(lazy_get)]
 #![feature(link_cfg)]
 #![feature(offset_of_enum)]
 #![feature(panic_internals)]
@@ -121,16 +120,17 @@
 #![feature(ptr_alignment_type)]
 #![feature(ptr_metadata)]
 #![feature(set_ptr_value)]
+#![feature(signed_bigint_helpers)]
 #![feature(slice_ptr_get)]
 #![feature(str_internals)]
 #![feature(str_split_inclusive_remainder)]
 #![feature(str_split_remainder)]
+#![feature(type_info)]
 #![feature(ub_checks)]
-#![feature(unchecked_neg)]
-#![feature(unchecked_shifts)]
 #![feature(unsafe_pinned)]
 #![feature(utf16_extra)]
 #![feature(variant_count)]
+#![feature(widening_mul)]
 // tidy-alphabetical-end
 //
 // Language features:
@@ -149,6 +149,7 @@
 #![feature(decl_macro)]
 #![feature(deprecated_suggestion)]
 #![feature(derive_const)]
+#![feature(diagnostic_on_const)]
 #![feature(doc_cfg)]
 #![feature(doc_notable_trait)]
 #![feature(extern_types)]
@@ -183,6 +184,7 @@
 #![feature(staged_api)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance_lints)]
+#![feature(target_feature_inline_always)]
 #![feature(trait_alias)]
 #![feature(transparent_unions)]
 #![feature(try_blocks)]
@@ -226,11 +228,7 @@ use prelude::rust_2024::*;
 mod macros;
 
 #[unstable(feature = "assert_matches", issue = "82775")]
-/// Unstable module containing the unstable `assert_matches` macro.
-pub mod assert_matches {
-    #[unstable(feature = "assert_matches", issue = "82775")]
-    pub use crate::macros::{assert_matches, debug_assert_matches};
-}
+pub use crate::macros::{assert_matches, debug_assert_matches};
 
 #[unstable(feature = "derive_from", issue = "144889")]
 /// Unstable module containing the unstable `From` derive macro.
