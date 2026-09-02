@@ -2030,4 +2030,545 @@ pub mod verify {
             true
         );
     }
+
+    // ==================================================================
+    // Challenge 20: verify safety of char-related Searcher methods
+    //
+    // For each searcher type we define a type invariant `C` and prove the
+    // challenge's three criteria against the real, unmodified method
+    // bodies:
+    //   1. `into_searcher` establishes `C` (base-case harnesses);
+    //   2. `C` implies the Searcher safety property: every returned index
+    //      pair lies on UTF-8 char boundaries (asserted on the values the
+    //      real methods return);
+    //   3. every method preserves `C` (inductive-step harnesses that admit
+    //      an arbitrary `C`-satisfying state — not just reachable ones —
+    //      then run the real method and re-assert `C`).
+    //
+    // Accepted limitation: bounded haystack length.
+    //
+    // The challenge asks for proofs over haystacks of arbitrary size.
+    // These proofs are bounded in exactly one dimension: the haystack is
+    // at most `HAYSTACK_BYTES` bytes long, and every harness that runs a
+    // search loop carries the matching `#[kani::unwind]` bound. Within
+    // that bound the proofs are exhaustive:
+    //   - every haystack: contents and length are symbolic, so every
+    //     valid UTF-8 string of at most HAYSTACK_BYTES bytes, with every
+    //     combination of the four UTF-8 width classes that fits, is one
+    //     symbolic input;
+    //   - every needle: an arbitrary `char` (`CharSearcher`) or
+    //     `[char; 2]` (`MultiCharEqSearcher` and the wrappers);
+    //   - every searcher state: the inductive-step harnesses start from
+    //     an arbitrary `C`-satisfying state, a superset of the states any
+    //     call sequence reaches, so they are unbounded in the number of
+    //     calls made before the one under verification.
+    //
+    // Why HAYSTACK_BYTES = 5. A 4-byte (maximum-width) character plus one
+    // neighbour is the smallest haystack in which every case the search
+    // loops distinguish is reachable: every needle width; a memchr hit on
+    // a continuation byte that is *not* the end of the needle, which
+    // leaves `finger` mid-character for the next iteration (the
+    // `EA 81 81` case discussed in `CharSearcher::next_match`); a match
+    // preceded by such a false hit (a multi-iteration loop); the needle
+    // partially overlapping the end of the search window; and "found
+    // nothing". The `kani::cover`s in the harnesses witness that these
+    // arms execute.
+    //
+    // Why the unwind bounds are sound. Every iteration of every loop
+    // under verification moves a cursor by at least one byte
+    // (`finger += index + 1` / `finger_back = index` in the memchr loops;
+    // `next`/`next_back` consume one whole character in the trait
+    // defaults), so over a haystack of at most HAYSTACK_BYTES bytes a
+    // loop runs at most HAYSTACK_BYTES + 1 iterations and the bound
+    // HAYSTACK_BYTES + 2 unwinds it completely. Kani checks this: a bound
+    // that is too small fails the unwinding assertion rather than
+    // silently truncating the proof.
+    //
+    // Why the bound is not lifted with loop contracts. Four of the loops
+    // under verification are the generic `Searcher`/`ReverseSearcher`
+    // trait defaults (`next_match`, `next_reject`, `next_match_back`,
+    // `next_reject_back`), which loop over `self.next()`/`next_back()`.
+    // A loop invariant strong enough to re-enter `self.next()` safely
+    // must state the concrete searcher's `C`, which a generic trait body
+    // cannot name without changing shipped trait code. The unbounded
+    // argument for those loops is the inductive-step harnesses on
+    // `next`/`next_back` (the per-iteration lemma the loops need: one
+    // step from any `C`-state returns a boundary-valid range and
+    // re-establishes `C`) together with the bounded end-to-end harnesses
+    // that run the real default bodies. The two remaining loops,
+    // `CharSearcher::next_match`/`next_match_back`, are unwound within
+    // the same bound. Lifting it with a `#[safety::loop_invariant]` on
+    // those two loops was tried with the pinned Kani (branch
+    // `c20-loop-contracts-experiment` on the author's fork): with the
+    // invariant `finger <= finger_back && finger_back <= haystack.len()`,
+    // a symbolic-length haystack over a 16-byte backing array, and
+    // loop-free first/last-occurrence specifications of memchr/memrchr,
+    // every boundary assertion, the loop invariant and `C` verify in
+    // about 10 s per direction -- but the proofs cannot be merged: the
+    // slice comparison `slice == &self.utf8_encoded[..]` lowers to
+    // CBMC's builtin `memcmp`, whose internal locals are linked in after
+    // Kani's loop-modifies inference and so fail the loop-contract
+    // assigns check (four spurious "is assignable" failures per harness,
+    // nothing else). The comparison cannot be stubbed around it
+    // (`compare_bytes` is a bodyless intrinsic and Kani's stub resolution
+    // does not match the blanket `PartialEq` impl for `[u8]`), and an
+    // explicit `kani::loop_modifies` clause fails on the loop-body locals
+    // Kani hoists. That is a tool limitation to report upstream; the
+    // bounded proofs here are the shipped evidence.
+    // ==================================================================
+
+    /// Maximum haystack length in bytes — the one accepted bound of these
+    /// proofs (see the section comment). 5 fits a 4-byte (maximum-width)
+    /// character plus a neighbour, so every UTF-8 width class and every
+    /// arm of the search loops is reachable. Every loop under
+    /// verification advances a cursor by at least one byte per iteration,
+    /// so an unwind bound of `HAYSTACK_BYTES + 2` (the `#[kani::unwind]`
+    /// literals below are at least that) unwinds it completely: at most
+    /// HAYSTACK_BYTES + 1 iterations, plus one for the unwinding
+    /// assertion.
+    const HAYSTACK_BYTES: usize = 5;
+
+    /// An arbitrary UTF-8 string of 0..=N bytes written into a
+    /// caller-owned buffer, built constructively as a concatenation of
+    /// up to N symbolic `char`s — every valid UTF-8 string of at most N
+    /// bytes is reachable, multibyte characters included. Constructive
+    /// generation is used instead of filtering `kani::any()` bytes
+    /// through `from_utf8`, because under CI's `-Z loop-contracts` the
+    /// loop invariants inside `run_utf8_validation` abstract the
+    /// validator's loops, making its *functional* result unreliable as
+    /// a filter (and the constructive form is cheaper for the solver).
+    fn symbolic_str<const N: usize>(buf: &mut [u8; N]) -> &str {
+        let mut len = 0usize;
+        let mut i = 0;
+        while i < N {
+            if kani::any() {
+                let c: char = kani::any();
+                let w = c.len_utf8();
+                if len + w <= N {
+                    c.encode_utf8(&mut buf[len..]);
+                    len += w;
+                }
+            }
+            i += 1;
+        }
+        // SAFETY: `buf[..len]` is a concatenation of UTF-8 encodings of
+        // `char`s, hence valid UTF-8 by construction.
+        unsafe { crate::str::from_utf8_unchecked(&buf[..len]) }
+    }
+
+    // ------------------------------------------------------------------
+    // Stubs for memchr/memrchr.
+    //
+    // Challenge 20 allows assuming "the safety and functional correctness
+    // of all functions in the slice module", which covers
+    // `core::slice::memchr::{memchr,memrchr}`. Following the stub pattern
+    // accepted in PR #544, these are *semantically identical
+    // implementations* of the first/last-occurrence contract — no
+    // nondeterminism, no `kani::assume` — replacing only the optimized
+    // word-at-a-time scan, which CBMC unwinds poorly. Each harness's
+    // unwind bound fully unwinds the linear scan, so the proofs remain
+    // exhaustive. They are applied per-harness, only where the real call
+    // graph reaches memchr/memrchr (`CharSearcher::next_match` /
+    // `next_match_back`).
+    // ------------------------------------------------------------------
+
+    fn stub_memchr(x: u8, text: &[u8]) -> Option<usize> {
+        let mut i = 0;
+        while i < text.len() {
+            if text[i] == x {
+                return Some(i);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn stub_memrchr(x: u8, text: &[u8]) -> Option<usize> {
+        let mut i = text.len();
+        while i > 0 {
+            i -= 1;
+            if text[i] == x {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    // ------------------------------------------------------------------
+    // CharSearcher
+    // ------------------------------------------------------------------
+
+    /// Type invariant `C` for `CharSearcher` (the condition of challenge
+    /// criterion 2): both fingers are in-bounds char boundaries of the
+    /// haystack in the right order, and the needle metadata is the true
+    /// UTF-8 encoding of the needle. (Inside `next_match`/`next_match_back`
+    /// the fingers may transiently leave boundaries — the documented
+    /// mid-loop state — but every public method must restore `C` on exit,
+    /// which is exactly what these harnesses check.)
+    fn type_invariant_cs(s: &CharSearcher<'_>) -> bool {
+        let mut enc = [0u8; 4];
+        let enc_len = s.needle.encode_utf8(&mut enc).len();
+        s.finger <= s.finger_back
+            && s.finger_back <= s.haystack.len()
+            && s.haystack.is_char_boundary(s.finger)
+            && s.haystack.is_char_boundary(s.finger_back)
+            && s.utf8_size() == enc_len
+            && s.utf8_encoded[..enc_len] == enc[..enc_len]
+    }
+
+    /// An arbitrary `CharSearcher` state satisfying `C` — the induction
+    /// hypothesis for the step harnesses. This covers every
+    /// `C`-satisfying state, a superset of the states reachable by call
+    /// sequences from `into_searcher` (whose base case is
+    /// `verify_cs_into_searcher`).
+    fn any_char_searcher(haystack: &str) -> CharSearcher<'_> {
+        let needle: char = kani::any();
+        let mut utf8_encoded = [0u8; 4];
+        let utf8_size = needle.encode_utf8(&mut utf8_encoded).len() as u8;
+        let finger: usize = kani::any();
+        let finger_back: usize = kani::any();
+        kani::assume(finger <= finger_back && finger_back <= haystack.len());
+        kani::assume(haystack.is_char_boundary(finger));
+        kani::assume(haystack.is_char_boundary(finger_back));
+        CharSearcher { haystack, finger, finger_back, needle, utf8_size, utf8_encoded }
+    }
+
+    /// Criterion 2's safety property for a returned index pair.
+    fn assert_valid_range(haystack: &str, a: usize, b: usize) {
+        assert!(a <= b && b <= haystack.len());
+        assert!(haystack.is_char_boundary(a));
+        assert!(haystack.is_char_boundary(b));
+    }
+
+    /// Criterion 1: `char::into_searcher` establishes `C`.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    pub fn verify_cs_into_searcher() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let needle: char = kani::any();
+        let searcher = needle.into_searcher(haystack);
+        assert!(type_invariant_cs(&searcher));
+        assert!(searcher.finger == 0);
+        assert!(searcher.finger_back == haystack.len());
+    }
+
+    /// Criteria 2+3 for the real `CharSearcher::next`.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    pub fn verify_cs_next() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_char_searcher(haystack);
+        match s.next() {
+            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                assert_valid_range(haystack, a, b);
+                kani::cover(true, "next returned Match or Reject");
+            }
+            SearchStep::Done => kani::cover(true, "next returned Done"),
+        }
+        assert!(type_invariant_cs(&s));
+    }
+
+    /// Criteria 2+3 for the real `CharSearcher::next_back`.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    pub fn verify_cs_next_back() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_char_searcher(haystack);
+        match s.next_back() {
+            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                assert_valid_range(haystack, a, b);
+                kani::cover(true, "next_back returned Match or Reject");
+            }
+            SearchStep::Done => kani::cover(true, "next_back returned Done"),
+        }
+        assert!(type_invariant_cs(&s));
+    }
+
+    /// Criteria 2+3 for the real `CharSearcher::next_match` — the memchr
+    /// loop, with memchr replaced by the semantically identical
+    /// `stub_memchr` (see above). Every loop iteration advances `finger`
+    /// by at least one byte, so the unwind bound fully unwinds the search.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    #[kani::stub(crate::slice::memchr::memchr, stub_memchr)]
+    pub fn verify_cs_next_match() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_char_searcher(haystack);
+        match s.next_match() {
+            Some((a, b)) => {
+                assert_valid_range(haystack, a, b);
+                assert!(b - a == s.utf8_size());
+                kani::cover(true, "next_match found the needle");
+            }
+            None => kani::cover(true, "next_match found nothing"),
+        }
+        assert!(type_invariant_cs(&s));
+    }
+
+    /// Criteria 2+3 for the real `CharSearcher::next_match_back` — the
+    /// memrchr loop, with memrchr replaced by the semantically identical
+    /// `stub_memrchr`. Every iteration decreases `finger_back` by at
+    /// least one byte.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    #[kani::stub(crate::slice::memchr::memrchr, stub_memrchr)]
+    pub fn verify_cs_next_match_back() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_char_searcher(haystack);
+        match s.next_match_back() {
+            Some((a, b)) => {
+                assert_valid_range(haystack, a, b);
+                assert!(b - a == s.utf8_size());
+                kani::cover(true, "next_match_back found the needle");
+            }
+            None => kani::cover(true, "next_match_back found nothing"),
+        }
+        assert!(type_invariant_cs(&s));
+    }
+
+    /// Criteria 2+3 for `CharSearcher::next_reject` — the real trait
+    /// default, looping over the real `next()`. Each `next()` consumes at
+    /// least one byte, so the unwind bound fully unwinds the loop.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_cs_next_reject() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_char_searcher(haystack);
+        if let Some((a, b)) = s.next_reject() {
+            assert_valid_range(haystack, a, b);
+            kani::cover(true, "next_reject returned a range");
+        }
+        assert!(type_invariant_cs(&s));
+    }
+
+    /// Criteria 2+3 for `CharSearcher::next_reject_back` — the real trait
+    /// default over the real `next_back()`.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_cs_next_reject_back() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_char_searcher(haystack);
+        if let Some((a, b)) = s.next_reject_back() {
+            assert_valid_range(haystack, a, b);
+            kani::cover(true, "next_reject_back returned a range");
+        }
+        assert!(type_invariant_cs(&s));
+    }
+
+    /// From-creation run to `Done`: every step of the real `next()` on a
+    /// freshly created searcher yields boundary-valid ranges and
+    /// preserves `C` (criteria 1+2+3 composed).
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_cs_search_to_done() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let needle: char = kani::any();
+        let mut s = needle.into_searcher(haystack);
+        loop {
+            match s.next() {
+                SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                    assert_valid_range(haystack, a, b)
+                }
+                SearchStep::Done => break,
+            }
+            assert!(type_invariant_cs(&s));
+        }
+        kani::cover(true, "searched the whole haystack");
+    }
+
+    // ------------------------------------------------------------------
+    // MultiCharEqSearcher (and its four delegating wrapper searchers)
+    // ------------------------------------------------------------------
+
+    /// Type invariant `C` for `MultiCharEqSearcher`: the `CharIndices`
+    /// iterator views exactly the haystack subrange
+    /// `[front, front + rem)`, and both endpoints are char boundaries.
+    /// This is what makes the real `next`/`next_back` (and the trait
+    /// defaults built on them) return boundary-valid indices: `next()`
+    /// yields `front` and `next_back()` yields `front + rem` positions,
+    /// and `Chars`/`CharIndices` step through whole characters.
+    fn type_invariant_mces<C: MultiCharEq>(s: &MultiCharEqSearcher<'_, C>) -> bool {
+        let front = s.char_indices.front_offset;
+        let rem = s.char_indices.iter.iter.len();
+        front + rem <= s.haystack.len()
+            && s.haystack.is_char_boundary(front)
+            && s.haystack.is_char_boundary(front + rem)
+            && s.char_indices.iter.iter.as_slice().as_ptr().addr()
+                == s.haystack.as_ptr().addr() + front
+    }
+
+    /// An arbitrary `C`-satisfying `MultiCharEqSearcher` state — the
+    /// induction hypothesis for the step harnesses. `char_eq.matches` is
+    /// a pure, safe predicate, so the safety argument is independent of
+    /// the concrete `MultiCharEq` instantiation; harnesses use
+    /// `[char; 2]`.
+    fn any_mces(haystack: &str) -> MultiCharEqSearcher<'_, [char; 2]> {
+        let k: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(k <= j && j <= haystack.len());
+        kani::assume(haystack.is_char_boundary(k));
+        kani::assume(haystack.is_char_boundary(j));
+        // SAFETY: k <= j <= len and both are char boundaries (assumed
+        // above); get_unchecked avoids dragging the slice-error panic
+        // machinery into the CBMC formula.
+        let sub = unsafe { haystack.get_unchecked(k..j) };
+        let char_indices = crate::str::CharIndices { front_offset: k, iter: sub.chars() };
+        let char_eq: [char; 2] = kani::any();
+        MultiCharEqSearcher { char_eq, haystack, char_indices }
+    }
+
+    /// Criterion 1: `into_searcher` establishes `C` for
+    /// `MultiCharEqSearcher`.
+    #[kani::proof]
+    pub fn verify_mces_into_searcher() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let chars: [char; 2] = kani::any();
+        let searcher = MultiCharEqPattern(chars).into_searcher(haystack);
+        assert!(type_invariant_mces(&searcher));
+    }
+
+    /// Criteria 2+3 for the real `MultiCharEqSearcher::next`.
+    #[kani::proof]
+    pub fn verify_mces_next() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_mces(haystack);
+        match s.next() {
+            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                assert_valid_range(haystack, a, b);
+                kani::cover(true, "mces next returned Match or Reject");
+            }
+            SearchStep::Done => kani::cover(true, "mces next returned Done"),
+        }
+        assert!(type_invariant_mces(&s));
+    }
+
+    /// Criteria 2+3 for the real `MultiCharEqSearcher::next_back`.
+    #[kani::proof]
+    pub fn verify_mces_next_back() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_mces(haystack);
+        match s.next_back() {
+            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                assert_valid_range(haystack, a, b);
+                kani::cover(true, "mces next_back returned Match or Reject");
+            }
+            SearchStep::Done => kani::cover(true, "mces next_back returned Done"),
+        }
+        assert!(type_invariant_mces(&s));
+    }
+
+    /// Criteria 2+3 for the four trait defaults on `MultiCharEqSearcher`
+    /// (`next_match`, `next_reject`, `next_match_back`,
+    /// `next_reject_back`) — the real default loops over the real
+    /// `next`/`next_back`. Each iteration consumes at least one byte.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_mces_next_match() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_mces(haystack);
+        if let Some((a, b)) = s.next_match() {
+            assert_valid_range(haystack, a, b);
+            kani::cover(true, "mces next_match returned a range");
+        }
+        assert!(type_invariant_mces(&s));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_mces_next_reject() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_mces(haystack);
+        if let Some((a, b)) = s.next_reject() {
+            assert_valid_range(haystack, a, b);
+            kani::cover(true, "mces next_reject returned a range");
+        }
+        assert!(type_invariant_mces(&s));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_mces_next_match_back() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_mces(haystack);
+        if let Some((a, b)) = s.next_match_back() {
+            assert_valid_range(haystack, a, b);
+            kani::cover(true, "mces next_match_back returned a range");
+        }
+        assert!(type_invariant_mces(&s));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_mces_next_reject_back() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let mut s = any_mces(haystack);
+        if let Some((a, b)) = s.next_reject_back() {
+            assert_valid_range(haystack, a, b);
+            kani::cover(true, "mces next_reject_back returned a range");
+        }
+        assert!(type_invariant_mces(&s));
+    }
+
+    /// The four remaining challenge searcher types
+    /// (`CharArraySearcher`, `CharArrayRefSearcher`, `CharSliceSearcher`,
+    /// `CharPredicateSearcher`) are `pattern_methods!` newtype delegations
+    /// to `MultiCharEqSearcher`, so their invariant is the wrapped
+    /// searcher's `C` and all six methods delegate to the code verified
+    /// above. These harnesses check the delegation itself end-to-end for
+    /// the array wrapper (the other three wrappers expand from the same
+    /// macro with a different `MultiCharEq` instance; `matches` is a pure
+    /// safe predicate in all four).
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_char_array_searcher_delegation() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let chars: [char; 2] = kani::any();
+        let mut s = chars.into_searcher(haystack);
+        assert!(type_invariant_mces(&s.0));
+        match s.next() {
+            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                assert_valid_range(haystack, a, b)
+            }
+            SearchStep::Done => {}
+        }
+        if let Some((a, b)) = s.next_match() {
+            assert_valid_range(haystack, a, b);
+        }
+        assert!(type_invariant_mces(&s.0));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    pub fn verify_char_array_searcher_delegation_back() {
+        let mut buf = [0u8; HAYSTACK_BYTES];
+        let haystack = symbolic_str(&mut buf);
+        let chars: [char; 2] = kani::any();
+        let mut s = chars.into_searcher(haystack);
+        match s.next_back() {
+            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                assert_valid_range(haystack, a, b)
+            }
+            SearchStep::Done => {}
+        }
+        if let Some((a, b)) = s.next_match_back() {
+            assert_valid_range(haystack, a, b);
+        }
+        assert!(type_invariant_mces(&s.0));
+    }
 }
