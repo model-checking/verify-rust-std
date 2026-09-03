@@ -875,6 +875,7 @@ impl FusedIterator for Bytes<'_> {}
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
+    use crate::clone::CloneToUninit;
 
     // Helper function
     fn arbitrary_cstr(slice: &[u8]) -> &CStr {
@@ -1095,5 +1096,47 @@ mod verify {
         let expected_is_empty = bytes.len() == 0;
         assert_eq!(expected_is_empty, c_str.is_empty());
         assert!(c_str.is_safe());
+    }
+
+    // ops::Index<ops::RangeFrom<usize>> for CStr
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_index_range_from() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let start: usize = kani::any();
+        let bytes_with_nul = c_str.to_bytes_with_nul();
+
+        if start < bytes_with_nul.len() {
+            let sub_cstr = &c_str[start..];
+            assert!(sub_cstr.is_safe());
+            assert_eq!(sub_cstr.to_bytes_with_nul(), &bytes_with_nul[start..]);
+        }
+        // else: would panic (expected behavior, not UB)
+    }
+
+    // CloneToUninit for CStr
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_clone_to_uninit() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        let c_str = arbitrary_cstr(slice);
+
+        let bytes_with_nul = c_str.to_bytes_with_nul();
+        let len = bytes_with_nul.len();
+        kani::assume(len <= MAX_SIZE);
+
+        let mut dest: [u8; MAX_SIZE] = [0u8; MAX_SIZE];
+        unsafe {
+            c_str.clone_to_uninit(dest.as_mut_ptr());
+        }
+
+        // Verify the clone copied the correct bytes
+        assert_eq!(&dest[..len], bytes_with_nul);
     }
 }
