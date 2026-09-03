@@ -890,7 +890,7 @@ mod verify {
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
     #[kani::proof]
-    #[kani::unwind(32)] // 7.3 seconds when 16; 33.1 seconds when 32
+    #[kani::unwind(33)]
     fn check_from_bytes_until_nul() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();

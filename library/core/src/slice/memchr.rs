@@ -1,6 +1,8 @@
 // Original implementation taken from rust-memchr.
 // Copyright 2015 Andrew Gallant, bluss and Nicolas Koch
 
+#[cfg(kani)]
+use crate::kani;
 use crate::intrinsics::const_eval_select;
 
 const LO_USIZE: usize = usize::repeat_u8(0x01);
@@ -23,12 +25,22 @@ const fn contains_zero_byte(x: usize) -> bool {
 #[inline]
 #[must_use]
 pub const fn memchr(x: u8, text: &[u8]) -> Option<usize> {
-    // Fast path for small slices.
-    if text.len() < 2 * USIZE_BYTES {
-        return memchr_naive(x, text);
-    }
+    // For Kani, always use the byte-by-byte loop: it is semantically
+    // equivalent to the word-at-a-time `memchr_aligned` (see comment there)
+    // but symbolically executes with a fraction of the cost, and `memchr` is
+    // reached from many contract clauses (e.g. `CStr::is_safe`).
+    #[cfg(kani)]
+    return memchr_naive(x, text);
 
-    memchr_aligned(x, text)
+    #[cfg(not(kani))]
+    {
+        // Fast path for small slices.
+        if text.len() < 2 * USIZE_BYTES {
+            return memchr_naive(x, text);
+        }
+
+        memchr_aligned(x, text)
+    }
 }
 
 #[inline]
@@ -158,4 +170,33 @@ pub fn memrchr(x: u8, text: &[u8]) -> Option<usize> {
 
     // Find the byte before the point the body loop stopped.
     text[..offset].iter().rposition(|elt| *elt == x)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod verify {
+    use super::*;
+
+    /// With `cfg(kani)`, `memchr` always takes the `memchr_naive` path (see
+    /// comment there), so the word-at-a-time `memchr_aligned` is no longer
+    /// exercised by the harnesses of its callers (e.g. `CStr`). This harness
+    /// keeps `memchr_aligned` covered by checking it against `memchr_naive`
+    /// for all inputs up to MAX_SIZE, including all UB checks in its unsafe
+    /// word-sized reads.
+    ///
+    /// MAX_SIZE needs to exceed 2 * size_of::<usize>() so that the aligned
+    /// word-scanning loop is reachable (smaller inputs take an early naive
+    /// path inside `memchr_aligned`'s compile-time branch counterpart).
+    #[kani::proof]
+    #[kani::unwind(26)]
+    pub fn check_memchr_aligned_equiv_naive() {
+        const MAX_SIZE: usize = 24;
+        let x: u8 = kani::any();
+        let text: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&text);
+        // Implicit precondition of `memchr_aligned`, established by its only
+        // caller `memchr`: short slices are handled by `memchr_naive` there.
+        kani::assume(slice.len() >= 2 * USIZE_BYTES);
+        assert_eq!(memchr_aligned(x, slice), memchr_naive(x, slice));
+    }
 }
