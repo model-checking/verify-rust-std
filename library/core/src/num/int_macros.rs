@@ -1090,6 +1090,7 @@ macro_rules! int_impl {
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
         #[inline]
+        #[requires(rhs > 0 && self % rhs == 0 && (self != Self::MIN || rhs != -1))]
         pub const unsafe fn unchecked_div_exact(self, rhs: Self) -> Self {
             assert_unsafe_precondition!(
                 check_language_ub,

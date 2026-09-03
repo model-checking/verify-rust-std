@@ -1719,6 +1719,25 @@ mod verify {
         }
     }
 
+    macro_rules! generate_unchecked_div_exact_intervals {
+        ($type:ty, $method:ident, $($harness_name:ident, $min:expr, $max:expr),+) => {
+            $(
+                #[kani::proof_for_contract($type::$method)]
+                pub fn $harness_name() {
+                    let num1: $type = kani::any::<$type>();
+                    let num2: $type = kani::any::<$type>();
+
+                    kani::assume(num1 >= $min && num1 <= $max);
+                    kani::assume(num2 >= $min && num2 <= $max);
+
+                    unsafe {
+                        num1.$method(num2);
+                    }
+                }
+            )+
+        }
+    }
+
     /// A macro to generate Kani proof harnesses for the `carrying_mul` method,
     ///
     /// The macro creates multiple harnesses for different ranges of input values,
@@ -2190,5 +2209,119 @@ mod verify {
         checked_f128_to_int_unchecked_u128,
         usize,
         checked_f128_to_int_unchecked_usize
+    );
+
+    // `unchecked_div_exact` proofs (small bit-widths: full range)
+    generate_unchecked_math_harness!(i8, unchecked_div_exact, checked_unchecked_div_exact_i8);
+    generate_unchecked_math_harness!(i16, unchecked_div_exact, checked_unchecked_div_exact_i16);
+    generate_unchecked_math_harness!(u8, unchecked_div_exact, checked_unchecked_div_exact_u8);
+    generate_unchecked_math_harness!(u16, unchecked_div_exact, checked_unchecked_div_exact_u16);
+
+    // `unchecked_div_exact` interval-bounded proofs (for larger bit-widths)
+    // Note: rhs must be > 0 per the function's precondition, so all
+    // intervals below are restricted to positive divisor ranges only.
+    generate_unchecked_div_exact_intervals!(
+        i32,
+        unchecked_div_exact,
+        checked_unchecked_div_exact_i32_small_divisor,
+        1,
+        64,
+        checked_unchecked_div_exact_i32_large_divisor,
+        i32::MAX - 1000,
+        i32::MAX,
+        checked_unchecked_div_exact_i32_edge_divisor,
+        i32::MAX / 2,
+        i32::MAX
+    );
+    generate_unchecked_div_exact_intervals!(
+        i64,
+        unchecked_div_exact,
+        checked_unchecked_div_exact_i64_small_divisor,
+        1,
+        64,
+        checked_unchecked_div_exact_i64_large_divisor,
+        i64::MAX - 1000,
+        i64::MAX,
+        checked_unchecked_div_exact_i64_edge_divisor,
+        i64::MAX / 2,
+        i64::MAX
+    );
+    generate_unchecked_div_exact_intervals!(
+        i128,
+        unchecked_div_exact,
+        checked_unchecked_div_exact_i128_small_divisor,
+        1,
+        64,
+        checked_unchecked_div_exact_i128_large_divisor,
+        i128::MAX - 1000,
+        i128::MAX,
+        checked_unchecked_div_exact_i128_edge_divisor,
+        i128::MAX / 2,
+        i128::MAX
+    );
+    generate_unchecked_div_exact_intervals!(
+        isize,
+        unchecked_div_exact,
+        checked_unchecked_div_exact_isize_small_divisor,
+        1,
+        64,
+        checked_unchecked_div_exact_isize_large_divisor,
+        isize::MAX - 1000,
+        isize::MAX,
+        checked_unchecked_div_exact_isize_edge_divisor,
+        isize::MAX / 2,
+        isize::MAX
+    );
+    generate_unchecked_div_exact_intervals!(
+        u32,
+        unchecked_div_exact,
+        checked_unchecked_div_exact_u32_small_divisor,
+        1,
+        64,
+        checked_unchecked_div_exact_u32_large_divisor,
+        u32::MAX - 1000,
+        u32::MAX,
+        checked_unchecked_div_exact_u32_edge_divisor,
+        u32::MAX / 2,
+        u32::MAX
+    );
+    generate_unchecked_div_exact_intervals!(
+        u64,
+        unchecked_div_exact,
+        checked_unchecked_div_exact_u64_small_divisor,
+        1,
+        64,
+        checked_unchecked_div_exact_u64_large_divisor,
+        u64::MAX - 1000,
+        u64::MAX,
+        checked_unchecked_div_exact_u64_edge_divisor,
+        u64::MAX / 2,
+        u64::MAX
+    );
+    generate_unchecked_div_exact_intervals!(
+        u128,
+        unchecked_div_exact,
+        checked_unchecked_div_exact_u128_small_divisor,
+        1,
+        64,
+        checked_unchecked_div_exact_u128_large_divisor,
+        u128::MAX - 1000,
+        u128::MAX,
+        checked_unchecked_div_exact_u128_edge_divisor,
+        u128::MAX / 2,
+        u128::MAX
+    );
+    generate_unchecked_div_exact_intervals!(
+        usize,
+        unchecked_div_exact,
+        checked_unchecked_div_exact_usize_small_divisor,
+        1,
+        64,
+        checked_unchecked_div_exact_usize_large_divisor,
+        usize::MAX - 1000,
+        usize::MAX,
+        checked_unchecked_div_exact_usize_edge_divisor,
+        usize::MAX / 2,
+        usize::MAX
     );
 }
