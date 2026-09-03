@@ -3,7 +3,7 @@
 #[macro_use] // import iterator! and forward_iterator!
 mod macros;
 
-use safety::requires;
+use safety::{ensures, requires};
 
 use super::{from_raw_parts, from_raw_parts_mut};
 use crate::hint::assert_unchecked;
@@ -1392,6 +1392,19 @@ impl<'a, T: 'a> Windows<'a, T> {
     pub(super) const fn new(slice: &'a [T], size: NonZero<usize>) -> Self {
         Self { v: slice, size }
     }
+
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(idx < self.len())]
+    #[ensures(|result| result.len() == self.size.get())]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a [T] {
+        // SAFETY: since the caller guarantees that `i` is in bounds,
+        // which means that `i` cannot overflow an `isize`, and the
+        // slice created by `from_raw_parts` is a subslice of `self.v`
+        // thus is guaranteed to be valid for the lifetime `'a` of `self.v`.
+        unsafe { from_raw_parts(self.v.as_ptr().add(idx), self.size.get()) }
+    }
 }
 
 // FIXME(#26925) Remove in favor of `#[derive(Clone)]`
@@ -1457,13 +1470,9 @@ impl<'a, T> Iterator for Windows<'a, T> {
         }
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        // SAFETY: since the caller guarantees that `i` is in bounds,
-        // which means that `i` cannot overflow an `isize`, and the
-        // slice created by `from_raw_parts` is a subslice of `self.v`
-        // thus is guaranteed to be valid for the lifetime `'a` of `self.v`.
-        unsafe { from_raw_parts(self.v.as_ptr().add(idx), self.size.get()) }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -1547,6 +1556,26 @@ impl<'a, T: 'a> Chunks<'a, T> {
     pub(super) const fn new(slice: &'a [T], size: usize) -> Self {
         Self { v: slice, chunk_size: size }
     }
+
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(self.chunk_size != 0 && idx < self.len())]
+    #[ensures(|result| !result.is_empty() && result.len() <= self.chunk_size)]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a [T] {
+        let start = idx * self.chunk_size;
+        // SAFETY: the caller guarantees that `i` is in bounds,
+        // which means that `start` must be in bounds of the
+        // underlying `self.v` slice, and we made sure that `len`
+        // is also in bounds of `self.v`. Thus, `start` cannot overflow
+        // an `isize`, and the slice constructed by `from_raw_parts`
+        // is a subslice of `self.v` which is guaranteed to be valid
+        // for the lifetime `'a` of `self.v`.
+        unsafe {
+            let len = cmp::min(self.v.len().unchecked_sub(start), self.chunk_size);
+            from_raw_parts(self.v.as_ptr().add(start), len)
+        }
+    }
 }
 
 // FIXME(#26925) Remove in favor of `#[derive(Clone)]`
@@ -1615,20 +1644,9 @@ impl<'a, T> Iterator for Chunks<'a, T> {
         }
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let start = idx * self.chunk_size;
-        // SAFETY: the caller guarantees that `i` is in bounds,
-        // which means that `start` must be in bounds of the
-        // underlying `self.v` slice, and we made sure that `len`
-        // is also in bounds of `self.v`. Thus, `start` cannot overflow
-        // an `isize`, and the slice constructed by `from_raw_parts`
-        // is a subslice of `self.v` which is guaranteed to be valid
-        // for the lifetime `'a` of `self.v`.
-        unsafe {
-            let len = cmp::min(self.v.len().unchecked_sub(start), self.chunk_size);
-            from_raw_parts(self.v.as_ptr().add(start), len)
-        }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -1736,6 +1754,25 @@ impl<'a, T: 'a> ChunksMut<'a, T> {
     pub(super) const fn new(slice: &'a mut [T], size: usize) -> Self {
         Self { v: slice, chunk_size: size, _marker: PhantomData }
     }
+
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(self.chunk_size != 0 && idx < self.len())]
+    #[ensures(|result| !result.is_empty() && result.len() <= self.chunk_size)]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a mut [T] {
+        let start = idx * self.chunk_size;
+        // SAFETY: see comments for `Chunks::iterator_get_unchecked` and `self.v`.
+        //
+        // Also note that the caller also guarantees that we're never called
+        // with the same index again, and that no other methods that will
+        // access this subslice are called, so it is valid for the returned
+        // slice to be mutable.
+        unsafe {
+            let len = cmp::min(self.v.len().unchecked_sub(start), self.chunk_size);
+            from_raw_parts_mut(self.v.as_mut_ptr().add(start), len)
+        }
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -1805,19 +1842,9 @@ impl<'a, T> Iterator for ChunksMut<'a, T> {
         }
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let start = idx * self.chunk_size;
-        // SAFETY: see comments for `Chunks::__iterator_get_unchecked` and `self.v`.
-        //
-        // Also note that the caller also guarantees that we're never called
-        // with the same index again, and that no other methods that will
-        // access this subslice are called, so it is valid for the returned
-        // slice to be mutable.
-        unsafe {
-            let len = cmp::min(self.v.len().unchecked_sub(start), self.chunk_size);
-            from_raw_parts_mut(self.v.as_mut_ptr().add(start), len)
-        }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -1928,6 +1955,17 @@ impl<'a, T> ChunksExact<'a, T> {
         Self { v: fst, rem: snd, chunk_size }
     }
 
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(self.chunk_size != 0 && idx < self.len())]
+    #[ensures(|result| result.len() == self.chunk_size)]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a [T] {
+        let start = idx * self.chunk_size;
+        // SAFETY: mostly identical to `Chunks::iterator_get_unchecked`.
+        unsafe { from_raw_parts(self.v.as_ptr().add(start), self.chunk_size) }
+    }
+
     /// Returns the remainder of the original slice that is not going to be
     /// returned by the iterator. The returned slice has at most `chunk_size-1`
     /// elements.
@@ -2004,11 +2042,9 @@ impl<'a, T> Iterator for ChunksExact<'a, T> {
         self.next_back()
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let start = idx * self.chunk_size;
-        // SAFETY: mostly identical to `Chunks::__iterator_get_unchecked`.
-        unsafe { from_raw_parts(self.v.as_ptr().add(start), self.chunk_size) }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -2109,6 +2145,17 @@ impl<'a, T> ChunksExactMut<'a, T> {
         Self { v: fst, rem: snd, chunk_size, _marker: PhantomData }
     }
 
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(self.chunk_size != 0 && idx < self.len())]
+    #[ensures(|result| result.len() == self.chunk_size)]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a mut [T] {
+        let start = idx * self.chunk_size;
+        // SAFETY: see comments for `Chunks::iterator_get_unchecked` and `self.v`.
+        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), self.chunk_size) }
+    }
+
     /// Returns the remainder of the original slice that is not going to be
     /// returned by the iterator. The returned slice has at most `chunk_size-1`
     /// elements.
@@ -2166,11 +2213,9 @@ impl<'a, T> Iterator for ChunksExactMut<'a, T> {
         self.next_back()
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let start = idx * self.chunk_size;
-        // SAFETY: see comments for `Chunks::__iterator_get_unchecked` and `self.v`.
-        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), self.chunk_size) }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -2369,6 +2414,18 @@ impl<'a, T: 'a> RChunks<'a, T> {
     pub(super) const fn new(slice: &'a [T], size: usize) -> Self {
         Self { v: slice, chunk_size: size }
     }
+
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(self.chunk_size != 0 && idx < self.len())]
+    #[ensures(|result| !result.is_empty() && result.len() <= self.chunk_size)]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a [T] {
+        let end = self.v.len() - idx * self.chunk_size;
+        let start = end.checked_sub(self.chunk_size).unwrap_or(0);
+        // SAFETY: mostly identical to `Chunks::iterator_get_unchecked`.
+        unsafe { from_raw_parts(self.v.as_ptr().add(start), end - start) }
+    }
 }
 
 // FIXME(#26925) Remove in favor of `#[derive(Clone)]`
@@ -2448,15 +2505,9 @@ impl<'a, T> Iterator for RChunks<'a, T> {
         }
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let end = self.v.len() - idx * self.chunk_size;
-        let start = match end.checked_sub(self.chunk_size) {
-            None => 0,
-            Some(start) => start,
-        };
-        // SAFETY: mostly identical to `Chunks::__iterator_get_unchecked`.
-        unsafe { from_raw_parts(self.v.as_ptr().add(start), end - start) }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -2550,6 +2601,19 @@ impl<'a, T: 'a> RChunksMut<'a, T> {
     pub(super) const fn new(slice: &'a mut [T], size: usize) -> Self {
         Self { v: slice, chunk_size: size, _marker: PhantomData }
     }
+
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(self.chunk_size != 0 && idx < self.len())]
+    #[ensures(|result| !result.is_empty() && result.len() <= self.chunk_size)]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a mut [T] {
+        let end = self.v.len() - idx * self.chunk_size;
+        let start = end.checked_sub(self.chunk_size).unwrap_or(0);
+        // SAFETY: see comments for `RChunks::iterator_get_unchecked` and
+        // `ChunksMut::iterator_get_unchecked`, `self.v`.
+        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), end - start) }
+    }
 }
 
 #[stable(feature = "rchunks", since = "1.31.0")]
@@ -2629,16 +2693,9 @@ impl<'a, T> Iterator for RChunksMut<'a, T> {
         }
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let end = self.v.len() - idx * self.chunk_size;
-        let start = match end.checked_sub(self.chunk_size) {
-            None => 0,
-            Some(start) => start,
-        };
-        // SAFETY: see comments for `RChunks::__iterator_get_unchecked` and
-        // `ChunksMut::__iterator_get_unchecked`, `self.v`.
-        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), end - start) }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -2746,6 +2803,18 @@ impl<'a, T> RChunksExact<'a, T> {
         Self { v: snd, rem: fst, chunk_size }
     }
 
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(self.chunk_size != 0 && idx < self.len())]
+    #[ensures(|result| result.len() == self.chunk_size)]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a [T] {
+        let end = self.v.len() - idx * self.chunk_size;
+        let start = end - self.chunk_size;
+        // SAFETY: mostly identical to `Chunks::iterator_get_unchecked`.
+        unsafe { from_raw_parts(self.v.as_ptr().add(start), self.chunk_size) }
+    }
+
     /// Returns the remainder of the original slice that is not going to be
     /// returned by the iterator. The returned slice has at most `chunk_size-1`
     /// elements.
@@ -2823,12 +2892,9 @@ impl<'a, T> Iterator for RChunksExact<'a, T> {
         self.next_back()
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let end = self.v.len() - idx * self.chunk_size;
-        let start = end - self.chunk_size;
-        // SAFETY: mostly identical to `Chunks::__iterator_get_unchecked`.
-        unsafe { from_raw_parts(self.v.as_ptr().add(start), self.chunk_size) }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -2930,6 +2996,18 @@ impl<'a, T> RChunksExactMut<'a, T> {
         Self { v: snd, rem: fst, chunk_size }
     }
 
+    /// Inherent twin of `__iterator_get_unchecked`, so the contract has a
+    /// nameable, non-generic target for `proof_for_contract`.
+    #[inline]
+    #[requires(self.chunk_size != 0 && idx < self.len())]
+    #[ensures(|result| result.len() == self.chunk_size)]
+    unsafe fn iterator_get_unchecked(&mut self, idx: usize) -> &'a mut [T] {
+        let end = self.v.len() - idx * self.chunk_size;
+        let start = end - self.chunk_size;
+        // SAFETY: see comments for `RChunksMut::iterator_get_unchecked` and `self.v`.
+        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), self.chunk_size) }
+    }
+
     /// Returns the remainder of the original slice that is not going to be
     /// returned by the iterator. The returned slice has at most `chunk_size-1`
     /// elements.
@@ -2990,12 +3068,9 @@ impl<'a, T> Iterator for RChunksExactMut<'a, T> {
         self.next_back()
     }
 
-    #[requires(idx < self.len())]
     unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
-        let end = self.v.len() - idx * self.chunk_size;
-        let start = end - self.chunk_size;
-        // SAFETY: see comments for `RChunksMut::__iterator_get_unchecked` and `self.v`.
-        unsafe { from_raw_parts_mut(self.v.as_mut_ptr().add(start), self.chunk_size) }
+        // SAFETY: same contract as `iterator_get_unchecked`.
+        unsafe { self.iterator_get_unchecked(idx) }
     }
 }
 
@@ -3292,6 +3367,23 @@ mod verify {
         Iter::new(slice)
     }
 
+    fn any_slice_mut<T>(orig_slice: &mut [T]) -> &mut [T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &mut orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *mut T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts_mut(ptr, 0) }
+        }
+    }
+
+    fn any_iter_mut<'a, T>(orig_slice: &'a mut [T]) -> IterMut<'a, T> {
+        let slice = any_slice_mut(orig_slice);
+        IterMut::new(slice)
+    }
+
     /// Macro that generates a harness for a given `Iter` method.
     ///
     /// Takes the name of the harness, the element type, and an expression to check.
@@ -3321,6 +3413,35 @@ mod verify {
             fn $harness() {
                 let array: [$elem_ty; MAX_LEN] = kani::any();
                 let mut iter = any_iter::<$elem_ty>(&array);
+                let _ = unsafe { iter.$func($($args),*) };
+            }
+        };
+    }
+
+    /// Macro that generates a harness for a given safe `IterMut` method.
+    ///
+    /// Mirrors `check_safe_abstraction!` but builds a mutable iterator over a
+    /// `&mut` backing array via `any_iter_mut`.
+    macro_rules! check_safe_abstraction_mut {
+        ($harness:ident, $elem_ty:ty, $call:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                let mut array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut iter = any_iter_mut::<$elem_ty>(&mut array);
+                let target = $call;
+                target(&mut iter);
+                kani::assert(iter.is_safe(), "IterMut is safe");
+            }
+        };
+    }
+
+    /// Macro that generates a harness for a given unsafe `IterMut` method.
+    macro_rules! check_unsafe_contracts_mut {
+        ($harness:ident, $elem_ty:ty, $func:ident($($args:expr),*)) => {
+            #[kani::proof_for_contract(IterMut::$func)]
+            fn $harness() {
+                let mut array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut iter = any_iter_mut::<$elem_ty>(&mut array);
                 let _ = unsafe { iter.$func($($args),*) };
             }
         };
@@ -3403,9 +3524,946 @@ mod verify {
         };
     }
 
+    /// Mirror of `check_iter_with_ty!` for the mutable `IterMut` iterator.
+    ///
+    /// `IterMut` is generated by the same `iterator!` macro as `Iter`, so it
+    /// exposes the same O(1) methods (plus the `IterMut`-specific `into_slice`
+    /// and `as_mut_slice`). It does not implement `Clone` (cloning would alias
+    /// the underlying `&mut` data), so there is no clone harness.
+    macro_rules! check_iter_mut_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                fn check_new_iter_mut() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let iter = IterMut::new(slice);
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                /// Count consumes the value, thus, invoke it directly.
+                #[kani::proof]
+                fn check_count() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    iter.count();
+                }
+
+                #[kani::proof]
+                fn check_default() {
+                    let iter: IterMut<'_, $ty> = IterMut::default();
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                /// `into_slice` consumes the iterator, thus, invoke it directly.
+                #[kani::proof]
+                fn check_into_slice() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.into_slice();
+                }
+
+                check_unsafe_contracts_mut!(check_next_back_unchecked, $ty, next_back_unchecked());
+                check_unsafe_contracts_mut!(check_pre_dec_end, $ty, pre_dec_end(kani::any()));
+
+                // `IterMut::post_inc_start` trips a Kani `proof_for_contract`
+                // instrumentation bug for aligned `T` (the contract reentrancy
+                // "single top-level call" check spuriously fails for `char`/`(char, u8)`
+                // though every real UB check passes, and neither a turbofish-pinned
+                // target nor a smaller backing array nor higher `--object-bits` helps;
+                // the sibling contracts `pre_dec_end`/`next_back_unchecked` are fine).
+                // Discharge it as a plain proof instead: establish the documented
+                // precondition `offset <= len` by construction and assert the
+                // `is_safe()` postcondition directly.
+                #[kani::proof]
+                fn check_post_inc_start() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let len = iter.len();
+                    let offset = kani::any_where(move |o: &usize| *o <= len);
+                    let _ = unsafe { iter.post_inc_start(offset) };
+                    kani::assert(iter.is_safe(), "IterMut is safe");
+                }
+
+                // Public functions that call safe abstraction `make_slice`.
+                check_safe_abstraction_mut!(check_as_slice, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    iter.as_slice();
+                });
+                check_safe_abstraction_mut!(check_as_mut_slice, $ty, |iter: &mut IterMut<
+                    '_,
+                    $ty,
+                >| {
+                    iter.as_mut_slice();
+                });
+                check_safe_abstraction_mut!(check_as_ref, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    let _ = iter.as_ref();
+                });
+
+                check_safe_abstraction_mut!(check_advance_back_by, $ty, |iter: &mut IterMut<
+                    '_,
+                    $ty,
+                >| {
+                    let _ = iter.advance_back_by(kani::any());
+                });
+
+                check_safe_abstraction_mut!(check_is_empty, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    let _ = iter.is_empty();
+                });
+                check_safe_abstraction_mut!(check_len, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    let _ = iter.len();
+                });
+                check_safe_abstraction_mut!(check_size_hint, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    let _ = iter.size_hint();
+                });
+                check_safe_abstraction_mut!(check_nth, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    let _ = iter.nth(kani::any());
+                });
+                check_safe_abstraction_mut!(check_advance_by, $ty, |iter: &mut IterMut<
+                    '_,
+                    $ty,
+                >| {
+                    let _ = iter.advance_by(kani::any());
+                });
+                check_safe_abstraction_mut!(check_next_back, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    let _ = iter.next_back();
+                });
+                check_safe_abstraction_mut!(check_nth_back, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    let _ = iter.nth_back(kani::any());
+                });
+                check_safe_abstraction_mut!(check_next, $ty, |iter: &mut IterMut<'_, $ty>| {
+                    let _ = iter.next();
+                });
+            }
+        };
+    }
+
     // FIXME: Add harnesses for ZST with alignment > 1.
     check_iter_with_ty!(verify_unit, (), isize::MAX as usize);
     check_iter_with_ty!(verify_u8, u8, u32::MAX as usize);
     check_iter_with_ty!(verify_char, char, 50);
     check_iter_with_ty!(verify_tup, (char, u8), 50);
+
+    check_iter_mut_with_ty!(verify_mut_unit, (), isize::MAX as usize);
+    check_iter_mut_with_ty!(verify_mut_u8, u8, u32::MAX as usize);
+    check_iter_mut_with_ty!(verify_mut_char, char, 50);
+    check_iter_mut_with_ty!(verify_mut_tup, (char, u8), 50);
+
+    /// Harnesses for the consuming/looping `Iter` and `IterMut` methods
+    /// (`fold`, `for_each`, `position`, `rposition`, `last`).
+    ///
+    /// Unlike the O(1) methods above, these iterate over the whole slice, so
+    /// the proof is bounded: a small backing length plus an explicit
+    /// `#[kani::unwind]` (see challenge #16 -- a looping harness over a
+    /// symbolic-length slice needs an explicit unwind bound or CBMC
+    /// over-unwinds to a timeout). The unwind value is a *verified* unwinding
+    /// assertion, so too small a bound fails loudly rather than vacuously.
+    macro_rules! check_iter_looping_with_ty {
+        ($module:ident, $ty:ty) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = 4;
+
+                // ----- Iter (immutable) -----
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_fold() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    let _ = iter.fold(0usize, |acc, _x| acc);
+                }
+
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_for_each() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    iter.for_each(|_x| {});
+                }
+
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_position() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter::<$ty>(&array);
+                    let _ = iter.position(|_x| kani::any());
+                }
+
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_rposition() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter::<$ty>(&array);
+                    let _ = iter.rposition(|_x| kani::any());
+                }
+
+                /// `last` is O(1) (delegates to a single `next_back`), no unwind.
+                #[kani::proof]
+                fn check_last() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter::<$ty>(&array);
+                    let _ = iter.last();
+                }
+
+                // ----- IterMut (mutable) -----
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_fold_mut() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.fold(0usize, |acc, _x| acc);
+                }
+
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_for_each_mut() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    iter.for_each(|_x| {});
+                }
+
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_position_mut() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.position(|_x| kani::any());
+                }
+
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_rposition_mut() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let mut iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.rposition(|_x| kani::any());
+                }
+
+                #[kani::proof]
+                fn check_last_mut() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let iter = any_iter_mut::<$ty>(&mut array);
+                    let _ = iter.last();
+                }
+            }
+        };
+    }
+
+    check_iter_looping_with_ty!(verify_loop_unit, ());
+    check_iter_looping_with_ty!(verify_loop_u8, u8);
+    check_iter_looping_with_ty!(verify_loop_char, char);
+    check_iter_looping_with_ty!(verify_loop_tup, (char, u8));
+
+    // Nameable predicate for the Split family (closures are unnameable; the
+    // symbolic-bool return explores every split position).
+    fn pred_any<T>(_x: &T) -> bool {
+        kani::any()
+    }
+
+    // ======== MACRO DEFINITIONS ========
+
+    // ===== Windows + Chunks (read-only) =====
+    macro_rules! check_windows_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof_for_contract(Windows::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.windows(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+            }
+        };
+    }
+
+    macro_rules! check_chunks_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof_for_contract(Chunks::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks(size);
+                    let _ = iter.next_back();
+                }
+            }
+        };
+    }
+
+    // ===== ChunksExact + RChunksExact =====
+    // ChunksExact (read-only): pub(super) const fn new(slice, chunk_size) has an
+    // unsafe body (split_at_unchecked); get_unchecked is proved against the
+    // contract on the inherent `iterator_get_unchecked`.
+    macro_rules! check_chunks_exact_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                // Shape G: constructor with unsafe body (assume chunk_size != 0).
+                #[kani::proof]
+                fn check_new() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let _iter = ChunksExact::new(slice, size);
+                }
+
+                #[kani::proof_for_contract(ChunksExact::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_exact(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+            }
+        };
+    }
+
+    // RChunksExact (read-only): mirror of ChunksExact for the reverse iterator.
+    macro_rules! check_rchunks_exact_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                // Shape G: constructor with unsafe body (assume chunk_size != 0).
+                #[kani::proof]
+                fn check_new() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let _iter = RChunksExact::new(slice, size);
+                }
+
+                #[kani::proof_for_contract(RChunksExact::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_exact(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+            }
+        };
+    }
+
+    // ===== RChunks =====
+    macro_rules! check_rchunks_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof_for_contract(RChunks::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+
+                #[kani::proof]
+                fn check_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks(size);
+                    let _ = iter.next_back();
+                }
+            }
+        };
+    }
+
+    // ===== ChunksMut + ChunksExactMut (GENUINE-MUT) =====
+    /// Harnesses for the genuine-mut `ChunksMut` iterator.
+    ///
+    /// `ChunksMut` hands out non-overlapping `&mut [T]` subslices of a wrapped
+    /// `*mut [T]`; it never writes *through* those references, so no
+    /// `#[kani::modifies]` is needed. `get_unchecked` is proved against the
+    /// contract on the inherent `iterator_get_unchecked`.
+    /// Per the `[(); N]` CBMC mut-path convention, this is instantiated for
+    /// `u8`, `char`, and `(char, u8)` only -- the `()` ZST case is dropped.
+    macro_rules! check_chunks_mut_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof_for_contract(ChunksMut::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+
+                #[kani::proof]
+                fn check_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let n = kani::any();
+                    let _ = iter.nth(n);
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_mut(size);
+                    let n = kani::any();
+                    let _ = iter.nth_back(n);
+                }
+            }
+        };
+    }
+
+    /// Harnesses for the genuine-mut `ChunksExactMut` iterator.
+    ///
+    /// Like `ChunksMut` but with a `pub(super) const fn new` whose body splits
+    /// the slice with an `unsafe` `split_at_mut_unchecked`; `new` is reachable
+    /// from `mod verify` and gets its own harness (assume `chunk_size != 0`).
+    /// `get_unchecked` is proved against the contract on the inherent
+    /// `iterator_get_unchecked`. No `#[kani::modifies]` (only reborrows are handed out).
+    /// Instantiated for `u8`, `char`, `(char, u8)` only (drop `()`).
+    macro_rules! check_chunks_exact_mut_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                fn check_new() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let _iter = ChunksExactMut::new(slice, size);
+                }
+
+                #[kani::proof_for_contract(ChunksExactMut::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+
+                #[kani::proof]
+                fn check_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let n = kani::any();
+                    let _ = iter.nth(n);
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.chunks_exact_mut(size);
+                    let n = kani::any();
+                    let _ = iter.nth_back(n);
+                }
+            }
+        };
+    }
+
+    // ===== RChunksMut + RChunksExactMut =====
+    macro_rules! check_rchunks_mut_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof_for_contract(RChunksMut::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+
+                #[kani::proof]
+                fn check_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let n = kani::any();
+                    let _ = iter.nth(n);
+                }
+
+                #[kani::proof]
+                fn check_last() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let iter = slice.rchunks_mut(size);
+                    let _ = iter.last();
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_mut(size);
+                    let n = kani::any();
+                    let _ = iter.nth_back(n);
+                }
+            }
+        };
+    }
+
+    macro_rules! check_rchunks_exact_mut_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                fn check_new() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let _iter = RChunksExactMut::new(slice, size);
+                }
+
+                #[kani::proof_for_contract(RChunksExactMut::iterator_get_unchecked)]
+                fn check_get_unchecked() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let _ = unsafe { iter.iterator_get_unchecked(kani::any()) };
+                }
+
+                #[kani::proof]
+                fn check_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_nth() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let n = kani::any();
+                    let _ = iter.nth(n);
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_nth_back() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let size = kani::any_where(|x: &usize| *x != 0);
+                    let mut iter = slice.rchunks_exact_mut(size);
+                    let n = kani::any();
+                    let _ = iter.nth_back(n);
+                }
+            }
+        };
+    }
+
+    // ===== ArrayWindows =====
+    macro_rules! check_array_windows_with_ty {
+        ($module:ident, $ty:ty, $max:expr, $n:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                fn check_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let mut iter: ArrayWindows<'_, $ty, $n> = ArrayWindows::new(slice);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_nth() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let mut iter: ArrayWindows<'_, $ty, $n> = ArrayWindows::new(slice);
+                    let n = kani::any();
+                    let _ = iter.nth(n);
+                }
+
+                #[kani::proof]
+                fn check_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let mut iter: ArrayWindows<'_, $ty, $n> = ArrayWindows::new(slice);
+                    let _ = iter.next_back();
+                }
+
+                #[kani::proof]
+                fn check_nth_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let mut iter: ArrayWindows<'_, $ty, $n> = ArrayWindows::new(slice);
+                    let n = kani::any();
+                    let _ = iter.nth_back(n);
+                }
+            }
+        };
+    }
+
+    // ===== Split family (Split, SplitN, RSplitN, SplitNMut, RSplitNMut) — looping next/next_back + O(1) size_hint, all instantiated over (), u8, char, (char, u8) with MAX_LEN=4 =====
+    // ===== Split family: looping next/next_back (position/rposition scan symbolic length -> unwind).
+    // size_hint members are O(1) via GenericSplitN; MAX_LEN stays 4 for the whole family.
+
+    /// `Split`: forward + reverse splitter (Iterator + DoubleEndedIterator).
+    macro_rules! check_split_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let mut iter = slice.split(pred_any::<$ty>);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                #[kani::unwind(5)]
+                fn check_next_back() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let mut iter = slice.split(pred_any::<$ty>);
+                    let _ = iter.next_back();
+                }
+            }
+        };
+    }
+
+    /// `SplitN`: forward-limited splitter (GenericSplitN: next looping, size_hint O(1)).
+    macro_rules! check_splitn_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                #[kani::unwind(6)]
+                fn check_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let n = kani::any();
+                    let mut iter = slice.splitn(n, pred_any::<$ty>);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_size_hint() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let n = kani::any();
+                    let iter = slice.splitn(n, pred_any::<$ty>);
+                    let _ = crate::iter::Iterator::size_hint(&iter);
+                }
+            }
+        };
+    }
+
+    /// `RSplitN`: reverse-limited splitter (GenericSplitN: next looping, size_hint O(1)).
+    macro_rules! check_rsplitn_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                #[kani::unwind(6)]
+                fn check_next() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let n = kani::any();
+                    let mut iter = slice.rsplitn(n, pred_any::<$ty>);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_size_hint() {
+                    let array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice::<$ty>(&array);
+                    let n = kani::any();
+                    let iter = slice.rsplitn(n, pred_any::<$ty>);
+                    let _ = crate::iter::Iterator::size_hint(&iter);
+                }
+            }
+        };
+    }
+
+    /// `SplitNMut`: forward-limited mutable splitter (GenericSplitN: next looping, size_hint O(1)).
+    /// Mutable iterator hands out `&mut` reborrows only -> no `#[kani::modifies]`.
+    macro_rules! check_splitn_mut_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                #[kani::unwind(6)]
+                fn check_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let n = kani::any();
+                    let mut iter = slice.splitn_mut(n, pred_any::<$ty>);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_size_hint() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let n = kani::any();
+                    let iter = slice.splitn_mut(n, pred_any::<$ty>);
+                    let _ = crate::iter::Iterator::size_hint(&iter);
+                }
+            }
+        };
+    }
+
+    /// `RSplitNMut`: reverse-limited mutable splitter (GenericSplitN: next looping, size_hint O(1)).
+    macro_rules! check_rsplitn_mut_with_ty {
+        ($module:ident, $ty:ty, $max:expr) => {
+            mod $module {
+                use super::*;
+                const MAX_LEN: usize = $max;
+
+                #[kani::proof]
+                #[kani::unwind(6)]
+                fn check_next() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let n = kani::any();
+                    let mut iter = slice.rsplitn_mut(n, pred_any::<$ty>);
+                    let _ = iter.next();
+                }
+
+                #[kani::proof]
+                fn check_size_hint() {
+                    let mut array: [$ty; MAX_LEN] = kani::any();
+                    let slice = any_slice_mut::<$ty>(&mut array);
+                    let n = kani::any();
+                    let iter = slice.rsplitn_mut(n, pred_any::<$ty>);
+                    let _ = crate::iter::Iterator::size_hint(&iter);
+                }
+            }
+        };
+    }
+
+    // ======== INSTANTIATIONS ========
+
+    // Windows + Chunks (read-only)
+    check_windows_with_ty!(windows_unit, (), isize::MAX as usize);
+    check_windows_with_ty!(windows_u8, u8, u32::MAX as usize);
+    check_windows_with_ty!(windows_char, char, 50);
+    check_windows_with_ty!(windows_char_u8, (char, u8), 50);
+
+    check_chunks_with_ty!(chunks_unit, (), 50);
+    check_chunks_with_ty!(chunks_u8, u8, 50);
+    check_chunks_with_ty!(chunks_char, char, 50);
+    check_chunks_with_ty!(chunks_char_u8, (char, u8), 50);
+
+    // ChunksExact + RChunksExact
+    check_chunks_exact_with_ty!(chunks_exact_unit, (), 50);
+    check_chunks_exact_with_ty!(chunks_exact_u8, u8, 50);
+    check_chunks_exact_with_ty!(chunks_exact_char, char, 50);
+    check_chunks_exact_with_ty!(chunks_exact_tup, (char, u8), 50);
+
+    check_rchunks_exact_with_ty!(rchunks_exact_unit, (), 50);
+    check_rchunks_exact_with_ty!(rchunks_exact_u8, u8, 50);
+    check_rchunks_exact_with_ty!(rchunks_exact_char, char, 50);
+    check_rchunks_exact_with_ty!(rchunks_exact_tup, (char, u8), 50);
+
+    // RChunks
+    check_rchunks_with_ty!(rchunks_unit, (), 50);
+    check_rchunks_with_ty!(rchunks_u8, u8, 50);
+    check_rchunks_with_ty!(rchunks_char, char, 50);
+    check_rchunks_with_ty!(rchunks_tup, (char, u8), 50);
+
+    // ChunksMut + ChunksExactMut (GENUINE-MUT)
+    // GENUINE-MUT: instantiate u8, char, (char, u8) only -- drop () per the
+    // [(); N] CBMC mut-path convention.
+    check_chunks_mut_with_ty!(chunks_mut_u8, u8, 50);
+    check_chunks_mut_with_ty!(chunks_mut_char, char, 50);
+    check_chunks_mut_with_ty!(chunks_mut_tup, (char, u8), 50);
+
+    check_chunks_exact_mut_with_ty!(chunks_exact_mut_u8, u8, 50);
+    check_chunks_exact_mut_with_ty!(chunks_exact_mut_char, char, 50);
+    check_chunks_exact_mut_with_ty!(chunks_exact_mut_tup, (char, u8), 50);
+
+    // RChunksMut + RChunksExactMut
+    // RChunksMut (GENUINE-MUT: drop (); instantiate u8, char, (char, u8) only)
+    check_rchunks_mut_with_ty!(rchunks_mut_u8, u8, 50);
+    check_rchunks_mut_with_ty!(rchunks_mut_char, char, 50);
+    check_rchunks_mut_with_ty!(rchunks_mut_char_u8, (char, u8), 50);
+
+    // RChunksExactMut (GENUINE-MUT: drop (); instantiate u8, char, (char, u8) only)
+    check_rchunks_exact_mut_with_ty!(rchunks_exact_mut_u8, u8, 50);
+    check_rchunks_exact_mut_with_ty!(rchunks_exact_mut_char, char, 50);
+    check_rchunks_exact_mut_with_ty!(rchunks_exact_mut_char_u8, (char, u8), 50);
+
+    // ArrayWindows
+    // () : MAX_LEN = isize::MAX as usize
+    check_array_windows_with_ty!(array_windows_unit_n1, (), isize::MAX as usize, 1);
+    check_array_windows_with_ty!(array_windows_unit_n2, (), isize::MAX as usize, 2);
+    check_array_windows_with_ty!(array_windows_unit_n3, (), isize::MAX as usize, 3);
+
+    // u8 : MAX_LEN = u32::MAX as usize
+    check_array_windows_with_ty!(array_windows_u8_n1, u8, u32::MAX as usize, 1);
+    check_array_windows_with_ty!(array_windows_u8_n2, u8, u32::MAX as usize, 2);
+    check_array_windows_with_ty!(array_windows_u8_n3, u8, u32::MAX as usize, 3);
+
+    // char : MAX_LEN = 50
+    check_array_windows_with_ty!(array_windows_char_n1, char, 50, 1);
+    check_array_windows_with_ty!(array_windows_char_n2, char, 50, 2);
+    check_array_windows_with_ty!(array_windows_char_n3, char, 50, 3);
+
+    // (char, u8) : MAX_LEN = 50
+    check_array_windows_with_ty!(array_windows_char_u8_n1, (char, u8), 50, 1);
+    check_array_windows_with_ty!(array_windows_char_u8_n2, (char, u8), 50, 2);
+    check_array_windows_with_ty!(array_windows_char_u8_n3, (char, u8), 50, 3);
+
+    // Split family (Split, SplitN, RSplitN, SplitNMut, RSplitNMut) — looping next/next_back + O(1) size_hint, all instantiated over (), u8, char, (char, u8) with MAX_LEN=4
+    // Split family: MAX_LEN = 4 for ALL types (looping harnesses with #[kani::unwind]).
+    // All five structs are read-only-instantiation kind (keep ()): cover (), u8, char, (char, u8).
+
+    check_split_with_ty!(split_unit, (), 4);
+    check_split_with_ty!(split_u8, u8, 4);
+    check_split_with_ty!(split_char, char, 4);
+    check_split_with_ty!(split_tup, (char, u8), 4);
+
+    check_splitn_with_ty!(splitn_unit, (), 4);
+    check_splitn_with_ty!(splitn_u8, u8, 4);
+    check_splitn_with_ty!(splitn_char, char, 4);
+    check_splitn_with_ty!(splitn_tup, (char, u8), 4);
+
+    check_rsplitn_with_ty!(rsplitn_unit, (), 4);
+    check_rsplitn_with_ty!(rsplitn_u8, u8, 4);
+    check_rsplitn_with_ty!(rsplitn_char, char, 4);
+    check_rsplitn_with_ty!(rsplitn_tup, (char, u8), 4);
+
+    check_splitn_mut_with_ty!(splitn_mut_unit, (), 4);
+    check_splitn_mut_with_ty!(splitn_mut_u8, u8, 4);
+    check_splitn_mut_with_ty!(splitn_mut_char, char, 4);
+    check_splitn_mut_with_ty!(splitn_mut_tup, (char, u8), 4);
+
+    check_rsplitn_mut_with_ty!(rsplitn_mut_unit, (), 4);
+    check_rsplitn_mut_with_ty!(rsplitn_mut_u8, u8, 4);
+    check_rsplitn_mut_with_ty!(rsplitn_mut_char, char, 4);
+    check_rsplitn_mut_with_ty!(rsplitn_mut_tup, (char, u8), 4);
 }
