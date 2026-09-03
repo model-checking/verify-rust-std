@@ -2408,36 +2408,9 @@ impl<T> Rc<[T]> {
 
             let mut guard = Guard { mem: NonNull::new_unchecked(mem), elems, layout, n_elems: 0 };
 
-            #[cfg(not(kani))]
             for (i, item) in iter.enumerate() {
                 ptr::write(elems.add(i), item);
                 guard.n_elems += 1;
-            }
-
-            #[cfg(kani)]
-            {
-                // This equivalent `while let` spelling lets Kani attach loop contracts.
-                // It is not a cfg-swap vacuity workaround: every iteration performs the
-                // same `next`, element write, and initialized-count update as the
-                // production `enumerate` loop above. This is sound because `enumerate`
-                // is precisely repeated `next` plus an index increment, while the
-                // initialized-prefix count remains synchronized with that index.
-                // The non-Kani build keeps the idiomatic loop; the two implementations
-                // differ only in syntax needed by Kani, not in the algorithm being checked.
-                let mut iter = iter;
-                let mut i = 0usize;
-
-                #[kani::loop_invariant(i == guard.n_elems)]
-                #[kani::loop_modifies(
-                    &i,
-                    &guard.n_elems,
-                    ptr::slice_from_raw_parts_mut(elems, len)
-                )]
-                while let Some(item) = iter.next() {
-                    ptr::write(elems.add(i), item);
-                    i += 1;
-                    guard.n_elems += 1;
-                }
             }
 
             // All clear. Forget the guard so it doesn't free the new RcInner.
@@ -3795,11 +3768,7 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for Weak<T, A> {
     /// assert!(other_weak_foo.upgrade().is_none());
     /// ```
     fn drop(&mut self) {
-        let inner = if let Some(inner) = self.inner() {
-            inner
-        } else {
-            return;
-        };
+        let inner = if let Some(inner) = self.inner() { inner } else { return };
 
         inner.dec_weak();
         // the weak count starts at 1, and will only go to zero if all
@@ -9177,6 +9146,116 @@ mod verify {
     gen_from_slice_copy_harness!(harness_from_slice_copy_unit, ());
     gen_from_slice_copy_harness!(harness_from_slice_copy_array, [u8; 4]);
     gen_from_slice_copy_harness!(harness_from_slice_copy_bool, bool);
+
+    // A manual `Clone` implementation keeps this type out of the `TrivialClone`
+    // specialization, forcing `RcFromSlice` to use its default clone-per-element path.
+    struct NonTrivialClone<T>(T);
+
+    impl<T: Clone> Clone for NonTrivialClone<T> {
+        fn clone(&self) -> Self {
+            Self(self.0.clone())
+        }
+    }
+
+    // `from_iter_exact` consumes a `Cloned<slice::Iter<_>>`, whose private pointer state
+    // and yielded values cannot currently be summarized by a sound, tractable Kani loop
+    // contract. Bound the source so the harness can verify the original loop by unwinding it.
+    // `RcFromSlice<T: Clone>::from_slice` default implementation harnesses.
+    macro_rules! gen_from_slice_clone_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            // The source contains at most four elements, so the iterator loop needs
+            // at most four body iterations plus its terminating condition.
+            #[kani::unwind(6)]
+            pub fn $name() {
+                type Elem = NonTrivialClone<$ty>;
+                let values: [$ty; 4] = kani::any();
+                let source = [
+                    NonTrivialClone(values[0]),
+                    NonTrivialClone(values[1]),
+                    NonTrivialClone(values[2]),
+                    NonTrivialClone(values[3]),
+                ];
+                let source_len: usize = kani::any();
+                kani::assume(source_len <= source.len());
+                let source = &source[..source_len];
+
+                // Call the target function through the non-`TrivialClone` specialization.
+                let rc = <Rc<[Elem], Global> as RcFromSlice<Elem>>::from_slice(source);
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "RcFromSlice Clone returns a non-null allocation");
+                assert!(rc.len() == source_len);
+                kani::cover(true, "RcFromSlice Clone preserves the source length");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "RcFromSlice Clone creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "RcFromSlice Clone creates no explicit weak owners");
+            }
+        };
+    }
+
+    gen_from_slice_clone_harness!(harness_from_slice_clone_i8, i8);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_i16, i16);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_i32, i32);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_i64, i64);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_i128, i128);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_u8, u8);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_u16, u16);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_u32, u32);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_u64, u64);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_u128, u128);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_unit, ());
+    gen_from_slice_clone_harness!(harness_from_slice_clone_array, [u8; 4]);
+    gen_from_slice_clone_harness!(harness_from_slice_clone_bool, bool);
+
+    // The `TrustedLen` path enters `from_iter_exact` with iterator state that current Kani
+    // loop contracts cannot summarize while preserving pointer validity and yielded values.
+    // Bound the iterator so the harness can verify the original loop by unwinding it.
+    // `FromIterator<T> for Rc<[T]>` dispatches through the `TrustedLen` implementation of
+    // `ToRcSlice::to_rc_slice`.
+    macro_rules! gen_to_rc_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            // The iterator contains at most four elements, so the iterator loop needs
+            // at most four body iterations plus its terminating condition.
+            #[kani::unwind(6)]
+            pub fn $name() {
+                let values: [$ty; 4] = kani::any();
+                let expected = values;
+                let source_len: usize = kani::any();
+                kani::assume(source_len <= values.len());
+
+                // Call the target function through `FromIterator` and `ToRcSlice`.
+                let rc: Rc<[$ty], Global> = values.into_iter().take(source_len).collect();
+
+                let ptr = Rc::as_ptr(&rc);
+                assert!(!ptr.is_null());
+                kani::cover(true, "ToRcSlice returns a non-null allocation");
+                assert!(rc.len() == source_len);
+                kani::cover(true, "ToRcSlice preserves the source length");
+                assert!(Rc::strong_count(&rc) == 1);
+                kani::cover(true, "ToRcSlice creates one strong owner");
+                assert!(Rc::weak_count(&rc) == 0);
+                kani::cover(true, "ToRcSlice creates no explicit weak owners");
+            }
+        };
+    }
+
+    gen_to_rc_slice_harness!(harness_to_rc_slice_i8, i8);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_i16, i16);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_i32, i32);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_i64, i64);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_i128, i128);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_u8, u8);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_u16, u16);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_u32, u32);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_u64, u64);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_u128, u128);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_unit, ());
+    gen_to_rc_slice_harness!(harness_to_rc_slice_array, [u8; 4]);
+    gen_to_rc_slice_harness!(harness_to_rc_slice_bool, bool);
 
     // `Rc::try_from` harnesses.
     macro_rules! gen_try_from_slice_to_array_harness {
