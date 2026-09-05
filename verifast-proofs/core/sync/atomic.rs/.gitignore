@@ -1,0 +1,16 @@
+__pycache__/
+*.log
+*.rmeta
+*.rlib
+*.o
+/proof/original/
+/proof/normalized-original/
+/proof/verified/
+/proof/clients*.rs
+/proof/coverage.json
+/checks/operations/*.rs
+!/checks/operations/positive.rs
+!/checks/operations/unsized-domain-rejected.rs
+/checks/operations/results.json
+/checks/decoder/replay-runtime/
+/checks/decoder/replay-fixtures/

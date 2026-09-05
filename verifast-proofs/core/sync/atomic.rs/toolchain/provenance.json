@@ -1,0 +1,42 @@
+{
+  "status": "proposed VeriFast 26.01 update; unreleased and subject to review",
+  "verifast_base": "26.01",
+  "source_archive_prefix": "verifast-verifast-dcfad5b",
+  "source_archive_sha256": "0bcffc9ff57c0adf3d659c27a9b0e504bb0be878d84e7a4841cb7616633ff0a7",
+  "vfdeps_archive_sha256": "8bd48b02aa1887321d28b8490fe5803ea045845324f5d2adf49e72ddb6643bc1",
+  "vfdeps_release": "25.01",
+  "vfdeps_asset": "vfdeps-adf88dc-macos-aarch64.txz",
+  "decoder_utility_commit": "2d6606d9b59cd0c88a66729f3f076c10c0c8e0b2",
+  "rust": "nightly-2025-11-25",
+  "target": "arm64-apple-macosx (LP64)",
+  "runtime": "verifast-26.01 in the fresh build directory",
+  "runtime_label": "26.01-local-atomic-source",
+  "approved_release": false,
+  "modified_files": [
+    "src/frontend/ast.ml",
+    "src/frontend/ocaml_expr_of_ast.ml",
+    "src/SExpressionEmitter.ml",
+    "src/verifast1.ml",
+    "src/rust_frontend/vf_mir/vf_mir.capnp",
+    "src/rust_frontend/vf_mir_exporter/src/lib.rs",
+    "src/rust_frontend/vf_mir_exporter/src/preprocessor.rs",
+    "src/rust_frontend/vf_mir_translator/rust_parser.ml",
+    "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml",
+    "src/refinement_checker/refinement_checker.ml",
+    "bin/rust/std/lib.rsspec"
+  ],
+  "source_patch_sha256": "689ade100389e4a7d9a4e3fcc47ad51d9bfb61d6d103afbdf875cfe77077d48f",
+  "rust_edition": 2024,
+  "new_gates": [
+    "compiler-resolved Self",
+    "repeated macro contracts",
+    "compiler ABI alignment and repr alignment lower bound",
+    "all 14 from_ptr bodies and complete module refinement after metadata normalization",
+    "all 15 generic operation wrappers including unwind paths",
+    "91 concrete legal ordering combinations",
+    "12 integer and 5 pointer element-size domain witnesses",
+    "29 operation controls including boolean invariant failures",
+    "25 malformed MIR decoder controls in a separate replay runtime",
+    "all 14 from_ptr fresh/shared callers and three ownership rejection controls"
+  ]
+}

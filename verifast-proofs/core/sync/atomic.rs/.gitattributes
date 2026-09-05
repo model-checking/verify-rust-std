@@ -1,0 +1,2 @@
+# Preserve release-relative patch bytes, including CRLF and context whitespace.
+toolchain/verifast-26.01-atomic-source.patch -text -whitespace

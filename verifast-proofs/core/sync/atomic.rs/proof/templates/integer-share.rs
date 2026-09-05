@@ -1,0 +1,69 @@
+/*@
+fix accepts_u8(value: u8) -> bool { true }
+pred_ctor own_atomic_contents(p: *u8)(;) = std::intrinsics::atomic_points_to(p, 1, accepts_u8);
+pred <AtomicU8>.own(t, value) = true;
+pred <AtomicU8>.share(k, t, l) = [_]frac_borrow(k, own_atomic_contents(ref_origin(l) as *u8));
+
+lem AtomicU8_share_mono(k: lifetime_t, k1: lifetime_t, t: thread_id_t, l: *AtomicU8)
+    req lifetime_inclusion(k1, k) == true &*& [_]AtomicU8_share(k, t, l);
+    ens [_]AtomicU8_share(k1, t, l);
+{
+    open AtomicU8_share(k, t, l);
+    frac_borrow_mono(k, k1, own_atomic_contents(ref_origin(l) as *u8));
+    close AtomicU8_share(k1, t, l);
+    leak AtomicU8_share(k1, t, l);
+}
+
+lem AtomicU8_sync(t1: thread_id_t)
+    req is_Sync(typeid(AtomicU8)) == true &*& [_]AtomicU8_share(?k, ?t0, ?l);
+    ens [_]AtomicU8_share(k, t1, l);
+{
+    open AtomicU8_share(k, t0, l);
+    close AtomicU8_share(k, t1, l);
+    leak AtomicU8_share(k, t1, l);
+}
+
+lem AtomicU8_share_full(k: lifetime_t, t: thread_id_t, l: *AtomicU8)
+    req atomic_mask(MaskTop) &*& full_borrow(k, AtomicU8_full_borrow_content(t, l)) &*& [?q]lifetime_token(k) &*& ref_origin(l) == l;
+    ens atomic_mask(MaskTop) &*& [_]AtomicU8_share(k, t, l) &*& [q]lifetime_token(k);
+{
+    open_full_borrow_strong_m_(k, AtomicU8_full_borrow_content(t, l));
+    open AtomicU8_full_borrow_content(t, l)();
+    open AtomicU8_own(t, _);
+    div_rem(l as usize, 1);
+    std::intrinsics::atomic_align_of_u8();
+    std::intrinsics::close_atomic_points_to_m(l as *u8, accepts_u8);
+    close own_atomic_contents(l as *u8)();
+    close True();
+    produce_lem_ptr_chunk restore_full_borrow_(True, own_atomic_contents(l as *u8), AtomicU8_full_borrow_content(t, l))() {
+        open True();
+        open own_atomic_contents(l as *u8)();
+        std::intrinsics::open_atomic_points_to(l as *u8);
+        close_points_to(l);
+        assert *l |-> ?value;
+        close AtomicU8_own(t, value);
+        open_points_to(l);
+        close AtomicU8_full_borrow_content(t, l)();
+    } {
+        close_full_borrow_strong_m_();
+    }
+    full_borrow_into_frac_m(k, own_atomic_contents(l as *u8));
+    close AtomicU8_share(k, t, l);
+    leak AtomicU8_share(k, t, l);
+}
+
+lem init_ref_AtomicU8(p: *AtomicU8)
+    req atomic_mask(Nlft) &*& ref_init_perm(p, ?x) &*& [_]AtomicU8_share(?k, ?t, x) &*& [?q]lifetime_token(k);
+    ens atomic_mask(Nlft) &*& [q]lifetime_token(k) &*& [_]AtomicU8_share(k, t, p) &*& [_]frac_borrow(k, ref_initialized_(p));
+{
+    open AtomicU8_share(k, t, x);
+    open_ref_init_perm_AtomicU8(p);
+    close_ref_initialized_AtomicU8(p, 1);
+    close ref_initialized_::<AtomicU8>(p)();
+    borrow_m(k, ref_initialized_(p));
+    leak borrow_end_token(k, ref_initialized_(p));
+    full_borrow_into_frac_m(k, ref_initialized_(p));
+    close AtomicU8_share(k, t, p);
+    leak AtomicU8_share(k, t, p);
+}
+@*/

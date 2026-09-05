@@ -1,0 +1,58 @@
+name: VeriFast atomics
+
+on:
+  workflow_dispatch:
+  merge_group:
+  pull_request:
+    branches: [main]
+  push:
+    paths:
+      - 'library/core/src/sync/atomic.rs'
+      - 'library/core/src/intrinsics/mod.rs'
+      - 'rust-toolchain.toml'
+      - 'verifast-proofs/core/sync/atomic.rs/**'
+      - '.github/workflows/verifast-atomics.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  atomics:
+    name: Atomic safety including 128-bit types
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned Rust compiler components
+        run: rustup toolchain install nightly-2025-11-25 --profile minimal --component rustc-dev,llvm-tools-preview,rust-src
+      - name: Cache verified download inputs and Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/atomic-downloads
+            ${{ runner.temp }}/atomic-cargo
+          key: atomic-build-macos-arm64-${{ hashFiles('verifast-proofs/core/sync/atomic.rs/toolchain/provenance.json') }}
+      - name: Build experimental VeriFast and check the complete atomic scope
+        run: >-
+          python3 verifast-proofs/core/sync/atomic.rs/toolchain/build.py
+          --workdir "$RUNNER_TEMP/atomic-build"
+          --downloads "$RUNNER_TEMP/atomic-downloads"
+          --cargo-home "$RUNNER_TEMP/atomic-cargo"
+          --check
+      - name: Upload proof coverage, generated sources, and build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: atomic-safety-evidence
+          path: |
+            ${{ runner.temp }}/atomic-build/build-manifest.json
+            ${{ runner.temp }}/atomic-build/*.log
+            verifast-proofs/core/sync/atomic.rs/proof/*.log
+            verifast-proofs/core/sync/atomic.rs/proof/coverage.json
+            verifast-proofs/core/sync/atomic.rs/proof/verified/*.rs
+            verifast-proofs/core/sync/atomic.rs/proof/normalized-original/*.rs
+            verifast-proofs/core/sync/atomic.rs/checks/**/*.log
+            verifast-proofs/core/sync/atomic.rs/checks/operations/results.json

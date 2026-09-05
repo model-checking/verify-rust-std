@@ -1,0 +1,1214 @@
+--- a/src/frontend/ast.ml
++++ b/src/frontend/ast.ml
+@@ -1120,6 +1120,8 @@
+   struct_attr =
+   | Packed
+   | ReprC
++  | RustcAbiAlignment of int (* Compiler-exported fact, not a source annotation. *)
++  | RustcMinimumAlignment of int
+ and constant_value = (* ?constant_value *)
+   IntConst of big_int
+ | BoolConst of bool
+--- a/src/frontend/ocaml_expr_of_ast.ml
++++ b/src/frontend/ocaml_expr_of_ast.ml
+@@ -1170,6 +1170,8 @@
+ and of_struct_attr = function
+   Packed -> c "Packed"
+ | ReprC -> c "ReprC"
++| RustcAbiAlignment n -> C ("RustcAbiAlignment", [I n])
++| RustcMinimumAlignment n -> C ("RustcMinimumAlignment", [I n])
+ and of_constant_value = function
+   IntConst n -> C ("IntConst", [BigInt n])
+ | BoolConst b -> C ("BoolConst", [B b])
+--- a/src/SExpressionEmitter.ml
++++ b/src/SExpressionEmitter.ml
+@@ -170,6 +170,9 @@
+ 
+ let sexpr_of_attr : struct_attr -> sexpression = function
+   | Packed -> Symbol "packed"
++  | ReprC -> Symbol "repr-c"
++  | RustcAbiAlignment n -> List [Symbol "rustc-abi-alignment"; Number (Big_int.big_int_of_int n)]
++  | RustcMinimumAlignment n -> List [Symbol "rustc-minimum-alignment"; Number (Big_int.big_int_of_int n)]
+ 
+ let sexpr_of_field (Field (loc, ghostness, type_expr, name, binding, visibility, final, expr)) : sexpression =
+   build_list
+--- a/src/verifast1.ml
++++ b/src/verifast1.ml
+@@ -6500,6 +6500,21 @@
+         ctxt#assume_forall name [trigger] (List.map (fun x -> ctxt#type_inductive) tparams) fact
+       end
+     in
++    List.iter (function
++      | RustcAbiAlignment n ->
++        if dialect <> Some Rust || tparams <> [] || n <= 0 || n land (n - 1) <> 0 then
++          static_error l "Invalid compiler-exported concrete ABI alignment" None;
++        let type_info = ctxt#mk_app type_info_func [] in
++        ctxt#assert_term (ctxt#mk_eq (mk_alignof type_info) (ctxt#mk_intlit n))
++      | RustcMinimumAlignment n ->
++        if dialect <> Some Rust || n <= 0 || n land (n - 1) <> 0 then
++          static_error l "Invalid compiler-exported minimum alignment" None;
++        assume_axiom (fun _ targs _ ->
++          let a = mk_alignof (ctxt#mk_app type_info_func targs) in
++          (sn ^ "_minimum_alignment", a,
++            ctxt#mk_and (ctxt#mk_le (ctxt#mk_intlit n) a)
++              (ctxt#mk_eq (ctxt#mk_mod a (ctxt#mk_intlit n)) (ctxt#mk_intlit 0))))
++      | _ -> ()) attrs;
+     let packed = List.mem Packed attrs in
+     let repr_c = dialect <> Some Rust || List.mem ReprC attrs in
+     assume_axiom (fun _ _ s -> (sn ^ "_size_limits", s, ctxt#mk_and (ctxt#mk_lt (ctxt#mk_intlit 0) s) (ctxt#mk_le s max_uintptr_term)));
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -279,6 +279,8 @@
+     predicates @7: List(Predicate);
+     implementsDrop @8: Bool;
+     isReprC @11: Bool;
++    knownAlignment @12: UInt64; # Zero if unknown; otherwise rustc's ABI alignment.
++    reprAlignment @13: UInt64; # Zero if absent; repr(align(N)) requires alignment to be a multiple of N.
+ }
+ 
+ enum AliasTyKind {
+@@ -870,6 +872,7 @@
+     isTraitFn @12: Bool;
+     isDropFn @13: Bool; # Implements std::ops::Drop::drop
+     visibility @22: Visibility;
++    implSelfTy @26: Option(Ty); # Compiler-resolved Self for an inherent or trait impl.
+ }
+ 
+ struct Trait {
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -926,6 +926,10 @@
+             // Encode traits (consumes annotations)
+             self.encode_traits(&mut req_adt_defs, vf_mir_cpn.reborrow());
+ 
++            // An annotation in a macro definition belongs to every expansion
++            // of that function. Keep an immutable source snapshot so consuming
++            // the first expansion does not silently leave later ones specless.
++            let source_body_annots = self.annots.clone();
+             vf_mir_cpn.fill_bodies(&self.bodies, |mut body_cpn, (body, span)| {
+                 Self::encode_span_data(
+                     self.tcx,
+@@ -944,6 +948,11 @@
+                         )
+                     })
+                     .collect::<LinkedList<_>>();
++                if body.span.from_expansion() {
++                    annots = source_body_annots.iter().filter(|annot| {
++                        body_span.contains(annot.span().expect("Dummy annot found during serialization").data())
++                    }).cloned().collect();
++                }
+                 let mut_annots = annots.extract_if(|annot| {
+                     annot.kind == GhostRangeKind::Mut
+                 }).map(|annot| {
+@@ -1094,6 +1103,22 @@
+             });
+             adt_def_cpn.set_implements_drop(adt_def.has_dtor(tcx));
+             adt_def_cpn.set_is_repr_c(adt_def.repr().c());
++            if let Some(alignment) = adt_def.repr().align {
++                adt_def_cpn.set_repr_alignment(alignment.bytes());
++            }
++            // Do not turn the alignment of one instantiation into a fact about
++            // every instantiation of a generic type. This first implementation
++            // deliberately exports layout only for types without parameters.
++            if tcx.generics_of(adt_def.did()).count() == 0 {
++                let adt_ty = tcx.type_of(adt_def.did()).instantiate_identity();
++                let typing_env = ty::TypingEnv {
++                    typing_mode: ty::TypingMode::PostAnalysis,
++                    param_env: ty::ParamEnv::empty(),
++                };
++                if let Ok(layout) = tcx.layout_of(typing_env.as_query_input(adt_ty)) {
++                    adt_def_cpn.set_known_alignment(layout.align.abi.bytes());
++                }
++            }
+         }
+ 
+         fn encode_adt_kind(adt_kind: ty::AdtKind, mut adt_kind_cpn: adt_kind_cpn::Builder<'_>) {
+@@ -1309,6 +1334,12 @@
+             }
+ 
+             if let Some(impl_did) = tcx.impl_of_assoc(def_id) {
++                Self::encode_ty(
++                    tcx,
++                    enc_ctx,
++                    tcx.type_of(impl_did).instantiate_identity(),
++                    body_cpn.reborrow().init_impl_self_ty().init_something(),
++                );
+                 let impl_hir_gens = tcx.hir_get_generics(impl_did.expect_local()).unwrap();
+                 let impl_hir_generics_cpn = body_cpn.reborrow().init_impl_block_hir_generics();
+                 let impl_hir_generics_some_cpn = impl_hir_generics_cpn.init_something();
+--- a/src/rust_frontend/vf_mir_exporter/src/preprocessor.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/preprocessor.rs
+@@ -68,7 +68,7 @@
+     Mut,
+ }
+ 
+-#[derive(Debug)]
++#[derive(Clone, Debug)]
+ pub struct GhostRange {
+     in_fn_body: bool,
+     pub kind: GhostRangeKind,
+--- a/src/rust_frontend/vf_mir_translator/rust_parser.ml
++++ b/src/rust_frontend/vf_mir_translator/rust_parser.ml
+@@ -4,6 +4,11 @@
+ open Parser
+ open Big_int
+ open Verifast0
++
++(* Set only while parsing one compiler-exported impl body; restored even when
++   parsing fails. Outside an impl, Self retains its existing trait-parameter
++   interpretation. The exporter supplies the type, not the function's name. *)
++let impl_self_ty : Ast.type_expr option ref = ref None
+ 
+ let expr_of_lft_param_expr loc e = CallExpr (loc, "lft_of", [], [], [LitPat (Typeid (loc, TypeExpr e))], Static)
+ let expr_of_lft_param loc x = expr_of_lft_param_expr loc (match x with "'static" -> ManifestTypeExpr (loc, StaticLifetime) | _ -> IdentTypeExpr (loc, None, x))
+@@ -107,7 +112,8 @@
+     parse_type as tp
+   ] -> RustRefTypeExpr (l, lft, mutability, tp)
+ | [ (l, Kwd "any") ] -> ManifestTypeExpr (l, AnyType)
+-| [ (l, Kwd "Self") ] -> IdentTypeExpr (l, None, "Self")
++| [ (l, Kwd "Self") ] ->
++    (match !impl_self_ty with Some ty -> ty | None -> IdentTypeExpr (l, None, "Self"))
+ | [ (l, Kwd "(");
+     [%let tp = function%parser
+        [ (_, Kwd ")") ] -> StructTypeExpr (l, Some "std_tuple_0_", None, [], [])
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -1314,15 +1314,105 @@
+         "std::mem::ManuallyDrop::deref_mut"
+     | _ -> name
+ 
++  (* Preserve every concrete AtomicOrdering when selecting a trusted contract.
++     Generic operands are admitted only because every selected contract also
++     requires a ghost type-domain fact. Concrete invalid types are rejected here
++     before rustc's later monomorphization diagnostics could be skipped. *)
++  and specialize_atomic_intrinsic (fn_def_ty_cpn : D.ty_kind_fn_def_ty)
++      (loc : Ast.loc) =
++    let name = fn_def_ty_cpn.id.name in
++    let intrinsic =
++      match String.split_on_char ':' name with
++      | [("core" | "std"); ""; "intrinsics"; ""; op] -> Some op
++      | _ -> None
++    in
++    match intrinsic with
++    | Some (("atomic_store" | "atomic_load" | "atomic_xchg" |
++             "atomic_cxchg" | "atomic_cxchgweak" | "atomic_xadd" |
++             "atomic_xsub" | "atomic_and" | "atomic_nand" | "atomic_or" |
++             "atomic_xor" | "atomic_max" | "atomic_min" | "atomic_umax" |
++             "atomic_umin") as op) ->
++        let reject message = Ast.static_error loc (op ^ ": " ^ message) None in
++        if fn_def_ty_cpn.late_bound_generic_param_count <> 0 then
++          reject "late-bound generic arguments are not permitted";
++        let rmw_pair = List.mem op ["atomic_xadd"; "atomic_xsub"; "atomic_and";
++                                   "atomic_nand"; "atomic_or"; "atomic_xor"] in
++        let comparison = op = "atomic_cxchg" || op = "atomic_cxchgweak" in
++        let type_count = if rmw_pair then 2 else 1 in
++        let order_count = if comparison then 2 else 1 in
++        if List.length fn_def_ty_cpn.substs <> type_count + order_count then
++          reject "incorrect type/ordering argument count";
++        let rec split n xs = if n = 0 then [], xs else
++          match xs with x :: xs -> let a, b = split (n - 1) xs in x :: a, b
++                      | [] -> assert false in
++        let type_args, order_args = split type_count fn_def_ty_cpn.substs in
++        let operand (arg : D.generic_arg) = match arg.kind with
++          | Type ty -> ty
++          | _ -> reject "expected a type argument before ordering constants" in
++        let primary = operand (List.hd type_args) in
++        let is_integer (ty : D.ty) = match ty.kind with
++          | Int _ | UInt _ -> true | _ -> false in
++        let is_param (ty : D.ty) = match ty.kind with Param _ -> true | _ -> false in
++        let is_supported_pointer (ty : D.ty) = match ty.kind with
++          | RawPtr {ty = {kind = (Slice _ | Str | Dynamic _ | Foreign)}} -> false
++          | RawPtr _ -> true
++          | _ -> false in
++        if not (is_param primary || is_integer primary || is_supported_pointer primary) then
++          reject "operand must be an integer, thin raw pointer, or a generic type with an atomic-domain precondition";
++        if List.mem op ["atomic_max"; "atomic_min"] then
++          (match primary.kind with Int _ | Param _ -> ()
++           | _ -> reject "signed min/max require a signed integer operand");
++        if List.mem op ["atomic_umax"; "atomic_umin"] then
++          (match primary.kind with UInt _ | Param _ -> ()
++           | _ -> reject "unsigned min/max require an unsigned integer operand");
++        if rmw_pair then begin
++          let secondary = operand (List.nth type_args 1) in
++          if not (is_param secondary || is_integer secondary) then
++            reject "RMW update operand must be an integer or a generic type";
++          if not (is_param primary || is_param secondary) then
++            match primary.kind, secondary.kind with
++            | Int a, Int b when a = b -> ()
++            | UInt a, UInt b when a = b -> ()
++            | RawPtr _, UInt USize -> ()
++            | _ -> reject "RMW operands must be the same integer type or (thin pointer, usize)"
++        end;
++        let ordering (arg : D.generic_arg) = match arg.kind with
++          | Const {kind = Value {
++              ty = {kind = Adt {
++                id = {name = ("core::intrinsics::AtomicOrdering" |
++                              "std::intrinsics::AtomicOrdering")};
++                kind = EnumKind; substs = [];
++              }};
++              val_tree = Branch [Leaf {data; size = 4}];
++            }} ->
++              (match Stdint.Uint128.to_string (DecoderAux.uint128_get data) with
++               | "0" -> "relaxed" | "1" -> "release" | "2" -> "acquire"
++               | "3" -> "acqrel" | "4" -> "seqcst"
++               | _ -> reject "invalid AtomicOrdering variant index")
++          | _ -> reject "expected a concrete fieldless AtomicOrdering enum constant encoded as one u32 variant index" in
++        let orders = List.map ordering order_args in
++        if op = "atomic_store" && List.mem (List.hd orders) ["acquire"; "acqrel"] then
++          reject "Acquire and AcqRel are not permitted for stores";
++        if op = "atomic_load" && List.mem (List.hd orders) ["release"; "acqrel"] then
++          reject "Release and AcqRel are not permitted for loads";
++        if comparison && List.mem (List.nth orders 1) ["release"; "acqrel"] then
++          reject "Release and AcqRel are not permitted for compare-exchange failure";
++        Some ("std::intrinsics::" ^ op ^ "_" ^ String.concat "_" orders, type_args)
++    | _ -> None
++
++
+   and translate_fn_def_ty (fn_def_ty_cpn : D.ty_kind_fn_def_ty) (loc : Ast.loc)
+       =
+     let id_cpn = fn_def_ty_cpn.id in
+     let id = id_cpn.name in
+-    let name = TrName.translate_def_path id in
++    let name, substs_cpn =
++      match specialize_atomic_intrinsic fn_def_ty_cpn loc with
++      | Some specialization -> specialization
++      | None -> TrName.translate_def_path id, fn_def_ty_cpn.substs
++    in
+     let late_bound_generic_param_count =
+       fn_def_ty_cpn.late_bound_generic_param_count
+     in
+-    let substs_cpn = fn_def_ty_cpn.substs in
+     let* substs =
+       ListAux.try_map
+         (fun subst_cpn -> translate_generic_arg subst_cpn loc)
+@@ -2206,17 +2296,19 @@
+       | `TrOperandMove (Var (_, fn_name), place_is_mutable) ->
+           translate_regular_fn_call [] fn_name
+       | `TrTypedConstantFn fn_def_ty_cpn -> (
+-          let fn_name = fn_def_ty_cpn.id.name in
+-          let substs_cpn = fn_def_ty_cpn.substs in
+-          let fn_name = translate_fn_name fn_name substs_cpn in
+-          let substs_cpn =
+-            substs_cpn
+-            @ List.init fn_def_ty_cpn.late_bound_generic_param_count
+-                (fun i : D.generic_arg ->
+-                  { kind = Lifetime { id = "'erased" } })
+-          in
+           let fn_name, substs_cpn =
+-            Args.body_tr_defs_ctx.fn_specializer fn_name substs_cpn
++            match specialize_atomic_intrinsic fn_def_ty_cpn call_loc with
++            | Some specialization -> specialization
++            | None ->
++                let substs_cpn = fn_def_ty_cpn.substs in
++                let fn_name = translate_fn_name fn_def_ty_cpn.id.name substs_cpn in
++                let substs_cpn =
++                  substs_cpn
++                  @ List.init fn_def_ty_cpn.late_bound_generic_param_count
++                      (fun i : D.generic_arg ->
++                        { kind = Lifetime { id = "'erased" } })
++                in
++                Args.body_tr_defs_ctx.fn_specializer fn_name substs_cpn
+           in
+           let* substs =
+             ListAux.try_map
+@@ -4679,7 +4771,7 @@
+               [],
+               Static )))
+ 
+-  let translate_body (body_tr_defs_ctx : body_tr_defs_ctx) (body_cpn : BodyRd.t)
++  let translate_body_without_self_context (body_tr_defs_ctx : body_tr_defs_ctx) (body_cpn : BodyRd.t)
+       =
+     let open BodyRd in
+     let var_id_trs_map_ref = ref [] in
+@@ -5021,6 +5113,21 @@
+             ({ id = loc; info = env_map } : VF0.debug_info_rust_fe) )
+     | DefKind.AssocFn -> failwith "Todo: MIR Body kind AssocFn"
+     | _ -> Error (`TrBodyFatal "Unknown MIR Body kind")
++
++  let translate_body body_tr_defs_ctx body_cpn =
++    let* self_ty =
++      match OptionRd.get (BodyRd.impl_self_ty_get body_cpn) with
++      | OptionRd.Nothing -> Ok None
++      | OptionRd.Something ty ->
++          let* loc = translate_span_data (BodyRd.fn_sig_span_get body_cpn) in
++          let* ty = translate_decoded_ty (D.decode_ty (VfMirRd.of_pointer ty)) loc in
++          Ok (Some ty.Mir.vf_ty)
++    in
++    let previous = !Rust_parser.impl_self_ty in
++    Rust_parser.impl_self_ty := self_ty;
++    Fun.protect
++      ~finally:(fun () -> Rust_parser.impl_self_ty := previous)
++      (fun () -> translate_body_without_self_context body_tr_defs_ctx body_cpn)
+ 
+   let translate_visibility (vis : D.visibility) =
+     match vis with
+@@ -6037,6 +6144,34 @@
+       let vis_cpn = vis_get adt_def_cpn in
+       let* vis = translate_visibility @@ D.decode_visibility vis_cpn in
+       let is_local = is_local_get adt_def_cpn in
++      let known_alignment = known_alignment_get adt_def_cpn in
++      let alignment_attrs =
++        if known_alignment = Stdint.Uint64.zero then []
++        else begin
++          if vf_tparams <> [] then
++            Ast.static_error def_loc "A concrete ABI alignment for a generic ADT is not supported" None;
++          (* Rust's maximum permitted alignment is 2^29; this also makes the
++             conversion to the host OCaml int unambiguous. *)
++          if known_alignment > Stdint.Uint64.of_int (1 lsl 29) then
++            Ast.static_error def_loc "Invalid compiler-exported ABI alignment" None;
++          let n = Stdint.Uint64.to_int known_alignment in
++          if n <= 0 || n land (n - 1) <> 0 then
++            Ast.static_error def_loc "Invalid compiler-exported ABI alignment" None;
++          [Ast.RustcAbiAlignment n]
++        end
++      in
++      let repr_alignment = repr_alignment_get adt_def_cpn in
++      let alignment_attrs =
++        if repr_alignment = Stdint.Uint64.zero then alignment_attrs
++        else begin
++          if repr_alignment > Stdint.Uint64.of_int (1 lsl 29) then
++            Ast.static_error def_loc "Invalid compiler-exported minimum alignment" None;
++          let n = Stdint.Uint64.to_int repr_alignment in
++          if n <= 0 || n land (n - 1) <> 0 then
++            Ast.static_error def_loc "Invalid compiler-exported minimum alignment" None;
++          Ast.RustcMinimumAlignment n :: alignment_attrs
++        end
++      in
+       let kind_cpn = kind_get adt_def_cpn in
+       let* kind, fds, fds_no_zst, def, aux_decls =
+         match AdtKindRd.get kind_cpn with
+@@ -6057,7 +6192,7 @@
+                       (*instance_pred_decl list*) [],
+                       (*is polymorphic*) false ),
+                   (*struct_attr list*)
+-                  if is_repr_c_get adt_def_cpn then [ ReprC ] else [] )
++                  (if is_repr_c_get adt_def_cpn then [ Ast.ReprC ] else []) @ alignment_attrs )
+             in
+             let struct_typedef_aux =
+               Ast.TypedefDecl
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -85,6 +85,15 @@
+ 
+ let string_of_region = function
+   Region s -> s
++
++type atomic_ordering = AtomicRelaxed | AtomicRelease | AtomicAcquire | AtomicAcqRel | AtomicSeqCst
++
++let string_of_atomic_ordering = function
++  AtomicRelaxed -> "Relaxed"
++| AtomicRelease -> "Release"
++| AtomicAcquire -> "Acquire"
++| AtomicAcqRel -> "AcqRel"
++| AtomicSeqCst -> "SeqCst"
+ 
+ type literal_const_expr =
+   BoolValue of bool
+@@ -105,6 +114,7 @@
+ and const_expr =
+   ParamConstExpr of string
+ | LiteralConstExpr of literal_const_expr
++| AtomicOrderingConst of string * atomic_ordering
+ and ty =
+   Bool
+ | Int of int_width
+@@ -148,6 +158,7 @@
+ let string_of_const_expr = function
+   ParamConstExpr param -> Printf.sprintf "ParamConstExpr %s" param
+ | LiteralConstExpr literal -> string_of_literal_const_expr literal
++| AtomicOrderingConst (name, ordering) -> name ^ "::" ^ string_of_atomic_ordering ordering
+ 
+ let rec string_of_ty = function
+   Bool -> "Bool"
+@@ -297,7 +308,25 @@
+     let valtree = value_cpn.val_tree in
+     match valtree with
+       Leaf scalar_int_cpn -> LiteralConstExpr (decode_scalar_int ty scalar_int_cpn)
+-    | Branch _ -> failwith "Branch not supported"
++    | Branch branches ->
++      (* The pinned exporter encodes a fieldless enum as a singleton branch
++         containing its u32 variant index. Keep AtomicOrdering nominal and
++         distinct from integer constants; do not generalize this to other ADTs. *)
++      begin match ty, branches with
++        Adt (name, Enum, []), [Leaf {data; size=4}]
++          when name = "std::intrinsics::AtomicOrdering" || name = "core::intrinsics::AtomicOrdering" ->
++          let ordering =
++            match Stdint.Uint128.to_string (decode_uint128 data) with
++              "0" -> AtomicRelaxed
++            | "1" -> AtomicRelease
++            | "2" -> AtomicAcquire
++            | "3" -> AtomicAcqRel
++            | "4" -> AtomicSeqCst
++            | _ -> failwith "Unsupported AtomicOrdering variant index"
++          in
++          AtomicOrderingConst (name, ordering)
++      | _ -> failwith "Branch not supported (expected a fieldless AtomicOrdering constant)"
++      end
+ 
+ type call_path = basic_block_path option
+ and basic_block_path = {bb_caller: basic_block_path option; bb_index: int}
+@@ -619,6 +648,7 @@
+       is_trait_fn=false;
+       is_drop_fn=false;
+       visibility=Public;
++    impl_self_ty=Nothing;
+     }
+   );
+   (
+@@ -716,6 +746,7 @@
+     is_trait_fn=false;
+     is_drop_fn=false;
+     visibility=Public;
++    impl_self_ty=Nothing;
+   }
+   );
+   ("std::result::Result::<T, E>::map",
+@@ -955,6 +986,7 @@
+     is_trait_fn=false;
+     is_drop_fn=false;
+     visibility=Public;
++    impl_self_ty=Nothing;
+   });
+   ("std::result::Result::<T, E>::map_err",
+   let span = Regular
+@@ -1193,6 +1225,7 @@
+     is_trait_fn=false;
+     is_drop_fn=false;
+     visibility=Public;
++    impl_self_ty=Nothing;
+   });
+   ("std::option::Option::<T>::map",
+   let span = Regular
+@@ -1409,6 +1442,7 @@
+     is_trait_fn=false;
+     is_drop_fn=false;
+     visibility=Public;
++    impl_self_ty=Nothing;
+   });
+   "std::option::Option::<T>::unwrap_or_else",
+   let span = Regular
+@@ -1589,6 +1623,7 @@
+     is_trait_fn=false;
+     is_drop_fn=false;
+     visibility=Public;
++    impl_self_ty=Nothing;
+   }
+ ]
+ 
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -326,6 +326,53 @@
+         req true;
+         ens atomic_align_of::<usize>() == std::mem::size_of::<usize>();
+     
++    // Atomic integer alignment is its size in the Rust atomic ABI. These are
++    // safety contracts for the trusted primitive operations, distinct from
++    // rustc-exported alignment of the actual enclosing struct.
++    lem_auto atomic_align_of_i8();
++        req true;
++        ens atomic_align_of::<i8>() == std::mem::size_of::<i8>();
++
++    lem_auto atomic_align_of_i16();
++        req true;
++        ens atomic_align_of::<i16>() == std::mem::size_of::<i16>();
++
++    lem_auto atomic_align_of_u16();
++        req true;
++        ens atomic_align_of::<u16>() == std::mem::size_of::<u16>();
++
++    lem_auto atomic_align_of_i32();
++        req true;
++        ens atomic_align_of::<i32>() == std::mem::size_of::<i32>();
++
++    lem_auto atomic_align_of_u32();
++        req true;
++        ens atomic_align_of::<u32>() == std::mem::size_of::<u32>();
++
++    lem_auto atomic_align_of_i64();
++        req true;
++        ens atomic_align_of::<i64>() == std::mem::size_of::<i64>();
++
++    lem_auto atomic_align_of_u64();
++        req true;
++        ens atomic_align_of::<u64>() == std::mem::size_of::<u64>();
++
++    lem_auto atomic_align_of_i128();
++        req true;
++        ens atomic_align_of::<i128>() == std::mem::size_of::<i128>();
++
++    lem_auto atomic_align_of_u128();
++        req true;
++        ens atomic_align_of::<u128>() == std::mem::size_of::<u128>();
++
++    lem_auto atomic_align_of_isize();
++        req true;
++        ens atomic_align_of::<isize>() == std::mem::size_of::<isize>();
++
++    lem atomic_align_of_ptr<T>();
++        req true;
++        ens atomic_align_of::<*T>() == std::mem::size_of::<usize>();
++
+     pred atomic_points_to<T>(p: *T, frac: real, inv_: fix(T, bool););
+     
+     lem close_atomic_points_to_m<T>(p: *T, inv_: fix(T, bool));
+@@ -338,21 +385,654 @@
+     
+     @*/
+     
++    // BEGIN LOCAL ATOMIC OPERATION MODEL
++    // The domain facts denote exactly the supported Rust intrinsic operand
++    // classes. Generic callers must establish them; T: Copy alone is not enough.
++    /*@
++    fix atomic_type<T>() -> bool;
++    fix atomic_signed_type<T>() -> bool;
++    fix atomic_unsigned_type<T>() -> bool;
++    fix atomic_rmw_types<T, U>() -> bool;
++
++    inductive atomic_rmw_op = RmwAdd | RmwSub | RmwAnd | RmwNand | RmwOr | RmwXor;
++    // The result of the primitive wrapping arithmetic/bitwise update. This
++    // function is abstract here; closure witnesses must work for its result.
++    fix atomic_rmw_value<t, u>(stored_type: *_, update_type: *_, op: atomic_rmw_op, old: t, val: u) -> t;
++    lem_type atomic_rmw_preserves<t, u>(stored_type: *_, update_type: *_, op: atomic_rmw_op, inv_: fix(t, bool), val: u) = lem(old: t);
++        req inv_(old) == true;
++        ens inv_(atomic_rmw_value(stored_type, update_type, op, old, val)) == true;
++
++    lem_auto atomic_domain_i8();
++        req true;
++        ens atomic_type::<i8>() == true;
++    lem_auto atomic_domain_i8_sign();
++        req true;
++        ens atomic_signed_type::<i8>() == true;
++    lem_auto atomic_domain_i8_rmw();
++        req true;
++        ens atomic_rmw_types::<i8, i8>() == true;
++
++    lem_auto atomic_domain_u8();
++        req true;
++        ens atomic_type::<u8>() == true;
++    lem_auto atomic_domain_u8_sign();
++        req true;
++        ens atomic_unsigned_type::<u8>() == true;
++    lem_auto atomic_domain_u8_rmw();
++        req true;
++        ens atomic_rmw_types::<u8, u8>() == true;
++
++    lem_auto atomic_domain_i16();
++        req true;
++        ens atomic_type::<i16>() == true;
++    lem_auto atomic_domain_i16_sign();
++        req true;
++        ens atomic_signed_type::<i16>() == true;
++    lem_auto atomic_domain_i16_rmw();
++        req true;
++        ens atomic_rmw_types::<i16, i16>() == true;
++
++    lem_auto atomic_domain_u16();
++        req true;
++        ens atomic_type::<u16>() == true;
++    lem_auto atomic_domain_u16_sign();
++        req true;
++        ens atomic_unsigned_type::<u16>() == true;
++    lem_auto atomic_domain_u16_rmw();
++        req true;
++        ens atomic_rmw_types::<u16, u16>() == true;
++
++    lem_auto atomic_domain_i32();
++        req true;
++        ens atomic_type::<i32>() == true;
++    lem_auto atomic_domain_i32_sign();
++        req true;
++        ens atomic_signed_type::<i32>() == true;
++    lem_auto atomic_domain_i32_rmw();
++        req true;
++        ens atomic_rmw_types::<i32, i32>() == true;
++
++    lem_auto atomic_domain_u32();
++        req true;
++        ens atomic_type::<u32>() == true;
++    lem_auto atomic_domain_u32_sign();
++        req true;
++        ens atomic_unsigned_type::<u32>() == true;
++    lem_auto atomic_domain_u32_rmw();
++        req true;
++        ens atomic_rmw_types::<u32, u32>() == true;
++
++    lem_auto atomic_domain_i64();
++        req true;
++        ens atomic_type::<i64>() == true;
++    lem_auto atomic_domain_i64_sign();
++        req true;
++        ens atomic_signed_type::<i64>() == true;
++    lem_auto atomic_domain_i64_rmw();
++        req true;
++        ens atomic_rmw_types::<i64, i64>() == true;
++
++    lem_auto atomic_domain_u64();
++        req true;
++        ens atomic_type::<u64>() == true;
++    lem_auto atomic_domain_u64_sign();
++        req true;
++        ens atomic_unsigned_type::<u64>() == true;
++    lem_auto atomic_domain_u64_rmw();
++        req true;
++        ens atomic_rmw_types::<u64, u64>() == true;
++
++    lem_auto atomic_domain_i128();
++        req true;
++        ens atomic_type::<i128>() == true;
++    lem_auto atomic_domain_i128_sign();
++        req true;
++        ens atomic_signed_type::<i128>() == true;
++    lem_auto atomic_domain_i128_rmw();
++        req true;
++        ens atomic_rmw_types::<i128, i128>() == true;
++
++    lem_auto atomic_domain_u128();
++        req true;
++        ens atomic_type::<u128>() == true;
++    lem_auto atomic_domain_u128_sign();
++        req true;
++        ens atomic_unsigned_type::<u128>() == true;
++    lem_auto atomic_domain_u128_rmw();
++        req true;
++        ens atomic_rmw_types::<u128, u128>() == true;
++
++    lem_auto atomic_domain_isize();
++        req true;
++        ens atomic_type::<isize>() == true;
++    lem_auto atomic_domain_isize_sign();
++        req true;
++        ens atomic_signed_type::<isize>() == true;
++    lem_auto atomic_domain_isize_rmw();
++        req true;
++        ens atomic_rmw_types::<isize, isize>() == true;
++
++    lem_auto atomic_domain_usize();
++        req true;
++        ens atomic_type::<usize>() == true;
++    lem_auto atomic_domain_usize_sign();
++        req true;
++        ens atomic_unsigned_type::<usize>() == true;
++    lem_auto atomic_domain_usize_rmw();
++        req true;
++        ens atomic_rmw_types::<usize, usize>() == true;
++
++    // A raw pointer to a sized type is thin. Pointer values need not be
++    // dereferenceable and the update operand is a byte count or bit mask.
++    lem atomic_domain_ptr<T>();
++        req true;
++        ens atomic_type::<*T>() == true &*& atomic_rmw_types::<*T, usize>() == true;
++    @*/
++
++    /*@
++    lem_auto(atomic_rmw_value(typeid(u8), typeid(u8), RmwAnd, old, val)) atomic_rmw_u8_and(old: u8, val: u8);
++        req true;
++        ens atomic_rmw_value(typeid(u8), typeid(u8), RmwAnd, old, val) == (old & val);
++
++    lem_auto(atomic_rmw_value(typeid(u8), typeid(u8), RmwNand, old, val)) atomic_rmw_u8_nand(old: u8, val: u8);
++        req true;
++        ens atomic_rmw_value(typeid(u8), typeid(u8), RmwNand, old, val) == (255 - (old & val));
++
++    lem_auto(atomic_rmw_value(typeid(u8), typeid(u8), RmwOr, old, val)) atomic_rmw_u8_or(old: u8, val: u8);
++        req true;
++        ens atomic_rmw_value(typeid(u8), typeid(u8), RmwOr, old, val) == (old | val);
++
++    lem_auto(atomic_rmw_value(typeid(u8), typeid(u8), RmwXor, old, val)) atomic_rmw_u8_xor(old: u8, val: u8);
++        req true;
++        ens atomic_rmw_value(typeid(u8), typeid(u8), RmwXor, old, val) == (old ^ val);
++
++    lem_auto(atomic_rmw_value(typeid(u8), typeid(u8), RmwAdd, old, val)) atomic_rmw_u8_add(old: u8, val: u8);
++        req true;
++        ens atomic_rmw_value(typeid(u8), typeid(u8), RmwAdd, old, val) == ((old + val) % 256);
++
++    lem_auto(atomic_rmw_value(typeid(u8), typeid(u8), RmwSub, old, val)) atomic_rmw_u8_sub(old: u8, val: u8);
++        req true;
++        ens atomic_rmw_value(typeid(u8), typeid(u8), RmwSub, old, val) == ((old - val + 256) % 256);
++
++    @*/
++
++    /*@
++    // Exact restricted value tables for boolean-byte clients.
++    lem atomic_rmw_bool_bytes_and(old: u8, val: u8);
++        req (old == 0 || old == 1) &*& (val == 0 || val == 1);
++        ens atomic_rmw_value::<u8, u8>(typeid(u8), typeid(u8), RmwAnd, old, val) == (old * val);
++
++    lem atomic_rmw_bool_bytes_nand(old: u8, val: u8);
++        req (old == 0 || old == 1) &*& (val == 0 || val == 1);
++        ens atomic_rmw_value::<u8, u8>(typeid(u8), typeid(u8), RmwNand, old, val) == (255 - old * val);
++
++    lem atomic_rmw_bool_bytes_or(old: u8, val: u8);
++        req (old == 0 || old == 1) &*& (val == 0 || val == 1);
++        ens atomic_rmw_value::<u8, u8>(typeid(u8), typeid(u8), RmwOr, old, val) == (if old == 0 { val } else { 1 });
++
++    lem atomic_rmw_bool_bytes_xor(old: u8, val: u8);
++        req (old == 0 || old == 1) &*& (val == 0 || val == 1);
++        ens atomic_rmw_value::<u8, u8>(typeid(u8), typeid(u8), RmwXor, old, val) == (if old == val { 0 } else { 1 });
++
++    @*/
++
+     unsafe fn atomic_store_relaxed<T>(dst: *mut T, val: T);
+-    //@ req [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
+     //@ ens [f]atomic_points_to(dst, 1, inv_);
+     //@ on_unwind_ens false;
+-    
++
+     unsafe fn atomic_store_release<T>(dst: *mut T, val: T);
+-    //@ req [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
+     //@ ens [f]atomic_points_to(dst, 1, inv_);
+     //@ on_unwind_ens false;
+-    
++
+     unsafe fn atomic_store_seqcst<T>(dst: *mut T, val: T);
+-    //@ req [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
+     //@ ens [f]atomic_points_to(dst, 1, inv_);
+     //@ on_unwind_ens false;
+-    
++
++    unsafe fn atomic_load_relaxed<T>(dst: *const T) -> T;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, ?g, ?inv_);
++    //@ ens [f]atomic_points_to(dst, g, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_load_acquire<T>(dst: *const T) -> T;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, ?g, ?inv_);
++    //@ ens [f]atomic_points_to(dst, g, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_load_seqcst<T>(dst: *const T) -> T;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, ?g, ?inv_);
++    //@ ens [f]atomic_points_to(dst, g, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xchg_relaxed<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xchg_release<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xchg_acquire<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xchg_acqrel<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xchg_seqcst<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_relaxed_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_relaxed_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_relaxed_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_release_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_release_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_release_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_acquire_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_acquire_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_acquire_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_acqrel_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_acqrel_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_acqrel_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_seqcst_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_seqcst_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchg_seqcst_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_relaxed_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_relaxed_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_relaxed_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_release_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_release_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_release_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_acquire_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_acquire_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_acquire_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_acqrel_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_acqrel_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_acqrel_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_seqcst_relaxed<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_seqcst_acquire<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_cxchgweak_seqcst_seqcst<T>(dst: *mut T, old: T, val: T) -> (T, bool);
++    //@ req atomic_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result.0) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xadd_relaxed<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAdd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xadd_release<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAdd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xadd_acquire<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAdd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xadd_acqrel<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAdd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xadd_seqcst<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAdd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xsub_relaxed<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwSub, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xsub_release<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwSub, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xsub_acquire<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwSub, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xsub_acqrel<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwSub, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xsub_seqcst<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwSub, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_and_relaxed<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAnd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_and_release<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAnd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_and_acquire<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAnd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_and_acqrel<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAnd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_and_seqcst<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwAnd, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_nand_relaxed<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwNand, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_nand_release<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwNand, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_nand_acquire<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwNand, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_nand_acqrel<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwNand, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_nand_seqcst<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwNand, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_or_relaxed<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwOr, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_or_release<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwOr, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_or_acquire<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwOr, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_or_acqrel<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwOr, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_or_seqcst<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwOr, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xor_relaxed<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwXor, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xor_release<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwXor, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xor_acquire<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwXor, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xor_acqrel<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwXor, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_xor_seqcst<T, U>(dst: *mut T, val: U) -> T;
++    //@ req atomic_rmw_types::<T, U>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& [_]is_atomic_rmw_preserves::<T, U>(?preserves, typeid(T), typeid(U), RmwXor, inv_, val);
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_max_relaxed<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_max_release<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_max_acquire<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_max_acqrel<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_max_seqcst<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_min_relaxed<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_min_release<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_min_acquire<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_min_acqrel<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_min_seqcst<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_signed_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umax_relaxed<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umax_release<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umax_acquire<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umax_acqrel<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umax_seqcst<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umin_relaxed<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umin_release<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umin_acquire<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umin_acqrel<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    unsafe fn atomic_umin_seqcst<T>(dst: *mut T, val: T) -> T;
++    //@ req atomic_unsigned_type::<T>() == true &*& [?f]atomic_points_to(dst, 1, ?inv_) &*& inv_(val) == true;
++    //@ ens [f]atomic_points_to(dst, 1, inv_) &*& inv_(result) == true;
++    //@ on_unwind_ens false;
++
++    // END LOCAL ATOMIC OPERATION MODEL
++
+ }
+ 
+ mod mem {

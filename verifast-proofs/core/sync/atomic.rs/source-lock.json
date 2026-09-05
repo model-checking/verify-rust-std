@@ -1,0 +1,8 @@
+{
+  "repository_revision": "ad7590c3dbdfeb97f2b4c7254dc5f4787ca9e783",
+  "rust": "nightly-2025-11-25",
+  "sources": {
+    "library/core/src/sync/atomic.rs": "d038c12276122db2a1e0ec8453df3b20302be6bf74d3108aca1fe2b09c678160",
+    "library/core/src/intrinsics/mod.rs": "28678854f5401c08bcc675531c4b167c7c08f7599887757ee5fd246072f0f815"
+  }
+}

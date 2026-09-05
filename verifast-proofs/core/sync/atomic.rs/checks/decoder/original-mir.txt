@@ -1,0 +1,603 @@
+( adtDefs = (nil = void),
+  bodies = [
+    ( defKind = (fn = void),
+      defPath = "store_relaxed",
+      contract = (
+        annotations = [
+          ( raw = "//@ req *dst |-> _;",
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 5,
+                  col = (pos = 0) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 5,
+                  col = (pos = 18) ) ) ),
+            startLine = 5,
+            startCol = 1,
+            endLine = 5,
+            endCol = 20 ),
+          ( raw = "//@ ens *dst |-> val;",
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 6,
+                  col = (pos = 0) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 6,
+                  col = (pos = 20) ) ) ),
+            startLine = 6,
+            startCol = 1,
+            endLine = 6,
+            endCol = 22 ),
+          ( raw = "//@ on_unwind_ens false;",
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 7,
+                  col = (pos = 0) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 7,
+                  col = (pos = 23) ) ) ),
+            startLine = 7,
+            startCol = 1,
+            endLine = 7,
+            endCol = 25 ) ],
+        span = (
+          regular = (
+            lo = (
+              file = (
+                name = (
+                  real = (
+                    localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+              line = 4,
+              col = (pos = 46) ),
+            hi = (
+              file = (
+                name = (
+                  real = (
+                    localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+              line = 8,
+              col = (pos = 0) ) ) ) ),
+      inputs = [
+        ( kind = (
+            rawPtr = (
+              ty = (
+                kind = (uInt = (u8 = void)) ),
+              mutability = (mut = void) ) ) ),
+        ( kind = (uInt = (u8 = void)) ) ],
+      localDecls = [
+        ( mutability = (mut = void),
+          id = (name = "_0"),
+          ty = (kind = (tuple = [])),
+          sourceInfo = (
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 46) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 46) ) ) ) ) ),
+        ( mutability = (not = void),
+          id = (name = "_1"),
+          ty = (
+            kind = (
+              rawPtr = (
+                ty = (
+                  kind = (uInt = (u8 = void)) ),
+                mutability = (mut = void) ) ) ),
+          sourceInfo = (
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 24) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 27) ) ) ) ) ),
+        ( mutability = (not = void),
+          id = (name = "_2"),
+          ty = (
+            kind = (uInt = (u8 = void)) ),
+          sourceInfo = (
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 38) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 41) ) ) ) ) ),
+        ( mutability = (mut = void),
+          id = (name = "_3"),
+          ty = (
+            kind = (
+              rawPtr = (
+                ty = (
+                  kind = (uInt = (u8 = void)) ),
+                mutability = (mut = void) ) ) ),
+          sourceInfo = (
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 10,
+                  col = (pos = 90) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 10,
+                  col = (pos = 93) ) ) ) ) ),
+        ( mutability = (mut = void),
+          id = (name = "_4"),
+          ty = (
+            kind = (uInt = (u8 = void)) ),
+          sourceInfo = (
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 10,
+                  col = (pos = 95) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 10,
+                  col = (pos = 98) ) ) ) ) ) ],
+      basicBlocks = [
+        ( id = (index = 0),
+          statements = [
+            ( sourceInfo = (
+                span = (
+                  regular = (
+                    lo = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 90) ),
+                    hi = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 93) ) ) ) ),
+              kind = (
+                storageLive = (name = "_3") ) ),
+            ( sourceInfo = (
+                span = (
+                  regular = (
+                    lo = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 90) ),
+                    hi = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 93) ) ) ) ),
+              kind = (
+                assign = (
+                  lhsPlace = (
+                    local = (name = "_3"),
+                    projection = [],
+                    localIsMutable = true,
+                    kind = (other = void) ),
+                  rhsRvalue = (
+                    use = (
+                      copy = (
+                        local = (name = "_1"),
+                        projection = [],
+                        localIsMutable = false,
+                        kind = (other = void) ) ) ) ) ) ),
+            ( sourceInfo = (
+                span = (
+                  regular = (
+                    lo = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 95) ),
+                    hi = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 98) ) ) ) ),
+              kind = (
+                storageLive = (name = "_4") ) ),
+            ( sourceInfo = (
+                span = (
+                  regular = (
+                    lo = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 95) ),
+                    hi = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 98) ) ) ) ),
+              kind = (
+                assign = (
+                  lhsPlace = (
+                    local = (name = "_4"),
+                    projection = [],
+                    localIsMutable = true,
+                    kind = (other = void) ),
+                  rhsRvalue = (
+                    use = (
+                      copy = (
+                        local = (name = "_2"),
+                        projection = [],
+                        localIsMutable = false,
+                        kind = (other = void) ) ) ) ) ) ) ],
+          terminator = (
+            sourceInfo = (
+              span = (
+                regular = (
+                  lo = (
+                    file = (
+                      name = (
+                        real = (
+                          localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                    line = 10,
+                    col = (pos = 8) ),
+                  hi = (
+                    file = (
+                      name = (
+                        real = (
+                          localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                    line = 10,
+                    col = (pos = 99) ) ) ) ),
+            kind = (
+              call = (
+                func = (
+                  constant = (
+                    span = (
+                      regular = (
+                        lo = (
+                          file = (
+                            name = (
+                              real = (
+                                localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                          line = 10,
+                          col = (pos = 8) ),
+                        hi = (
+                          file = (
+                            name = (
+                              real = (
+                                localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                          line = 10,
+                          col = (pos = 89) ) ) ),
+                    const = (
+                      val = (
+                        constValue = (zeroSized = void),
+                        ty = (
+                          kind = (
+                            fnDef = (
+                              id = (
+                                name = "std::intrinsics::atomic_store" ),
+                              substs = [
+                                ( kind = (
+                                    type = (
+                                      kind = (uInt = (u8 = void)) ) ) ),
+                                ( kind = (
+                                    const = (
+                                      kind = (
+                                        value = (
+                                          ty = (
+                                            kind = (
+                                              adt = (
+                                                id = (
+                                                  name = "std::intrinsics::AtomicOrdering" ),
+                                                kind = (enumKind = void),
+                                                substs = [] ) ) ),
+                                          valTree = (
+                                            branch = [
+                                              ( leaf = (data = (h = 0, l = 0), size = 4) ) ] ) ) ) ) ) ) ],
+                              lateBoundGenericParamCount = 0 ) ) ) ) ) ) ),
+                args = [
+                  ( move = (
+                      local = (name = "_3"),
+                      projection = [],
+                      localIsMutable = true,
+                      kind = (other = void) ) ),
+                  ( move = (
+                      local = (name = "_4"),
+                      projection = [],
+                      localIsMutable = true,
+                      kind = (other = void) ) ) ],
+                destination = (
+                  local = (name = "_0"),
+                  projection = [],
+                  localIsMutable = true,
+                  kind = (other = void) ),
+                callSpan = (
+                  regular = (
+                    lo = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 8) ),
+                    hi = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 99) ) ) ),
+                unwindAction = (unreachable = void),
+                target = (something = (index = 1)) ) ) ),
+          isCleanup = false ),
+        ( id = (index = 1),
+          statements = [
+            ( sourceInfo = (
+                span = (
+                  regular = (
+                    lo = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 98) ),
+                    hi = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 99) ) ) ) ),
+              kind = (
+                storageDead = (name = "_4") ) ),
+            ( sourceInfo = (
+                span = (
+                  regular = (
+                    lo = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 98) ),
+                    hi = (
+                      file = (
+                        name = (
+                          real = (
+                            localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                      line = 10,
+                      col = (pos = 99) ) ) ) ),
+              kind = (
+                storageDead = (name = "_3") ) ) ],
+          terminator = (
+            sourceInfo = (
+              span = (
+                regular = (
+                  lo = (
+                    file = (
+                      name = (
+                        real = (
+                          localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                    line = 12,
+                    col = (pos = 1) ),
+                  hi = (
+                    file = (
+                      name = (
+                        real = (
+                          localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                    line = 12,
+                    col = (pos = 1) ) ) ) ),
+            kind = (return = void) ),
+          isCleanup = false ) ],
+      span = (
+        regular = (
+          lo = (
+            file = (
+              name = (
+                real = (
+                  localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+            line = 4,
+            col = (pos = 0) ),
+          hi = (
+            file = (
+              name = (
+                real = (
+                  localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+            line = 12,
+            col = (pos = 1) ) ) ),
+      impSpan = (
+        regular = (
+          lo = (
+            file = (
+              name = (
+                real = (
+                  localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+            line = 8,
+            col = (pos = 0) ),
+          hi = (
+            file = (
+              name = (
+                real = (
+                  localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+            line = 12,
+            col = (pos = 1) ) ) ),
+      varDebugInfo = [
+        ( name = (name = "dst"),
+          sourceInfo = (
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 24) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 27) ) ) ) ),
+          value = (
+            place = (
+              local = (name = "_1"),
+              projection = [],
+              localIsMutable = false,
+              kind = (other = void) ) ) ),
+        ( name = (name = "val"),
+          sourceInfo = (
+            span = (
+              regular = (
+                lo = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 38) ),
+                hi = (
+                  file = (
+                    name = (
+                      real = (
+                        localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+                  line = 4,
+                  col = (pos = 41) ) ) ) ),
+          value = (
+            place = (
+              local = (name = "_2"),
+              projection = [],
+              localIsMutable = false,
+              kind = (other = void) ) ) ) ],
+      ghostStmts = [],
+      unsafety = (unsafe = void),
+      hirGenerics = (
+        params = [],
+        whereClause = void,
+        span = (
+          regular = (
+            lo = (
+              file = (
+                name = (
+                  real = (
+                    localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+              line = 4,
+              col = (pos = 23) ),
+            hi = (
+              file = (
+                name = (
+                  real = (
+                    localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+              line = 4,
+              col = (pos = 23) ) ) ) ),
+      isTraitFn = false,
+      isDropFn = false,
+      ghostDeclBlocks = [],
+      output = (kind = (tuple = [])),
+      predicates = [],
+      generics = [],
+      fnSigSpan = (
+        regular = (
+          lo = (
+            file = (
+              name = (
+                real = (
+                  localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+            line = 4,
+            col = (pos = 0) ),
+          hi = (
+            file = (
+              name = (
+                real = (
+                  localPath = "__ATOMIC_DECODER_FIXTURE__" ) ) ),
+            line = 4,
+            col = (pos = 46) ) ) ),
+      visibility = (restricted = void),
+      isFromExpansion = false,
+      loopSpecBlocks = [] ) ],
+  ghostDeclBatches = [],
+  traitImpls = [],
+  directives = [],
+  traits = (nil = void),
+  modules = [],
+  targetTriple = "arm64-apple-macosx",
+  pointerWidth = 64,
+  tyAliases = [] )
