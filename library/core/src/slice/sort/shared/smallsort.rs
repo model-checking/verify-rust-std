@@ -1031,7 +1031,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(cadical)]
+            #[kani::solver(kissat)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [u8; LEN] = kani::any();
@@ -1382,7 +1382,7 @@ mod verify {
     /// directly at its guard length.
     #[kani::proof]
     #[kani::unwind(11)]
-    #[kani::solver(cadical)]
+    #[kani::solver(kissat)]
     pub fn check_ss_sort9_optimal() {
         let mut v: [u8; 9] = kani::any();
         let before = v;
