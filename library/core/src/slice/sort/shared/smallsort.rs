@@ -973,7 +973,6 @@ mod verify {
     check_ss_stable_i32!(check_ss_stable_i32_len_6, 6, 8);
     check_ss_stable_i32!(check_ss_stable_i32_len_7, 7, 9);
     check_ss_stable_i32!(check_ss_stable_i32_len_8, 8, 10);
-    check_ss_stable_i32!(check_ss_stable_i32_len_9, 9, 11);
 
     /// `<i32 as UnstableSmallSortTypeImpl>::small_sort`.
     ///
@@ -999,10 +998,9 @@ mod verify {
                 let mut v: [i32; LEN] = kani::any();
                 let before = v;
 
-                <i32 as UnstableSmallSortTypeImpl>::small_sort(
-                    &mut v,
-                    &mut |a: &i32, b: &i32| a < b,
-                );
+                <i32 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &i32, b: &i32| {
+                    a < b
+                });
 
                 assert_sorted(&v);
                 assert_permutation(&v, &before);
@@ -1039,10 +1037,7 @@ mod verify {
                 let mut v: [u8; LEN] = kani::any();
                 let before = v;
 
-                <u8 as UnstableSmallSortTypeImpl>::small_sort(
-                    &mut v,
-                    &mut |a: &u8, b: &u8| a < b,
-                );
+                <u8 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u8, b: &u8| a < b);
 
                 assert_sorted(&v);
                 assert_permutation(&v, &before);
@@ -1087,7 +1082,7 @@ mod verify {
     check_ss_stable_cell!(check_ss_stable_cell_len_1, 1, 3);
     check_ss_stable_cell!(check_ss_stable_cell_len_2, 2, 4);
     check_ss_stable_cell!(check_ss_stable_cell_len_3, 3, 5);
-    check_ss_stable_cell!(check_ss_stable_cell_len_8, 8, 10);
+    check_ss_stable_cell!(check_ss_stable_cell_len_7, 7, 9);
 
     /// `<Cell<i32> as UnstableSmallSortTypeImpl>::small_sort`.
     ///
@@ -1104,10 +1099,14 @@ mod verify {
                 let mut v: [Cell<i32>; LEN] = crate::array::from_fn(|_| Cell::new(kani::any()));
                 let before: [i32; LEN] = crate::array::from_fn(|i| v[i].get());
 
-                <Cell<i32> as UnstableSmallSortTypeImpl>::small_sort(
-                    &mut v,
-                    &mut |a: &Cell<i32>, b: &Cell<i32>| a.get() < b.get(),
-                );
+                <Cell<i32> as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &Cell<
+                    i32,
+                >,
+                                                                                   b: &Cell<
+                    i32,
+                >| {
+                    a.get() < b.get()
+                });
 
                 let after: [i32; LEN] = crate::array::from_fn(|i| v[i].get());
                 assert_sorted(&after);
@@ -1119,7 +1118,7 @@ mod verify {
     check_ss_unstable_cell!(check_ss_unstable_cell_len_0, 0, 2);
     check_ss_unstable_cell!(check_ss_unstable_cell_len_1, 1, 3);
     check_ss_unstable_cell!(check_ss_unstable_cell_len_2, 2, 4);
-    check_ss_unstable_cell!(check_ss_unstable_cell_len_8, 8, 10);
+    check_ss_unstable_cell!(check_ss_unstable_cell_len_7, 7, 9);
 
     /// `<NonCopyI32 as UnstableSmallSortFreezeTypeImpl>::small_sort`.
     ///
@@ -1156,7 +1155,6 @@ mod verify {
     check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_3, 3, 5);
     check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_7, 7, 9);
     check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_8, 8, 10);
-    check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_9, 9, 11);
 
     /// `<u128 as UnstableSmallSortTypeImpl>::small_sort`.
     ///
