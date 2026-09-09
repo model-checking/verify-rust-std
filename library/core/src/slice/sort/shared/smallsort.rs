@@ -944,7 +944,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [i32; LEN] = kani::any();
@@ -992,7 +992,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [i32; LEN] = kani::any();
@@ -1031,7 +1031,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [u8; LEN] = kani::any();
@@ -1057,7 +1057,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [Cell<i32>; LEN] = crate::array::from_fn(|_| Cell::new(kani::any()));
@@ -1093,7 +1093,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [Cell<i32>; LEN] = crate::array::from_fn(|_| Cell::new(kani::any()));
@@ -1131,7 +1131,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [NonCopyI32; LEN] = crate::array::from_fn(|_| NonCopyI32(kani::any()));
@@ -1166,7 +1166,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [u128; LEN] = kani::any();
@@ -1200,7 +1200,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [[u64; 11]; LEN] = kani::any();
@@ -1237,7 +1237,7 @@ mod verify {
     /// multiset is preserved, and no other element of the buffer is disturbed.
     #[kani::proof]
     #[kani::unwind(10)]
-    #[kani::solver(kissat)]
+    #[kani::solver(cadical)]
     pub fn check_ss_swap_if_less() {
         const LEN: usize = 8;
         let mut v: [i32; LEN] = kani::any();
@@ -1276,7 +1276,7 @@ mod verify {
     /// (reading it back would be UB otherwise).
     #[kani::proof]
     #[kani::unwind(6)]
-    #[kani::solver(kissat)]
+    #[kani::solver(cadical)]
     pub fn check_ss_sort4_stable() {
         const LEN: usize = 4;
         let v: [i32; LEN] = kani::any();
@@ -1307,7 +1307,7 @@ mod verify {
         ($name:ident, $len:expr, $unwind:expr) => {
             #[kani::proof]
             #[kani::unwind($unwind)]
-            #[kani::solver(kissat)]
+            #[kani::solver(cadical)]
             pub fn $name() {
                 const LEN: usize = $len;
                 let mut v: [i32; LEN] = kani::any();
@@ -1354,7 +1354,7 @@ mod verify {
     /// at its only call-site shape (8 elements), full `i32` width.
     #[kani::proof]
     #[kani::unwind(10)]
-    #[kani::solver(kissat)]
+    #[kani::solver(cadical)]
     pub fn check_ss_sort8_stable() {
         let mut v: [i32; 8] = kani::any();
         let before = v;
@@ -1382,7 +1382,7 @@ mod verify {
     /// directly at its guard length.
     #[kani::proof]
     #[kani::unwind(11)]
-    #[kani::solver(kissat)]
+    #[kani::solver(cadical)]
     pub fn check_ss_sort9_optimal() {
         let mut v: [u8; 9] = kani::any();
         let before = v;
