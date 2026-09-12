@@ -780,23 +780,15 @@ pub fn format_exact<'a>(
 pub mod grisu_verify {
     use super::*;
     use crate::kani;
+    use crate::num::flt2dec::flt2dec_verify::arbitrary_finite_decoded;
 
-    // Scope of the proofs in this module.  `format_exact_opt` is called
-    // directly, unstubbed, against a 1-byte buffer: `len` is then concrete, so
-    // CBMC prunes the unreachable digit iterations and the proof closes in
-    // seconds.  With a symbolic `len` (any longer buffer) the unrolled digit
-    // loops keep every `possibly_round` instance live and the formula exceeds
-    // the 2^12 addressed objects the repository runs CBMC with
-    // (`--object-bits 12`); `format_shortest_opt`, whose digit loops are bounded
-    // only by the arithmetic (up to 17 digits, unwind 20), produces a program of
-    // ~4.7M SSA steps and ~120k verification conditions whose bit-blasting runs
-    // out of memory, and the value-dependent `debug_assert!`s of its weeding
-    // step (`round_and_weed`, a nested function that cannot be stubbed) turn the
-    // proof into a numerical-correctness obligation over the 64x64-bit `Fp`
-    // products.  Those two functions are therefore covered here through the
-    // wrapper proofs below (both callees modelled as opaque), and a direct proof
-    // needs loop contracts on the digit loops.
-    //
+    // The direct strategy harnesses keep all arithmetic and rounding code.
+    // Buffer lengths are symbolic: shortest mode includes the minimum legal
+    // buffer, and exact mode includes both one-byte and multi-digit buffers.
+    // These are bounded harnesses; a successful run covers lengths up to 32,
+    // not arbitrary slice lengths. Unwinding assertions remain enabled.
+    const PROOF_BUFLEN: usize = 32;
+
     // An arbitrary `Decoded` satisfying every precondition the `grisu` entry
     // points assert.  `mant + plus < 2^61` (and the `checked_add`/`checked_sub`
     // assumptions) keep the scaled `Fp` arithmetic inside `u64`.
@@ -827,23 +819,47 @@ pub mod grisu_verify {
         Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
     }
 
-    // Direct proof of `format_exact_opt`: NO stubs, NO in-body assumes, over the
-    // function's full documented precondition, an arbitrary `limit`, and a
-    // 1-byte buffer.  Every buffer access in `format_exact_opt` is bounded
-    // structurally (`len` is clamped to `buf.len()` on every path, each digit
-    // write is gated by an `i == len` return, and `possibly_round`'s carry write
-    // is guarded by `len < buf.len()`); this proof exercises the `len` clamp,
-    // the `exp <= limit` early path (`possibly_round` with `len == 0`), the
-    // first digit of both the integral and the fractional loop, and the real
-    // `cached_power` / `Fp::mul` / `possibly_round` arithmetic, so the
-    // value-dependent `debug_assert!`s are discharged from the real values.
+    // Call the generator itself, including round_and_weed. The wrapper harness
+    // below checks a separate obligation and does not establish this one.
     #[kani::proof]
-    #[kani::unwind(20)]
-    fn check_format_exact_opt_buf1() {
-        let d = arbitrary_decoded_exact();
+    #[kani::unwind(33)]
+    fn check_format_shortest_opt() {
+        let d = arbitrary_finite_decoded();
+        let len: usize = kani::any();
+        kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
+        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+        let start = buf.as_ptr().cast::<u8>();
+        kani::cover!(len == MAX_SIG_DIGITS);
+        kani::cover!(len == PROOF_BUFLEN);
+        let result = format_shortest_opt(&d, &mut buf[..len]);
+        kani::cover!(result.is_none());
+        let _ = result.map(|(digits, _)| {
+            kani::cover!(digits.len() > 1);
+            assert!(!digits.is_empty());
+            assert!(digits.len() <= len);
+            assert_eq!(digits.as_ptr(), start);
+        });
+    }
+
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn check_format_exact_opt() {
+        let d = arbitrary_finite_decoded();
         let limit: i16 = kani::any();
-        let mut buf: [MaybeUninit<u8>; 1] = [const { MaybeUninit::uninit() }; 1];
-        let _ = format_exact_opt(&d, &mut buf, limit);
+        let len: usize = kani::any();
+        kani::assume(len > 0 && len <= PROOF_BUFLEN);
+        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+        let start = buf.as_ptr().cast::<u8>();
+        kani::cover!(len == 1);
+        kani::cover!(len == PROOF_BUFLEN);
+        let result = format_exact_opt(&d, &mut buf[..len], limit);
+        kani::cover!(result.is_none());
+        let _ = result.map(|(digits, _)| {
+            kani::cover!(digits.is_empty());
+            kani::cover!(digits.len() > 1);
+            assert!(digits.len() <= len);
+            assert_eq!(digits.as_ptr(), start);
+        });
     }
 
     // Wholesale havoc stub for the dragon fallback (modelled as an opaque op that

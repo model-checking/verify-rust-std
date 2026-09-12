@@ -673,6 +673,27 @@ pub mod flt2dec_verify {
     use super::*;
     use crate::kani;
 
+    // Use the real decoder so the exponent, rounding interval, and tie-breaking
+    // flag stay related. Choosing these fields independently admits values that
+    // neither primitive float type can produce. The sign does not affect Decoded.
+    pub(crate) fn arbitrary_finite_decoded() -> Decoded {
+        let decoded = if kani::any() {
+            let bits: u32 = kani::any();
+            kani::assume(bits > 0 && bits < 0x7f80_0000);
+            decode(f32::from_bits(bits)).1
+        } else {
+            let bits: u64 = kani::any();
+            kani::assume(bits > 0 && bits < 0x7ff0_0000_0000_0000);
+            decode(f64::from_bits(bits)).1
+        };
+        match decoded {
+            FullDecoded::Finite(d) => d,
+            FullDecoded::Nan | FullDecoded::Infinite | FullDecoded::Zero => {
+                unreachable!("the input bits represent a positive finite nonzero float")
+            }
+        }
+    }
+
     // Upper bound on the (symbolic) digit-buffer length used by the proofs of
     // `digits_to_dec_str` / `digits_to_exp_str`.  Their `assume_init` safety
     // obligations depend only on control flow driven by `buf.len()`, `exp`, and

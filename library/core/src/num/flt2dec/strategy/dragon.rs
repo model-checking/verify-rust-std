@@ -387,3 +387,52 @@ pub fn format_exact<'a>(
     // SAFETY: we initialized that memory above.
     (unsafe { buf[..len].assume_init_ref() }, k)
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod dragon_verify {
+    use super::*;
+    use crate::kani;
+    use crate::num::flt2dec::flt2dec_verify::arbitrary_finite_decoded;
+
+    // Keep every Big operation, comparison, and digit write. In particular,
+    // neither termination nor the buffer index is assumed. The unwind bound
+    // includes Big32x40's limb loops, and its assertions remain enabled.
+    // Lengths above 32 require a separate proof; these harnesses are bounded.
+    const PROOF_BUFLEN: usize = 32;
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    fn check_format_shortest() {
+        let d = arbitrary_finite_decoded();
+        let len: usize = kani::any();
+        kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
+        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+        let start = buf.as_ptr().cast::<u8>();
+        kani::cover!(len == MAX_SIG_DIGITS);
+        kani::cover!(len == PROOF_BUFLEN);
+        let (digits, _) = format_shortest(&d, &mut buf[..len]);
+        kani::cover!(digits.len() > 1);
+        assert!(!digits.is_empty());
+        assert!(digits.len() <= len);
+        assert_eq!(digits.as_ptr(), start);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    fn check_format_exact() {
+        let d = arbitrary_finite_decoded();
+        let limit: i16 = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= PROOF_BUFLEN);
+        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+        let start = buf.as_ptr().cast::<u8>();
+        kani::cover!(len == 0);
+        kani::cover!(len == PROOF_BUFLEN);
+        let (digits, _) = format_exact(&d, &mut buf[..len], limit);
+        kani::cover!(digits.is_empty());
+        kani::cover!(digits.len() > 1);
+        assert!(digits.len() <= len);
+        assert_eq!(digits.as_ptr(), start);
+    }
+}
