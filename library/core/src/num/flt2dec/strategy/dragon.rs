@@ -409,10 +409,10 @@ pub mod dragon_verify {
         kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
         let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
         let start = buf.as_ptr().cast::<u8>();
-        kani::cover!(len == MAX_SIG_DIGITS);
-        kani::cover!(len == PROOF_BUFLEN);
+        kani::cover(len == MAX_SIG_DIGITS, "shortest uses the minimum buffer");
+        kani::cover(len == PROOF_BUFLEN, "shortest uses the largest proof buffer");
         let (digits, _) = format_shortest(&d, &mut buf[..len]);
-        kani::cover!(digits.len() > 1);
+        kani::cover(digits.len() > 1, "shortest produces multiple digits");
         assert!(!digits.is_empty());
         assert!(digits.len() <= len);
         assert_eq!(digits.as_ptr(), start);
@@ -427,11 +427,11 @@ pub mod dragon_verify {
         kani::assume(len <= PROOF_BUFLEN);
         let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
         let start = buf.as_ptr().cast::<u8>();
-        kani::cover!(len == 0);
-        kani::cover!(len == PROOF_BUFLEN);
+        kani::cover(len == 0, "exact accepts an empty buffer");
+        kani::cover(len == PROOF_BUFLEN, "exact uses the largest proof buffer");
         let (digits, _) = format_exact(&d, &mut buf[..len], limit);
-        kani::cover!(digits.is_empty());
-        kani::cover!(digits.len() > 1);
+        kani::cover(digits.is_empty(), "exact can return an empty prefix");
+        kani::cover(digits.len() > 1, "exact produces multiple digits");
         assert!(digits.len() <= len);
         assert_eq!(digits.as_ptr(), start);
     }
