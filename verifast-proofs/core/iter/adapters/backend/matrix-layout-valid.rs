@@ -19,6 +19,7 @@ unsafe fn writable_window<T, const N: usize>(p: *mut [std::mem::MaybeUninit<T>; 
 //@ ens *p |-> _;
 //@ on_unwind_ens false;
 {
+    //@ std::mem::Array__MaybeUninit_to_Array_MaybeUninit(p);
     //@ Array_to_array(p);
     //@ collapse_window::<T, N>(p as *std::mem::MaybeUninit<T>);
     //@ expand_window(p as *std::mem::MaybeUninit<[T; N]>);

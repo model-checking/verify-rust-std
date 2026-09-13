@@ -46,10 +46,10 @@ lem owned_values_mono<T0, T1>(t: thread_id_t, values: list<T0>)
     ens type_interp::<T0>() &*& type_interp::<T1>() &*&
         foreach(map::<T0, T1>(upcast, values), own::<T1>(t));
 {
-    open foreach(values, own::<T0>(t));
     match values {
-        nil => {}
+        nil => { open foreach(values, own::<T0>(t)); }
         cons(value, rest) => {
+            open foreach(values, own::<T0>(t));
             open own::<T0>(t)(value);
             own_mono::<T0, T1>(t, value);
             close own::<T1>(t)(upcast::<T0, T1>(value));
@@ -63,10 +63,10 @@ lem owned_values_send<T>(t0: thread_id_t, t1: thread_id_t, values: list<T>)
     req type_interp::<T>() &*& is_Send(typeid(T)) == true &*& foreach(values, own::<T>(t0));
     ens type_interp::<T>() &*& foreach(values, own::<T>(t1));
 {
-    open foreach(values, own::<T>(t0));
     match values {
-        nil => {}
+        nil => { open foreach(values, own::<T>(t0)); }
         cons(value, rest) => {
+            open foreach(values, own::<T>(t0));
             open own::<T>(t0)(value);
             Send::send::<T>(t0, t1, value);
             close own::<T>(t1)(value);
@@ -167,8 +167,8 @@ lem pack_matrix<T, N: ?Sized>(p: *[[T; N]; 2])
 
 // These conversions preserve writable storage. They do not claim initialized T values.
 lem collapse_window<T, N: ?Sized>(p: *std::mem::MaybeUninit<T>)
-    req p[..usize_of_const(typeid(N))] |-> _;
-    ens *(p as *std::mem::MaybeUninit<[T; N]>) |-> _;
+    req p[..usize_of_const(typeid(N))] |-> ?slots;
+    ens *(p as *std::mem::MaybeUninit<[T; N]>) |-> ?window;
 {
     std::mem::array_layout::<T, N>();
     std::mem::MaybeUninit_layout::<T>();
@@ -179,8 +179,8 @@ lem collapse_window<T, N: ?Sized>(p: *std::mem::MaybeUninit<T>)
 }
 
 lem expand_window<T, N: ?Sized>(p: *std::mem::MaybeUninit<[T; N]>)
-    req *p |-> _;
-    ens (p as *std::mem::MaybeUninit<T>)[..usize_of_const(typeid(N))] |-> _;
+    req *p |-> ?window;
+    ens (p as *std::mem::MaybeUninit<T>)[..usize_of_const(typeid(N))] |-> ?slots;
 {
     std::mem::MaybeUninit_layout::<T>();
     std::mem::open_MaybeUninit(p);
@@ -247,8 +247,8 @@ lem lend_array<T>(k: lifetime_t, p: *T, count: usize)
 }
 
 lem reclaim_array<T>(k: lifetime_t, p: *T, count: usize)
-    req 0 <= count &*& [_]lifetime_dead_token(k) &*&
-        array_borrow_tokens(k, p, count) &*& array_at_lft_(k, p, count, _);
+    req array_borrow_tokens(k, p, count) &*& 0 <= count &*&
+        [_]lifetime_dead_token(k) &*& array_at_lft_(k, p, count, _);
     ens p[..count] |-?-> _;
 {
     open array_borrow_tokens(k, p, count);

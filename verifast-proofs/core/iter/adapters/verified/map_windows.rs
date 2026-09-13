@@ -42,7 +42,7 @@ pred live<T, N>(t: thread_id_t, b: *Buffer<T, N>, start: usize, values: list<T>)
 pred storage<T, N>(b: *Buffer<T, N>; start: usize) =
     bounds(b, start) &*& base(b)[..2 * width::<N>()] |-> ?slots;
 
-pred_ctor writable_matrix<T, N>(b: *Buffer<T, N>)(;) = (*b).buffer |-> _;
+pred_ctor writable_matrix<T, N>(b: *Buffer<T, N>)(;) = (*b).buffer |-> ?matrix;
 
 pred<T, N> <Buffer<T, N>>.own(t, buffer) =
     exists::<list<T>>(?values) &*&
@@ -96,8 +96,8 @@ lem Buffer_send<T, N: ?Sized>(t1: thread_id_t)
 pred drop_frame<T, N>(b: *Buffer<T, N>, start: usize,
     matrix: *[[std::mem::MaybeUninit<T>; N]; 2], k: lifetime_t, slice: *[T]) =
     bounds(b, start) &*& ref_mut_end_token(matrix, &(*b).buffer) &*&
-    (matrix as *std::mem::MaybeUninit<T>)[..start] |-> _ &*&
-    ((matrix as *std::mem::MaybeUninit<T>) + start + width::<N>())[..width::<N>() - start] |-> _ &*&
+    (matrix as *std::mem::MaybeUninit<T>)[..start] |-> ?prefix &*&
+    ((matrix as *std::mem::MaybeUninit<T>) + start + width::<N>())[..width::<N>() - start] |-> ?suffix &*&
     array_borrow_tokens(k, ((matrix as *std::mem::MaybeUninit<T>) + start) as *T, width::<N>()) &*&
     close_points_to_at_lft_token(1, k, slice, 1) &*&
     slice as *T == ((matrix as *std::mem::MaybeUninit<T>) + start) as *T &*&
@@ -255,8 +255,8 @@ impl<T, const N: usize> Buffer<T, N> {
             pred ctx(;) =
                 ref_mut_end_token(result, window) &*&
                 ref_mut_end_token(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2], &(*self).buffer) &*&
-                buffer_mut_ptr[..start] |-> _ &*&
-                (buffer_mut_ptr + start + width::<N>())[..width::<N>() - start] |-> _;
+                buffer_mut_ptr[..start] |-> ?prefix &*&
+                (buffer_mut_ptr + start + width::<N>())[..width::<N>() - start] |-> ?suffix;
             produce_lem_ptr_chunk restore_full_borrow_(ctx,
                 <std::mem::MaybeUninit<[T; N]>>.full_borrow_content(t, result),
                 writable_matrix(self))() {
@@ -336,6 +336,8 @@ impl<T, const N: usize> Buffer<T, N> {
                 ptr::copy_nonoverlapping(buffer_mut_ptr.add(self.start + 1), buffer_mut_ptr, N - 1);
                 (*buffer_mut_ptr.add(N - 1)).write(next);
                 //@ end_ref_mut_::<std::mem::MaybeUninit<T>>();
+                //@ open array(buffer_mut_ptr + width::<N>(), 0, _);
+                //@ close array(buffer_mut_ptr + width::<N>(), 0, nil);
                 //@ close array(buffer_mut_ptr + width::<N>() - 1, 1, cons(std::mem::MaybeUninit::new(next), nil));
                 //@ array_join(buffer_mut_ptr);
                 buffer_mut_ptr.add(self.start)
@@ -443,12 +445,12 @@ impl<T, const N: usize> Drop for Buffer<T, N> {
         // `self.start` are initialized. We drop them here.
         unsafe {
             let buffer_mut_ptr = self.buffer_mut_ptr();
-            let initialized_part: *mut [T] =
-                crate::ptr::slice_from_raw_parts_mut(buffer_mut_ptr.add(self.start).cast(), N);
             //@ let matrix = buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2];
             //@ unpack_matrix(matrix);
             //@ array_split(buffer_mut_ptr, start);
             //@ array_split(buffer_mut_ptr + start, width::<N>());
+            let initialized_part: *mut [T] =
+                crate::ptr::slice_from_raw_parts_mut(buffer_mut_ptr.add(self.start).cast(), N);
             //@ initialized_slots(buffer_mut_ptr + start, values);
             //@ let k = begin_lifetime();
             //@ lend_array(k, (buffer_mut_ptr + start) as *T, width::<N>());

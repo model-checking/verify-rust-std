@@ -43,8 +43,10 @@ explicit caller obligations here. Constructor preservation and the surrounding
 `MapWindows` iterator implementation are outside this projection.
 
 The shared accessor requires a lifetime borrow of the window. The mutable
-accessor requires a borrow of the whole backing array because its pointer
-helper borrows that array. Establishing those borrows from the full safe
+accessor requires a borrow of the whole backing array of initialized
+`MaybeUninit` wrappers because its pointer helper borrows that array.
+These wrappers can contain uninitialized bytes and need no `T` ownership.
+Establishing those borrows from the full safe
 abstraction is outside this port. The mutable accessor accepts storage that
 does not yet own initialized `T` values, as required by the clone path.
 
@@ -184,7 +186,7 @@ and the wrapper's documented layout. They include zero-sized element types.
 The matrix conversion and writable-window proofs remain mandatory; the layout
 facts do not grant storage or ownership permissions.
 The patch also removes implicit `Sized` bounds from the array length parameters
-of the three existing array conversion lemmas. Symbolic const parameters are
+of the existing array conversion lemmas. Symbolic const parameters are
 not Rust value types. The element type bounds and every storage precondition
 remain in force, and the patched prelude is cached with checksum validation.
 

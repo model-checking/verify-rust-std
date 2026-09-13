@@ -303,7 +303,8 @@ import re
 for path in (Path("array_layout.rs"), Path("verified/map_windows.rs"), Path("verified/step_by.rs")):
     for line_number, line in enumerate(path.read_text().splitlines(), 1):
         if re.match(r"\s*(?:unsafe\s+)?(?:fn|lem)\s+\w+", line):
-            print(f"{path}:{line_number}")
+            location_path = "verified/../array_layout.rs" if path.name == "array_layout.rs" else str(path)
+            print(f"{location_path}:{line_number}")
 PY
   )
 fi
