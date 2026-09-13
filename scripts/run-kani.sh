@@ -17,6 +17,14 @@ usage() {
 # Generator proofs need more objects; helper jobs can select a smaller capacity.
 declare -a command_args
 kani_object_bits="${KANI_OBJECT_BITS:-14}"
+# Optional encoding experiments preserve the verification checks and bounds.
+kani_cbmc_args=(--object-bits "$kani_object_bits")
+if [[ "${KANI_SYMEX_CACHE_DEREFERENCES:-false}" == true ]]; then
+    kani_cbmc_args+=(--symex-cache-dereferences)
+fi
+if [[ "${KANI_ARRAY_FIELD_SENSITIVITY:-true}" == false ]]; then
+    kani_cbmc_args+=(--no-array-field-sensitivity)
+fi
 path=""
 run_command="verify-std"
 with_autoharness="false"
@@ -222,7 +230,7 @@ run_verification_subset() {
         -j \
         --output-format=terse \
         "${command_args[@]}" \
-        --cbmc-args --object-bits "$kani_object_bits"
+        --cbmc-args "${kani_cbmc_args[@]}"
 }
 
 # Check if binary exists and is up to date
@@ -303,7 +311,7 @@ main() {
                 $unstable_args \
                 --no-assert-contracts \
                 "${command_args[@]}" \
-                --cbmc-args --object-bits "$kani_object_bits"
+                --cbmc-args "${kani_cbmc_args[@]}"
         fi
       elif [[ "$run_command" == "autoharness" ]]; then
           # Run verification for a subset of automatically generated harnesses
@@ -313,7 +321,7 @@ main() {
               $unstable_args \
               --no-assert-contracts \
               "${command_args[@]}" \
-              --cbmc-args --object-bits "$kani_object_bits"
+              --cbmc-args "${kani_cbmc_args[@]}"
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
@@ -348,7 +356,7 @@ main() {
             $unstable_args \
             --no-assert-contracts \
             "${command_args[@]}" \
-            --cbmc-args --object-bits "$kani_object_bits"
+            --cbmc-args "${kani_cbmc_args[@]}"
         # remove metadata file for Kani-generated "dummy" crate that we won't
         # get scanner data for
         local target=$(find "target/kani_verify_std/target/" -mindepth 1 \

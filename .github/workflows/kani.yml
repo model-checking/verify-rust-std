@@ -157,6 +157,9 @@ jobs:
       KANI_JOBS: 1
       RAYON_NUM_THREADS: 1
       KANI_OBJECT_BITS: ${{ (matrix.kind == 'contract' || matrix.kind == 'equivalence') && '12' || '14' }}
+      # Compare encoding cost on the four probes before changing full-domain jobs.
+      KANI_SYMEX_CACHE_DEREFERENCES: ${{ matrix.kind == 'fixed-exponent' && 'true' || 'false' }}
+      KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.kind == 'fixed-exponent' && 'false' || 'true' }}
       HARNESS_MODULE: ${{ matrix.module }}
       HARNESS_PROOF: ${{ matrix.proof }}
       HARNESS_KIND: ${{ matrix.kind }}
