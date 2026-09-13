@@ -1,9 +1,9 @@
 # Generic iterator adapter proof port
 
 This is an **unvalidated VeriFast port candidate** for part of Challenge 16.
-Hosted verification passes the frontend regression checks and now reaches
-the adapter proof and source refinement stages. Those stages still need
-passing verdicts. See the hosted results below.
+Hosted verification passes the frontend regression checks and full adapter
+source refinement. The adapter contracts still need a passing proof verdict.
+See the hosted results below.
 The files under `verified/` are proof inputs, not evidence of a successful
 proof. This port does not yet close Felipe's review requests on PR #602.
 
@@ -102,7 +102,7 @@ The [25.11 exporter](https://github.com/verifast/verifast/blob/25.11/src/rust_fr
 has no `AddUnchecked` case. Static inspection of the
 [26.01 exporter](https://github.com/verifast/verifast/blob/26.01/src/rust_frontend/vf_mir_exporter/src/lib.rs#L2445-L2464)
 found the same omission, so that release alone does not address this failure.
-Neither the generic contracts nor source refinement have a passing verdict.
+That original run established neither the contracts nor source refinement.
 The current runner uses VeriFast 26.09 plus the narrow frontend patch in
 `backend/add-unchecked.patch`. It maps `AddUnchecked` to the existing integer
 addition operation, whose symbolic execution checks overflow. On inputs
@@ -134,13 +134,22 @@ storage. The mutable test converts the new reference to a raw pointer to
 test creation independently of a further return reborrow. These fixtures
 validate the frontend extension, not the adapter contracts.
 
+The patch also preserves const operands and `ConstArgHasType` constraints
+through the MIR schema and refinement checker. Constraints are compared after
+generic parameter renaming; unsupported predicates still fail refinement.
+Hosted run [34749576406](https://github.com/model-checking/verify-rust-std/actions/runs/34749576406)
+accepted a renamed const parameter and rejected changing the return from
+`N` to `M`. Run [34749771017](https://github.com/model-checking/verify-rust-std/actions/runs/34749771017)
+then passed refinement of the full adapter projection. Its contract proof
+failed, so the workflow correctly remained unsuccessful.
+
 `backend/prepare.sh` pins the source commit, source archive hash, and upstream
-dependency bundle hash. It builds the MIR exporter and the verifier's Rust
-translator on the hosted Linux worker. Arithmetic rules and library contracts
+dependency bundle hash. It builds the MIR exporter, verifier, and refinement
+checker on the hosted Linux worker. Arithmetic rules and library contracts
 are unchanged. Source projections and mandatory refinement remain unchanged.
-The workflow caches only the compiled frontend, keyed by its preparation
-script and patches, with binary checksums checked on restoration. Every
-regression, proof, and refinement gate reruns after a cache hit.
+The workflow caches these three binaries, keyed by the preparation script
+and patches, with binary checksums checked on restoration. Every regression,
+proof, and refinement gate reruns after a cache hit.
 
 ## Local static checks and optional manual verification
 

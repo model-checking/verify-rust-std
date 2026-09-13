@@ -83,7 +83,7 @@ lem wrap_slots<T>(p: *T, values: list<T>)
 impl<T, const N: usize> Buffer<T, N> {
     #[inline]
     fn buffer_ptr(&self) -> *const MaybeUninit<T>
-//@ req true;
+//@ req pointer_within_limits(base(self)) == true;
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
@@ -92,7 +92,7 @@ impl<T, const N: usize> Buffer<T, N> {
 
     #[inline]
     fn buffer_mut_ptr(&mut self) -> *mut MaybeUninit<T>
-//@ req true;
+//@ req pointer_within_limits(base(self)) == true;
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
