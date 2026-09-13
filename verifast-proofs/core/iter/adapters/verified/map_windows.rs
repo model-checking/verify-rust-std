@@ -161,7 +161,7 @@ impl<T, const N: usize> Buffer<T, N> {
     req thread_token(?t) &*& live(t, self, ?start, ?values) &*& <T>.own(t, next);
     @*/
     /*@
-    ens thread_token(t) &*& live(t, self, start == width::<N>() ? 0 : start + 1,
+    ens thread_token(t) &*& live(t, self, if start == width::<N>() { 0 } else { start + 1 },
         append(tail(values), cons(next, nil)));
     @*/
     //@ on_unwind_ens thread_token(t);
@@ -247,8 +247,8 @@ impl<T, const N: usize> Buffer<T, N> {
             close array(to_drop, 1, _);
             array_join(buffer_mut_ptr);
         }
-        close bounds(self, (start == width::<N>() ? 0 : start + 1));
-        close live(t, self, (start == width::<N>() ? 0 : start + 1),
+        close bounds(self, if start == width::<N>() { 0 } else { start + 1 });
+        close live(t, self, if start == width::<N>() { 0 } else { start + 1 },
             append(tail(values), cons(next, nil)));
         }
         @*/
