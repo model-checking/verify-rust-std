@@ -656,10 +656,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// this through the iterator's upper `size_hint`, which is exact for the `TrustedLen`
     /// iterators every caller passes.
     #[inline]
-    #[requires(iter.size_hint().1.is_some_and(|hi| {
-        dst.checked_add(hi).is_some_and(|end| end <= self.capacity())
-            && written.checked_add(hi).is_some()
-    }))]
+    #[requires(self.write_iter_precondition(dst, iter.size_hint().1, *written))]
     #[ensures(|_| old(*written) <= *written
         && *written - old(*written) <= old(iter.size_hint().1.unwrap_or(0)))]
     #[cfg_attr(kani, kani::modifies(written, self.slots(dst, iter.size_hint().1.unwrap_or(0))))]
@@ -676,20 +673,68 @@ impl<T, A: Allocator> VecDeque<T, A> {
         });
         // Under Kani the very same iteration is spelled as an explicit loop (see
         // `write_iter_loop`) so that a loop contract can be attached; loop contracts cannot be
-        // attached to the closure-driven `for_each`.
+        // attached to the closure-driven `for_each`. The statement above is also compiled
+        // under Kani, byte for byte, as `write_iter_for_each`, and checked against this
+        // function's contract for bounded iterator lengths (`verify::bounded_evidence`).
         #[cfg(kani)]
         unsafe {
             self.write_iter_loop(dst, iter, written)
         }
     }
 
-    /// The loop of [`Self::write_iter`] in the form Kani's loop contracts accept: every element
-    /// yielded by `iter` is written to `dst + i` and counted, exactly as `for_each` does above;
-    /// nothing is skipped, synthesized or forgotten. It is verified as part of `write_iter`'s
-    /// contract proof (`check_write_iter_*` in `mod verify`). Callers of `write_iter` are
-    /// verified with this helper replaced by its contract (`stub_write_iter_loop`), because a
-    /// loop contract cannot survive the havocking of the reference-carrying
-    /// `Take<ByRefSized<&mut I>>` adapter that `write_iter_wrapping` passes.
+    /// The precondition of [`Self::write_iter`]'s contract as one predicate, so that the
+    /// contract replacement in `mod verify` (`write_iter_contract_replacement`) asserts exactly
+    /// the clause the contract requires. Only used by the verification contracts and by
+    /// `mod verify`.
+    #[cfg(kani)]
+    fn write_iter_precondition(&self, dst: usize, upper: Option<usize>, written: usize) -> bool {
+        upper.is_some_and(|hi| {
+            dst.checked_add(hi).is_some_and(|end| end <= self.capacity())
+                && written.checked_add(hi).is_some()
+        })
+    }
+
+    /// The shipped statement of [`Self::write_iter`] (its `#[cfg(not(kani))]` body), byte for
+    /// byte, as a Kani-visible sibling: `verify::bounded_evidence` substitutes it for
+    /// `write_iter_loop` to check the shipped text against `write_iter`'s contract, bounded in
+    /// the iterator length. It must stay byte-identical to that statement; diff the two when
+    /// editing either.
+    #[cfg(kani)]
+    #[inline]
+    unsafe fn write_iter_for_each(
+        &mut self,
+        dst: usize,
+        iter: impl Iterator<Item = T>,
+        written: &mut usize,
+    ) {
+        iter.enumerate().for_each(|(i, element)| unsafe {
+            self.buffer_write(dst + i, element);
+            *written += 1;
+        });
+    }
+
+    /// The iteration of [`Self::write_iter`] transcribed into the form Kani's loop contracts
+    /// accept: `iter` is driven with `next()`, every element is written to `dst + i` and
+    /// counted, exactly as the shipped `for_each` statement does; nothing is skipped,
+    /// synthesized or forgotten. `write_iter`'s contract proof (`check_write_iter_*` in
+    /// `mod verify`) runs this transcription unbounded; `verify::bounded_evidence` checks the
+    /// shipped statement itself ([`Self::write_iter_for_each`]) against the same contract,
+    /// bounded in the iterator length.
+    ///
+    /// Why a transcription: the shipped loop is inside `Iterator::for_each` → `Enumerate::fold`
+    /// → `I::fold` (core), where no loop contract can be attached, and `Enumerate::fold` keeps
+    /// its index in a closure that a loop contract lower down could neither name nor re-pin
+    /// after havocking. The transcription relies on `Iterator`'s documented equivalence between
+    /// `fold` and repeated `next()`. Its loop-contract proof is a partial-correctness proof
+    /// (Kani's loop contracts assume termination); termination follows from the exact
+    /// `size_hint` of the `TrustedLen` iterators every caller passes. `loop_decreases` is not
+    /// used because at the pinned Kani it conflicts with an explicit `loop_modifies`.
+    ///
+    /// Callers of `write_iter` whose iterator is reused after the call (the wrapping branch of
+    /// `write_iter_wrapping`, which passes `Take<ByRefSized<&mut I>>`) are verified with this
+    /// helper replaced by `write_iter`'s contract plus the consumption of the iterator
+    /// (`verify::write_iter_contract_replacement`), because a loop contract cannot survive the
+    /// havocking of that reference-carrying adapter.
     #[cfg(kani)]
     #[inline]
     unsafe fn write_iter_loop(
@@ -4027,14 +4072,154 @@ impl<T, const N: usize> From<[T; N]> for VecDeque<T> {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
+    //! Kani proofs for Challenge 25.
+    //!
+    //! # Method
+    //!
+    //! Every harness starts from [`any_deque`]: a real allocation of symbolic capacity, a
+    //! symbolic `head` over every physical index and a symbolic `len` (so both the contiguous
+    //! and the wrapped ring layout are explored), with exactly the logical range initialized.
+    //! There is no `kani::unwind` and no length constant in any proof; the only bound on sizes
+    //! is CBMC's object model (`MAX_ALLOCATION_BYTES`). The 13 unsafe functions carry
+    //! `#[requires]`/`#[ensures]`/`kani::modifies` contracts checked by `proof_for_contract`
+    //! harnesses; the 30 safe functions have `#[kani::proof]` harnesses. Loops are discharged
+    //! with loop contracts (`retain_mut`, `write_iter_loop`).
+    //!
+    //! # Element shapes (generic `T`)
+    //!
+    //! Kani rejects a `#[kani::proof]` on a generic function, so each harness body is written
+    //! once for arbitrary `T` and instantiated over element *shapes* chosen to cover every
+    //! property of `T` that the code observes. `VecDeque<T>` is parametric in `T` except through
+    //! `size_of`/`align_of` (allocation and pointer arithmetic), `T::IS_ZST` (the branches that
+    //! skip the buffer), moves of opaque values, and the drop glue `ptr::drop_in_place::<[T]>`
+    //! in `truncate`, `drain` and `Drop for VecDeque`; it never branches on `needs_drop` or on
+    //! element values (the only value-dependent code is the user closures, which the harnesses
+    //! make nondeterministic).
+    //!
+    //! | shape | size | align | `needs_drop` / non-`Copy` | validity invariant |
+    //! |---|---|---|---|---|
+    //! | `()` | 0 | 1 | no | no |
+    //! | `u8` | 1 | 1 | no | no |
+    //! | `bool` | 1 | 1 | no | yes (`0`/`1`) |
+    //! | `[u8; 3]` | 3 | 1 | no | no |
+    //! | `u64` | 8 | 8 | no | no |
+    //! | [`Al16`] | 16 | 16 | no | no |
+    //! | [`WithDrop`] | 1 | 1 | yes | no |
+    //!
+    //! `u8`, `u64` and `()` instantiate every harness (plus `[u8; 3]` on the cheap ones);
+    //! `bool`, `Al16` and `WithDrop` instantiate the harnesses whose targets exercise their
+    //! property (see the instantiation lists). For `WithDrop` the unbounded harnesses cover
+    //! every target that drops at most single elements; the slice drop glue
+    //! (`drop_in_place::<[T]>`, a compiler-generated loop that cannot carry a loop contract) is
+    //! checked bounded (`len <= 4`) in [`bounded_evidence`]. Generators write pre-existing
+    //! elements with one symbolic byte per region (a valid bit pattern of the shape,
+    //! [`Shape::any_fill`]); elements that enter through the API are per-element `kani::any()`.
+    //! Representative shapes are the closest Kani can come to the challenge's "no
+    //! monomorphization" clause.
+    //!
+    //! # Stubs and the `write_iter` transcription
+    //!
+    //! Everything a harness assumes about a callee is either its verified contract or one of
+    //! the items below, each with the harness that checks what it hides:
+    //!
+    //! | replacement | replaces | asserts | over-approximates | evidence | residual argument |
+    //! |---|---|---|---|---|---|
+    //! | `write_iter_loop` (cfg(kani) body of `write_iter`) | the shipped `for_each` statement | — | — (transcription) | `bounded_evidence::bounded_write_iter_shipped_text_*` runs the shipped statement (`write_iter_for_each`) against the same contract, `n <= 4` | `Iterator::fold` ≡ repeated `next()`; see `write_iter_loop`'s doc for why no loop contract can reach the shipped loop |
+    //! | [`VecDeque::write_iter_contract_replacement`] (and its `_drop` variant for `resize_with`) | `write_iter_loop` | `write_iter`'s precondition, via `write_iter_precondition` | `write_iter`'s `modifies` region gets an arbitrary fill; `written += hi`; iterator advanced by `hi` | `bounded_write_iter_wrapping_shipped_text_u8` (the branch with the shipped statement iterating) and `bounded_replacement_advance_by_matches_next_u8` (`advance_by(hi)` ≡ `hi` × `next()`) | exact-`hi` = `TrustedLen` exactness (asserted `lo == hi`) |
+    //! | [`stub_ptr_rotate`] (`check_make_contiguous_*` only) | `core::slice::rotate::ptr_rotate` | its documented precondition (range writable) | leaves memory untouched | `bounded_evidence::bounded_rotate_permutes_range_u8`: the real `rotate_left`/`rotate_right` on ranges of every length and amount up to eight, symbolic contents, guard bytes — exactly the rotated sequence, nothing else written | a rotation only permutes initialized slots; `make_contiguous` does nothing value-dependent afterwards |
+    //!
+    //! Loop-contract proofs are partial-correctness proofs at the pinned Kani (termination is
+    //! assumed); the loops involved terminate by the exact `size_hint` of `TrustedLen`
+    //! iterators (`write_iter_loop`) and by `cur` reaching `len` (`retain_mut`).
+    //!
+    //! # Kani limitations at the pinned version (`152c6a8`)
+    //!
+    //! 1. `stub_verified` on a contract whose `modifies` names a slice ICEs (kani#3682; the fix,
+    //!    kani#4749, is 92 commits after the pin), and `kani::stub` of a contracted function is
+    //!    rejected (kani#4591). Hence the contract-free `write_iter_loop` is the stub target.
+    //!    Even with kani#4749, `stub_verified(write_iter)` would not prove the wrapping branch:
+    //!    the generated replacement drops the by-value `Take<ByRefSized<&mut I>>` unconsumed,
+    //!    so the second call would see the whole iterator again (see
+    //!    `write_iter_contract_replacement`).
+    //! 2. A loop contract cannot survive the havocking of a loop-carried adapter holding a
+    //!    `&mut` (`Take<ByRefSized<&mut I>>`): its private fields cannot be re-pinned.
+    //! 3. A stub must be a method when the original is one: signatures are compared by the
+    //!    position of their own generic parameters.
+    //! 4. CBMC aborts on a `loop_modifies` target that is a zero-sized closure (kani#4786), so
+    //!    `retain_mut`'s loop contracts do not list the predicate.
+    //! 5. `loop_decreases` cannot be combined with an explicit `loop_modifies`.
+    //! 6. `-Z uninit-checks` and `-Z valid-value-checks` are not enabled by CI (the former
+    //!    rejects alloc at this pin, kani#3300); reading uninitialized memory and invalid values
+    //!    are therefore only excluded by construction (initialized ranges, valid fills).
+
     use core::iter::TrustedLen;
     use core::marker::PhantomData;
     use core::mem::SizedTypeProperties;
+    use core::sync::atomic::AtomicUsize;
+    use core::sync::atomic::Ordering::Relaxed;
     use core::{cmp, kani, ptr};
 
     use crate::alloc::Layout;
     use crate::collections::VecDeque;
     use crate::vec::Vec;
+
+    // ---------------------------------------------------------------------------------------
+    // Element shapes
+    // ---------------------------------------------------------------------------------------
+
+    /// An element type the generic harness bodies are instantiated with (see the shape matrix
+    /// in the module documentation). `any_fill` is the byte the generators write into every
+    /// byte of a pre-existing element; it must be a valid bit pattern for `Self`, which is why
+    /// types with a validity invariant override it.
+    pub(super) trait Shape: kani::Arbitrary {
+        fn any_fill() -> u8 {
+            kani::any()
+        }
+    }
+
+    impl Shape for u8 {}
+    impl Shape for u64 {}
+    impl Shape for [u8; 3] {}
+    impl Shape for () {}
+
+    /// Validity invariant: only the bit patterns `0` and `1` are valid.
+    impl Shape for bool {
+        fn any_fill() -> u8 {
+            kani::any_where(|b: &u8| *b <= 1)
+        }
+    }
+
+    /// Alignment larger than any primitive's (`align_of == size_of == 16`).
+    #[derive(kani::Arbitrary)]
+    #[repr(align(16))]
+    pub(super) struct Al16(u8);
+    impl Shape for Al16 {}
+
+    /// Number of `WithDrop` destructors that have run. Reset by the harnesses that assert on it
+    /// (`bounded_evidence`); the other harnesses only require that no destructor runs on an
+    /// uninitialized or already-moved slot, which Kani's memory checks enforce.
+    pub(super) static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    /// `needs_drop` (and therefore non-`Copy`, move-only) element: its destructor counts itself
+    /// and reads its payload.
+    #[derive(kani::Arbitrary)]
+    pub(super) struct WithDrop(u8);
+    impl Drop for WithDrop {
+        fn drop(&mut self) {
+            DROPS.fetch_add(1, Relaxed);
+            core::hint::black_box(self.0);
+        }
+    }
+    impl Shape for WithDrop {}
+
+    /// Ends a harness that owns `deque`. For shapes without a destructor the deque is dropped,
+    /// exercising `Drop for VecDeque` (whose `ptr::drop_in_place::<[T]>` is then a no-op). For
+    /// `needs_drop` shapes it is leaked: `drop_in_place::<[T]>` is a compiler-generated loop of
+    /// symbolic length that cannot carry a loop contract, so the drop-glue paths are checked
+    /// separately, bounded, in `bounded_evidence`.
+    pub(super) fn finish<T, A: crate::alloc::Allocator>(deque: VecDeque<T, A>) {
+        if core::mem::needs_drop::<T>() { core::mem::forget(deque) } else { drop(deque) }
+    }
 
     /// A non-vacuity witness for a path through the ring buffer. Zero-sized element types never
     /// touch the buffer (every such path is excluded by `T::IS_ZST` checks in the code), so the
@@ -4065,11 +4250,13 @@ mod verify {
     /// * `head` ranges over every valid physical index and `len` over `0..=cap`, so both the
     ///   contiguous (`head + len <= cap`) and the wrapped (`head + len > cap`) ring layouts are
     ///   explored (see the `kani::cover` witnesses).
-    /// * Exactly the logical range `head..head + len` (wrapping at `cap`) is initialized, with an
-    ///   arbitrary byte pattern; slots outside it stay uninitialized. The element types used by
-    ///   the harnesses have no validity invariant, so any byte pattern is a valid `T`, and no
-    ///   proof depends on the element values.
-    pub(super) fn any_deque<T>() -> VecDeque<T> {
+    /// * Exactly the logical range `head..head + len` (wrapping at `cap`) is initialized, every
+    ///   byte with the shape's arbitrary valid fill byte (`Shape::any_fill`); slots outside it
+    ///   stay uninitialized. `VecDeque<T>` never branches on element values (the only
+    ///   value-dependent code is the user closures, which the harnesses make nondeterministic,
+    ///   and the elements `AnyIter` yields are per-element `kani::any()`), so one symbolic byte
+    ///   per initialized region loses nothing.
+    pub(super) fn any_deque<T: Shape>() -> VecDeque<T> {
         let requested: usize = kani::any();
         kani::assume(Layout::array::<T>(requested).is_ok());
         kani::assume(
@@ -4082,7 +4269,7 @@ mod verify {
         let head: usize = if cap == 0 { 0 } else { kani::any_where(|h: &usize| *h < cap) };
         let len: usize = kani::any_where(|l: &usize| *l <= cap);
         if !T::IS_ZST && len > 0 {
-            let fill: u8 = kani::any();
+            let fill: u8 = T::any_fill();
             let head_room = cap - head;
             unsafe {
                 if len <= head_room {
@@ -4107,7 +4294,7 @@ mod verify {
     pub(super) fn touch<T>(deque: &VecDeque<T>) {
         let i: usize = kani::any();
         if let Some(elem) = deque.get(i) {
-            let _ = unsafe { ptr::read(elem) };
+            core::mem::forget(unsafe { ptr::read(elem) });
         }
         assert!(deque.invariant_holds());
     }
@@ -4159,70 +4346,94 @@ mod verify {
     /// Contract replacement for the loop of `VecDeque::write_iter` (`write_iter_loop`), used
     /// when verifying the callers of `write_iter` (`write_iter_wrapping`, `resize_with`).
     /// `write_iter` itself, loop included, is verified against its real body by
-    /// `check_write_iter_*`.
+    /// `check_write_iter_*`. (Running the real loop inside the callers was tried at the pinned
+    /// Kani: the loop contract is then instrumented for the `Take<ByRefSized<&mut _>>`
+    /// instance of the wrapping branch as well, and neither `check_resize_with_u8` nor a
+    /// direct-branch-only `write_iter_wrapping` harness finished within 20 minutes.)
     ///
-    /// This is what `#[kani::stub_verified(write_iter)]` would generate. It is written by hand
-    /// because the pinned Kani (a) cannot generate the replacement of a contract whose
-    /// `modifies` clause names a slice (kani-compiler `transform/contracts.rs` resolves
-    /// `write_any_slice` with the slice type itself as the element type and ICEs in
-    /// `reachability.rs`), and (b) cannot `kani::stub` a function that carries a contract
-    /// (model-checking/kani#4591); hence the contract-free helper is the stub target.
+    /// This is what `#[kani::stub_verified(write_iter)]` would generate, **plus one step**. It
+    /// is written by hand because the pinned Kani (a) ICEs when generating the replacement of a
+    /// contract whose `modifies` clause names a slice (model-checking/kani#3682; the fix,
+    /// model-checking/kani#4749, postdates the pin) and (b) cannot `kani::stub` a function that
+    /// carries a contract (model-checking/kani#4591); hence the contract-free helper is the
+    /// stub target. The extra step is `iter.advance_by(hi)`: a pure contract replacement drops
+    /// the by-value `Take<ByRefSized<&mut I>>` unconsumed, so the caller's second `write_iter`
+    /// call would see the whole iterator again and could write past `len` — the caller's own
+    /// `ensures`/`modifies` are only provable with the consumption modelled. This step is what
+    /// the loop does (it calls `next()` until `None`, i.e. exactly `hi` times for an exact
+    /// hint), and `bounded_evidence::bounded_write_iter_wrapping_shipped_text_u8` runs the
+    /// shipped statement on this very adapter stack, bounded, and
+    /// `bounded_evidence::bounded_replacement_advance_by_matches_next_u8` checks
+    /// `advance_by(hi)` against `hi` calls of `next()` on it.
     ///
-    /// It *asserts* the precondition of `write_iter`'s contract (so a caller violating it fails
-    /// its proof), then models every behaviour the contract permits: the iterator yields some
-    /// `n <= hi` elements, exactly the slots `dst..dst + n` receive arbitrary values, and
-    /// `*written` grows by `n`. The iterator is dropped rather than driven, so no loop is needed.
-    unsafe fn stub_write_iter_loop<T, A: crate::alloc::Allocator>(
-        deque: &mut VecDeque<T, A>,
-        dst: usize,
-        mut iter: impl Iterator<Item = T>,
-        written: &mut usize,
-    ) {
-        let n = unsafe { model_write_iter(deque, dst, &iter, written) };
-        // Consume the elements from the iterator exactly as the real loop does, so that an
-        // iterator shared with a later call (`write_iter_wrapping`'s wrapping branch borrows
-        // `iter` for the first call and passes it on to the second) reports the right
-        // remaining length. `advance_by` is O(1) for the harness iterator and the `Take` /
-        // `ByRefSized` adapters the callee wraps it in.
-        assert!(iter.advance_by(n).is_ok());
-    }
-
-    /// Like [`stub_write_iter_loop`] but drops the iterator instead of advancing it. Only valid
-    /// where the iterator is not observed after the call, i.e. in the non-wrapping branch of
-    /// `write_iter_wrapping` (used by the `resize_with` harnesses, whose `Take<RepeatWith<_>>`
-    /// iterator cannot be advanced without a loop).
-    unsafe fn stub_write_iter_loop_drop<T, A: crate::alloc::Allocator>(
-        deque: &mut VecDeque<T, A>,
-        dst: usize,
-        iter: impl Iterator<Item = T>,
-        written: &mut usize,
-    ) {
-        let _ = unsafe { model_write_iter(deque, dst, &iter, written) };
-        drop(iter);
-    }
-
-    /// Shared model of one `write_iter` call: checks the contract's precondition, requires the
-    /// exact size hint every `TrustedLen` caller guarantees, havocs exactly the slots that
-    /// receive elements and advances `*written`. Returns the number of elements written.
-    unsafe fn model_write_iter<T, A: crate::alloc::Allocator>(
-        deque: &mut VecDeque<T, A>,
-        dst: usize,
-        iter: &impl Iterator<Item = T>,
-        written: &mut usize,
-    ) -> usize {
-        let (lo, hi) = iter.size_hint();
-        let hi = hi.expect("write_iter: iterator must have an upper size bound");
-        assert!(lo == hi, "write_iter callers pass TrustedLen iterators");
-        assert!(dst.checked_add(hi).is_some_and(|end| end <= deque.capacity()));
-        assert!(written.checked_add(hi).is_some());
-        if !T::IS_ZST && hi > 0 {
-            unsafe { ptr::write_bytes(deque.ptr().add(dst), kani::any::<u8>(), hi) };
+    /// What it does: *asserts* the precondition of `write_iter`'s contract — through the same
+    /// predicate the contract uses, `write_iter_precondition`, so the two cannot drift — then
+    /// models the effect the contract permits: exactly the slots `dst..dst + hi` receive an
+    /// arbitrary valid fill (the `modifies` region, `slots(dst, hi)`; one symbolic byte per
+    /// region, since no proof reads element values), `*written` grows by `hi`, and the iterator
+    /// is advanced by `hi`. Writing exactly `hi` rather than the contract's `<= hi` is the one
+    /// assumption beyond the contract; it is the `TrustedLen` exactness every caller relies on
+    /// (asserted here as `lo == hi`) and what the loop does with such an iterator.
+    ///
+    /// It is a method rather than a free function because the pinned Kani compares a stub's
+    /// signature with the original's by the position of their *own* generic parameters (the
+    /// `impl Iterator` argument here); a free function would put `T` and `A` in those
+    /// positions and be rejected ("Cannot stub … Expected type `&mut VecDeque<T, A>` …").
+    impl<T: Shape, A: crate::alloc::Allocator> VecDeque<T, A> {
+        pub(super) unsafe fn write_iter_contract_replacement(
+            &mut self,
+            dst: usize,
+            mut iter: impl Iterator<Item = T>,
+            written: &mut usize,
+        ) {
+            let (lo, hi) = iter.size_hint();
+            kani::assert(
+                self.write_iter_precondition(dst, hi, *written),
+                "write_iter precondition",
+            );
+            let hi = hi.unwrap();
+            kani::assert(lo == hi, "write_iter callers pass TrustedLen iterators");
+            if !T::IS_ZST && hi > 0 {
+                unsafe { ptr::write_bytes(self.ptr().add(dst), T::any_fill(), hi) };
+            }
+            *written += hi;
+            // Consume the elements exactly as the real loop does, so that an iterator shared
+            // with a later call (`write_iter_wrapping`'s wrapping branch borrows `iter` for the
+            // first call and passes it on to the second) reports the right remaining length.
+            // `advance_by` is O(1) for the harness iterator and the `Take` / `ByRefSized`
+            // adapters the callee wraps it in.
+            kani::assert(
+                iter.advance_by(hi).is_ok(),
+                "write_iter replacement: iterator advanced by hi",
+            );
         }
-        *written += hi;
-        hi
+
+        /// Like [`Self::write_iter_contract_replacement`] but drops the iterator instead of
+        /// advancing it. Only valid where the iterator is not observed after the call, i.e. in
+        /// the non-wrapping branch of `write_iter_wrapping`; used by the `resize_with`
+        /// harnesses, whose `Take<RepeatWith<_>>` iterator cannot be advanced without a loop.
+        pub(super) unsafe fn write_iter_contract_replacement_drop(
+            &mut self,
+            dst: usize,
+            iter: impl Iterator<Item = T>,
+            written: &mut usize,
+        ) {
+            let (lo, hi) = iter.size_hint();
+            kani::assert(
+                self.write_iter_precondition(dst, hi, *written),
+                "write_iter precondition",
+            );
+            let hi = hi.unwrap();
+            kani::assert(lo == hi, "write_iter callers pass TrustedLen iterators");
+            if !T::IS_ZST && hi > 0 {
+                unsafe { ptr::write_bytes(self.ptr().add(dst), T::any_fill(), hi) };
+            }
+            *written += hi;
+            drop(iter);
+        }
     }
 
-    fn check_write_iter<T: kani::Arbitrary>() {
+    fn check_write_iter<T: Shape>() {
         let mut deque = any_deque::<T>();
         let dst: usize = kani::any();
         let n: usize = kani::any();
@@ -4232,9 +4443,10 @@ mod verify {
         assert_eq!(written, before + n);
         kani::cover(n > 1, "write_iter: more than one element written");
         kani::cover(dst > 0 && n > 0, "write_iter: non-zero destination");
+        finish(deque);
     }
 
-    fn check_write_iter_wrapping<T: kani::Arbitrary>() {
+    fn check_write_iter_wrapping<T: Shape>() {
         let mut deque = any_deque::<T>();
         let dst: usize = kani::any();
         let len: usize = kani::any();
@@ -4246,9 +4458,10 @@ mod verify {
         kani::cover(len > deque.capacity() - dst, "write_iter_wrapping: wrapping branch");
         kani::cover(n > 0 && len <= deque.capacity() - dst, "write_iter_wrapping: direct branch");
         touch(&deque);
+        finish(deque);
     }
 
-    fn check_copy<T: kani::Arbitrary>() {
+    fn check_copy<T: Shape>() {
         let mut deque = any_deque::<T>();
         let src: usize = kani::any();
         let dst: usize = kani::any();
@@ -4259,7 +4472,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_copy_nonoverlapping<T: kani::Arbitrary>() {
+    fn check_copy_nonoverlapping<T: Shape>() {
         let mut deque = any_deque::<T>();
         let src: usize = kani::any();
         let dst: usize = kani::any();
@@ -4269,7 +4482,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_wrap_copy<T: kani::Arbitrary>() {
+    fn check_wrap_copy<T: Shape>() {
         let mut deque = any_deque::<T>();
         let src: usize = kani::any();
         let dst: usize = kani::any();
@@ -4314,29 +4527,32 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_buffer_read<T: kani::Arbitrary>() {
+    fn check_buffer_read<T: Shape>() {
         let mut deque = any_deque::<T>();
         let off: usize = kani::any();
         let value = unsafe { deque.buffer_read(off) };
         core::mem::forget(value);
         kani::cover(off > 0, "buffer_read: non-zero offset");
+        finish(deque);
     }
 
-    fn check_buffer_write<T: kani::Arbitrary>() {
+    fn check_buffer_write<T: Shape>() {
         let mut deque = any_deque::<T>();
         let off: usize = kani::any();
         let slot = unsafe { deque.buffer_write(off, kani::any()) };
-        let _ = unsafe { ptr::read(slot) };
+        core::mem::forget(unsafe { ptr::read(slot) });
         kani::cover(off > 0, "buffer_write: non-zero offset");
+        finish(deque);
     }
 
-    fn check_push_unchecked<T: kani::Arbitrary>() {
+    fn check_push_unchecked<T: Shape>() {
         let mut deque = any_deque::<T>();
         let old_len = deque.len;
         unsafe { deque.push_unchecked(kani::any()) };
         assert_eq!(deque.len, old_len + 1);
         kani::cover(old_len >= deque.capacity() - deque.head, "push_unchecked: wrapped write");
         touch(&deque);
+        finish(deque);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -4355,7 +4571,7 @@ mod verify {
         assert!(core::ub_checks::can_write(ptr::slice_from_raw_parts_mut(start, len)));
     }
 
-    fn check_make_contiguous<T: kani::Arbitrary>() {
+    fn check_make_contiguous<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len;
         let cap = deque.capacity();
@@ -4365,7 +4581,7 @@ mod verify {
         let slice = deque.make_contiguous();
         assert_eq!(slice.len(), len);
         if len > 0 {
-            let _ = unsafe { ptr::read(&slice[len - 1]) };
+            core::mem::forget(unsafe { ptr::read(&slice[len - 1]) });
         }
         assert!(deque.is_contiguous());
         let head_len = cap - head;
@@ -4412,11 +4628,16 @@ mod verify {
     /// Lays out a logical ring of `len` elements starting at `head` inside the first `ring_cap`
     /// slots of `deque`'s buffer (`ring_cap <= deque.capacity()`, `head < ring_cap` unless
     /// `ring_cap == 0`, `len <= ring_cap`): initializes exactly those slots and sets the fields.
-    pub(super) fn init_ring<T>(deque: &mut VecDeque<T>, ring_cap: usize, head: usize, len: usize) {
+    pub(super) fn init_ring<T: Shape>(
+        deque: &mut VecDeque<T>,
+        ring_cap: usize,
+        head: usize,
+        len: usize,
+    ) {
         assert!(ring_cap <= deque.capacity() && len <= ring_cap);
         assert!(head < ring_cap || (ring_cap == 0 && head == 0));
         if !T::IS_ZST && len > 0 {
-            let fill: u8 = kani::any();
+            let fill: u8 = T::any_fill();
             let head_room = ring_cap - head;
             unsafe {
                 if len <= head_room {
@@ -4432,7 +4653,7 @@ mod verify {
     }
 
     /// A `Vec<T>` of symbolic length whose elements are all initialized.
-    pub(super) fn any_vec<T>() -> Vec<T> {
+    pub(super) fn any_vec<T: Shape>() -> Vec<T> {
         let len: usize = kani::any();
         kani::assume(Layout::array::<T>(len).is_ok());
         kani::assume(
@@ -4440,13 +4661,13 @@ mod verify {
         );
         let mut vec = Vec::<T>::with_capacity(len);
         if !T::IS_ZST && len > 0 {
-            unsafe { ptr::write_bytes(vec.as_mut_ptr(), kani::any::<u8>(), len) };
+            unsafe { ptr::write_bytes(vec.as_mut_ptr(), T::any_fill(), len) };
         }
         unsafe { vec.set_len(len) };
         vec
     }
 
-    fn check_buffer_range<T: kani::Arbitrary>() {
+    fn check_buffer_range<T: Shape>() {
         let deque = any_deque::<T>();
         let start: usize = kani::any();
         let end: usize = kani::any();
@@ -4459,7 +4680,7 @@ mod verify {
         core::mem::forget(deque);
     }
 
-    fn check_copy_slice<T: kani::Arbitrary>() {
+    fn check_copy_slice<T: Shape>() {
         let mut deque = any_deque::<T>();
         let src = any_vec::<T>();
         let dst: usize = kani::any();
@@ -4469,7 +4690,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_handle_capacity_increase<T: kani::Arbitrary>() {
+    fn check_handle_capacity_increase<T: Shape>() {
         let mut deque = any_empty_deque::<T>();
         let new_cap = deque.capacity();
         let old_cap: usize = kani::any_where(|c: &usize| *c <= new_cap);
@@ -4489,13 +4710,13 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_from_contiguous_raw_parts_in<T: kani::Arbitrary>() {
+    fn check_from_contiguous_raw_parts_in<T: Shape>() {
         let vec = any_empty_deque_vec::<T>();
         let (ptr, _, capacity, alloc) = vec.into_raw_parts_with_alloc();
         let start: usize = kani::any();
         let end: usize = kani::any();
         if !T::IS_ZST && start <= end && end <= capacity && end > start {
-            unsafe { ptr::write_bytes(ptr.add(start), kani::any::<u8>(), end - start) };
+            unsafe { ptr::write_bytes(ptr.add(start), T::any_fill(), end - start) };
         }
         let deque =
             unsafe { VecDeque::from_contiguous_raw_parts_in(ptr, start..end, capacity, alloc) };
@@ -4511,6 +4732,7 @@ mod verify {
             start == 0 && end == 0 && capacity > 0,
             "from_contiguous_raw_parts_in: empty range",
         );
+        finish(deque);
     }
 
     /// A `Vec<T>` with symbolic capacity and no elements, used to obtain raw parts.
@@ -4525,7 +4747,7 @@ mod verify {
         Vec::<T>::with_capacity(requested)
     }
 
-    fn check_abort_shrink<T: kani::Arbitrary>() {
+    fn check_abort_shrink<T: Shape>() {
         let mut deque = any_empty_deque::<T>();
         let cap = deque.capacity();
         let target_cap: usize = kani::any_where(|c: &usize| *c <= cap);
@@ -4550,7 +4772,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_rotate_left_inner<T: kani::Arbitrary>() {
+    fn check_rotate_left_inner<T: Shape>() {
         let mut deque = any_deque::<T>();
         let mid: usize = kani::any();
         unsafe { deque.rotate_left_inner(mid) };
@@ -4558,7 +4780,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_rotate_right_inner<T: kani::Arbitrary>() {
+    fn check_rotate_right_inner<T: Shape>() {
         let mut deque = any_deque::<T>();
         let k: usize = kani::any();
         unsafe { deque.rotate_right_inner(k) };
@@ -4582,19 +4804,20 @@ mod verify {
         }));
     }
 
-    fn check_get<T: kani::Arbitrary>() {
+    fn check_get<T: Shape>() {
         let deque = any_deque::<T>();
         let i: usize = kani::any();
         let elem = deque.get(i);
         assert_eq!(elem.is_some(), i < deque.len());
         if let Some(elem) = elem {
-            let _ = unsafe { ptr::read(elem) };
+            core::mem::forget(unsafe { ptr::read(elem) });
         }
         kani::cover(i > 0 && i < deque.len(), "get: in-bounds non-front index");
         kani::cover(i >= deque.len(), "get: out-of-bounds index");
+        finish(deque);
     }
 
-    fn check_get_mut<T: kani::Arbitrary>() {
+    fn check_get_mut<T: Shape>() {
         let mut deque = any_deque::<T>();
         let i: usize = kani::any();
         let len = deque.len();
@@ -4605,9 +4828,10 @@ mod verify {
         }
         kani::cover(i > 0 && i < len, "get_mut: in-bounds non-front index");
         touch(&deque);
+        finish(deque);
     }
 
-    fn check_swap<T: kani::Arbitrary>() {
+    fn check_swap<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let i: usize = kani::any_where(|x: &usize| *x < len);
@@ -4615,22 +4839,23 @@ mod verify {
         deque.swap(i, j);
         kani::cover(i != j, "swap: distinct indices");
         touch(&deque);
+        finish(deque);
     }
 
-    fn check_as_slices<T: kani::Arbitrary>() {
+    fn check_as_slices<T: Shape>() {
         let deque = any_deque::<T>();
         let (a, b) = deque.as_slices();
         assert_eq!(a.len() + b.len(), deque.len());
         if let Some(last) = a.last() {
-            let _ = unsafe { ptr::read(last) };
+            core::mem::forget(unsafe { ptr::read(last) });
         }
         if let Some(last) = b.last() {
-            let _ = unsafe { ptr::read(last) };
+            core::mem::forget(unsafe { ptr::read(last) });
         }
         kani::cover(!a.is_empty() && !b.is_empty(), "as_slices: both halves non-empty");
     }
 
-    fn check_as_mut_slices<T: kani::Arbitrary>() {
+    fn check_as_mut_slices<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let (a, b) = deque.as_mut_slices();
@@ -4651,21 +4876,21 @@ mod verify {
         (start, end)
     }
 
-    fn check_range<T: kani::Arbitrary>() {
+    fn check_range<T: Shape>() {
         let deque = any_deque::<T>();
         let (start, end) = any_subrange(deque.len());
         let mut iter = deque.range(start..end);
         assert_eq!(iter.len(), end - start);
         if let Some(first) = iter.next() {
-            let _ = unsafe { ptr::read(first) };
+            core::mem::forget(unsafe { ptr::read(first) });
         }
         if let Some(last) = iter.next_back() {
-            let _ = unsafe { ptr::read(last) };
+            core::mem::forget(unsafe { ptr::read(last) });
         }
         kani::cover(end - start > 2, "range: more than two elements");
     }
 
-    fn check_range_mut<T: kani::Arbitrary>() {
+    fn check_range_mut<T: Shape>() {
         let mut deque = any_deque::<T>();
         let (start, end) = any_subrange(deque.len());
         let mut iter = deque.range_mut(start..end);
@@ -4680,7 +4905,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_drain<T: kani::Arbitrary>() {
+    fn check_drain<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let (start, end) = any_subrange(len);
@@ -4709,7 +4934,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_pop_front<T: kani::Arbitrary>() {
+    fn check_pop_front<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let elem = deque.pop_front();
@@ -4718,9 +4943,10 @@ mod verify {
         core::mem::forget(elem);
         kani::cover(len > 1, "pop_front: elements remain");
         touch(&deque);
+        finish(deque);
     }
 
-    fn check_pop_back<T: kani::Arbitrary>() {
+    fn check_pop_back<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let elem = deque.pop_back();
@@ -4729,9 +4955,10 @@ mod verify {
         core::mem::forget(elem);
         kani::cover(len > 1, "pop_back: elements remain");
         touch(&deque);
+        finish(deque);
     }
 
-    fn check_push_front<T: kani::Arbitrary>() {
+    fn check_push_front<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let full = deque.is_full();
@@ -4741,9 +4968,10 @@ mod verify {
         cover_buffer_path!(T, full && len > 0, "push_front: buffer grown");
         kani::cover(!full && len > 0, "push_front: no growth");
         touch(&deque);
+        finish(deque);
     }
 
-    fn check_push_back<T: kani::Arbitrary>() {
+    fn check_push_back<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let full = deque.is_full();
@@ -4753,9 +4981,10 @@ mod verify {
         cover_buffer_path!(T, full && len > 0, "push_back: buffer grown");
         kani::cover(!full && len > 0, "push_back: no growth");
         touch(&deque);
+        finish(deque);
     }
 
-    fn check_reserve<T: kani::Arbitrary>() {
+    fn check_reserve<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let old_cap = deque.capacity();
@@ -4769,7 +4998,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_reserve_exact<T: kani::Arbitrary>() {
+    fn check_reserve_exact<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let old_cap = deque.capacity();
@@ -4783,7 +5012,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_try_reserve<T: kani::Arbitrary>() {
+    fn check_try_reserve<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let old_cap = deque.capacity();
@@ -4802,7 +5031,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_try_reserve_exact<T: kani::Arbitrary>() {
+    fn check_try_reserve_exact<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let old_cap = deque.capacity();
@@ -4821,7 +5050,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_shrink_to<T: kani::Arbitrary>() {
+    fn check_shrink_to<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let head = deque.head;
@@ -4857,7 +5086,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_truncate<T: kani::Arbitrary>() {
+    fn check_truncate<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let front_len = deque.as_slices().0.len();
@@ -4873,7 +5102,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_insert<T: kani::Arbitrary>() {
+    fn check_insert<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let full = deque.is_full();
@@ -4887,7 +5116,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_remove<T: kani::Arbitrary>() {
+    fn check_remove<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let index: usize = kani::any();
@@ -4901,9 +5130,10 @@ mod verify {
             "remove: front half shifted",
         );
         touch(&deque);
+        finish(deque);
     }
 
-    fn check_split_off<T: kani::Arbitrary>() {
+    fn check_split_off<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let first_len = deque.as_slices().0.len();
@@ -4918,9 +5148,11 @@ mod verify {
         );
         touch(&deque);
         touch(&other);
+        finish(deque);
+        finish(other);
     }
 
-    fn check_append<T: kani::Arbitrary>() {
+    fn check_append<T: Shape>() {
         let mut deque = any_deque::<T>();
         let mut other = any_deque::<T>();
         let len = deque.len();
@@ -4934,9 +5166,11 @@ mod verify {
         kani::cover(len + other_len <= old_cap && other_len > 0 && len > 0, "append: in place");
         touch(&deque);
         touch(&other);
+        finish(deque);
+        finish(other);
     }
 
-    fn check_retain_mut<T: kani::Arbitrary>() {
+    fn check_retain_mut<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         deque.retain_mut(|elem| {
@@ -4951,7 +5185,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_grow<T: kani::Arbitrary>() {
+    fn check_grow<T: Shape>() {
         let mut deque = any_deque::<T>();
         kani::assume(deque.is_full());
         let len = deque.len();
@@ -4967,13 +5201,14 @@ mod verify {
     /// `Take<RepeatWith<_>>` iterator. That iterator cannot be advanced without a loop, so the
     /// contract replacement of `write_iter`'s loop can only model calls after which the
     /// iterator is not reused, i.e. the non-wrapping branch of `write_iter_wrapping` (see
-    /// `stub_write_iter_loop_drop`). The two `resize_with` harnesses therefore restrict the
-    /// appended elements to not wrap around the end of the buffer, in two complementary ways;
-    /// the wrapping write path itself is verified by `check_write_iter_wrapping_*`.
+    /// `write_iter_contract_replacement_drop`). The two `resize_with` harnesses therefore
+    /// restrict the appended elements to not wrap around the end of the buffer, in two
+    /// complementary ways; the wrapping write path itself is verified by
+    /// `check_write_iter_wrapping_*`.
     ///
     /// Variant 1: arbitrary (possibly wrapped) deque, capacity reserved up front so that the
     /// appended elements fit behind the last element without wrapping.
-    fn check_resize_with<T: kani::Arbitrary>() {
+    fn check_resize_with<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let new_len: usize = kani::any();
@@ -4996,7 +5231,7 @@ mod verify {
     /// Variant 2: contiguous deque starting at `head == 0`, so that the growth performed by
     /// `resize_with` itself (`reserve` → `handle_capacity_increase`, case A) keeps the appended
     /// elements from wrapping.
-    fn check_resize_with_grow<T: kani::Arbitrary>() {
+    fn check_resize_with_grow<T: Shape>() {
         let mut deque = any_deque::<T>();
         kani::assume(deque.head == 0);
         let len = deque.len();
@@ -5015,7 +5250,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_rotate_left<T: kani::Arbitrary>() {
+    fn check_rotate_left<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let n: usize = kani::any_where(|n: &usize| *n <= len);
@@ -5026,7 +5261,7 @@ mod verify {
         touch(&deque);
     }
 
-    fn check_rotate_right<T: kani::Arbitrary>() {
+    fn check_rotate_right<T: Shape>() {
         let mut deque = any_deque::<T>();
         let len = deque.len();
         let n: usize = kani::any_where(|n: &usize| *n <= len);
@@ -5088,19 +5323,19 @@ mod verify {
     contract_harnesses!(
         write_iter_wrapping,
         check_write_iter_wrapping,
-        [kani::stub(VecDeque::<u8>::write_iter_loop, stub_write_iter_loop)],
+        [kani::stub(VecDeque::<u8>::write_iter_loop, VecDeque::<u8>::write_iter_contract_replacement)],
         [u8 => check_write_iter_wrapping_u8]
     );
     contract_harnesses!(
         write_iter_wrapping,
         check_write_iter_wrapping,
-        [kani::stub(VecDeque::<u64>::write_iter_loop, stub_write_iter_loop)],
+        [kani::stub(VecDeque::<u64>::write_iter_loop, VecDeque::<u64>::write_iter_contract_replacement)],
         [u64 => check_write_iter_wrapping_u64]
     );
     contract_harnesses!(
         write_iter_wrapping,
         check_write_iter_wrapping,
-        [kani::stub(VecDeque::<()>::write_iter_loop, stub_write_iter_loop)],
+        [kani::stub(VecDeque::<()>::write_iter_loop, VecDeque::<()>::write_iter_contract_replacement)],
         [() => check_write_iter_wrapping_unit]
     );
     contract_harnesses!(handle_capacity_increase, check_handle_capacity_increase, [u8 => check_handle_capacity_increase_u8, u64 => check_handle_capacity_increase_u64, () => check_handle_capacity_increase_unit]);
@@ -5138,22 +5373,22 @@ mod verify {
     proof_harnesses!(check_grow, [], [u8 => check_grow_u8]);
     proof_harnesses!(
         check_resize_with,
-        [kani::stub(VecDeque::<u8>::write_iter_loop, stub_write_iter_loop_drop)],
+        [kani::stub(VecDeque::<u8>::write_iter_loop, VecDeque::<u8>::write_iter_contract_replacement_drop)],
         [u8 => check_resize_with_u8]
     );
     proof_harnesses!(
         check_resize_with,
-        [kani::stub(VecDeque::<()>::write_iter_loop, stub_write_iter_loop_drop)],
+        [kani::stub(VecDeque::<()>::write_iter_loop, VecDeque::<()>::write_iter_contract_replacement_drop)],
         [() => check_resize_with_unit]
     );
     proof_harnesses!(
         check_resize_with_grow,
-        [kani::stub(VecDeque::<u8>::write_iter_loop, stub_write_iter_loop_drop)],
+        [kani::stub(VecDeque::<u8>::write_iter_loop, VecDeque::<u8>::write_iter_contract_replacement_drop)],
         [u8 => check_resize_with_grow_u8]
     );
     proof_harnesses!(
         check_resize_with_grow,
-        [kani::stub(VecDeque::<()>::write_iter_loop, stub_write_iter_loop_drop)],
+        [kani::stub(VecDeque::<()>::write_iter_loop, VecDeque::<()>::write_iter_contract_replacement_drop)],
         [() => check_resize_with_grow_unit]
     );
     proof_harnesses!(
@@ -5163,6 +5398,305 @@ mod verify {
     );
     proof_harnesses!(check_rotate_left, [], [u8 => check_rotate_left_u8, () => check_rotate_left_unit]);
     proof_harnesses!(check_rotate_right, [], [u8 => check_rotate_right_u8, () => check_rotate_right_unit]);
+
+    // Additional shapes (see the shape matrix in the module documentation). `WithDrop` goes on
+    // the targets that move or read elements and drop at most one at a time; `Al16` and `bool`
+    // on the cheap allocation/read paths. The drop-glue paths are in `bounded_evidence`.
+    contract_harnesses!(push_unchecked, check_push_unchecked, [WithDrop => check_push_unchecked_withdrop, Al16 => check_push_unchecked_al16, bool => check_push_unchecked_bool]);
+    contract_harnesses!(buffer_read, check_buffer_read, [WithDrop => check_buffer_read_withdrop, Al16 => check_buffer_read_al16, bool => check_buffer_read_bool]);
+    contract_harnesses!(buffer_write, check_buffer_write, [WithDrop => check_buffer_write_withdrop, Al16 => check_buffer_write_al16]);
+    contract_harnesses!(buffer_range, check_buffer_range, [Al16 => check_buffer_range_al16]);
+    contract_harnesses!(copy, check_copy, [Al16 => check_copy_al16]);
+    contract_harnesses!(copy_nonoverlapping, check_copy_nonoverlapping, [Al16 => check_copy_nonoverlapping_al16]);
+    contract_harnesses!(write_iter, check_write_iter, [WithDrop => check_write_iter_withdrop, Al16 => check_write_iter_al16, bool => check_write_iter_bool]);
+    contract_harnesses!(
+        write_iter_wrapping,
+        check_write_iter_wrapping,
+        [kani::stub(VecDeque::<WithDrop>::write_iter_loop, VecDeque::<WithDrop>::write_iter_contract_replacement)],
+        [WithDrop => check_write_iter_wrapping_withdrop]
+    );
+    contract_harnesses!(from_contiguous_raw_parts_in, check_from_contiguous_raw_parts_in, [WithDrop => check_from_contiguous_raw_parts_in_withdrop, Al16 => check_from_contiguous_raw_parts_in_al16]);
+    proof_harnesses!(check_get, [], [WithDrop => check_get_withdrop, Al16 => check_get_al16, bool => check_get_bool]);
+    proof_harnesses!(check_get_mut, [], [WithDrop => check_get_mut_withdrop]);
+    proof_harnesses!(check_swap, [], [WithDrop => check_swap_withdrop]);
+    proof_harnesses!(check_pop_front, [], [WithDrop => check_pop_front_withdrop, Al16 => check_pop_front_al16, bool => check_pop_front_bool]);
+    proof_harnesses!(check_pop_back, [], [WithDrop => check_pop_back_withdrop]);
+    proof_harnesses!(check_push_front, [], [WithDrop => check_push_front_withdrop]);
+    proof_harnesses!(check_push_back, [], [WithDrop => check_push_back_withdrop, Al16 => check_push_back_al16, bool => check_push_back_bool]);
+    proof_harnesses!(check_remove, [], [WithDrop => check_remove_withdrop]);
+    proof_harnesses!(check_split_off, [], [WithDrop => check_split_off_withdrop, Al16 => check_split_off_al16]);
+    proof_harnesses!(check_append, [], [WithDrop => check_append_withdrop]);
+    proof_harnesses!(check_shrink_to, [], [Al16 => check_shrink_to_al16]);
+
+    /// Bounded supplementary evidence.
+    ///
+    /// None of the harnesses in this module is the proof of any function listed in Challenge
+    /// 25. Each is supplementary evidence for one stub, one transcription or one drop-glue path
+    /// named in its doc comment, and this module is the only place in `verify` that uses
+    /// `#[kani::unwind]`. Every listed function keeps its unbounded harness in the parent
+    /// module. No harness here reaches a loop that carries a loop contract except the
+    /// `retain_mut` drop-glue one (Kani replaces such loops by their contracts regardless of the
+    /// unwind bound, which is fine there: only the drop glue is bounded); the `write_iter`
+    /// iteration is exercised through the contract-free `write_iter_for_each`, the shipped
+    /// statement.
+    mod bounded_evidence {
+        use core::iter::ByRefSized;
+
+        use super::*;
+
+        /// Bound on the iterator length / element count of every harness in this module.
+        const N: usize = 4;
+
+        // -----------------------------------------------------------------------------------
+        // Item 2: the shipped `for_each` statement of `write_iter`
+        // -----------------------------------------------------------------------------------
+
+        /// `write_iter`'s contract checked against the shipped `for_each` statement
+        /// (`write_iter_for_each`, substituted for `write_iter_loop`), the deque fully
+        /// symbolic, the iterator length bounded by `N`.
+        fn write_iter_shipped_text<T: Shape>() {
+            let mut deque = any_deque::<T>();
+            let dst: usize = kani::any();
+            let n: usize = kani::any();
+            kani::assume(n <= N);
+            let mut written: usize = kani::any();
+            let before = written;
+            unsafe { deque.write_iter(dst, AnyIter::<T>::new(n), &mut written) };
+            assert_eq!(written, before + n);
+            kani::cover(n == N && dst > 0, "shipped text: N elements written at a non-zero offset");
+            finish(deque);
+        }
+
+        macro_rules! shipped_text_harness {
+            ($ty:ty, $name:ident) => {
+                #[kani::proof_for_contract(VecDeque::<$ty>::write_iter)]
+                #[kani::stub(VecDeque::<$ty>::write_iter_loop, VecDeque::<$ty>::write_iter_for_each)]
+                #[kani::unwind(6)]
+                fn $name() {
+                    write_iter_shipped_text::<$ty>();
+                }
+            };
+        }
+        shipped_text_harness!(u8, bounded_write_iter_shipped_text_u8);
+        shipped_text_harness!(u64, bounded_write_iter_shipped_text_u64);
+        shipped_text_harness!([u8; 3], bounded_write_iter_shipped_text_u8x3);
+        shipped_text_harness!((), bounded_write_iter_shipped_text_unit);
+        shipped_text_harness!(WithDrop, bounded_write_iter_shipped_text_withdrop);
+
+        // -----------------------------------------------------------------------------------
+        // Item 3: what `write_iter_contract_replacement` adds to `write_iter`'s contract
+        // -----------------------------------------------------------------------------------
+
+        /// The wrapping branch of `write_iter_wrapping` with the shipped statement doing the
+        /// iteration on the real adapter stack (`Take<ByRefSized<&mut AnyIter>>`, then the
+        /// borrowed iterator itself): every element is written exactly once (`written == n`),
+        /// which is the consumption `write_iter_contract_replacement` models with
+        /// `advance_by(hi)`.
+        #[kani::proof_for_contract(VecDeque::<u8>::write_iter_wrapping)]
+        #[kani::stub(VecDeque::<u8>::write_iter_loop, VecDeque::<u8>::write_iter_for_each)]
+        #[kani::unwind(6)]
+        fn bounded_write_iter_wrapping_shipped_text_u8() {
+            let mut deque = any_deque::<u8>();
+            let dst: usize = kani::any();
+            let len: usize = kani::any();
+            let n: usize = kani::any();
+            kani::assume(n <= N);
+            let old_len = deque.len;
+            let written = unsafe { deque.write_iter_wrapping(dst, AnyIter::<u8>::new(n), len) };
+            assert_eq!(written, n);
+            assert_eq!(deque.len, old_len + n);
+            kani::cover(
+                n > 1 && n > deque.capacity() - dst,
+                "shipped text, wrapping branch: both write_iter calls write",
+            );
+            touch(&deque);
+        }
+
+        /// `advance_by(hi)` — the step `write_iter_contract_replacement` adds to the contract —
+        /// leaves the borrowed iterator in the same state as `hi` calls of `next()` (what the
+        /// loop does), on the adapter stack `write_iter_wrapping` builds and on the bare
+        /// iterator, for `hi = size_hint().1` (the value the replacement uses; `Take::next` and
+        /// `Take::advance_by` differ only past the hint).
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_replacement_advance_by_matches_next_u8() {
+            let n: usize = kani::any();
+            let k: usize = kani::any();
+            kani::assume(n <= N && k <= N);
+            // The adapter stack of the wrapping branch's first call.
+            let mut a = AnyIter::<u8>::new(n);
+            let mut b = AnyIter::<u8>::new(n);
+            let mut ta = ByRefSized(&mut a).take(k);
+            let hi = ta.size_hint().1.unwrap();
+            assert_eq!(ta.size_hint().0, hi);
+            assert!(ta.advance_by(hi).is_ok());
+            let mut tb = ByRefSized(&mut b).take(k);
+            let mut steps = 0;
+            while let Some(_) = tb.next() {
+                steps += 1;
+            }
+            assert_eq!(steps, hi);
+            drop(ta);
+            drop(tb);
+            assert_eq!(a.size_hint(), b.size_hint());
+            assert_eq!(a.size_hint().1, Some(n - hi));
+            // The bare iterator (direct branch, and the wrapping branch's second call).
+            let mut c = AnyIter::<u8>::new(n);
+            let mut d = AnyIter::<u8>::new(n);
+            let hi = c.size_hint().1.unwrap();
+            assert!(c.advance_by(hi).is_ok());
+            let mut steps = 0;
+            while let Some(_) = d.next() {
+                steps += 1;
+            }
+            assert_eq!(steps, hi);
+            assert_eq!(c.size_hint(), d.size_hint());
+            kani::cover(k > 0 && k < n, "Take budget smaller than the iterator");
+            kani::cover(k > n, "Take budget larger than the iterator");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Item 3: `stub_ptr_rotate`
+        // -----------------------------------------------------------------------------------
+
+        /// `<[u8]>::rotate_left` / `rotate_right` — the calls `make_contiguous` makes, hence
+        /// `core::slice::rotate::ptr_rotate` — on ranges of every length up to eight and every
+        /// rotation amount, with symbolic contents and a symbolic guard byte on each side: the
+        /// range holds exactly the rotated sequence afterwards and the guards are untouched,
+        /// i.e. `ptr_rotate` permutes the slots of the range and writes nothing else — what
+        /// `stub_ptr_rotate` abstracts for `check_make_contiguous_*`. Lengths and amounts are
+        /// enumerated rather than symbolic so that `ptr_rotate`'s algorithm selection is
+        /// concrete: only the selected, loop-free `ptr_rotate_memmove` is explored (the two
+        /// looping algorithms need `min(left, right) > 256` for `u8`, and would otherwise be
+        /// unwound although unreachable).
+        #[kani::proof]
+        #[kani::unwind(10)]
+        fn bounded_rotate_permutes_range_u8() {
+            const N: usize = 8;
+            for len in 0..=N {
+                for mid in 0..=len {
+                    let mut buf: [u8; N + 2] = kani::any();
+                    let before = buf;
+                    buf[1..1 + len].rotate_left(mid);
+                    for i in 0..len {
+                        assert_eq!(buf[1 + i], before[1 + (i + mid) % len]);
+                    }
+                    assert_eq!(buf[0], before[0]);
+                    for i in 1 + len..N + 2 {
+                        assert_eq!(buf[i], before[i]);
+                    }
+                    let mut buf: [u8; N + 2] = kani::any();
+                    let before = buf;
+                    buf[1..1 + len].rotate_right(mid);
+                    for i in 0..len {
+                        assert_eq!(buf[1 + (i + mid) % len], before[1 + i]);
+                    }
+                    assert_eq!(buf[0], before[0]);
+                    for i in 1 + len..N + 2 {
+                        assert_eq!(buf[i], before[i]);
+                    }
+                }
+            }
+            kani::cover(true, "rotate: all lengths and amounts up to 8 enumerated");
+        }
+
+        // -----------------------------------------------------------------------------------
+        // Item 1: the drop-glue paths, for the `needs_drop` shape
+        // -----------------------------------------------------------------------------------
+
+        /// A `VecDeque<WithDrop>` of capacity `<= 8` with `len <= N` elements written in place
+        /// (no destructor runs while building), symbolic head, and `DROPS` reset to zero.
+        fn small_deque_with_drop() -> VecDeque<WithDrop> {
+            const CAP: usize = 8;
+            let requested: usize = kani::any();
+            kani::assume(requested <= CAP);
+            let mut deque = VecDeque::<WithDrop>::with_capacity(requested);
+            let cap = deque.capacity();
+            kani::assume(cap <= CAP);
+            let head: usize = if cap == 0 { 0 } else { kani::any_where(|h: &usize| *h < cap) };
+            let len: usize = kani::any_where(|l: &usize| *l <= cmp::min(cap, N));
+            for i in 0..len {
+                unsafe { ptr::write(deque.ptr().add((head + i) % cap), WithDrop(kani::any())) };
+            }
+            deque.head = head;
+            deque.len = len;
+            kani::cover(len > cap - head, "drop glue: wrapped layout");
+            DROPS.store(0, Relaxed);
+            deque
+        }
+
+        /// `truncate` runs the destructor of exactly the removed elements, and `Drop for
+        /// VecDeque` those of the remaining ones (`ptr::drop_in_place::<[T]>` on both slices).
+        #[kani::proof]
+        #[kani::unwind(10)]
+        fn bounded_truncate_drop_glue_withdrop() {
+            let mut deque = small_deque_with_drop();
+            let len = deque.len();
+            let new_len: usize = kani::any();
+            deque.truncate(new_len);
+            let removed = len.saturating_sub(new_len);
+            assert_eq!(DROPS.load(Relaxed), removed);
+            assert_eq!(deque.len(), len - removed);
+            kani::cover(removed > 1 && len > removed, "truncate: several dropped, some remain");
+            drop(deque);
+            assert_eq!(DROPS.load(Relaxed), len);
+        }
+
+        /// `drain` runs the destructor of exactly the drained elements (the ones not pulled out
+        /// through `Drain`'s destructor), the rest through `Drop for VecDeque`.
+        #[kani::proof]
+        #[kani::unwind(10)]
+        fn bounded_drain_drop_glue_withdrop() {
+            let mut deque = small_deque_with_drop();
+            let len = deque.len();
+            let (start, end) = any_subrange(len);
+            let mut drain = deque.drain(start..end);
+            let pulled: bool = kani::any();
+            if pulled {
+                if let Some(elem) = drain.next() {
+                    drop(elem);
+                }
+            }
+            drop(drain);
+            assert_eq!(DROPS.load(Relaxed), end - start);
+            assert_eq!(deque.len(), len - (end - start));
+            kani::cover(
+                pulled && end - start > 1 && start > 0 && end < len,
+                "drain: one pulled, interior range",
+            );
+            drop(deque);
+            assert_eq!(DROPS.load(Relaxed), len);
+        }
+
+        /// `Drop for VecDeque` runs every element's destructor exactly once, for both ring
+        /// layouts.
+        #[kani::proof]
+        #[kani::unwind(10)]
+        fn bounded_vecdeque_drop_glue_withdrop() {
+            let deque = small_deque_with_drop();
+            let len = deque.len();
+            let wrapped = len > deque.capacity() - deque.head;
+            drop(deque);
+            assert_eq!(DROPS.load(Relaxed), len);
+            kani::cover(wrapped && len > 1, "Drop for VecDeque: wrapped layout");
+        }
+
+        /// `retain_mut` drops exactly the rejected elements (through `truncate`), `Drop for
+        /// VecDeque` the kept ones. `retain_mut`'s own loops run under their loop contracts
+        /// here as everywhere; the drop glue is what this harness bounds.
+        #[kani::proof]
+        #[kani::unwind(10)]
+        fn bounded_retain_mut_drop_glue_withdrop() {
+            let mut deque = small_deque_with_drop();
+            let len = deque.len();
+            deque.retain_mut(|_| kani::any());
+            let kept = deque.len();
+            assert_eq!(DROPS.load(Relaxed), len - kept);
+            kani::cover(kept > 0 && kept < len, "retain_mut: some dropped, some kept");
+            drop(deque);
+            assert_eq!(DROPS.load(Relaxed), len);
+        }
+    }
 
     #[kani::proof]
     fn check_vecdeque_swap() {
