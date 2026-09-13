@@ -134,7 +134,23 @@
              if TranslatorArgs.ignore_ref_creation then true
              else
                let directives =
-@@ -5993,17 +5993,18 @@
+@@ -3157,7 +3157,14 @@
+             Ok (`TrRvalueExpr e)
+           | _ ->
+           let* ty_info = translate_decoded_ty cast_data.ty loc in
+-          let ty = ty_info.vf_ty in
++          let ty =
++            match ty_info.vf_ty with
++            | Ast.RustRefTypeExpr (_, Ast.InferredTypeExpr _, _, (Ast.SliceTypeExpr _ as slice_ty))
++                when cast_data.kind = D.PointerCoercion ->
++                (* The borrow is checked by Rvalue::Ref; this coercion only adds slice metadata. *)
++                Ast.PtrTypeExpr (loc, slice_ty)
++            | ty -> ty
++          in
+           match operand with
+           | `TrOperandCopy expr
+           | `TrOperandMove (expr, _ (*place_is_mutable*))
+@@ -5993,17 +6000,18 @@
             with
             | Lifetime -> Ok (`Lifetime name)
             | Type -> Ok (`Type name)
@@ -162,7 +178,7 @@
        let lft_params =
          Util.flatmap (function `Lifetime x -> [ x ] | _ -> []) generics
        in
-@@ -6029,7 +6030,9 @@
+@@ -6029,7 +6037,9 @@
          |> List.map decode_predicate
        in
        let sized_tparams = compute_sized_tparams preds in

@@ -19,3 +19,14 @@ unsafe fn exclusive<T, const N: usize>(p: *mut [T; N]) -> *mut [T; N]
 {
     unsafe { &mut *p as *mut [T; N] }
 }
+
+unsafe fn matrix_ptr<T, const N: usize>(
+    p: *const [[std::mem::MaybeUninit<T>; N]; 2],
+) -> *const std::mem::MaybeUninit<T>
+//@ req pointer_within_limits(p) == true &*& [?f]ref_initialized(p);
+//@ ens [f]ref_initialized(p) &*& result == p as *std::mem::MaybeUninit<T>;
+//@ on_unwind_ens false;
+{
+    //@ reborrow_ref_(p);
+    unsafe { (*p).as_ptr().cast() }
+}

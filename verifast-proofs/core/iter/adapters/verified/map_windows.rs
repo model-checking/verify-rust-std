@@ -123,12 +123,13 @@ impl<T, const N: usize> Buffer<T, N> {
         debug_assert!(self.start + N <= 2 * N);
 
         // SAFETY: our invariant guarantees these elements are initialized.
+        let buffer_ptr = unsafe { self.buffer_ptr() };
         //@ let window = (base(self) + start) as *[T; N];
         //@ let reference = precreate_ref(window);
         //@ init_ref_share('a, t, reference);
         //@ let r = open_frac_borrow('a, ref_initialized_(reference), q);
         //@ open [r]ref_initialized_::<[T; N]>(reference)();
-        let result = unsafe { &*self.buffer_ptr().add(self.start).cast() };
+        let result = unsafe { &*buffer_ptr.add(self.start).cast() };
         //@ close [r]ref_initialized_::<[T; N]>(reference)();
         //@ close_frac_borrow(r, ref_initialized_(reference));
         //@ close [f]bounds(self, start);

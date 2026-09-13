@@ -147,6 +147,21 @@ if not all(s in diagnostics for s in ("ConstParamTerm N", "ConstParamTerm M", "n
     sys.exit("The refinement negative check did not distinguish the two const parameters.")
 PY
 
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/matrix-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The array-to-slice negative check unexpectedly passed.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The array-to-slice negative check did not reject missing reference permissions.")
+PY
+
 # Keep every stage sequential and require both proof and refinement to succeed.
 # Collect their independent diagnostics even when the first stage fails.
 # No assumption, unwind, reference-creation, or overflow suppression flags.
