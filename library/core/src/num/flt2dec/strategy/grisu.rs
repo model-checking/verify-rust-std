@@ -1083,6 +1083,14 @@ pub mod grisu_verify {
 
                 #[kani::proof]
                 #[kani::unwind(19)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
                 #[kani::stub(round_and_weed, stub_round_and_weed)]
                 #[kani::stub_verified(round_shortest_contract)]
                 #[kani::solver(kissat)]
@@ -1112,6 +1120,14 @@ pub mod grisu_verify {
                 // rounding contract retains its own 33-iteration proof bound.
                 #[kani::proof]
                 #[kani::unwind(19)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
                 #[kani::stub(possibly_round, stub_possibly_round)]
                 #[kani::stub_verified(round_exact_contract)]
                 #[kani::solver(kissat)]

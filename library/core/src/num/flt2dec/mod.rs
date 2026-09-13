@@ -668,6 +668,8 @@ where
 }
 
 #[cfg(kani)]
+mod bit_scan_verify;
+#[cfg(kani)]
 mod rounding_verify;
 
 #[cfg(kani)]

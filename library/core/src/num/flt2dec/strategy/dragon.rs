@@ -556,6 +556,14 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($shortest_unwind)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
                 #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
                 #[kani::stub(Big::is_zero, stub_is_zero)]
                 #[kani::stub(
@@ -581,6 +589,14 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($exact_unwind)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
                 #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
                 #[kani::stub(Big::is_zero, stub_is_zero)]
                 #[kani::stub(

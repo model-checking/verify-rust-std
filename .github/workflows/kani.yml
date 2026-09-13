@@ -137,6 +137,10 @@ jobs:
             module: num::flt2dec::strategy::dragon::dragon_verify
             proof: check_comparison_models_agree
             kind: equivalence
+          - name: bit-scan-equivalence
+            module: num::flt2dec::bit_scan_verify
+            proof: check_leading_zeros_models_agree
+            kind: equivalence
           - name: dragon-exact-fixed-exponent
             module: num::flt2dec::strategy::dragon::dragon_verify::f64_exp_1023
             proof: check_format_exact
