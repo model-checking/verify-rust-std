@@ -414,6 +414,11 @@ pub mod dragon_verify {
         <u32 as crate::num::bignum::FullOps>::full_div_rem(digit, divisor, borrow)
     }
 
+    // Keep ordinary stub substitution separate from verified contract dispatch.
+    fn stub_div_rem_digit(digit: u32, divisor: u32, borrow: u32) -> (u32, u32) {
+        div_rem_digit_contract(digit, divisor, borrow)
+    }
+
     #[kani::proof_for_contract(div_rem_digit_contract)]
     #[kani::solver(kissat)]
     fn check_div_rem_digit_contract() {
@@ -448,7 +453,7 @@ pub mod dragon_verify {
     #[kani::proof_for_contract(div_2pow10_contract)]
     #[kani::stub(
         <u32 as crate::num::bignum::FullOps>::full_div_rem,
-        div_rem_digit_contract
+        stub_div_rem_digit
     )]
     #[kani::stub_verified(div_rem_digit_contract)]
     #[kani::unwind(41)]
