@@ -148,6 +148,7 @@ jobs:
     env:
       KANI_JOBS: 1
       RAYON_NUM_THREADS: 1
+      KANI_OBJECT_BITS: ${{ matrix.kind == 'contract' && '12' || '14' }}
       HARNESS_MODULE: ${{ matrix.module }}
       HARNESS_PROOF: ${{ matrix.proof }}
       HARNESS_KIND: ${{ matrix.kind }}

@@ -14,8 +14,9 @@ usage() {
 }
 
 # Initialize variables
-# Keep Kani's default object capacity: flt2dec proofs exceed a 12-bit limit.
+# Generator proofs need more objects; helper jobs can select a smaller capacity.
 declare -a command_args
+kani_object_bits="${KANI_OBJECT_BITS:-14}"
 path=""
 run_command="verify-std"
 with_autoharness="false"
@@ -220,7 +221,8 @@ run_verification_subset() {
         $harness_args --exact \
         -j \
         --output-format=terse \
-        "${command_args[@]}"
+        "${command_args[@]}" \
+        --cbmc-args --object-bits "$kani_object_bits"
 }
 
 # Check if binary exists and is up to date
@@ -300,7 +302,8 @@ main() {
             "$kani_path" verify-std -Z unstable-options ./library \
                 $unstable_args \
                 --no-assert-contracts \
-                "${command_args[@]}"
+                "${command_args[@]}" \
+                --cbmc-args --object-bits "$kani_object_bits"
         fi
       elif [[ "$run_command" == "autoharness" ]]; then
           # Run verification for a subset of automatically generated harnesses
@@ -309,7 +312,8 @@ main() {
           "$kani_path" autoharness -Z autoharness -Z unstable-options --std ./library \
               $unstable_args \
               --no-assert-contracts \
-              "${command_args[@]}"
+              "${command_args[@]}" \
+              --cbmc-args --object-bits "$kani_object_bits"
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
@@ -343,7 +347,8 @@ main() {
             --only-codegen -j --output-format=terse \
             $unstable_args \
             --no-assert-contracts \
-            "${command_args[@]}"
+            "${command_args[@]}" \
+            --cbmc-args --object-bits "$kani_object_bits"
         # remove metadata file for Kani-generated "dummy" crate that we won't
         # get scanner data for
         local target=$(find "target/kani_verify_std/target/" -mindepth 1 \
