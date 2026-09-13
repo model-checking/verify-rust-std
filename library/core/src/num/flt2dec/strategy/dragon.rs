@@ -405,6 +405,28 @@ pub mod dragon_verify {
     // Lengths above 32 require a separate proof; these harnesses are bounded.
     const PROOF_BUFLEN: usize = 32;
 
+    // Bigint division needs the remainder bound to justify the next limb's
+    // division. Prove that scalar obligation separately; the storage contract
+    // below does not depend on the quotient's numeric value.
+    #[kani::requires(borrow < divisor)]
+    #[kani::ensures(|result| result.1 < divisor)]
+    fn div_rem_digit_contract(digit: u32, divisor: u32, borrow: u32) -> (u32, u32) {
+        <u32 as crate::num::bignum::FullOps>::full_div_rem(digit, divisor, borrow)
+    }
+
+    #[kani::proof_for_contract(div_rem_digit_contract)]
+    #[kani::solver(kissat)]
+    fn check_div_rem_digit_contract() {
+        let digit: u32 = kani::any();
+        let divisor: u32 = kani::any();
+        let borrow: u32 = kani::any();
+        let (_, remainder) = div_rem_digit_contract(digit, divisor, borrow);
+        kani::cover(divisor == 1, "limb division accepts the unit divisor");
+        kani::cover(divisor == u32::MAX, "limb division accepts the largest divisor");
+        kani::cover(borrow == divisor - 1, "limb division accepts the largest borrow");
+        kani::cover(remainder == 0, "limb division can have no remainder");
+    }
+
     // Division preserves the bigint's allocated prefix and unused zero limbs.
     // Its numeric result is overapproximated; the generator still performs the
     // real addition, comparison, and subsequent digit extraction.
@@ -424,6 +446,11 @@ pub mod dragon_verify {
     }
 
     #[kani::proof_for_contract(div_2pow10_contract)]
+    #[kani::stub(
+        <u32 as crate::num::bignum::FullOps>::full_div_rem,
+        div_rem_digit_contract
+    )]
+    #[kani::stub_verified(div_rem_digit_contract)]
     #[kani::unwind(41)]
     #[kani::solver(kissat)]
     fn check_div_2pow10_contract() {

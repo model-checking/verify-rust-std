@@ -97,6 +97,10 @@ jobs:
             module: num::flt2dec::strategy::dragon::dragon_verify
             proof: check_div_2pow10_contract
             kind: contract
+          - name: limb-division-contract
+            module: num::flt2dec::strategy::dragon::dragon_verify
+            proof: check_div_rem_digit_contract
+            kind: contract
           - name: rounding-contract
             module: num::flt2dec::rounding_verify
             proof: check_round_up_contract
