@@ -22,7 +22,7 @@
 +    lem array_upcast<T0, T1, N: ?Sized>(value: [T0; N]);
 +        req is_subtype_of::<T0, T1>() == true;
 +        ens Array_elems(upcast::<[T0; N], [T1; N]>(value)) ==
-+            map(upcast::<T0, T1>, Array_elems(value));
++            map::<T0, T1>(upcast, Array_elems(value));
 +
 +    lem array_elems_length<T, N: ?Sized>(value: [T; N]);
 +        req true;

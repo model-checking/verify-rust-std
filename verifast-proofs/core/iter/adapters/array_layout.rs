@@ -44,7 +44,7 @@ lem owned_values_mono<T0, T1>(t: thread_id_t, values: list<T0>)
     req type_interp::<T0>() &*& type_interp::<T1>() &*&
         is_subtype_of::<T0, T1>() == true &*& foreach(values, own::<T0>(t));
     ens type_interp::<T0>() &*& type_interp::<T1>() &*&
-        foreach(map(upcast::<T0, T1>, values), own::<T1>(t));
+        foreach(map::<T0, T1>(upcast, values), own::<T1>(t));
 {
     open foreach(values, own::<T0>(t));
     match values {
@@ -56,7 +56,7 @@ lem owned_values_mono<T0, T1>(t: thread_id_t, values: list<T0>)
             owned_values_mono::<T0, T1>(t, rest);
         }
     }
-    close foreach(map(upcast::<T0, T1>, values), own::<T1>(t));
+    close foreach(map::<T0, T1>(upcast, values), own::<T1>(t));
 }
 
 lem owned_values_send<T>(t0: thread_id_t, t1: thread_id_t, values: list<T>)
@@ -78,9 +78,9 @@ lem owned_values_send<T>(t0: thread_id_t, t1: thread_id_t, values: list<T>)
 
 lem mapped_uninit_upcast<T0, T1>(values: list<T0>)
     req is_subtype_of::<T0, T1>() == true;
-    ens map(upcast::<std::mem::MaybeUninit<T0>, std::mem::MaybeUninit<T1>>,
+    ens map::<std::mem::MaybeUninit<T0>, std::mem::MaybeUninit<T1>>(upcast,
             map(std::mem::MaybeUninit::new, values)) ==
-        map(std::mem::MaybeUninit::new, map(upcast::<T0, T1>, values));
+        map(std::mem::MaybeUninit::new, map::<T0, T1>(upcast, values));
 {
     match values {
         nil => {}
@@ -99,7 +99,7 @@ fix matrix_elems<T, N>(matrix: [[T; N]; 2]) -> list<T> {
 lem matrix_upcast<T0, T1, N: ?Sized>(matrix: [[T0; N]; 2])
     req is_subtype_of::<T0, T1>() == true;
     ens matrix_elems::<T1, N>(upcast::<[[T0; N]; 2], [[T1; N]; 2]>(matrix)) ==
-        map(upcast::<T0, T1>, matrix_elems(matrix));
+        map::<T0, T1>(upcast, matrix_elems(matrix));
 {
     std::mem::array_subtype::<T0, T1, N>();
     std::mem::array_upcast::<[T0; N], [T1; N], 2>(matrix);
@@ -112,7 +112,7 @@ lem matrix_upcast<T0, T1, N: ?Sized>(matrix: [[T0; N]; 2])
                 cons(second, suffix) => {
                     std::mem::array_upcast::<T0, T1, N>(first);
                     std::mem::array_upcast::<T0, T1, N>(second);
-                    mapped_append(upcast::<T0, T1>, Array_elems(first), Array_elems(second));
+                    mapped_append::<T0, T1>(upcast, Array_elems(first), Array_elems(second));
                 }
             }
         }

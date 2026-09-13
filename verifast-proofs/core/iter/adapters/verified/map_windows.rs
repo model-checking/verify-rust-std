@@ -67,12 +67,12 @@ lem Buffer_own_mono<T0, T1, N: ?Sized>()
     std::mem::upcast_identity(buffer.start);
     std::mem::MaybeUninit_subtype::<T0, T1>();
     matrix_upcast::<std::mem::MaybeUninit<T0>, std::mem::MaybeUninit<T1>, N>(buffer.buffer);
-    mapped_range(upcast::<std::mem::MaybeUninit<T0>, std::mem::MaybeUninit<T1>>,
+    mapped_range::<std::mem::MaybeUninit<T0>, std::mem::MaybeUninit<T1>>(upcast,
         matrix_elems(buffer.buffer), buffer.start, width::<N>());
     mapped_uninit_upcast::<T0, T1>(values);
-    mapped_length(upcast::<T0, T1>, values);
+    mapped_length::<T0, T1>(upcast, values);
     owned_values_mono::<T0, T1>(t, values);
-    close exists(map(upcast::<T0, T1>, values));
+    close exists(map::<T0, T1>(upcast, values));
     close Buffer_own::<T1, N>(t, Buffer::<T1, N> {
         buffer: upcast(buffer.buffer), start: upcast(buffer.start) });
 }
