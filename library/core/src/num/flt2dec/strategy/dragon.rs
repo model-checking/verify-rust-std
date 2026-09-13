@@ -398,13 +398,49 @@ pub mod dragon_verify {
         for_each_finite_partition,
     };
 
-    // Keep the generator comparisons and digit writes. Exact mode uses the
-    // separate division contract below for initial fixup. Neither termination
-    // nor the buffer index is assumed. The unwind bound includes Big32x40's
-    // limb loops, and its assertions remain enabled.
+    // Keep exact comparison semantics and the generator's digit writes. The
+    // comparison models have a separate equivalence proof; exact mode also
+    // uses the division contract below for initial fixup. Neither termination
+    // nor the buffer index is assumed. Bigint unwind assertions remain enabled.
     // Lengths above 32 require a separate proof; these harnesses are bounded.
     const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
+
+    #[kani::requires(left.kani_valid_storage() && right.kani_valid_storage())]
+    #[kani::ensures(|agrees| *agrees)]
+    fn comparison_models_agree(left: &Big, right: &Big) -> bool {
+        (left.cmp(right) == left.kani_cmp_model(right))
+            & (left.is_zero() == left.kani_is_zero_model())
+    }
+
+    // Check the verified lemma's storage preconditions, then compute the exact
+    // model directly so constant limb indices survive symbolic execution.
+    fn stub_cmp(left: &Big, right: &Big) -> Ordering {
+        let _ = comparison_models_agree(left, right);
+        left.kani_cmp_model(right)
+    }
+
+    fn stub_is_zero(value: &Big) -> bool {
+        let _ = comparison_models_agree(value, &Big::from_small(0));
+        value.kani_is_zero_model()
+    }
+
+    #[kani::proof_for_contract(comparison_models_agree)]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_comparison_models_agree() {
+        let left = Big::kani_any_valid();
+        let right = Big::kani_any_valid();
+        let _ = comparison_models_agree(&left, &right);
+        let ordering = left.kani_cmp_model(&right);
+        kani::cover(ordering == Ordering::Less, "comparison can be less");
+        kani::cover(ordering == Ordering::Equal, "comparison can be equal");
+        kani::cover(ordering == Ordering::Greater, "comparison can be greater");
+        kani::cover(left.kani_is_zero_model(), "zero testing accepts zero");
+        kani::cover(!left.kani_is_zero_model(), "zero testing accepts nonzero limbs");
+        kani::cover(left.kani_size() == 0, "comparison accepts empty zero storage");
+        kani::cover(left.kani_size() == 40, "comparison accepts all bigint limbs");
+    }
 
     // Bigint division needs the remainder bound to justify the next limb's
     // division. Prove that scalar obligation separately; the storage contract
@@ -471,7 +507,7 @@ pub mod dragon_verify {
 
     // Division preserves the bigint's allocated prefix and unused zero limbs.
     // Its numeric result is overapproximated; the generator still performs the
-    // real addition, comparison, and subsequent digit extraction.
+    // real addition, exact comparison semantics, and subsequent digit extraction.
     // Read size without constructing a slice: old expressions must not panic.
     #[kani::requires(n <= PROOF_BUFLEN && value.kani_valid_storage())]
     #[kani::ensures(|_| {
@@ -518,6 +554,9 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($shortest_unwind)]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::stub_verified(comparison_models_agree)]
                 #[kani::stub(
                     crate::num::flt2dec::round_up,
                     crate::num::flt2dec::rounding_verify::stub_round_up
@@ -541,6 +580,9 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($exact_unwind)]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::stub_verified(comparison_models_agree)]
                 #[kani::stub(
                     crate::num::flt2dec::round_up,
                     crate::num::flt2dec::rounding_verify::stub_round_up

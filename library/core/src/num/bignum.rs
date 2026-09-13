@@ -422,6 +422,43 @@ impl Big32x40 {
             )
     }
 
+    // The equivalence contract in dragon_verify checks these constant-index
+    // models against the real methods for every valid storage representation.
+    pub(crate) fn kani_cmp_model(&self, other: &Self) -> crate::cmp::Ordering {
+        use crate::cmp::Ordering::{Equal, Greater, Less};
+
+        macro_rules! compare_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let ordering = Equal;
+                $(let ordering = match self.base[$index].cmp(&other.base[$index]) {
+                    Less => Less,
+                    Equal => ordering,
+                    Greater => Greater,
+                };)+
+                ordering
+            }};
+        }
+
+        // A differing higher limb supersedes every lower limb's ordering.
+        compare_limbs!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        )
+    }
+
+    pub(crate) fn kani_is_zero_model(&self) -> bool {
+        macro_rules! limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& (self.base[$index] == 0))+
+            };
+        }
+
+        limbs_are_zero!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        )
+    }
+
     // Contract proofs include every storage size, including the empty zero
     // representation. Leading zero limbs within the active prefix are valid.
     pub(crate) fn kani_any_valid() -> Self {
