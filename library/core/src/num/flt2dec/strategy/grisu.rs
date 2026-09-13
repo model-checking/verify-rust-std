@@ -840,8 +840,7 @@ pub mod grisu_verify {
         }
     }
 
-    // Pass initialized input bytes by value so these read-only contracts have
-    // no borrowed argument objects to track at each unrolled generator call.
+    // Shortest rounding keeps its input immutable and returns only metadata.
     #[kani::requires(
         len > 0 && len <= PROOF_BUFLEN
             && crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |digit| digit < u8::MAX)
@@ -936,18 +935,16 @@ pub mod grisu_verify {
         kani::cover(result.is_none(), "shortest rounding can request the Dragon fallback");
     }
 
-    // Keep uninitialized padding in this proof: only the caller's initialized
+    // Keep uninitialized padding in this proof: only the initialized input
     // prefix is copied before executing the real final-rounding helper.
     #[kani::requires(
         len <= capacity && capacity <= PROOF_BUFLEN
             && exp < i16::MAX && remainder < ten_kappa
-            && crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |digit| digit < u8::MAX)
     )]
     #[kani::ensures(|result| result.as_ref().is_none_or(|&(written, _)| {
         written >= len && written <= capacity && written - len <= 1
     }))]
     fn round_exact_contract(
-        digits: [u8; PROOF_BUFLEN],
         len: usize,
         capacity: usize,
         exp: i16,
@@ -956,6 +953,13 @@ pub mod grisu_verify {
         ten_kappa: u64,
         ulp: u64,
     ) -> Option<(usize, i16)> {
+        // Quantify every prefix allowed by the adapter's byte check here.
+        // The postcondition does not depend on its values, so callers pass
+        // only the numeric state after checking their actual input bytes.
+        let digits: [u8; PROOF_BUFLEN] = kani::any();
+        kani::assume(crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |digit| {
+            digit < u8::MAX
+        }));
         let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
         let start = buf.as_mut_ptr().cast::<u8>();
         // SAFETY: the contract bounds len by both distinct arrays' capacities.
@@ -986,12 +990,11 @@ pub mod grisu_verify {
         ulp: u64,
     ) -> Option<(&[u8], i16)> {
         assert!(len <= buf.len() && buf.len() <= PROOF_BUFLEN);
-        let mut digits = [0; PROOF_BUFLEN];
         // SAFETY: this adapter has possibly_round's initialized-prefix contract.
-        // The verified precondition reads its bytes before the model can write.
-        digits[..len].copy_from_slice(unsafe { buf[..len].assume_init_ref() });
-        let result =
-            round_exact_contract(digits, len, buf.len(), exp, limit, remainder, ten_kappa, ulp);
+        // Read every active byte before the model can write to this buffer.
+        let digits = unsafe { buf[..len].assume_init_ref() };
+        assert!(crate::num::flt2dec::rounding_verify::bytes_below_max(digits));
+        let result = round_exact_contract(len, buf.len(), exp, limit, remainder, ten_kappa, ulp);
         let written = result.map_or(len, |(written, _)| written);
         assert!(written <= buf.len());
         // The contract proves metadata and initialized output, without a byte
@@ -1018,11 +1021,9 @@ pub mod grisu_verify {
     #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
     #[kani::solver(kissat)]
     fn check_round_exact_contract() {
-        let digits: [u8; PROOF_BUFLEN] = kani::any();
         let len = usize::from(kani::any::<u8>());
         let capacity = usize::from(kani::any::<u8>());
         let result = round_exact_contract(
-            digits,
             len,
             capacity,
             kani::any(),

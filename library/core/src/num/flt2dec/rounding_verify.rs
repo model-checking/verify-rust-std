@@ -5,6 +5,20 @@ use crate::kani;
 
 const PROOF_BUFLEN: usize = 32;
 
+// Read only the active slice, checking the byte condition needed by round_up.
+pub(crate) fn bytes_below_max(digits: &[u8]) -> bool {
+    assert!(digits.len() <= PROOF_BUFLEN);
+    macro_rules! check_bytes {
+        ($($index:literal),+ $(,)?) => {
+            true $(& ((digits.len() <= $index) || digits[$index] < u8::MAX))+
+        };
+    }
+    check_bytes!(
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31,
+    )
+}
+
 // Read every byte with constant indices in helper proofs.
 pub(crate) fn prefix_checksum(digits: &[u8]) -> u8 {
     assert!(digits.len() <= PROOF_BUFLEN);
