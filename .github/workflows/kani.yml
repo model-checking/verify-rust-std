@@ -180,7 +180,7 @@ jobs:
             harness_args+=(--harness "$HARNESS_MODULE::$HARNESS_PROOF")
           fi
           output_format=terse
-          if [[ "$HARNESS_KIND" == contract ]]; then
+          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == fixed-exponent ]]; then
             output_format=regular
           fi
           printf 'Selected %s harnesses\n' "$(( ${#harness_args[@]} / 2 ))"

@@ -855,8 +855,12 @@ pub mod grisu_verify {
                     });
                 }
 
+                // Integral extraction takes at most ten iterations. Fractional
+                // extraction stops once err = 10^18 >= 2^59: the cached power
+                // gives e <= 60, hence maxerr = 2^(e - 1) <= 2^59. The separate
+                // rounding contract retains its own 33-iteration proof bound.
                 #[kani::proof]
-                #[kani::unwind(33)]
+                #[kani::unwind(19)]
                 #[kani::stub(
                     crate::num::flt2dec::round_up,
                     crate::num::flt2dec::rounding_verify::stub_round_up
