@@ -4,9 +4,119 @@ pred_ctor array_owned<T, N>()(t: thread_id_t, value: [T; N]) =
     foreach(Array_elems(value), own::<T>(t));
 type_pred_def for<T, N> <[T; N]>.own = array_owned::<T, N>;
 
+lem mapped_append<a, b>(f: fix(a, b), xs: list<a>, ys: list<a>)
+    req true;
+    ens map(f, append(xs, ys)) == append(map(f, xs), map(f, ys));
+{
+    match xs {
+        nil => {}
+        cons(x, rest) => { mapped_append(f, rest, ys); }
+    }
+}
+
+lem mapped_length<a, b>(f: fix(a, b), xs: list<a>)
+    req true;
+    ens length(map(f, xs)) == length(xs);
+{
+    match xs {
+        nil => {}
+        cons(x, rest) => { mapped_length(f, rest); }
+    }
+}
+
+lem mapped_range<a, b>(f: fix(a, b), xs: list<a>, start: usize, count: usize)
+    req 0 <= start &*& 0 <= count;
+    ens take(count, drop(start, map(f, xs))) == map(f, take(count, drop(start, xs)));
+{
+    match xs {
+        nil => {}
+        cons(x, rest) => {
+            if start > 0 {
+                mapped_range(f, rest, start - 1, count);
+            } else {
+                if count > 0 { mapped_range(f, rest, 0, count - 1); }
+            }
+        }
+    }
+}
+
+lem owned_values_mono<T0, T1>(t: thread_id_t, values: list<T0>)
+    req type_interp::<T0>() &*& type_interp::<T1>() &*&
+        is_subtype_of::<T0, T1>() == true &*& foreach(values, own::<T0>(t));
+    ens type_interp::<T0>() &*& type_interp::<T1>() &*&
+        foreach(map(upcast::<T0, T1>, values), own::<T1>(t));
+{
+    open foreach(values, own::<T0>(t));
+    match values {
+        nil => {}
+        cons(value, rest) => {
+            open own::<T0>(t)(value);
+            own_mono::<T0, T1>(t, value);
+            close own::<T1>(t)(upcast::<T0, T1>(value));
+            owned_values_mono::<T0, T1>(t, rest);
+        }
+    }
+    close foreach(map(upcast::<T0, T1>, values), own::<T1>(t));
+}
+
+lem owned_values_send<T>(t0: thread_id_t, t1: thread_id_t, values: list<T>)
+    req type_interp::<T>() &*& is_Send(typeid(T)) == true &*& foreach(values, own::<T>(t0));
+    ens type_interp::<T>() &*& foreach(values, own::<T>(t1));
+{
+    open foreach(values, own::<T>(t0));
+    match values {
+        nil => {}
+        cons(value, rest) => {
+            open own::<T>(t0)(value);
+            Send::send::<T>(t0, t1, value);
+            close own::<T>(t1)(value);
+            owned_values_send(t0, t1, rest);
+        }
+    }
+    close foreach(values, own::<T>(t1));
+}
+
+lem mapped_uninit_upcast<T0, T1>(values: list<T0>)
+    req is_subtype_of::<T0, T1>() == true;
+    ens map(upcast::<std::mem::MaybeUninit<T0>, std::mem::MaybeUninit<T1>>,
+            map(std::mem::MaybeUninit::new, values)) ==
+        map(std::mem::MaybeUninit::new, map(upcast::<T0, T1>, values));
+{
+    match values {
+        nil => {}
+        cons(value, rest) => {
+            std::mem::MaybeUninit_upcast_new::<T0, T1>(value);
+            mapped_uninit_upcast::<T0, T1>(rest);
+        }
+    }
+}
+
 fix matrix_elems<T, N>(matrix: [[T; N]; 2]) -> list<T> {
     append(Array_elems(head(Array_elems(matrix))),
         Array_elems(head(tail(Array_elems(matrix)))))
+}
+
+lem matrix_upcast<T0, T1, N: ?Sized>(matrix: [[T0; N]; 2])
+    req is_subtype_of::<T0, T1>() == true;
+    ens matrix_elems::<T1, N>(upcast::<[[T0; N]; 2], [[T1; N]; 2]>(matrix)) ==
+        map(upcast::<T0, T1>, matrix_elems(matrix));
+{
+    std::mem::array_subtype::<T0, T1, N>();
+    std::mem::array_upcast::<[T0; N], [T1; N], 2>(matrix);
+    std::mem::array_elems_length::<[T0; N], 2>(matrix);
+    match Array_elems(matrix) {
+        nil => {}
+        cons(first, rest) => {
+            match rest {
+                nil => {}
+                cons(second, suffix) => {
+                    std::mem::array_upcast::<T0, T1, N>(first);
+                    std::mem::array_upcast::<T0, T1, N>(second);
+                    mapped_append(upcast::<T0, T1>, Array_elems(first), Array_elems(second));
+                }
+            }
+        }
+    }
 }
 
 // Keep a fraction while changing representations so precision relates the values.
@@ -117,7 +227,7 @@ lem own_matrix_storage<T, N: ?Sized>(t: thread_id_t, matrix: [[std::mem::MaybeUn
     close array_owned::<[std::mem::MaybeUninit<T>; N], 2>()(t, matrix);
 }
 
-pred array_borrow_tokens<T>(k: lifetime_t, p: *T, count: usize;) =
+pred array_borrow_tokens<T>(k: lifetime_t, p: *T, count: usize) =
     pointer_within_limits(p) == true &*&
     if count == 0 { true } else {
         points_to_at_lft_end_token(k, p) &*& array_borrow_tokens(k, p + 1, count - 1)

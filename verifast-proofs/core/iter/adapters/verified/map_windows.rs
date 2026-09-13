@@ -4,6 +4,7 @@ use crate::mem::MaybeUninit;
 use crate::{fmt, ptr};
 
 //@ use array_layout::{array_borrow_tokens, collapse_window, expand_window, lend_array, matrix_elems, own_matrix_storage, pack_matrix, reclaim_array, unpack_matrix};
+//@ use array_layout::{mapped_length, mapped_range, mapped_uninit_upcast, matrix_upcast, owned_values_mono, owned_values_send};
 
 struct Buffer<T, const N: usize> {
     // Invariant: `self.buffer[self.start..self.start + N]` is initialized,
@@ -46,12 +47,50 @@ pred_ctor writable_matrix<T, N>(b: *Buffer<T, N>)(;) = (*b).buffer |-> _;
 pred<T, N> <Buffer<T, N>>.own(t, buffer) =
     exists::<list<T>>(?values) &*&
     0 < width::<N>() &*& width::<N>() <= usize::MAX / 2 &*&
-    buffer.start <= width::<N>() &*&
+    0 <= buffer.start &*& buffer.start <= width::<N>() &*&
     2 * width::<N>() * std::mem::size_of::<T>() <= isize::MAX &*&
     length(values) == width::<N>() &*&
     take(width::<N>(), drop(buffer.start, matrix_elems(buffer.buffer))) ==
         map(std::mem::MaybeUninit::new, values) &*&
     foreach(values, own::<T>(t));
+
+lem Buffer_own_mono<T0, T1, N: ?Sized>()
+    req type_interp::<T0>() &*& type_interp::<T1>() &*& type_interp::<N>() &*&
+        Buffer_own::<T0, N>(?t, ?buffer) &*& is_subtype_of::<T0, T1>() == true;
+    ens type_interp::<T0>() &*& type_interp::<T1>() &*& type_interp::<N>() &*&
+        Buffer_own::<T1, N>(t, Buffer::<T1, N> {
+            buffer: upcast(buffer.buffer), start: upcast(buffer.start) });
+{
+    open Buffer_own::<T0, N>(t, buffer);
+    open exists::<list<T0>>(?values);
+    std::mem::subtype_layout::<T0, T1>();
+    std::mem::upcast_identity(buffer.start);
+    std::mem::MaybeUninit_subtype::<T0, T1>();
+    matrix_upcast::<std::mem::MaybeUninit<T0>, std::mem::MaybeUninit<T1>, N>(buffer.buffer);
+    mapped_range(upcast::<std::mem::MaybeUninit<T0>, std::mem::MaybeUninit<T1>>,
+        matrix_elems(buffer.buffer), buffer.start, width::<N>());
+    mapped_uninit_upcast::<T0, T1>(values);
+    mapped_length(upcast::<T0, T1>, values);
+    owned_values_mono::<T0, T1>(t, values);
+    close exists(map(upcast::<T0, T1>, values));
+    close Buffer_own::<T1, N>(t, Buffer::<T1, N> {
+        buffer: upcast(buffer.buffer), start: upcast(buffer.start) });
+}
+
+lem Buffer_send<T, N: ?Sized>(t1: thread_id_t)
+    req type_interp::<T>() &*& type_interp::<N>() &*& Buffer_own::<T, N>(?t0, ?buffer) &*&
+        is_Send(typeid(Buffer<T, N>)) == true;
+    ens type_interp::<T>() &*& type_interp::<N>() &*& Buffer_own::<T, N>(t1, buffer);
+{
+    open Buffer_own::<T, N>(t0, buffer);
+    open exists::<list<T>>(?values);
+    std::mem::array_Send::<[std::mem::MaybeUninit<T>; N], 2>();
+    std::mem::array_Send::<std::mem::MaybeUninit<T>, N>();
+    std::mem::MaybeUninit_Send::<T>();
+    owned_values_send(t0, t1, values);
+    close exists(values);
+    close Buffer_own::<T, N>(t1, buffer);
+}
 
 // The same frame survives normal and unwinding generic drop glue.
 pred drop_frame<T, N>(b: *Buffer<T, N>, start: usize,

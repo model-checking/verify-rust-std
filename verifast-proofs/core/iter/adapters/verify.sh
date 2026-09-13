@@ -236,6 +236,23 @@ if "Cannot prove condition" not in diagnostics or "Rust frontend failed" in diag
     raise SystemExit("The negative layout check did not reject the incorrect stride")
 PY
 
+for negative_fixture in backend/subtype-invalid.rs backend/value-send-invalid.rs; do
+  if timeout --signal=TERM --kill-after=5s 30s \
+    verifast -rustc_args '--edition 2024' "$negative_fixture" >"$negative_log" 2>&1; then
+    printf 'Invalid generic conversion unexpectedly verified: %s\n' "$negative_fixture" >&2
+    exit 1
+  fi
+  cat "$negative_log"
+  python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove condition" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The negative conversion check did not reject its missing precondition")
+PY
+done
+
 layout_status=0
 timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/matrix-layout-valid.rs || layout_status=$?

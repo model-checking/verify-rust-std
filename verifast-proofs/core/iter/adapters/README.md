@@ -188,6 +188,16 @@ of the three existing array conversion lemmas. Symbolic const parameters are
 not Rust value types. The element type bounds and every storage precondition
 remain in force, and the patched prelude is cached with checksum validation.
 
+`backend/array-subtyping.patch` models the standard covariance, fixed element
+count, and `Send` conditions of arrays and `MaybeUninit<T>`, plus representation
+preservation under [Rust subtyping](https://doc.rust-lang.org/reference/subtyping.html).
+The `Send` conditions follow the [array](https://doc.rust-lang.org/std/primitive.array.html#impl-Send-for-%5BT;+N%5D)
+and [wrapper](https://doc.rust-lang.org/std/mem/union.MaybeUninit.html#impl-Send-for-MaybeUninit%3CT%3E)
+implementations. These are trusted type-model facts. The
+`Buffer` ownership proofs must still transfer every active element's ownership;
+they cannot produce generic `T` ownership from those facts. Negative fixtures
+require rejection when the subtype relation or `T: Send` is missing.
+
 ## Local static checks and optional manual verification
 
 The static check reads small files and starts no compiler or solver:
