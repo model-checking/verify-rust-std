@@ -806,12 +806,32 @@ pub mod grisu_verify {
         ten_kappa: u64,
         ulp: u64,
     ) -> bool {
-        let steps = u128::from(digit.saturating_sub(b'1'));
-        let terminal = u128::from(remainder) + steps * u128::from(ten_kappa);
-        if terminal >= u128::from(threshold) {
+        // The caller bounds digit by nine. Saturation preserves comparison
+        // with threshold: an overflowing mathematical sum exceeds every u64.
+        // Repeated additions also match the real loop's remainder updates.
+        let after_1 = remainder.saturating_add(ten_kappa);
+        let after_2 = after_1.saturating_add(ten_kappa);
+        let after_3 = after_2.saturating_add(ten_kappa);
+        let after_4 = after_3.saturating_add(ten_kappa);
+        let after_5 = after_4.saturating_add(ten_kappa);
+        let after_6 = after_5.saturating_add(ten_kappa);
+        let after_7 = after_6.saturating_add(ten_kappa);
+        let after_8 = after_7.saturating_add(ten_kappa);
+        let terminal = match digit {
+            b'0' | b'1' => remainder,
+            b'2' => after_1,
+            b'3' => after_2,
+            b'4' => after_3,
+            b'5' => after_4,
+            b'6' => after_5,
+            b'7' => after_6,
+            b'8' => after_7,
+            _ => after_8,
+        };
+        if terminal >= threshold {
             true
         } else {
-            let remainder = terminal as u64;
+            let remainder = terminal;
             let target = plus1v - ulp;
             !(remainder < target
                 && threshold - remainder >= ten_kappa
