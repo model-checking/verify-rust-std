@@ -423,7 +423,7 @@ impl Big32x40 {
     }
 
     // The equivalence contract in dragon_verify checks these constant-index
-    // models against the real methods for every valid storage representation.
+    // models for every in-bounds storage size and arbitrary limb contents.
     pub(crate) fn kani_cmp_model(&self, other: &Self) -> crate::cmp::Ordering {
         use crate::cmp::Ordering::{Equal, Greater, Less};
 
@@ -432,14 +432,19 @@ impl Big32x40 {
                 let less = false;
                 let greater = false;
                 $(
+                    let active = (self.size > $index) | (other.size > $index);
                     let equal = self.base[$index] == other.base[$index];
-                    let less = (self.base[$index] < other.base[$index]) | (equal & less);
-                    let greater = (self.base[$index] > other.base[$index]) | (equal & greater);
+                    let preserve = !active | equal;
+                    let less = (active & (self.base[$index] < other.base[$index]))
+                        | (preserve & less);
+                    let greater = (active & (self.base[$index] > other.base[$index]))
+                        | (preserve & greater);
                 )+
                 if less { Less } else if greater { Greater } else { Equal }
             }};
         }
 
+        // Like Ord::cmp, inspect both arrays through the larger active size.
         // A differing higher limb supersedes every lower limb's ordering.
         // Eager Boolean operations avoid a branch at each constant limb index.
         compare_limbs!(
@@ -451,7 +456,7 @@ impl Big32x40 {
     pub(crate) fn kani_is_zero_model(&self) -> bool {
         macro_rules! limbs_are_zero {
             ($($index:literal),+ $(,)?) => {
-                true $(& (self.base[$index] == 0))+
+                true $(& ((self.size <= $index) | (self.base[$index] == 0)))+
             };
         }
 

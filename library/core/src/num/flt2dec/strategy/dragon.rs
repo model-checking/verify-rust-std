@@ -406,14 +406,14 @@ pub mod dragon_verify {
     const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
 
-    #[kani::requires(left.kani_valid_storage() && right.kani_valid_storage())]
+    #[kani::requires(left.kani_size() <= 40 && right.kani_size() <= 40)]
     #[kani::ensures(|agrees| *agrees)]
     fn comparison_models_agree(left: &Big, right: &Big) -> bool {
         (left.cmp(right) == left.kani_cmp_model(right))
             & (left.is_zero() == left.kani_is_zero_model())
     }
 
-    // Check the verified lemma's storage preconditions, then compute the exact
+    // Check the verified lemma's size preconditions, then compute the exact
     // model directly so constant limb indices survive symbolic execution.
     fn stub_cmp(left: &Big, right: &Big) -> Ordering {
         let _ = comparison_models_agree(left, right);
@@ -429,8 +429,10 @@ pub mod dragon_verify {
     #[kani::unwind(41)]
     #[kani::solver(kissat)]
     fn check_comparison_models_agree() {
-        let left = Big::kani_any_valid();
-        let right = Big::kani_any_valid();
+        // These methods only need size bounds. Inactive limbs may be arbitrary;
+        // unlike arithmetic contracts, this proof needs no zero-tail invariant.
+        let left: Big = kani::any();
+        let right: Big = kani::any();
         let _ = comparison_models_agree(&left, &right);
         let ordering = left.kani_cmp_model(&right);
         kani::cover(ordering == Ordering::Less, "comparison can be less");
@@ -440,6 +442,10 @@ pub mod dragon_verify {
         kani::cover(!left.kani_is_zero_model(), "zero testing accepts nonzero limbs");
         kani::cover(left.kani_size() == 0, "comparison accepts empty zero storage");
         kani::cover(left.kani_size() == 40, "comparison accepts all bigint limbs");
+        kani::cover(
+            left.kani_size() == 0 && !left.kani_valid_storage(),
+            "comparison models accept arbitrary inactive limbs",
+        );
     }
 
     // Bigint division needs the remainder bound to justify the next limb's
