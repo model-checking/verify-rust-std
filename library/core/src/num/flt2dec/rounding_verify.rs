@@ -5,6 +5,20 @@ use crate::kani;
 
 const PROOF_BUFLEN: usize = 32;
 
+// Read every byte with constant indices in helper proofs.
+pub(crate) fn prefix_checksum(digits: &[u8]) -> u8 {
+    assert!(digits.len() <= PROOF_BUFLEN);
+    macro_rules! read_bytes {
+        ($($index:literal),+ $(,)?) => {
+            0 $(^ (if digits.len() > $index { digits[$index] } else { 0 }))+
+        };
+    }
+    read_bytes!(
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31,
+    )
+}
+
 // The fixed capacity lets contract predicates use constant indices instead of
 // unfolding a symbolic iterator each time a generator rounds its output.
 pub(crate) fn prefix_all(

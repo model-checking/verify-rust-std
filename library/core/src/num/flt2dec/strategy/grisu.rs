@@ -337,115 +337,115 @@ pub fn format_shortest_opt<'a>(
         // restore invariants
         remainder = r;
     }
+}
 
-    // we've generated all significant digits of `plus1`, but not sure if it's the optimal one.
-    // for example, if `minus1` is 3.14153... and `plus1` is 3.14158..., there are 5 different
-    // shortest representation from 3.14154 to 3.14158 but we only have the greatest one.
-    // we have to successively decrease the last digit and check if this is the optimal repr.
-    // there are at most 9 candidates (..1 to ..9), so this is fairly quick. ("rounding" phase)
+// we've generated all significant digits of `plus1`, but not sure if it's the optimal one.
+// for example, if `minus1` is 3.14153... and `plus1` is 3.14158..., there are 5 different
+// shortest representation from 3.14154 to 3.14158 but we only have the greatest one.
+// we have to successively decrease the last digit and check if this is the optimal repr.
+// there are at most 9 candidates (..1 to ..9), so this is fairly quick. ("rounding" phase)
+//
+// the function checks if this "optimal" repr is actually within the ulp ranges,
+// and also, it is possible that the "second-to-optimal" repr can actually be optimal
+// due to the rounding error. in either cases this returns `None`. ("weeding" phase)
+//
+// all arguments here are scaled by the common (but implicit) value `k`, so that:
+// - `remainder = (plus1 % 10^kappa) * k`
+// - `threshold = (plus1 - minus1) * k` (and also, `remainder < threshold`)
+// - `plus1v = (plus1 - v) * k` (and also, `threshold > plus1v` from prior invariants)
+// - `ten_kappa = 10^kappa * k`
+// - `ulp = 2^-e * k`
+fn round_and_weed(
+    buf: &mut [u8],
+    exp: i16,
+    remainder: u64,
+    threshold: u64,
+    plus1v: u64,
+    ten_kappa: u64,
+    ulp: u64,
+) -> Option<(&[u8], i16)> {
+    assert!(!buf.is_empty());
+
+    // produce two approximations to `v` (actually `plus1 - v`) within 1.5 ulps.
+    // the resulting representation should be the closest representation to both.
     //
-    // the function checks if this "optimal" repr is actually within the ulp ranges,
-    // and also, it is possible that the "second-to-optimal" repr can actually be optimal
-    // due to the rounding error. in either cases this returns `None`. ("weeding" phase)
-    //
-    // all arguments here are scaled by the common (but implicit) value `k`, so that:
-    // - `remainder = (plus1 % 10^kappa) * k`
-    // - `threshold = (plus1 - minus1) * k` (and also, `remainder < threshold`)
-    // - `plus1v = (plus1 - v) * k` (and also, `threshold > plus1v` from prior invariants)
-    // - `ten_kappa = 10^kappa * k`
-    // - `ulp = 2^-e * k`
-    fn round_and_weed(
-        buf: &mut [u8],
-        exp: i16,
-        remainder: u64,
-        threshold: u64,
-        plus1v: u64,
-        ten_kappa: u64,
-        ulp: u64,
-    ) -> Option<(&[u8], i16)> {
-        assert!(!buf.is_empty());
+    // here `plus1 - v` is used since calculations are done with respect to `plus1`
+    // in order to avoid overflow/underflow (hence the seemingly swapped names).
+    let plus1v_down = plus1v + ulp; // plus1 - (v - 1 ulp)
+    let plus1v_up = plus1v - ulp; // plus1 - (v + 1 ulp)
 
-        // produce two approximations to `v` (actually `plus1 - v`) within 1.5 ulps.
-        // the resulting representation should be the closest representation to both.
+    // decrease the last digit and stop at the closest representation to `v + 1 ulp`.
+    let mut plus1w = remainder; // plus1w(n) = plus1 - w(n)
+    {
+        let last = buf.last_mut().unwrap();
+
+        // we work with the approximated digits `w(n)`, which is initially equal to `plus1 -
+        // plus1 % 10^kappa`. after running the loop body `n` times, `w(n) = plus1 -
+        // plus1 % 10^kappa - n * 10^kappa`. we set `plus1w(n) = plus1 - w(n) =
+        // plus1 % 10^kappa + n * 10^kappa` (thus `remainder = plus1w(0)`) to simplify checks.
+        // note that `plus1w(n)` is always increasing.
         //
-        // here `plus1 - v` is used since calculations are done with respect to `plus1`
-        // in order to avoid overflow/underflow (hence the seemingly swapped names).
-        let plus1v_down = plus1v + ulp; // plus1 - (v - 1 ulp)
-        let plus1v_up = plus1v - ulp; // plus1 - (v + 1 ulp)
-
-        // decrease the last digit and stop at the closest representation to `v + 1 ulp`.
-        let mut plus1w = remainder; // plus1w(n) = plus1 - w(n)
-        {
-            let last = buf.last_mut().unwrap();
-
-            // we work with the approximated digits `w(n)`, which is initially equal to `plus1 -
-            // plus1 % 10^kappa`. after running the loop body `n` times, `w(n) = plus1 -
-            // plus1 % 10^kappa - n * 10^kappa`. we set `plus1w(n) = plus1 - w(n) =
-            // plus1 % 10^kappa + n * 10^kappa` (thus `remainder = plus1w(0)`) to simplify checks.
-            // note that `plus1w(n)` is always increasing.
-            //
-            // we have three conditions to terminate. any of them will make the loop unable to
-            // proceed, but we then have at least one valid representation known to be closest to
-            // `v + 1 ulp` anyway. we will denote them as TC1 through TC3 for brevity.
-            //
-            // TC1: `w(n) <= v + 1 ulp`, i.e., this is the last repr that can be the closest one.
-            // this is equivalent to `plus1 - w(n) = plus1w(n) >= plus1 - (v + 1 ulp) = plus1v_up`.
-            // combined with TC2 (which checks if `w(n+1)` is valid), this prevents the possible
-            // overflow on the calculation of `plus1w(n)`.
-            //
-            // TC2: `w(n+1) < minus1`, i.e., the next repr definitely does not round to `v`.
-            // this is equivalent to `plus1 - w(n) + 10^kappa = plus1w(n) + 10^kappa >
-            // plus1 - minus1 = threshold`. the left hand side can overflow, but we know
-            // `threshold > plus1v`, so if TC1 is false, `threshold - plus1w(n) >
-            // threshold - (plus1v - 1 ulp) > 1 ulp` and we can safely test if
-            // `threshold - plus1w(n) < 10^kappa` instead.
-            //
-            // TC3: `abs(w(n) - (v + 1 ulp)) <= abs(w(n+1) - (v + 1 ulp))`, i.e., the next repr is
-            // no closer to `v + 1 ulp` than the current repr. given `z(n) = plus1v_up - plus1w(n)`,
-            // this becomes `abs(z(n)) <= abs(z(n+1))`. again assuming that TC1 is false, we have
-            // `z(n) > 0`. we have two cases to consider:
-            //
-            // - when `z(n+1) >= 0`: TC3 becomes `z(n) <= z(n+1)`. as `plus1w(n)` is increasing,
-            //   `z(n)` should be decreasing and this is clearly false.
-            // - when `z(n+1) < 0`:
-            //   - TC3a: the precondition is `plus1v_up < plus1w(n) + 10^kappa`. assuming TC2 is
-            //     false, `threshold >= plus1w(n) + 10^kappa` so it cannot overflow.
-            //   - TC3b: TC3 becomes `z(n) <= -z(n+1)`, i.e., `plus1v_up - plus1w(n) >=
-            //     plus1w(n+1) - plus1v_up = plus1w(n) + 10^kappa - plus1v_up`. the negated TC1
-            //     gives `plus1v_up > plus1w(n)`, so it cannot overflow or underflow when
-            //     combined with TC3a.
-            //
-            // consequently, we should stop when `TC1 || TC2 || (TC3a && TC3b)`. the following is
-            // equal to its inverse, `!TC1 && !TC2 && (!TC3a || !TC3b)`.
-            while plus1w < plus1v_up
-                && threshold - plus1w >= ten_kappa
-                && (plus1w + ten_kappa < plus1v_up
-                    || plus1v_up - plus1w >= plus1w + ten_kappa - plus1v_up)
-            {
-                *last -= 1;
-                debug_assert!(*last > b'0'); // the shortest repr cannot end with `0`
-                plus1w += ten_kappa;
-            }
-        }
-
-        // check if this representation is also the closest representation to `v - 1 ulp`.
+        // we have three conditions to terminate. any of them will make the loop unable to
+        // proceed, but we then have at least one valid representation known to be closest to
+        // `v + 1 ulp` anyway. we will denote them as TC1 through TC3 for brevity.
         //
-        // this is simply same to the terminating conditions for `v + 1 ulp`, with all `plus1v_up`
-        // replaced by `plus1v_down` instead. overflow analysis equally holds.
-        if plus1w < plus1v_down
+        // TC1: `w(n) <= v + 1 ulp`, i.e., this is the last repr that can be the closest one.
+        // this is equivalent to `plus1 - w(n) = plus1w(n) >= plus1 - (v + 1 ulp) = plus1v_up`.
+        // combined with TC2 (which checks if `w(n+1)` is valid), this prevents the possible
+        // overflow on the calculation of `plus1w(n)`.
+        //
+        // TC2: `w(n+1) < minus1`, i.e., the next repr definitely does not round to `v`.
+        // this is equivalent to `plus1 - w(n) + 10^kappa = plus1w(n) + 10^kappa >
+        // plus1 - minus1 = threshold`. the left hand side can overflow, but we know
+        // `threshold > plus1v`, so if TC1 is false, `threshold - plus1w(n) >
+        // threshold - (plus1v - 1 ulp) > 1 ulp` and we can safely test if
+        // `threshold - plus1w(n) < 10^kappa` instead.
+        //
+        // TC3: `abs(w(n) - (v + 1 ulp)) <= abs(w(n+1) - (v + 1 ulp))`, i.e., the next repr is
+        // no closer to `v + 1 ulp` than the current repr. given `z(n) = plus1v_up - plus1w(n)`,
+        // this becomes `abs(z(n)) <= abs(z(n+1))`. again assuming that TC1 is false, we have
+        // `z(n) > 0`. we have two cases to consider:
+        //
+        // - when `z(n+1) >= 0`: TC3 becomes `z(n) <= z(n+1)`. as `plus1w(n)` is increasing,
+        //   `z(n)` should be decreasing and this is clearly false.
+        // - when `z(n+1) < 0`:
+        //   - TC3a: the precondition is `plus1v_up < plus1w(n) + 10^kappa`. assuming TC2 is
+        //     false, `threshold >= plus1w(n) + 10^kappa` so it cannot overflow.
+        //   - TC3b: TC3 becomes `z(n) <= -z(n+1)`, i.e., `plus1v_up - plus1w(n) >=
+        //     plus1w(n+1) - plus1v_up = plus1w(n) + 10^kappa - plus1v_up`. the negated TC1
+        //     gives `plus1v_up > plus1w(n)`, so it cannot overflow or underflow when
+        //     combined with TC3a.
+        //
+        // consequently, we should stop when `TC1 || TC2 || (TC3a && TC3b)`. the following is
+        // equal to its inverse, `!TC1 && !TC2 && (!TC3a || !TC3b)`.
+        while plus1w < plus1v_up
             && threshold - plus1w >= ten_kappa
-            && (plus1w + ten_kappa < plus1v_down
-                || plus1v_down - plus1w >= plus1w + ten_kappa - plus1v_down)
+            && (plus1w + ten_kappa < plus1v_up
+                || plus1v_up - plus1w >= plus1w + ten_kappa - plus1v_up)
         {
-            return None;
+            *last -= 1;
+            debug_assert!(*last > b'0'); // the shortest repr cannot end with `0`
+            plus1w += ten_kappa;
         }
-
-        // now we have the closest representation to `v` between `plus1` and `minus1`.
-        // this is too liberal, though, so we reject any `w(n)` not between `plus0` and `minus0`,
-        // i.e., `plus1 - plus1w(n) <= minus0` or `plus1 - plus1w(n) >= plus0`. we utilize the facts
-        // that `threshold = plus1 - minus1` and `plus1 - plus0 = minus0 - minus1 = 2 ulp`.
-        if 2 * ulp <= plus1w && plus1w <= threshold - 4 * ulp { Some((buf, exp)) } else { None }
     }
+
+    // check if this representation is also the closest representation to `v - 1 ulp`.
+    //
+    // this is simply same to the terminating conditions for `v + 1 ulp`, with all `plus1v_up`
+    // replaced by `plus1v_down` instead. overflow analysis equally holds.
+    if plus1w < plus1v_down
+        && threshold - plus1w >= ten_kappa
+        && (plus1w + ten_kappa < plus1v_down
+            || plus1v_down - plus1w >= plus1w + ten_kappa - plus1v_down)
+    {
+        return None;
+    }
+
+    // now we have the closest representation to `v` between `plus1` and `minus1`.
+    // this is too liberal, though, so we reject any `w(n)` not between `plus0` and `minus0`,
+    // i.e., `plus1 - plus1w(n) <= minus0` or `plus1 - plus1w(n) >= plus0`. we utilize the facts
+    // that `threshold = plus1 - minus1` and `plus1 - plus0 = minus0 - minus1 = 2 ulp`.
+    if 2 * ulp <= plus1w && plus1w <= threshold - 4 * ulp { Some((buf, exp)) } else { None }
 }
 
 /// The shortest mode implementation for Grisu with Dragon fallback.
@@ -786,14 +786,132 @@ pub mod grisu_verify {
     };
 
     // The direct strategy harnesses execute the real generator bodies. Exact
-    // mode composes the final-rounding contract; shortest mode retains
-    // round_and_weed.
+    // and shortest modes compose separately proved final-rounding contracts.
     // Buffer lengths are symbolic: shortest mode includes the minimum legal
     // buffer, and exact mode includes both one-byte and multi-digit buffers.
     // These are bounded harnesses; a successful run covers lengths up to 32,
     // not arbitrary slice lengths. Unwinding assertions remain enabled.
     const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
+
+    // At digit one the loop must stop. If its remainder would already exceed
+    // threshold, the loop's threshold check forces an earlier stop. With digit
+    // zero this checks the initial state, which must not decrement at all.
+    // Callers establish this numeric condition before using the helper model.
+    fn weed_stops_before_zero(
+        digit: u8,
+        remainder: u64,
+        threshold: u64,
+        plus1v: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> bool {
+        let steps = u128::from(digit.saturating_sub(b'1'));
+        let terminal = u128::from(remainder) + steps * u128::from(ten_kappa);
+        if terminal >= u128::from(threshold) {
+            true
+        } else {
+            let remainder = terminal as u64;
+            let target = plus1v - ulp;
+            !(remainder < target
+                && threshold - remainder >= ten_kappa
+                && (remainder + ten_kappa < target
+                    || target - remainder >= remainder + ten_kappa - target))
+        }
+    }
+
+    #[kani::requires(
+        len > 0 && len <= PROOF_BUFLEN
+            && crate::num::flt2dec::rounding_verify::prefix_all(digits, len, |digit| digit < u8::MAX)
+            && digits[len - 1] >= b'0' && digits[len - 1] <= b'9'
+            && remainder < threshold && ten_kappa > 0
+            && ulp <= threshold / 4 && ulp <= plus1v && plus1v <= u64::MAX - ulp
+            && weed_stops_before_zero(digits[len - 1], remainder, threshold, plus1v, ten_kappa, ulp)
+    )]
+    #[kani::ensures(|result| result.as_ref().is_none_or(|&(written, output_exp)| {
+        written == len && output_exp == exp
+    }))]
+    fn round_shortest_contract(
+        digits: &[u8; PROOF_BUFLEN],
+        len: usize,
+        exp: i16,
+        remainder: u64,
+        threshold: u64,
+        plus1v: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> Option<(usize, i16)> {
+        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+        let start = buf.as_mut_ptr().cast::<u8>();
+        // SAFETY: the contract bounds len by both distinct arrays' capacities.
+        unsafe { crate::ptr::copy_nonoverlapping(digits.as_ptr(), start, len) };
+        round_and_weed(
+            // SAFETY: the copy initialized exactly this prefix.
+            unsafe { buf[..len].assume_init_mut() },
+            exp,
+            remainder,
+            threshold,
+            plus1v,
+            ten_kappa,
+            ulp,
+        )
+        .map(|(output, output_exp)| {
+            assert_eq!(output.as_ptr(), start.cast_const());
+            let checksum = crate::num::flt2dec::rounding_verify::prefix_checksum(output);
+            kani::cover(checksum == 0, "shortest rounding returns readable bytes");
+            kani::cover(
+                output[len - 1] < digits[len - 1],
+                "shortest rounding can decrease the final digit",
+            );
+            (output.len(), output_exp)
+        })
+    }
+
+    fn stub_round_and_weed(
+        buf: &mut [u8],
+        exp: i16,
+        remainder: u64,
+        threshold: u64,
+        plus1v: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> Option<(&[u8], i16)> {
+        let len = buf.len();
+        assert!(len <= PROOF_BUFLEN);
+        let mut digits = [0; PROOF_BUFLEN];
+        digits[..len].copy_from_slice(buf);
+        let result = round_shortest_contract(
+            &digits, len, exp, remainder, threshold, plus1v, ten_kappa, ulp,
+        );
+        // Overapproximate output values within the initialized input prefix.
+        let output: [u8; PROOF_BUFLEN] = kani::any();
+        buf.copy_from_slice(&output[..len]);
+        result.map(|(written, output_exp)| (&buf[..written], output_exp))
+    }
+
+    #[kani::proof_for_contract(round_shortest_contract)]
+    #[kani::unwind(33)]
+    #[kani::solver(kissat)]
+    fn check_round_shortest_contract() {
+        let digits: [u8; PROOF_BUFLEN] = kani::any();
+        let len = usize::from(kani::any::<u8>());
+        let result = round_shortest_contract(
+            &digits,
+            len,
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+        );
+        kani::cover(len == 1 && result.is_some(), "shortest rounding accepts a single digit");
+        kani::cover(
+            len == PROOF_BUFLEN && result.is_some(),
+            "shortest rounding accepts a full buffer",
+        );
+        kani::cover(result.is_none(), "shortest rounding can request the Dragon fallback");
+    }
 
     // Keep uninitialized padding in this proof: only the caller's initialized
     // prefix is copied before executing the real final-rounding helper.
@@ -826,7 +944,7 @@ pub mod grisu_verify {
                 assert_eq!(output.as_ptr(), start.cast_const());
                 // Read every returned byte, including any appended carry. This
                 // checks initialization instead of merely inspecting slice metadata.
-                let checksum = output.iter().fold(0_u8, |checksum, &digit| checksum ^ digit);
+                let checksum = crate::num::flt2dec::rounding_verify::prefix_checksum(output);
                 kani::cover(checksum == 0, "final rounding returns readable output bytes");
                 (output.len(), output_exp)
             })
@@ -932,8 +1050,8 @@ pub mod grisu_verify {
         Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
     }
 
-    // Call the generator itself, including round_and_weed. The wrapper harness
-    // below checks a separate obligation and does not establish this one.
+    // Call the real generator loops and compose the final-rounding proof. The
+    // wrapper harness below checks a separate obligation.
     macro_rules! check_partition {
         ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
             mod $name {
@@ -941,6 +1059,8 @@ pub mod grisu_verify {
 
                 #[kani::proof]
                 #[kani::unwind(19)]
+                #[kani::stub(round_and_weed, stub_round_and_weed)]
+                #[kani::stub_verified(round_shortest_contract)]
                 #[kani::solver(kissat)]
                 fn check_format_shortest_opt() {
                     let d = $decode::<$group>();
