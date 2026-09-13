@@ -18,6 +18,16 @@ if [[ ! -d "$VERIFAST_HOME" ]]; then
   fi
 
   case "$VFVERSION,$VFPLATFORM" in
+    26.09,linux)
+      # https://github.com/verifast/verifast/attestations/45611735
+      VFHASH=da1b619fa63ba73c12ce591638ced90fd2471add6f181d0e3310657fe4df98aa
+      RUST_VERSION=nightly-2026-02-05
+      ;;
+    26.09,macos-aarch)
+      # https://github.com/verifast/verifast/attestations/45611653
+      VFHASH=1bd2c69dee4a4968a8fde73f3a8605f0ef7d75fa778b578c916f7693f2b0268e
+      RUST_VERSION=nightly-2026-02-05
+      ;;
     26.01,linux)
       # https://github.com/verifast/verifast/attestations/17117165
       VFHASH=f7cb316b482c5113fe65801d44ff2d2db1490be07c2d05f1dee3547c4ada8390

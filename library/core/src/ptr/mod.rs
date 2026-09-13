@@ -892,6 +892,7 @@ pub const fn null_mut<T: PointeeSized + Thin>() -> *mut T {
 #[must_use]
 #[stable(feature = "strict_provenance", since = "1.84.0")]
 #[rustc_const_stable(feature = "strict_provenance", since = "1.84.0")]
+#[rustc_diagnostic_item = "ptr_without_provenance"]
 pub const fn without_provenance<T>(addr: usize) -> *const T {
     without_provenance_mut(addr)
 }
@@ -930,6 +931,7 @@ pub const fn dangling<T>() -> *const T {
 #[must_use]
 #[stable(feature = "strict_provenance", since = "1.84.0")]
 #[rustc_const_stable(feature = "strict_provenance", since = "1.84.0")]
+#[rustc_diagnostic_item = "ptr_without_provenance_mut"]
 #[allow(integer_to_ptr_transmutes)] // Expected semantics here.
 pub const fn without_provenance_mut<T>(addr: usize) -> *mut T {
     // An int-to-pointer transmute currently has exactly the intended semantics: it creates a
@@ -2579,6 +2581,10 @@ pub fn hash<T: PointeeSized, S: hash::Hasher>(hashee: *const T, into: &mut S) {
 }
 
 #[stable(feature = "fnptr_impls", since = "1.4.0")]
+#[diagnostic::on_const(
+    message = "pointers cannot be reliably compared during const eval",
+    note = "see issue #53020 <https://github.com/rust-lang/rust/issues/53020> for more information"
+)]
 impl<F: FnPtr> PartialEq for F {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -2586,9 +2592,17 @@ impl<F: FnPtr> PartialEq for F {
     }
 }
 #[stable(feature = "fnptr_impls", since = "1.4.0")]
+#[diagnostic::on_const(
+    message = "pointers cannot be reliably compared during const eval",
+    note = "see issue #53020 <https://github.com/rust-lang/rust/issues/53020> for more information"
+)]
 impl<F: FnPtr> Eq for F {}
 
 #[stable(feature = "fnptr_impls", since = "1.4.0")]
+#[diagnostic::on_const(
+    message = "pointers cannot be reliably compared during const eval",
+    note = "see issue #53020 <https://github.com/rust-lang/rust/issues/53020> for more information"
+)]
 impl<F: FnPtr> PartialOrd for F {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -2596,6 +2610,10 @@ impl<F: FnPtr> PartialOrd for F {
     }
 }
 #[stable(feature = "fnptr_impls", since = "1.4.0")]
+#[diagnostic::on_const(
+    message = "pointers cannot be reliably compared during const eval",
+    note = "see issue #53020 <https://github.com/rust-lang/rust/issues/53020> for more information"
+)]
 impl<F: FnPtr> Ord for F {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
@@ -2703,7 +2721,7 @@ impl<F: FnPtr> fmt::Debug for F {
 /// same requirements apply to field projections, even inside `addr_of!`. (In particular, it makes
 /// no difference whether the pointer is null or dangling.)
 #[stable(feature = "raw_ref_macros", since = "1.51.0")]
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub macro addr_of($place:expr) {
     &raw const $place
 }
@@ -2793,7 +2811,7 @@ pub macro addr_of($place:expr) {
 /// same requirements apply to field projections, even inside `addr_of_mut!`. (In particular, it
 /// makes no difference whether the pointer is null or dangling.)
 #[stable(feature = "raw_ref_macros", since = "1.51.0")]
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub macro addr_of_mut($place:expr) {
     &raw mut $place
 }
