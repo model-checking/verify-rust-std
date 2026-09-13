@@ -260,8 +260,8 @@ impl<T, const N: usize> Buffer<T, N> {
     {
         //@ open [f]bounds(self, start);
         //@ assert start + width::<N>() <= 2 * width::<N>();
-        if cfg!(debug_assertions) {
-            //~allow_dead_code // The disabled configuration branch is unreachable.
+        #[rustfmt::skip]
+        if cfg!(debug_assertions) { //~allow_dead_code // The disabled configuration branch is unreachable.
             assert!(self.start + N <= 2 * N); //~allow_dead_code // The proven bounds exclude assertion failure.
         }
 
@@ -293,8 +293,8 @@ impl<T, const N: usize> Buffer<T, N> {
     {
         //@ open bounds(self, start);
         //@ assert start + width::<N>() <= 2 * width::<N>();
-        if cfg!(debug_assertions) {
-            //~allow_dead_code // The disabled configuration branch is unreachable.
+        #[rustfmt::skip]
+        if cfg!(debug_assertions) { //~allow_dead_code // The disabled configuration branch is unreachable.
             assert!(self.start + N <= 2 * N); //~allow_dead_code // The proven bounds exclude assertion failure.
         }
 
@@ -381,8 +381,8 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ open foreach(values, own::<T>(t));
         //@ open array(buffer_mut_ptr + start, width::<N>(), _);
         //@ assert start + width::<N>() <= 2 * width::<N>();
-        if cfg!(debug_assertions) {
-            //~allow_dead_code // The disabled configuration branch is unreachable.
+        #[rustfmt::skip]
+        if cfg!(debug_assertions) { //~allow_dead_code // The disabled configuration branch is unreachable.
             assert!(self.start + N <= 2 * N); //~allow_dead_code // The proven bounds exclude assertion failure.
         }
 

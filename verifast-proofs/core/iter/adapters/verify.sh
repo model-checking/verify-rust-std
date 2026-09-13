@@ -269,6 +269,22 @@ if "Cannot prove condition" not in diagnostics or "Rust frontend failed" in diag
 PY
 done
 
+if timeout --signal=TERM --kill-after=5s 30s \
+  verifast -rustc_args '--edition 2024' backend/ghost-reachability-invalid.rs >"$negative_log" 2>&1; then
+  echo 'An unreachable normal-path ghost assertion unexpectedly verified.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if not any("ghost-reachability-invalid.rs(9," in line and line.endswith(": dead code")
+           for line in diagnostics.splitlines()):
+    raise SystemExit("The reachability negative check did not reject the ghost assertion")
+PY
+
 layout_status=0
 timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/matrix-layout-valid.rs || layout_status=$?

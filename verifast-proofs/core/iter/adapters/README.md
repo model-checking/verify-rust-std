@@ -66,6 +66,9 @@ the `next` argument at the end of `push`. Hosted MIR inspection shows its drop
 flag is cleared on both branches before the only potentially unwinding call.
 An explicit `live` assertion after restoration keeps the normal completion
 path subject to reachability checking. No global dead-code option is used.
+A mandatory negative fixture gives a function contradictory preconditions and
+permits only its generated return to be unreachable. The ghost assertion must
+still be rejected, guarding the normal-path check used in `push`.
 
 `source/` contains complete, hashed copies of the two std source files.
 `source-map.json` records the exact lines projected into `original/`:
