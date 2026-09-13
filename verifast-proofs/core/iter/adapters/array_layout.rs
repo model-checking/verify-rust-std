@@ -101,7 +101,7 @@ lem own_uninit_rows<T, N: ?Sized>(t: thread_id_t, rows: list<[std::mem::MaybeUni
         nil => {}
         cons(row, rest) => {
             own_uninit_values(t, Array_elems(row));
-            close <[std::mem::MaybeUninit<T>; N]>.own(t, row);
+            close array_owned::<std::mem::MaybeUninit<T>, N>()(t, row);
             close own::<[std::mem::MaybeUninit<T>; N]>(t)(row);
             own_uninit_rows(t, rest);
         }
@@ -114,7 +114,7 @@ lem own_matrix_storage<T, N: ?Sized>(t: thread_id_t, matrix: [[std::mem::MaybeUn
     ens <[[std::mem::MaybeUninit<T>; N]; 2]>.own(t, matrix);
 {
     own_uninit_rows(t, Array_elems(matrix));
-    close <[[std::mem::MaybeUninit<T>; N]; 2]>.own(t, matrix);
+    close array_owned::<[std::mem::MaybeUninit<T>; N], 2>()(t, matrix);
 }
 
 pred array_borrow_tokens<T>(k: lifetime_t, p: *T, count: usize;) =
