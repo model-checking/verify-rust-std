@@ -15,7 +15,7 @@ or unwind bounds. The target contracts are:
 | --- | --- |
 | `StepBy<I>::original_step` | Preserve the step field and return its nonzero successor, for any `I`. |
 | `Buffer<T, N>::as_array_ref` | Derive the active window's reference from its shared borrow and valid buffer bounds. |
-| `Buffer<T, N>::as_uninit_array_mut` | Derive a writable window from its exclusive storage borrow, without requiring initialized `T` values. |
+| `Buffer<T, N>::as_uninit_array_mut` | Derive a writable window from an exclusive borrow of the backing array, without requiring initialized `T` values. |
 | `Buffer<T, N>::push` | Consume one new `T`, drop the old front, and preserve ownership of the shifted window on normal return. |
 | `Buffer<T, N>::drop` | Drop exactly the initialized window and recover its storage on normal return. |
 
@@ -41,9 +41,10 @@ intended `MapWindows` constructor and Rust layout restrictions. They are
 explicit caller obligations here. Constructor preservation and the surrounding
 `MapWindows` iterator implementation are outside this projection.
 
-The reference accessors require the corresponding lifetime borrow of the
-window. Establishing those borrows from the full safe abstraction is also
-outside this port. The mutable accessor deliberately accepts storage that
+The shared accessor requires a lifetime borrow of the window. The mutable
+accessor requires a borrow of the whole backing array because its pointer
+helper borrows that array. Establishing those borrows from the full safe
+abstraction is outside this port. The mutable accessor accepts storage that
 does not yet own initialized `T` values, as required by the clone path.
 
 ## Source correspondence

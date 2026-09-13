@@ -1,5 +1,9 @@
 /*@
 
+// MaybeUninit owns storage, without requiring ownership of a contained T.
+pred_ctor maybe_uninit_own<T>()(t: thread_id_t, value: std::mem::MaybeUninit<T>) = true;
+type_pred_def for<T> <std::mem::MaybeUninit<T>>.own = maybe_uninit_own::<T>;
+
 fix matrix_elems<T, N>(matrix: [[T; N]; 2]) -> list<T> {
     append(Array_elems(head(Array_elems(matrix))),
         Array_elems(head(tail(Array_elems(matrix)))))
@@ -13,10 +17,10 @@ lem pack_array<T, N>(p: *[T; N])
     req (p as *T)[..usize_of_const(typeid(N))] |-> ?elems;
     ens *p |-> ?array &*& Array_elems(array) == elems;
 {
-    close saved_array(p as *T, usize_of_const(typeid(N)), elems)();
+    close saved_array::<T>(p as *T, usize_of_const(typeid(N)), elems)();
     array_to_Array(p);
     Array_to_array(p);
-    open saved_array(p as *T, usize_of_const(typeid(N)), elems)();
+    open saved_array::<T>(p as *T, usize_of_const(typeid(N)), elems)();
     merge_fractions array(p as *T, usize_of_const(typeid(N)), _);
     array_to_Array(p);
 }
@@ -47,6 +51,26 @@ lem pack_matrix<T, N>(p: *[[T; N]; 2])
     close array((p as *[T; N]) + 1, 1, cons(second, nil));
     close array(p as *[T; N], 2, cons(first, cons(second, nil)));
     pack_array(p);
+}
+
+// These conversions preserve writable storage. They do not claim initialized T values.
+lem collapse_window<T, N>(p: *std::mem::MaybeUninit<T>)
+    req p[..usize_of_const(typeid(N))] |-> _;
+    ens *(p as *std::mem::MaybeUninit<[T; N]>) |-> _;
+{
+    array__to_u8s_(p, usize_of_const(typeid(N)));
+    array_to_array_(p as *u8);
+    from_u8s_(p as *[T; N]);
+    std::mem::close_MaybeUninit_(p as *std::mem::MaybeUninit<[T; N]>);
+}
+
+lem expand_window<T, N>(p: *std::mem::MaybeUninit<[T; N]>)
+    req *p |-> _;
+    ens (p as *std::mem::MaybeUninit<T>)[..usize_of_const(typeid(N))] |-> _;
+{
+    std::mem::open_MaybeUninit(p);
+    Array__to_array_(p as *[T; N]);
+    std::mem::array__to_array_MaybeUninit(p as *T);
 }
 
 @*/
