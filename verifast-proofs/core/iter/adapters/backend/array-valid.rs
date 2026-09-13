@@ -11,8 +11,8 @@ unsafe fn shared<'a, T, const N: usize>(p: *const [T; N]) -> &'a [T; N]
 }
 
 unsafe fn exclusive<'a, T, const N: usize>(p: *mut [T; N]) -> &'a mut [T; N]
-//@ req *p |-> ?values;
-//@ ens *result |-> values &*& ref_mut_end_token(result, p);
+//@ req thread_token(?t) &*& [?q]lifetime_token('a) &*& full_borrow('a, <[T; N]>.full_borrow_content(t, p));
+//@ ens thread_token(t) &*& [q]lifetime_token('a) &*& full_borrow('a, <[T; N]>.full_borrow_content(t, result));
 //@ on_unwind_ens false;
 {
     unsafe { &mut *p }

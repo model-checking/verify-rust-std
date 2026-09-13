@@ -128,11 +128,18 @@ if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in dia
     sys.exit("The mutable-array negative check did not reach a storage proof failure.")
 PY
 
-# Keep every stage sequential and fail on any unsuccessful proof or refinement.
+# Keep every stage sequential and require both proof and refinement to succeed.
+# Collect their independent diagnostics even when the first stage fails.
 # No assumption, unwind, reference-creation, or overflow suppression flags.
+proof_status=0
 timeout --signal=TERM --kill-after=10s 600s \
-  verifast -rustc_args '--edition 2024' -skip_specless_fns verified/lib.rs
+  verifast -rustc_args '--edition 2024' -skip_specless_fns verified/lib.rs || proof_status=$?
+refinement_status=0
 timeout --signal=TERM --kill-after=10s 600s \
-  refinement-checker --rustc-args '--edition 2024' original/lib.rs verified/lib.rs
+  refinement-checker --rustc-args '--edition 2024' original/lib.rs verified/lib.rs || refinement_status=$?
 python3 -I check_sources.py
+if (( proof_status != 0 || refinement_status != 0 )); then
+  printf 'FAIL: proof status %s; refinement status %s\n' "$proof_status" "$refinement_status" >&2
+  exit 1
+fi
 echo 'PASS: generic adapter contracts, source refinement, and source identity'

@@ -103,11 +103,13 @@ impl<T, const N: usize> Buffer<T, N> {
     fn as_array_ref<'a>(&'a self) -> &'a [T; N]
 /*@
     req [?f]bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
+        type_interp::<[T; N]>() &*&
         [_](<[T; N]>.share)('a, ?t, (base(self) + start) as *[T; N]);
     @*/
     /*@
     ens [f]bounds(self, start) &*& [q]lifetime_token('a) &*&
-        result == (base(self) + start) as *[T; N] &*&
+        type_interp::<[T; N]>() &*&
+        ref_origin(result) == ref_origin((base(self) + start) as *[T; N]) &*&
         [_](<[T; N]>.share)('a, t, result);
     @*/
     //@ on_unwind_ens false;
@@ -116,7 +118,14 @@ impl<T, const N: usize> Buffer<T, N> {
         debug_assert!(self.start + N <= 2 * N);
 
         // SAFETY: our invariant guarantees these elements are initialized.
+        //@ let window = (base(self) + start) as *[T; N];
+        //@ let reference = precreate_ref(window);
+        //@ init_ref_share('a, t, reference);
+        //@ let r = open_frac_borrow('a, ref_initialized_(reference), q);
+        //@ open [r]ref_initialized_(reference);
         let result = unsafe { &*self.buffer_ptr().add(self.start).cast() };
+        //@ close [r]ref_initialized_(reference);
+        //@ close_frac_borrow(r, ref_initialized_(reference));
         //@ close [f]bounds(self, start);
         result
     }
@@ -124,13 +133,12 @@ impl<T, const N: usize> Buffer<T, N> {
     #[inline]
     fn as_uninit_array_mut<'a>(&'a mut self) -> &'a mut MaybeUninit<[T; N]>
 /*@
-    req bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
-        full_borrow('a, <MaybeUninit<[T; N]>>.full_borrow_content(?t,
+    req thread_token(?t) &*& bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
+        full_borrow('a, <MaybeUninit<[T; N]>>.full_borrow_content(t,
             (base(self) + start) as *MaybeUninit<[T; N]>));
     @*/
     /*@
-    ens bounds(self, start) &*& [q]lifetime_token('a) &*&
-        result == (base(self) + start) as *MaybeUninit<[T; N]> &*&
+    ens thread_token(t) &*& bounds(self, start) &*& [q]lifetime_token('a) &*&
         full_borrow('a, <MaybeUninit<[T; N]>>.full_borrow_content(t, result));
     @*/
     //@ on_unwind_ens false;
@@ -228,7 +236,7 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ std::mem::open_MaybeUninit(to_drop);
         //@ close points_to(to_drop as *T, head(values));
         unsafe { ptr::drop_in_place(to_drop.cast_init()) };
-        //@ std::mem::close_MaybeUninit(to_drop);
+        //@ std::mem::close_MaybeUninit_(to_drop);
         /*@
         if start == width::<N>() {
             close array(to_drop, width::<N>(), _);
