@@ -631,130 +631,130 @@ pub fn format_exact_opt<'a>(
     }
 
     // further calculation is useless (`possibly_round` definitely fails), so we give up.
-    return None;
+    None
+}
 
-    // we've generated all requested digits of `v`, which should be also same to corresponding
-    // digits of `v - 1 ulp`. now we check if there is a unique representation shared by
-    // both `v - 1 ulp` and `v + 1 ulp`; this can be either same to generated digits, or
-    // to the rounded-up version of those digits. if the range contains multiple representations
-    // of the same length, we cannot be sure and should return `None` instead.
+// we've generated all requested digits of `v`, which should be also same to corresponding
+// digits of `v - 1 ulp`. now we check if there is a unique representation shared by
+// both `v - 1 ulp` and `v + 1 ulp`; this can be either same to generated digits, or
+// to the rounded-up version of those digits. if the range contains multiple representations
+// of the same length, we cannot be sure and should return `None` instead.
+//
+// all arguments here are scaled by the common (but implicit) value `k`, so that:
+// - `remainder = (v % 10^kappa) * k`
+// - `ten_kappa = 10^kappa * k`
+// - `ulp = 2^-e * k`
+//
+// SAFETY: the first `len` bytes of `buf` must be initialized.
+unsafe fn possibly_round(
+    buf: &mut [MaybeUninit<u8>],
+    mut len: usize,
+    mut exp: i16,
+    limit: i16,
+    remainder: u64,
+    ten_kappa: u64,
+    ulp: u64,
+) -> Option<(&[u8], i16)> {
+    debug_assert!(remainder < ten_kappa);
+
+    //           10^kappa
+    //    :   :   :<->:   :
+    //    :   :   :   :   :
+    //    :|1 ulp|1 ulp|  :
+    //    :|<--->|<--->|  :
+    // ----|-----|-----|----
+    //     |     v     |
+    // v - 1 ulp   v + 1 ulp
     //
-    // all arguments here are scaled by the common (but implicit) value `k`, so that:
-    // - `remainder = (v % 10^kappa) * k`
-    // - `ten_kappa = 10^kappa * k`
-    // - `ulp = 2^-e * k`
+    // (for the reference, the dotted line indicates the exact value for
+    // possible representations in given number of digits.)
     //
-    // SAFETY: the first `len` bytes of `buf` must be initialized.
-    unsafe fn possibly_round(
-        buf: &mut [MaybeUninit<u8>],
-        mut len: usize,
-        mut exp: i16,
-        limit: i16,
-        remainder: u64,
-        ten_kappa: u64,
-        ulp: u64,
-    ) -> Option<(&[u8], i16)> {
-        debug_assert!(remainder < ten_kappa);
-
-        //           10^kappa
-        //    :   :   :<->:   :
-        //    :   :   :   :   :
-        //    :|1 ulp|1 ulp|  :
-        //    :|<--->|<--->|  :
-        // ----|-----|-----|----
-        //     |     v     |
-        // v - 1 ulp   v + 1 ulp
-        //
-        // (for the reference, the dotted line indicates the exact value for
-        // possible representations in given number of digits.)
-        //
-        // error is too large that there are at least three possible representations
-        // between `v - 1 ulp` and `v + 1 ulp`. we cannot determine which one is correct.
-        if ulp >= ten_kappa {
-            return None;
-        }
-
-        //    10^kappa
-        //   :<------->:
-        //   :         :
-        //   : |1 ulp|1 ulp|
-        //   : |<--->|<--->|
-        // ----|-----|-----|----
-        //     |     v     |
-        // v - 1 ulp   v + 1 ulp
-        //
-        // in fact, 1/2 ulp is enough to introduce two possible representations.
-        // (remember that we need a unique representation for both `v - 1 ulp` and `v + 1 ulp`.)
-        // this won't overflow, as `ulp < ten_kappa` from the first check.
-        if ten_kappa - ulp <= ulp {
-            return None;
-        }
-
-        //     remainder
-        //       :<->|                           :
-        //       :   |                           :
-        //       :<--------- 10^kappa ---------->:
-        //     | :   |                           :
-        //     |1 ulp|1 ulp|                     :
-        //     |<--->|<--->|                     :
-        // ----|-----|-----|------------------------
-        //     |     v     |
-        // v - 1 ulp   v + 1 ulp
-        //
-        // if `v + 1 ulp` is closer to the rounded-down representation (which is already in `buf`),
-        // then we can safely return. note that `v - 1 ulp` *can* be less than the current
-        // representation, but as `1 ulp < 10^kappa / 2`, this condition is enough:
-        // the distance between `v - 1 ulp` and the current representation
-        // cannot exceed `10^kappa / 2`.
-        //
-        // the condition equals to `remainder + ulp < 10^kappa / 2`.
-        // since this can easily overflow, first check if `remainder < 10^kappa / 2`.
-        // we've already verified that `ulp < 10^kappa / 2`, so as long as
-        // `10^kappa` did not overflow after all, the second check is fine.
-        if ten_kappa - remainder > remainder && ten_kappa - 2 * remainder >= 2 * ulp {
-            // SAFETY: our caller initialized that memory.
-            return Some((unsafe { buf[..len].assume_init_ref() }, exp));
-        }
-
-        //   :<------- remainder ------>|   :
-        //   :                          |   :
-        //   :<--------- 10^kappa --------->:
-        //   :                    |     |   : |
-        //   :                    |1 ulp|1 ulp|
-        //   :                    |<--->|<--->|
-        // -----------------------|-----|-----|-----
-        //                        |     v     |
-        //                    v - 1 ulp   v + 1 ulp
-        //
-        // on the other hands, if `v - 1 ulp` is closer to the rounded-up representation,
-        // we should round up and return. for the same reason we don't need to check `v + 1 ulp`.
-        //
-        // the condition equals to `remainder - ulp >= 10^kappa / 2`.
-        // again we first check if `remainder > ulp` (note that this is not `remainder >= ulp`,
-        // as `10^kappa` is never zero). also note that `remainder - ulp <= 10^kappa`,
-        // so the second check does not overflow.
-        if remainder > ulp && ten_kappa - (remainder - ulp) <= remainder - ulp {
-            if let Some(c) =
-                // SAFETY: our caller must have initialized that memory.
-                round_up(unsafe { buf[..len].assume_init_mut() })
-            {
-                // only add an additional digit when we've been requested the fixed precision.
-                // we also need to check that, if the original buffer was empty,
-                // the additional digit can only be added when `exp == limit` (edge case).
-                exp += 1;
-                if exp > limit && len < buf.len() {
-                    buf[len] = MaybeUninit::new(c);
-                    len += 1;
-                }
-            }
-            // SAFETY: we and our caller initialized that memory.
-            return Some((unsafe { buf[..len].assume_init_ref() }, exp));
-        }
-
-        // otherwise we are doomed (i.e., some values between `v - 1 ulp` and `v + 1 ulp` are
-        // rounding down and others are rounding up) and give up.
-        None
+    // error is too large that there are at least three possible representations
+    // between `v - 1 ulp` and `v + 1 ulp`. we cannot determine which one is correct.
+    if ulp >= ten_kappa {
+        return None;
     }
+
+    //    10^kappa
+    //   :<------->:
+    //   :         :
+    //   : |1 ulp|1 ulp|
+    //   : |<--->|<--->|
+    // ----|-----|-----|----
+    //     |     v     |
+    // v - 1 ulp   v + 1 ulp
+    //
+    // in fact, 1/2 ulp is enough to introduce two possible representations.
+    // (remember that we need a unique representation for both `v - 1 ulp` and `v + 1 ulp`.)
+    // this won't overflow, as `ulp < ten_kappa` from the first check.
+    if ten_kappa - ulp <= ulp {
+        return None;
+    }
+
+    //     remainder
+    //       :<->|                           :
+    //       :   |                           :
+    //       :<--------- 10^kappa ---------->:
+    //     | :   |                           :
+    //     |1 ulp|1 ulp|                     :
+    //     |<--->|<--->|                     :
+    // ----|-----|-----|------------------------
+    //     |     v     |
+    // v - 1 ulp   v + 1 ulp
+    //
+    // if `v + 1 ulp` is closer to the rounded-down representation (which is already in `buf`),
+    // then we can safely return. note that `v - 1 ulp` *can* be less than the current
+    // representation, but as `1 ulp < 10^kappa / 2`, this condition is enough:
+    // the distance between `v - 1 ulp` and the current representation
+    // cannot exceed `10^kappa / 2`.
+    //
+    // the condition equals to `remainder + ulp < 10^kappa / 2`.
+    // since this can easily overflow, first check if `remainder < 10^kappa / 2`.
+    // we've already verified that `ulp < 10^kappa / 2`, so as long as
+    // `10^kappa` did not overflow after all, the second check is fine.
+    if ten_kappa - remainder > remainder && ten_kappa - 2 * remainder >= 2 * ulp {
+        // SAFETY: our caller initialized that memory.
+        return Some((unsafe { buf[..len].assume_init_ref() }, exp));
+    }
+
+    //   :<------- remainder ------>|   :
+    //   :                          |   :
+    //   :<--------- 10^kappa --------->:
+    //   :                    |     |   : |
+    //   :                    |1 ulp|1 ulp|
+    //   :                    |<--->|<--->|
+    // -----------------------|-----|-----|-----
+    //                        |     v     |
+    //                    v - 1 ulp   v + 1 ulp
+    //
+    // on the other hands, if `v - 1 ulp` is closer to the rounded-up representation,
+    // we should round up and return. for the same reason we don't need to check `v + 1 ulp`.
+    //
+    // the condition equals to `remainder - ulp >= 10^kappa / 2`.
+    // again we first check if `remainder > ulp` (note that this is not `remainder >= ulp`,
+    // as `10^kappa` is never zero). also note that `remainder - ulp <= 10^kappa`,
+    // so the second check does not overflow.
+    if remainder > ulp && ten_kappa - (remainder - ulp) <= remainder - ulp {
+        if let Some(c) =
+            // SAFETY: our caller must have initialized that memory.
+            round_up(unsafe { buf[..len].assume_init_mut() })
+        {
+            // only add an additional digit when we've been requested the fixed precision.
+            // we also need to check that, if the original buffer was empty,
+            // the additional digit can only be added when `exp == limit` (edge case).
+            exp += 1;
+            if exp > limit && len < buf.len() {
+                buf[len] = MaybeUninit::new(c);
+                len += 1;
+            }
+        }
+        // SAFETY: we and our caller initialized that memory.
+        return Some((unsafe { buf[..len].assume_init_ref() }, exp));
+    }
+
+    // otherwise we are doomed (i.e., some values between `v - 1 ulp` and `v + 1 ulp` are
+    // rounding down and others are rounding up) and give up.
+    None
 }
 
 /// The exact and fixed mode implementation for Grisu with Dragon fallback.
@@ -786,7 +786,7 @@ pub mod grisu_verify {
     };
 
     // The direct strategy harnesses execute the real generator bodies. Exact
-    // mode composes the verified round_up contract; shortest mode retains
+    // mode composes the final-rounding contract; shortest mode retains
     // round_and_weed.
     // Buffer lengths are symbolic: shortest mode includes the minimum legal
     // buffer, and exact mode includes both one-byte and multi-digit buffers.
@@ -794,6 +794,121 @@ pub mod grisu_verify {
     // not arbitrary slice lengths. Unwinding assertions remain enabled.
     const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
+
+    // Keep uninitialized padding in this proof: only the caller's initialized
+    // prefix is copied before executing the real final-rounding helper.
+    #[kani::requires(
+        len <= capacity && capacity <= PROOF_BUFLEN
+            && exp < i16::MAX && remainder < ten_kappa
+            && crate::num::flt2dec::rounding_verify::prefix_all(digits, len, |digit| digit < u8::MAX)
+    )]
+    #[kani::ensures(|result| result.as_ref().is_none_or(|&(written, _)| {
+        written >= len && written <= capacity && written - len <= 1
+    }))]
+    #[kani::modifies(digits)]
+    fn round_exact_contract(
+        digits: &mut [u8; PROOF_BUFLEN],
+        len: usize,
+        capacity: usize,
+        exp: i16,
+        limit: i16,
+        remainder: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> Option<(usize, i16)> {
+        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+        let start = buf.as_mut_ptr().cast::<u8>();
+        // SAFETY: the contract bounds len by both distinct arrays' capacities.
+        // This initializes exactly the prefix required by possibly_round.
+        unsafe { crate::ptr::copy_nonoverlapping(digits.as_ptr(), start, len) };
+        // SAFETY: the copy above initialized the first len bytes.
+        unsafe { possibly_round(&mut buf[..capacity], len, exp, limit, remainder, ten_kappa, ulp) }
+            .map(|(output, output_exp)| {
+                assert_eq!(output.as_ptr(), start.cast_const());
+                // Read every returned byte, including any appended carry. This
+                // checks initialization instead of merely inspecting slice metadata.
+                let checksum = output.iter().enumerate().fold(0_u8, |checksum, (index, &digit)| {
+                    digits[index] = digit;
+                    checksum ^ digit
+                });
+                kani::cover(checksum == 0, "final rounding returns readable output bytes");
+                (output.len(), output_exp)
+            })
+    }
+
+    // The verified contract overapproximates byte values and the decision to
+    // return None. It can write only the input prefix or a proved output prefix;
+    // unused padding in the generator's buffer remains uninitialized.
+    unsafe fn stub_possibly_round(
+        buf: &mut [MaybeUninit<u8>],
+        len: usize,
+        exp: i16,
+        limit: i16,
+        remainder: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> Option<(&[u8], i16)> {
+        assert!(len <= buf.len() && buf.len() <= PROOF_BUFLEN);
+        let mut digits = [0; PROOF_BUFLEN];
+        // SAFETY: this adapter has possibly_round's initialized-prefix contract.
+        // The verified precondition reads its bytes before the model can write.
+        digits[..len].copy_from_slice(unsafe { buf[..len].assume_init_ref() });
+        let result = round_exact_contract(
+            &mut digits,
+            len,
+            buf.len(),
+            exp,
+            limit,
+            remainder,
+            ten_kappa,
+            ulp,
+        );
+        let written = result.map_or(len, |(written, _)| written);
+        assert!(written <= buf.len());
+        // SAFETY: the contract bounds written by both distinct arrays. All
+        // source bytes are initialized; this initializes only the active prefix.
+        unsafe {
+            crate::ptr::copy_nonoverlapping(digits.as_ptr(), buf.as_mut_ptr().cast(), written)
+        };
+        result.map(|(written, output_exp)| {
+            // SAFETY: the copy above initialized this prefix.
+            (unsafe { buf[..written].assume_init_ref() }, output_exp)
+        })
+    }
+
+    #[kani::proof_for_contract(round_exact_contract)]
+    #[kani::unwind(33)]
+    #[kani::stub(
+        crate::num::flt2dec::round_up,
+        crate::num::flt2dec::rounding_verify::stub_round_up
+    )]
+    #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
+    #[kani::solver(kissat)]
+    fn check_round_exact_contract() {
+        let mut digits: [u8; PROOF_BUFLEN] = kani::any();
+        let len = usize::from(kani::any::<u8>());
+        let capacity = usize::from(kani::any::<u8>());
+        let result = round_exact_contract(
+            &mut digits,
+            len,
+            capacity,
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+        );
+        kani::cover(len == 0 && result.is_some(), "final rounding accepts an empty prefix");
+        kani::cover(
+            len == PROOF_BUFLEN && result.is_some(),
+            "final rounding accepts a full buffer",
+        );
+        kani::cover(result.is_none(), "final rounding can request the Dragon fallback");
+        kani::cover(
+            result.is_some_and(|(written, _)| written > len),
+            "final rounding can append an initialized carry",
+        );
+    }
 
     // An arbitrary `Decoded` satisfying every precondition the `grisu` entry
     // points assert.  `mant + plus < 2^61` (and the `checked_add`/`checked_sub`
@@ -861,11 +976,8 @@ pub mod grisu_verify {
                 // rounding contract retains its own 33-iteration proof bound.
                 #[kani::proof]
                 #[kani::unwind(19)]
-                #[kani::stub(
-                    crate::num::flt2dec::round_up,
-                    crate::num::flt2dec::rounding_verify::stub_round_up
-                )]
-                #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::stub(possibly_round, stub_possibly_round)]
+                #[kani::stub_verified(round_exact_contract)]
                 #[kani::solver(kissat)]
                 fn check_format_exact_opt() {
                     let d = $decode::<$group>();

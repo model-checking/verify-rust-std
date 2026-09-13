@@ -7,7 +7,11 @@ const PROOF_BUFLEN: usize = 32;
 
 // The fixed capacity lets contract predicates use constant indices instead of
 // unfolding a symbolic iterator each time a generator rounds its output.
-fn prefix_all(digits: &[u8; PROOF_BUFLEN], len: usize, predicate: impl Fn(u8) -> bool) -> bool {
+pub(crate) fn prefix_all(
+    digits: &[u8; PROOF_BUFLEN],
+    len: usize,
+    predicate: impl Fn(u8) -> bool,
+) -> bool {
     macro_rules! check_bytes {
         ($($index:literal),+ $(,)?) => {
             true $(& ((len <= $index) | predicate(digits[$index])))+

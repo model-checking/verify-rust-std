@@ -125,6 +125,10 @@ jobs:
             module: num::flt2dec::rounding_verify
             proof: check_round_up_contract
             kind: contract
+          - name: grisu-exact-rounding-contract
+            module: num::flt2dec::strategy::grisu::grisu_verify
+            proof: check_round_exact_contract
+            kind: contract
           - name: comparison-equivalence-contract
             module: num::flt2dec::strategy::dragon::dragon_verify
             proof: check_comparison_models_agree
