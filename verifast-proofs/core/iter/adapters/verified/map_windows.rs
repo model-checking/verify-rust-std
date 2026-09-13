@@ -356,6 +356,9 @@ impl<T, const N: usize> Buffer<T, N> {
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);
+        //@ open array(base(self) + start, width::<N>(), map(std::mem::MaybeUninit::new, values));
+        //@ assert pointer_within_limits(base(self) + start + 1) == true;
+        //@ close array(base(self) + start, width::<N>(), map(std::mem::MaybeUninit::new, values));
         //@ assert base(self)[..start] |-> ?prefix_slots;
         //@ assert (base(self) + start + width::<N>())[..width::<N>() - start] |-> ?suffix_slots;
         //@ joined_window(prefix_slots, map(std::mem::MaybeUninit::new, values), suffix_slots);
