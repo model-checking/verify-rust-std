@@ -469,12 +469,21 @@ pub mod dragon_verify {
     }
 
     macro_rules! check_partition {
+        ($name:ident, arbitrary_finite_f32, $group:literal, $cover_fallback:literal) => {
+            check_partition!($name, arbitrary_finite_f32, $group, $cover_fallback, 19, 33);
+        };
         ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
+            check_partition!($name, $decode, $group, $cover_fallback, 41, 41);
+        };
+        (
+            $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
+            $shortest_unwind:literal, $exact_unwind:literal
+        ) => {
             mod $name {
                 use super::*;
 
                 #[kani::proof]
-                #[kani::unwind(41)]
+                #[kani::unwind($shortest_unwind)]
                 #[kani::stub(
                     crate::num::flt2dec::round_up,
                     crate::num::flt2dec::rounding_verify::stub_round_up
@@ -497,7 +506,7 @@ pub mod dragon_verify {
                 }
 
                 #[kani::proof]
-                #[kani::unwind(41)]
+                #[kani::unwind($exact_unwind)]
                 #[kani::stub(
                     crate::num::flt2dec::round_up,
                     crate::num::flt2dec::rounding_verify::stub_round_up
@@ -526,5 +535,7 @@ pub mod dragon_verify {
     }
 
     for_each_finite_partition!(check_partition);
-    check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent, 1023, false);
+    // These inputs need fewer bigint limbs. Keep enough iterations for the
+    // digit and rounding loops; unwinding assertions check every loop bound.
+    check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent, 1023, false, 19, 33);
 }
