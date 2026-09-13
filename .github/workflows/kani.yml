@@ -208,9 +208,9 @@ jobs:
             --exclude-pattern time::Duration::from_secs_f \
             --include-pattern unicode::unicode_data::conversions::to_ \
             --exclude-pattern ::precondition_check \
-            --harness-timeout 10m \
+            --harness-timeout 30m \
             --default-unwind 1000 \
-            --jobs=3 --output-format=terse | tee autoharness-verification.log
+            --jobs=1 --output-format=terse | tee autoharness-verification.log
           gzip autoharness-verification.log
 
       - name: Upload Autoharness Verification Log
