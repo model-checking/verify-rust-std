@@ -431,8 +431,10 @@ pub mod dragon_verify {
     fn check_comparison_models_agree() {
         // These methods only need size bounds. Inactive limbs may be arbitrary;
         // unlike arithmetic contracts, this proof needs no zero-tail invariant.
-        let left: Big = kani::any();
-        let right: Big = kani::any();
+        // Six symbolic bits represent every permitted size, 0 through 40, while
+        // keeping unused upper index bits concrete during symbolic execution.
+        let left = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let right = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
         let _ = comparison_models_agree(&left, &right);
         let ordering = left.kani_cmp_model(&right);
         kani::cover(ordering == Ordering::Less, "comparison can be less");

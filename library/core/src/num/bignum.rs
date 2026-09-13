@@ -398,6 +398,10 @@ impl crate::kani::Arbitrary for Big32x40 {
 
 #[cfg(kani)]
 impl Big32x40 {
+    pub(crate) fn kani_with_arbitrary_limbs(size: usize) -> Self {
+        Self { size, base: crate::kani::any() }
+    }
+
     pub(crate) fn kani_size(&self) -> usize {
         self.size
     }
