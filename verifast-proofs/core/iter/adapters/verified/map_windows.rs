@@ -3,6 +3,8 @@
 use crate::mem::MaybeUninit;
 use crate::{fmt, ptr};
 
+//@ include!{"../array_layout.rsspec"}
+
 struct Buffer<T, const N: usize> {
     // Invariant: `self.buffer[self.start..self.start + N]` is initialized,
     // with all other elements being uninitialized. This also
@@ -94,8 +96,8 @@ impl<T, const N: usize> Buffer<T, N> {
 
     #[inline]
     unsafe fn buffer_mut_ptr(&mut self) -> *mut MaybeUninit<T>
-//@ req pointer_within_limits(base(self)) == true;
-    //@ ens result == base(self);
+//@ req (*self).buffer |-> ?matrix;
+    //@ ens *(result as *[[std::mem::MaybeUninit<T>; N]; 2]) |-> matrix &*& ref_mut_end_token(result as *[[std::mem::MaybeUninit<T>; N]; 2], &(*self).buffer);
     //@ on_unwind_ens false;
     {
         self.buffer.as_mut_ptr().cast()
@@ -174,9 +176,15 @@ impl<T, const N: usize> Buffer<T, N> {
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);
-        //@ open foreach(values, own::<T>(t));
-        //@ open array(base(self) + start, width::<N>(), _);
+        //@ array_join(base(self));
+        //@ array_join(base(self));
+        //@ pack_matrix(&(*self).buffer);
         let buffer_mut_ptr = unsafe { self.buffer_mut_ptr() };
+        //@ unpack_matrix(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2]);
+        //@ array_split(buffer_mut_ptr, start);
+        //@ array_split(buffer_mut_ptr + start, width::<N>());
+        //@ open foreach(values, own::<T>(t));
+        //@ open array(buffer_mut_ptr + start, width::<N>(), _);
         debug_assert!(self.start + N <= 2 * N);
 
         let to_drop = if self.start == N {
@@ -203,6 +211,7 @@ impl<T, const N: usize> Buffer<T, N> {
                 //@ array_to_array_(buffer_mut_ptr);
                 ptr::copy_nonoverlapping(buffer_mut_ptr.add(self.start + 1), buffer_mut_ptr, N - 1);
                 (*buffer_mut_ptr.add(N - 1)).write(next);
+                //@ end_ref_mut_::<std::mem::MaybeUninit<T>>();
                 //@ close array(buffer_mut_ptr + width::<N>() - 1, 1, cons(std::mem::MaybeUninit::new(next), nil));
                 //@ array_join(buffer_mut_ptr);
                 buffer_mut_ptr.add(self.start)
@@ -226,6 +235,7 @@ impl<T, const N: usize> Buffer<T, N> {
             let to_drop = unsafe {
                 //@ open array(buffer_mut_ptr + start + width::<N>(), width::<N>() - start, _);
                 (*buffer_mut_ptr.add(self.start + N)).write(next);
+                //@ end_ref_mut_::<std::mem::MaybeUninit<T>>();
                 //@ close array(buffer_mut_ptr + start + width::<N>() + 1, 0, nil);
                 //@ close array(buffer_mut_ptr + start + width::<N>(), 1, cons(std::mem::MaybeUninit::new(next), nil));
                 //@ array_join(buffer_mut_ptr + start + 1);
@@ -254,6 +264,13 @@ impl<T, const N: usize> Buffer<T, N> {
             close array(to_drop, 1, _);
             array_join(buffer_mut_ptr);
         }
+        array_join(buffer_mut_ptr);
+        array_join(buffer_mut_ptr);
+        pack_matrix(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2]);
+        end_ref_mut_::<[[std::mem::MaybeUninit<T>; N]; 2]>();
+        unpack_matrix(&(*self).buffer);
+        array_split(base(self), if start == width::<N>() { 0 } else { start + 1 });
+        array_split(base(self) + (if start == width::<N>() { 0 } else { start + 1 }), width::<N>());
         close bounds(self, if start == width::<N>() { 0 } else { start + 1 });
         close live(t, self, if start == width::<N>() { 0 } else { start + 1 },
             append(tail(values), cons(next, nil)));

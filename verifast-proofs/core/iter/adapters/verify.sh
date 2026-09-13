@@ -204,6 +204,9 @@ PY
 # Keep every stage sequential and require both proof and refinement to succeed.
 # Collect their independent diagnostics even when the first stage fails.
 # No assumption, unwind, reference-creation, or overflow suppression flags.
+layout_status=0
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/matrix-layout-valid.rs || layout_status=$?
 proof_status=0
 timeout --signal=TERM --kill-after=10s 600s \
   verifast -rustc_args '--edition 2024' -skip_specless_fns verified/lib.rs || proof_status=$?
@@ -255,8 +258,9 @@ for path in (Path("verified/map_windows.rs"), Path("verified/step_by.rs")):
 PY
   )
 fi
-if (( proof_status != 0 || refinement_status != 0 )); then
-  printf 'FAIL: proof status %s; refinement status %s\n' "$proof_status" "$refinement_status" >&2
+if (( proof_status != 0 || refinement_status != 0 || layout_status != 0 )); then
+  printf 'FAIL: proof status %s; refinement status %s; layout status %s\n' \
+    "$proof_status" "$refinement_status" "$layout_status" >&2
   exit 1
 fi
 echo 'PASS: generic adapter contracts, source refinement, and source identity'
