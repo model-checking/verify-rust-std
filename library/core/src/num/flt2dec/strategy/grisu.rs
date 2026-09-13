@@ -473,6 +473,34 @@ pub fn format_exact_opt<'a>(
     buf: &'a mut [MaybeUninit<u8>],
     limit: i16,
 ) -> Option<(/*digits*/ &'a [u8], /*exp*/ i16)> {
+    generate_exact(d, buf, limit).and_then(|rounding| {
+        // SAFETY: generation initialized the recorded prefix, or selected an
+        // empty prefix. No buffer writes occur between generation and rounding.
+        unsafe {
+            possibly_round(
+                buf,
+                rounding.len,
+                rounding.exp,
+                limit,
+                rounding.remainder,
+                rounding.ten_kappa,
+                rounding.ulp,
+            )
+        }
+    })
+}
+
+// Keep the rounding state separate from generation so every exit shares one
+// final call. This also avoids repeating its proof contract at each loop step.
+struct ExactRounding {
+    len: usize,
+    exp: i16,
+    remainder: u64,
+    ten_kappa: u64,
+    ulp: u64,
+}
+
+fn generate_exact(d: &Decoded, buf: &mut [MaybeUninit<u8>], limit: i16) -> Option<ExactRounding> {
     assert!(d.mant > 0);
     assert!(d.mant < (1 << 61)); // we need at least three bits of additional precision
     assert!(!buf.is_empty());
@@ -536,10 +564,14 @@ pub fn format_exact_opt<'a>(
         // this will increase the false negative rate, but only very, *very* slightly;
         // it can only matter noticeably when the mantissa is bigger than 60 bits.
         //
-        // SAFETY: `len=0`, so the obligation of having initialized this memory is trivial.
-        return unsafe {
-            possibly_round(buf, 0, exp, limit, v.f / 10, (max_ten_kappa as u64) << e, err << e)
-        };
+        // The empty prefix needs no initialization.
+        return Some(ExactRounding {
+            len: 0,
+            exp,
+            remainder: v.f / 10,
+            ten_kappa: (max_ten_kappa as u64) << e,
+            ulp: err << e,
+        });
     } else if ((exp as i32 - limit as i32) as usize) < buf.len() {
         (exp - limit) as usize
     } else {
@@ -569,10 +601,14 @@ pub fn format_exact_opt<'a>(
         // is the buffer full? run the rounding pass with the remainder.
         if i == len {
             let vrem = ((r as u64) << e) + vfrac; // == (v % 10^kappa) * 2^e
-            // SAFETY: we have initialized `len` many bytes.
-            return unsafe {
-                possibly_round(buf, len, exp, limit, vrem, (ten_kappa as u64) << e, err << e)
-            };
+            // We have initialized `len` many bytes.
+            return Some(ExactRounding {
+                len,
+                exp,
+                remainder: vrem,
+                ten_kappa: (ten_kappa as u64) << e,
+                ulp: err << e,
+            });
         }
 
         // break the loop when we have rendered all integral digits.
@@ -622,8 +658,8 @@ pub fn format_exact_opt<'a>(
 
         // is the buffer full? run the rounding pass with the remainder.
         if i == len {
-            // SAFETY: we have initialized `len` many bytes.
-            return unsafe { possibly_round(buf, len, exp, limit, r, 1 << e, err) };
+            // We have initialized `len` many bytes.
+            return Some(ExactRounding { len, exp, remainder: r, ten_kappa: 1 << e, ulp: err });
         }
 
         // restore invariants
