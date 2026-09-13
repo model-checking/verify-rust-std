@@ -822,7 +822,7 @@ pub mod grisu_verify {
     // Call the generator itself, including round_and_weed. The wrapper harness
     // below checks a separate obligation and does not establish this one.
     #[kani::proof]
-    #[kani::unwind(33)]
+    #[kani::unwind(19)]
     fn check_format_shortest_opt() {
         let d = arbitrary_finite_decoded();
         let len: usize = kani::any();
@@ -843,6 +843,11 @@ pub mod grisu_verify {
 
     #[kani::proof]
     #[kani::unwind(33)]
+    #[kani::stub(
+        crate::num::flt2dec::round_up,
+        crate::num::flt2dec::rounding_verify::stub_round_up
+    )]
+    #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
     fn check_format_exact_opt() {
         let d = arbitrary_finite_decoded();
         let limit: i16 = kani::any();

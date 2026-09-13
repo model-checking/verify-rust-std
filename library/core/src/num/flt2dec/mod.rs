@@ -668,6 +668,9 @@ where
 }
 
 #[cfg(kani)]
+mod rounding_verify;
+
+#[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 pub mod flt2dec_verify {
     use super::*;

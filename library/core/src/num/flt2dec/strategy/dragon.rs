@@ -403,6 +403,11 @@ pub mod dragon_verify {
 
     #[kani::proof]
     #[kani::unwind(41)]
+    #[kani::stub(
+        crate::num::flt2dec::round_up,
+        crate::num::flt2dec::rounding_verify::stub_round_up
+    )]
+    #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
     fn check_format_shortest() {
         let d = arbitrary_finite_decoded();
         let len: usize = kani::any();
@@ -420,6 +425,11 @@ pub mod dragon_verify {
 
     #[kani::proof]
     #[kani::unwind(41)]
+    #[kani::stub(
+        crate::num::flt2dec::round_up,
+        crate::num::flt2dec::rounding_verify::stub_round_up
+    )]
+    #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
     fn check_format_exact() {
         let d = arbitrary_finite_decoded();
         let limit: i16 = kani::any();
