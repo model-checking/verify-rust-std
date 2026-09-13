@@ -268,20 +268,23 @@ mod verify {
     // Boundedness: the chunk fill iterates through the generic default
     // `Iterator::try_fold` (a while-let loop that calls a generic closure in
     // iterator.rs), so this adapter cannot attach a loop contract to it. A
-    // fixed `MAX_LEN` is still a complete state-space cover, not a truncation:
-    // every reachable value of `initialized` is in 0..=N for every slice
-    // length, so any `MAX_LEN >= N + 2` exercises every reachable
-    // configuration (empty source, saturation before exhaustion, and
-    // exhaustion before saturation).
+    // fixed `MAX_LEN` only proves safety for sources up to that length. A
+    // mapping can return `None` arbitrarily many times before yielding `Some`;
+    // covering every value of `initialized` does not prove preservation of
+    // the buffer and iterator invariants across those extra iterations.
+    // These harnesses do not meet the challenge's unbounded requirement.
     //
-    // N = 0 is excluded on purpose. The current upstream implementation has a
-    // latent N = 0 defect: the closure does a one-element
+    // N = 0 with a nonempty source remains an upstream defect in this snapshot:
+    // the closure does a one-element
     // `copy_nonoverlapping` of the mapped payload into `guard.array` at
     // `idx` before it compares `guard.initialized < N`, so `next_chunk::<0>()`
     // on a source that yields at least one element writes out of bounds into
     // the zero-capacity array. Repo rules (doc/src/general-rules.md) do not
-    // permit a local change to the runtime logic, so the fix must land
-    // upstream. An upstream report is prepared. These harnesses cover N >= 1.
+    // permit a local change to the runtime logic unless it has been
+    // incorporated upstream. The defect is tracked at
+    // https://github.com/rust-lang/rust/issues/153803, with a proposed fix at
+    // https://github.com/rust-lang/rust/pull/153813.
+    // The separate empty-source N = 0 harnesses below do not cover this defect.
     macro_rules! check_next_chunk {
         ($harness:ident, $elem_ty:ty, $out_ty:ty, $n:expr) => {
             #[kani::proof]
@@ -310,4 +313,19 @@ mod verify {
     check_next_chunk!(check_filter_map_next_chunk_out_unit, u8, (), 3);
     check_next_chunk!(check_filter_map_next_chunk_out_tup, u8, (char, u8), 3);
     check_next_chunk!(check_filter_map_next_chunk_out_drop, u8, DropToken, 3);
+
+    // Empty sources avoid the faulty payload copy. Check both dropless and
+    // drop-requiring outputs at zero capacity, including dropping the result.
+    #[kani::proof]
+    fn check_filter_map_next_chunk_empty_n0() {
+        let mut it = FilterMap::new(crate::iter::empty::<u8>(), |_| kani::any::<Option<u8>>());
+        let _ = it.next_chunk::<0>();
+    }
+
+    #[kani::proof]
+    fn check_filter_map_next_chunk_empty_drop_n0() {
+        let mut it =
+            FilterMap::new(crate::iter::empty::<u8>(), |_| kani::any::<Option<DropToken>>());
+        let _ = it.next_chunk::<0>();
+    }
 }

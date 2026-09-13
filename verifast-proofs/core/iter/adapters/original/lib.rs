@@ -1,0 +1,13 @@
+#![no_std]
+#![crate_type = "lib"]
+#![allow(dead_code, unused_imports, internal_features)]
+#![feature(core_intrinsics, staged_api)]
+#![stable(feature = "rust1", since = "1.0.0")]
+
+extern crate core as std;
+
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use std::{fmt, intrinsics, mem, num, ptr};
+
+mod map_windows;
+mod step_by;

@@ -276,6 +276,7 @@ where
     }
 
     #[inline]
+    #[requires(idx < Iterator::size_hint(self).0)]
     #[cfg_attr(kani, kani::modifies(self))]
     unsafe fn get_unchecked(&mut self, idx: usize) -> <Self as Iterator>::Item {
         let idx = self.index + idx;
@@ -852,7 +853,9 @@ mod verify {
                 let array_a: [$a; MAX_LEN] = kani::any();
                 let array_b: [$b; MAX_LEN] = kani::any();
                 let mut it = any_zip_iter::<$a, $b>(&array_a, &array_b);
-                let n = kani::any_where(|x: &usize| *x <= MAX_LEN);
+                // Requests beyond the remaining length, including usize::MAX,
+                // must exhaust the iterator without overflowing or reading past it.
+                let n: usize = kani::any();
                 let _ = crate::iter::Iterator::nth(&mut it, n);
             }
             #[kani::proof]
@@ -965,7 +968,8 @@ mod verify {
                 let array_a: [u8; MAX_LEN] = kani::any();
                 let array_b: [u8; MAX_LEN] = kani::any();
                 let mut it = Zip::new($mk_a(any_slice(&array_a)), $mk_b(any_slice(&array_b)));
-                let n = kani::any_where(|x: &usize| *x <= MAX_LEN);
+                // The request can exceed either backing slice's length.
+                let n: usize = kani::any();
                 let _ = crate::iter::Iterator::nth(&mut it, n);
             }
 

@@ -152,6 +152,7 @@ where
     I: UncheckedIterator<Item = &'a T>,
     T: Clone,
 {
+    #[requires(self.it.size_hint().0 > 0)]
     unsafe fn next_unchecked(&mut self) -> T {
         // SAFETY: `Cloned` is 1:1 with the inner iterator, so if the caller promised
         // that there's an element left, the inner iterator has one too.

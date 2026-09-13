@@ -248,20 +248,22 @@ mod verify {
     // Boundedness: the chunk fill iterates through the generic default
     // `Iterator::try_fold` (a while-let loop that calls a generic closure in
     // iterator.rs), so this adapter cannot attach a loop contract to it. A
-    // fixed `MAX_LEN` is still a complete state-space cover, not a truncation:
-    // every reachable value of `initialized` is in 0..=N for every slice
-    // length, so any `MAX_LEN >= N + 2` exercises every reachable
-    // configuration (empty source, saturation before exhaustion, and
-    // exhaustion before saturation).
+    // fixed `MAX_LEN` only proves safety for sources up to that length. A
+    // predicate can reject arbitrarily many elements before accepting one;
+    // covering every value of `initialized` does not prove preservation of
+    // the buffer and iterator invariants across those extra iterations.
+    // These harnesses do not meet the challenge's unbounded requirement.
     //
-    // N = 0 is excluded on purpose. The current upstream implementation has a
-    // latent N = 0 defect: the closure writes through
+    // N = 0 with a nonempty source remains an upstream defect in this snapshot:
+    // the closure writes through
     // `array.get_unchecked_mut(idx)` before it compares `initialized < N`, so
     // `next_chunk::<0>()` on a source that yields at least one element writes
     // out of bounds into the zero-length array. Repo rules
     // (doc/src/general-rules.md) do not permit a local change to the runtime
-    // logic, so the fix must land upstream. An upstream report is prepared.
-    // These harnesses cover N >= 1.
+    // logic unless it has been incorporated upstream. The defect is tracked
+    // at https://github.com/rust-lang/rust/issues/153803, with a proposed fix
+    // at https://github.com/rust-lang/rust/pull/153813.
+    // The separate empty-source N = 0 harness below does not cover this defect.
     macro_rules! check_next_chunk_dropless {
         ($harness:ident, $elem_ty:ty, $n:expr) => {
             #[kani::proof]
@@ -286,4 +288,12 @@ mod verify {
     check_next_chunk_dropless!(check_filter_next_chunk_dropless_u8_n1, u8, 1);
     check_next_chunk_dropless!(check_filter_next_chunk_dropless_char_n1, char, 1);
     check_next_chunk_dropless!(check_filter_next_chunk_dropless_tup_n1, (char, u8), 1);
+
+    // With no source elements, the faulty write is unreachable. Exercise the
+    // zero-capacity result and its drop without claiming nonempty-source safety.
+    #[kani::proof]
+    fn check_filter_next_chunk_dropless_empty_n0() {
+        let mut it = Filter::new(crate::iter::empty::<u8>(), |_: &u8| kani::any::<bool>());
+        let _ = it.next_chunk_dropless::<0>();
+    }
 }
