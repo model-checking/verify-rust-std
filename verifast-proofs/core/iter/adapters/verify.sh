@@ -75,6 +75,21 @@ fi
 negative_log="$(mktemp)"
 trap 'rm -f -- "$negative_log"' EXIT
 if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/array-length-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The array-to-slice coercion accepted an incorrect length.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The array length check did not report the expected proof failure")
+PY
+if timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/add-overflow.rs >"$negative_log" 2>&1; then
   cat "$negative_log"
   echo 'The frontend accepted unchecked addition without an overflow precondition.' >&2

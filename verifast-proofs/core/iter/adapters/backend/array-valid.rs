@@ -40,3 +40,13 @@ unsafe fn matrix_mut_ptr<T, const N: usize>(
 {
     unsafe { (*p).as_mut_ptr().cast() }
 }
+
+unsafe fn array_len<T, const N: usize>(p: *const [T; N]) -> usize
+//@ req [?f]ref_initialized(p);
+//@ ens [f]ref_initialized(p) &*& result == usize_of_const(typeid(N));
+//@ on_unwind_ens false;
+{
+    //@ reborrow_ref_(p);
+    let slice: &[T] = unsafe { &*p };
+    slice.len()
+}

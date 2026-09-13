@@ -11,6 +11,14 @@
          ignored @1: Void; # A predicate that we are ignoring for now
      }
  }
+@@ -681,6 +685,7 @@
+         kind @2: CastKind;
+         operand @0: Operand;
+         ty @1: Ty;
++        sourceTy @3: Ty;
+     }
+
+     struct AggregateData {
 --- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
 +++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
 @@ -1224,6 +1224,13 @@
@@ -39,6 +47,16 @@
              let name_cpn = p_cpn.reborrow().init_name();
              Self::encode_hir_generic_param_name(enc_ctx, p.def_id, &p.name, name_cpn);
              let span_cpn = p_cpn.reborrow().init_span();
+@@ -2287,6 +2299,9 @@
+                     }
+                     let operand_cpn = cast_data_cpn.reborrow().init_operand();
+                     Self::encode_operand(tcx, enc_ctx, operand, operand_cpn);
++                    let source_ty = operand.ty(&enc_ctx.body().local_decls, tcx);
++                    let source_ty_cpn = cast_data_cpn.reborrow().init_source_ty();
++                    Self::encode_ty(tcx, enc_ctx, source_ty, source_ty_cpn);
+                     let ty_cpn = cast_data_cpn.init_ty();
+                     Self::encode_ty(tcx, enc_ctx, *ty, ty_cpn);
+                 }
 --- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
 +++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
 @@ -801,8 +801,9 @@
@@ -151,7 +169,7 @@
              if TranslatorArgs.ignore_ref_creation then true
              else
                let directives =
-@@ -3157,7 +3165,14 @@
+@@ -3157,12 +3165,34 @@
              Ok (`TrRvalueExpr e)
            | _ ->
            let* ty_info = translate_decoded_ty cast_data.ty loc in
@@ -164,10 +182,31 @@
 +                Ast.PtrTypeExpr (loc, slice_ty)
 +            | ty -> ty
 +          in
++          let cast_expr expr =
++            match cast_data.kind, cast_data.source_ty.kind, cast_data.ty.kind with
++            | D.PointerCoercion,
++              (D.Ref {ty = {kind = D.Array array_ty}} | D.RawPtr {ty = {kind = D.Array array_ty}}),
++              (D.Ref {ty = {kind = D.Slice elem_ty}} | D.RawPtr {ty = {kind = D.Slice elem_ty}}) ->
++                let* elem_ty_info = translate_decoded_ty elem_ty loc in
++                let* len = translate_ty_const array_ty.size loc in
++                (* Unsize preserves the borrowed data pointer and adds the array length. *)
++                let call = Ast.CallExpr (loc, "std::ptr::slice_from_raw_parts_mut",
++                  [elem_ty_info.vf_ty], [],
++                  [LitPat (Ast.CastExpr (loc, PtrTypeExpr (loc, elem_ty_info.vf_ty), expr));
++                   LitPat len], Static) in
++                Ok (`TrRvalueExpr (result_of_outcome loc call))
++            | cast -> Ok (`TrRvalueExpr (Ast.CastExpr (loc, ty, expr)))
++          in
            match operand with
            | `TrOperandCopy expr
            | `TrOperandMove (expr, _ (*place_is_mutable*))
-@@ -5993,17 +6008,18 @@
+           | `TrTypedConstantScalar expr ->
+-              Ok (`TrRvalueExpr (Ast.CastExpr (loc, ty, expr)))
++              cast_expr expr
+           | `TrTypedConstantRvalueBinderBuilder rvalue_binder_builder ->
+               failwith "Todo: Rvalue::Cast"
+               (*Todo @Nima: We need a better design (refactor) for passing different results of operand translation*)
+@@ -5993,17 +6023,18 @@
             with
             | Lifetime -> Ok (`Lifetime name)
             | Type -> Ok (`Type name)
@@ -195,7 +234,7 @@
        let lft_params =
          Util.flatmap (function `Lifetime x -> [ x ] | _ -> []) generics
        in
-@@ -6029,7 +6045,9 @@
+@@ -6029,7 +6060,9 @@
          |> List.map decode_predicate
        in
        let sized_tparams = compute_sized_tparams preds in
