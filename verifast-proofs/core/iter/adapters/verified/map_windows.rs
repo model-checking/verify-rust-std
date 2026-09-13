@@ -104,11 +104,14 @@ impl<T, const N: usize> Buffer<T, N> {
 /*@
     req [?f]bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
         [_](<[T; N]>.share)('a, ?t, (base(self) + start) as *[T; N]);
+    @*/
+    /*@
     ens [f]bounds(self, start) &*& [q]lifetime_token('a) &*&
         result == (base(self) + start) as *[T; N] &*&
         [_](<[T; N]>.share)('a, t, result);
-    on_unwind_ens false;
-    @*/ {
+    @*/
+    //@ on_unwind_ens false;
+    {
         //@ open [f]bounds(self, start);
         debug_assert!(self.start + N <= 2 * N);
 
@@ -124,11 +127,14 @@ impl<T, const N: usize> Buffer<T, N> {
     req bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
         full_borrow('a, <MaybeUninit<[T; N]>>.full_borrow_content(?t,
             (base(self) + start) as *MaybeUninit<[T; N]>));
+    @*/
+    /*@
     ens bounds(self, start) &*& [q]lifetime_token('a) &*&
         result == (base(self) + start) as *MaybeUninit<[T; N]> &*&
         full_borrow('a, <MaybeUninit<[T; N]>>.full_borrow_content(t, result));
-    on_unwind_ens false;
-    @*/ {
+    @*/
+    //@ on_unwind_ens false;
+    {
         //@ open bounds(self, start);
         debug_assert!(self.start + N <= 2 * N);
 
@@ -145,10 +151,12 @@ impl<T, const N: usize> Buffer<T, N> {
     fn push(&mut self, next: T)
     /*@
     req thread_token(?t) &*& live(t, self, ?start, ?values) &*& <T>.own(t, next);
+    @*/
+    /*@
     ens thread_token(t) &*& live(t, self, start == width::<N>() ? 0 : start + 1,
         append(tail(values), cons(next, nil)));
-    on_unwind_ens thread_token(t);
     @*/
+    //@ on_unwind_ens thread_token(t);
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);
@@ -241,9 +249,11 @@ impl<T, const N: usize> Drop for Buffer<T, N> {
     fn drop(&mut self)
     /*@
     req thread_token(?t) &*& live(t, self, ?start, ?values);
-    ens thread_token(t) &*& storage(self, start);
-    on_unwind_ens thread_token(t);
     @*/
+    /*@
+    ens thread_token(t) &*& storage(self, start);
+    @*/
+    //@ on_unwind_ens thread_token(t);
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);

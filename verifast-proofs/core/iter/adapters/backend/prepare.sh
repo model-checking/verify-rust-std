@@ -7,6 +7,18 @@ if [[ "$(uname -s)" != Linux || "${1:-}" != --remote ]]; then
 fi
 
 backend_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# The cached exporter still needs the pinned toolchain's shared libraries.
+rustup component add --toolchain nightly-2026-02-05 rustc-dev llvm-tools
+cache_key="$(sha256sum "$backend_dir/prepare.sh" "$backend_dir/add-unchecked.patch" \
+  "$backend_dir/const-generics.patch" | sha256sum | cut -d ' ' -f 1)"
+cache_dir="$HOME/.cache/verifast-iter-adapters/$cache_key"
+if [[ -f "$cache_dir/checksums" ]]; then
+  (cd "$cache_dir" && sha256sum --check checksums)
+  install -m 755 "$cache_dir/verifast" "${VERIFAST_HOME:?}/bin/verifast"
+  install -m 755 "$cache_dir/vf-rust-mir-exporter" "$VERIFAST_HOME/bin/vf-rust-mir-exporter"
+  echo 'Restored the patched frontend; all proof and regression checks will run'
+  exit 0
+fi
 source_commit=809de4596839b739dd999f9e462242c835e3af46
 source_hash=0238aec44351c877b3c859c7252340540923c1b620f9981be176d7cea4e67a1e
 build_dir="$(mktemp -d "${TMPDIR:-/tmp}/verifast-iter-backend.XXXXXXXX")"
@@ -39,7 +51,6 @@ export CAPNP_INC_DIR="$CAPNP_INCLUDE"
 export OCAMLOPT_CCLIB_FLAGS='-Wl,-rpath=$ORIGIN'
 export Z3_DLL_DIR=/tmp/vfdeps-adf88dc/lib
 
-rustup component add --toolchain nightly-2026-02-05 rustc-dev llvm-tools
 CARGO_BUILD_JOBS=1 cargo +nightly-2026-02-05 install --locked --jobs 1 \
   --git https://github.com/btj/capnpc-ocaml-decoder \
   --rev 2d6606d9b59cd0c88a66729f3f076c10c0c8e0b2 --root "$build_dir/decoder"
@@ -54,4 +65,8 @@ install -m 755 "$build_dir/src/rust_frontend/vf_mir_exporter/target/debug/vf_mir
   dune build -j 1 vfconsole/vfconsole.exe
 )
 install -m 755 "$build_dir/src/_build/default/vfconsole/vfconsole.exe" "$VERIFAST_HOME/bin/verifast"
+mkdir -p "$cache_dir"
+install -m 755 "$VERIFAST_HOME/bin/verifast" "$cache_dir/verifast"
+install -m 755 "$VERIFAST_HOME/bin/vf-rust-mir-exporter" "$cache_dir/vf-rust-mir-exporter"
+(cd "$cache_dir" && sha256sum verifast vf-rust-mir-exporter > checksums)
 echo 'Prepared VeriFast 26.09 with checked addition and symbolic usize const parameters'

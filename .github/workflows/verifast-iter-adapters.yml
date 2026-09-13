@@ -56,6 +56,13 @@ jobs:
           sudo --non-interactive apt-get update -qq
           sudo --non-interactive apt-get install -y --no-install-recommends capnproto
 
+      - name: Restore compiled frontend
+        id: backend-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/verifast-iter-adapters
+          key: ${{ runner.os }}-verifast-iter-v1-${{ hashFiles('verifast-proofs/core/iter/adapters/backend/prepare.sh', 'verifast-proofs/core/iter/adapters/backend/*.patch') }}
+
       - name: Verify contracts and source refinement
         run: |
           # A service cgroup limits the entire compiler/verifier process tree.
@@ -77,3 +84,10 @@ jobs:
             --property=RuntimeMaxSec=1500 \
             --property=TimeoutStopSec=15 \
             /usr/bin/bash verifast-proofs/core/iter/adapters/verify.sh --remote
+
+      - name: Save compiled frontend
+        if: ${{ always() && !cancelled() && steps.backend-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/verifast-iter-adapters
+          key: ${{ steps.backend-cache.outputs.cache-primary-key }}
