@@ -57,9 +57,14 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get install -y jq
       
-      # Step 3: Run Kani on the std library (default configuration)
+      # Step 3: Run Kani on the std library
       - name: Run Kani Verification
-        run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
+        run: |
+          # Keep the flt2dec generator proofs from running concurrently.
+          if [[ "$WORKER_INDEX" == "2" ]]; then
+            export RAYON_NUM_THREADS=1
+          fi
+          head/scripts/run-kani.sh --path ${{github.workspace}}/head
    
   kani_autoharness:
     name: Verify std library using autoharness
