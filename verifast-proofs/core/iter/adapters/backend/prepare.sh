@@ -16,6 +16,7 @@ if [[ -f "$cache_dir/checksums" ]]; then
   (cd "$cache_dir" && sha256sum --check checksums)
   install -m 755 "$cache_dir/verifast" "${VERIFAST_HOME:?}/bin/verifast"
   install -m 755 "$cache_dir/vf-rust-mir-exporter" "$VERIFAST_HOME/bin/vf-rust-mir-exporter"
+  install -m 755 "$cache_dir/refinement-checker" "$VERIFAST_HOME/bin/refinement-checker"
   echo 'Restored the patched frontend; all proof and regression checks will run'
   exit 0
 fi
@@ -62,11 +63,14 @@ install -m 755 "$build_dir/src/rust_frontend/vf_mir_exporter/target/debug/vf_mir
   "${VERIFAST_HOME:?}/bin/vf-rust-mir-exporter"
 (
   cd "$build_dir/src"
-  dune build -j 1 vfconsole/vfconsole.exe
+  dune build -j 1 vfconsole/vfconsole.exe refinement_checker/refinement_checker.exe
 )
 install -m 755 "$build_dir/src/_build/default/vfconsole/vfconsole.exe" "$VERIFAST_HOME/bin/verifast"
+install -m 755 "$build_dir/src/_build/default/refinement_checker/refinement_checker.exe" \
+  "$VERIFAST_HOME/bin/refinement-checker"
 mkdir -p "$cache_dir"
 install -m 755 "$VERIFAST_HOME/bin/verifast" "$cache_dir/verifast"
 install -m 755 "$VERIFAST_HOME/bin/vf-rust-mir-exporter" "$cache_dir/vf-rust-mir-exporter"
-(cd "$cache_dir" && sha256sum verifast vf-rust-mir-exporter > checksums)
+install -m 755 "$VERIFAST_HOME/bin/refinement-checker" "$cache_dir/refinement-checker"
+(cd "$cache_dir" && sha256sum verifast vf-rust-mir-exporter refinement-checker > checksums)
 echo 'Prepared VeriFast 26.09 with checked addition and symbolic usize const parameters'

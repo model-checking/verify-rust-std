@@ -7,7 +7,7 @@ struct Buffer<T, const N: usize> {
     // Invariant: `self.buffer[self.start..self.start + N]` is initialized,
     // with all other elements being uninitialized. This also
     // implies that `self.start <= N`.
-    buffer: [[MaybeUninit<T>; N]; 2],
+    buffer: [[std::mem::MaybeUninit<T>; N]; 2],
     start: usize,
 }
 
@@ -15,8 +15,8 @@ struct Buffer<T, const N: usize> {
 
 fix width<N>() -> usize { usize_of_const(typeid(N)) }
 
-fix base<T, N>(b: *Buffer<T, N>) -> *MaybeUninit<T> {
-    &(*b).buffer as *MaybeUninit<T>
+fix base<T, N>(b: *Buffer<T, N>) -> *std::mem::MaybeUninit<T> {
+    &(*b).buffer as *std::mem::MaybeUninit<T>
 }
 
 // These are constructor/layout restrictions, not a finite proof bound.
@@ -31,7 +31,7 @@ pred bounds<T, N>(b: *Buffer<T, N>; start: usize) =
 pred live<T, N>(t: thread_id_t, b: *Buffer<T, N>; start: usize, values: list<T>) =
     bounds(b, start) &*& length(values) == width::<N>() &*&
     base(b)[..start] |-> ?prefix &*&
-    (base(b) + start)[..width::<N>()] |-> map(MaybeUninit::new, values) &*&
+    (base(b) + start)[..width::<N>()] |-> map(std::mem::MaybeUninit::new, values) &*&
     (base(b) + start + width::<N>())[..width::<N>() - start] |-> ?suffix &*&
     foreach(values, (<T>.own)(t));
 
@@ -39,8 +39,8 @@ pred storage<T, N>(b: *Buffer<T, N>; start: usize) =
     bounds(b, start) &*& base(b)[..2 * width::<N>()] |-> ?slots;
 
 // Unwrap initialized slots without requiring T: Copy or duplicating T.own.
-lem initialized_slots<T>(p: *MaybeUninit<T>, values: list<T>)
-    req p[..length(values)] |-> map(MaybeUninit::new, values);
+lem initialized_slots<T>(p: *std::mem::MaybeUninit<T>, values: list<T>)
+    req p[..length(values)] |-> map(std::mem::MaybeUninit::new, values);
     ens (p as *T)[..length(values)] |-> values;
 {
     open array(p, length(values), _);
@@ -59,17 +59,17 @@ lem initialized_slots<T>(p: *MaybeUninit<T>, values: list<T>)
 
 lem wrap_slots<T>(p: *T, values: list<T>)
     req p[..length(values)] |-> values;
-    ens (p as *MaybeUninit<T>)[..length(values)] |-> map(MaybeUninit::new, values);
+    ens (p as *std::mem::MaybeUninit<T>)[..length(values)] |-> map(std::mem::MaybeUninit::new, values);
 {
     open array(p, length(values), values);
     match values {
         nil => {
-            close array(p as *MaybeUninit<T>, 0, nil);
+            close array(p as *std::mem::MaybeUninit<T>, 0, nil);
         }
         cons(value, tail) => {
-            std::mem::close_MaybeUninit(p as *MaybeUninit<T>);
+            std::mem::close_MaybeUninit(p as *std::mem::MaybeUninit<T>);
             wrap_slots(p + 1, tail);
-            close array(p as *MaybeUninit<T>, length(values), _);
+            close array(p as *std::mem::MaybeUninit<T>, length(values), _);
         }
     }
 }
@@ -82,7 +82,7 @@ lem wrap_slots<T>(p: *T, values: list<T>)
 
 impl<T, const N: usize> Buffer<T, N> {
     #[inline]
-    fn buffer_ptr(&self) -> *const MaybeUninit<T>
+    fn buffer_ptr(&self) -> *const std::mem::MaybeUninit<T>
 //@ req true;
     //@ ens result == base(self);
     //@ on_unwind_ens false;
@@ -91,7 +91,7 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    fn buffer_mut_ptr(&mut self) -> *mut MaybeUninit<T>
+    fn buffer_mut_ptr(&mut self) -> *mut std::mem::MaybeUninit<T>
 //@ req true;
     //@ ens result == base(self);
     //@ on_unwind_ens false;
@@ -131,15 +131,15 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    fn as_uninit_array_mut<'a>(&'a mut self) -> &'a mut MaybeUninit<[T; N]>
+    fn as_uninit_array_mut<'a>(&'a mut self) -> &'a mut std::mem::MaybeUninit<[T; N]>
 /*@
     req thread_token(?t) &*& bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
-        full_borrow('a, <MaybeUninit<[T; N]>>.full_borrow_content(t,
-            (base(self) + start) as *MaybeUninit<[T; N]>));
+        full_borrow('a, <std::mem::MaybeUninit<[T; N]>>.full_borrow_content(t,
+            (base(self) + start) as *std::mem::MaybeUninit<[T; N]>));
     @*/
     /*@
     ens thread_token(t) &*& bounds(self, start) &*& [q]lifetime_token('a) &*&
-        full_borrow('a, <MaybeUninit<[T; N]>>.full_borrow_content(t, result));
+        full_borrow('a, <std::mem::MaybeUninit<[T; N]>>.full_borrow_content(t, result));
     @*/
     //@ on_unwind_ens false;
     {
@@ -196,7 +196,7 @@ impl<T, const N: usize> Buffer<T, N> {
                 //@ open array(buffer_mut_ptr + width::<N>() - 1, 1, _);
                 ptr::copy_nonoverlapping(buffer_mut_ptr.add(self.start + 1), buffer_mut_ptr, N - 1);
                 (*buffer_mut_ptr.add(N - 1)).write(next);
-                //@ close array(buffer_mut_ptr + width::<N>() - 1, 1, cons(MaybeUninit::new(next), nil));
+                //@ close array(buffer_mut_ptr + width::<N>() - 1, 1, cons(std::mem::MaybeUninit::new(next), nil));
                 //@ array_join(buffer_mut_ptr);
                 buffer_mut_ptr.add(self.start)
             };
@@ -220,7 +220,7 @@ impl<T, const N: usize> Buffer<T, N> {
                 //@ open array(buffer_mut_ptr + start + width::<N>(), width::<N>() - start, _);
                 (*buffer_mut_ptr.add(self.start + N)).write(next);
                 //@ close array(buffer_mut_ptr + start + width::<N>() + 1, 0, nil);
-                //@ close array(buffer_mut_ptr + start + width::<N>(), 1, cons(MaybeUninit::new(next), nil));
+                //@ close array(buffer_mut_ptr + start + width::<N>(), 1, cons(std::mem::MaybeUninit::new(next), nil));
                 //@ array_join(buffer_mut_ptr + start + 1);
                 buffer_mut_ptr.add(self.start)
             };

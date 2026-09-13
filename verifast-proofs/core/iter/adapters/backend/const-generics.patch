@@ -40,7 +40,7 @@
      | Lifetime -> `Lifetime name
 -    | Const -> failwith "Const generic parameters are not yet supported"
 +    | Const -> `Const name
- 
+
    and decode_generic_arg (gen_arg_cpn : D.generic_arg) =
      let kind_cpn = gen_arg_cpn.kind in
 @@ -1641,7 +1643,10 @@
@@ -146,3 +146,34 @@
        let send_tparams = compute_send_tparams preds in
        let tparams_targs =
          List.map (fun x -> Ast.IdentTypeExpr (def_loc, None, x)) vf_tparams
+--- a/src/refinement_checker/refinement_checker.ml
++++ b/src/refinement_checker/refinement_checker.ml
+@@ -320,6 +320,7 @@
+ | Closure of term list
+ | FnDef of string * gen_arg list
+ | ScalarInt of literal_const_expr
++| ConstParamTerm of string
+ | StaticPtr of string
+ | ConstPtr of string (* The bytes the constant pointer points to *)
+ | SliceConstant of ty * string
+@@ -335,6 +336,7 @@
+ | EnumValue (variant, ts) -> Printf.sprintf "EnumValue %s %s" variant (string_of_terms ts)
+ | FnDef (fn, genArgs) -> Printf.sprintf "FnDef %s [%s]" fn (String.concat "; " (List.map string_of_gen_arg genArgs))
+ | ScalarInt literal -> Printf.sprintf "ScalarInt %s" (string_of_literal_const_expr literal)
++| ConstParamTerm name -> Printf.sprintf "ConstParamTerm %s" name
+ | ConstPtr bytes -> Printf.sprintf "ConstPtr %s" bytes
+ | SliceConstant (ty, bytes) -> Printf.sprintf "SliceConstant %s %s" (string_of_ty ty) bytes
+ | Closure ts -> Printf.sprintf "Closure %s" (string_of_terms ts)
+@@ -362,7 +364,11 @@
+
+ let eval_mir_const genv mir_const_cpn =
+   match mir_const_cpn with
+-    Ty mir_ty_const_cpn -> failwith "Using typesystem constant expressions as MIR constant operands is not yet supported"
++    Ty mir_ty_const_cpn ->
++      begin match decode_const_expr genv mir_ty_const_cpn with
++        ParamConstExpr name -> ConstParamTerm name
++      | LiteralConstExpr literal -> ScalarInt literal
++      end
+   | Val mir_val_const_cpn ->
+     let ty = decode_ty genv mir_val_const_cpn.ty in
+     let mir_const_value_cpn = mir_val_const_cpn.const_value in

@@ -127,6 +127,25 @@ diagnostics = Path(sys.argv[1]).read_text()
 if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
     sys.exit("The mutable-array negative check did not reach a storage proof failure.")
 PY
+timeout --signal=TERM --kill-after=10s 60s \
+  refinement-checker --rustc-args '--edition 2024' \
+  backend/refinement-original.rs backend/refinement-valid.rs
+if timeout --signal=TERM --kill-after=10s 60s \
+  refinement-checker --rustc-args '--edition 2024' \
+  backend/refinement-original.rs backend/refinement-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The refinement checker equated distinct symbolic const parameters.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if not all(s in diagnostics for s in ("ConstParamTerm N", "ConstParamTerm M", "not equal")):
+    sys.exit("The refinement negative check did not distinguish the two const parameters.")
+PY
 
 # Keep every stage sequential and require both proof and refinement to succeed.
 # Collect their independent diagnostics even when the first stage fails.

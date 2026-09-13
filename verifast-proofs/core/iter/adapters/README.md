@@ -1,9 +1,9 @@
 # Generic iterator adapter proof port
 
 This is an **unvalidated VeriFast port candidate** for part of Challenge 16.
-Hosted verification previously stopped in the VeriFast Rust frontend.
-The current revision includes a frontend fix awaiting hosted validation;
-the refinement checker has not passed. See the hosted results below.
+Hosted verification passes the frontend regression checks and now reaches
+the adapter proof and source refinement stages. Those stages still need
+passing verdicts. See the hosted results below.
 The files under `verified/` are proof inputs, not evidence of a successful
 proof. This port does not yet close Felipe's review requests on PR #602.
 
@@ -60,9 +60,9 @@ contract on every selected method. It also rejects common proof suppression
 directives. This lexical guard does not parse or validate VeriFast proofs.
 Only a successful verifier run can establish the contracts.
 
-The annotated version changes the two pointer helpers to raw field-address
-expressions and names the returned references so ghost assertions can follow
-their construction. `refinement-checker` must establish that these changes
+The annotated version keeps the original pointer helper implementations and
+names the returned references so ghost assertions can follow their
+construction. `refinement-checker` must establish that these changes
 preserve the projected Rust behavior. It is mandatory, even if VeriFast
 passes. No compiler directives are ignored during refinement.
 
@@ -120,12 +120,27 @@ array lengths using the existing `typeid`/`usize_of_const` representation.
 It keeps const parameters distinct from Rust types and does not add `Sized`
 bounds to them. The exporter rejects other const parameter types. A positive
 symbolic-length proof and an incorrect-length negative test must pass before
-the adapter contracts are checked. This extension awaits hosted validation.
+the adapter contracts are checked. Both passed in hosted run
+[34745790943](https://github.com/model-checking/verify-rust-std/actions/runs/34745790943).
+
+The same patch routes array ownership and borrowing through VeriFast's
+existing type predicates. It also removes the upstream frontend's blanket
+shortcut for mutable-reference creation. Hosted run
+[34748227762](https://github.com/model-checking/verify-rust-std/actions/runs/34748227762)
+passed every backend regression gate: valid arithmetic, symbolic width,
+shared array reborrowing, and mutable array reference creation; rejection
+of overflow, a wrong width, missing shared ownership, and missing mutable
+storage. The mutable test converts the new reference to a raw pointer to
+test creation independently of a further return reborrow. These fixtures
+validate the frontend extension, not the adapter contracts.
 
 `backend/prepare.sh` pins the source commit, source archive hash, and upstream
 dependency bundle hash. It builds the MIR exporter and the verifier's Rust
 translator on the hosted Linux worker. Arithmetic rules and library contracts
 are unchanged. Source projections and mandatory refinement remain unchanged.
+The workflow caches only the compiled frontend, keyed by its preparation
+script and patches, with binary checksums checked on restoration. Every
+regression, proof, and refinement gate reruns after a cache hit.
 
 ## Local static checks and optional manual verification
 
@@ -161,8 +176,7 @@ this candidate without altering the existing LinkedList and RawVec checks.
 
 ## Remaining work
 
-- Validate the frontend's `AddUnchecked` mapping and both regression checks. Then
-  obtain verifier and refinement verdicts, including checks of symbolic const
+- Obtain verifier and refinement verdicts for the adapters, including symbolic const
   sizes, `NonZero::new_unchecked`, reference creation, and generic slice drop glue.
   The explicit slice assertions in `drop` must be proved by that memory
   model; no local axiom has been added to make them pass.
