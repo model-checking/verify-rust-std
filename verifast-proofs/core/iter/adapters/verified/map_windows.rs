@@ -259,7 +259,7 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ on_unwind_ens false;
     {
         //@ open [f]bounds(self, start);
-        debug_assert!(self.start + N <= 2 * N);
+        assert!(self.start + N <= 2 * N);
 
         // SAFETY: our invariant guarantees these elements are initialized.
         let buffer_ptr = unsafe { self.buffer_ptr() };
@@ -288,7 +288,7 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ on_unwind_ens false;
     {
         //@ open bounds(self, start);
-        debug_assert!(self.start + N <= 2 * N);
+        assert!(self.start + N <= 2 * N);
 
         // SAFETY: our invariant guarantees these elements are in bounds.
         //@ open_full_borrow_strong_('a, writable_matrix(self));
@@ -371,7 +371,7 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ array_split(buffer_mut_ptr + start, width::<N>());
         //@ open foreach(values, own::<T>(t));
         //@ open array(buffer_mut_ptr + start, width::<N>(), _);
-        debug_assert!(self.start + N <= 2 * N);
+        assert!(self.start + N <= 2 * N);
 
         let to_drop = if self.start == N {
             // We have reached the end of our buffer and have to copy
@@ -447,7 +447,8 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ open own::<T>(t)(head(values));
         unsafe { ptr::drop_in_place(to_drop.cast_init()) };
         //@ finish_push_storage(t, self, start, append(tail(values), cons(next, nil)), buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2]);
-    }
+        //@ assert live(t, self, if start == width::<N>() { 0 } else { start + 1 }, append(tail(values), cons(next, nil)));
+    } //~allow_dead_code // Rust emits cleanup for the already moved next argument.
 }
 
 impl<T, const N: usize> Drop for Buffer<T, N> {

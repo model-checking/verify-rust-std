@@ -274,10 +274,10 @@ timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/matrix-layout-valid.rs || layout_status=$?
 proof_status=0
 timeout --signal=TERM --kill-after=10s 600s \
-  verifast -rustc_args '--edition 2024' -skip_specless_fns verified/lib.rs || proof_status=$?
+  verifast -rustc_args '--edition 2024 -C debug-assertions=yes' -skip_specless_fns verified/lib.rs || proof_status=$?
 refinement_status=0
 timeout --signal=TERM --kill-after=10s 600s \
-  refinement-checker --rustc-args '--edition 2024' original/lib.rs verified/lib.rs || refinement_status=$?
+  refinement-checker --rustc-args '--edition 2024 -C debug-assertions=yes' original/lib.rs verified/lib.rs || refinement_status=$?
 python3 -I check_sources.py
 if (( proof_status != 0 || layout_status != 0 )); then
   # Inspect compiler-generated cleanup when reachability diagnostics remain.

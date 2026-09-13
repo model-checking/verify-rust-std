@@ -54,6 +54,18 @@ does not yet own initialized `T` values, as required by the clone path.
 
 ## Source correspondence
 
+The annotated projection spells the three window-bound `debug_assert!` calls
+as `assert!`. Both refinement inputs and the full proof explicitly enable debug
+assertions, so refinement must establish the equivalence of these bodies.
+The conditions remain proof obligations. This avoids unreachable branches from
+the `cfg!(debug_assertions)` macro expansion.
+
+One line-local `allow_dead_code` directive covers Rust's generated cleanup for
+the `next` argument at the end of `push`. Hosted MIR inspection shows its drop
+flag is cleared on both branches before the only potentially unwinding call.
+An explicit `live` assertion after restoration keeps the normal completion
+path subject to reachability checking. No global dead-code option is used.
+
 `source/` contains complete, hashed copies of the two std source files.
 `source-map.json` records the exact lines projected into `original/`:
 the actual struct declarations and selected method implementations.
