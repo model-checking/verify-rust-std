@@ -84,11 +84,12 @@ lem wrap_slots<T>(p: *T, values: list<T>)
 impl<T, const N: usize> Buffer<T, N> {
     #[inline]
     unsafe fn buffer_ptr(&self) -> *const MaybeUninit<T>
-//@ req pointer_within_limits(base(self)) == true;
-    //@ ens result == base(self);
+//@ req pointer_within_limits(base(self)) == true &*& [?f]ref_initialized(&(*self).buffer);
+    //@ ens [f]ref_initialized(&(*self).buffer) &*& result == base(self);
     //@ on_unwind_ens false;
     {
-        &raw const self.buffer as *const MaybeUninit<T>
+        //@ reborrow_ref_(&(*self).buffer);
+        self.buffer.as_ptr().cast()
     }
 
     #[inline]
@@ -97,18 +98,21 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
-        &raw mut self.buffer as *mut MaybeUninit<T>
+        self.buffer.as_mut_ptr().cast()
     }
 
     #[inline]
     unsafe fn as_array_ref<'a>(&'a self) -> &'a [T; N]
 /*@
     req [?f]bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
+        [_]frac_borrow('a, ref_initialized_(self)) &*&
+        [?bf]ref_initialized(&(*self).buffer) &*&
         type_interp::<[T; N]>() &*&
         [_](<[T; N]>.share)('a, ?t, (base(self) + start) as *[T; N]);
     @*/
     /*@
     ens [f]bounds(self, start) &*& [q]lifetime_token('a) &*&
+        [bf]ref_initialized(&(*self).buffer) &*&
         type_interp::<[T; N]>() &*&
         ref_origin(result) == ref_origin((base(self) + start) as *[T; N]) &*&
         [_](<[T; N]>.share)('a, t, result);
