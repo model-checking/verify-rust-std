@@ -8,7 +8,7 @@
 +    lem array_layout<T, N>();
 +        req true;
 +        ens std::mem::size_of(typeid([T; N])) == std::mem::size_of::<T>() * usize_of_const(typeid(N)) &*&
-+            std::mem::align_of(typeid([T; N])) == std::mem::align_of::<T>();
++            std::mem::align_of::<[T; N]>() == std::mem::align_of::<T>();
 +
 +    lem MaybeUninit_layout<T>();
 +        req true;

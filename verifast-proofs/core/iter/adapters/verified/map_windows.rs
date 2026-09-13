@@ -92,6 +92,7 @@ lem initialized_slots<T>(p: *std::mem::MaybeUninit<T>, values: list<T>)
     req p[..length(values)] |-> map(std::mem::MaybeUninit::new, values);
     ens (p as *T)[..length(values)] |-> values;
 {
+    std::mem::MaybeUninit_layout::<T>();
     open array(p, length(values), _);
     match values {
         nil => {
@@ -110,6 +111,7 @@ lem wrap_slots<T>(p: *T, values: list<T>)
     req p[..length(values)] |-> values;
     ens (p as *std::mem::MaybeUninit<T>)[..length(values)] |-> map(std::mem::MaybeUninit::new, values);
 {
+    std::mem::MaybeUninit_layout::<T>();
     open array(p, length(values), values);
     match values {
         nil => {
