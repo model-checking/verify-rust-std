@@ -429,17 +429,19 @@ impl Big32x40 {
 
         macro_rules! compare_limbs {
             ($($index:literal),+ $(,)?) => {{
-                let ordering = Equal;
-                $(let ordering = match self.base[$index].cmp(&other.base[$index]) {
-                    Less => Less,
-                    Equal => ordering,
-                    Greater => Greater,
-                };)+
-                ordering
+                let less = false;
+                let greater = false;
+                $(
+                    let equal = self.base[$index] == other.base[$index];
+                    let less = (self.base[$index] < other.base[$index]) | (equal & less);
+                    let greater = (self.base[$index] > other.base[$index]) | (equal & greater);
+                )+
+                if less { Less } else if greater { Greater } else { Equal }
             }};
         }
 
         // A differing higher limb supersedes every lower limb's ordering.
+        // Eager Boolean operations avoid a branch at each constant limb index.
         compare_limbs!(
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
             24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
