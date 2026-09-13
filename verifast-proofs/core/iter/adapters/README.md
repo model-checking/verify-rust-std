@@ -183,6 +183,10 @@ array type IDs and `MaybeUninit<T>`. The facts follow the
 and the wrapper's documented layout. They include zero-sized element types.
 The matrix conversion and writable-window proofs remain mandatory; the layout
 facts do not grant storage or ownership permissions.
+The patch also removes implicit `Sized` bounds from the array length parameters
+of the three existing array conversion lemmas. Symbolic const parameters are
+not Rust value types. The element type bounds and every storage precondition
+remain in force, and the patched prelude is cached with checksum validation.
 
 ## Local static checks and optional manual verification
 

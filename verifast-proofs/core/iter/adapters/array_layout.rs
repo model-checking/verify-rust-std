@@ -13,7 +13,7 @@ fix matrix_elems<T, N>(matrix: [[T; N]; 2]) -> list<T> {
 pred_ctor saved_array<T>(p: *T, count: usize, elems: list<T>)(;) =
     [1/2]array(p, count, elems);
 
-lem pack_array<T, N>(p: *[T; N])
+lem pack_array<T, N: ?Sized>(p: *[T; N])
     req (p as *T)[..usize_of_const(typeid(N))] |-> ?elems;
     ens *p |-> ?array &*& Array_elems(array) == elems;
 {
@@ -25,7 +25,7 @@ lem pack_array<T, N>(p: *[T; N])
     array_to_Array(p);
 }
 
-lem unpack_matrix<T, N>(p: *[[T; N]; 2])
+lem unpack_matrix<T, N: ?Sized>(p: *[[T; N]; 2])
     req *p |-> ?matrix;
     ens (p as *T)[..2 * usize_of_const(typeid(N))] |-> matrix_elems(matrix);
 {
@@ -39,7 +39,7 @@ lem unpack_matrix<T, N>(p: *[[T; N]; 2])
     array_join(p as *T);
 }
 
-lem pack_matrix<T, N>(p: *[[T; N]; 2])
+lem pack_matrix<T, N: ?Sized>(p: *[[T; N]; 2])
     req (p as *T)[..2 * usize_of_const(typeid(N))] |-> ?elems;
     ens *p |-> ?matrix &*& matrix_elems(matrix) == elems;
 {
@@ -56,7 +56,7 @@ lem pack_matrix<T, N>(p: *[[T; N]; 2])
 }
 
 // These conversions preserve writable storage. They do not claim initialized T values.
-lem collapse_window<T, N>(p: *std::mem::MaybeUninit<T>)
+lem collapse_window<T, N: ?Sized>(p: *std::mem::MaybeUninit<T>)
     req p[..usize_of_const(typeid(N))] |-> _;
     ens *(p as *std::mem::MaybeUninit<[T; N]>) |-> _;
 {
@@ -68,7 +68,7 @@ lem collapse_window<T, N>(p: *std::mem::MaybeUninit<T>)
     std::mem::close_MaybeUninit_(p as *std::mem::MaybeUninit<[T; N]>);
 }
 
-lem expand_window<T, N>(p: *std::mem::MaybeUninit<[T; N]>)
+lem expand_window<T, N: ?Sized>(p: *std::mem::MaybeUninit<[T; N]>)
     req *p |-> _;
     ens (p as *std::mem::MaybeUninit<T>)[..usize_of_const(typeid(N))] |-> _;
 {
@@ -93,7 +93,7 @@ lem own_uninit_values<T>(t: thread_id_t, values: list<std::mem::MaybeUninit<T>>)
     close foreach(values, own::<std::mem::MaybeUninit<T>>(t));
 }
 
-lem own_uninit_rows<T, N>(t: thread_id_t, rows: list<[std::mem::MaybeUninit<T>; N]>)
+lem own_uninit_rows<T, N: ?Sized>(t: thread_id_t, rows: list<[std::mem::MaybeUninit<T>; N]>)
     req true;
     ens foreach(rows, own::<[std::mem::MaybeUninit<T>; N]>(t));
 {
@@ -109,7 +109,7 @@ lem own_uninit_rows<T, N>(t: thread_id_t, rows: list<[std::mem::MaybeUninit<T>; 
     close foreach(rows, own::<[std::mem::MaybeUninit<T>; N]>(t));
 }
 
-lem own_matrix_storage<T, N>(t: thread_id_t, matrix: [[std::mem::MaybeUninit<T>; N]; 2])
+lem own_matrix_storage<T, N: ?Sized>(t: thread_id_t, matrix: [[std::mem::MaybeUninit<T>; N]; 2])
     req true;
     ens <[[std::mem::MaybeUninit<T>; N]; 2]>.own(t, matrix);
 {

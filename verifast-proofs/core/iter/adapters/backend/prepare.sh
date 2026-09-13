@@ -19,6 +19,7 @@ if [[ -f "$cache_dir/checksums" ]]; then
   install -m 755 "$cache_dir/vf-rust-mir-exporter" "$VERIFAST_HOME/bin/vf-rust-mir-exporter"
   install -m 755 "$cache_dir/refinement-checker" "$VERIFAST_HOME/bin/refinement-checker"
   install -m 644 "$cache_dir/std-lib.rsspec" "$VERIFAST_HOME/bin/rust/std/lib.rsspec"
+  install -m 644 "$cache_dir/prelude_core.rsspec" "$VERIFAST_HOME/bin/rust/prelude_core.rsspec"
   echo 'Restored the patched frontend; all proof and regression checks will run'
   exit 0
 fi
@@ -74,10 +75,12 @@ install -m 755 "$build_dir/src/_build/default/vfconsole/vfconsole.exe" "$VERIFAS
 install -m 755 "$build_dir/src/_build/default/refinement_checker/main.exe" \
   "$VERIFAST_HOME/bin/refinement-checker"
 install -m 644 "$build_dir/bin/rust/std/lib.rsspec" "$VERIFAST_HOME/bin/rust/std/lib.rsspec"
+install -m 644 "$build_dir/bin/rust/prelude_core.rsspec" "$VERIFAST_HOME/bin/rust/prelude_core.rsspec"
 mkdir -p "$cache_dir"
 install -m 755 "$VERIFAST_HOME/bin/verifast" "$cache_dir/verifast"
 install -m 755 "$VERIFAST_HOME/bin/vf-rust-mir-exporter" "$cache_dir/vf-rust-mir-exporter"
 install -m 755 "$VERIFAST_HOME/bin/refinement-checker" "$cache_dir/refinement-checker"
 install -m 644 "$VERIFAST_HOME/bin/rust/std/lib.rsspec" "$cache_dir/std-lib.rsspec"
-(cd "$cache_dir" && sha256sum verifast vf-rust-mir-exporter refinement-checker std-lib.rsspec > checksums)
+install -m 644 "$VERIFAST_HOME/bin/rust/prelude_core.rsspec" "$cache_dir/prelude_core.rsspec"
+(cd "$cache_dir" && sha256sum verifast vf-rust-mir-exporter refinement-checker std-lib.rsspec prelude_core.rsspec > checksums)
 echo 'Prepared VeriFast 26.09 with checked addition and symbolic usize const parameters'

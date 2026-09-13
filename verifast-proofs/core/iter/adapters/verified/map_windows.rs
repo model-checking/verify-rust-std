@@ -64,7 +64,7 @@ pred drop_frame<T, N>(b: *Buffer<T, N>, start: usize,
     slice as *T == ((matrix as *std::mem::MaybeUninit<T>) + start) as *T &*&
     ptr_len(slice) == width::<N>();
 
-lem finish_drop_storage<T, N>(b: *Buffer<T, N>, start: usize,
+lem finish_drop_storage<T, N: ?Sized>(b: *Buffer<T, N>, start: usize,
     matrix: *[[std::mem::MaybeUninit<T>; N]; 2], k: lifetime_t, slice: *[T])
     nonghost_callers_only
     req drop_frame(b, start, matrix, k, slice) &*& *slice |-> _;

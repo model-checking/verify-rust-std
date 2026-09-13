@@ -5,7 +5,7 @@
      /*@
      
 +    // Rust array layout and MaybeUninit transparency, including zero-sized T.
-+    lem array_layout<T, N>();
++    lem array_layout<T, N: ?Sized>();
 +        req true;
 +        ens std::mem::size_of(typeid([T; N])) == std::mem::size_of::<T>() * usize_of_const(typeid(N)) &*&
 +            std::mem::align_of::<[T; N]>() == std::mem::align_of::<T>();
@@ -18,3 +18,24 @@
      fix size_of_val<T: ?Sized>(x: *T) -> usize;
      fix align_of_val<T: ?Sized>(x: *T) -> usize;
      
+--- a/bin/rust/prelude_core.rsspec
++++ b/bin/rust/prelude_core.rsspec
+@@ -312,15 +312,15 @@
+     req true;
+     ens slice_of_elems(slice_elems(slice)) == slice;
+
+-lem Array__to_array_<T, N>(p: *[T; N]);
++lem Array__to_array_<T, N: ?Sized>(p: *[T; N]);
+     req [?f](*p |-?-> ?array_);
+     ens [f](p as *T)[..usize_of_const(typeid(N))] |-?-> match array_ { none => repeat(nat_of_int(usize_of_const(typeid(N))), none), some(array) => map(some, Array_elems(array)) };
+
+-lem Array_to_array<T, N>(p: *[T; N]);
++lem Array_to_array<T, N: ?Sized>(p: *[T; N]);
+     req [?f](*p |-> ?array);
+     ens [f](p as *T)[..usize_of_const(typeid(N))] |-> Array_elems(array);
+
+-lem array_to_Array<T, N>(p: *[T; N]);
++lem array_to_Array<T, N: ?Sized>(p: *[T; N]);
+     req [?f](p as *T)[..usize_of_const(typeid(N))] |-> ?elems;
+     ens [f](*p |-> Array_of_elems(elems));
+
