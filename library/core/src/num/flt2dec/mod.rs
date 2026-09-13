@@ -679,16 +679,21 @@ pub mod flt2dec_verify {
     // Use the real decoder so the exponent, rounding interval, and tie-breaking
     // flag stay related. Choosing these fields independently admits values that
     // neither primitive float type can produce. The sign does not affect Decoded.
-    pub(crate) fn arbitrary_finite_decoded() -> Decoded {
-        let decoded = if kani::any() {
-            let bits: u32 = kani::any();
-            kani::assume(bits > 0 && bits < 0x7f80_0000);
-            decode(f32::from_bits(bits)).1
-        } else {
-            let bits: u64 = kani::any();
-            kani::assume(bits > 0 && bits < 0x7ff0_0000_0000_0000);
-            decode(f64::from_bits(bits)).1
-        };
+    pub(crate) fn arbitrary_finite_f32<const GROUP: u32>() -> Decoded {
+        assert!(GROUP < 4);
+        let bits = (GROUP << 29) | (kani::any::<u32>() & 0x1fff_ffff);
+        kani::assume(bits > 0 && bits < 0x7f80_0000);
+        finite_decoded(decode(f32::from_bits(bits)).1)
+    }
+
+    pub(crate) fn arbitrary_finite_f64<const GROUP: u64>() -> Decoded {
+        assert!(GROUP < 32);
+        let bits = (GROUP << 58) | (kani::any::<u64>() & 0x03ff_ffff_ffff_ffff);
+        kani::assume(bits > 0 && bits < 0x7ff0_0000_0000_0000);
+        finite_decoded(decode(f64::from_bits(bits)).1)
+    }
+
+    fn finite_decoded(decoded: FullDecoded) -> Decoded {
         match decoded {
             FullDecoded::Finite(d) => d,
             FullDecoded::Nan | FullDecoded::Infinite | FullDecoded::Zero => {
@@ -696,6 +701,54 @@ pub mod flt2dec_verify {
             }
         }
     }
+
+    // Exhaust the high exponent bits: 4 groups for f32 and 32 for f64.
+    // The remaining exponent bits and every significand bit stay symbolic.
+    // Their union is the original positive finite nonzero input domain,
+    // including subnormals. Every strategy instantiates the complete list.
+    // Fallback reachability is existential over the union. Check it in f64
+    // group 16; individual groups need not contain a fallback case.
+    macro_rules! for_each_finite_partition {
+        ($proof:ident) => {
+            $proof!(f32_00, arbitrary_finite_f32, 0, false);
+            $proof!(f32_01, arbitrary_finite_f32, 1, false);
+            $proof!(f32_02, arbitrary_finite_f32, 2, false);
+            $proof!(f32_03, arbitrary_finite_f32, 3, false);
+            $proof!(f64_00, arbitrary_finite_f64, 0, false);
+            $proof!(f64_01, arbitrary_finite_f64, 1, false);
+            $proof!(f64_02, arbitrary_finite_f64, 2, false);
+            $proof!(f64_03, arbitrary_finite_f64, 3, false);
+            $proof!(f64_04, arbitrary_finite_f64, 4, false);
+            $proof!(f64_05, arbitrary_finite_f64, 5, false);
+            $proof!(f64_06, arbitrary_finite_f64, 6, false);
+            $proof!(f64_07, arbitrary_finite_f64, 7, false);
+            $proof!(f64_08, arbitrary_finite_f64, 8, false);
+            $proof!(f64_09, arbitrary_finite_f64, 9, false);
+            $proof!(f64_10, arbitrary_finite_f64, 10, false);
+            $proof!(f64_11, arbitrary_finite_f64, 11, false);
+            $proof!(f64_12, arbitrary_finite_f64, 12, false);
+            $proof!(f64_13, arbitrary_finite_f64, 13, false);
+            $proof!(f64_14, arbitrary_finite_f64, 14, false);
+            $proof!(f64_15, arbitrary_finite_f64, 15, false);
+            $proof!(f64_16, arbitrary_finite_f64, 16, true);
+            $proof!(f64_17, arbitrary_finite_f64, 17, false);
+            $proof!(f64_18, arbitrary_finite_f64, 18, false);
+            $proof!(f64_19, arbitrary_finite_f64, 19, false);
+            $proof!(f64_20, arbitrary_finite_f64, 20, false);
+            $proof!(f64_21, arbitrary_finite_f64, 21, false);
+            $proof!(f64_22, arbitrary_finite_f64, 22, false);
+            $proof!(f64_23, arbitrary_finite_f64, 23, false);
+            $proof!(f64_24, arbitrary_finite_f64, 24, false);
+            $proof!(f64_25, arbitrary_finite_f64, 25, false);
+            $proof!(f64_26, arbitrary_finite_f64, 26, false);
+            $proof!(f64_27, arbitrary_finite_f64, 27, false);
+            $proof!(f64_28, arbitrary_finite_f64, 28, false);
+            $proof!(f64_29, arbitrary_finite_f64, 29, false);
+            $proof!(f64_30, arbitrary_finite_f64, 30, false);
+            $proof!(f64_31, arbitrary_finite_f64, 31, false);
+        };
+    }
+    pub(crate) use for_each_finite_partition;
 
     // Upper bound on the (symbolic) digit-buffer length used by the proofs of
     // `digits_to_dec_str` / `digits_to_exp_str`.  Their `assume_init` safety

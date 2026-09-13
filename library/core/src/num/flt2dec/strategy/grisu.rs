@@ -780,7 +780,9 @@ pub fn format_exact<'a>(
 pub mod grisu_verify {
     use super::*;
     use crate::kani;
-    use crate::num::flt2dec::flt2dec_verify::arbitrary_finite_decoded;
+    use crate::num::flt2dec::flt2dec_verify::{
+        arbitrary_finite_f32, arbitrary_finite_f64, for_each_finite_partition,
+    };
 
     // The direct strategy harnesses keep all arithmetic and rounding code.
     // Buffer lengths are symbolic: shortest mode includes the minimum legal
@@ -821,53 +823,67 @@ pub mod grisu_verify {
 
     // Call the generator itself, including round_and_weed. The wrapper harness
     // below checks a separate obligation and does not establish this one.
-    #[kani::proof]
-    #[kani::unwind(19)]
-    #[kani::solver(kissat)]
-    fn check_format_shortest_opt() {
-        let d = arbitrary_finite_decoded();
-        let len: usize = kani::any();
-        kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
-        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
-        let start = buf.as_ptr().cast::<u8>();
-        kani::cover(len == MAX_SIG_DIGITS, "shortest uses the minimum buffer");
-        kani::cover(len == PROOF_BUFLEN, "shortest uses the largest proof buffer");
-        let result = format_shortest_opt(&d, &mut buf[..len]);
-        kani::cover(result.is_none(), "shortest can request the Dragon fallback");
-        let _ = result.map(|(digits, _)| {
-            kani::cover(digits.len() > 1, "shortest produces multiple digits");
-            assert!(!digits.is_empty());
-            assert!(digits.len() <= len);
-            assert_eq!(digits.as_ptr(), start);
-        });
+    macro_rules! check_partition {
+        ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
+            mod $name {
+                use super::*;
+
+                #[kani::proof]
+                #[kani::unwind(19)]
+                #[kani::solver(kissat)]
+                fn check_format_shortest_opt() {
+                    let d = $decode::<$group>();
+                    let len: usize = kani::any();
+                    kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == MAX_SIG_DIGITS, "shortest uses the minimum buffer");
+                    kani::cover(len == PROOF_BUFLEN, "shortest uses the largest proof buffer");
+                    let result = format_shortest_opt(&d, &mut buf[..len]);
+                    if $cover_fallback {
+                        kani::cover(result.is_none(), "shortest can request the Dragon fallback");
+                    }
+                    let _ = result.map(|(digits, _)| {
+                        kani::cover(digits.len() > 1, "shortest produces multiple digits");
+                        assert!(!digits.is_empty());
+                        assert!(digits.len() <= len);
+                        assert_eq!(digits.as_ptr(), start);
+                    });
+                }
+
+                #[kani::proof]
+                #[kani::unwind(33)]
+                #[kani::stub(
+                    crate::num::flt2dec::round_up,
+                    crate::num::flt2dec::rounding_verify::stub_round_up
+                )]
+                #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::solver(kissat)]
+                fn check_format_exact_opt() {
+                    let d = $decode::<$group>();
+                    let limit: i16 = kani::any();
+                    let len: usize = kani::any();
+                    kani::assume(len > 0 && len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == 1, "exact uses a one-byte buffer");
+                    kani::cover(len == PROOF_BUFLEN, "exact uses the largest proof buffer");
+                    let result = format_exact_opt(&d, &mut buf[..len], limit);
+                    if $cover_fallback {
+                        kani::cover(result.is_none(), "exact can request the Dragon fallback");
+                    }
+                    let _ = result.map(|(digits, _)| {
+                        kani::cover(digits.is_empty(), "exact can return an empty prefix");
+                        kani::cover(digits.len() > 1, "exact produces multiple digits");
+                        assert!(digits.len() <= len);
+                        assert_eq!(digits.as_ptr(), start);
+                    });
+                }
+            }
+        };
     }
 
-    #[kani::proof]
-    #[kani::unwind(33)]
-    #[kani::stub(
-        crate::num::flt2dec::round_up,
-        crate::num::flt2dec::rounding_verify::stub_round_up
-    )]
-    #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
-    #[kani::solver(kissat)]
-    fn check_format_exact_opt() {
-        let d = arbitrary_finite_decoded();
-        let limit: i16 = kani::any();
-        let len: usize = kani::any();
-        kani::assume(len > 0 && len <= PROOF_BUFLEN);
-        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
-        let start = buf.as_ptr().cast::<u8>();
-        kani::cover(len == 1, "exact uses a one-byte buffer");
-        kani::cover(len == PROOF_BUFLEN, "exact uses the largest proof buffer");
-        let result = format_exact_opt(&d, &mut buf[..len], limit);
-        kani::cover(result.is_none(), "exact can request the Dragon fallback");
-        let _ = result.map(|(digits, _)| {
-            kani::cover(digits.is_empty(), "exact can return an empty prefix");
-            kani::cover(digits.len() > 1, "exact produces multiple digits");
-            assert!(digits.len() <= len);
-            assert_eq!(digits.as_ptr(), start);
-        });
-    }
+    for_each_finite_partition!(check_partition);
 
     // Wholesale havoc stub for the dragon fallback (modelled as an opaque op that
     // writes a digit and returns an in-bounds slice of `buf`).

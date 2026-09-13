@@ -60,11 +60,9 @@ jobs:
       # Step 3: Run Kani on the std library
       - name: Run Kani Verification
         run: |
-          # Keep the flt2dec generator proofs from running concurrently.
-          if [[ "$WORKER_INDEX" == "2" ]]; then
-            export KANI_JOBS=1
-            export RAYON_NUM_THREADS=1
-          fi
+          # Exponent groups can span partitions. Run one proof at a time.
+          export KANI_JOBS=1
+          export RAYON_NUM_THREADS=1
           head/scripts/run-kani.sh --path ${{github.workspace}}/head
    
   kani_autoharness:
