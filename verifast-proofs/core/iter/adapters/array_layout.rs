@@ -24,6 +24,15 @@ lem mapped_length<a, b>(f: fix(a, b), xs: list<a>)
     }
 }
 
+lem joined_window<a>(prefix: list<a>, window: list<a>, suffix: list<a>)
+    req true;
+    ens take(length(window), drop(length(prefix), append(append(prefix, window), suffix))) == window;
+{
+    append_assoc(prefix, window, suffix);
+    drop_append(length(prefix), prefix, append(window, suffix));
+    take_append_l(length(window), window, suffix);
+}
+
 lem mapped_range<a, b>(f: fix(a, b), xs: list<a>, start: usize, count: usize)
     req 0 <= start &*& 0 <= count;
     ens take(count, drop(start, map(f, xs))) == map(f, take(count, drop(start, xs)));
@@ -47,16 +56,19 @@ lem owned_values_mono<T0, T1>(t: thread_id_t, values: list<T0>)
         foreach(map::<T0, T1>(upcast, values), own::<T1>(t));
 {
     match values {
-        nil => { open foreach(values, own::<T0>(t)); }
+        nil => {
+            open foreach(values, own::<T0>(t));
+            close foreach(map::<T0, T1>(upcast, values), own::<T1>(t));
+        }
         cons(value, rest) => {
             open foreach(values, own::<T0>(t));
             open own::<T0>(t)(value);
             own_mono::<T0, T1>(t, value);
             close own::<T1>(t)(upcast::<T0, T1>(value));
             owned_values_mono::<T0, T1>(t, rest);
+            close foreach(map::<T0, T1>(upcast, values), own::<T1>(t));
         }
     }
-    close foreach(map::<T0, T1>(upcast, values), own::<T1>(t));
 }
 
 lem owned_values_send<T>(t0: thread_id_t, t1: thread_id_t, values: list<T>)
@@ -64,16 +76,19 @@ lem owned_values_send<T>(t0: thread_id_t, t1: thread_id_t, values: list<T>)
     ens type_interp::<T>() &*& foreach(values, own::<T>(t1));
 {
     match values {
-        nil => { open foreach(values, own::<T>(t0)); }
+        nil => {
+            open foreach(values, own::<T>(t0));
+            close foreach(values, own::<T>(t1));
+        }
         cons(value, rest) => {
             open foreach(values, own::<T>(t0));
             open own::<T>(t0)(value);
             Send::send::<T>(t0, t1, value);
             close own::<T>(t1)(value);
             owned_values_send(t0, t1, rest);
+            close foreach(values, own::<T>(t1));
         }
     }
-    close foreach(values, own::<T>(t1));
 }
 
 lem mapped_uninit_upcast<T0, T1>(values: list<T0>)
@@ -172,8 +187,8 @@ lem collapse_window<T, N: ?Sized>(p: *std::mem::MaybeUninit<T>)
 {
     std::mem::array_layout::<T, N>();
     std::mem::MaybeUninit_layout::<T>();
+    array_to_array_(p);
     array__to_u8s_(p, usize_of_const(typeid(N)));
-    array_to_array_(p as *u8);
     from_u8s_(p as *[T; N]);
     std::mem::close_MaybeUninit_(p as *std::mem::MaybeUninit<[T; N]>);
 }
@@ -193,14 +208,14 @@ lem own_uninit_values<T>(t: thread_id_t, values: list<std::mem::MaybeUninit<T>>)
     ens foreach(values, own::<std::mem::MaybeUninit<T>>(t));
 {
     match values {
-        nil => {}
+        nil => { close foreach(values, own::<std::mem::MaybeUninit<T>>(t)); }
         cons(value, rest) => {
             std::mem::MaybeUninit_own_init(t, value);
             close own::<std::mem::MaybeUninit<T>>(t)(value);
             own_uninit_values(t, rest);
+            close foreach(values, own::<std::mem::MaybeUninit<T>>(t));
         }
     }
-    close foreach(values, own::<std::mem::MaybeUninit<T>>(t));
 }
 
 lem own_uninit_rows<T, N: ?Sized>(t: thread_id_t, rows: list<[std::mem::MaybeUninit<T>; N]>)
@@ -208,15 +223,15 @@ lem own_uninit_rows<T, N: ?Sized>(t: thread_id_t, rows: list<[std::mem::MaybeUni
     ens foreach(rows, own::<[std::mem::MaybeUninit<T>; N]>(t));
 {
     match rows {
-        nil => {}
+        nil => { close foreach(rows, own::<[std::mem::MaybeUninit<T>; N]>(t)); }
         cons(row, rest) => {
             own_uninit_values(t, Array_elems(row));
             close array_owned::<std::mem::MaybeUninit<T>, N>()(t, row);
             close own::<[std::mem::MaybeUninit<T>; N]>(t)(row);
             own_uninit_rows(t, rest);
+            close foreach(rows, own::<[std::mem::MaybeUninit<T>; N]>(t));
         }
     }
-    close foreach(rows, own::<[std::mem::MaybeUninit<T>; N]>(t));
 }
 
 lem own_matrix_storage<T, N: ?Sized>(t: thread_id_t, matrix: [[std::mem::MaybeUninit<T>; N]; 2])
@@ -234,7 +249,7 @@ pred array_borrow_tokens<T>(k: lifetime_t, p: *T, count: usize) =
     };
 
 lem lend_array<T>(k: lifetime_t, p: *T, count: usize)
-    req 0 <= count &*& p[..count] |-> ?values;
+    req p[..count] |-> ?values &*& 0 <= count;
     ens array_at_lft(k, p, count, values) &*& array_borrow_tokens(k, p, count);
 {
     open array(p, count, values);

@@ -4,7 +4,7 @@ use crate::mem::MaybeUninit;
 use crate::{fmt, ptr};
 
 //@ use array_layout::{array_borrow_tokens, collapse_window, expand_window, lend_array, matrix_elems, own_matrix_storage, pack_matrix, reclaim_array, unpack_matrix};
-//@ use array_layout::{mapped_length, mapped_range, mapped_uninit_upcast, matrix_upcast, owned_values_mono, owned_values_send};
+//@ use array_layout::{joined_window, mapped_append, mapped_length, mapped_range, mapped_uninit_upcast, matrix_upcast, owned_values_mono, owned_values_send};
 
 struct Buffer<T, const N: usize> {
     // Invariant: `self.buffer[self.start..self.start + N]` is initialized,
@@ -248,40 +248,42 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ array_split(buffer_mut_ptr, start);
         //@ array_split(buffer_mut_ptr + start, width::<N>());
         //@ collapse_window::<T, N>(buffer_mut_ptr + start);
-        let result = unsafe { &mut *buffer_mut_ptr.add(self.start).cast() };
-        //@ let window = (buffer_mut_ptr + start) as *std::mem::MaybeUninit<[T; N]>;
-        /*@
-        {
-            pred ctx(;) =
-                ref_mut_end_token(result, window) &*&
-                ref_mut_end_token(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2], &(*self).buffer) &*&
-                buffer_mut_ptr[..start] |-> ?prefix &*&
-                (buffer_mut_ptr + start + width::<N>())[..width::<N>() - start] |-> ?suffix;
-            produce_lem_ptr_chunk restore_full_borrow_(ctx,
-                <std::mem::MaybeUninit<[T; N]>>.full_borrow_content(t, result),
-                writable_matrix(self))() {
-                open ctx();
-                open_full_borrow_content::<std::mem::MaybeUninit<[T; N]>>(t, result);
-                assert *result |-> ?borrowed_contents;
-                std::mem::MaybeUninit_own_dispose::<[T; N]>(t, borrowed_contents);
-                end_ref_mut_::<std::mem::MaybeUninit<[T; N]>>();
-                expand_window(window);
-                array_join(buffer_mut_ptr);
-                array_join(buffer_mut_ptr);
-                pack_matrix(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2]);
-                end_ref_mut_::<[[std::mem::MaybeUninit<T>; N]; 2]>();
-                close writable_matrix::<T, N>(self)();
-            } {
-                assert *result |-> ?contents;
-                std::mem::MaybeUninit_own_init::<[T; N]>(t, contents);
-                close_full_borrow_content::<std::mem::MaybeUninit<[T; N]>>(t, result);
-                close ctx();
-                close_full_borrow_strong_();
+        unsafe {
+            let result = &mut *buffer_mut_ptr.add(self.start).cast();
+            //@ let window = (buffer_mut_ptr + start) as *std::mem::MaybeUninit<[T; N]>;
+            /*@
+            {
+                pred ctx() =
+                    ref_mut_end_token(result, window) &*&
+                    ref_mut_end_token(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2], &(*self).buffer) &*&
+                    buffer_mut_ptr[..start] |-> ?prefix &*&
+                    (buffer_mut_ptr + start + width::<N>())[..width::<N>() - start] |-> ?suffix;
+                produce_lem_ptr_chunk restore_full_borrow_(ctx,
+                    <std::mem::MaybeUninit<[T; N]>>.full_borrow_content(t, result),
+                    writable_matrix(self))() {
+                    open ctx();
+                    open_full_borrow_content::<std::mem::MaybeUninit<[T; N]>>(t, result);
+                    assert *result |-> ?borrowed_contents;
+                    std::mem::MaybeUninit_own_dispose::<[T; N]>(t, borrowed_contents);
+                    end_ref_mut_::<std::mem::MaybeUninit<[T; N]>>();
+                    expand_window(window);
+                    array_join(buffer_mut_ptr);
+                    array_join(buffer_mut_ptr);
+                    pack_matrix(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2]);
+                    end_ref_mut_::<[[std::mem::MaybeUninit<T>; N]; 2]>();
+                    close writable_matrix::<T, N>(self)();
+                } {
+                    assert *result |-> ?contents;
+                    std::mem::MaybeUninit_own_init::<[T; N]>(t, contents);
+                    close_full_borrow_content::<std::mem::MaybeUninit<[T; N]>>(t, result);
+                    close ctx();
+                    close_full_borrow_strong_();
+                }
             }
+            @*/
+            //@ close bounds(self, start);
+            result
         }
-        @*/
-        //@ close bounds(self, start);
-        result
     }
 
     /// Pushes a new item `next` to the back, and pops the front-most one.
@@ -300,6 +302,9 @@ impl<T, const N: usize> Buffer<T, N> {
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);
+        //@ assert base(self)[..start] |-> ?prefix_slots;
+        //@ assert (base(self) + start + width::<N>())[..width::<N>() - start] |-> ?suffix_slots;
+        //@ joined_window(prefix_slots, map(std::mem::MaybeUninit::new, values), suffix_slots);
         //@ array_join(base(self));
         //@ array_join(base(self));
         //@ pack_matrix(&(*self).buffer);
@@ -374,10 +379,13 @@ impl<T, const N: usize> Buffer<T, N> {
         // SAFETY: the index is valid and this is element `a` in the
         // diagram above and has not been dropped yet.
         //@ close foreach(nil, own::<T>(t));
+        //@ close own::<T>(t)(next);
         //@ close foreach(cons(next, nil), own::<T>(t));
         //@ foreach_append(tail(values), cons(next, nil));
+        //@ mapped_append::<T, std::mem::MaybeUninit<T>>(std::mem::MaybeUninit::new, tail(values), cons(next, nil));
         //@ std::mem::open_MaybeUninit(to_drop);
         //@ close points_to(to_drop as *T, head(values));
+        //@ open own::<T>(t)(head(values));
         unsafe { ptr::drop_in_place(to_drop.cast_init()) };
         //@ std::mem::close_MaybeUninit_(to_drop);
         /*@
@@ -438,6 +446,9 @@ impl<T, const N: usize> Drop for Buffer<T, N> {
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);
+        //@ assert base(self)[..start] |-> ?prefix_slots;
+        //@ assert (base(self) + start + width::<N>())[..width::<N>() - start] |-> ?suffix_slots;
+        //@ joined_window(prefix_slots, map(std::mem::MaybeUninit::new, values), suffix_slots);
         //@ array_join(base(self));
         //@ array_join(base(self));
         //@ pack_matrix(&(*self).buffer);
