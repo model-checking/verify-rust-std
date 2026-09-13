@@ -70,6 +70,71 @@ jobs:
           head/scripts/run-kani.sh --path ${{github.workspace}}/head \
             --kani-args --harness-timeout 30m --fail-fast
    
+  check-flt2dec:
+    name: Verify flt2dec (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: dragon-exact
+            module: num::flt2dec::strategy::dragon::dragon_verify
+            proof: check_format_exact
+            kind: generator
+          - name: dragon-shortest
+            module: num::flt2dec::strategy::dragon::dragon_verify
+            proof: check_format_shortest
+            kind: generator
+          - name: grisu-exact
+            module: num::flt2dec::strategy::grisu::grisu_verify
+            proof: check_format_exact_opt
+            kind: generator
+          - name: grisu-shortest
+            module: num::flt2dec::strategy::grisu::grisu_verify
+            proof: check_format_shortest_opt
+            kind: generator
+          - name: division-contract
+            module: num::flt2dec::strategy::dragon::dragon_verify
+            proof: check_div_2pow10_contract
+            kind: contract
+    env:
+      KANI_JOBS: 1
+      RAYON_NUM_THREADS: 1
+      HARNESS_MODULE: ${{ matrix.module }}
+      HARNESS_PROOF: ${{ matrix.proof }}
+      HARNESS_KIND: ${{ matrix.kind }}
+    steps:
+      - name: Remove unnecessary software to free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          path: head
+          submodules: true
+
+      - name: Verify all groups in this proof family
+        run: |
+          # Keep every exponent group, with independent results for each target.
+          harness_args=()
+          if [[ "$HARNESS_KIND" == generator ]]; then
+            for group in {0..3}; do
+              printf -v group_name 'f32_%02d' "$group"
+              harness_args+=(--harness "$HARNESS_MODULE::$group_name::$HARNESS_PROOF")
+            done
+            for group in {0..31}; do
+              printf -v group_name 'f64_%02d' "$group"
+              harness_args+=(--harness "$HARNESS_MODULE::$group_name::$HARNESS_PROOF")
+            done
+          else
+            harness_args+=(--harness "$HARNESS_MODULE::$HARNESS_PROOF")
+          fi
+          printf 'Selected %s harnesses\n' "$(( ${#harness_args[@]} / 2 ))"
+          head/scripts/run-kani.sh --path "${GITHUB_WORKSPACE}/head" \
+            --kani-args --jobs 1 --harness-timeout 30m --fail-fast \
+            --exact "${harness_args[@]}"
+
   kani_autoharness:
     name: Verify std library using autoharness
     runs-on: ${{ matrix.os }}
