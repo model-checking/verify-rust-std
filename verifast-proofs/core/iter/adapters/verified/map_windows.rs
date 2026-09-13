@@ -87,7 +87,7 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
-        self.buffer.as_flattened().as_ptr()
+        self.buffer.as_ptr().cast()
     }
 
     #[inline]
@@ -96,7 +96,7 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
-        self.buffer.as_flattened_mut().as_mut_ptr()
+        self.buffer.as_mut_ptr().cast()
     }
 
     #[inline]
@@ -247,8 +247,8 @@ impl<T, const N: usize> Buffer<T, N> {
             close array(to_drop, 1, _);
             array_join(buffer_mut_ptr);
         }
-        close bounds(self, start == width::<N>() ? 0 : start + 1);
-        close live(t, self, start == width::<N>() ? 0 : start + 1,
+        close bounds(self, (start == width::<N>() ? 0 : start + 1));
+        close live(t, self, (start == width::<N>() ? 0 : start + 1),
             append(tail(values), cons(next, nil)));
         }
         @*/
