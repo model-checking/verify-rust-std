@@ -71,7 +71,7 @@ jobs:
             --kani-args --harness-timeout 30m --fail-fast
    
   check-flt2dec:
-    name: Verify flt2dec (${{ matrix.name }})
+    name: Verify flt2dec (${{ matrix.name }}, cvc5)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -154,10 +154,14 @@ jobs:
           else
             harness_args+=(--harness "$HARNESS_MODULE::$HARNESS_PROOF")
           fi
+          output_format=terse
+          if [[ "$HARNESS_KIND" == contract ]]; then
+            output_format=regular
+          fi
           printf 'Selected %s harnesses\n' "$(( ${#harness_args[@]} / 2 ))"
           head/scripts/run-kani.sh --path "${GITHUB_WORKSPACE}/head" \
-            --kani-args --jobs 1 --harness-timeout 30m --fail-fast --output-format=terse \
-            --exact "${harness_args[@]}"
+            --kani-args --jobs 1 --harness-timeout 30m --fail-fast --output-format="$output_format" \
+            --solver cvc5 --exact "${harness_args[@]}"
 
   kani_autoharness:
     name: Verify std library using autoharness
