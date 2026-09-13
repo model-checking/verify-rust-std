@@ -87,7 +87,7 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
-        (&raw const self.buffer).cast()
+        self.buffer.as_flattened().as_ptr()
     }
 
     #[inline]
@@ -96,7 +96,7 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
-        (&raw mut self.buffer).cast()
+        self.buffer.as_flattened_mut().as_mut_ptr()
     }
 
     #[inline]
@@ -238,6 +238,7 @@ impl<T, const N: usize> Buffer<T, N> {
         unsafe { ptr::drop_in_place(to_drop.cast_init()) };
         //@ std::mem::close_MaybeUninit_(to_drop);
         /*@
+        {
         if start == width::<N>() {
             close array(to_drop, width::<N>(), _);
             close array(buffer_mut_ptr, 0, nil);
@@ -249,6 +250,7 @@ impl<T, const N: usize> Buffer<T, N> {
         close bounds(self, start == width::<N>() ? 0 : start + 1);
         close live(t, self, start == width::<N>() ? 0 : start + 1,
             append(tail(values), cons(next, nil)));
+        }
         @*/
     }
 }
