@@ -432,6 +432,40 @@ pub mod dragon_verify {
         kani::cover(remainder == 0, "limb division can have no remainder");
     }
 
+    // Verify the limb loop separately from the outer power-of-ten loop.
+    #[kani::requires(divisor > 0 && value.kani_valid_storage())]
+    #[kani::ensures(|result| {
+        value.kani_valid_storage()
+            && value.kani_size() == old(value.kani_size())
+            && *result < divisor
+    })]
+    #[kani::modifies(value)]
+    fn div_rem_small_contract(value: &mut Big, divisor: u32) -> u32 {
+        value.div_rem_small(divisor)
+    }
+
+    fn stub_div_rem_small(value: &mut Big, divisor: u32) -> u32 {
+        div_rem_small_contract(value, divisor)
+    }
+
+    #[kani::proof_for_contract(div_rem_small_contract)]
+    #[kani::stub(
+        <u32 as crate::num::bignum::FullOps>::full_div_rem,
+        stub_div_rem_digit
+    )]
+    #[kani::stub_verified(div_rem_digit_contract)]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_div_rem_small_contract() {
+        let mut value = Big::kani_any_valid();
+        let divisor: u32 = kani::any();
+        let _ = div_rem_small_contract(&mut value, divisor);
+        kani::cover(divisor == 1, "bigint division accepts the unit divisor");
+        kani::cover(divisor == u32::MAX, "bigint division accepts the largest divisor");
+        kani::cover(value.kani_size() == 0, "bigint division accepts empty zero storage");
+        kani::cover(value.kani_size() == 40, "bigint division accepts all limbs");
+    }
+
     // Division preserves the bigint's allocated prefix and unused zero limbs.
     // Its numeric result is overapproximated; the generator still performs the
     // real addition, comparison, and subsequent digit extraction.
@@ -451,12 +485,9 @@ pub mod dragon_verify {
     }
 
     #[kani::proof_for_contract(div_2pow10_contract)]
-    #[kani::stub(
-        <u32 as crate::num::bignum::FullOps>::full_div_rem,
-        stub_div_rem_digit
-    )]
-    #[kani::stub_verified(div_rem_digit_contract)]
-    #[kani::unwind(41)]
+    #[kani::stub(Big::div_rem_small, stub_div_rem_small)]
+    #[kani::stub_verified(div_rem_small_contract)]
+    #[kani::unwind(5)]
     #[kani::solver(kissat)]
     fn check_div_2pow10_contract() {
         let mut value = Big::kani_any_valid();
