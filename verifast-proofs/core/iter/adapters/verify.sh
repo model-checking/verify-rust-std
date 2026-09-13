@@ -171,7 +171,7 @@ import re
 
 for path in (Path("verified/map_windows.rs"), Path("verified/step_by.rs")):
     for line_number, line in enumerate(path.read_text().splitlines(), 1):
-        if re.match(r"\s*(fn|lem)\s+\w+", line):
+        if re.match(r"\s*(?:unsafe\s+)?fn\s+\w+", line):
             print(f"{path}:{line_number}")
 PY
   )

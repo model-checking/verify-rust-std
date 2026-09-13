@@ -82,7 +82,7 @@ lem wrap_slots<T>(p: *T, values: list<T>)
 
 impl<T, const N: usize> Buffer<T, N> {
     #[inline]
-    fn buffer_ptr(&self) -> *const MaybeUninit<T>
+    unsafe fn buffer_ptr(&self) -> *const MaybeUninit<T>
 //@ req pointer_within_limits(base(self)) == true;
     //@ ens result == base(self);
     //@ on_unwind_ens false;
@@ -91,7 +91,7 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    fn buffer_mut_ptr(&mut self) -> *mut MaybeUninit<T>
+    unsafe fn buffer_mut_ptr(&mut self) -> *mut MaybeUninit<T>
 //@ req pointer_within_limits(base(self)) == true;
     //@ ens result == base(self);
     //@ on_unwind_ens false;
@@ -100,7 +100,7 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    fn as_array_ref<'a>(&'a self) -> &'a [T; N]
+    unsafe fn as_array_ref<'a>(&'a self) -> &'a [T; N]
 /*@
     req [?f]bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
         type_interp::<[T; N]>() &*&
@@ -131,7 +131,7 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    fn as_uninit_array_mut<'a>(&'a mut self) -> &'a mut MaybeUninit<[T; N]>
+    unsafe fn as_uninit_array_mut<'a>(&'a mut self) -> &'a mut MaybeUninit<[T; N]>
 /*@
     req thread_token(?t) &*& bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
         full_borrow('a, <std::mem::MaybeUninit<[T; N]>>.full_borrow_content(t,
@@ -156,7 +156,7 @@ impl<T, const N: usize> Buffer<T, N> {
     ///
     /// All the elements will be shifted to the front end when pushing reaches
     /// the back end.
-    fn push(&mut self, next: T)
+    unsafe fn push(&mut self, next: T)
     /*@
     req thread_token(?t) &*& live(t, self, ?start, ?values) &*& <T>.own(t, next);
     @*/
@@ -170,7 +170,7 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ open bounds(self, start);
         //@ open foreach(values, own::<T>(t));
         //@ open array(base(self) + start, width::<N>(), _);
-        let buffer_mut_ptr = self.buffer_mut_ptr();
+        let buffer_mut_ptr = unsafe { self.buffer_mut_ptr() };
         debug_assert!(self.start + N <= 2 * N);
 
         let to_drop = if self.start == N {

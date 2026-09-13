@@ -60,9 +60,14 @@ contract on every selected method. It also rejects common proof suppression
 directives. This lexical guard does not parse or validate VeriFast proofs.
 Only a successful verifier run can establish the contracts.
 
-The annotated version keeps the original pointer helper implementations and
-names the returned references so ghost assertions can follow their
-construction. `refinement-checker` must establish that these changes
+The annotated version keeps the original pointer helper bodies and names
+returned references so ghost assertions can follow their construction.
+Private proof methods are marked `unsafe` to express their explicit caller
+obligations. The upstream refinement checker permits this change for private
+functions; the original projection and standard library keep their original
+signatures. The `Drop` trait implementation retains its safe signature and
+must establish its contract from the type ownership invariant.
+`refinement-checker` must establish that these changes
 preserve the projected Rust behavior. It is mandatory, even if VeriFast
 passes. No compiler directives are ignored during refinement.
 

@@ -26,7 +26,7 @@ impl<I> StepBy<I> {
     /// The `step` that was originally passed to `Iterator::step_by(step)`,
     /// aka `self.step_minus_one + 1`.
     #[inline]
-    fn original_step(&self) -> NonZero<usize>
+    unsafe fn original_step(&self) -> NonZero<usize>
 //@ req [?f](*self).step_minus_one |-> ?step &*& step < usize::MAX;
     //@ ens [f](*self).step_minus_one |-> step &*& result.get() == step + 1 &*& 0 < result.get();
     //@ on_unwind_ens false;
