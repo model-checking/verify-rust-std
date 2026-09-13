@@ -170,7 +170,7 @@
    match mir_const_cpn with
 -    Ty mir_ty_const_cpn -> failwith "Using typesystem constant expressions as MIR constant operands is not yet supported"
 +    Ty mir_ty_const_cpn ->
-+      begin match decode_const_expr genv mir_ty_const_cpn with
++      begin match decode_const_expr genv mir_ty_const_cpn.const with
 +        ParamConstExpr name -> ConstParamTerm name
 +      | LiteralConstExpr literal -> ScalarInt literal
 +      end
