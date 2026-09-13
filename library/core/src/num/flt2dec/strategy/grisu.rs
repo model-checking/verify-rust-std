@@ -805,9 +805,8 @@ pub mod grisu_verify {
     #[kani::ensures(|result| result.as_ref().is_none_or(|&(written, _)| {
         written >= len && written <= capacity && written - len <= 1
     }))]
-    #[kani::modifies(digits)]
     fn round_exact_contract(
-        digits: &mut [u8; PROOF_BUFLEN],
+        digits: &[u8; PROOF_BUFLEN],
         len: usize,
         capacity: usize,
         exp: i16,
@@ -827,10 +826,7 @@ pub mod grisu_verify {
                 assert_eq!(output.as_ptr(), start.cast_const());
                 // Read every returned byte, including any appended carry. This
                 // checks initialization instead of merely inspecting slice metadata.
-                let checksum = output.iter().enumerate().fold(0_u8, |checksum, (index, &digit)| {
-                    digits[index] = digit;
-                    checksum ^ digit
-                });
+                let checksum = output.iter().fold(0_u8, |checksum, &digit| checksum ^ digit);
                 kani::cover(checksum == 0, "final rounding returns readable output bytes");
                 (output.len(), output_exp)
             })
@@ -853,22 +849,18 @@ pub mod grisu_verify {
         // SAFETY: this adapter has possibly_round's initialized-prefix contract.
         // The verified precondition reads its bytes before the model can write.
         digits[..len].copy_from_slice(unsafe { buf[..len].assume_init_ref() });
-        let result = round_exact_contract(
-            &mut digits,
-            len,
-            buf.len(),
-            exp,
-            limit,
-            remainder,
-            ten_kappa,
-            ulp,
-        );
+        let result =
+            round_exact_contract(&digits, len, buf.len(), exp, limit, remainder, ten_kappa, ulp);
         let written = result.map_or(len, |(written, _)| written);
         assert!(written <= buf.len());
+        // The contract proves metadata and initialized output, without a byte
+        // value postcondition. Model those bytes here so the verified call has
+        // an empty write set instead of repeatedly havocing an array.
+        let output: [u8; PROOF_BUFLEN] = kani::any();
         // SAFETY: the contract bounds written by both distinct arrays. All
         // source bytes are initialized; this initializes only the active prefix.
         unsafe {
-            crate::ptr::copy_nonoverlapping(digits.as_ptr(), buf.as_mut_ptr().cast(), written)
+            crate::ptr::copy_nonoverlapping(output.as_ptr(), buf.as_mut_ptr().cast(), written)
         };
         result.map(|(written, output_exp)| {
             // SAFETY: the copy above initialized this prefix.
@@ -885,11 +877,11 @@ pub mod grisu_verify {
     #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
     #[kani::solver(kissat)]
     fn check_round_exact_contract() {
-        let mut digits: [u8; PROOF_BUFLEN] = kani::any();
+        let digits: [u8; PROOF_BUFLEN] = kani::any();
         let len = usize::from(kani::any::<u8>());
         let capacity = usize::from(kani::any::<u8>());
         let result = round_exact_contract(
-            &mut digits,
+            &digits,
             len,
             capacity,
             kani::any(),
