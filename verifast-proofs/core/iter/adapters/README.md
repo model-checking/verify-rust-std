@@ -23,8 +23,10 @@ The two raw buffer pointer helpers also have contracts. `push` and `drop`
 use the standard library specification of generic drop glue. The candidate
 `drop` safety proof recovers field storage on both outcomes through one lifetime
 loan frame. This proof has not passed validation. The `push` unwind postcondition
-returns the thread token only; preserving its buffer state after a panicking
-element destructor remains a safe-abstraction obligation.
+retains the surviving values, backing storage, and borrow token in
+`push_drop_frame`, together with the old front's storage after destruction.
+`finish_push_storage` must prove that those resources restore `live`, including
+after a panicking element destructor. Its proof remains subject to hosted validation.
 
 ## Ownership and bounds
 

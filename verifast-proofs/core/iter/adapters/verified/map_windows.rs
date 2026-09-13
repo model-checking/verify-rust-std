@@ -92,6 +92,56 @@ lem Buffer_send<T, N: ?Sized>(t1: thread_id_t)
     close Buffer_own::<T, N>(t1, buffer);
 }
 
+// A destructor cannot consume ownership of the surviving window.
+pred push_drop_frame<T, N>(t: thread_id_t, b: *Buffer<T, N>, start: usize,
+    values: list<T>, matrix: *[[std::mem::MaybeUninit<T>; N]; 2]) =
+    bounds(b, if start == width::<N>() { 0 } else { start + 1 }) &*&
+    0 <= start &*& start <= width::<N>() &*& length(values) == width::<N>() &*&
+    ref_mut_end_token(matrix, &(*b).buffer) &*& foreach(values, own::<T>(t)) &*&
+    if start == width::<N>() {
+        (matrix as *std::mem::MaybeUninit<T>)[..width::<N>()] |-> map(std::mem::MaybeUninit::new, values) &*&
+        ((matrix as *std::mem::MaybeUninit<T>) + start + 1)[..width::<N>() - 1] |-> ?stale
+    } else {
+        (matrix as *std::mem::MaybeUninit<T>)[..start] |-> ?prefix &*&
+        ((matrix as *std::mem::MaybeUninit<T>) + start + 1)[..width::<N>()] |-> map(std::mem::MaybeUninit::new, values) &*&
+        ((matrix as *std::mem::MaybeUninit<T>) + start + width::<N>() + 1)[..width::<N>() - start - 1] |-> ?suffix
+    };
+
+// This ghost restoration is valid after either outcome of dropping the old front.
+lem finish_push_storage<T, N: ?Sized>(t: thread_id_t, b: *Buffer<T, N>, start: usize,
+    values: list<T>, matrix: *[[std::mem::MaybeUninit<T>; N]; 2])
+    req push_drop_frame(t, b, start, values, matrix) &*&
+        *(((matrix as *std::mem::MaybeUninit<T>) + start) as *T) |-> _;
+    ens live(t, b, if start == width::<N>() { 0 } else { start + 1 }, values);
+{
+    open push_drop_frame(t, b, start, values, matrix);
+    open bounds(b, if start == width::<N>() { 0 } else { start + 1 });
+    let p = matrix as *std::mem::MaybeUninit<T>;
+    std::mem::close_MaybeUninit_(p + start);
+    if start == width::<N>() {
+        close array(p + start, width::<N>(), _);
+        assert (p + start)[..width::<N>()] |-> ?suffix;
+        joined_window(nil, map(std::mem::MaybeUninit::new, values), suffix);
+        array_join(p);
+    } else {
+        close array(p + start + 1, 0, nil);
+        close array(p + start, 1, _);
+        array_join(p);
+        assert p[..start + 1] |-> ?prefix;
+        assert (p + start + width::<N>() + 1)[..width::<N>() - start - 1] |-> ?suffix;
+        joined_window(prefix, map(std::mem::MaybeUninit::new, values), suffix);
+        array_join(p);
+        array_join(p);
+    }
+    pack_matrix(matrix);
+    end_ref_mut(matrix);
+    unpack_matrix(&(*b).buffer);
+    array_split(base(b), if start == width::<N>() { 0 } else { start + 1 });
+    array_split(base(b) + (if start == width::<N>() { 0 } else { start + 1 }), width::<N>());
+    close bounds(b, if start == width::<N>() { 0 } else { start + 1 });
+    close live(t, b, if start == width::<N>() { 0 } else { start + 1 }, values);
+}
+
 // The same frame survives normal and unwinding generic drop glue.
 pred drop_frame<T, N>(b: *Buffer<T, N>, start: usize,
     matrix: *[[std::mem::MaybeUninit<T>; N]; 2], k: lifetime_t, slice: *[T]) =
@@ -298,7 +348,11 @@ impl<T, const N: usize> Buffer<T, N> {
     ens thread_token(t) &*& live(t, self, if start == width::<N>() { 0 } else { start + 1 },
         append(tail(values), cons(next, nil)));
     @*/
-    //@ on_unwind_ens thread_token(t);
+    /*@
+    on_unwind_ens thread_token(t) &*&
+        push_drop_frame(t, self, start, append(tail(values), cons(next, nil)), ?matrix) &*&
+        *(((matrix as *std::mem::MaybeUninit<T>) + start) as *T) |-> _;
+    @*/
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);
@@ -383,33 +437,13 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ close foreach(cons(next, nil), own::<T>(t));
         //@ foreach_append(tail(values), cons(next, nil));
         //@ mapped_append::<T, std::mem::MaybeUninit<T>>(std::mem::MaybeUninit::new, tail(values), cons(next, nil));
+        //@ close bounds(self, if start == width::<N>() { 0 } else { start + 1 });
+        //@ close push_drop_frame(t, self, start, append(tail(values), cons(next, nil)), buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2]);
         //@ std::mem::open_MaybeUninit(to_drop);
         //@ close points_to(to_drop as *T, head(values));
         //@ open own::<T>(t)(head(values));
         unsafe { ptr::drop_in_place(to_drop.cast_init()) };
-        //@ std::mem::close_MaybeUninit_(to_drop);
-        /*@
-        {
-        if start == width::<N>() {
-            close array(to_drop, width::<N>(), _);
-            close array(buffer_mut_ptr, 0, nil);
-        } else {
-            close array(to_drop + 1, 0, nil);
-            close array(to_drop, 1, _);
-            array_join(buffer_mut_ptr);
-        }
-        array_join(buffer_mut_ptr);
-        array_join(buffer_mut_ptr);
-        pack_matrix(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2]);
-        end_ref_mut_::<[[std::mem::MaybeUninit<T>; N]; 2]>();
-        unpack_matrix(&(*self).buffer);
-        array_split(base(self), if start == width::<N>() { 0 } else { start + 1 });
-        array_split(base(self) + (if start == width::<N>() { 0 } else { start + 1 }), width::<N>());
-        close bounds(self, if start == width::<N>() { 0 } else { start + 1 });
-        close live(t, self, if start == width::<N>() { 0 } else { start + 1 },
-            append(tail(values), cons(next, nil)));
-        }
-        @*/
+        //@ finish_push_storage(t, self, start, append(tail(values), cons(next, nil)), buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2]);
     }
 }
 
