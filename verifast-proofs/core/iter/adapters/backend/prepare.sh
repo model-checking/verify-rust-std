@@ -11,7 +11,7 @@ backend_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 rustup component add --toolchain nightly-2026-02-05 rustc-dev llvm-tools
 cache_key="$(sha256sum "$backend_dir/prepare.sh" "$backend_dir/add-unchecked.patch" \
   "$backend_dir/const-generics.patch" "$backend_dir/nonzero-usize.patch" \
-  "$backend_dir/maybeuninit-ownership.patch" | sha256sum | cut -d ' ' -f 1)"
+  "$backend_dir/maybeuninit-ownership.patch" "$backend_dir/array-layout.patch" | sha256sum | cut -d ' ' -f 1)"
 cache_dir="$HOME/.cache/verifast-iter-adapters/$cache_key"
 if [[ -f "$cache_dir/checksums" ]]; then
   (cd "$cache_dir" && sha256sum --check checksums)
@@ -38,6 +38,7 @@ patch --batch --fuzz=0 --directory="$build_dir" -p1 < "$backend_dir/add-unchecke
 patch --batch --fuzz=0 --directory="$build_dir" -p1 < "$backend_dir/const-generics.patch"
 patch --batch --fuzz=0 --directory="$build_dir" -p1 < "$backend_dir/nonzero-usize.patch"
 patch --batch --fuzz=0 --directory="$build_dir" -p1 < "$backend_dir/maybeuninit-ownership.patch"
+patch --batch --fuzz=0 --directory="$build_dir" -p1 < "$backend_dir/array-layout.patch"
 
 # Use the dependency bundle pinned by upstream's setup-build.sh. Its compiler
 # and package paths are built for /tmp/vfdeps-adf88dc on Linux.

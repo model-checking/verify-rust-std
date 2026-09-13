@@ -221,6 +221,21 @@ PY
 # Keep every stage sequential and require both proof and refinement to succeed.
 # Collect their independent diagnostics even when the first stage fails.
 # No assumption, unwind, reference-creation, or overflow suppression flags.
+if timeout --signal=TERM --kill-after=5s 30s \
+  verifast -rustc_args '--edition 2024' backend/layout-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The incorrect array stride unexpectedly verified' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove condition" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The negative layout check did not reject the incorrect stride")
+PY
+
 layout_status=0
 timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/matrix-layout-valid.rs || layout_status=$?
@@ -231,7 +246,7 @@ refinement_status=0
 timeout --signal=TERM --kill-after=10s 600s \
   refinement-checker --rustc-args '--edition 2024' original/lib.rs verified/lib.rs || refinement_status=$?
 python3 -I check_sources.py
-if (( proof_status != 0 )); then
+if (( proof_status != 0 || layout_status != 0 )); then
   # These bounded, sequential diagnostics cannot replace the full proof verdict.
   while IFS= read -r proof_location; do
     diagnostic_status=0
@@ -268,9 +283,9 @@ PY
 from pathlib import Path
 import re
 
-for path in (Path("verified/map_windows.rs"), Path("verified/step_by.rs")):
+for path in (Path("array_layout.rs"), Path("verified/map_windows.rs"), Path("verified/step_by.rs")):
     for line_number, line in enumerate(path.read_text().splitlines(), 1):
-        if re.match(r"\s*(?:unsafe\s+)?fn\s+\w+", line):
+        if re.match(r"\s*(?:unsafe\s+)?(?:fn|lem)\s+\w+", line):
             print(f"{path}:{line_number}")
 PY
   )

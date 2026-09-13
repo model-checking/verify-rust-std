@@ -1,0 +1,20 @@
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -371,6 +371,17 @@
+
+     /*@
+     
++    // Rust array layout and MaybeUninit transparency, including zero-sized T.
++    lem array_layout<T, N>();
++        req true;
++        ens std::mem::size_of(typeid([T; N])) == std::mem::size_of::<T>() * usize_of_const(typeid(N)) &*&
++            std::mem::align_of(typeid([T; N])) == std::mem::align_of::<T>();
++
++    lem MaybeUninit_layout<T>();
++        req true;
++        ens std::mem::size_of::<MaybeUninit<T>>() == std::mem::size_of::<T>() &*&
++            std::mem::align_of::<MaybeUninit<T>>() == std::mem::align_of::<T>();
++
+     fix size_of_val<T: ?Sized>(x: *T) -> usize;
+     fix align_of_val<T: ?Sized>(x: *T) -> usize;
+     

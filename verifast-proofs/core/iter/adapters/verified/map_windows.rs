@@ -3,7 +3,7 @@
 use crate::mem::MaybeUninit;
 use crate::{fmt, ptr};
 
-//@ use array_layout::{collapse_window, expand_window, matrix_elems, pack_matrix, unpack_matrix};
+//@ use array_layout::{array_borrow_tokens, collapse_window, expand_window, lend_array, matrix_elems, own_matrix_storage, pack_matrix, reclaim_array, unpack_matrix};
 
 struct Buffer<T, const N: usize> {
     // Invariant: `self.buffer[self.start..self.start + N]` is initialized,
@@ -42,6 +42,50 @@ pred storage<T, N>(b: *Buffer<T, N>; start: usize) =
     bounds(b, start) &*& base(b)[..2 * width::<N>()] |-> ?slots;
 
 pred_ctor writable_matrix<T, N>(b: *Buffer<T, N>)(;) = (*b).buffer |-> _;
+
+pred<T, N> <Buffer<T, N>>.own(t, buffer) =
+    exists::<list<T>>(?values) &*&
+    0 < width::<N>() &*& width::<N>() <= usize::MAX / 2 &*&
+    buffer.start <= width::<N>() &*&
+    2 * width::<N>() * std::mem::size_of::<T>() <= isize::MAX &*&
+    length(values) == width::<N>() &*&
+    take(width::<N>(), drop(buffer.start, matrix_elems(buffer.buffer))) ==
+        map(std::mem::MaybeUninit::new, values) &*&
+    foreach(values, own::<T>(t));
+
+// The same frame survives normal and unwinding generic drop glue.
+pred drop_frame<T, N>(b: *Buffer<T, N>, start: usize,
+    matrix: *[[std::mem::MaybeUninit<T>; N]; 2], k: lifetime_t, slice: *[T]) =
+    bounds(b, start) &*& ref_mut_end_token(matrix, &(*b).buffer) &*&
+    (matrix as *std::mem::MaybeUninit<T>)[..start] |-> _ &*&
+    ((matrix as *std::mem::MaybeUninit<T>) + start + width::<N>())[..width::<N>() - start] |-> _ &*&
+    array_borrow_tokens(k, ((matrix as *std::mem::MaybeUninit<T>) + start) as *T, width::<N>()) &*&
+    close_points_to_at_lft_token(1, k, slice, 1) &*&
+    slice as *T == ((matrix as *std::mem::MaybeUninit<T>) + start) as *T &*&
+    ptr_len(slice) == width::<N>();
+
+lem finish_drop_storage<T, N>(b: *Buffer<T, N>, start: usize,
+    matrix: *[[std::mem::MaybeUninit<T>; N]; 2], k: lifetime_t, slice: *[T])
+    nonghost_callers_only
+    req drop_frame(b, start, matrix, k, slice) &*& *slice |-> _;
+    ens storage(b, start);
+{
+    open drop_frame(b, start, matrix, k, slice);
+    open bounds(b, start);
+    close_points_to_at_lft_(slice);
+    open_points_to_slice_at_lft_(slice);
+    end_lifetime(k);
+    let p = matrix as *std::mem::MaybeUninit<T>;
+    reclaim_array(k, (p + start) as *T, width::<N>());
+    std::mem::array__to_array_MaybeUninit((p + start) as *T);
+    array_join(p);
+    array_join(p);
+    pack_matrix(matrix);
+    end_ref_mut(matrix);
+    unpack_matrix(&(*b).buffer);
+    close bounds(b, start);
+    close storage(b, start);
+}
 
 // Unwrap initialized slots without requiring T: Copy or duplicating T.own.
 lem initialized_slots<T>(p: *std::mem::MaybeUninit<T>, values: list<T>)
@@ -164,8 +208,8 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ array_split(buffer_mut_ptr + start, width::<N>());
         //@ collapse_window::<T, N>(buffer_mut_ptr + start);
         let result = unsafe { &mut *buffer_mut_ptr.add(self.start).cast() };
+        //@ let window = (buffer_mut_ptr + start) as *std::mem::MaybeUninit<[T; N]>;
         /*@
-        let window = (buffer_mut_ptr + start) as *std::mem::MaybeUninit<[T; N]>;
         {
             pred ctx(;) =
                 ref_mut_end_token(result, window) &*&
@@ -324,31 +368,55 @@ impl<T, const N: usize> Drop for Buffer<T, N> {
     req thread_token(?t) &*& live(t, self, ?start, ?values);
     @*/
     /*@
-    ens thread_token(t) &*& storage(self, start);
+    ens thread_token(t) &*& drop_frame(self, start, ?matrix, ?k, ?slice) &*& *slice |-> _;
     @*/
-    //@ on_unwind_ens thread_token(t);
+    //@ on_unwind_ens thread_token(t) &*& drop_frame(self, start, ?matrix, ?k, ?slice) &*& *slice |-> _;
+    /*@
+    safety_proof {
+        open Buffer_full_borrow_content::<T, N>(_t, self)();
+        open <Buffer<T, N>>.own(_t, ?buffer);
+        open exists::<list<T>>(?values);
+        let start = buffer.start;
+        unpack_matrix(&(*self).buffer);
+        array_split(base(self), start);
+        array_split(base(self) + start, width::<N>());
+        close bounds(self, start);
+        close live(_t, self, start, values);
+        call();
+        assert drop_frame(self, start, ?matrix, ?k, ?slice);
+        finish_drop_storage(self, start, matrix, k, slice);
+        open storage(self, start);
+        open bounds(self, start);
+        pack_matrix(&(*self).buffer);
+        assert (*self).buffer |-> ?after;
+        own_matrix_storage(_t, after);
+    }
+    @*/
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);
+        //@ array_join(base(self));
+        //@ array_join(base(self));
+        //@ pack_matrix(&(*self).buffer);
         // SAFETY: our invariant guarantees that N elements starting from
         // `self.start` are initialized. We drop them here.
         unsafe {
-            let initialized_part: *mut [T] = crate::ptr::slice_from_raw_parts_mut(
-                self.buffer_mut_ptr().add(self.start).cast(),
-                N,
-            );
-            //@ initialized_slots(base(self) + start, values);
-            // This assertion must be discharged by the Rust slice memory model.
-            // No additional axiom or assumed drop contract is supplied here.
-            //@ assert *initialized_part |-> slice_of_elems(values);
+            let buffer_mut_ptr = self.buffer_mut_ptr();
+            let initialized_part: *mut [T] =
+                crate::ptr::slice_from_raw_parts_mut(buffer_mut_ptr.add(self.start).cast(), N);
+            //@ let matrix = buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2];
+            //@ unpack_matrix(matrix);
+            //@ array_split(buffer_mut_ptr, start);
+            //@ array_split(buffer_mut_ptr + start, width::<N>());
+            //@ initialized_slots(buffer_mut_ptr + start, values);
+            //@ let k = begin_lifetime();
+            //@ lend_array(k, (buffer_mut_ptr + start) as *T, width::<N>());
+            //@ close_points_to_slice_at_lft(initialized_part);
+            //@ open_points_to_at_lft(initialized_part, 1);
             //@ close <[T]>.own(t, slice_of_elems(values));
+            //@ close bounds(self, start);
+            //@ close drop_frame(self, start, matrix, k, initialized_part);
             ptr::drop_in_place(initialized_part);
-            //@ assert (initialized_part as *T)[..width::<N>()] |-?-> ?remaining;
-            //@ std::mem::array__to_array_MaybeUninit(initialized_part as *T);
         }
-        //@ array_join(base(self));
-        //@ array_join(base(self));
-        //@ close bounds(self, start);
-        //@ close storage(self, start);
     }
 }

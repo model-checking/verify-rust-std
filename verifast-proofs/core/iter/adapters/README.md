@@ -17,13 +17,14 @@ or unwind bounds. The target contracts are:
 | `Buffer<T, N>::as_array_ref` | Derive the active window's reference from its shared borrow and valid buffer bounds. |
 | `Buffer<T, N>::as_uninit_array_mut` | Derive a writable window from an exclusive borrow of the backing array, without requiring initialized `T` values. |
 | `Buffer<T, N>::push` | Consume one new `T`, drop the old front, and preserve ownership of the shifted window on normal return. |
-| `Buffer<T, N>::drop` | Drop exactly the initialized window and recover its storage on normal return. |
+| `Buffer<T, N>::drop` | Drop exactly the initialized window and recover its storage on normal return and unwind. |
 
 The two raw buffer pointer helpers also have contracts. `push` and `drop`
-use the standard library specification of generic drop glue. Their unwind
-postconditions return the thread token only. Unwind paths remain enabled,
-but these contracts do not establish buffer-state recovery after a panicking
-destructor. This is a remaining obligation for a full safe-abstraction proof.
+use the standard library specification of generic drop glue. The candidate
+`drop` safety proof recovers field storage on both outcomes through one lifetime
+loan frame. This proof has not passed validation. The `push` unwind postcondition
+returns the thread token only; preserving its buffer state after a panicking
+element destructor remains a safe-abstraction obligation.
 
 ## Ownership and bounds
 
@@ -176,6 +177,13 @@ ownership semantics and are not proved from its implementation by this port.
 A positive wrapper fixture and rejection of missing ownership of an ordinary
 `T` are mandatory. No new borrowing or generic drop contract is introduced.
 
+`backend/array-layout.patch` supplies trusted size and alignment relations for
+array type IDs and `MaybeUninit<T>`. The facts follow the
+[Rust array layout guarantee](https://doc.rust-lang.org/reference/type-layout.html#array-layout)
+and the wrapper's documented layout. They include zero-sized element types.
+The matrix conversion and writable-window proofs remain mandatory; the layout
+facts do not grant storage or ownership permissions.
+
 ## Local static checks and optional manual verification
 
 The static check reads small files and starts no compiler or solver:
@@ -212,8 +220,9 @@ this candidate without altering the existing LinkedList and RawVec checks.
 
 - Obtain verifier and refinement verdicts for the adapters, including symbolic const
   sizes, `NonZero::new_unchecked`, reference creation, and generic slice drop glue.
-  The explicit slice assertions in `drop` must be proved by that memory
-  model; no local axiom has been added to make them pass.
+  The lifetime loans in `drop` must connect element storage to the slice
+  contract and recover storage on both outcomes. There is no adapter-specific
+  borrowing or drop axiom.
 - Complete the safe-abstraction and unwind-state obligations described above.
 - Port the remaining Challenge 16 targets, including arbitrary-length filter,
   filter-map, and zip iteration. This package has no proof of those loops.
