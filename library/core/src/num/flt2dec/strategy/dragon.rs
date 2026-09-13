@@ -397,11 +397,42 @@ pub mod dragon_verify {
         arbitrary_finite_f32, arbitrary_finite_f64, for_each_finite_partition,
     };
 
-    // Keep every Big operation, comparison, and digit write. In particular,
-    // neither termination nor the buffer index is assumed. The unwind bound
-    // includes Big32x40's limb loops, and its assertions remain enabled.
+    // Keep the generator comparisons and digit writes. Exact mode uses the
+    // separate division contract below for initial fixup. Neither termination
+    // nor the buffer index is assumed. The unwind bound includes Big32x40's
+    // limb loops, and its assertions remain enabled.
     // Lengths above 32 require a separate proof; these harnesses are bounded.
     const PROOF_BUFLEN: usize = 32;
+
+    // Division preserves the bigint's allocated prefix and unused zero limbs.
+    // Its numeric result is overapproximated; the generator still performs the
+    // real addition, comparison, and subsequent digit extraction.
+    #[kani::requires(n <= PROOF_BUFLEN && value.kani_valid_storage())]
+    #[kani::ensures(|_| {
+        value.kani_valid_storage() && value.digits().len() == old(value.digits().len())
+    })]
+    #[kani::modifies(value)]
+    fn div_2pow10_contract(value: &mut Big, n: usize) {
+        let _ = div_2pow10(value, n);
+    }
+
+    fn stub_div_2pow10(value: &mut Big, n: usize) -> &mut Big {
+        div_2pow10_contract(value, n);
+        value
+    }
+
+    #[kani::proof_for_contract(div_2pow10_contract)]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_div_2pow10_contract() {
+        let mut value = Big::kani_any_valid();
+        let n: usize = kani::any();
+        div_2pow10_contract(&mut value, n);
+        kani::cover(n == 0, "division accepts the minimum power");
+        kani::cover(n == PROOF_BUFLEN, "division accepts the maximum proof power");
+        kani::cover(value.digits().is_empty(), "division accepts empty zero storage");
+        kani::cover(value.digits().len() == 40, "division accepts all bigint limbs");
+    }
 
     macro_rules! check_partition {
         ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
@@ -438,6 +469,8 @@ pub mod dragon_verify {
                     crate::num::flt2dec::rounding_verify::stub_round_up
                 )]
                 #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::stub(div_2pow10, stub_div_2pow10)]
+                #[kani::stub_verified(div_2pow10_contract)]
                 #[kani::solver(kissat)]
                 fn check_format_exact() {
                     let d = $decode::<$group>();

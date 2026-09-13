@@ -389,6 +389,28 @@ pub type Digit32 = u32;
 
 define_bignum!(Big32x40: type=Digit32, n=40);
 
+#[cfg(kani)]
+impl crate::kani::Arbitrary for Big32x40 {
+    fn any() -> Self {
+        Self { size: crate::kani::any(), base: crate::kani::any() }
+    }
+}
+
+#[cfg(kani)]
+impl Big32x40 {
+    pub(crate) fn kani_valid_storage(&self) -> bool {
+        self.size <= self.base.len() && self.base[self.size..].iter().all(|&digit| digit == 0)
+    }
+
+    // Contract proofs include every storage size, including the empty zero
+    // representation. Leading zero limbs within the active prefix are valid.
+    pub(crate) fn kani_any_valid() -> Self {
+        let value: Self = crate::kani::any();
+        crate::kani::assume(value.kani_valid_storage());
+        value
+    }
+}
+
 // this one is used for testing only.
 #[doc(hidden)]
 pub mod tests {
