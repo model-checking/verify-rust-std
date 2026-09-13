@@ -403,7 +403,19 @@ impl Big32x40 {
     }
 
     pub(crate) fn kani_valid_storage(&self) -> bool {
-        self.size <= self.base.len() && self.base[self.size..].iter().all(|&digit| digit == 0)
+        // Constant indices avoid unfolding a symbolic slice iterator in every
+        // contract invocation. Eager Boolean operations preserve the predicate.
+        macro_rules! inactive_limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((self.size > $index) | (self.base[$index] == 0)))+
+            };
+        }
+
+        self.size <= self.base.len()
+            && inactive_limbs_are_zero!(
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+            )
     }
 
     // Contract proofs include every storage size, including the empty zero

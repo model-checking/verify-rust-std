@@ -5,15 +5,30 @@ use crate::kani;
 
 const PROOF_BUFLEN: usize = 32;
 
+// The fixed capacity lets contract predicates use constant indices instead of
+// unfolding a symbolic iterator each time a generator rounds its output.
+fn prefix_all(digits: &[u8; PROOF_BUFLEN], len: usize, predicate: impl Fn(u8) -> bool) -> bool {
+    macro_rules! check_bytes {
+        ($($index:literal),+ $(,)?) => {
+            true $(& ((len <= $index) | predicate(digits[$index])))+
+        };
+    }
+
+    check_bytes!(
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31,
+    )
+}
+
 // A fixed array gives the contract a sized write set. The adapter below copies
 // only the active prefix back, so the contract cannot initialize unused bytes
 // in a generator's MaybeUninit buffer.
 #[kani::requires(
-    len <= PROOF_BUFLEN && digits.iter().take(len).all(|&digit| digit < u8::MAX)
+    len <= PROOF_BUFLEN && prefix_all(digits, len, |digit| digit < u8::MAX)
 )]
 #[kani::ensures(|result| {
     *result == old(
-        digits.iter().take(len).all(|&digit| digit == b'9')
+        prefix_all(digits, len, |digit| digit == b'9')
             .then_some(if len == 0 { b'1' } else { b'0' })
     )
 })]
