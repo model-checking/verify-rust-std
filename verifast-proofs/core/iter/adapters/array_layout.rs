@@ -6,18 +6,17 @@ fix matrix_elems<T, N>(matrix: [[T; N]; 2]) -> list<T> {
 }
 
 // Keep a fraction while changing representations so precision relates the values.
-lem split_array_fraction<T>(p: *T, count: usize)
-    req [?f]array(p, count, ?elems);
-    ens [f/2]array(p, count, elems) &*& [f/2]array(p, count, elems);
-{}
+pred_ctor saved_array<T>(p: *T, count: usize, elems: list<T>)(;) =
+    [1/2]array(p, count, elems);
 
 lem pack_array<T, N>(p: *[T; N])
     req (p as *T)[..usize_of_const(typeid(N))] |-> ?elems;
     ens *p |-> ?array &*& Array_elems(array) == elems;
 {
-    split_array_fraction(p as *T, usize_of_const(typeid(N)));
+    close saved_array(p as *T, usize_of_const(typeid(N)), elems)();
     array_to_Array(p);
     Array_to_array(p);
+    open saved_array(p as *T, usize_of_const(typeid(N)), elems)();
     merge_fractions array(p as *T, usize_of_const(typeid(N)), _);
     array_to_Array(p);
 }

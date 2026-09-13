@@ -3,7 +3,7 @@
 use crate::mem::MaybeUninit;
 use crate::{fmt, ptr};
 
-//@ use crate::array_layout::{matrix_elems, pack_matrix, unpack_matrix};
+//@ use array_layout::{matrix_elems, pack_matrix, unpack_matrix};
 
 struct Buffer<T, const N: usize> {
     // Invariant: `self.buffer[self.start..self.start + N]` is initialized,
