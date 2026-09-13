@@ -27,8 +27,8 @@ impl<I> StepBy<I> {
     /// aka `self.step_minus_one + 1`.
     #[inline]
     fn original_step(&self) -> NonZero<usize>
-//@ req [?f]self.step_minus_one |-> ?step &*& step < usize::MAX;
-    //@ ens [f]self.step_minus_one |-> step &*& result.get() == step + 1 &*& 0 < result.get();
+//@ req [?f](*self).step_minus_one |-> ?step &*& step < usize::MAX;
+    //@ ens [f](*self).step_minus_one |-> step &*& result.get() == step + 1 &*& 0 < result.get();
     //@ on_unwind_ens false;
     {
         // SAFETY: By type invariant, `step_minus_one` cannot be `MAX`, which
