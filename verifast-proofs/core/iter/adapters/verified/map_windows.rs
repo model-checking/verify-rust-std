@@ -7,7 +7,7 @@ struct Buffer<T, const N: usize> {
     // Invariant: `self.buffer[self.start..self.start + N]` is initialized,
     // with all other elements being uninitialized. This also
     // implies that `self.start <= N`.
-    buffer: [[std::mem::MaybeUninit<T>; N]; 2],
+    buffer: [[MaybeUninit<T>; N]; 2],
     start: usize,
 }
 
@@ -33,7 +33,7 @@ pred live<T, N>(t: thread_id_t, b: *Buffer<T, N>; start: usize, values: list<T>)
     base(b)[..start] |-> ?prefix &*&
     (base(b) + start)[..width::<N>()] |-> map(std::mem::MaybeUninit::new, values) &*&
     (base(b) + start + width::<N>())[..width::<N>() - start] |-> ?suffix &*&
-    foreach(values, (<T>.own)(t));
+    foreach(values, own::<T>(t));
 
 pred storage<T, N>(b: *Buffer<T, N>; start: usize) =
     bounds(b, start) &*& base(b)[..2 * width::<N>()] |-> ?slots;
@@ -82,7 +82,7 @@ lem wrap_slots<T>(p: *T, values: list<T>)
 
 impl<T, const N: usize> Buffer<T, N> {
     #[inline]
-    fn buffer_ptr(&self) -> *const std::mem::MaybeUninit<T>
+    fn buffer_ptr(&self) -> *const MaybeUninit<T>
 //@ req true;
     //@ ens result == base(self);
     //@ on_unwind_ens false;
@@ -91,7 +91,7 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    fn buffer_mut_ptr(&mut self) -> *mut std::mem::MaybeUninit<T>
+    fn buffer_mut_ptr(&mut self) -> *mut MaybeUninit<T>
 //@ req true;
     //@ ens result == base(self);
     //@ on_unwind_ens false;
@@ -131,7 +131,7 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    fn as_uninit_array_mut<'a>(&'a mut self) -> &'a mut std::mem::MaybeUninit<[T; N]>
+    fn as_uninit_array_mut<'a>(&'a mut self) -> &'a mut MaybeUninit<[T; N]>
 /*@
     req thread_token(?t) &*& bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
         full_borrow('a, <std::mem::MaybeUninit<[T; N]>>.full_borrow_content(t,
@@ -168,7 +168,7 @@ impl<T, const N: usize> Buffer<T, N> {
     {
         //@ open live(t, self, start, values);
         //@ open bounds(self, start);
-        //@ open foreach(values, (<T>.own)(t));
+        //@ open foreach(values, own::<T>(t));
         //@ open array(base(self) + start, width::<N>(), _);
         let buffer_mut_ptr = self.buffer_mut_ptr();
         debug_assert!(self.start + N <= 2 * N);
@@ -230,8 +230,8 @@ impl<T, const N: usize> Buffer<T, N> {
 
         // SAFETY: the index is valid and this is element `a` in the
         // diagram above and has not been dropped yet.
-        //@ close foreach(nil, (<T>.own)(t));
-        //@ close foreach(cons(next, nil), (<T>.own)(t));
+        //@ close foreach(nil, own::<T>(t));
+        //@ close foreach(cons(next, nil), own::<T>(t));
         //@ foreach_append(tail(values), cons(next, nil));
         //@ std::mem::open_MaybeUninit(to_drop);
         //@ close points_to(to_drop as *T, head(values));
