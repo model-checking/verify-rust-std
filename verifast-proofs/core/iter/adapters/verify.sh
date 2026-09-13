@@ -41,12 +41,43 @@ PY
 
 command -v timeout >/dev/null
 ulimit -c 0
-ulimit -v 2097152
 ulimit -t 600
-export VFVERSION=25.11
+export VFVERSION=26.09
 export CARGO_BUILD_JOBS=1
 export RAYON_NUM_THREADS=1
 export PATH="$proof_dir/../../..:$PATH"
+
+# Install the pinned release and build only its patched MIR exporter remotely.
+# The workflow's cgroup also covers this build. Proof processes get the tighter
+# per-process address-space limit after the compiler has finished.
+export VFPLATFORM=linux
+# shellcheck source=/dev/null
+source "$proof_dir/../../../setup-verifast-home"
+export VERIFAST_HOME
+timeout --signal=TERM --kill-after=10s 900s bash backend/prepare.sh --remote
+ulimit -v 2097152
+
+# Check both the defined-input case and rejection of a potentially overflowing
+# input before trusting the frontend mapping for the adapter proof.
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/add-valid.rs
+negative_log="$(mktemp)"
+trap 'rm -f -- "$negative_log"' EXIT
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/add-overflow.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The frontend accepted unchecked addition without an overflow precondition.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Potential arithmetic overflow." not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The negative check did not produce the required overflow diagnostic.")
+PY
 
 # Keep every stage sequential and fail on any unsuccessful proof or refinement.
 # No assumption, unwind, reference-creation, or overflow suppression flags.

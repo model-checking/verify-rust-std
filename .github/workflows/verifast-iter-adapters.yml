@@ -51,6 +51,11 @@ jobs:
           bash verifast-proofs/core/iter/adapters/verify.sh --static
           python3 -I verifast-proofs/core/iter/adapters/test_sources.py
 
+      - name: Install frontend schema compiler
+        run: |
+          sudo --non-interactive apt-get update -qq
+          sudo --non-interactive apt-get install -y --no-install-recommends capnproto
+
       - name: Verify contracts and source refinement
         run: |
           # A service cgroup limits the entire compiler/verifier process tree.

@@ -1,8 +1,9 @@
 # Generic iterator adapter proof port
 
 This is an **unvalidated VeriFast port candidate** for part of Challenge 16.
-Hosted verification is blocked in the pinned VeriFast Rust frontend;
-the refinement checker has not run. See the hosted results below.
+Hosted verification previously stopped in the VeriFast Rust frontend.
+The current revision includes a frontend fix awaiting hosted validation;
+the refinement checker has not passed. See the hosted results below.
 The files under `verified/` are proof inputs, not evidence of a successful
 proof. This port does not yet close Felipe's review requests on PR #602.
 
@@ -102,7 +103,19 @@ has no `AddUnchecked` case. Static inspection of the
 [26.01 exporter](https://github.com/verifast/verifast/blob/26.01/src/rust_frontend/vf_mir_exporter/src/lib.rs#L2445-L2464)
 found the same omission, so that release alone does not address this failure.
 Neither the generic contracts nor source refinement have a passing verdict.
-The runner continues to fail on this error; no target or check is suppressed.
+The current runner uses VeriFast 26.09 plus the narrow frontend patch in
+`backend/add-unchecked.patch`. It maps `AddUnchecked` to the existing integer
+addition operation, whose symbolic execution checks overflow. On inputs
+where no overflow occurs, unchecked addition has the same result. Outside
+that domain, unchecked addition is undefined, and the verifier must reject it.
+Before checking the adapters, the runner requires a valid successor proof
+and an explicit overflow diagnostic for the same operation without its
+range precondition. A frontend crash does not count as the negative result.
+
+`backend/prepare.sh` pins both the source commit and archive hash. It builds
+only the MIR exporter on the hosted Linux worker and replaces that worker's
+exporter. It does not alter the verifier, its arithmetic rules, or library
+contracts. Source projections and mandatory refinement remain unchanged.
 
 ## Local static checks and optional manual verification
 
@@ -118,8 +131,10 @@ On a separate Linux machine with at least 8 GiB currently available RAM:
 bash verifast-proofs/core/iter/adapters/verify.sh --remote
 ```
 
-The runner uses the repository's pinned VeriFast 25.11 wrappers and Rust
-nightly 2025-10-09. The wrappers can download their toolchains. Each process
+The runner uses the repository's VeriFast 26.09 wrappers and Rust
+nightly 2026-02-05, with the frontend patch described above. The wrappers
+can download their toolchains. The remote build needs `capnp`, `rustc-dev`,
+and `llvm-tools`; the workflow installs them. Each proof process
 has a 2 GiB address-space limit, each verification stage has a ten-minute
 wall limit, and the stages run sequentially. Address-space limits are per
 process, not a combined memory cap. Use an otherwise idle remote worker with
@@ -136,8 +151,7 @@ this candidate without altering the existing LinkedList and RawVec checks.
 
 ## Remaining work
 
-- Resolve the frontend's confirmed `AddUnchecked` limitation without changing
-  the original source projection or introducing an assumed contract. Then
+- Validate the frontend's `AddUnchecked` mapping and both regression checks. Then
   obtain verifier and refinement verdicts, including checks of symbolic const
   sizes, `NonZero::new_unchecked`, reference creation, and generic slice drop glue.
   The explicit slice assertions in `drop` must be proved by that memory
