@@ -4,7 +4,7 @@
     {
       "upstream": "library/core/src/iter/adapters/map_windows.rs",
       "snapshot": "source/map_windows.rs",
-      "sha256": "2a3af923ad354d4c61ebcb9dc0fcbcac75ce3703420686d63a39d75289cbcf2d",
+      "sha256": "f82419679445fa307ffc7d869f5e8e75578925a82ea51005ef7dddf46a8e1d61",
       "projection": "original/map_windows.rs",
       "ranges": [[2, 2], [4, 4], [41, 47], [108, 108], [116, 201], [224, 236]],
       "contracts": ["buffer_ptr", "buffer_mut_ptr", "as_array_ref", "as_uninit_array_mut", "push", "drop"]

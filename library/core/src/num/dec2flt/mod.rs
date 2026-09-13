@@ -179,7 +179,7 @@ from_str_float_impl!(f16);
 from_str_float_impl!(f32);
 from_str_float_impl!(f64);
 
-// FIXME(f16_f128): A fallback is used when the backend+target does not support f16 well, in order
+// FIXME(f16): A fallback is used when the backend+target does not support f16 well, in order
 // to avoid ICEs.
 
 #[cfg(not(target_has_reliable_f16))]
@@ -255,11 +255,7 @@ fn biased_fp_to_float<F: RawFloat>(x: BiasedFp) -> F {
 #[inline(always)] // Will be inlined into a function with `#[inline(never)]`, see above
 pub fn dec2flt<F: RawFloat>(s: &str) -> Result<F, ParseFloatError> {
     let mut s = s.as_bytes();
-    let c = if let Some(&c) = s.first() {
-        c
-    } else {
-        return Err(pfe_empty());
-    };
+    let Some(&c) = s.first() else { return Err(pfe_empty()) };
     let negative = c == b'-';
     if c == b'-' || c == b'+' {
         s = &s[1..];

@@ -124,6 +124,8 @@ macro_rules! assert_ne {
     };
 }
 
+// FIXME add back debug_assert_matches doc link after bootstrap.
+
 /// Asserts that an expression matches the provided pattern.
 ///
 /// This macro is generally preferable to `assert!(matches!(value, pattern))`, because it can print
@@ -135,10 +137,8 @@ macro_rules! assert_ne {
 /// otherwise this macro will panic.
 ///
 /// Assertions are always checked in both debug and release builds, and cannot
-/// be disabled. See [`debug_assert_matches!`] for assertions that are disabled in
+/// be disabled. See `debug_assert_matches!` for assertions that are disabled in
 /// release builds by default.
-///
-/// [`debug_assert_matches!`]: crate::assert_matches::debug_assert_matches
 ///
 /// On panic, this macro will print the value of the expression with its debug representation.
 ///
@@ -149,7 +149,7 @@ macro_rules! assert_ne {
 /// ```
 /// #![feature(assert_matches)]
 ///
-/// use std::assert_matches::assert_matches;
+/// use std::assert_matches;
 ///
 /// let a = Some(345);
 /// let b = Some(56);
@@ -168,7 +168,7 @@ macro_rules! assert_ne {
 /// ```
 #[unstable(feature = "assert_matches", issue = "82775")]
 #[allow_internal_unstable(panic_internals)]
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub macro assert_matches {
     ($left:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
         match $left {
@@ -382,7 +382,7 @@ macro_rules! debug_assert_ne {
 /// ```
 /// #![feature(assert_matches)]
 ///
-/// use std::assert_matches::debug_assert_matches;
+/// use std::debug_assert_matches;
 ///
 /// let a = Some(345);
 /// let b = Some(56);
@@ -401,10 +401,10 @@ macro_rules! debug_assert_ne {
 /// ```
 #[unstable(feature = "assert_matches", issue = "82775")]
 #[allow_internal_unstable(assert_matches)]
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub macro debug_assert_matches($($arg:tt)*) {
     if $crate::cfg!(debug_assertions) {
-        $crate::assert_matches::assert_matches!($($arg)*);
+        $crate::assert_matches!($($arg)*);
     }
 }
 
@@ -991,7 +991,7 @@ pub(crate) mod builtin {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_diagnostic_item = "format_args_macro"]
     #[allow_internal_unsafe]
-    #[allow_internal_unstable(fmt_internals)]
+    #[allow_internal_unstable(fmt_internals, fmt_arguments_from_str)]
     #[rustc_builtin_macro]
     #[macro_export]
     macro_rules! format_args {
@@ -1005,7 +1005,7 @@ pub(crate) mod builtin {
     ///
     /// This macro will be removed once `format_args` is allowed in const contexts.
     #[unstable(feature = "const_format_args", issue = "none")]
-    #[allow_internal_unstable(fmt_internals, const_fmt_arguments_new)]
+    #[allow_internal_unstable(fmt_internals, fmt_arguments_from_str)]
     #[rustc_builtin_macro]
     #[macro_export]
     macro_rules! const_format_args {
@@ -1020,7 +1020,7 @@ pub(crate) mod builtin {
         reason = "`format_args_nl` is only for internal \
                   language use and is subject to change"
     )]
-    #[allow_internal_unstable(fmt_internals)]
+    #[allow_internal_unstable(fmt_internals, fmt_arguments_from_str)]
     #[rustc_builtin_macro]
     #[doc(hidden)]
     #[macro_export]
@@ -1499,6 +1499,55 @@ pub(crate) mod builtin {
     /// - `INPUT_ACTIVITIES`: Specifies one valid activity for each input parameter.
     /// - `OUTPUT_ACTIVITY`: Must not be set if the function implicitly returns nothing
     ///   (or explicitly returns `-> ()`). Otherwise, it must be set to one of the allowed activities.
+    ///
+    /// ACTIVITIES might either be `Dual` or `Const`, more options will be exposed later.
+    ///
+    /// `Const` should be used on non-float arguments, or float-based arguments as an optimization
+    /// if we are not interested in computing the derivatives with respect to this argument.
+    ///
+    /// `Dual` can be used for float scalar values or for references, raw pointers, or other
+    /// indirect input arguments. It can also be used on a scalar float return value.
+    /// If used on a return value, the generated function will return a tuple of two float scalars.
+    /// If used on an input argument, a new shadow argument of the same type will be created,
+    /// directly following the original argument.
+    ///
+    /// ### Usage examples:
+    ///
+    /// ```rust,ignore (autodiff requires a -Z flag as well as fat-lto for testing)
+    /// #![feature(autodiff)]
+    /// use std::autodiff::*;
+    /// #[autodiff_forward(rb_fwd1, Dual, Const, Dual)]
+    /// #[autodiff_forward(rb_fwd2, Const, Dual, Dual)]
+    /// #[autodiff_forward(rb_fwd3, Dual, Dual, Dual)]
+    /// fn rosenbrock(x: f64, y: f64) -> f64 {
+    ///     (1.0 - x).powi(2) + 100.0 * (y - x.powi(2)).powi(2)
+    /// }
+    /// #[autodiff_forward(rb_inp_fwd, Dual, Dual, Dual)]
+    /// fn rosenbrock_inp(x: f64, y: f64, out: &mut f64) {
+    ///     *out = (1.0 - x).powi(2) + 100.0 * (y - x.powi(2)).powi(2);
+    /// }
+    ///
+    /// fn main() {
+    ///   let x0 = rosenbrock(1.0, 3.0); // 400.0
+    ///   let (x1, dx1) = rb_fwd1(1.0, 1.0, 3.0); // (400.0, -800.0)
+    ///   let (x2, dy1) = rb_fwd2(1.0, 3.0, 1.0); // (400.0, 400.0)
+    ///   // When seeding both arguments at once the tangent return is the sum of both.
+    ///   let (x3, dxy) = rb_fwd3(1.0, 1.0, 3.0, 1.0); // (400.0, -400.0)
+    ///
+    ///   let mut out = 0.0;
+    ///   let mut dout = 0.0;
+    ///   rb_inp_fwd(1.0, 1.0, 3.0, 1.0, &mut out, &mut dout);
+    ///   // (out, dout) == (400.0, -400.0)
+    /// }
+    /// ```
+    ///
+    /// We might want to track how one input float affects one or more output floats. In this case,
+    /// the shadow of one input should be initialized to `1.0`, while the shadows of the other
+    /// inputs should be initialized to `0.0`. The shadow of the output(s) should be initialized to
+    /// `0.0`. After calling the generated function, the shadow of the input will be zeroed,
+    /// while the shadow(s) of the output(s) will contain the derivatives. Forward mode is generally
+    /// more efficient if we have more output floats marked as `Dual` than input floats.
+    /// Related information can also be found under the term "Vector-Jacobian product" (VJP).
     #[unstable(feature = "autodiff", issue = "124509")]
     #[allow_internal_unstable(rustc_attrs)]
     #[allow_internal_unstable(core_intrinsics)]
@@ -1518,6 +1567,60 @@ pub(crate) mod builtin {
     /// - `INPUT_ACTIVITIES`: Specifies one valid activity for each input parameter.
     /// - `OUTPUT_ACTIVITY`: Must not be set if the function implicitly returns nothing
     ///   (or explicitly returns `-> ()`). Otherwise, it must be set to one of the allowed activities.
+    ///
+    /// ACTIVITIES might either be `Active`, `Duplicated` or `Const`, more options will be exposed later.
+    ///
+    /// `Active` can be used for float scalar values.
+    /// If used on an input, a new float will be appended to the return tuple of the generated
+    /// function. If the function returns a float scalar, `Active` can be used for the return as
+    /// well. In this case a float scalar will be appended to the argument list, it works as seed.
+    ///
+    /// `Duplicated` can be used on references, raw pointers, or other indirect input
+    /// arguments. It creates a new shadow argument of the same type, following the original argument.
+    /// A const reference or pointer argument will receive a mutable reference or pointer as shadow.
+    ///
+    /// `Const` should be used on non-float arguments, or float-based arguments as an optimization
+    /// if we are not interested in computing the derivatives with respect to this argument.
+    ///
+    /// ### Usage examples:
+    ///
+    /// ```rust,ignore (autodiff requires a -Z flag as well as fat-lto for testing)
+    /// #![feature(autodiff)]
+    /// use std::autodiff::*;
+    /// #[autodiff_reverse(rb_rev, Active, Active, Active)]
+    /// fn rosenbrock(x: f64, y: f64) -> f64 {
+    ///     (1.0 - x).powi(2) + 100.0 * (y - x.powi(2)).powi(2)
+    /// }
+    /// #[autodiff_reverse(rb_inp_rev, Active, Active, Duplicated)]
+    /// fn rosenbrock_inp(x: f64, y: f64, out: &mut f64) {
+    ///     *out = (1.0 - x).powi(2) + 100.0 * (y - x.powi(2)).powi(2);
+    /// }
+    ///
+    /// fn main() {
+    ///     let (output1, dx1, dy1) = rb_rev(1.0, 3.0, 1.0);
+    ///     dbg!(output1, dx1, dy1); // (400.0, -800.0, 400.0)
+    ///     let mut output2 = 0.0;
+    ///     let mut seed = 1.0;
+    ///     let (dx2, dy2) = rb_inp_rev(1.0, 3.0, &mut output2, &mut seed);
+    ///     // (dx2, dy2, output2, seed) == (-800.0, 400.0, 400.0, 0.0)
+    /// }
+    /// ```
+    ///
+    ///
+    /// We often want to track how one or more input floats affect one output float. This output can
+    /// be a scalar return value, or a mutable reference or pointer argument. In the latter case, the
+    /// mutable input should be marked as duplicated and its shadow initialized to `0.0`. The shadow of
+    /// the output should be marked as active or duplicated and initialized to `1.0`. After calling
+    /// the generated function, the shadow(s) of the input(s) will contain the derivatives. The
+    /// shadow of the outputs ("seed") will be reset to zero.
+    /// If the function has more than one output float marked as active or duplicated, users might want to
+    /// set one of them to `1.0` and the others to `0.0` to compute partial derivatives.
+    /// Unlike forward-mode, a call to the generated function does not reset the shadow of the
+    /// inputs.
+    /// Reverse mode is generally more efficient if we have more active/duplicated input than
+    /// output floats.
+    ///
+    /// Related information can also be found under the term "Jacobian-Vector Product" (JVP).
     #[unstable(feature = "autodiff", issue = "124509")]
     #[allow_internal_unstable(rustc_attrs)]
     #[allow_internal_unstable(core_intrinsics)]
@@ -1785,6 +1888,31 @@ pub(crate) mod builtin {
     #[rustc_builtin_macro]
     #[unstable(feature = "derive_from", issue = "144889")]
     pub macro From($item: item) {
+        /* compiler built-in */
+    }
+
+    /// Externally Implementable Item: Defines an attribute macro that can override the item
+    /// this is applied to.
+    #[unstable(feature = "extern_item_impls", issue = "125418")]
+    #[rustc_builtin_macro]
+    #[allow_internal_unstable(eii_internals, decl_macro, rustc_attrs)]
+    pub macro eii($item:item) {
+        /* compiler built-in */
+    }
+
+    /// Unsafely Externally Implementable Item: Defines an unsafe attribute macro that can override
+    /// the item this is applied to.
+    #[unstable(feature = "extern_item_impls", issue = "125418")]
+    #[rustc_builtin_macro]
+    #[allow_internal_unstable(eii_internals, decl_macro, rustc_attrs)]
+    pub macro unsafe_eii($item:item) {
+        /* compiler built-in */
+    }
+
+    /// Impl detail of EII
+    #[unstable(feature = "eii_internals", issue = "none")]
+    #[rustc_builtin_macro]
+    pub macro eii_declaration($item:item) {
         /* compiler built-in */
     }
 }

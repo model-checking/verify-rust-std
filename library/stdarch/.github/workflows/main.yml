@@ -84,6 +84,8 @@ jobs:
           os: ubuntu-latest
         - tuple: nvptx64-nvidia-cuda
           os: ubuntu-latest
+        - tuple: amdgcn-amd-amdhsa
+          os: ubuntu-latest
         - tuple: thumbv6m-none-eabi
           os: ubuntu-latest
         - tuple: thumbv7m-none-eabi
@@ -201,6 +203,10 @@ jobs:
             tuple: aarch64-apple-ios-macabi
             os: macos-15
           norun: true # https://github.com/rust-lang/stdarch/issues/1206
+        - target:
+            tuple: amdgcn-amd-amdhsa
+            os: ubuntu-latest
+          norun: true
 
     steps:
     - uses: actions/checkout@v4
@@ -212,15 +218,20 @@ jobs:
 
     - run: rustup target add ${{ matrix.target.tuple }}
       shell: bash
-      if: matrix.build_std == ''
+      if: matrix.build_std == '' && matrix.target.tuple != 'amdgcn-amd-amdhsa'
     - run: |
         rustup component add rust-src
         echo "CARGO_UNSTABLE_BUILD_STD=std" >> $GITHUB_ENV
       shell: bash
       if: matrix.build_std != ''
+    - run: |
+        rustup component add rust-src
+        echo "CARGO_UNSTABLE_BUILD_STD=core,alloc" >> $GITHUB_ENV
+      shell: bash
+      if: matrix.target.tuple == 'amdgcn-amd-amdhsa'
 
     # Configure some env vars based on matrix configuration
-    - run: echo "PROFILE=--profile=${{matrix.profile}}" >> $GITHUB_ENV
+    - run: echo "PROFILE=${{matrix.profile}}" >> $GITHUB_ENV
       shell: bash
     - run: echo "NORUN=1" >> $GITHUB_ENV
       shell: bash
@@ -233,7 +244,7 @@ jobs:
       if: matrix.disable_assert_instr != ''
     - run: echo "NOSTD=1" >> $GITHUB_ENV
       shell: bash
-      if: startsWith(matrix.target.tuple, 'thumb') || matrix.target.tuple == 'nvptx64-nvidia-cuda'
+      if: startsWith(matrix.target.tuple, 'thumb') || matrix.target.tuple == 'nvptx64-nvidia-cuda' || matrix.target.tuple == 'amdgcn-amd-amdhsa'
 
     # Windows & OSX go straight to `run.sh` ...
     - run: ./ci/run.sh
@@ -248,6 +259,43 @@ jobs:
       if: matrix.target.os == 'ubuntu-latest' && !startsWith(matrix.target.tuple, 'thumb')
       env:
         TARGET: ${{ matrix.target.tuple }}
+
+  intrinsic-test:
+    needs: [style]
+    name: Intrinsic Test
+    runs-on: ubuntu-latest 
+    strategy:
+      matrix:
+        target:
+          - aarch64-unknown-linux-gnu
+          - aarch64_be-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - arm-unknown-linux-gnueabihf
+          - x86_64-unknown-linux-gnu
+        profile: [dev, release]
+        include:
+          - target: aarch64_be-unknown-linux-gnu
+            build_std: true
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust
+      run: |
+        rustup update nightly --no-self-update
+        rustup default nightly
+    - run: rustup target add ${{ matrix.target }}
+      if: ${{ (matrix.build_std || false) == false }}
+    - run: |
+        rustup component add rust-src
+        echo "CARGO_UNSTABLE_BUILD_STD=std" >> $GITHUB_ENV
+      if: ${{ matrix.build_std }}
+
+    # Configure some env vars based on matrix configuration
+    - run: echo "PROFILE=${{ matrix.profile }}" >> $GITHUB_ENV
+    - run: ./ci/intrinsic-test-docker.sh ${{ matrix.target }}
+      if: ${{ !startsWith(matrix.target, 'thumb') }}
+      env:
+        TARGET: ${{ matrix.target }}
 
   # Check that the generated files agree with the checked-in versions.
   check-stdarch-gen:
@@ -276,6 +324,7 @@ jobs:
       - docs
       - verify
       - test
+      - intrinsic-test
       - check-stdarch-gen
     runs-on: ubuntu-latest
     # We need to ensure this job does *not* get skipped if its dependencies fail,

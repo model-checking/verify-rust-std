@@ -1,8 +1,8 @@
 use crate::ffi::OsString;
 use crate::os::unix::ffi::OsStringExt;
 use crate::path::{Path, PathBuf};
-use crate::sys::common::small_c_string::run_path_with_cstr;
 use crate::sys::cvt;
+use crate::sys::helpers::run_path_with_cstr;
 use crate::{io, ptr};
 
 #[inline]
@@ -21,6 +21,7 @@ pub fn is_verbatim_sep(b: u8) -> bool {
 
 pub use super::windows_prefix::parse_prefix;
 
+pub const HAS_PREFIXES: bool = true;
 pub const MAIN_SEP_STR: &str = "/";
 pub const MAIN_SEP: char = '/';
 

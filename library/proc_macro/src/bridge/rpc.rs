@@ -4,28 +4,26 @@ use std::any::Any;
 use std::io::Write;
 use std::num::NonZero;
 
-pub(super) type Writer = super::buffer::Buffer;
+use super::buffer::Buffer;
 
 pub(super) trait Encode<S>: Sized {
-    fn encode(self, w: &mut Writer, s: &mut S);
+    fn encode(self, w: &mut Buffer, s: &mut S);
 }
 
-pub(super) type Reader<'a> = &'a [u8];
-
-pub(super) trait DecodeMut<'a, 's, S>: Sized {
-    fn decode(r: &mut Reader<'a>, s: &'s mut S) -> Self;
+pub(super) trait Decode<'a, 's, S>: Sized {
+    fn decode(r: &mut &'a [u8], s: &'s mut S) -> Self;
 }
 
 macro_rules! rpc_encode_decode {
     (le $ty:ty) => {
         impl<S> Encode<S> for $ty {
-            fn encode(self, w: &mut Writer, _: &mut S) {
+            fn encode(self, w: &mut Buffer, _: &mut S) {
                 w.extend_from_array(&self.to_le_bytes());
             }
         }
 
-        impl<S> DecodeMut<'_, '_, S> for $ty {
-            fn decode(r: &mut Reader<'_>, _: &mut S) -> Self {
+        impl<S> Decode<'_, '_, S> for $ty {
+            fn decode(r: &mut &[u8], _: &mut S) -> Self {
                 const N: usize = size_of::<$ty>();
 
                 let mut bytes = [0; N];
@@ -38,49 +36,46 @@ macro_rules! rpc_encode_decode {
     };
     (struct $name:ident $(<$($T:ident),+>)? { $($field:ident),* $(,)? }) => {
         impl<S, $($($T: Encode<S>),+)?> Encode<S> for $name $(<$($T),+>)? {
-            fn encode(self, w: &mut Writer, s: &mut S) {
+            fn encode(self, w: &mut Buffer, s: &mut S) {
                 $(self.$field.encode(w, s);)*
             }
         }
 
-        impl<'a, S, $($($T: for<'s> DecodeMut<'a, 's, S>),+)?> DecodeMut<'a, '_, S>
+        impl<'a, S, $($($T: for<'s> Decode<'a, 's, S>),+)?> Decode<'a, '_, S>
             for $name $(<$($T),+>)?
         {
-            fn decode(r: &mut Reader<'a>, s: &mut S) -> Self {
+            fn decode(r: &mut &'a [u8], s: &mut S) -> Self {
                 $name {
-                    $($field: DecodeMut::decode(r, s)),*
+                    $($field: Decode::decode(r, s)),*
                 }
             }
         }
     };
     (enum $name:ident $(<$($T:ident),+>)? { $($variant:ident $(($field:ident))*),* $(,)? }) => {
         impl<S, $($($T: Encode<S>),+)?> Encode<S> for $name $(<$($T),+>)? {
-            fn encode(self, w: &mut Writer, s: &mut S) {
+            fn encode(self, w: &mut Buffer, s: &mut S) {
                 // HACK(eddyb): `Tag` enum duplicated between the
                 // two impls as there's no other place to stash it.
-                #[allow(non_upper_case_globals)]
-                mod tag {
-                    #[repr(u8)] enum Tag { $($variant),* }
-
-                    $(pub(crate) const $variant: u8 = Tag::$variant as u8;)*
-                }
+                #[allow(non_camel_case_types)]
+                #[repr(u8)]
+                enum Tag { $($variant),* }
 
                 match self {
                     $($name::$variant $(($field))* => {
-                        tag::$variant.encode(w, s);
+                        (Tag::$variant as u8).encode(w, s);
                         $($field.encode(w, s);)*
                     })*
                 }
             }
         }
 
-        impl<'a, S, $($($T: for<'s> DecodeMut<'a, 's, S>),+)?> DecodeMut<'a, '_, S>
+        impl<'a, S, $($($T: for<'s> Decode<'a, 's, S>),+)?> Decode<'a, '_, S>
             for $name $(<$($T),+>)?
         {
-            fn decode(r: &mut Reader<'a>, s: &mut S) -> Self {
+            fn decode(r: &mut &'a [u8], s: &mut S) -> Self {
                 // HACK(eddyb): `Tag` enum duplicated between the
                 // two impls as there's no other place to stash it.
-                #[allow(non_upper_case_globals)]
+                #[allow(non_upper_case_globals, non_camel_case_types)]
                 mod tag {
                     #[repr(u8)] enum Tag { $($variant),* }
 
@@ -89,7 +84,7 @@ macro_rules! rpc_encode_decode {
 
                 match u8::decode(r, s) {
                     $(tag::$variant => {
-                        $(let $field = DecodeMut::decode(r, s);)*
+                        $(let $field = Decode::decode(r, s);)*
                         $name::$variant $(($field))*
                     })*
                     _ => unreachable!(),
@@ -100,21 +95,21 @@ macro_rules! rpc_encode_decode {
 }
 
 impl<S> Encode<S> for () {
-    fn encode(self, _: &mut Writer, _: &mut S) {}
+    fn encode(self, _: &mut Buffer, _: &mut S) {}
 }
 
-impl<S> DecodeMut<'_, '_, S> for () {
-    fn decode(_: &mut Reader<'_>, _: &mut S) -> Self {}
+impl<S> Decode<'_, '_, S> for () {
+    fn decode(_: &mut &[u8], _: &mut S) -> Self {}
 }
 
 impl<S> Encode<S> for u8 {
-    fn encode(self, w: &mut Writer, _: &mut S) {
+    fn encode(self, w: &mut Buffer, _: &mut S) {
         w.push(self);
     }
 }
 
-impl<S> DecodeMut<'_, '_, S> for u8 {
-    fn decode(r: &mut Reader<'_>, _: &mut S) -> Self {
+impl<S> Decode<'_, '_, S> for u8 {
+    fn decode(r: &mut &[u8], _: &mut S) -> Self {
         let x = r[0];
         *r = &r[1..];
         x
@@ -125,13 +120,13 @@ rpc_encode_decode!(le u32);
 rpc_encode_decode!(le usize);
 
 impl<S> Encode<S> for bool {
-    fn encode(self, w: &mut Writer, s: &mut S) {
+    fn encode(self, w: &mut Buffer, s: &mut S) {
         (self as u8).encode(w, s);
     }
 }
 
-impl<S> DecodeMut<'_, '_, S> for bool {
-    fn decode(r: &mut Reader<'_>, s: &mut S) -> Self {
+impl<S> Decode<'_, '_, S> for bool {
+    fn decode(r: &mut &[u8], s: &mut S) -> Self {
         match u8::decode(r, s) {
             0 => false,
             1 => true,
@@ -140,87 +135,64 @@ impl<S> DecodeMut<'_, '_, S> for bool {
     }
 }
 
-impl<S> Encode<S> for char {
-    fn encode(self, w: &mut Writer, s: &mut S) {
-        (self as u32).encode(w, s);
-    }
-}
-
-impl<S> DecodeMut<'_, '_, S> for char {
-    fn decode(r: &mut Reader<'_>, s: &mut S) -> Self {
-        char::from_u32(u32::decode(r, s)).unwrap()
-    }
-}
-
 impl<S> Encode<S> for NonZero<u32> {
-    fn encode(self, w: &mut Writer, s: &mut S) {
+    fn encode(self, w: &mut Buffer, s: &mut S) {
         self.get().encode(w, s);
     }
 }
 
-impl<S> DecodeMut<'_, '_, S> for NonZero<u32> {
-    fn decode(r: &mut Reader<'_>, s: &mut S) -> Self {
+impl<S> Decode<'_, '_, S> for NonZero<u32> {
+    fn decode(r: &mut &[u8], s: &mut S) -> Self {
         Self::new(u32::decode(r, s)).unwrap()
     }
 }
 
 impl<S, A: Encode<S>, B: Encode<S>> Encode<S> for (A, B) {
-    fn encode(self, w: &mut Writer, s: &mut S) {
+    fn encode(self, w: &mut Buffer, s: &mut S) {
         self.0.encode(w, s);
         self.1.encode(w, s);
     }
 }
 
-impl<'a, S, A: for<'s> DecodeMut<'a, 's, S>, B: for<'s> DecodeMut<'a, 's, S>> DecodeMut<'a, '_, S>
+impl<'a, S, A: for<'s> Decode<'a, 's, S>, B: for<'s> Decode<'a, 's, S>> Decode<'a, '_, S>
     for (A, B)
 {
-    fn decode(r: &mut Reader<'a>, s: &mut S) -> Self {
-        (DecodeMut::decode(r, s), DecodeMut::decode(r, s))
-    }
-}
-
-impl<S> Encode<S> for &[u8] {
-    fn encode(self, w: &mut Writer, s: &mut S) {
-        self.len().encode(w, s);
-        w.write_all(self).unwrap();
-    }
-}
-
-impl<'a, S> DecodeMut<'a, '_, S> for &'a [u8] {
-    fn decode(r: &mut Reader<'a>, s: &mut S) -> Self {
-        let len = usize::decode(r, s);
-        let xs = &r[..len];
-        *r = &r[len..];
-        xs
+    fn decode(r: &mut &'a [u8], s: &mut S) -> Self {
+        (Decode::decode(r, s), Decode::decode(r, s))
     }
 }
 
 impl<S> Encode<S> for &str {
-    fn encode(self, w: &mut Writer, s: &mut S) {
-        self.as_bytes().encode(w, s);
+    fn encode(self, w: &mut Buffer, s: &mut S) {
+        let bytes = self.as_bytes();
+        bytes.len().encode(w, s);
+        w.write_all(bytes).unwrap();
     }
 }
 
-impl<'a, S> DecodeMut<'a, '_, S> for &'a str {
-    fn decode(r: &mut Reader<'a>, s: &mut S) -> Self {
-        str::from_utf8(<&[u8]>::decode(r, s)).unwrap()
+impl<'a, S> Decode<'a, '_, S> for &'a str {
+    fn decode(r: &mut &'a [u8], s: &mut S) -> Self {
+        let len = usize::decode(r, s);
+        let xs = &r[..len];
+        *r = &r[len..];
+        str::from_utf8(xs).unwrap()
     }
 }
 
 impl<S> Encode<S> for String {
-    fn encode(self, w: &mut Writer, s: &mut S) {
+    fn encode(self, w: &mut Buffer, s: &mut S) {
         self[..].encode(w, s);
     }
 }
 
-impl<S> DecodeMut<'_, '_, S> for String {
-    fn decode(r: &mut Reader<'_>, s: &mut S) -> Self {
+impl<S> Decode<'_, '_, S> for String {
+    fn decode(r: &mut &[u8], s: &mut S) -> Self {
         <&str>::decode(r, s).to_string()
     }
 }
 
 impl<S, T: Encode<S>> Encode<S> for Vec<T> {
-    fn encode(self, w: &mut Writer, s: &mut S) {
+    fn encode(self, w: &mut Buffer, s: &mut S) {
         self.len().encode(w, s);
         for x in self {
             x.encode(w, s);
@@ -228,8 +200,8 @@ impl<S, T: Encode<S>> Encode<S> for Vec<T> {
     }
 }
 
-impl<'a, S, T: for<'s> DecodeMut<'a, 's, S>> DecodeMut<'a, '_, S> for Vec<T> {
-    fn decode(r: &mut Reader<'a>, s: &mut S) -> Self {
+impl<'a, S, T: for<'s> Decode<'a, 's, S>> Decode<'a, '_, S> for Vec<T> {
+    fn decode(r: &mut &'a [u8], s: &mut S) -> Self {
         let len = usize::decode(r, s);
         let mut vec = Vec::with_capacity(len);
         for _ in 0..len {
@@ -283,13 +255,13 @@ impl PanicMessage {
 }
 
 impl<S> Encode<S> for PanicMessage {
-    fn encode(self, w: &mut Writer, s: &mut S) {
+    fn encode(self, w: &mut Buffer, s: &mut S) {
         self.as_str().encode(w, s);
     }
 }
 
-impl<S> DecodeMut<'_, '_, S> for PanicMessage {
-    fn decode(r: &mut Reader<'_>, s: &mut S) -> Self {
+impl<S> Decode<'_, '_, S> for PanicMessage {
+    fn decode(r: &mut &[u8], s: &mut S) -> Self {
         match Option::<String>::decode(r, s) {
             Some(s) => PanicMessage::String(s),
             None => PanicMessage::Unknown,

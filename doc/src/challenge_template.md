@@ -4,7 +4,6 @@
 - **Solution:** *Option field to point to the PR that solved this challenge.*
 - **Tracking Issue:** *Link to issue*
 - **Start date:** *YYYY/MM/DD*
-- **End date:** *YYYY/MM/DD*
 - **Reward:** *TBD*[^reward]
 
 -------------------

@@ -4,7 +4,7 @@ use crate::fs::TryLockError;
 use crate::hash::Hash;
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut, SeekFrom};
 use crate::path::{Path, PathBuf};
-use crate::sys::common::small_c_string::run_path_with_cstr;
+use crate::sys::helpers::run_path_with_cstr;
 use crate::sys::time::SystemTime;
 use crate::sys::{unsupported, unsupported_err};
 
@@ -106,7 +106,7 @@ impl FilePermissions {
     }
 
     pub fn set_readonly(&mut self, _readonly: bool) {
-        panic!("Perimissions do not exist")
+        panic!("Permissions do not exist")
     }
 }
 
@@ -489,6 +489,14 @@ pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
 }
 
 pub fn set_perm(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
+    unsupported()
+}
+
+pub fn set_times(_p: &Path, _times: FileTimes) -> io::Result<()> {
+    unsupported()
+}
+
+pub fn set_times_nofollow(_p: &Path, _times: FileTimes) -> io::Result<()> {
     unsupported()
 }
 

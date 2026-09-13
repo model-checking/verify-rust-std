@@ -15,10 +15,6 @@ unsafe extern "C" {
     fn insertq(x: i64x2, y: i64x2) -> i64x2;
     #[link_name = "llvm.x86.sse4a.insertqi"]
     fn insertqi(x: i64x2, y: i64x2, len: u8, idx: u8) -> i64x2;
-    #[link_name = "llvm.x86.sse4a.movnt.sd"]
-    fn movntsd(x: *mut f64, y: __m128d);
-    #[link_name = "llvm.x86.sse4a.movnt.ss"]
-    fn movntss(x: *mut f32, y: __m128);
 }
 
 /// Extracts the bit range specified by `y` from the lower 64 bits of `x`.
@@ -114,7 +110,13 @@ pub fn _mm_inserti_si64<const LEN: i32, const IDX: i32>(x: __m128i, y: __m128i) 
 #[cfg_attr(test, assert_instr(movntsd))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 pub unsafe fn _mm_stream_sd(p: *mut f64, a: __m128d) {
-    movntsd(p, a);
+    // see #1541, we should use inline asm to be sure, because LangRef isn't clear enough
+    crate::arch::asm!(
+        vps!("movntsd",  ",{a}"),
+        p = in(reg) p,
+        a = in(xmm_reg) a,
+        options(nostack, preserves_flags),
+    );
 }
 
 /// Non-temporal store of `a.0` into `p`.
@@ -134,7 +136,13 @@ pub unsafe fn _mm_stream_sd(p: *mut f64, a: __m128d) {
 #[cfg_attr(test, assert_instr(movntss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 pub unsafe fn _mm_stream_ss(p: *mut f32, a: __m128) {
-    movntss(p, a);
+    // see #1541, we should use inline asm to be sure, because LangRef isn't clear enough
+    crate::arch::asm!(
+        vps!("movntss",  ",{a}"),
+        p = in(reg) p,
+        a = in(xmm_reg) a,
+        options(nostack, preserves_flags),
+    );
 }
 
 #[cfg(test)]
@@ -143,7 +151,7 @@ mod tests {
     use stdarch_test::simd_test;
 
     #[simd_test(enable = "sse4a")]
-    unsafe fn test_mm_extract_si64() {
+    fn test_mm_extract_si64() {
         let b = 0b0110_0000_0000_i64;
         //        ^^^^ bit range extracted
         let x = _mm_setr_epi64x(b, 0);
@@ -156,7 +164,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse4a")]
-    unsafe fn test_mm_extracti_si64() {
+    fn test_mm_extracti_si64() {
         let a = _mm_setr_epi64x(0x0123456789abcdef, 0);
         let r = _mm_extracti_si64::<8, 8>(a);
         let e = _mm_setr_epi64x(0xcd, 0);
@@ -164,7 +172,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse4a")]
-    unsafe fn test_mm_insert_si64() {
+    fn test_mm_insert_si64() {
         let i = 0b0110_i64;
         //        ^^^^ bit range inserted
         let z = 0b1010_1010_1010i64;
@@ -181,7 +189,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse4a")]
-    unsafe fn test_mm_inserti_si64() {
+    fn test_mm_inserti_si64() {
         let a = _mm_setr_epi64x(0x0123456789abcdef, 0);
         let b = _mm_setr_epi64x(0x0011223344556677, 0);
         let r = _mm_inserti_si64::<8, 8>(a, b);
@@ -198,7 +206,7 @@ mod tests {
     // Miri cannot support this until it is clear how it fits in the Rust memory model
     // (non-temporal store)
     #[cfg_attr(miri, ignore)]
-    unsafe fn test_mm_stream_sd() {
+    fn test_mm_stream_sd() {
         let mut mem = MemoryF64 {
             data: [1.0_f64, 2.0],
         };
@@ -208,7 +216,10 @@ mod tests {
 
             let x = _mm_setr_pd(3.0, 4.0);
 
-            _mm_stream_sd(d, x);
+            unsafe {
+                _mm_stream_sd(d, x);
+            }
+            _mm_sfence();
         }
         assert_eq!(mem.data[0], 3.0);
         assert_eq!(mem.data[1], 2.0);
@@ -223,7 +234,7 @@ mod tests {
     // Miri cannot support this until it is clear how it fits in the Rust memory model
     // (non-temporal store)
     #[cfg_attr(miri, ignore)]
-    unsafe fn test_mm_stream_ss() {
+    fn test_mm_stream_ss() {
         let mut mem = MemoryF32 {
             data: [1.0_f32, 2.0, 3.0, 4.0],
         };
@@ -233,7 +244,10 @@ mod tests {
 
             let x = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
 
-            _mm_stream_ss(d, x);
+            unsafe {
+                _mm_stream_ss(d, x);
+            }
+            _mm_sfence();
         }
         assert_eq!(mem.data[0], 5.0);
         assert_eq!(mem.data[1], 2.0);

@@ -9,11 +9,11 @@ use crate::os::raw::{c_int, c_short};
 use crate::os::solid::ffi::OsStrExt;
 use crate::path::{Path, PathBuf};
 use crate::sync::Arc;
-pub use crate::sys::fs::common::exists;
+pub use crate::sys::fs::common::{Dir, exists};
+use crate::sys::helpers::ignore_notfound;
 use crate::sys::pal::{abi, error};
 use crate::sys::time::SystemTime;
 use crate::sys::{unsupported, unsupported_err};
-use crate::sys_common::ignore_notfound;
 
 type CIntNotMinusOne = core::num::niche_types::NotAllOnes<c_int>;
 
@@ -536,6 +536,14 @@ pub fn set_perm(p: &Path, perm: FilePermissions) -> io::Result<()> {
     })
     .map_err(|e| e.as_io_error())?;
     Ok(())
+}
+
+pub fn set_times(_p: &Path, _times: FileTimes) -> io::Result<()> {
+    unsupported()
+}
+
+pub fn set_times_nofollow(_p: &Path, _times: FileTimes) -> io::Result<()> {
+    unsupported()
 }
 
 pub fn rmdir(p: &Path) -> io::Result<()> {
