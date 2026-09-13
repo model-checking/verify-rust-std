@@ -28,7 +28,7 @@ pred bounds<T, N>(b: *Buffer<T, N>; start: usize) =
     pointer_within_limits(base(b) + 2 * width::<N>()) == true;
 
 // Inactive slots may retain copied bytes. They carry no ownership of T.
-pred live<T, N>(t: thread_id_t, b: *Buffer<T, N>; start: usize, values: list<T>) =
+pred live<T, N>(t: thread_id_t, b: *Buffer<T, N>, start: usize, values: list<T>) =
     bounds(b, start) &*& length(values) == width::<N>() &*&
     base(b)[..start] |-> ?prefix &*&
     (base(b) + start)[..width::<N>()] |-> map(std::mem::MaybeUninit::new, values) &*&
