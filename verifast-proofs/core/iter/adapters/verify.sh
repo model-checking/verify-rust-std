@@ -203,6 +203,22 @@ PY
 
 timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/maybeuninit-own-valid.rs
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/cast-init-valid.rs
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/cast-init-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The pointer cast granted access to missing initialized storage.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The cast negative check did not reject a read without storage")
+PY
 if timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/value-own-invalid.rs >"$negative_log" 2>&1; then
   echo 'The ownership model created ownership of an arbitrary T.' >&2

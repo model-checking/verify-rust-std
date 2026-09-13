@@ -143,6 +143,12 @@ storage. The mutable test converts the new reference to a raw pointer to
 test creation independently of a further return reborrow. These fixtures
 validate the frontend extension, not the adapter contracts.
 
+The `MaybeUninit` pointer `cast_init` translation is an ordinary raw-pointer
+cast, matching its [Rust implementation](https://github.com/rust-lang/rust/blob/master/library/core/src/ptr/mut_ptr.rs).
+It preserves the address and grants no permission to read or drop `T`.
+The runner checks both address preservation and rejection of a read without
+initialized storage before checking the adapters.
+
 The patch also preserves const operands and `ConstArgHasType` constraints
 through the MIR schema and refinement checker. Constraints are compared after
 generic parameter renaming; unsupported predicates still fail refinement.
