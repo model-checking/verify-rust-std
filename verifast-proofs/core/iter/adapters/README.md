@@ -1,11 +1,12 @@
 # Generic iterator adapter proof port
 
-This is an **unvalidated VeriFast port candidate** for part of Challenge 16.
-Hosted verification passes the frontend regression checks and full adapter
-source refinement. The adapter contracts still need a passing proof verdict.
-See the hosted results below.
-The files under `verified/` are proof inputs, not evidence of a successful
-proof. This port does not yet close Felipe's review requests on PR #602.
+This port proves generic contracts for part of Challenge 16. Hosted run
+[34762580703](https://github.com/model-checking/verify-rust-std/actions/runs/34762580703)
+at `6cc9cce69aac424a7fe6604165357921f26ac34d` passed the full adapter proof,
+source refinement, source identity checks, and every backend regression gate.
+Coverage is limited to the contracts below and depends on the documented
+caller obligations and trusted backend extensions. Other Challenge 16 targets
+and the complete safe abstraction remain open.
 
 The functions retain generic type parameters. `Buffer<T, N>` also retains
 symbolic `N`; there are no representative element types, fixed array sizes,
@@ -20,13 +21,13 @@ or unwind bounds. The target contracts are:
 | `Buffer<T, N>::drop` | Drop exactly the initialized window and recover its storage on normal return and unwind. |
 
 The two raw buffer pointer helpers also have contracts. `push` and `drop`
-use the standard library specification of generic drop glue. The candidate
+use the standard library specification of generic drop glue. The
 `drop` safety proof recovers field storage on both outcomes through one lifetime
-loan frame. This proof has not passed validation. The `push` unwind postcondition
+loan frame. The `push` unwind postcondition
 retains the surviving values, backing storage, and borrow token in
 `push_drop_frame`, together with the old front's storage after destruction.
-`finish_push_storage` must prove that those resources restore `live`, including
-after a panicking element destructor. Its proof remains subject to hosted validation.
+`finish_push_storage` proves that those resources restore `live`, including
+after a panicking element destructor.
 
 ## Ownership and bounds
 
@@ -118,19 +119,15 @@ The job has a 30-minute timeout and cancels superseded runs. Tool errors,
 proof failures, and resource-limit failures fail the job. Verification and
 refinement stay sequential and retain the per-process limits below.
 
-Hosted run [34733601368](https://github.com/MavenRain/verify-rust-std/actions/runs/34733601368)
-at commit `9e95bb7e83553d0e47035821eaecf4be030cab6b` passed the source checks
-and their nine tests, then failed before proof checking. The Rust MIR exporter
-encountered `AddUnchecked` in `StepBy<I>::original_step` and panicked with
-`not yet implemented` at `src/lib.rs:2455`. The earlier missing
-`cast_maybe_uninit` feature flag was fixed in that commit.
+Run [34762580703](https://github.com/model-checking/verify-rust-std/actions/runs/34762580703)
+verified 433 statements in the full adapter proof and 149 in the standalone
+matrix-layout fixture on `x86_64-unknown-linux-gnu`. The full refinement checker
+accepted the annotated implementations, and the source checker confirmed their
+original projections against the current std snapshots. All positive and
+negative backend fixtures passed, including the reachability guard. The source
+checker also passed its nine tests. No compiler or verifier was run locally.
 
-The [25.11 exporter](https://github.com/verifast/verifast/blob/25.11/src/rust_frontend/vf_mir_exporter/src/lib.rs#L2436-L2455)
-has no `AddUnchecked` case. Static inspection of the
-[26.01 exporter](https://github.com/verifast/verifast/blob/26.01/src/rust_frontend/vf_mir_exporter/src/lib.rs#L2445-L2464)
-found the same omission, so that release alone does not address this failure.
-That original run established neither the contracts nor source refinement.
-The current runner uses VeriFast 26.09 plus the narrow frontend patch in
+The runner uses VeriFast 26.09 plus the narrow frontend patch in
 `backend/add-unchecked.patch`. It maps `AddUnchecked` to the existing integer
 addition operation, whose symbolic execution checks overflow. On inputs
 where no overflow occurs, unchecked addition has the same result. Outside
@@ -139,22 +136,17 @@ Before checking the adapters, the runner requires a valid successor proof
 and an explicit overflow diagnostic for the same operation without its
 range precondition. A frontend crash does not count as the negative result.
 
-The unchecked-add regression passed in hosted run
-[34744234144](https://github.com/MavenRain/verify-rust-std/actions/runs/34744234144).
-That run then reached the translator's unsupported const-parameter check.
 `backend/const-generics.patch` adds symbolic `usize` const arguments and
 array lengths using the existing `typeid`/`usize_of_const` representation.
 It keeps const parameters distinct from Rust types and does not add `Sized`
 bounds to them. The exporter rejects other const parameter types. A positive
 symbolic-length proof and an incorrect-length negative test must pass before
-the adapter contracts are checked. Both passed in hosted run
-[34745790943](https://github.com/model-checking/verify-rust-std/actions/runs/34745790943).
+the adapter contracts are checked.
 
 The same patch routes array ownership and borrowing through VeriFast's
 existing type predicates. It also removes the upstream frontend's blanket
-shortcut for mutable-reference creation. Hosted run
-[34748227762](https://github.com/model-checking/verify-rust-std/actions/runs/34748227762)
-passed every backend regression gate: valid arithmetic, symbolic width,
+shortcut for mutable-reference creation. Mandatory regression gates cover
+valid arithmetic, symbolic width,
 shared array reborrowing, and mutable array reference creation; rejection
 of overflow, a wrong width, missing shared ownership, and missing mutable
 storage. The mutable test converts the new reference to a raw pointer to
@@ -170,11 +162,8 @@ initialized storage before checking the adapters.
 The patch also preserves const operands and `ConstArgHasType` constraints
 through the MIR schema and refinement checker. Constraints are compared after
 generic parameter renaming; unsupported predicates still fail refinement.
-Hosted run [34749576406](https://github.com/model-checking/verify-rust-std/actions/runs/34749576406)
-accepted a renamed const parameter and rejected changing the return from
-`N` to `M`. Run [34749771017](https://github.com/model-checking/verify-rust-std/actions/runs/34749771017)
-then passed refinement of the full adapter projection. Its contract proof
-failed, so the workflow correctly remained unsuccessful.
+The refinement fixtures require acceptance of a renamed const parameter and
+rejection of a change in the returned value from `N` to `M`.
 
 `backend/prepare.sh` pins the source commit, source archive hash, and upstream
 dependency bundle hash. It builds the MIR exporter, verifier, and refinement
@@ -254,21 +243,17 @@ The runner does not suppress unwind paths, overflow checks, or reference
 creation checks, and does not allow assumed proof obligations.
 
 The existing VeriFast workflow is unchanged. The separate adapter job checks
-this candidate without altering the existing LinkedList and RawVec checks.
+these contracts without altering the existing LinkedList and RawVec checks.
 
 ## Remaining work
 
-- Obtain verifier and refinement verdicts for the adapters, including symbolic const
-  sizes, `NonZero::new_unchecked`, reference creation, and generic slice drop glue.
-  The lifetime loans in `drop` must connect element storage to the slice
-  contract and recover storage on both outcomes. There is no adapter-specific
-  borrowing or drop axiom.
-- Complete the safe-abstraction and unwind-state obligations described above.
+- Prove constructor preservation and establish the accessor borrows from the
+  full safe abstraction, including the surrounding `MapWindows` implementation.
 - Port the remaining Challenge 16 targets, including arbitrary-length filter,
   filter-map, and zip iteration. This package has no proof of those loops.
 - Reconcile the real nonempty-source `next_chunk::<0>()` defect in filter and
   filter-map. The `MapWindows` constructor's exclusion of zero-sized windows
   does not justify excluding that separate, valid filter input domain.
 
-Existing Kani results remain bounded where documented. Existing PR CI at
-`4459557` predates this port and does not validate it.
+Existing Kani results remain bounded where documented. The successful VeriFast
+run establishes only the selected contracts, not completion of Challenge 16.

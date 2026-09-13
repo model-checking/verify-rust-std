@@ -1,4 +1,4 @@
-// Generic proof candidate. See ../README.md for validation status and scope.
+// Generic contract proof. See ../README.md for validation evidence and scope.
 
 use crate::intrinsics;
 use crate::num::NonZero;

@@ -7,9 +7,9 @@ Specifically, it currently contains the following proofs:
 - Partial proof of [LinkedList](alloc/collections/linked_list.rs/)
 - Partial proof of [RawVec](alloc/raw_vec/mod.rs/)
 
-A [generic iterator adapter port candidate](core/iter/adapters/) is also
-available. It has not yet passed VeriFast or refinement validation and is
-not included in the existing proof-coverage claims.
+- Generic contracts for selected [iterator adapter methods](core/iter/adapters/),
+  with passing proof and source refinement checks. See its README for caller
+  obligations, trusted backend extensions, and remaining coverage.
 
 See each proof's accompanying README for a tour of the proof and applicable caveats.
 
