@@ -3855,11 +3855,7 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for Weak<T, A> {
     /// assert!(other_weak_foo.upgrade().is_none());
     /// ```
     fn drop(&mut self) {
-        let inner = if let Some(inner) = self.inner() {
-            inner
-        } else {
-            return;
-        };
+        let inner = if let Some(inner) = self.inner() { inner } else { return };
 
         inner.dec_weak();
         // the weak count starts at 1, and will only go to zero if all
@@ -4868,14 +4864,8 @@ mod verify {
     }
 
     rc_check_assume_init!(check_rc_assume_init_i8, i8);
-    rc_check_assume_init!(check_rc_assume_init_i16, i16);
-    rc_check_assume_init!(check_rc_assume_init_i32, i32);
-    rc_check_assume_init!(check_rc_assume_init_i64, i64);
     rc_check_assume_init!(check_rc_assume_init_i128, i128);
     rc_check_assume_init!(check_rc_assume_init_u8, u8);
-    rc_check_assume_init!(check_rc_assume_init_u16, u16);
-    rc_check_assume_init!(check_rc_assume_init_u32, u32);
-    rc_check_assume_init!(check_rc_assume_init_u64, u64);
     rc_check_assume_init!(check_rc_assume_init_u128, u128);
     rc_check_assume_init!(check_rc_assume_init_unit, ());
     rc_check_assume_init!(check_rc_assume_init_array, [u8; 4]);
@@ -4908,14 +4898,8 @@ mod verify {
     }
 
     rc_check_assume_init_slice!(check_rc_assume_init_slice_i8, i8);
-    rc_check_assume_init_slice!(check_rc_assume_init_slice_i16, i16);
-    rc_check_assume_init_slice!(check_rc_assume_init_slice_i32, i32);
-    rc_check_assume_init_slice!(check_rc_assume_init_slice_i64, i64);
     rc_check_assume_init_slice!(check_rc_assume_init_slice_i128, i128);
     rc_check_assume_init_slice!(check_rc_assume_init_slice_u8, u8);
-    rc_check_assume_init_slice!(check_rc_assume_init_slice_u16, u16);
-    rc_check_assume_init_slice!(check_rc_assume_init_slice_u32, u32);
-    rc_check_assume_init_slice!(check_rc_assume_init_slice_u64, u64);
     rc_check_assume_init_slice!(check_rc_assume_init_slice_u128, u128);
     rc_check_assume_init_slice!(check_rc_assume_init_slice_unit, ());
     rc_check_assume_init_slice!(check_rc_assume_init_slice_array, [u8; 4]);
@@ -4948,23 +4932,14 @@ mod verify {
     }
 
     rc_check_from_raw_sized!(check_rc_from_raw_i8, i8);
-    rc_check_from_raw_sized!(check_rc_from_raw_i16, i16);
-    rc_check_from_raw_sized!(check_rc_from_raw_i32, i32);
-    rc_check_from_raw_sized!(check_rc_from_raw_i64, i64);
     rc_check_from_raw_sized!(check_rc_from_raw_i128, i128);
     rc_check_from_raw_sized!(check_rc_from_raw_u8, u8);
-    rc_check_from_raw_sized!(check_rc_from_raw_u16, u16);
-    rc_check_from_raw_sized!(check_rc_from_raw_u32, u32);
-    rc_check_from_raw_sized!(check_rc_from_raw_u64, u64);
     rc_check_from_raw_sized!(check_rc_from_raw_u128, u128);
     rc_check_from_raw_sized!(check_rc_from_raw_bool, bool);
     rc_check_from_raw_sized!(check_rc_from_raw_unit, ());
     rc_check_from_raw_sized!(check_rc_from_raw_array, [u8; 4]);
 
     rc_check_from_raw_unsized!(check_rc_from_raw_vec_u8, [u8]);
-    rc_check_from_raw_unsized!(check_rc_from_raw_vec_u16, [u16]);
-    rc_check_from_raw_unsized!(check_rc_from_raw_vec_u32, [u32]);
-    rc_check_from_raw_unsized!(check_rc_from_raw_vec_u64, [u64]);
     rc_check_from_raw_unsized!(check_rc_from_raw_vec_u128, [u128]);
 
     // Rc::increment_strong_count harnesses.
@@ -5003,23 +4978,14 @@ mod verify {
     }
 
     rc_check_increment_strong_count_sized!(check_increment_strong_count_i8, i8);
-    rc_check_increment_strong_count_sized!(check_increment_strong_count_i16, i16);
-    rc_check_increment_strong_count_sized!(check_increment_strong_count_i32, i32);
-    rc_check_increment_strong_count_sized!(check_increment_strong_count_i64, i64);
     rc_check_increment_strong_count_sized!(check_increment_strong_count_i128, i128);
     rc_check_increment_strong_count_sized!(check_increment_strong_count_u8, u8);
-    rc_check_increment_strong_count_sized!(check_increment_strong_count_u16, u16);
-    rc_check_increment_strong_count_sized!(check_increment_strong_count_u32, u32);
-    rc_check_increment_strong_count_sized!(check_increment_strong_count_u64, u64);
     rc_check_increment_strong_count_sized!(check_increment_strong_count_u128, u128);
     rc_check_increment_strong_count_sized!(check_increment_strong_count_bool, bool);
     rc_check_increment_strong_count_sized!(check_increment_strong_count_unit, ());
     rc_check_increment_strong_count_sized!(check_increment_strong_count_array, [u8; 4]);
 
     rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u8, [u8]);
-    rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u16, [u16]);
-    rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u32, [u32]);
-    rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u64, [u64]);
     rc_check_increment_strong_count_unsized!(check_increment_strong_count_vec_u128, [u128]);
 
     // Rc::decrement_strong_count harnesses.
@@ -5058,23 +5024,14 @@ mod verify {
     }
 
     rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i8, i8);
-    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i16, i16);
-    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i32, i32);
-    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i64, i64);
     rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_i128, i128);
     rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u8, u8);
-    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u16, u16);
-    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u32, u32);
-    rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u64, u64);
     rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_u128, u128);
     rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_bool, bool);
     rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_unit, ());
     rc_check_decrement_strong_count_sized!(check_rc_decrement_strong_count_array, [u8; 4]);
 
     rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u8, [u8]);
-    rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u16, [u16]);
-    rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u32, [u32]);
-    rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u64, [u64]);
     rc_check_decrement_strong_count_unsized!(check_rc_decrement_strong_count_vec_u128, [u128]);
 
     // Rc::from_raw_in harnesses.
@@ -5105,23 +5062,14 @@ mod verify {
     }
 
     rc_check_from_raw_in_sized!(check_rc_from_raw_in_i8, i8);
-    rc_check_from_raw_in_sized!(check_rc_from_raw_in_i16, i16);
-    rc_check_from_raw_in_sized!(check_rc_from_raw_in_i32, i32);
-    rc_check_from_raw_in_sized!(check_rc_from_raw_in_i64, i64);
     rc_check_from_raw_in_sized!(check_rc_from_raw_in_i128, i128);
     rc_check_from_raw_in_sized!(check_rc_from_raw_in_u8, u8);
-    rc_check_from_raw_in_sized!(check_rc_from_raw_in_u16, u16);
-    rc_check_from_raw_in_sized!(check_rc_from_raw_in_u32, u32);
-    rc_check_from_raw_in_sized!(check_rc_from_raw_in_u64, u64);
     rc_check_from_raw_in_sized!(check_rc_from_raw_in_u128, u128);
     rc_check_from_raw_in_sized!(check_rc_from_raw_in_unit, ());
     rc_check_from_raw_in_sized!(check_rc_from_raw_in_bool, bool);
     rc_check_from_raw_in_sized!(check_rc_from_raw_in_array, [u8; 4]);
 
     rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u8, [u8]);
-    rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u16, [u16]);
-    rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u32, [u32]);
-    rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u64, [u64]);
     rc_check_from_raw_in_unsized!(check_rc_from_raw_in_vec_u128, [u128]);
 
     // Rc::increment_strong_count_in harnesses.
@@ -5160,23 +5108,14 @@ mod verify {
     }
 
     rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i8, i8);
-    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i16, i16);
-    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i32, i32);
-    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i64, i64);
     rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_i128, i128);
     rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u8, u8);
-    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u16, u16);
-    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u32, u32);
-    rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u64, u64);
     rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_u128, u128);
     rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_bool, bool);
     rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_unit, ());
     rc_check_increment_strong_count_in_sized!(check_rc_increment_strong_count_in_array, [u8; 4]);
 
     rc_check_increment_strong_count_in_unsized!(check_rc_increment_strong_count_in_vec_u8, [u8]);
-    rc_check_increment_strong_count_in_unsized!(check_rc_increment_strong_count_in_vec_u16, [u16]);
-    rc_check_increment_strong_count_in_unsized!(check_rc_increment_strong_count_in_vec_u32, [u32]);
-    rc_check_increment_strong_count_in_unsized!(check_rc_increment_strong_count_in_vec_u64, [u64]);
     rc_check_increment_strong_count_in_unsized!(
         check_rc_increment_strong_count_in_vec_u128,
         [u128]
@@ -5216,23 +5155,14 @@ mod verify {
     }
 
     rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i8, i8);
-    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i16, i16);
-    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i32, i32);
-    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i64, i64);
     rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_i128, i128);
     rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u8, u8);
-    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u16, u16);
-    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u32, u32);
-    rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u64, u64);
     rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_u128, u128);
     rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_bool, bool);
     rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_unit, ());
     rc_check_decrement_strong_count_in_sized!(check_rc_decrement_strong_count_in_array, [u8; 4]);
 
     rc_check_decrement_strong_count_in_unsized!(check_rc_decrement_strong_count_in_vec_u8, [u8]);
-    rc_check_decrement_strong_count_in_unsized!(check_rc_decrement_strong_count_in_vec_u16, [u16]);
-    rc_check_decrement_strong_count_in_unsized!(check_rc_decrement_strong_count_in_vec_u32, [u32]);
-    rc_check_decrement_strong_count_in_unsized!(check_rc_decrement_strong_count_in_vec_u64, [u64]);
     rc_check_decrement_strong_count_in_unsized!(
         check_rc_decrement_strong_count_in_vec_u128,
         [u128]
@@ -5272,23 +5202,14 @@ mod verify {
     }
 
     rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i8, i8);
-    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i16, i16);
-    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i32, i32);
-    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i64, i64);
     rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_i128, i128);
     rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u8, u8);
-    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u16, u16);
-    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u32, u32);
-    rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u64, u64);
     rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_u128, u128);
     rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_bool, bool);
     rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_unit, ());
     rc_check_get_mut_unchecked_sized!(check_get_mut_unchecked_array, [u8; 4]);
 
     rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u8, [u8]);
-    rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u16, [u16]);
-    rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u32, [u32]);
-    rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u64, [u64]);
     rc_check_get_mut_unchecked_unsized!(check_get_mut_unchecked_vec_u128, [u128]);
 
     // Rc<dyn Any>::downcast_unchecked harnesses.
@@ -5318,23 +5239,14 @@ mod verify {
     }
 
     rc_check_downcast_unchecked!(check_downcast_unchecked_i8, i8);
-    rc_check_downcast_unchecked!(check_downcast_unchecked_i16, i16);
-    rc_check_downcast_unchecked!(check_downcast_unchecked_i32, i32);
-    rc_check_downcast_unchecked!(check_downcast_unchecked_i64, i64);
     rc_check_downcast_unchecked!(check_downcast_unchecked_i128, i128);
     rc_check_downcast_unchecked!(check_downcast_unchecked_u8, u8);
-    rc_check_downcast_unchecked!(check_downcast_unchecked_u16, u16);
-    rc_check_downcast_unchecked!(check_downcast_unchecked_u32, u32);
-    rc_check_downcast_unchecked!(check_downcast_unchecked_u64, u64);
     rc_check_downcast_unchecked!(check_downcast_unchecked_u128, u128);
     rc_check_downcast_unchecked!(check_downcast_unchecked_bool, bool);
     rc_check_downcast_unchecked!(check_downcast_unchecked_unit, ());
     rc_check_downcast_unchecked!(check_downcast_unchecked_array, [u8; 4]);
 
     rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u8, u8);
-    rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u16, u16);
-    rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u32, u32);
-    rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u64, u64);
     rc_check_downcast_unchecked_vec!(check_downcast_unchecked_vec_u128, u128);
 
     // Weak::from_raw harnesses.
@@ -5367,23 +5279,14 @@ mod verify {
     }
 
     rc_check_weak_from_raw_sized!(check_weak_from_raw_i8, i8);
-    rc_check_weak_from_raw_sized!(check_weak_from_raw_i16, i16);
-    rc_check_weak_from_raw_sized!(check_weak_from_raw_i32, i32);
-    rc_check_weak_from_raw_sized!(check_weak_from_raw_i64, i64);
     rc_check_weak_from_raw_sized!(check_weak_from_raw_i128, i128);
     rc_check_weak_from_raw_sized!(check_weak_from_raw_u8, u8);
-    rc_check_weak_from_raw_sized!(check_weak_from_raw_u16, u16);
-    rc_check_weak_from_raw_sized!(check_weak_from_raw_u32, u32);
-    rc_check_weak_from_raw_sized!(check_weak_from_raw_u64, u64);
     rc_check_weak_from_raw_sized!(check_weak_from_raw_u128, u128);
     rc_check_weak_from_raw_sized!(check_weak_from_raw_bool, bool);
     rc_check_weak_from_raw_sized!(check_weak_from_raw_unit, ());
     rc_check_weak_from_raw_sized!(check_weak_from_raw_array, [u8; 4]);
 
     rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u8, [u8]);
-    rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u16, [u16]);
-    rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u32, [u32]);
-    rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u64, [u64]);
     rc_check_weak_from_raw_unsized!(check_weak_from_raw_vec_u128, [u128]);
 
     // Weak::from_raw_in harnesses.
@@ -5416,23 +5319,14 @@ mod verify {
     }
 
     rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i8, i8);
-    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i16, i16);
-    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i32, i32);
-    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i64, i64);
     rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_i128, i128);
     rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u8, u8);
-    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u16, u16);
-    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u32, u32);
-    rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u64, u64);
     rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_u128, u128);
     rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_bool, bool);
     rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_unit, ());
     rc_check_weak_from_raw_in_sized!(check_weak_from_raw_in_array, [u8; 4]);
 
     rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u8, [u8]);
-    rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u16, [u16]);
-    rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u32, [u32]);
-    rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u64, [u64]);
     rc_check_weak_from_raw_in_unsized!(check_weak_from_raw_in_vec_u128, [u128]);
 
     // === SAFE FUNCTIONS (54 of 54) ===
@@ -5858,23 +5752,14 @@ mod verify {
     }
 
     rc_check_from_box_in_sized!(check_from_box_in_i8, i8);
-    rc_check_from_box_in_sized!(check_from_box_in_i16, i16);
-    rc_check_from_box_in_sized!(check_from_box_in_i32, i32);
-    rc_check_from_box_in_sized!(check_from_box_in_i64, i64);
     rc_check_from_box_in_sized!(check_from_box_in_i128, i128);
     rc_check_from_box_in_sized!(check_from_box_in_u8, u8);
-    rc_check_from_box_in_sized!(check_from_box_in_u16, u16);
-    rc_check_from_box_in_sized!(check_from_box_in_u32, u32);
-    rc_check_from_box_in_sized!(check_from_box_in_u64, u64);
     rc_check_from_box_in_sized!(check_from_box_in_u128, u128);
     rc_check_from_box_in_sized!(check_from_box_in_unit, ());
     rc_check_from_box_in_sized!(check_from_box_in_arr, [u8; 4]);
     rc_check_from_box_in_sized!(check_from_box_in_bool, bool);
 
     rc_check_from_box_in_unsized!(check_from_box_in_vec_u8, [u8]);
-    rc_check_from_box_in_unsized!(check_from_box_in_vec_u16, [u16]);
-    rc_check_from_box_in_unsized!(check_from_box_in_vec_u32, [u32]);
-    rc_check_from_box_in_unsized!(check_from_box_in_vec_u64, [u64]);
     rc_check_from_box_in_unsized!(check_from_box_in_vec_u128, [u128]);
 
     // Weak::as_ptr harnesses: a live/dangling pair per type — `downgrade`
@@ -6583,23 +6468,14 @@ mod verify {
     }
 
     rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i8, i8);
-    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i16, i16);
-    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i32, i32);
-    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i64, i64);
     rc_check_inc_strong_non_overflow_sized!(check_inc_strong_i128, i128);
     rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u8, u8);
-    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u16, u16);
-    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u32, u32);
-    rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u64, u64);
     rc_check_inc_strong_non_overflow_sized!(check_inc_strong_u128, u128);
     rc_check_inc_strong_non_overflow_sized!(check_inc_strong_unit, ());
     rc_check_inc_strong_non_overflow_sized!(check_inc_strong_array, [u8; 4]);
     rc_check_inc_strong_non_overflow_sized!(check_inc_strong_bool, bool);
 
     rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u8, [u8]);
-    rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u16, [u16]);
-    rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u32, [u32]);
-    rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u64, [u64]);
     rc_check_inc_strong_non_overflow_unsized!(check_inc_strong_vec_u128, [u128]);
 
     // RcInnerPtr::inc_weak harnesses: same shape as inc_strong — ordinary
@@ -6649,23 +6525,14 @@ mod verify {
     }
 
     rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i8, i8);
-    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i16, i16);
-    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i32, i32);
-    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i64, i64);
     rc_check_inc_weak_non_overflow_sized!(check_inc_weak_i128, i128);
     rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u8, u8);
-    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u16, u16);
-    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u32, u32);
-    rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u64, u64);
     rc_check_inc_weak_non_overflow_sized!(check_inc_weak_u128, u128);
     rc_check_inc_weak_non_overflow_sized!(check_inc_weak_unit, ());
     rc_check_inc_weak_non_overflow_sized!(check_inc_weak_array, [u8; 4]);
     rc_check_inc_weak_non_overflow_sized!(check_inc_weak_bool, bool);
 
     rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u8, [u8]);
-    rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u16, [u16]);
-    rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u32, [u32]);
-    rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u64, [u64]);
     rc_check_inc_weak_non_overflow_unsized!(check_inc_weak_vec_u128, [u128]);
 
     // UniqueRc::into_rc harnesses.
@@ -6681,14 +6548,8 @@ mod verify {
     }
 
     rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i8, i8);
-    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i16, i16);
-    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i32, i32);
-    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i64, i64);
     rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_i128, i128);
     rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u8, u8);
-    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u16, u16);
-    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u32, u32);
-    rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u64, u64);
     rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_u128, u128);
     rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_bool, bool);
     rc_check_uniquerc_into_rc_sized!(check_uniquerc_into_rc_unit, ());
@@ -6708,14 +6569,8 @@ mod verify {
     }
 
     rc_check_downgrade_sized!(check_downgrade_i8, i8);
-    rc_check_downgrade_sized!(check_downgrade_i16, i16);
-    rc_check_downgrade_sized!(check_downgrade_i32, i32);
-    rc_check_downgrade_sized!(check_downgrade_i64, i64);
     rc_check_downgrade_sized!(check_downgrade_i128, i128);
     rc_check_downgrade_sized!(check_downgrade_u8, u8);
-    rc_check_downgrade_sized!(check_downgrade_u16, u16);
-    rc_check_downgrade_sized!(check_downgrade_u32, u32);
-    rc_check_downgrade_sized!(check_downgrade_u64, u64);
     rc_check_downgrade_sized!(check_downgrade_u128, u128);
     rc_check_downgrade_sized!(check_downgrade_unit, ());
     rc_check_downgrade_sized!(check_downgrade_array, [u8; 4]);
@@ -6735,14 +6590,8 @@ mod verify {
     }
 
     rc_check_deref_mut_sized!(check_deref_mut_i8, i8);
-    rc_check_deref_mut_sized!(check_deref_mut_i16, i16);
-    rc_check_deref_mut_sized!(check_deref_mut_i32, i32);
-    rc_check_deref_mut_sized!(check_deref_mut_i64, i64);
     rc_check_deref_mut_sized!(check_deref_mut_i128, i128);
     rc_check_deref_mut_sized!(check_deref_mut_u8, u8);
-    rc_check_deref_mut_sized!(check_deref_mut_u16, u16);
-    rc_check_deref_mut_sized!(check_deref_mut_u32, u32);
-    rc_check_deref_mut_sized!(check_deref_mut_u64, u64);
     rc_check_deref_mut_sized!(check_deref_mut_u128, u128);
     rc_check_deref_mut_sized!(check_deref_mut_bool, bool);
     rc_check_deref_mut_sized!(check_deref_mut_unit, ());
@@ -6761,14 +6610,8 @@ mod verify {
     }
 
     rc_check_deref_sized!(check_deref_i8, i8);
-    rc_check_deref_sized!(check_deref_i16, i16);
-    rc_check_deref_sized!(check_deref_i32, i32);
-    rc_check_deref_sized!(check_deref_i64, i64);
     rc_check_deref_sized!(check_deref_i128, i128);
     rc_check_deref_sized!(check_deref_u8, u8);
-    rc_check_deref_sized!(check_deref_u16, u16);
-    rc_check_deref_sized!(check_deref_u32, u32);
-    rc_check_deref_sized!(check_deref_u64, u64);
     rc_check_deref_sized!(check_deref_u128, u128);
     rc_check_deref_sized!(check_deref_bool, bool);
     rc_check_deref_sized!(check_deref_unit, ());
@@ -6891,23 +6734,14 @@ mod verify {
     }
 
     rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i8, i8);
-    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i16, i16);
-    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i32, i32);
-    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i64, i64);
     rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_i128, i128);
     rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u8, u8);
-    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u16, u16);
-    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u32, u32);
-    rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u64, u64);
     rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_u128, u128);
     rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_unit, ());
     rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_array, [u8; 4]);
     rc_check_unique_rc_uninit_new_sized!(check_unique_rc_uninit_new_bool, bool);
 
     rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u8, [u8]);
-    rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u16, [u16]);
-    rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u32, [u32]);
-    rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u64, [u64]);
     rc_check_unique_rc_uninit_new_unsized!(check_unique_rc_uninit_new_slice_u128, [u128]);
 
     // UniqueRcUninit::data_ptr harnesses.
@@ -6938,23 +6772,14 @@ mod verify {
     }
 
     rc_check_data_ptr_sized!(check_data_ptr_i8, i8);
-    rc_check_data_ptr_sized!(check_data_ptr_i16, i16);
-    rc_check_data_ptr_sized!(check_data_ptr_i32, i32);
-    rc_check_data_ptr_sized!(check_data_ptr_i64, i64);
     rc_check_data_ptr_sized!(check_data_ptr_i128, i128);
     rc_check_data_ptr_sized!(check_data_ptr_u8, u8);
-    rc_check_data_ptr_sized!(check_data_ptr_u16, u16);
-    rc_check_data_ptr_sized!(check_data_ptr_u32, u32);
-    rc_check_data_ptr_sized!(check_data_ptr_u64, u64);
     rc_check_data_ptr_sized!(check_data_ptr_u128, u128);
     rc_check_data_ptr_sized!(check_data_ptr_unit, ());
     rc_check_data_ptr_sized!(check_data_ptr_array, [u8; 4]);
     rc_check_data_ptr_sized!(check_data_ptr_bool, bool);
 
     rc_check_data_ptr_unsized!(check_data_ptr_slice_u8, [u8]);
-    rc_check_data_ptr_unsized!(check_data_ptr_slice_u16, [u16]);
-    rc_check_data_ptr_unsized!(check_data_ptr_slice_u32, [u32]);
-    rc_check_data_ptr_unsized!(check_data_ptr_slice_u64, [u64]);
     rc_check_data_ptr_unsized!(check_data_ptr_slice_u128, [u128]);
 
     // UniqueRcUninit::drop harnesses.
@@ -6982,23 +6807,14 @@ mod verify {
     }
 
     rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i8, i8);
-    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i16, i16);
-    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i32, i32);
-    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i64, i64);
     rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_i128, i128);
     rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u8, u8);
-    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u16, u16);
-    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u32, u32);
-    rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u64, u64);
     rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_u128, u128);
     rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_unit, ());
     rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_array, [u8; 4]);
     rc_check_unique_rc_uninit_drop_sized!(check_unique_rc_uninit_drop_bool, bool);
 
     rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u8, [u8]);
-    rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u16, [u16]);
-    rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u32, [u32]);
-    rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u64, [u64]);
     rc_check_unique_rc_uninit_drop_unsized!(check_unique_rc_uninit_drop_slice_u128, [u128]);
 
     // RcInnerPtr::inner harnesses.
@@ -7028,23 +6844,14 @@ mod verify {
     }
 
     rc_check_inner_sized!(check_inner_i8, i8);
-    rc_check_inner_sized!(check_inner_i16, i16);
-    rc_check_inner_sized!(check_inner_i32, i32);
-    rc_check_inner_sized!(check_inner_i64, i64);
     rc_check_inner_sized!(check_inner_i128, i128);
     rc_check_inner_sized!(check_inner_u8, u8);
-    rc_check_inner_sized!(check_inner_u16, u16);
-    rc_check_inner_sized!(check_inner_u32, u32);
-    rc_check_inner_sized!(check_inner_u64, u64);
     rc_check_inner_sized!(check_inner_u128, u128);
     rc_check_inner_sized!(check_inner_unit, ());
     rc_check_inner_sized!(check_inner_array, [u8; 4]);
     rc_check_inner_sized!(check_inner_bool, bool);
 
     rc_check_inner_unsized!(check_inner_vec_u8, [u8]);
-    rc_check_inner_unsized!(check_inner_vec_u16, [u16]);
-    rc_check_inner_unsized!(check_inner_vec_u32, [u32]);
-    rc_check_inner_unsized!(check_inner_vec_u64, [u64]);
     rc_check_inner_unsized!(check_inner_vec_u128, [u128]);
 
     // Rc::into_inner_with_allocator harnesses.
@@ -7076,23 +6883,14 @@ mod verify {
     }
 
     rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i8, i8);
-    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i16, i16);
-    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i32, i32);
-    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i64, i64);
     rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_i128, i128);
     rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u8, u8);
-    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u16, u16);
-    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u32, u32);
-    rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u64, u64);
     rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_u128, u128);
     rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_unit, ());
     rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_array, [u8; 4]);
     rc_check_into_inner_with_allocator!(check_into_inner_with_allocator_bool, bool);
 
     rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u8, [u8]);
-    rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u16, [u16]);
-    rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u32, [u32]);
-    rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u64, [u64]);
     rc_check_into_inner_with_allocator_unsized!(check_into_inner_with_allocator_vec_u128, [u128]);
 
     // Rc::new harnesses.
@@ -7109,14 +6907,8 @@ mod verify {
     }
 
     rc_check_rc_new!(check_rc_new_i8, i8);
-    rc_check_rc_new!(check_rc_new_i16, i16);
-    rc_check_rc_new!(check_rc_new_i32, i32);
-    rc_check_rc_new!(check_rc_new_i64, i64);
     rc_check_rc_new!(check_rc_new_i128, i128);
     rc_check_rc_new!(check_rc_new_u8, u8);
-    rc_check_rc_new!(check_rc_new_u16, u16);
-    rc_check_rc_new!(check_rc_new_u32, u32);
-    rc_check_rc_new!(check_rc_new_u64, u64);
     rc_check_rc_new!(check_rc_new_u128, u128);
     rc_check_rc_new!(check_rc_new_unit, ());
     rc_check_rc_new!(check_rc_new_array_u8_4, [u8; 4]);
@@ -7134,14 +6926,8 @@ mod verify {
     }
 
     rc_check_rc_new_uninit!(check_rc_new_uninit_i8, i8);
-    rc_check_rc_new_uninit!(check_rc_new_uninit_i16, i16);
-    rc_check_rc_new_uninit!(check_rc_new_uninit_i32, i32);
-    rc_check_rc_new_uninit!(check_rc_new_uninit_i64, i64);
     rc_check_rc_new_uninit!(check_rc_new_uninit_i128, i128);
     rc_check_rc_new_uninit!(check_rc_new_uninit_u8, u8);
-    rc_check_rc_new_uninit!(check_rc_new_uninit_u16, u16);
-    rc_check_rc_new_uninit!(check_rc_new_uninit_u32, u32);
-    rc_check_rc_new_uninit!(check_rc_new_uninit_u64, u64);
     rc_check_rc_new_uninit!(check_rc_new_uninit_u128, u128);
     rc_check_rc_new_uninit!(check_rc_new_uninit_unit, ());
     rc_check_rc_new_uninit!(check_rc_new_uninit_array, [u8; 4]);
@@ -7159,14 +6945,8 @@ mod verify {
     }
 
     rc_check_rc_new_zeroed!(check_rc_new_zeroed_i8, i8);
-    rc_check_rc_new_zeroed!(check_rc_new_zeroed_i16, i16);
-    rc_check_rc_new_zeroed!(check_rc_new_zeroed_i32, i32);
-    rc_check_rc_new_zeroed!(check_rc_new_zeroed_i64, i64);
     rc_check_rc_new_zeroed!(check_rc_new_zeroed_i128, i128);
     rc_check_rc_new_zeroed!(check_rc_new_zeroed_u8, u8);
-    rc_check_rc_new_zeroed!(check_rc_new_zeroed_u16, u16);
-    rc_check_rc_new_zeroed!(check_rc_new_zeroed_u32, u32);
-    rc_check_rc_new_zeroed!(check_rc_new_zeroed_u64, u64);
     rc_check_rc_new_zeroed!(check_rc_new_zeroed_u128, u128);
     rc_check_rc_new_zeroed!(check_rc_new_zeroed_unit, ());
     rc_check_rc_new_zeroed!(check_rc_new_zeroed_array, [u8; 4]);
@@ -7185,14 +6965,8 @@ mod verify {
     }
 
     rc_check_new_uninit_in!(check_new_uninit_in_i8, i8);
-    rc_check_new_uninit_in!(check_new_uninit_in_i16, i16);
-    rc_check_new_uninit_in!(check_new_uninit_in_i32, i32);
-    rc_check_new_uninit_in!(check_new_uninit_in_i64, i64);
     rc_check_new_uninit_in!(check_new_uninit_in_i128, i128);
     rc_check_new_uninit_in!(check_new_uninit_in_u8, u8);
-    rc_check_new_uninit_in!(check_new_uninit_in_u16, u16);
-    rc_check_new_uninit_in!(check_new_uninit_in_u32, u32);
-    rc_check_new_uninit_in!(check_new_uninit_in_u64, u64);
     rc_check_new_uninit_in!(check_new_uninit_in_u128, u128);
     rc_check_new_uninit_in!(check_new_uninit_in_unit, ());
     rc_check_new_uninit_in!(check_new_uninit_in_array, [u8; 4]);
@@ -7211,14 +6985,8 @@ mod verify {
     }
 
     rc_check_new_zeroed_in!(check_new_zeroed_in_i8, i8);
-    rc_check_new_zeroed_in!(check_new_zeroed_in_i16, i16);
-    rc_check_new_zeroed_in!(check_new_zeroed_in_i32, i32);
-    rc_check_new_zeroed_in!(check_new_zeroed_in_i64, i64);
     rc_check_new_zeroed_in!(check_new_zeroed_in_i128, i128);
     rc_check_new_zeroed_in!(check_new_zeroed_in_u8, u8);
-    rc_check_new_zeroed_in!(check_new_zeroed_in_u16, u16);
-    rc_check_new_zeroed_in!(check_new_zeroed_in_u32, u32);
-    rc_check_new_zeroed_in!(check_new_zeroed_in_u64, u64);
     rc_check_new_zeroed_in!(check_new_zeroed_in_u128, u128);
     rc_check_new_zeroed_in!(check_new_zeroed_in_unit, ());
     rc_check_new_zeroed_in!(check_new_zeroed_in_array, [u8; 4]);
@@ -7242,14 +7010,8 @@ mod verify {
     }
 
     rc_check_new_cyclic_in!(check_new_cyclic_in_i8, i8);
-    rc_check_new_cyclic_in!(check_new_cyclic_in_i16, i16);
-    rc_check_new_cyclic_in!(check_new_cyclic_in_i32, i32);
-    rc_check_new_cyclic_in!(check_new_cyclic_in_i64, i64);
     rc_check_new_cyclic_in!(check_new_cyclic_in_i128, i128);
     rc_check_new_cyclic_in!(check_new_cyclic_in_u8, u8);
-    rc_check_new_cyclic_in!(check_new_cyclic_in_u16, u16);
-    rc_check_new_cyclic_in!(check_new_cyclic_in_u32, u32);
-    rc_check_new_cyclic_in!(check_new_cyclic_in_u64, u64);
     rc_check_new_cyclic_in!(check_new_cyclic_in_u128, u128);
     rc_check_new_cyclic_in!(check_new_cyclic_in_unit, ());
     rc_check_new_cyclic_in!(check_new_cyclic_in_array, [u8; 4]);
@@ -7278,23 +7040,14 @@ mod verify {
     }
 
     rc_check_try_new_in!(check_try_new_in_i8, i8);
-    rc_check_try_new_in!(check_try_new_in_i16, i16);
-    rc_check_try_new_in!(check_try_new_in_i32, i32);
-    rc_check_try_new_in!(check_try_new_in_i64, i64);
     rc_check_try_new_in!(check_try_new_in_i128, i128);
     rc_check_try_new_in!(check_try_new_in_u8, u8);
-    rc_check_try_new_in!(check_try_new_in_u16, u16);
-    rc_check_try_new_in!(check_try_new_in_u32, u32);
-    rc_check_try_new_in!(check_try_new_in_u64, u64);
     rc_check_try_new_in!(check_try_new_in_u128, u128);
     rc_check_try_new_in!(check_try_new_in_unit, ());
     rc_check_try_new_in!(check_try_new_in_array, [u8; 4]);
     rc_check_try_new_in!(check_try_new_in_bool, bool);
 
     rc_check_try_new_in_unsized!(check_try_new_in_vec_u8, u8);
-    rc_check_try_new_in_unsized!(check_try_new_in_vec_u16, u16);
-    rc_check_try_new_in_unsized!(check_try_new_in_vec_u32, u32);
-    rc_check_try_new_in_unsized!(check_try_new_in_vec_u64, u64);
     rc_check_try_new_in_unsized!(check_try_new_in_vec_u128, u128);
 
     // Rc::try_new_uninit_in harnesses.
@@ -7309,14 +7062,8 @@ mod verify {
     }
 
     rc_check_try_new_uninit_in!(check_try_new_uninit_in_i8, i8);
-    rc_check_try_new_uninit_in!(check_try_new_uninit_in_i16, i16);
-    rc_check_try_new_uninit_in!(check_try_new_uninit_in_i32, i32);
-    rc_check_try_new_uninit_in!(check_try_new_uninit_in_i64, i64);
     rc_check_try_new_uninit_in!(check_try_new_uninit_in_i128, i128);
     rc_check_try_new_uninit_in!(check_try_new_uninit_in_u8, u8);
-    rc_check_try_new_uninit_in!(check_try_new_uninit_in_u16, u16);
-    rc_check_try_new_uninit_in!(check_try_new_uninit_in_u32, u32);
-    rc_check_try_new_uninit_in!(check_try_new_uninit_in_u64, u64);
     rc_check_try_new_uninit_in!(check_try_new_uninit_in_u128, u128);
     rc_check_try_new_uninit_in!(check_try_new_uninit_in_unit, ());
     rc_check_try_new_uninit_in!(check_try_new_uninit_in_array, [u8; 4]);
@@ -7334,14 +7081,8 @@ mod verify {
     }
 
     rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i8, i8);
-    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i16, i16);
-    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i32, i32);
-    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i64, i64);
     rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_i128, i128);
     rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u8, u8);
-    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u16, u16);
-    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u32, u32);
-    rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u64, u64);
     rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_u128, u128);
     rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_unit, ());
     rc_check_try_new_zeroed_in!(check_try_new_zeroed_in_array, [u8; 4]);
@@ -7367,14 +7108,8 @@ mod verify {
     }
 
     rc_check_pin_in!(check_pin_in_i8, i8);
-    rc_check_pin_in!(check_pin_in_i16, i16);
-    rc_check_pin_in!(check_pin_in_i32, i32);
-    rc_check_pin_in!(check_pin_in_i64, i64);
     rc_check_pin_in!(check_pin_in_i128, i128);
     rc_check_pin_in!(check_pin_in_u8, u8);
-    rc_check_pin_in!(check_pin_in_u16, u16);
-    rc_check_pin_in!(check_pin_in_u32, u32);
-    rc_check_pin_in!(check_pin_in_u64, u64);
     rc_check_pin_in!(check_pin_in_u128, u128);
     rc_check_pin_in!(check_pin_in_unit, ());
     rc_check_pin_in!(check_pin_in_array, [u8; 4]);
@@ -7394,14 +7129,8 @@ mod verify {
     }
 
     rc_check_new_uninit_slice!(check_new_uninit_slice_i8, i8);
-    rc_check_new_uninit_slice!(check_new_uninit_slice_i16, i16);
-    rc_check_new_uninit_slice!(check_new_uninit_slice_i32, i32);
-    rc_check_new_uninit_slice!(check_new_uninit_slice_i64, i64);
     rc_check_new_uninit_slice!(check_new_uninit_slice_i128, i128);
     rc_check_new_uninit_slice!(check_new_uninit_slice_u8, u8);
-    rc_check_new_uninit_slice!(check_new_uninit_slice_u16, u16);
-    rc_check_new_uninit_slice!(check_new_uninit_slice_u32, u32);
-    rc_check_new_uninit_slice!(check_new_uninit_slice_u64, u64);
     rc_check_new_uninit_slice!(check_new_uninit_slice_u128, u128);
     rc_check_new_uninit_slice!(check_new_uninit_slice_unit, ());
     rc_check_new_uninit_slice!(check_new_uninit_slice_bool, bool);
@@ -7420,14 +7149,8 @@ mod verify {
     }
 
     rc_check_new_zeroed_slice!(check_new_zeroed_slice_i8, i8);
-    rc_check_new_zeroed_slice!(check_new_zeroed_slice_i16, i16);
-    rc_check_new_zeroed_slice!(check_new_zeroed_slice_i32, i32);
-    rc_check_new_zeroed_slice!(check_new_zeroed_slice_i64, i64);
     rc_check_new_zeroed_slice!(check_new_zeroed_slice_i128, i128);
     rc_check_new_zeroed_slice!(check_new_zeroed_slice_u8, u8);
-    rc_check_new_zeroed_slice!(check_new_zeroed_slice_u16, u16);
-    rc_check_new_zeroed_slice!(check_new_zeroed_slice_u32, u32);
-    rc_check_new_zeroed_slice!(check_new_zeroed_slice_u64, u64);
     rc_check_new_zeroed_slice!(check_new_zeroed_slice_u128, u128);
     rc_check_new_zeroed_slice!(check_new_zeroed_slice_unit, ());
     rc_check_new_zeroed_slice!(check_new_zeroed_slice_bool, bool);
@@ -7452,14 +7175,8 @@ mod verify {
     }
 
     rc_check_into_array_slice!(check_into_array_slice_i8, i8);
-    rc_check_into_array_slice!(check_into_array_slice_i16, i16);
-    rc_check_into_array_slice!(check_into_array_slice_i32, i32);
-    rc_check_into_array_slice!(check_into_array_slice_i64, i64);
     rc_check_into_array_slice!(check_into_array_slice_i128, i128);
     rc_check_into_array_slice!(check_into_array_slice_u8, u8);
-    rc_check_into_array_slice!(check_into_array_slice_u16, u16);
-    rc_check_into_array_slice!(check_into_array_slice_u32, u32);
-    rc_check_into_array_slice!(check_into_array_slice_u64, u64);
     rc_check_into_array_slice!(check_into_array_slice_u128, u128);
     rc_check_into_array_slice!(check_into_array_slice_unit, ());
     rc_check_into_array_slice!(check_into_array_slice_bool, bool);
@@ -7486,14 +7203,8 @@ mod verify {
     }
 
     rc_check_pin!(check_pin_i8, i8);
-    rc_check_pin!(check_pin_i16, i16);
-    rc_check_pin!(check_pin_i32, i32);
-    rc_check_pin!(check_pin_i64, i64);
     rc_check_pin!(check_pin_i128, i128);
     rc_check_pin!(check_pin_u8, u8);
-    rc_check_pin!(check_pin_u16, u16);
-    rc_check_pin!(check_pin_u32, u32);
-    rc_check_pin!(check_pin_u64, u64);
     rc_check_pin!(check_pin_u128, u128);
     rc_check_pin!(check_pin_unit, ());
     rc_check_pin!(check_pin_bool, bool);
@@ -7514,14 +7225,8 @@ mod verify {
     }
 
     rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i8, i8);
-    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i16, i16);
-    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i32, i32);
-    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i64, i64);
     rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_i128, i128);
     rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u8, u8);
-    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u16, u16);
-    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u32, u32);
-    rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u64, u64);
     rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_u128, u128);
     rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_unit, ());
     rc_check_new_uninit_slice_in!(check_new_uninit_slice_in_bool, bool);
@@ -7550,23 +7255,14 @@ mod verify {
     }
 
     rc_check_try_new!(check_try_new_i8, i8);
-    rc_check_try_new!(check_try_new_i16, i16);
-    rc_check_try_new!(check_try_new_i32, i32);
-    rc_check_try_new!(check_try_new_i64, i64);
     rc_check_try_new!(check_try_new_i128, i128);
     rc_check_try_new!(check_try_new_u8, u8);
-    rc_check_try_new!(check_try_new_u16, u16);
-    rc_check_try_new!(check_try_new_u32, u32);
-    rc_check_try_new!(check_try_new_u64, u64);
     rc_check_try_new!(check_try_new_u128, u128);
     rc_check_try_new!(check_try_new_unit, ());
     rc_check_try_new!(check_try_new_bool, bool);
     rc_check_try_new!(check_try_new_array, [u8; 4]);
 
     rc_check_try_new_vec!(check_try_new_vec_u8, u8);
-    rc_check_try_new_vec!(check_try_new_vec_u16, u16);
-    rc_check_try_new_vec!(check_try_new_vec_u32, u32);
-    rc_check_try_new_vec!(check_try_new_vec_u64, u64);
     rc_check_try_new_vec!(check_try_new_vec_u128, u128);
 
     // Rc::try_new_uninit harnesses.
@@ -7581,14 +7277,8 @@ mod verify {
     }
 
     rc_check_try_new_uninit!(check_try_new_uninit_i8, i8);
-    rc_check_try_new_uninit!(check_try_new_uninit_i16, i16);
-    rc_check_try_new_uninit!(check_try_new_uninit_i32, i32);
-    rc_check_try_new_uninit!(check_try_new_uninit_i64, i64);
     rc_check_try_new_uninit!(check_try_new_uninit_i128, i128);
     rc_check_try_new_uninit!(check_try_new_uninit_u8, u8);
-    rc_check_try_new_uninit!(check_try_new_uninit_u16, u16);
-    rc_check_try_new_uninit!(check_try_new_uninit_u32, u32);
-    rc_check_try_new_uninit!(check_try_new_uninit_u64, u64);
     rc_check_try_new_uninit!(check_try_new_uninit_u128, u128);
     rc_check_try_new_uninit!(check_try_new_uninit_unit, ());
     rc_check_try_new_uninit!(check_try_new_uninit_array, [u8; 4]);
@@ -7606,14 +7296,8 @@ mod verify {
     }
 
     rc_check_try_new_zeroed!(check_try_new_zeroed_i8, i8);
-    rc_check_try_new_zeroed!(check_try_new_zeroed_i16, i16);
-    rc_check_try_new_zeroed!(check_try_new_zeroed_i32, i32);
-    rc_check_try_new_zeroed!(check_try_new_zeroed_i64, i64);
     rc_check_try_new_zeroed!(check_try_new_zeroed_i128, i128);
     rc_check_try_new_zeroed!(check_try_new_zeroed_u8, u8);
-    rc_check_try_new_zeroed!(check_try_new_zeroed_u16, u16);
-    rc_check_try_new_zeroed!(check_try_new_zeroed_u32, u32);
-    rc_check_try_new_zeroed!(check_try_new_zeroed_u64, u64);
     rc_check_try_new_zeroed!(check_try_new_zeroed_u128, u128);
     rc_check_try_new_zeroed!(check_try_new_zeroed_unit, ());
     rc_check_try_new_zeroed!(check_try_new_zeroed_array, [u8; 4]);
@@ -7788,14 +7472,8 @@ mod verify {
     }
 
     rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i8, i8);
-    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i16, i16);
-    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i32, i32);
-    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i64, i64);
     rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_i128, i128);
     rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u8, u8);
-    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u16, u16);
-    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u32, u32);
-    rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u64, u64);
     rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_u128, u128);
     rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_unit, ());
     rc_check_new_zeroed_slice_in!(check_new_zeroed_slice_in_bool, bool);
@@ -7832,23 +7510,14 @@ mod verify {
     }
 
     rc_check_as_ptr!(check_rc_as_ptr_i8, i8);
-    rc_check_as_ptr!(check_rc_as_ptr_i16, i16);
-    rc_check_as_ptr!(check_rc_as_ptr_i32, i32);
-    rc_check_as_ptr!(check_rc_as_ptr_i64, i64);
     rc_check_as_ptr!(check_rc_as_ptr_i128, i128);
     rc_check_as_ptr!(check_rc_as_ptr_u8, u8);
-    rc_check_as_ptr!(check_rc_as_ptr_u16, u16);
-    rc_check_as_ptr!(check_rc_as_ptr_u32, u32);
-    rc_check_as_ptr!(check_rc_as_ptr_u64, u64);
     rc_check_as_ptr!(check_rc_as_ptr_u128, u128);
     rc_check_as_ptr!(check_rc_as_ptr_unit, ());
     rc_check_as_ptr!(check_rc_as_ptr_array, [u8; 4]);
     rc_check_as_ptr!(check_rc_as_ptr_bool, bool);
 
     rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u8, [u8]);
-    rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u16, [u16]);
-    rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u32, [u32]);
-    rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u64, [u64]);
     rc_check_as_ptr_unsized!(check_rc_as_ptr_vec_u128, [u128]);
 
     // Rc::copy_from_slice harnesses.
@@ -7864,14 +7533,8 @@ mod verify {
     }
 
     rc_check_from_slice_copy!(check_from_slice_copy_i8, i8);
-    rc_check_from_slice_copy!(check_from_slice_copy_i16, i16);
-    rc_check_from_slice_copy!(check_from_slice_copy_i32, i32);
-    rc_check_from_slice_copy!(check_from_slice_copy_i64, i64);
     rc_check_from_slice_copy!(check_from_slice_copy_i128, i128);
     rc_check_from_slice_copy!(check_from_slice_copy_u8, u8);
-    rc_check_from_slice_copy!(check_from_slice_copy_u16, u16);
-    rc_check_from_slice_copy!(check_from_slice_copy_u32, u32);
-    rc_check_from_slice_copy!(check_from_slice_copy_u64, u64);
     rc_check_from_slice_copy!(check_from_slice_copy_u128, u128);
     rc_check_from_slice_copy!(check_from_slice_copy_unit, ());
     rc_check_from_slice_copy!(check_from_slice_copy_array, [u8; 4]);
@@ -8090,23 +7753,14 @@ mod verify {
     }
 
     rc_check_clone_rc_sized!(check_clone_rc_i8, i8);
-    rc_check_clone_rc_sized!(check_clone_rc_i16, i16);
-    rc_check_clone_rc_sized!(check_clone_rc_i32, i32);
-    rc_check_clone_rc_sized!(check_clone_rc_i64, i64);
     rc_check_clone_rc_sized!(check_clone_rc_i128, i128);
     rc_check_clone_rc_sized!(check_clone_rc_u8, u8);
-    rc_check_clone_rc_sized!(check_clone_rc_u16, u16);
-    rc_check_clone_rc_sized!(check_clone_rc_u32, u32);
-    rc_check_clone_rc_sized!(check_clone_rc_u64, u64);
     rc_check_clone_rc_sized!(check_clone_rc_u128, u128);
     rc_check_clone_rc_sized!(check_clone_rc_unit, ());
     rc_check_clone_rc_sized!(check_clone_rc_array, [u8; 4]);
     rc_check_clone_rc_sized!(check_clone_rc_bool, bool);
 
     rc_check_clone_rc_unsized!(check_clone_rc_vec_u8, [u8]);
-    rc_check_clone_rc_unsized!(check_clone_rc_vec_u16, [u16]);
-    rc_check_clone_rc_unsized!(check_clone_rc_vec_u32, [u32]);
-    rc_check_clone_rc_unsized!(check_clone_rc_vec_u64, [u64]);
     rc_check_clone_rc_unsized!(check_clone_rc_vec_u128, [u128]);
 
     // Rc::default harnesses.
@@ -8135,14 +7789,8 @@ mod verify {
     }
 
     rc_check_rc_default!(check_rc_default_i8, i8);
-    rc_check_rc_default!(check_rc_default_i16, i16);
-    rc_check_rc_default!(check_rc_default_i32, i32);
-    rc_check_rc_default!(check_rc_default_i64, i64);
     rc_check_rc_default!(check_rc_default_i128, i128);
     rc_check_rc_default!(check_rc_default_u8, u8);
-    rc_check_rc_default!(check_rc_default_u16, u16);
-    rc_check_rc_default!(check_rc_default_u32, u32);
-    rc_check_rc_default!(check_rc_default_u64, u64);
     rc_check_rc_default!(check_rc_default_u128, u128);
     rc_check_rc_default!(check_rc_default_unit, ());
     rc_check_rc_default!(check_rc_default_array, [u8; 4]);
@@ -8188,14 +7836,8 @@ mod verify {
     }
 
     rc_check_from_vec!(check_from_vec_i8, i8);
-    rc_check_from_vec!(check_from_vec_i16, i16);
-    rc_check_from_vec!(check_from_vec_i32, i32);
-    rc_check_from_vec!(check_from_vec_i64, i64);
     rc_check_from_vec!(check_from_vec_i128, i128);
     rc_check_from_vec!(check_from_vec_u8, u8);
-    rc_check_from_vec!(check_from_vec_u16, u16);
-    rc_check_from_vec!(check_from_vec_u32, u32);
-    rc_check_from_vec!(check_from_vec_u64, u64);
     rc_check_from_vec!(check_from_vec_u128, u128);
     rc_check_from_vec!(check_from_vec_unit, ());
     rc_check_from_vec!(check_from_vec_array, [u8; 4]);
@@ -8247,23 +7889,14 @@ mod verify {
     }
 
     rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i8, i8);
-    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i16, i16);
-    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i32, i32);
-    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i64, i64);
     rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_i128, i128);
     rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u8, u8);
-    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u16, u16);
-    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u32, u32);
-    rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u64, u64);
     rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_u128, u128);
     rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_unit, ());
     rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_bool, bool);
     rc_check_into_raw_with_allocator_sized!(check_into_raw_with_allocator_array, [u8; 4]);
 
     rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u8, [u8]);
-    rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u16, [u16]);
-    rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u32, [u32]);
-    rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u64, [u64]);
     rc_check_into_raw_with_allocator_unsized!(check_into_raw_with_allocator_vec_u128, [u128]);
 
     // `From<&[T]>` harnesses. With a `TrivialClone` element this dispatches
@@ -8284,7 +7917,6 @@ mod verify {
     }
 
     rc_check_from_ref_slice!(check_from_ref_slice_i8, i8);
-    rc_check_from_ref_slice!(check_from_ref_slice_u32, u32);
 
     // Element type that is `Clone` but not `TrivialClone`: the manual `Clone`
     // impl opts out of the `TrivialClone` specialization, so slice and
@@ -8317,7 +7949,6 @@ mod verify {
     }
 
     rc_check_from_slice_clone!(check_from_slice_clone_u8, u8);
-    rc_check_from_slice_clone!(check_from_slice_clone_u32, u32);
 
     // `FromIterator for Rc<[T]>` / `ToRcSlice` harnesses. An array iterator is
     // `TrustedLen`, taking the single-allocation `from_iter_exact`
@@ -8359,9 +7990,7 @@ mod verify {
     }
 
     rc_check_from_iter_trusted_len!(check_from_iter_trusted_len_u8, u8);
-    rc_check_from_iter_trusted_len!(check_from_iter_trusted_len_u32, u32);
     rc_check_from_iter_default!(check_from_iter_default_u8, u8);
-    rc_check_from_iter_default!(check_from_iter_default_u32, u32);
 
     // `TryFrom<Rc<[T]>> for Rc<[T; N]>` harnesses. The nondeterministic source
     // length reaches both the `Ok` (len == N) and `Err` (len != N) arms, each
@@ -8392,5 +8021,4 @@ mod verify {
     }
 
     rc_check_try_from_slice_to_array!(check_try_from_slice_to_array_u8, u8);
-    rc_check_try_from_slice_to_array!(check_try_from_slice_to_array_u32, u32);
 }
