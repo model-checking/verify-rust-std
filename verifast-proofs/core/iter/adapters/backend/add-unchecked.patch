@@ -1,0 +1,12 @@
+--- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
++++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
+@@ -2422,6 +2422,9 @@
+         fn encode_bin_op(bin_op: mir::BinOp, mut bin_op_cpn: bin_op_cpn::Builder<'_>) {
+             match bin_op {
+                 mir::BinOp::Add => bin_op_cpn.set_add(()),
++                // VeriFast checks integer addition for overflow. Unchecked addition
++                // has the same result on that domain and is undefined outside it.
++                mir::BinOp::AddUnchecked => bin_op_cpn.set_add(()),
+                 mir::BinOp::Sub => bin_op_cpn.set_sub(()),
+                 mir::BinOp::Mul => bin_op_cpn.set_mul(()),
+                 mir::BinOp::Div => bin_op_cpn.set_div(()),
