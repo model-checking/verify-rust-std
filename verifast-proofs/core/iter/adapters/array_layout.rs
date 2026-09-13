@@ -1,9 +1,5 @@
 /*@
 
-// MaybeUninit owns storage, without requiring ownership of a contained T.
-pred_ctor maybe_uninit_own<T>()(t: thread_id_t, value: std::mem::MaybeUninit<T>) = true;
-type_pred_def for<T> <std::mem::MaybeUninit<T>>.own = maybe_uninit_own::<T>;
-
 fix matrix_elems<T, N>(matrix: [[T; N]; 2]) -> list<T> {
     append(Array_elems(head(Array_elems(matrix))),
         Array_elems(head(tail(Array_elems(matrix)))))

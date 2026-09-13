@@ -165,8 +165,8 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ collapse_window::<T, N>(buffer_mut_ptr + start);
         let result = unsafe { &mut *buffer_mut_ptr.add(self.start).cast() };
         /*@
+        let window = (buffer_mut_ptr + start) as *std::mem::MaybeUninit<[T; N]>;
         {
-            let window = (buffer_mut_ptr + start) as *std::mem::MaybeUninit<[T; N]>;
             pred ctx(;) =
                 ref_mut_end_token(result, window) &*&
                 ref_mut_end_token(buffer_mut_ptr as *[[std::mem::MaybeUninit<T>; N]; 2], &(*self).buffer) &*&
@@ -177,7 +177,8 @@ impl<T, const N: usize> Buffer<T, N> {
                 writable_matrix(self))() {
                 open ctx();
                 open_full_borrow_content::<std::mem::MaybeUninit<[T; N]>>(t, result);
-                open <std::mem::MaybeUninit<[T; N]>>.own(t, _);
+                assert *result |-> ?borrowed_contents;
+                std::mem::MaybeUninit_own_dispose::<[T; N]>(t, borrowed_contents);
                 end_ref_mut_::<std::mem::MaybeUninit<[T; N]>>();
                 expand_window(window);
                 array_join(buffer_mut_ptr);
@@ -187,7 +188,7 @@ impl<T, const N: usize> Buffer<T, N> {
                 close writable_matrix::<T, N>(self)();
             } {
                 assert *result |-> ?contents;
-                close <std::mem::MaybeUninit<[T; N]>>.own(t, contents);
+                std::mem::MaybeUninit_own_init::<[T; N]>(t, contents);
                 close_full_borrow_content::<std::mem::MaybeUninit<[T; N]>>(t, result);
                 close ctx();
                 close_full_borrow_strong_();

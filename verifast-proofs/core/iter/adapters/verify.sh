@@ -201,6 +201,23 @@ if "Cannot prove" not in diagnostics or "Rust frontend failed" in diagnostics:
     sys.exit("The NonZero negative check did not reject the missing nonzero precondition.")
 PY
 
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/maybeuninit-own-valid.rs
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/value-own-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The ownership model created ownership of an arbitrary T.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The negative ownership check did not reject missing T ownership")
+PY
+
 # Keep every stage sequential and require both proof and refinement to succeed.
 # Collect their independent diagnostics even when the first stage fails.
 # No assumption, unwind, reference-creation, or overflow suppression flags.

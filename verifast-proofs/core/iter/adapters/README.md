@@ -151,9 +151,9 @@ failed, so the workflow correctly remained unsuccessful.
 
 `backend/prepare.sh` pins the source commit, source archive hash, and upstream
 dependency bundle hash. It builds the MIR exporter, verifier, and refinement
-checker on the hosted Linux worker. Arithmetic rules and library contracts
-for ownership, borrowing, and destruction are unchanged. Source projections
-and mandatory refinement remain unchanged. The workflow caches these three
+checker on the hosted Linux worker. Arithmetic rules and the existing borrowing
+and destruction contracts are unchanged. Mandatory source refinement still
+checks the selected implementations. The workflow caches these three
 binaries and the library specification, keyed by the preparation script and
 patches, with checksums checked on restoration. Every regression, proof, and
 refinement gate reruns after a cache hit.
@@ -166,7 +166,15 @@ The frontend routes only the `usize` instantiation to this specification.
 Other instantiations remain unsupported. The constructor implementation is
 not proved by this port; the new specification is part of its trusted library
 boundary. A positive fixture and rejection of a missing nonzero precondition
-are mandatory. No additional ownership, borrowing, or drop axiom is supplied.
+are mandatory.
+
+`backend/maybeuninit-ownership.patch` extends the trusted library specification
+with introduction and disposal rules for `MaybeUninit<T>` ownership. Owning
+that wrapper does not require ownership of a contained `T`; its memory remains
+tracked by separate storage predicates. These rules model the wrapper's
+ownership semantics and are not proved from its implementation by this port.
+A positive wrapper fixture and rejection of missing ownership of an ordinary
+`T` are mandatory. No new borrowing or generic drop contract is introduced.
 
 ## Local static checks and optional manual verification
 
