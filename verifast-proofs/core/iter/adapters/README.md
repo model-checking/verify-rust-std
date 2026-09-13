@@ -151,10 +151,21 @@ failed, so the workflow correctly remained unsuccessful.
 `backend/prepare.sh` pins the source commit, source archive hash, and upstream
 dependency bundle hash. It builds the MIR exporter, verifier, and refinement
 checker on the hosted Linux worker. Arithmetic rules and library contracts
-are unchanged. Source projections and mandatory refinement remain unchanged.
-The workflow caches these three binaries, keyed by the preparation script
-and patches, with binary checksums checked on restoration. Every regression,
-proof, and refinement gate reruns after a cache hit.
+for ownership, borrowing, and destruction are unchanged. Source projections
+and mandatory refinement remain unchanged. The workflow caches these three
+binaries and the library specification, keyed by the preparation script and
+patches, with checksums checked on restoration. Every regression, proof, and
+refinement gate reruns after a cache hit.
+
+`backend/nonzero-usize.patch` adds one trusted library contract for the
+`usize` instantiation of `NonZero::new_unchecked`. It requires a positive
+input, preserves its value through `get()`, and cannot unwind. This matches
+the [standard library implementation and its safety requirement](../../../../library/core/src/num/nonzero.rs).
+The frontend routes only the `usize` instantiation to this specification.
+Other instantiations remain unsupported. The constructor implementation is
+not proved by this port; the new specification is part of its trusted library
+boundary. A positive fixture and rejection of a missing nonzero precondition
+are mandatory. No additional ownership, borrowing, or drop axiom is supplied.
 
 ## Local static checks and optional manual verification
 

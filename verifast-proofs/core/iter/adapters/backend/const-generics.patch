@@ -122,7 +122,24 @@
            full_bor_content;
            points_to;
            pointee_fbc = None;
-@@ -3020,11 +3023,8 @@
+@@ -2433,7 +2436,15 @@
+                 Ok
+                   ( tmp_rvalue_binders,
+                     FnCallResult (CastExpr (fn_loc, PtrTypeExpr (fn_loc, ManifestTypeExpr (fn_loc, Int (Unsigned, FixedWidthRank 0))), arg)) )
+-            | "std::slice::<impl [T]>::as_ptr" ->
++            | "std::ptr::const_ptr::<impl *const T>::cast"
++            | "std::ptr::mut_ptr::<impl *mut T>::cast" -> (
++                match substs, args with
++                | [ Mir.GenArgType _; Mir.GenArgType target ], [ arg ] ->
++                    Ok (tmp_rvalue_binders, FnCallResult
++                      (Ast.CastExpr (fn_loc, PtrTypeExpr (fn_loc, target.vf_ty), arg)))
++                | inputs -> Error (`TrFnCallRExpr "Invalid generic arguments for pointer cast"))
++            | "std::slice::<impl [T]>::as_ptr"
++            | "std::slice::<impl [T]>::as_mut_ptr" ->
+                 let [ Mir.GenArgType gen_arg_ty_info; _ ] = substs in
+                 let [ arg ] = args in
+                 Ok
+@@ -3020,11 +3031,8 @@
            let* place_expr, place_is_mutable = translate_place place_cpn loc in
            let (path, line, _), _ = Ast.lexed_loc loc in
            let ignore_ref_creation =
@@ -134,7 +151,7 @@
              if TranslatorArgs.ignore_ref_creation then true
              else
                let directives =
-@@ -3157,7 +3157,14 @@
+@@ -3157,7 +3165,14 @@
              Ok (`TrRvalueExpr e)
            | _ ->
            let* ty_info = translate_decoded_ty cast_data.ty loc in
@@ -150,7 +167,7 @@
            match operand with
            | `TrOperandCopy expr
            | `TrOperandMove (expr, _ (*place_is_mutable*))
-@@ -5993,17 +6000,18 @@
+@@ -5993,17 +6008,18 @@
             with
             | Lifetime -> Ok (`Lifetime name)
             | Type -> Ok (`Type name)
@@ -178,7 +195,7 @@
        let lft_params =
          Util.flatmap (function `Lifetime x -> [ x ] | _ -> []) generics
        in
-@@ -6029,7 +6037,9 @@
+@@ -6029,7 +6045,9 @@
          |> List.map decode_predicate
        in
        let sized_tparams = compute_sized_tparams preds in

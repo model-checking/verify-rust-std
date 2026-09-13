@@ -10,13 +10,14 @@ backend_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # The cached exporter still needs the pinned toolchain's shared libraries.
 rustup component add --toolchain nightly-2026-02-05 rustc-dev llvm-tools
 cache_key="$(sha256sum "$backend_dir/prepare.sh" "$backend_dir/add-unchecked.patch" \
-  "$backend_dir/const-generics.patch" | sha256sum | cut -d ' ' -f 1)"
+  "$backend_dir/const-generics.patch" "$backend_dir/nonzero-usize.patch" | sha256sum | cut -d ' ' -f 1)"
 cache_dir="$HOME/.cache/verifast-iter-adapters/$cache_key"
 if [[ -f "$cache_dir/checksums" ]]; then
   (cd "$cache_dir" && sha256sum --check checksums)
   install -m 755 "$cache_dir/verifast" "${VERIFAST_HOME:?}/bin/verifast"
   install -m 755 "$cache_dir/vf-rust-mir-exporter" "$VERIFAST_HOME/bin/vf-rust-mir-exporter"
   install -m 755 "$cache_dir/refinement-checker" "$VERIFAST_HOME/bin/refinement-checker"
+  install -m 644 "$cache_dir/std-lib.rsspec" "$VERIFAST_HOME/bin/rust/std/lib.rsspec"
   echo 'Restored the patched frontend; all proof and regression checks will run'
   exit 0
 fi
@@ -34,6 +35,7 @@ tar -xzf "$build_dir/source.tar.gz" --strip-components=1 -C "$build_dir" \
   "verifast-$source_commit/src" "verifast-$source_commit/bin"
 patch --batch --fuzz=0 --directory="$build_dir" -p1 < "$backend_dir/add-unchecked.patch"
 patch --batch --fuzz=0 --directory="$build_dir" -p1 < "$backend_dir/const-generics.patch"
+patch --batch --fuzz=0 --directory="$build_dir" -p1 < "$backend_dir/nonzero-usize.patch"
 
 # Use the dependency bundle pinned by upstream's setup-build.sh. Its compiler
 # and package paths are built for /tmp/vfdeps-adf88dc on Linux.
@@ -68,9 +70,11 @@ install -m 755 "$build_dir/src/rust_frontend/vf_mir_exporter/target/debug/vf_mir
 install -m 755 "$build_dir/src/_build/default/vfconsole/vfconsole.exe" "$VERIFAST_HOME/bin/verifast"
 install -m 755 "$build_dir/src/_build/default/refinement_checker/main.exe" \
   "$VERIFAST_HOME/bin/refinement-checker"
+install -m 644 "$build_dir/bin/rust/std/lib.rsspec" "$VERIFAST_HOME/bin/rust/std/lib.rsspec"
 mkdir -p "$cache_dir"
 install -m 755 "$VERIFAST_HOME/bin/verifast" "$cache_dir/verifast"
 install -m 755 "$VERIFAST_HOME/bin/vf-rust-mir-exporter" "$cache_dir/vf-rust-mir-exporter"
 install -m 755 "$VERIFAST_HOME/bin/refinement-checker" "$cache_dir/refinement-checker"
-(cd "$cache_dir" && sha256sum verifast vf-rust-mir-exporter refinement-checker > checksums)
+install -m 644 "$VERIFAST_HOME/bin/rust/std/lib.rsspec" "$cache_dir/std-lib.rsspec"
+(cd "$cache_dir" && sha256sum verifast vf-rust-mir-exporter refinement-checker std-lib.rsspec > checksums)
 echo 'Prepared VeriFast 26.09 with checked addition and symbolic usize const parameters'

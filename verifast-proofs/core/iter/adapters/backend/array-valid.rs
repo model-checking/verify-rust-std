@@ -30,3 +30,13 @@ unsafe fn matrix_ptr<T, const N: usize>(
     //@ reborrow_ref_(p);
     unsafe { (*p).as_ptr().cast() }
 }
+
+unsafe fn matrix_mut_ptr<T, const N: usize>(
+    p: *mut [[std::mem::MaybeUninit<T>; N]; 2],
+) -> *mut std::mem::MaybeUninit<T>
+//@ req *p |-> ?matrix;
+//@ ens *(result as *[[std::mem::MaybeUninit<T>; N]; 2]) |-> matrix &*& ref_mut_end_token(result as *[[std::mem::MaybeUninit<T>; N]; 2], p);
+//@ on_unwind_ens false;
+{
+    unsafe { (*p).as_mut_ptr().cast() }
+}

@@ -162,6 +162,23 @@ if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in dia
     sys.exit("The array-to-slice negative check did not reject missing reference permissions.")
 PY
 
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/nonzero-valid.rs
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/nonzero-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The NonZero negative check unexpectedly passed.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The NonZero negative check did not reject the missing nonzero precondition.")
+PY
+
 # Keep every stage sequential and require both proof and refinement to succeed.
 # Collect their independent diagnostics even when the first stage fails.
 # No assumption, unwind, reference-creation, or overflow suppression flags.
