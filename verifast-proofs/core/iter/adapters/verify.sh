@@ -63,6 +63,8 @@ timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/add-valid.rs
 timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/const-valid.rs
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/array-valid.rs
 negative_log="$(mktemp)"
 trap 'rm -f -- "$negative_log"' EXIT
 if timeout --signal=TERM --kill-after=10s 60s \
@@ -94,6 +96,21 @@ import sys
 diagnostics = Path(sys.argv[1]).read_text()
 if "Cannot prove" not in diagnostics or "Rust frontend failed" in diagnostics:
     sys.exit("The const-parameter negative check did not reach a proof failure.")
+PY
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/array-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The frontend accepted an array reference without a shared borrow.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The array-reference negative check did not reach a borrow proof failure.")
 PY
 
 # Keep every stage sequential and fail on any unsuccessful proof or refinement.

@@ -55,7 +55,7 @@
      | Infer -> Ast.static_error loc "Todo: ConstKind::Infer" None
      | Bound -> Ast.static_error loc "Todo: ConstKind::Bound" None
      | Placeholder -> Ast.static_error loc "Todo: ConstKind::Placeholder" None
-@@ -1666,12 +1671,9 @@
+@@ -1666,20 +1671,18 @@
      let* elem_ty_info = translate_ty elem_ty_cpn loc in
      let elem_ty = elem_ty_info.vf_ty in
      let len_cpn = array_ty_cpn.size in
@@ -70,7 +70,32 @@
      in
      let size = Ast.SizeofExpr (loc, TypeExpr vf_ty) in
      let own tid vs =
-@@ -5993,17 +5995,18 @@
+-      Error "Expressing ownership of an array is not yet supported"
++      Ok (Ast.ExprCallExpr (loc, Ast.TypePredExpr (loc, vf_ty, "own"),
++        [Ast.LitPat tid; Ast.LitPat vs]))
+     in
+     let full_bor_content t l =
+-      Error
+-        "Expressing the full borrow content of an array is not yet supported"
++      Ok (Ast.ExprCallExpr (loc, Ast.TypePredExpr (loc, vf_ty, "full_borrow_content"),
++        [Ast.LitPat t; Ast.LitPat l]))
+     in
+     let points_to tid l vid_op =
+       let* pat = RustBelt.Aux.vid_op_to_var_pat vid_op loc in
+@@ -1692,9 +1695,9 @@
+           own;
+           shr =
+             (fun k t l ->
+-              Error
+-                "Expressing the shared ownership of an array is not yet \
+-                 supported");
++              Ok (Ast.CoefAsn (loc, Ast.DummyPat,
++                Ast.ExprCallExpr (loc, Ast.TypePredExpr (loc, vf_ty, "share"),
++                  [Ast.LitPat k; Ast.LitPat t; Ast.LitPat l]))));
+           full_bor_content;
+           points_to;
+           pointee_fbc = None;
+@@ -5993,17 +5996,18 @@
             with
             | Lifetime -> Ok (`Lifetime name)
             | Type -> Ok (`Type name)
@@ -85,9 +110,10 @@
        in
        let tparams =
 -        Util.flatmap (function `Type x -> [ x ] | _ -> []) generics
-+        Util.flatmap (function `Type x | `Const x -> [ x ] | `Lifetime _ -> []) generics
-       in
+-      in
 -      let tparams_with_bounds = Verifast0.tparams_with_default_bounds_exprs tparams in
++        Util.flatmap (function `Type x | `Const x -> [ x ] | `Lifetime _ -> []) generics
++      in
 +      let const_params =
 +        Util.flatmap (function `Const x -> [ x ] | `Type _ | `Lifetime _ -> []) generics
 +      in
@@ -97,7 +123,7 @@
        let lft_params =
          Util.flatmap (function `Lifetime x -> [ x ] | _ -> []) generics
        in
-@@ -6029,7 +6032,9 @@
+@@ -6029,7 +6033,9 @@
          |> List.map decode_predicate
        in
        let sized_tparams = compute_sized_tparams preds in
