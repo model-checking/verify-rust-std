@@ -441,11 +441,12 @@ pub mod dragon_verify {
     })]
     #[kani::modifies(value)]
     fn div_rem_small_contract(value: &mut Big, divisor: u32) -> u32 {
-        value.div_rem_small(divisor)
+        value.div_rem_small(divisor).1
     }
 
-    fn stub_div_rem_small(value: &mut Big, divisor: u32) -> u32 {
-        div_rem_small_contract(value, divisor)
+    fn stub_div_rem_small(value: &mut Big, divisor: u32) -> (&mut Big, u32) {
+        let remainder = div_rem_small_contract(value, divisor);
+        (value, remainder)
     }
 
     #[kani::proof_for_contract(div_rem_small_contract)]
