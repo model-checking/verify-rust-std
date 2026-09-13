@@ -157,6 +157,25 @@ refinement_status=0
 timeout --signal=TERM --kill-after=10s 600s \
   refinement-checker --rustc-args '--edition 2024' original/lib.rs verified/lib.rs || refinement_status=$?
 python3 -I check_sources.py
+if (( proof_status != 0 )); then
+  # These bounded, sequential diagnostics cannot replace the full proof verdict.
+  while IFS= read -r proof_location; do
+    diagnostic_status=0
+    timeout --signal=TERM --kill-after=5s 30s \
+      verifast -rustc_args '--edition 2024' -skip_specless_fns \
+      -focus "$proof_location" verified/lib.rs || diagnostic_status=$?
+    printf 'Diagnostic %s: status %s\n' "$proof_location" "$diagnostic_status"
+  done < <(python3 -I - <<'PY'
+from pathlib import Path
+import re
+
+for path in (Path("verified/map_windows.rs"), Path("verified/step_by.rs")):
+    for line_number, line in enumerate(path.read_text().splitlines(), 1):
+        if re.match(r"\s*(fn|lem)\s+\w+", line):
+            print(f"{path}:{line_number}")
+PY
+  )
+fi
 if (( proof_status != 0 || refinement_status != 0 )); then
   printf 'FAIL: proof status %s; refinement status %s\n' "$proof_status" "$refinement_status" >&2
   exit 1
