@@ -77,22 +77,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: dragon-exact
+          - name: dragon-exact-f32
             module: num::flt2dec::strategy::dragon::dragon_verify
             proof: check_format_exact
-            kind: generator
-          - name: dragon-shortest
+            kind: generator-f32
+          - name: dragon-exact-f64
+            module: num::flt2dec::strategy::dragon::dragon_verify
+            proof: check_format_exact
+            kind: generator-f64
+          - name: dragon-shortest-f32
             module: num::flt2dec::strategy::dragon::dragon_verify
             proof: check_format_shortest
-            kind: generator
-          - name: grisu-exact
+            kind: generator-f32
+          - name: dragon-shortest-f64
+            module: num::flt2dec::strategy::dragon::dragon_verify
+            proof: check_format_shortest
+            kind: generator-f64
+          - name: grisu-exact-f32
             module: num::flt2dec::strategy::grisu::grisu_verify
             proof: check_format_exact_opt
-            kind: generator
-          - name: grisu-shortest
+            kind: generator-f32
+          - name: grisu-exact-f64
+            module: num::flt2dec::strategy::grisu::grisu_verify
+            proof: check_format_exact_opt
+            kind: generator-f64
+          - name: grisu-shortest-f32
             module: num::flt2dec::strategy::grisu::grisu_verify
             proof: check_format_shortest_opt
-            kind: generator
+            kind: generator-f32
+          - name: grisu-shortest-f64
+            module: num::flt2dec::strategy::grisu::grisu_verify
+            proof: check_format_shortest_opt
+            kind: generator-f64
           - name: division-contract
             module: num::flt2dec::strategy::dragon::dragon_verify
             proof: check_div_2pow10_contract
@@ -140,13 +156,14 @@ jobs:
 
       - name: Verify all groups in this proof family
         run: |
-          # Keep every exponent group, with independent results for each target.
+          # Keep every exponent group and give each float type its own job.
           harness_args=()
-          if [[ "$HARNESS_KIND" == generator ]]; then
+          if [[ "$HARNESS_KIND" == generator-f32 ]]; then
             for group in {0..3}; do
               printf -v group_name 'f32_%02d' "$group"
               harness_args+=(--harness "$HARNESS_MODULE::$group_name::$HARNESS_PROOF")
             done
+          elif [[ "$HARNESS_KIND" == generator-f64 ]]; then
             for group in {0..31}; do
               printf -v group_name 'f64_%02d' "$group"
               harness_args+=(--harness "$HARNESS_MODULE::$group_name::$HARNESS_PROOF")
