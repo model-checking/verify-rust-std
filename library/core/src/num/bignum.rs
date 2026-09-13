@@ -426,10 +426,12 @@ impl Big32x40 {
             )
     }
 
-    // The equivalence contract in dragon_verify checks these constant-index
+    // The equivalence proof in dragon_verify checks these constant-index
     // models for every in-bounds storage size and arbitrary limb contents.
     pub(crate) fn kani_cmp_model(&self, other: &Self) -> crate::cmp::Ordering {
         use crate::cmp::Ordering::{Equal, Greater, Less};
+
+        assert!(self.size <= self.base.len() && other.size <= other.base.len());
 
         macro_rules! compare_limbs {
             ($($index:literal),+ $(,)?) => {{
@@ -458,6 +460,8 @@ impl Big32x40 {
     }
 
     pub(crate) fn kani_is_zero_model(&self) -> bool {
+        assert!(self.size <= self.base.len());
+
         macro_rules! limbs_are_zero {
             ($($index:literal),+ $(,)?) => {
                 true $(& ((self.size <= $index) | (self.base[$index] == 0)))+

@@ -129,10 +129,10 @@ jobs:
             module: num::flt2dec::strategy::grisu::grisu_verify
             proof: check_round_exact_contract
             kind: contract
-          - name: comparison-equivalence-contract
+          - name: comparison-equivalence
             module: num::flt2dec::strategy::dragon::dragon_verify
             proof: check_comparison_models_agree
-            kind: contract
+            kind: equivalence
           - name: dragon-exact-fixed-exponent
             module: num::flt2dec::strategy::dragon::dragon_verify::f64_exp_1023
             proof: check_format_exact
@@ -152,7 +152,7 @@ jobs:
     env:
       KANI_JOBS: 1
       RAYON_NUM_THREADS: 1
-      KANI_OBJECT_BITS: ${{ matrix.kind == 'contract' && '12' || '14' }}
+      KANI_OBJECT_BITS: ${{ (matrix.kind == 'contract' || matrix.kind == 'equivalence') && '12' || '14' }}
       HARNESS_MODULE: ${{ matrix.module }}
       HARNESS_PROOF: ${{ matrix.proof }}
       HARNESS_KIND: ${{ matrix.kind }}
@@ -185,7 +185,7 @@ jobs:
             harness_args+=(--harness "$HARNESS_MODULE::$HARNESS_PROOF")
           fi
           output_format=terse
-          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == fixed-exponent ]]; then
+          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == fixed-exponent ]]; then
             output_format=regular
           fi
           printf 'Selected %s harnesses\n' "$(( ${#harness_args[@]} / 2 ))"

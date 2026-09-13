@@ -406,26 +406,17 @@ pub mod dragon_verify {
     const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
 
-    #[kani::requires(left.kani_size() <= 40 && right.kani_size() <= 40)]
-    #[kani::ensures(|agrees| *agrees)]
-    fn comparison_models_agree(left: &Big, right: &Big) -> bool {
-        (left.cmp(right) == left.kani_cmp_model(right))
-            & (left.is_zero() == left.kani_is_zero_model())
-    }
-
-    // Check the verified lemma's size preconditions, then compute the exact
-    // model directly so constant limb indices survive symbolic execution.
+    // The models assert the size bounds checked by the independent equivalence
+    // proof, then compute exact results with constant limb indices.
     fn stub_cmp(left: &Big, right: &Big) -> Ordering {
-        let _ = comparison_models_agree(left, right);
         left.kani_cmp_model(right)
     }
 
     fn stub_is_zero(value: &Big) -> bool {
-        let _ = comparison_models_agree(value, &Big::from_small(0));
         value.kani_is_zero_model()
     }
 
-    #[kani::proof_for_contract(comparison_models_agree)]
+    #[kani::proof]
     #[kani::unwind(41)]
     #[kani::solver(kissat)]
     fn check_comparison_models_agree() {
@@ -435,7 +426,10 @@ pub mod dragon_verify {
         // keeping unused upper index bits concrete during symbolic execution.
         let left = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
         let right = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
-        let _ = comparison_models_agree(&left, &right);
+        // This is exactly the domain asserted by both models at their call sites.
+        kani::assume(left.kani_size() <= 40 && right.kani_size() <= 40);
+        assert!(left.cmp(&right) == left.kani_cmp_model(&right));
+        assert!(left.is_zero() == left.kani_is_zero_model());
         let ordering = left.kani_cmp_model(&right);
         kani::cover(ordering == Ordering::Less, "comparison can be less");
         kani::cover(ordering == Ordering::Equal, "comparison can be equal");
@@ -564,7 +558,6 @@ pub mod dragon_verify {
                 #[kani::unwind($shortest_unwind)]
                 #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
                 #[kani::stub(Big::is_zero, stub_is_zero)]
-                #[kani::stub_verified(comparison_models_agree)]
                 #[kani::stub(
                     crate::num::flt2dec::round_up,
                     crate::num::flt2dec::rounding_verify::stub_round_up
@@ -590,7 +583,6 @@ pub mod dragon_verify {
                 #[kani::unwind($exact_unwind)]
                 #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
                 #[kani::stub(Big::is_zero, stub_is_zero)]
-                #[kani::stub_verified(comparison_models_agree)]
                 #[kani::stub(
                     crate::num::flt2dec::round_up,
                     crate::num::flt2dec::rounding_verify::stub_round_up
