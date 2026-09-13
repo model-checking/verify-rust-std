@@ -216,9 +216,34 @@ if (( proof_status != 0 )); then
   while IFS= read -r proof_location; do
     diagnostic_status=0
     timeout --signal=TERM --kill-after=5s 30s \
-      verifast -rustc_args '--edition 2024' -skip_specless_fns \
-      -focus "$proof_location" verified/lib.rs || diagnostic_status=$?
-    printf 'Diagnostic %s: status %s\n' "$proof_location" "$diagnostic_status"
+      verifast -json -rustc_args '--edition 2024' -skip_specless_fns \
+      -focus "$proof_location" verified/lib.rs >"$negative_log" 2>&1 || diagnostic_status=$?
+    printf 'Diagnostic %s: process status %s\n' "$proof_location" "$diagnostic_status"
+    python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+if path.stat().st_size > 8 * 1024 * 1024:
+    raise SystemExit("Diagnostic exceeded the 8 MiB parsing limit")
+lines = path.read_text().splitlines()
+for line in reversed(lines):
+    if line.startswith('["VeriFast-Json",'):
+        result = json.loads(line)[3]["result"]
+        if result[0] == "SymbolicExecutionError":
+            print(json.dumps(result[2:4]))
+            for frame in result[1]:
+                if frame[0] == "Executing":
+                    print(json.dumps(frame)[:7000])
+                    break
+        else:
+            print(json.dumps(result)[:7000])
+        break
+else:
+    print("No JSON verdict; last diagnostic lines:")
+    print("\n".join(lines[-15:])[:7000])
+PY
   done < <(python3 -I - <<'PY'
 from pathlib import Path
 import re

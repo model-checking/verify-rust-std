@@ -276,7 +276,31 @@
    | Val mir_val_const_cpn ->
      let ty = decode_ty genv mir_val_const_cpn.ty in
      let mir_const_value_cpn = mir_val_const_cpn.const_value in
-@@ -2336,7 +2342,20 @@
+@@ -442,6 +448,7 @@
+                 lhs_place=local "contents_ptr";
+                 rhs_rvalue=Cast {
+                   kind=PtrToPtr;
++                  source_ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}};
+                   operand=Copy {
+                     local={name="self"};
+                     projection=[
+@@ -472,6 +479,7 @@
+                 lhs_place=local "contents_ptr2";
+                 rhs_rvalue=Cast {
+                   kind=PtrToPtr;
++                  source_ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}};
+                   operand=Copy {
+                     local={name="self"};
+                     projection=[
+@@ -658,6 +666,7 @@
+               lhs_place=local "result";
+               rhs_rvalue=Cast {
+                 kind=PtrToPtr;
++                source_ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}};
+                 operand=Copy {
+                   local={name="b"};
+                   projection=[
+@@ -2336,7 +2345,20 @@
    let projection_preds1, preds1 = List.partition (function Projection _ -> true | _ -> false) preds1 in
    if List.length projection_preds0 <> List.length projection_preds1 then failwith "The two functions have a different number of projection predicates";
    List.iter2 (fun pred0 pred1 -> check_predicate_refines_predicate root_genv0 pred0 root_genv1 pred1) projection_preds0 projection_preds1;
