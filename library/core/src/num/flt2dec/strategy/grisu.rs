@@ -823,6 +823,7 @@ pub mod grisu_verify {
     // below checks a separate obligation and does not establish this one.
     #[kani::proof]
     #[kani::unwind(19)]
+    #[kani::solver(kissat)]
     fn check_format_shortest_opt() {
         let d = arbitrary_finite_decoded();
         let len: usize = kani::any();
@@ -848,6 +849,7 @@ pub mod grisu_verify {
         crate::num::flt2dec::rounding_verify::stub_round_up
     )]
     #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
+    #[kani::solver(kissat)]
     fn check_format_exact_opt() {
         let d = arbitrary_finite_decoded();
         let limit: i16 = kani::any();
