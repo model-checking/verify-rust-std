@@ -820,9 +820,11 @@ pub mod grisu_verify {
         }
     }
 
+    // Pass initialized input bytes by value so these read-only contracts have
+    // no borrowed argument objects to track at each unrolled generator call.
     #[kani::requires(
         len > 0 && len <= PROOF_BUFLEN
-            && crate::num::flt2dec::rounding_verify::prefix_all(digits, len, |digit| digit < u8::MAX)
+            && crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |digit| digit < u8::MAX)
             && digits[len - 1] >= b'0' && digits[len - 1] <= b'9'
             && remainder < threshold && ten_kappa > 0
             && ulp <= threshold / 4 && ulp <= plus1v && plus1v <= u64::MAX - ulp
@@ -832,7 +834,7 @@ pub mod grisu_verify {
         written == len && output_exp == exp
     }))]
     fn round_shortest_contract(
-        digits: &[u8; PROOF_BUFLEN],
+        digits: [u8; PROOF_BUFLEN],
         len: usize,
         exp: i16,
         remainder: u64,
@@ -880,23 +882,24 @@ pub mod grisu_verify {
         assert!(len <= PROOF_BUFLEN);
         let mut digits = [0; PROOF_BUFLEN];
         digits[..len].copy_from_slice(buf);
-        let result = round_shortest_contract(
-            &digits, len, exp, remainder, threshold, plus1v, ten_kappa, ulp,
-        );
+        let result =
+            round_shortest_contract(digits, len, exp, remainder, threshold, plus1v, ten_kappa, ulp);
         // Overapproximate output values within the initialized input prefix.
         let output: [u8; PROOF_BUFLEN] = kani::any();
         buf.copy_from_slice(&output[..len]);
         result.map(|(written, output_exp)| (&buf[..written], output_exp))
     }
 
+    // The last digit is at most nine and the numeric precondition makes the
+    // loop stop before decrementing one, so at most eight iterations execute.
     #[kani::proof_for_contract(round_shortest_contract)]
-    #[kani::unwind(33)]
+    #[kani::unwind(9)]
     #[kani::solver(kissat)]
     fn check_round_shortest_contract() {
         let digits: [u8; PROOF_BUFLEN] = kani::any();
         let len = usize::from(kani::any::<u8>());
         let result = round_shortest_contract(
-            &digits,
+            digits,
             len,
             kani::any(),
             kani::any(),
@@ -918,13 +921,13 @@ pub mod grisu_verify {
     #[kani::requires(
         len <= capacity && capacity <= PROOF_BUFLEN
             && exp < i16::MAX && remainder < ten_kappa
-            && crate::num::flt2dec::rounding_verify::prefix_all(digits, len, |digit| digit < u8::MAX)
+            && crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |digit| digit < u8::MAX)
     )]
     #[kani::ensures(|result| result.as_ref().is_none_or(|&(written, _)| {
         written >= len && written <= capacity && written - len <= 1
     }))]
     fn round_exact_contract(
-        digits: &[u8; PROOF_BUFLEN],
+        digits: [u8; PROOF_BUFLEN],
         len: usize,
         capacity: usize,
         exp: i16,
@@ -968,7 +971,7 @@ pub mod grisu_verify {
         // The verified precondition reads its bytes before the model can write.
         digits[..len].copy_from_slice(unsafe { buf[..len].assume_init_ref() });
         let result =
-            round_exact_contract(&digits, len, buf.len(), exp, limit, remainder, ten_kappa, ulp);
+            round_exact_contract(digits, len, buf.len(), exp, limit, remainder, ten_kappa, ulp);
         let written = result.map_or(len, |(written, _)| written);
         assert!(written <= buf.len());
         // The contract proves metadata and initialized output, without a byte
@@ -999,7 +1002,7 @@ pub mod grisu_verify {
         let len = usize::from(kani::any::<u8>());
         let capacity = usize::from(kani::any::<u8>());
         let result = round_exact_contract(
-            &digits,
+            digits,
             len,
             capacity,
             kani::any(),
