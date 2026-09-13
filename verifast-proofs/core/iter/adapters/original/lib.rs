@@ -1,7 +1,7 @@
 #![no_std]
 #![crate_type = "lib"]
 #![allow(dead_code, unused_imports, internal_features)]
-#![feature(cast_maybe_uninit, core_intrinsics, staged_api)]
+#![feature(cast_maybe_uninit, core_intrinsics, staged_api, stmt_expr_attributes)]
 #![stable(feature = "rust1", since = "1.0.0")]
 
 extern crate core as std;

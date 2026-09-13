@@ -241,7 +241,6 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    #[rustfmt::skip] // Keep the line-specific VeriFast directives in place.
     unsafe fn as_array_ref<'a>(&'a self) -> &'a [T; N]
 /*@
     req [?f]bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
@@ -261,6 +260,7 @@ impl<T, const N: usize> Buffer<T, N> {
     {
         //@ open [f]bounds(self, start);
         //@ assert start + width::<N>() <= 2 * width::<N>();
+        #[rustfmt::skip]
         if cfg!(debug_assertions) { //~allow_dead_code // The disabled configuration branch is unreachable.
             assert!(self.start + N <= 2 * N); //~allow_dead_code // The proven bounds exclude assertion failure.
         }
@@ -280,7 +280,6 @@ impl<T, const N: usize> Buffer<T, N> {
     }
 
     #[inline]
-    #[rustfmt::skip] // Keep the line-specific VeriFast directives in place.
     unsafe fn as_uninit_array_mut<'a>(&'a mut self) -> &'a mut MaybeUninit<[T; N]>
 /*@
     req thread_token(?t) &*& bounds(self, ?start) &*& [?q]lifetime_token('a) &*&
@@ -294,6 +293,7 @@ impl<T, const N: usize> Buffer<T, N> {
     {
         //@ open bounds(self, start);
         //@ assert start + width::<N>() <= 2 * width::<N>();
+        #[rustfmt::skip]
         if cfg!(debug_assertions) { //~allow_dead_code // The disabled configuration branch is unreachable.
             assert!(self.start + N <= 2 * N); //~allow_dead_code // The proven bounds exclude assertion failure.
         }
@@ -348,7 +348,6 @@ impl<T, const N: usize> Buffer<T, N> {
     ///
     /// All the elements will be shifted to the front end when pushing reaches
     /// the back end.
-    #[rustfmt::skip] // Keep the line-specific VeriFast directives in place.
     unsafe fn push(&mut self, next: T)
     /*@
     req thread_token(?t) &*& live(t, self, ?start, ?values) &*& <T>.own(t, next);
@@ -382,6 +381,7 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ open foreach(values, own::<T>(t));
         //@ open array(buffer_mut_ptr + start, width::<N>(), _);
         //@ assert start + width::<N>() <= 2 * width::<N>();
+        #[rustfmt::skip]
         if cfg!(debug_assertions) { //~allow_dead_code // The disabled configuration branch is unreachable.
             assert!(self.start + N <= 2 * N); //~allow_dead_code // The proven bounds exclude assertion failure.
         }
