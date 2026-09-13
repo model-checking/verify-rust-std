@@ -51,7 +51,7 @@ install -m 755 "$build_dir/src/rust_frontend/vf_mir_exporter/target/debug/vf_mir
   "${VERIFAST_HOME:?}/bin/vf-rust-mir-exporter"
 (
   cd "$build_dir/src"
-  dune build --jobs 1 vfconsole/vfconsole.exe
+  dune build -j 1 vfconsole/vfconsole.exe
 )
 install -m 755 "$build_dir/src/_build/default/vfconsole/vfconsole.exe" "$VERIFAST_HOME/bin/verifast"
 echo 'Prepared VeriFast 26.09 with checked addition and symbolic usize const parameters'
