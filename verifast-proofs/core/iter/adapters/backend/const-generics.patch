@@ -1,6 +1,33 @@
+--- a/src/rust_frontend/vf_mir/vf_mir.capnp
++++ b/src/rust_frontend/vf_mir/vf_mir.capnp
+@@ -422,6 +422,10 @@
+         outlives @0: Outlives;
+         trait @2: Trait;
+         projection @3: Projection;
++        constArgHasType :group {
++            constant @4: TyConst;
++            ty @5: Ty;
++        }
+         ignored @1: Void; # A predicate that we are ignoring for now
+     }
+ }
 --- a/src/rust_frontend/vf_mir_exporter/src/lib.rs
 +++ b/src/rust_frontend/vf_mir_exporter/src/lib.rs
-@@ -1539,6 +1539,11 @@
+@@ -1224,6 +1224,13 @@
+                             Self::encode_typesystem_constant(enc_ctx.tcx, enc_ctx, &const_, term_cpn.init_const()),
+                     }
+                 }
++                ty::ClauseKind::ConstArgHasType(constant, ty) => {
++                    let mut constraint_cpn = pred_cpn.init_const_arg_has_type();
++                    Self::encode_typesystem_constant(
++                        enc_ctx.tcx, enc_ctx, &constant, constraint_cpn.reborrow().init_constant(),
++                    );
++                    Self::encode_ty(enc_ctx.tcx, enc_ctx, ty, constraint_cpn.init_ty());
++                }
+                 _ => pred_cpn.set_ignored(()),
+             }
+         }
+@@ -1539,6 +1546,11 @@
              p: &hir::GenericParam,
              mut p_cpn: hir_generic_param_cpn::Builder<'_>,
          ) {
@@ -177,3 +204,25 @@
    | Val mir_val_const_cpn ->
      let ty = decode_ty genv mir_val_const_cpn.ty in
      let mir_const_value_cpn = mir_val_const_cpn.const_value in
+@@ -2336,7 +2342,20 @@
+   let projection_preds1, preds1 = List.partition (function Projection _ -> true | _ -> false) preds1 in
+   if List.length projection_preds0 <> List.length projection_preds1 then failwith "The two functions have a different number of projection predicates";
+   List.iter2 (fun pred0 pred1 -> check_predicate_refines_predicate root_genv0 pred0 root_genv1 pred1) projection_preds0 projection_preds1;
+-  if preds0 <> [] || preds1 <> [] then failwith "Predicate kind not supported";
++  let is_const_predicate = function
++    | ConstArgHasType _ -> true
++    | Outlives _ | Trait _ | Projection _ | Ignored -> false
++  in
++  let decode_const_predicate genv = function
++    | ConstArgHasType pred -> Some (decode_const_expr genv pred.constant, decode_ty genv pred.ty)
++    | Outlives _ | Trait _ | Projection _ | Ignored -> None
++  in
++  let const_preds0, preds0 = List.partition is_const_predicate preds0 in
++  let const_preds1, preds1 = List.partition is_const_predicate preds1 in
++  if preds0 <> [] || preds1 <> [] ||
++     List.map (decode_const_predicate root_genv0) const_preds0 <>
++     List.map (decode_const_predicate root_genv1) const_preds1 then
++    failwith "Predicate kind not supported or const parameter predicates differ";
+   let inputs0 = body0.inputs in
+   let inputs1 = body1.inputs in
+   let inputs0 = List.map (decode_ty root_genv0) inputs0 in
