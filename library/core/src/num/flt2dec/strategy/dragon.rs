@@ -407,9 +407,10 @@ pub mod dragon_verify {
     // Division preserves the bigint's allocated prefix and unused zero limbs.
     // Its numeric result is overapproximated; the generator still performs the
     // real addition, comparison, and subsequent digit extraction.
+    // Read size without constructing a slice: old expressions must not panic.
     #[kani::requires(n <= PROOF_BUFLEN && value.kani_valid_storage())]
     #[kani::ensures(|_| {
-        value.kani_valid_storage() && value.digits().len() == old(value.digits().len())
+        value.kani_valid_storage() && value.kani_size() == old(value.kani_size())
     })]
     #[kani::modifies(value)]
     fn div_2pow10_contract(value: &mut Big, n: usize) {
@@ -430,8 +431,8 @@ pub mod dragon_verify {
         div_2pow10_contract(&mut value, n);
         kani::cover(n == 0, "division accepts the minimum power");
         kani::cover(n == PROOF_BUFLEN, "division accepts the maximum proof power");
-        kani::cover(value.digits().is_empty(), "division accepts empty zero storage");
-        kani::cover(value.digits().len() == 40, "division accepts all bigint limbs");
+        kani::cover(value.kani_size() == 0, "division accepts empty zero storage");
+        kani::cover(value.kani_size() == 40, "division accepts all bigint limbs");
     }
 
     macro_rules! check_partition {

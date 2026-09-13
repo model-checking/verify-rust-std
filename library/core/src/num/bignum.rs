@@ -398,6 +398,10 @@ impl crate::kani::Arbitrary for Big32x40 {
 
 #[cfg(kani)]
 impl Big32x40 {
+    pub(crate) fn kani_size(&self) -> usize {
+        self.size
+    }
+
     pub(crate) fn kani_valid_storage(&self) -> bool {
         self.size <= self.base.len() && self.base[self.size..].iter().all(|&digit| digit == 0)
     }
