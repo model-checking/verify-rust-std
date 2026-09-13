@@ -63,10 +63,10 @@ install -m 755 "$build_dir/src/rust_frontend/vf_mir_exporter/target/debug/vf_mir
   "${VERIFAST_HOME:?}/bin/vf-rust-mir-exporter"
 (
   cd "$build_dir/src"
-  dune build -j 1 vfconsole/vfconsole.exe refinement_checker/refinement_checker.exe
+  dune build -j 1 vfconsole/vfconsole.exe refinement_checker/main.exe
 )
 install -m 755 "$build_dir/src/_build/default/vfconsole/vfconsole.exe" "$VERIFAST_HOME/bin/verifast"
-install -m 755 "$build_dir/src/_build/default/refinement_checker/refinement_checker.exe" \
+install -m 755 "$build_dir/src/_build/default/refinement_checker/main.exe" \
   "$VERIFAST_HOME/bin/refinement-checker"
 mkdir -p "$cache_dir"
 install -m 755 "$VERIFAST_HOME/bin/verifast" "$cache_dir/verifast"
