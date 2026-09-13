@@ -9,5 +9,7 @@ extern crate core as std;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use std::{fmt, intrinsics, mem, num, ptr};
 
+#[path = "../array_layout.rs"]
+mod array_layout;
 mod map_windows;
 mod step_by;
