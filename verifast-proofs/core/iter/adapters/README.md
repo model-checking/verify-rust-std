@@ -1,7 +1,8 @@
 # Generic iterator adapter proof port
 
 This is an **unvalidated VeriFast port candidate** for part of Challenge 16.
-Neither VeriFast nor the refinement checker has been run on this revision.
+Hosted verification is blocked in the pinned VeriFast Rust frontend;
+the refinement checker has not run. See the hosted results below.
 The files under `verified/` are proof inputs, not evidence of a successful
 proof. This port does not yet close Felipe's review requests on PR #602.
 
@@ -89,9 +90,19 @@ The job has a 30-minute timeout and cancels superseded runs. Tool errors,
 proof failures, and resource-limit failures fail the job. Verification and
 refinement stay sequential and retain the per-process limits below.
 
-This workflow has not yet run on the port. Adding a CI job does not establish
-that the contracts or source refinement pass. Its result must be inspected
-before this candidate can count as verified coverage.
+Hosted run [34733601368](https://github.com/MavenRain/verify-rust-std/actions/runs/34733601368)
+at commit `9e95bb7e83553d0e47035821eaecf4be030cab6b` passed the source checks
+and their nine tests, then failed before proof checking. The Rust MIR exporter
+encountered `AddUnchecked` in `StepBy<I>::original_step` and panicked with
+`not yet implemented` at `src/lib.rs:2455`. The earlier missing
+`cast_maybe_uninit` feature flag was fixed in that commit.
+
+The [25.11 exporter](https://github.com/verifast/verifast/blob/25.11/src/rust_frontend/vf_mir_exporter/src/lib.rs#L2436-L2455)
+has no `AddUnchecked` case. Static inspection of the
+[26.01 exporter](https://github.com/verifast/verifast/blob/26.01/src/rust_frontend/vf_mir_exporter/src/lib.rs#L2445-L2464)
+found the same omission, so that release alone does not address this failure.
+Neither the generic contracts nor source refinement have a passing verdict.
+The runner continues to fail on this error; no target or check is suppressed.
 
 ## Local static checks and optional manual verification
 
@@ -125,9 +136,10 @@ this candidate without altering the existing LinkedList and RawVec checks.
 
 ## Remaining work
 
-- Obtain actual verifier and refinement verdicts. In particular, check the
-  pinned frontend's handling of symbolic const sizes, `NonZero::new_unchecked`
-  and `unchecked_add`, reference creation, and generic slice drop glue.
+- Resolve the frontend's confirmed `AddUnchecked` limitation without changing
+  the original source projection or introducing an assumed contract. Then
+  obtain verifier and refinement verdicts, including checks of symbolic const
+  sizes, `NonZero::new_unchecked`, reference creation, and generic slice drop glue.
   The explicit slice assertions in `drop` must be proved by that memory
   model; no local axiom has been added to make them pass.
 - Complete the safe-abstraction and unwind-state obligations described above.
