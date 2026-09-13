@@ -47,7 +47,7 @@ export CARGO_BUILD_JOBS=1
 export RAYON_NUM_THREADS=1
 export PATH="$proof_dir/../../..:$PATH"
 
-# Install the pinned release and build only its patched MIR exporter remotely.
+# Install the pinned release and build its patched Rust frontend remotely.
 # The workflow's cgroup also covers this build. Proof processes get the tighter
 # per-process address-space limit after the compiler has finished.
 export VFPLATFORM=linux
@@ -61,6 +61,8 @@ ulimit -v 2097152
 # input before trusting the frontend mapping for the adapter proof.
 timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/add-valid.rs
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/const-valid.rs
 negative_log="$(mktemp)"
 trap 'rm -f -- "$negative_log"' EXIT
 if timeout --signal=TERM --kill-after=10s 60s \
@@ -77,6 +79,21 @@ import sys
 diagnostics = Path(sys.argv[1]).read_text()
 if "Potential arithmetic overflow." not in diagnostics or "Rust frontend failed" in diagnostics:
     sys.exit("The negative check did not produce the required overflow diagnostic.")
+PY
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/const-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The frontend accepted an incorrect symbolic array length.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The const-parameter negative check did not reach a proof failure.")
 PY
 
 # Keep every stage sequential and fail on any unsuccessful proof or refinement.

@@ -112,10 +112,20 @@ Before checking the adapters, the runner requires a valid successor proof
 and an explicit overflow diagnostic for the same operation without its
 range precondition. A frontend crash does not count as the negative result.
 
-`backend/prepare.sh` pins both the source commit and archive hash. It builds
-only the MIR exporter on the hosted Linux worker and replaces that worker's
-exporter. It does not alter the verifier, its arithmetic rules, or library
-contracts. Source projections and mandatory refinement remain unchanged.
+The unchecked-add regression passed in hosted run
+[34744234144](https://github.com/MavenRain/verify-rust-std/actions/runs/34744234144).
+That run then reached the translator's unsupported const-parameter check.
+`backend/const-generics.patch` adds symbolic `usize` const arguments and
+array lengths using the existing `typeid`/`usize_of_const` representation.
+It keeps const parameters distinct from Rust types and does not add `Sized`
+bounds to them. The exporter rejects other const parameter types. A positive
+symbolic-length proof and an incorrect-length negative test must pass before
+the adapter contracts are checked. This extension awaits hosted validation.
+
+`backend/prepare.sh` pins the source commit, source archive hash, and upstream
+dependency bundle hash. It builds the MIR exporter and the verifier's Rust
+translator on the hosted Linux worker. Arithmetic rules and library contracts
+are unchanged. Source projections and mandatory refinement remain unchanged.
 
 ## Local static checks and optional manual verification
 
