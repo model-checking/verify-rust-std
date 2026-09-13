@@ -95,7 +95,19 @@
            full_bor_content;
            points_to;
            pointee_fbc = None;
-@@ -5993,17 +5996,18 @@
+@@ -3020,11 +3023,8 @@
+           let* place_expr, place_is_mutable = translate_place place_cpn loc in
+           let (path, line, _), _ = Ast.lexed_loc loc in
+           let ignore_ref_creation =
+-            bor_kind = Mut
+-            ||
+             not place_is_mutable && place_does_not_need_drop
+             ||
+-            (* ignore &mut E for now *)
+             if TranslatorArgs.ignore_ref_creation then true
+             else
+               let directives =
+@@ -5993,17 +5993,18 @@
             with
             | Lifetime -> Ok (`Lifetime name)
             | Type -> Ok (`Type name)
@@ -123,7 +135,7 @@
        let lft_params =
          Util.flatmap (function `Lifetime x -> [ x ] | _ -> []) generics
        in
-@@ -6029,7 +6033,9 @@
+@@ -6029,7 +6030,9 @@
          |> List.map decode_predicate
        in
        let sized_tparams = compute_sized_tparams preds in
