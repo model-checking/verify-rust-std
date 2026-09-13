@@ -25,6 +25,7 @@ pred bounds<T, N>(b: *Buffer<T, N>; start: usize) =
     width::<N>() <= usize::MAX / 2 &*& start <= width::<N>() &*&
     2 * width::<N>() * std::mem::size_of::<T>() <= isize::MAX &*&
     pointer_within_limits(base(b)) == true &*&
+    pointer_within_limits(base(b) + start) == true &*&
     pointer_within_limits(base(b) + 2 * width::<N>()) == true;
 
 // Inactive slots may retain copied bytes. They carry no ownership of T.
@@ -87,7 +88,7 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
-        self.buffer.as_ptr().cast()
+        &raw const self.buffer as *const MaybeUninit<T>
     }
 
     #[inline]
@@ -96,7 +97,7 @@ impl<T, const N: usize> Buffer<T, N> {
     //@ ens result == base(self);
     //@ on_unwind_ens false;
     {
-        self.buffer.as_mut_ptr().cast()
+        &raw mut self.buffer as *mut MaybeUninit<T>
     }
 
     #[inline]
@@ -122,9 +123,9 @@ impl<T, const N: usize> Buffer<T, N> {
         //@ let reference = precreate_ref(window);
         //@ init_ref_share('a, t, reference);
         //@ let r = open_frac_borrow('a, ref_initialized_(reference), q);
-        //@ open [r]ref_initialized_(reference);
+        //@ open [r]ref_initialized_::<[T; N]>(reference)();
         let result = unsafe { &*self.buffer_ptr().add(self.start).cast() };
-        //@ close [r]ref_initialized_(reference);
+        //@ close [r]ref_initialized_::<[T; N]>(reference)();
         //@ close_frac_borrow(r, ref_initialized_(reference));
         //@ close [f]bounds(self, start);
         result
@@ -194,6 +195,7 @@ impl<T, const N: usize> Buffer<T, N> {
             let to_drop = unsafe {
                 //@ array_split(buffer_mut_ptr, width::<N>() - 1);
                 //@ open array(buffer_mut_ptr + width::<N>() - 1, 1, _);
+                //@ array_to_array_(buffer_mut_ptr);
                 ptr::copy_nonoverlapping(buffer_mut_ptr.add(self.start + 1), buffer_mut_ptr, N - 1);
                 (*buffer_mut_ptr.add(N - 1)).write(next);
                 //@ close array(buffer_mut_ptr + width::<N>() - 1, 1, cons(std::mem::MaybeUninit::new(next), nil));
