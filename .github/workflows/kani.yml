@@ -103,6 +103,9 @@ jobs:
       # - core_arch::x86::__m128d::as_f64x2 is just one example of hundreds of
       #   core_arch::x86:: functions that are known to verify successfully.
       - name: Run Kani Verification
+        # Keep the thread labels required by log_parser.py with a single worker.
+        env:
+          RAYON_NUM_THREADS: "1"
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
@@ -210,7 +213,7 @@ jobs:
             --exclude-pattern ::precondition_check \
             --harness-timeout 30m \
             --default-unwind 1000 \
-            --jobs=1 --output-format=terse | tee autoharness-verification.log
+            --jobs --output-format=terse | tee autoharness-verification.log
           gzip autoharness-verification.log
 
       - name: Upload Autoharness Verification Log
