@@ -280,6 +280,35 @@ timeout --signal=TERM --kill-after=10s 600s \
   refinement-checker --rustc-args '--edition 2024' original/lib.rs verified/lib.rs || refinement_status=$?
 python3 -I check_sources.py
 if (( proof_status != 0 || layout_status != 0 )); then
+  # Inspect compiler-generated cleanup when reachability diagnostics remain.
+  diagnostic_status=0
+  timeout --signal=TERM --kill-after=5s 60s \
+    rustup run nightly-2026-02-05 rustc --edition 2024 --crate-type lib \
+    --emit=mir -Zmir-include-spans=yes -o "$negative_log" verified/lib.rs || diagnostic_status=$?
+  printf 'MIR diagnostic process status: %s\n' "$diagnostic_status"
+  if (( diagnostic_status == 0 )); then
+    python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+if path.stat().st_size > 8 * 1024 * 1024:
+    raise SystemExit("MIR diagnostic exceeded the 8 MiB parsing limit")
+printing = False
+budget = 24000
+for line in path.read_text().splitlines():
+    if line.startswith("fn "):
+        printing = "::push(" in line
+    if printing and budget > 0:
+        print(line[:budget])
+        budget -= len(line) + 1
+PY
+  fi
+  diagnostic_status=0
+  timeout --signal=TERM --kill-after=5s 60s \
+    verifast -rustc_args '--edition 2024 -C debug-assertions=no' \
+    -skip_specless_fns verified/lib.rs || diagnostic_status=$?
+  printf 'Debug-assertions-disabled diagnostic status: %s\n' "$diagnostic_status"
   # These bounded, sequential diagnostics cannot replace the full proof verdict.
   while IFS= read -r proof_location; do
     diagnostic_status=0
