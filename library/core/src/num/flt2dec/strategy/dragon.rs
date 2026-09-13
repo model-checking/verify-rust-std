@@ -394,7 +394,8 @@ pub mod dragon_verify {
     use super::*;
     use crate::kani;
     use crate::num::flt2dec::flt2dec_verify::{
-        arbitrary_finite_f32, arbitrary_finite_f64, for_each_finite_partition,
+        arbitrary_finite_f32, arbitrary_finite_f64, arbitrary_finite_f64_exponent,
+        for_each_finite_partition,
     };
 
     // Keep the generator comparisons and digit writes. Exact mode uses the
@@ -493,4 +494,5 @@ pub mod dragon_verify {
     }
 
     for_each_finite_partition!(check_partition);
+    check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent, 1023, false);
 }

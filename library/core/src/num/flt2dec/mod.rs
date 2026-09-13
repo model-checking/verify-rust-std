@@ -693,6 +693,16 @@ pub mod flt2dec_verify {
         finite_decoded(decode(f64::from_bits(bits)).1)
     }
 
+    // Additional CI probes test whether fixing the exponent makes the real
+    // arithmetic tractable. Every significand bit remains symbolic, and the
+    // exhaustive groups below remain part of the required verification.
+    pub(crate) fn arbitrary_finite_f64_exponent<const EXPONENT: u64>() -> Decoded {
+        assert!(EXPONENT < 0x7ff);
+        let bits = (EXPONENT << 52) | (kani::any::<u64>() & 0x000f_ffff_ffff_ffff);
+        kani::assume(bits > 0);
+        finite_decoded(decode(f64::from_bits(bits)).1)
+    }
+
     fn finite_decoded(decoded: FullDecoded) -> Decoded {
         match decoded {
             FullDecoded::Finite(d) => d,

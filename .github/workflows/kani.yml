@@ -101,6 +101,22 @@ jobs:
             module: num::flt2dec::rounding_verify
             proof: check_round_up_contract
             kind: contract
+          - name: dragon-exact-fixed-exponent
+            module: num::flt2dec::strategy::dragon::dragon_verify::f64_exp_1023
+            proof: check_format_exact
+            kind: fixed-exponent
+          - name: dragon-shortest-fixed-exponent
+            module: num::flt2dec::strategy::dragon::dragon_verify::f64_exp_1023
+            proof: check_format_shortest
+            kind: fixed-exponent
+          - name: grisu-exact-fixed-exponent
+            module: num::flt2dec::strategy::grisu::grisu_verify::f64_exp_1023
+            proof: check_format_exact_opt
+            kind: fixed-exponent
+          - name: grisu-shortest-fixed-exponent
+            module: num::flt2dec::strategy::grisu::grisu_verify::f64_exp_1023
+            proof: check_format_shortest_opt
+            kind: fixed-exponent
     env:
       KANI_JOBS: 1
       RAYON_NUM_THREADS: 1

@@ -781,7 +781,8 @@ pub mod grisu_verify {
     use super::*;
     use crate::kani;
     use crate::num::flt2dec::flt2dec_verify::{
-        arbitrary_finite_f32, arbitrary_finite_f64, for_each_finite_partition,
+        arbitrary_finite_f32, arbitrary_finite_f64, arbitrary_finite_f64_exponent,
+        for_each_finite_partition,
     };
 
     // The direct strategy harnesses keep all arithmetic and rounding code.
@@ -884,6 +885,7 @@ pub mod grisu_verify {
     }
 
     for_each_finite_partition!(check_partition);
+    check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent, 1023, false);
 
     // Wholesale havoc stub for the dragon fallback (modelled as an opaque op that
     // writes a digit and returns an in-bounds slice of `buf`).
