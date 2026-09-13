@@ -402,6 +402,10 @@ impl Big32x40 {
         self.size
     }
 
+    pub(crate) fn kani_limbs_mut(&mut self) -> &mut [u32; 40] {
+        &mut self.base
+    }
+
     pub(crate) fn kani_valid_storage(&self) -> bool {
         // Constant indices avoid unfolding a symbolic slice iterator in every
         // contract invocation. Eager Boolean operations preserve the predicate.

@@ -433,13 +433,14 @@ pub mod dragon_verify {
     }
 
     // Verify the limb loop separately from the outer power-of-ten loop.
+    // Only limbs are writable, so stubs retain the caller's size expression.
     #[kani::requires(divisor > 0 && value.kani_valid_storage())]
     #[kani::ensures(|result| {
         value.kani_valid_storage()
             && value.kani_size() == old(value.kani_size())
             && *result < divisor
     })]
-    #[kani::modifies(value)]
+    #[kani::modifies(value.kani_limbs_mut())]
     fn div_rem_small_contract(value: &mut Big, divisor: u32) -> u32 {
         value.div_rem_small(divisor).1
     }
@@ -475,7 +476,7 @@ pub mod dragon_verify {
     #[kani::ensures(|_| {
         value.kani_valid_storage() && value.kani_size() == old(value.kani_size())
     })]
-    #[kani::modifies(value)]
+    #[kani::modifies(value.kani_limbs_mut())]
     fn div_2pow10_contract(value: &mut Big, n: usize) {
         let _ = div_2pow10(value, n);
     }
