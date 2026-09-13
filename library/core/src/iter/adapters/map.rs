@@ -3,9 +3,13 @@ use safety::requires;
 use crate::fmt;
 use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
+<<<<<<< HEAD
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, UncheckedIterator};
 #[cfg(kani)]
 use crate::kani;
+=======
+use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen};
+>>>>>>> subtree/library
 use crate::num::NonZero;
 use crate::ops::Try;
 
@@ -69,7 +73,7 @@ pub struct Map<I, F> {
 }
 
 impl<I, F> Map<I, F> {
-    pub(in crate::iter) fn new(iter: I, f: F) -> Map<I, F> {
+    pub(in crate::iter) const fn new(iter: I, f: F) -> Map<I, F> {
         Map { iter, f }
     }
 
@@ -199,6 +203,7 @@ where
 {
 }
 
+<<<<<<< HEAD
 impl<B, I, F> UncheckedIterator for Map<I, F>
 where
     I: UncheckedIterator,
@@ -213,6 +218,8 @@ where
     }
 }
 
+=======
+>>>>>>> subtree/library
 #[doc(hidden)]
 #[unstable(feature = "trusted_random_access", issue = "none")]
 unsafe impl<I, F> TrustedRandomAccess for Map<I, F> where I: TrustedRandomAccess {}

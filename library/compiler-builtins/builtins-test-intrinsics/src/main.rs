@@ -1,12 +1,12 @@
-// By compiling this file we check that all the intrinsics we care about continue to be provided by
-// the `compiler_builtins` crate regardless of the changes we make to it. If we, by mistake, stop
-// compiling a C implementation and forget to implement that intrinsic in Rust, this file will fail
-// to link due to the missing intrinsic (symbol).
+//! Tests that require unmangled symbols from `compiler-builtins`.
+//!
+//! By compiling this file we check that all the intrinsics we care about continue to be provided by
+//! the `compiler_builtins` crate regardless of the changes we make to it. If we, by mistake, stop
+//! compiling a C implementation and forget to implement that intrinsic in Rust, this file will fail
+//! to link due to the missing intrinsic (symbol).
 
-#![allow(unused_features)]
-#![allow(internal_features)]
+#![allow(internal_features, unused_features)]
 #![deny(dead_code)]
-#![feature(allocator_api)]
 #![feature(f128)]
 #![feature(f16)]
 #![feature(lang_items)]

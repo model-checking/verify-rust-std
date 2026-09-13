@@ -25,6 +25,7 @@ const fn contains_zero_byte(x: usize) -> bool {
 #[inline]
 #[must_use]
 pub const fn memchr(x: u8, text: &[u8]) -> Option<usize> {
+<<<<<<< HEAD
     // For Kani, always use the byte-by-byte loop: it is semantically
     // equivalent to the word-at-a-time `memchr_aligned` (see comment there)
     // but symbolically executes with a fraction of the cost, and `memchr` is
@@ -41,6 +42,16 @@ pub const fn memchr(x: u8, text: &[u8]) -> Option<usize> {
 
         memchr_aligned(x, text)
     }
+=======
+    // Fast path for small slices.
+    let result =
+        if text.len() < 2 * USIZE_BYTES { memchr_naive(x, text) } else { memchr_aligned(x, text) };
+    if let Some(index) = result {
+        // SAFETY: Both implementations only return an index from within `text`.
+        unsafe { crate::hint::assert_unchecked(index < text.len()) };
+    }
+    result
+>>>>>>> subtree/library
 }
 
 #[inline]
@@ -119,8 +130,18 @@ const fn memchr_aligned(x: u8, text: &[u8]) -> Option<usize> {
 }
 
 /// Returns the last index matching the byte `x` in `text`.
+#[inline]
 #[must_use]
 pub fn memrchr(x: u8, text: &[u8]) -> Option<usize> {
+    let result = memrchr_aligned(x, text);
+    if let Some(index) = result {
+        // SAFETY: `memrchr_aligned` only returns the index of a matching byte in `text`.
+        unsafe { crate::hint::assert_unchecked(index < text.len()) };
+    }
+    result
+}
+
+fn memrchr_aligned(x: u8, text: &[u8]) -> Option<usize> {
     // Scan for a single byte value by reading two `usize` words at a time.
     //
     // Split `text` in three parts:

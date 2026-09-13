@@ -332,7 +332,7 @@ impl File {
         false
     }
 
-    pub fn read_buf(&self, cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         crate::io::default_read_buf(|buf| self.read(buf), cursor)
     }
 
@@ -480,6 +480,11 @@ pub fn rename(old: &Path, new: &Path) -> io::Result<()> {
 }
 
 pub fn set_perm(p: &Path, perm: FilePermissions) -> io::Result<()> {
+    // UEFI does not support symlinks
+    set_perm_nofollow(p, perm)
+}
+
+pub fn set_perm_nofollow(p: &Path, perm: FilePermissions) -> io::Result<()> {
     let f = uefi_fs::File::from_path(p, file::MODE_READ | file::MODE_WRITE, 0)?;
     set_perm_inner(&f, perm)
 }
@@ -587,6 +592,11 @@ mod uefi_fs {
         protocol: NonNull<file::Protocol>,
         path: crate::path::PathBuf,
     }
+
+    // SAFETY: UEFI has no regular threads, and as per <https://github.com/rust-lang/rust/issues/133604>
+    // std does not support being invoked from "irregular threads" such as interrupt handlers or other
+    // CPU cores that run outside the scope of UEFI.
+    unsafe impl Send for File {}
 
     impl File {
         pub(crate) fn from_path(path: &Path, open_mode: u64, attr: u64) -> io::Result<Self> {

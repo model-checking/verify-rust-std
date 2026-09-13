@@ -1,14 +1,12 @@
-use libc::c_int;
+use libc::{c_int, renameat, unlinkat};
 
 cfg_select! {
-    not(
-        any(
-            all(target_os = "linux", not(target_env = "musl")),
-            target_os = "l4re",
-            target_os = "android",
-            target_os = "hurd",
-        )
-    ) => {
+    not(any(
+        all(target_os = "linux", not(target_env = "musl")),
+        target_os = "l4re",
+        target_os = "android",
+        target_os = "hurd",
+    )) => {
         use libc::{open as open64, openat as openat64};
     }
     _ => {
@@ -25,9 +23,9 @@ use crate::os::wasi::io::{AsRawFd, FromRawFd};
 use crate::path::Path;
 use crate::sys::fd::FileDesc;
 use crate::sys::fs::OpenOptions;
-use crate::sys::fs::unix::{File, debug_path_fd};
+use crate::sys::fs::unix::{File, FileAttr, debug_path_fd};
 use crate::sys::helpers::run_path_with_cstr;
-use crate::sys::{AsInner, FromInner, IntoInner, cvt_r};
+use crate::sys::{AsInner, FromInner, IntoInner, cvt, cvt_r};
 use crate::{fmt, fs, io};
 
 pub struct Dir(OwnedFd);
@@ -38,7 +36,27 @@ impl Dir {
     }
 
     pub fn open_file(&self, path: &Path, opts: &OpenOptions) -> io::Result<File> {
-        run_path_with_cstr(path.as_ref(), &|path| self.open_file_c(path, &opts))
+        run_path_with_cstr(path.as_ref(), &|path| self.open_file_c(path, opts))
+    }
+
+    pub fn metadata(&self) -> io::Result<FileAttr> {
+        // Reuse the implementation for files, which should work for all FDs.
+        let fd = self.0.as_raw_fd();
+        let f = core::mem::ManuallyDrop::new(File(
+            // SAFETY: we borrowed `self` so the FD will not be closed while this function runs.
+            unsafe { FileDesc::from_raw_fd(fd) },
+        ));
+        f.file_attr()
+    }
+
+    pub fn remove_file(&self, path: &Path) -> io::Result<()> {
+        run_path_with_cstr(path, &|path| self.remove_c(path, false))
+    }
+
+    pub fn rename(&self, from: &Path, to_dir: &Self, to: &Path) -> io::Result<()> {
+        run_path_with_cstr(from, &|from| {
+            run_path_with_cstr(to, &|to| self.rename_c(from, to_dir, to))
+        })
     }
 
     pub fn open_with_c(path: &CStr, opts: &OpenOptions) -> io::Result<Self> {
@@ -60,6 +78,24 @@ impl Dir {
             openat64(self.0.as_raw_fd(), path.as_ptr(), flags, opts.mode as c_int)
         })?;
         Ok(File(unsafe { FileDesc::from_raw_fd(fd) }))
+    }
+
+    fn remove_c(&self, path: &CStr, remove_dir: bool) -> io::Result<()> {
+        cvt(unsafe {
+            unlinkat(
+                self.0.as_raw_fd(),
+                path.as_ptr(),
+                if remove_dir { libc::AT_REMOVEDIR } else { 0 },
+            )
+        })
+        .map(|_| ())
+    }
+
+    fn rename_c(&self, from: &CStr, to_dir: &Self, to: &CStr) -> io::Result<()> {
+        cvt(unsafe {
+            renameat(self.0.as_raw_fd(), from.as_ptr(), to_dir.0.as_raw_fd(), to.as_ptr())
+        })
+        .map(|_| ())
     }
 }
 

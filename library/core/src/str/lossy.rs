@@ -125,7 +125,7 @@ impl fmt::Debug for Debug<'_> {
                 let mut from = 0;
                 for (i, c) in valid.char_indices() {
                     let esc = c.escape_debug_ext(EscapeDebugExtArgs {
-                        escape_grapheme_extended: true,
+                        escape_grapheme_extender: true,
                         escape_single_quote: false,
                         escape_double_quote: true,
                     });
@@ -213,6 +213,7 @@ impl<'a> Iterator for Utf8Chunks<'a> {
 
         let mut i = 0;
         let mut valid_up_to = 0;
+<<<<<<< HEAD
         // TODO: remove `LEN` and use `self.source.len()` directly once
         // fix the issue that Kani loop contracts doesn't support `self`.
         // Tracked in https://github.com/model-checking/kani/issues/3700
@@ -225,6 +226,9 @@ impl<'a> Iterator for Utf8Chunks<'a> {
             // while let Some(&byte) = self.source.get(i) {
             // while let Some(byte) = self.source.get(i).copied() {
             let byte = unsafe { *self.source.get_unchecked(i) };
+=======
+        while let Some(byte) = self.source.get(i).copied() {
+>>>>>>> subtree/library
             i += 1;
 
             if byte < 128 {

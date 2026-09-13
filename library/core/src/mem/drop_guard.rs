@@ -109,31 +109,31 @@ where
 
 #[unstable(feature = "drop_guard", issue = "144426")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl<T, F> const Deref for DropGuard<T, F>
+const impl<T, F> Deref for DropGuard<T, F>
 where
     F: FnOnce(T),
 {
     type Target = T;
 
     fn deref(&self) -> &T {
-        &*self.inner
+        &self.inner
     }
 }
 
 #[unstable(feature = "drop_guard", issue = "144426")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl<T, F> const DerefMut for DropGuard<T, F>
+const impl<T, F> DerefMut for DropGuard<T, F>
 where
     F: FnOnce(T),
 {
     fn deref_mut(&mut self) -> &mut T {
-        &mut *self.inner
+        &mut self.inner
     }
 }
 
 #[unstable(feature = "drop_guard", issue = "144426")]
 #[rustc_const_unstable(feature = "const_drop_guard", issue = "none")]
-impl<T, F> const Drop for DropGuard<T, F>
+const impl<T, F> Drop for DropGuard<T, F>
 where
     F: [const] FnOnce(T),
 {

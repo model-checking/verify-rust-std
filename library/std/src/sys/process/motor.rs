@@ -1,5 +1,5 @@
 use super::CommandEnvs;
-use super::env::CommandEnv;
+use super::env::{CommandEnv, CommandResolvedEnvs};
 use crate::ffi::OsStr;
 pub use crate::ffi::OsString as EnvKey;
 use crate::num::NonZeroI32;
@@ -98,6 +98,10 @@ impl Command {
 
     pub fn get_env_clear(&self) -> bool {
         self.env.does_clear()
+    }
+
+    pub fn get_resolved_envs(&self) -> CommandResolvedEnvs {
+        CommandResolvedEnvs::new(self.env.capture())
     }
 
     pub fn get_current_dir(&self) -> Option<&Path> {
@@ -326,4 +330,8 @@ pub fn read_output(
     _stderr: &mut Vec<u8>,
 ) -> io::Result<()> {
     Err(io::Error::from_raw_os_error(moto_rt::E_NOT_IMPLEMENTED.into()))
+}
+
+pub fn getpid() -> u32 {
+    panic!("Pids on Motor OS are u64.")
 }

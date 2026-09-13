@@ -11,8 +11,6 @@ host_arch="$(uname -m | sed 's/arm64/aarch64/')"
 # calling docker, otherwise docker will create them but they will be owned
 # by root.
 mkdir -p target
-cargo generate-lockfile
-cargo generate-lockfile --manifest-path builtins-test-intrinsics/Cargo.toml
 
 run() {
     local target="$1"
@@ -78,6 +76,7 @@ run() {
         -e CI \
         -e CARGO_TARGET_DIR=/builtins-target \
         -e CARGO_TERM_COLOR \
+        -e LIBM_BUILD_VERBOSE \
         -e MAY_SKIP_LIBM_CI \
         -e RUSTFLAGS \
         -e RUST_BACKTRACE \
@@ -97,7 +96,7 @@ if [ "${1:-}" = "--help" ] || [ "$#" -gt 1 ]; then
     usage: ./ci/run-docker.sh [target]
 
     you can also set DOCKER_BASE_IMAGE to use something other than the default
-    ubuntu:25.04 (or rustlang/rust:nightly).
+    ubuntu:26.04 (or rustlang/rust:nightly).
     "
     exit
 fi
