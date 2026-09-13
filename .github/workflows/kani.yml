@@ -63,7 +63,8 @@ jobs:
           # Exponent groups can span partitions. Run one proof at a time.
           export KANI_JOBS=1
           export RAYON_NUM_THREADS=1
-          head/scripts/run-kani.sh --path ${{github.workspace}}/head
+          head/scripts/run-kani.sh --path ${{github.workspace}}/head \
+            --kani-args --harness-timeout 30m --fail-fast
    
   kani_autoharness:
     name: Verify std library using autoharness
@@ -209,7 +210,7 @@ jobs:
             --exclude-pattern time::Duration::from_secs_f \
             --include-pattern unicode::unicode_data::conversions::to_ \
             --exclude-pattern ::precondition_check \
-            --harness-timeout 30m \
+            --harness-timeout 30m --fail-fast \
             --default-unwind 1000 \
             --jobs=1 --output-format=terse | tee autoharness-verification.log
           gzip autoharness-verification.log
