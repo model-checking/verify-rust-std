@@ -1,6 +1,7 @@
 //! A bounded contract for the rounding helper used by the strategy proofs.
 
 use super::round_up;
+use crate::kani;
 
 const PROOF_BUFLEN: usize = 32;
 
