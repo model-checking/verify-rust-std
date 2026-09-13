@@ -57,6 +57,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get install -y jq
       
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust --tap diffblue/cbmc
+
       # Step 3: Run Kani on the std library
       - name: Run Kani Verification
         run: |
@@ -93,6 +97,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust --tap diffblue/cbmc
 
       # Step 2: Run Kani autoharness on the std library for selected functions.
       # Uses "--include-pattern" to make sure we do not try to run across all
@@ -257,6 +265,10 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
+
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust --tap diffblue/cbmc
 
       # Step 2: Run list on the std library
       - name: Run Kani Metrics
