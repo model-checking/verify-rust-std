@@ -63,8 +63,15 @@ timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/add-valid.rs
 timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/const-valid.rs
-timeout --signal=TERM --kill-after=10s 60s \
-  verifast -rustc_args '--edition 2024' backend/array-valid.rs
+if ! timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/array-valid.rs; then
+  # The regression already failed. Emit heap context without changing that verdict.
+  diagnostic_status=0
+  timeout --signal=TERM --kill-after=5s 30s \
+    verifast -json -rustc_args '--edition 2024' backend/array-valid.rs || diagnostic_status=$?
+  printf 'Array regression diagnostic status: %s\n' "$diagnostic_status"
+  exit 1
+fi
 negative_log="$(mktemp)"
 trap 'rm -f -- "$negative_log"' EXIT
 if timeout --signal=TERM --kill-after=10s 60s \
