@@ -64,7 +64,7 @@ timeout --signal=TERM --kill-after=10s 60s \
 timeout --signal=TERM --kill-after=10s 60s \
   verifast -rustc_args '--edition 2024' backend/const-valid.rs
 timeout --signal=TERM --kill-after=10s 60s \
-  verifast -verbose 1 -rustc_args '--edition 2024' backend/array-valid.rs
+  verifast -rustc_args '--edition 2024' backend/array-valid.rs
 negative_log="$(mktemp)"
 trap 'rm -f -- "$negative_log"' EXIT
 if timeout --signal=TERM --kill-after=10s 60s \

@@ -10,12 +10,12 @@ unsafe fn shared<'a, T, const N: usize>(p: *const [T; N]) -> &'a [T; N]
     unsafe { &*p }
 }
 
-// Keep one reference-creation expression without an unsafe-block coercion.
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn exclusive<'a, T, const N: usize>(p: *mut [T; N]) -> &'a mut [T; N]
+// Return the new reference as a raw pointer to test creation independently
+// of the extra lifetime reborrow inserted when returning a mutable reference.
+unsafe fn exclusive<T, const N: usize>(p: *mut [T; N]) -> *mut [T; N]
 //@ req *p |-> ?values;
 //@ ens *result |-> values &*& ref_mut_end_token(result, p);
 //@ on_unwind_ens false;
 {
-    &mut *p
+    unsafe { &mut *p as *mut [T; N] }
 }
