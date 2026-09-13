@@ -785,12 +785,15 @@ pub mod grisu_verify {
         for_each_finite_partition,
     };
 
-    // The direct strategy harnesses keep all arithmetic and rounding code.
+    // The direct strategy harnesses execute the real generator bodies. Exact
+    // mode composes the verified round_up contract; shortest mode retains
+    // round_and_weed.
     // Buffer lengths are symbolic: shortest mode includes the minimum legal
     // buffer, and exact mode includes both one-byte and multi-digit buffers.
     // These are bounded harnesses; a successful run covers lengths up to 32,
     // not arbitrary slice lengths. Unwinding assertions remain enabled.
     const PROOF_BUFLEN: usize = 32;
+    const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
 
     // An arbitrary `Decoded` satisfying every precondition the `grisu` entry
     // points assert.  `mant + plus < 2^61` (and the `checked_add`/`checked_sub`
@@ -834,7 +837,7 @@ pub mod grisu_verify {
                 #[kani::solver(kissat)]
                 fn check_format_shortest_opt() {
                     let d = $decode::<$group>();
-                    let len: usize = kani::any();
+                    let len = usize::from(kani::any::<u8>());
                     kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
                     let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
                     let start = buf.as_ptr().cast::<u8>();
@@ -863,7 +866,7 @@ pub mod grisu_verify {
                 fn check_format_exact_opt() {
                     let d = $decode::<$group>();
                     let limit: i16 = kani::any();
-                    let len: usize = kani::any();
+                    let len = usize::from(kani::any::<u8>());
                     kani::assume(len > 0 && len <= PROOF_BUFLEN);
                     let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
                     let start = buf.as_ptr().cast::<u8>();

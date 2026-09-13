@@ -404,6 +404,7 @@ pub mod dragon_verify {
     // limb loops, and its assertions remain enabled.
     // Lengths above 32 require a separate proof; these harnesses are bounded.
     const PROOF_BUFLEN: usize = 32;
+    const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
 
     // Bigint division needs the remainder bound to justify the next limb's
     // division. Prove that scalar obligation separately; the storage contract
@@ -525,7 +526,7 @@ pub mod dragon_verify {
                 #[kani::solver(kissat)]
                 fn check_format_shortest() {
                     let d = $decode::<$group>();
-                    let len: usize = kani::any();
+                    let len = usize::from(kani::any::<u8>());
                     kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
                     let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
                     let start = buf.as_ptr().cast::<u8>();
@@ -551,7 +552,7 @@ pub mod dragon_verify {
                 fn check_format_exact() {
                     let d = $decode::<$group>();
                     let limit: i16 = kani::any();
-                    let len: usize = kani::any();
+                    let len = usize::from(kani::any::<u8>());
                     kani::assume(len <= PROOF_BUFLEN);
                     let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
                     let start = buf.as_ptr().cast::<u8>();
