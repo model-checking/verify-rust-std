@@ -107,8 +107,8 @@ jobs:
       KANI_SYMEX_CACHE_DEREFERENCES: ${{ matrix.group.kind == 'probe' && 'true' || 'false' }}
       # Dragon's fixed limb indices can use the default array field splitting.
       KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.group.kind == 'probe' && startsWith(matrix.group.name, 'grisu-') && 'false' || 'true' }}
-      # Use SAT arithmetic refinement for the full Grisu shortest and multiplication domains.
-      KANI_ARITHMETIC_REFINEMENT: ${{ ((startsWith(matrix.group.name, 'grisu-shortest-') && startsWith(matrix.group.kind, 'generator-')) || startsWith(matrix.group.name, 'small-multiplication-equivalence-')) && 'true' || 'false' }}
+      # Use SAT arithmetic refinement for the full Grisu shortest domain.
+      KANI_ARITHMETIC_REFINEMENT: ${{ startsWith(matrix.group.name, 'grisu-shortest-') && startsWith(matrix.group.kind, 'generator-') && 'true' || 'false' }}
       # Test datatype-free SMT encoding on the two Grisu shortest probes first.
       KANI_FLAT_SMT_Z3: ${{ matrix.group.kind == 'probe' && startsWith(matrix.group.name, 'grisu-shortest-') && 'true' || 'false' }}
       HARNESS_GROUP: ${{ matrix.group.name }}

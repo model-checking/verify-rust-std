@@ -509,7 +509,7 @@ pub mod dragon_verify {
             #[kani::stub(u32::carrying_mul, stub_carrying_mul)]
             #[kani::stub(u32::carrying_mul_add, stub_carrying_mul_add)]
             #[kani::stub_verified(carrying_mul_add_contract)]
-            #[kani::solver(minisat)]
+            #[kani::solver(z3)]
             fn $name() {
                 check_mul_small_model_agrees::<$size>();
             }
