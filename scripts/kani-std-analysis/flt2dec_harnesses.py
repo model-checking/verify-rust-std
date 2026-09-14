@@ -65,6 +65,13 @@ def proof_groups():
             f"num::flt2dec::estimator_verify::check_estimator_model_agrees_{bits:02d}"
             for bits in range(first, last + 1)
         ], 30)
+
+    for first in range(0, 10, 8):
+        last = min(first + 7, 9)
+        add(f"decimal-division-equivalence-{first:02d}-{last:02d}", "equivalence", [
+            f"{GRISU}::check_decimal_division_model_agrees_{exponent:02d}"
+            for exponent in range(first, last + 1)
+        ], 30)
     return groups
 
 

@@ -199,6 +199,11 @@ struct ShortestRounding<'a> {
     ulp: u64,
 }
 
+#[inline]
+fn div_rem_pow10(value: u32, divisor: u32) -> (u32, u32) {
+    (value / divisor, value % divisor)
+}
+
 fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> ShortestRounding<'a> {
     assert!(d.mant > 0);
     assert!(d.minus > 0);
@@ -297,8 +302,7 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
         //   (it follows that `remainder = plus1int % 10^(kappa+1)`)
 
         // divide `remainder` by `10^kappa`. both are scaled by `2^-e`.
-        let q = remainder / ten_kappa;
-        let r = remainder % ten_kappa;
+        let (q, r) = div_rem_pow10(remainder, ten_kappa);
         debug_assert!(q < 10);
         buf[i] = MaybeUninit::new(b'0' + q as u8);
         i += 1;
@@ -1154,6 +1158,53 @@ pub mod grisu_verify {
         Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
     }
 
+    // Keep each division's literal divisor visible to the verifier. Each arm
+    // has a separate equivalence proof over every u32 dividend. The default
+    // arm checks the divisor domain at every generator call.
+    fn div_rem_pow10_model(value: u32, divisor: u32) -> (u32, u32) {
+        match divisor {
+            1 => (value, 0),
+            10 => (value / 10, value % 10),
+            100 => (value / 100, value % 100),
+            1_000 => (value / 1_000, value % 1_000),
+            10_000 => (value / 10_000, value % 10_000),
+            100_000 => (value / 100_000, value % 100_000),
+            1_000_000 => (value / 1_000_000, value % 1_000_000),
+            10_000_000 => (value / 10_000_000, value % 10_000_000),
+            100_000_000 => (value / 100_000_000, value % 100_000_000),
+            1_000_000_000 => (value / 1_000_000_000, value % 1_000_000_000),
+            _ => panic!("Grisu integral divisor must be a power of ten"),
+        }
+    }
+
+    macro_rules! check_decimal_divisor {
+        ($name:ident, $divisor:literal) => {
+            #[kani::proof]
+            #[kani::solver(kissat)]
+            fn $name() {
+                let value: u32 = kani::any();
+                assert_eq!(div_rem_pow10(value, $divisor), div_rem_pow10_model(value, $divisor));
+                kani::cover(value == 0, "decimal division includes zero");
+                kani::cover(value == u32::MAX, "decimal division includes the largest dividend");
+                kani::cover(
+                    value == $divisor - 1,
+                    "decimal division includes the largest remainder",
+                );
+            }
+        };
+    }
+
+    check_decimal_divisor!(check_decimal_division_model_agrees_00, 1);
+    check_decimal_divisor!(check_decimal_division_model_agrees_01, 10);
+    check_decimal_divisor!(check_decimal_division_model_agrees_02, 100);
+    check_decimal_divisor!(check_decimal_division_model_agrees_03, 1_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_04, 10_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_05, 100_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_06, 1_000_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_07, 10_000_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_08, 100_000_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_09, 1_000_000_000);
+
     struct CachedPowerIndex(i32);
 
     impl CachedPowerIndex {
@@ -1189,6 +1240,7 @@ pub mod grisu_verify {
                     crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
                 )]
                 #[kani::stub(round_and_weed, stub_round_and_weed)]
+                #[kani::stub(div_rem_pow10, div_rem_pow10_model)]
                 #[kani::stub_verified(round_shortest_contract)]
                 #[kani::solver(kissat)]
                 fn check_format_shortest_opt() {
