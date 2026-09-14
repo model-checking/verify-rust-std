@@ -2768,7 +2768,7 @@ pub const fn is_val_statically_known<T: Copy>(_arg: T) -> bool {
 #[requires(ub_checks::can_dereference(x) && ub_checks::can_write(x))]
 #[requires(ub_checks::can_dereference(y) && ub_checks::can_write(y))]
 #[requires(x.addr() != y.addr() || core::mem::size_of::<T>() == 0)]
-#[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), size_of::<T>(), 1))]
+#[requires(ub_checks::maybe_is_nonoverlapping(x as *const (), y as *const (), const { size_of::<T>() }, 1))]
 #[ensures(|_| ub_checks::can_dereference(x) && ub_checks::can_dereference(y))]
 pub const unsafe fn typed_swap_nonoverlapping<T>(x: *mut T, y: *mut T) {
     // SAFETY: The caller provided single non-overlapping items behind
@@ -3309,7 +3309,7 @@ fn check_copy_untyped<T>(src: *const T, dst: *mut T, count: usize) -> bool {
     #[cfg(kani)]
     if count > 0 {
         // Inspect a non-deterministically chosen byte in the copy.
-        let byte = kani::any_where(|sz: &usize| *sz < size_of::<T>());
+        let byte = kani::any_where(|sz: &usize| *sz < const { size_of::<T>() });
         // Instead of checking each of the `count`-many copies, non-deterministically pick one of
         // them and check it. Using quantifiers would not add value as we can rely on the solver to
         // pick an uninitialized element if such an element exists.

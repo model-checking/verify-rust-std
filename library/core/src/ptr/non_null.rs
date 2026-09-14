@@ -134,7 +134,7 @@ impl<T: Sized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_dangling", since = "1.36.0")]
     #[must_use]
     #[inline]
-    #[ensures(|result| !result.pointer.is_null() && result.pointer.is_aligned())]
+    #[ensures(|result| !result.as_ptr().is_null() && result.as_ptr().is_aligned())]
     pub const fn dangling() -> Self {
         let align = crate::mem::Alignment::of::<T>();
         NonNull::without_provenance(align.as_nonzero_usize())
@@ -326,7 +326,7 @@ impl<T: PointeeSized> NonNull<T> {
     /// [`std::ptr::from_raw_parts`]: crate::ptr::from_raw_parts
     #[unstable(feature = "ptr_metadata", issue = "81513")]
     #[inline]
-    #[ensures(|result| !result.pointer.is_null())]
+    #[ensures(|result| !result.as_ptr().is_null())]
     pub const fn from_raw_parts(
         data_pointer: NonNull<impl super::Thin>,
         metadata: <T as super::Pointee>::Metadata,
@@ -430,7 +430,7 @@ impl<T: PointeeSized> NonNull<T> {
     #[must_use]
     #[inline(always)]
     //Ensures address of resulting pointer is same as original
-    #[ensures(|result: &*mut T| *result == self.pointer as *mut T)]
+    #[ensures(|result: &*mut T| *result == unsafe { mem::transmute::<Self, *mut T>(self) })]
     pub const fn as_ptr(self) -> *mut T {
         // This is a transmute for the same reasons as `NonZero::get`.
 
@@ -659,11 +659,11 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some()
         && count * core::mem::size_of::<T>() <= isize::MAX as usize
-        && (self.pointer as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some() // check wrapping add
+        && (self.as_ptr() as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some() // check wrapping add
         // Zero-sized offsets (`count * size_of::<T>() == 0`) are always
         // permitted, including on dangling pointers, per the documentation.
         && (count == 0 || core::mem::size_of::<T>() == 0
-            || core::ub_checks::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize))))]
+            || core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_offset(count as isize))))]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
@@ -1028,7 +1028,7 @@ impl<T: PointeeSized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(ub_checks::can_dereference(self.pointer))]
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]
     pub const unsafe fn read(self) -> T
     where
         T: Sized,
@@ -1050,7 +1050,7 @@ impl<T: PointeeSized> NonNull<T> {
     #[inline]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(ub_checks::can_dereference(self.pointer))]
+    #[requires(ub_checks::can_dereference(self.as_ptr()))]
     pub unsafe fn read_volatile(self) -> T
     where
         T: Sized,
@@ -1071,7 +1071,7 @@ impl<T: PointeeSized> NonNull<T> {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
-    #[requires(ub_checks::can_read_unaligned(self.pointer))]
+    #[requires(ub_checks::can_read_unaligned(self.as_ptr()))]
     pub const unsafe fn read_unaligned(self) -> T
     where
         T: Sized,
@@ -1390,14 +1390,14 @@ impl<T: PointeeSized> NonNull<T> {
         let stride = crate::mem::size_of::<T>();
         // ZSTs
         if stride == 0 {
-            if self.pointer.addr() % align == 0 {
+            if self.as_ptr().addr() % align == 0 {
                 return *result == 0;
             } else {
                 return *result == usize::MAX;
             }
         }
         // In this case, the pointer cannot be aligned
-        if (align % stride == 0) && (self.pointer.addr() % stride != 0) {
+        if (align % stride == 0) && (self.as_ptr().addr() % stride != 0) {
             return *result == usize::MAX;
         }
         // Checking if the answer should indeed be usize::MAX when a % stride != 0 requires
@@ -1407,11 +1407,11 @@ impl<T: PointeeSized> NonNull<T> {
             return true;
         }
         // If we reach this case, either:
-        //  - align % stride == 0 and self.pointer.addr() % stride == 0, so it is definitely possible to align the pointer
+        //  - align % stride == 0 and self.as_ptr().addr() % stride == 0, so it is definitely possible to align the pointer
         //  - align % stride != 0 and result != usize::MAX, so align_offset is claiming that it's possible to align the pointer
         // Check that applying the returned result does indeed produce an aligned address
         let product = usize::wrapping_mul(*result, stride);
-        let new_addr = usize::wrapping_add(product, self.pointer.addr());
+        let new_addr = usize::wrapping_add(product, self.as_ptr().addr());
         *result != usize::MAX && new_addr % align == 0
     })]
     pub fn align_offset(self, align: usize) -> usize
@@ -1578,8 +1578,8 @@ impl<T> NonNull<[T]> {
     // validity requirements on `data`, so the postcondition must not
     // dereference the resulting pointer (`unsafe { result.as_ref() }.len()`,
     // as used previously, is UB for dangling or misaligned `data`).
-    #[ensures(|result| !result.pointer.is_null()
-        && result.pointer as *const T == data.pointer
+    #[ensures(|result| !result.as_ptr().is_null()
+        && result.as_ptr() as *const T == data.as_ptr() as *const T
         && result.len() == len)]
     pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self {
         // SAFETY: `data` is a `NonNull` pointer which is necessarily non-null
@@ -1663,7 +1663,7 @@ impl<T> NonNull<[T]> {
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_never_returns_null_ptr]
     // Address preservation
-    #[ensures(|result: &*mut T| *result == self.pointer as *mut T)]
+    #[ensures(|result: &*mut T| *result == self.as_ptr() as *mut T)]
     pub const fn as_mut_ptr(self) -> *mut T {
         self.as_non_null_ptr().as_ptr()
     }

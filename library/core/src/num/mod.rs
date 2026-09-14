@@ -1977,16 +1977,12 @@ mod verify {
                     kani::assume(lhs >= $min && lhs <= $max);
                     kani::assume(rhs >= $min && rhs <= $max);
 
-                    let (result_low, result_high) = lhs.widening_mul(rhs);
+                    let result = lhs.widening_mul(rhs);
 
                     // Compute expected result using wider type
                     let expected = (lhs as $wide_type) * (rhs as $wide_type);
 
-                    let expected_low = expected as $type;
-                    let expected_high = (expected >> <$type>::BITS) as $type;
-
-                    assert_eq!(result_low, expected_low);
-                    assert_eq!(result_high, expected_high);
+                    assert_eq!(result, expected);
                 }
             )+
         }
