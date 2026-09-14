@@ -3,7 +3,6 @@
 - **Status:** Resolved
 - **Tracking Issue:** [#72](https://github.com/model-checking/verify-rust-std/issues/72)
 - **Start date:** *2024/08/20*
-- **End date:** *2024/12/10*
 - **Reward:** *N/A*
 - **Contributors**: [Samuel Thomas](https://github.com/sgpthomas) and [Cole Vick](https://github.com/cvick32)
 -------------------
