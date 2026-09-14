@@ -25,7 +25,16 @@ fi
 if [[ "${KANI_ARRAY_FIELD_SENSITIVITY:-true}" == false ]]; then
     kani_cbmc_args+=(--no-array-field-sensitivity)
 fi
-if [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
+if [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
+    if [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
+        echo "Flat SMT encoding cannot be combined with SAT arithmetic refinement." >&2
+        exit 2
+    fi
+    # The Yices-compatible encoding avoids CBMC's datatype construction failure.
+    # The external solver is the installed Z3 binary, which accepts this SMT2 input.
+    echo "Using Z3 with CBMC's Yices-compatible SMT encoding." >&2
+    kani_cbmc_args+=(--yices --external-smt2-solver z3)
+elif [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
     kani_cbmc_args+=(--refine-arithmetic)
 fi
 path=""
