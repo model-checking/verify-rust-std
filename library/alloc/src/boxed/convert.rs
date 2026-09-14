@@ -769,7 +769,7 @@ mod verify {
     use core::error::Error;
     use core::{fmt, kani};
 
-    use super::{BoxFromSlice, boxed_slice_as_array_unchecked};
+    use super::boxed_slice_as_array_unchecked;
     use crate::boxed::Box;
     use crate::vec::Vec;
 
@@ -795,7 +795,7 @@ mod verify {
 
     impl Error for OtherError {}
 
-    // Clone but not Copy/TrivialClone, so `BoxFromSlice` takes the `to_vec` path.
+    // Clone but not Copy, so slice conversion exercises element cloning.
     #[derive(Clone)]
     struct CloneCell(u8);
 
@@ -832,7 +832,7 @@ mod verify {
     #[kani::proof]
     pub fn check_from_slice_trivial_clone() {
         let data: [u8; 2] = kani::any();
-        let boxed = <Box<[u8]> as BoxFromSlice<u8>>::from_slice(&data);
+        let boxed = Box::<[u8]>::from(&data[..]);
         assert!(&*boxed == &data);
     }
 
@@ -840,7 +840,7 @@ mod verify {
     #[kani::unwind(3)]
     pub fn check_from_slice_clone() {
         let data = [CloneCell(kani::any())];
-        let boxed = <Box<[CloneCell]> as BoxFromSlice<CloneCell>>::from_slice(&data);
+        let boxed = Box::<[CloneCell]>::from(&data[..]);
         assert!(boxed.len() == 1);
         assert!(boxed[0].0 == data[0].0);
     }
