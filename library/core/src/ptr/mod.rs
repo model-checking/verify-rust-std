@@ -525,6 +525,12 @@ mod mut_ptr;
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy_nonoverlapping"]
+#[cfg_attr(rapx, rapx::requires(Align(src, T)))]
+#[cfg_attr(rapx, rapx::requires(Align(dst, T)))]
+#[cfg_attr(rapx, rapx::requires(ValidPtr(src, T, count)))]
+#[cfg_attr(rapx, rapx::requires(ValidPtr(dst, T, count)))]
+#[cfg_attr(rapx, rapx::requires(NonOverlap(dst, src, T, count)))]
+#[cfg_attr(rapx, rapx::requires(ValidNum(size_of(T) * count <= isize::MAX)))]
 pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: usize) {
     ub_checks::assert_unsafe_precondition!(
         check_language_ub,
@@ -622,6 +628,10 @@ pub const unsafe fn copy_nonoverlapping<T>(src: *const T, dst: *mut T, count: us
 #[inline(always)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[rustc_diagnostic_item = "ptr_copy"]
+#[cfg_attr(rapx, rapx::requires(ValidPtr(src, T, count)))]
+#[cfg_attr(rapx, rapx::requires(Align(src, T)))]
+#[cfg_attr(rapx, rapx::requires(ValidPtr(dst, T, count)))]
+#[cfg_attr(rapx, rapx::requires(Align(dst, T)))]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
     // SAFETY: the safety contract for `copy` must be upheld by the caller.
     unsafe {
@@ -882,6 +892,7 @@ pub const fn null_mut<T: PointeeSized + Thin>() -> *mut T {
 #[must_use]
 #[stable(feature = "strict_provenance", since = "1.84.0")]
 #[rustc_const_stable(feature = "strict_provenance", since = "1.84.0")]
+#[rustc_diagnostic_item = "ptr_without_provenance"]
 pub const fn without_provenance<T>(addr: usize) -> *const T {
     without_provenance_mut(addr)
 }
@@ -920,6 +931,7 @@ pub const fn dangling<T>() -> *const T {
 #[must_use]
 #[stable(feature = "strict_provenance", since = "1.84.0")]
 #[rustc_const_stable(feature = "strict_provenance", since = "1.84.0")]
+#[rustc_diagnostic_item = "ptr_without_provenance_mut"]
 #[allow(integer_to_ptr_transmutes)] // Expected semantics here.
 pub const fn without_provenance_mut<T>(addr: usize) -> *mut T {
     // An int-to-pointer transmute currently has exactly the intended semantics: it creates a
@@ -1360,6 +1372,9 @@ pub const unsafe fn swap<T>(x: *mut T, y: *mut T) {
 #[rustc_diagnostic_item = "ptr_swap_nonoverlapping"]
 #[rustc_allow_const_fn_unstable(const_eval_select)] // both implementations behave the same
 #[track_caller]
+#[cfg_attr(rapx, rapx::requires(ValidPtr(x, T, count)))]
+#[cfg_attr(rapx, rapx::requires(Align(x, T)))]
+#[cfg_attr(rapx, rapx::requires(NonOverlap(x, y, T, count)))]
 pub const unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize) {
     ub_checks::assert_unsafe_precondition!(
         check_library_ub,
@@ -2224,6 +2239,9 @@ pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
     let new_addr = usize::wrapping_add(product, p.addr());
     *result != usize::MAX && new_addr % a == 0
 })]
+/// # Safety
+/// The alignment `a` must be a non-zero power of two.
+#[cfg_attr(rapx, rapx::requires(ValidNum(a != 0)))]
 pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     // FIXME(#75598): Direct use of these intrinsics improves codegen significantly at opt-level <=
     // 1, where the method versions of these operations are not inlined.
@@ -2238,14 +2256,15 @@ pub(crate) unsafe fn align_offset<T: Sized>(p: *const T, a: usize) -> usize {
     ///
     /// * `m` is a power-of-two;
     /// * `x < m`; (if `x ≥ m`, pass in `x % m` instead)
+    /// * `x` is odd, unless `m == 1` (any `x` is an inverse modulo 1)
     ///
     /// Implementation of this function shall not panic. Ever.
     #[safety::requires(m.is_power_of_two())]
     #[safety::requires(x < m)]
-    #[safety::requires(x % 2 != 0)]
+    #[safety::requires(m == 1 || x % 2 != 0)]
     // for Kani (v0.65.0), the below multiplication is too costly to prove
     #[cfg_attr(not(kani),
-        safety::ensures(|result| wrapping_mul(*result, x) % m == 1))]
+        safety::ensures(|result| wrapping_mul(*result, x) % m == 1 % m))]
     #[inline]
     const unsafe fn mod_inv(x: usize, m: usize) -> usize {
         /// Multiplicative modular inverse table modulo 2⁴ = 16.
@@ -2562,6 +2581,10 @@ pub fn hash<T: PointeeSized, S: hash::Hasher>(hashee: *const T, into: &mut S) {
 }
 
 #[stable(feature = "fnptr_impls", since = "1.4.0")]
+#[diagnostic::on_const(
+    message = "pointers cannot be reliably compared during const eval",
+    note = "see issue #53020 <https://github.com/rust-lang/rust/issues/53020> for more information"
+)]
 impl<F: FnPtr> PartialEq for F {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -2569,9 +2592,17 @@ impl<F: FnPtr> PartialEq for F {
     }
 }
 #[stable(feature = "fnptr_impls", since = "1.4.0")]
+#[diagnostic::on_const(
+    message = "pointers cannot be reliably compared during const eval",
+    note = "see issue #53020 <https://github.com/rust-lang/rust/issues/53020> for more information"
+)]
 impl<F: FnPtr> Eq for F {}
 
 #[stable(feature = "fnptr_impls", since = "1.4.0")]
+#[diagnostic::on_const(
+    message = "pointers cannot be reliably compared during const eval",
+    note = "see issue #53020 <https://github.com/rust-lang/rust/issues/53020> for more information"
+)]
 impl<F: FnPtr> PartialOrd for F {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -2579,6 +2610,10 @@ impl<F: FnPtr> PartialOrd for F {
     }
 }
 #[stable(feature = "fnptr_impls", since = "1.4.0")]
+#[diagnostic::on_const(
+    message = "pointers cannot be reliably compared during const eval",
+    note = "see issue #53020 <https://github.com/rust-lang/rust/issues/53020> for more information"
+)]
 impl<F: FnPtr> Ord for F {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
@@ -2686,7 +2721,7 @@ impl<F: FnPtr> fmt::Debug for F {
 /// same requirements apply to field projections, even inside `addr_of!`. (In particular, it makes
 /// no difference whether the pointer is null or dangling.)
 #[stable(feature = "raw_ref_macros", since = "1.51.0")]
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub macro addr_of($place:expr) {
     &raw const $place
 }
@@ -2776,7 +2811,7 @@ pub macro addr_of($place:expr) {
 /// same requirements apply to field projections, even inside `addr_of_mut!`. (In particular, it
 /// makes no difference whether the pointer is null or dangling.)
 #[stable(feature = "raw_ref_macros", since = "1.51.0")]
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub macro addr_of_mut($place:expr) {
     &raw mut $place
 }
