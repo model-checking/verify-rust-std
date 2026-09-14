@@ -169,6 +169,30 @@ get_current_commit() {
     fi
 }
 
+install_kani_dependencies() (
+    # Keep this download policy scoped to dependency installation in CI.
+    if [[ "${GITHUB_ACTIONS:-false}" != true ]]; then
+        exec "$@"
+    fi
+
+    local kani_download_config
+    kani_download_config=$(mktemp -d)
+    trap 'rm -f -- "$kani_download_config/.curlrc"
+          rmdir -- "$kani_download_config"' EXIT
+    # The pinned installers use curl -O for their archives. HTTP errors must
+    # fail before extraction, and retries must not run without time limits.
+    cat > "$kani_download_config/.curlrc" <<'EOF'
+fail
+retry = 5
+retry-all-errors
+retry-delay = 5
+retry-max-time = 300
+connect-timeout = 30
+max-time = 120
+EOF
+    CURL_HOME="$kani_download_config" "$@"
+)
+
 build_kani() {
     local directory="$1"
     pushd "$directory"
@@ -182,9 +206,9 @@ build_kani() {
         os_name=$(uname -s)
 
         if [[ "$os_name" == "Linux" ]]; then
-            ./scripts/setup/ubuntu/install_deps.sh
+            install_kani_dependencies ./scripts/setup/ubuntu/install_deps.sh
         elif [[ "$os_name" == "Darwin" ]]; then
-            ./scripts/setup/macos/install_deps.sh
+            install_kani_dependencies ./scripts/setup/macos/install_deps.sh
         else
             echo "Unknown operating system"
         fi
