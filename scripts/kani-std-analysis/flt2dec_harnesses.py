@@ -54,6 +54,10 @@ def proof_groups():
     ]:
         add(name, kind, [f"{module}::{proof}"], 30)
 
+    add("grisu-shortest-scaling-contract", "contract", [
+        f"{GRISU}::check_scale_shortest_contract"
+    ], 60)
+
     for first in range(0, 40, 8):
         add(f"small-multiplication-equivalence-{first:02d}-{first + 7:02d}", "equivalence", [
             f"{DRAGON}::check_mul_small_model_agrees_{size:02d}"

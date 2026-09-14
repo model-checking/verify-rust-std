@@ -204,15 +204,15 @@ fn div_rem_pow10(value: u32, divisor: u32) -> (u32, u32) {
     (value / divisor, value % divisor)
 }
 
-fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> ShortestRounding<'a> {
-    assert!(d.mant > 0);
-    assert!(d.minus > 0);
-    assert!(d.plus > 0);
-    assert!(d.mant.checked_add(d.plus).is_some());
-    assert!(d.mant.checked_sub(d.minus).is_some());
-    assert!(buf.len() >= MAX_SIG_DIGITS);
-    assert!(d.mant + d.plus < (1 << 61)); // we need at least three bits of additional precision
+struct ShortestScaled {
+    plus: Fp,
+    minus: Fp,
+    v: Fp,
+    minusk: i16,
+}
 
+#[inline]
+fn scale_shortest(d: &Decoded) -> ShortestScaled {
     // start with the normalized values with the shared exponent
     let plus = Fp { f: d.mant + d.plus, e: d.exp }.normalize();
     let minus = Fp { f: d.mant - d.minus, e: d.exp }.normalize_to(plus.e);
@@ -238,6 +238,19 @@ fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> Shortes
     let plus = plus.mul(cached);
     let minus = minus.mul(cached);
     let v = v.mul(cached);
+    ShortestScaled { plus, minus, v, minusk }
+}
+
+fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> ShortestRounding<'a> {
+    assert!(d.mant > 0);
+    assert!(d.minus > 0);
+    assert!(d.plus > 0);
+    assert!(d.mant.checked_add(d.plus).is_some());
+    assert!(d.mant.checked_sub(d.minus).is_some());
+    assert!(buf.len() >= MAX_SIG_DIGITS);
+    assert!(d.mant + d.plus < (1 << 61)); // we need at least three bits of additional precision
+
+    let ShortestScaled { plus, minus, v, minusk } = scale_shortest(d);
     debug_assert_eq!(plus.e, minus.e);
     debug_assert_eq!(plus.e, v.e);
 
@@ -868,6 +881,99 @@ pub mod grisu_verify {
     const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
 
+    // Decode gives minus = 1 and plus = 1 or 2. Its largest significand has
+    // 53 bits before the interval scaling. Callers prove these conditions
+    // from the real decoder, without restricting any finite float bits.
+    #[kani::requires(
+        mant >= 2 && minus == 1 && (plus == 1 || plus == 2)
+            && exp >= -1076 && exp <= 970
+            && mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53)
+    )]
+    #[kani::ensures(|result| shortest_scaling_valid(*result))]
+    fn scale_shortest_contract(
+        mant: u64,
+        minus: u64,
+        plus: u64,
+        exp: i16,
+    ) -> (u64, u64, u64, i16, i16) {
+        let d = Decoded { mant, minus, plus, exp, inclusive: false };
+        let ShortestScaled { plus, minus, v, minusk } = scale_shortest(&d);
+        assert_eq!(plus.e, minus.e);
+        assert_eq!(plus.e, v.e);
+        (plus.f, minus.f, v.f, plus.e, minusk)
+    }
+
+    fn shortest_scaling_valid(state: (u64, u64, u64, i16, i16)) -> bool {
+        let (plus, minus, v, exp, minusk) = state;
+        exp >= ALPHA
+            && exp <= GAMMA
+            && minusk >= -308
+            && minusk <= 332
+            && plus >= 1 << 62
+            && plus < u64::MAX
+            && minus > 1
+            && minus <= v
+            && v <= plus
+            && {
+                let upper = plus + 1;
+                let delta = upper - (minus - 1);
+                let e = -exp as usize;
+                let (max_kappa, _) = max_pow10_no_more_than((upper >> e) as u32);
+                // After max_kappa + 1 integral digits, this factor is the
+                // scale at digit 17. A threshold reaching 2^e exceeds every
+                // fractional remainder, so the real loop ends by that digit.
+                let scale: u128 = match max_kappa {
+                    0 => 10_000_000_000_000_000,
+                    1 => 1_000_000_000_000_000,
+                    2 => 100_000_000_000_000,
+                    3 => 10_000_000_000_000,
+                    4 => 1_000_000_000_000,
+                    5 => 100_000_000_000,
+                    6 => 10_000_000_000,
+                    7 => 1_000_000_000,
+                    8 => 100_000_000,
+                    9 => 10_000_000,
+                    _ => 0,
+                };
+                // Normalization and multiplication preserve the relative
+                // interval width. Two outward ulps absorb their rounding
+                // errors. These postconditions must be proved in CI.
+                scale > 0
+                    && delta >= 4
+                    && (delta as u128) << 53 >= upper as u128
+                    && 4 * (upper - v) as u128 <= 3 * delta as u128
+                    && delta as u128 * scale >= 1u128 << e
+            }
+    }
+
+    fn stub_scale_shortest(d: &Decoded) -> ShortestScaled {
+        let (plus, minus, v, exp, minusk) = scale_shortest_contract(d.mant, d.minus, d.plus, d.exp);
+        ShortestScaled {
+            plus: Fp { f: plus, e: exp },
+            minus: Fp { f: minus, e: exp },
+            v: Fp { f: v, e: exp },
+            minusk,
+        }
+    }
+
+    #[kani::proof_for_contract(scale_shortest_contract)]
+    #[kani::stub(u64::leading_zeros, crate::num::flt2dec::bit_scan_verify::leading_zeros_u64)]
+    #[kani::stub(u32::leading_zeros, crate::num::flt2dec::bit_scan_verify::leading_zeros_u32)]
+    #[kani::solver(z3)]
+    fn check_scale_shortest_contract() {
+        let mant = kani::any();
+        let minus = kani::any();
+        let plus = kani::any();
+        let exp = kani::any();
+        let result = scale_shortest_contract(mant, minus, plus, exp);
+        kani::cover(mant == 2 && exp == -1075, "scaling includes the smallest f64 subnormal");
+        kani::cover(exp == -1076, "scaling includes the smallest decoded exponent");
+        kani::cover(exp == 970, "scaling includes the largest decoded exponent");
+        kani::cover(plus == 2, "scaling includes unequal neighbor intervals");
+        kani::cover(result.3 == ALPHA, "scaling reaches the smallest target exponent");
+        kani::cover(result.3 == GAMMA, "scaling reaches the largest target exponent");
+    }
+
     // At digit one the loop must stop. If its remainder would already exceed
     // threshold, the loop's threshold check forces an earlier stop. With digit
     // zero this checks the initial state, which must not decrement at all.
@@ -1222,9 +1328,9 @@ pub mod grisu_verify {
     // wrapper harness below checks a separate obligation.
     macro_rules! check_partition {
         ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
-            check_partition!($name, $decode::<$group>(), $cover_fallback);
+            check_partition!($name, $decode::<$group>(), $cover_fallback => scale_shortest_contract);
         };
-        ($name:ident, $decoded:expr, $cover_fallback:literal $(, $cached_index:path)?) => {
+        ($name:ident, $decoded:expr, $cover_fallback:literal $(, $cached_index:path)? $(=> $scaling_contract:path)?) => {
             mod $name {
                 use super::*;
 
@@ -1242,6 +1348,10 @@ pub mod grisu_verify {
                 #[kani::stub(round_and_weed, stub_round_and_weed)]
                 #[kani::stub(div_rem_pow10, div_rem_pow10_model)]
                 #[kani::stub_verified(round_shortest_contract)]
+                $(
+                    #[kani::stub(scale_shortest, stub_scale_shortest)]
+                    #[kani::stub_verified($scaling_contract)]
+                )?
                 #[kani::solver(minisat)]
                 fn check_format_shortest_opt() {
                     let d = $decoded;
@@ -1306,7 +1416,7 @@ pub mod grisu_verify {
     }
 
     for_each_finite_partition!(check_partition);
-    check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent, 1023, false);
+    check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent::<1023>(), false);
 
     // All positive f64 values in [2^-8, 2^18), with every significand bit symbolic.
     // These additional probes assert the cached index instead of assuming it.
