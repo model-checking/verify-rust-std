@@ -540,6 +540,15 @@ pub mod dragon_verify {
         kani::cover(value.kani_size() == 40, "division accepts all bigint limbs");
     }
 
+    // Only the additional [1, 2) probes use this adapter. Check the scaling
+    // value against the independently proved model for the actual arguments,
+    // then expose the literal zero before expanding bigint multiplication.
+    // A nonzero estimate fails the proof; it is never assumed away.
+    fn estimate_unit_scale(mant: u64, exp: i16) -> i16 {
+        assert_eq!(crate::num::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp), 0);
+        0
+    }
+
     macro_rules! check_partition {
         ($name:ident, arbitrary_finite_f32, $group:literal, $cover_fallback:literal) => {
             check_partition!($name, arbitrary_finite_f32, $group, $cover_fallback, 19, 33);
@@ -551,15 +560,26 @@ pub mod dragon_verify {
             $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
             $shortest_unwind:literal, $exact_unwind:literal
         ) => {
+            check_partition!(
+                $name,
+                $decode,
+                $group,
+                $cover_fallback,
+                $shortest_unwind,
+                $exact_unwind,
+                crate::num::flt2dec::estimator_verify::estimate_scaling_factor
+            );
+        };
+        (
+            $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
+            $shortest_unwind:literal, $exact_unwind:literal, $estimate:path
+        ) => {
             mod $name {
                 use super::*;
 
                 #[kani::proof]
                 #[kani::unwind($shortest_unwind)]
-                #[kani::stub(
-                    crate::num::flt2dec::estimator::estimate_scaling_factor,
-                    crate::num::flt2dec::estimator_verify::estimate_scaling_factor
-                )]
+                #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
                     crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
@@ -593,10 +613,7 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($exact_unwind)]
-                #[kani::stub(
-                    crate::num::flt2dec::estimator::estimate_scaling_factor,
-                    crate::num::flt2dec::estimator_verify::estimate_scaling_factor
-                )]
+                #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
                     crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
@@ -637,5 +654,13 @@ pub mod dragon_verify {
     for_each_finite_partition!(check_partition);
     // These inputs need fewer bigint limbs. Keep enough iterations for the
     // digit and rounding loops; unwinding assertions check every loop bound.
-    check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent, 1023, false, 19, 33);
+    check_partition!(
+        f64_exp_1023,
+        arbitrary_finite_f64_exponent,
+        1023,
+        false,
+        19,
+        33,
+        estimate_unit_scale
+    );
 }
