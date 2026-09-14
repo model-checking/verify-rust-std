@@ -10,6 +10,8 @@ on:
       - 'library/**'
       - '.github/workflows/kani.yml'
       - 'scripts/run-kani.sh'
+      - 'scripts/kani-std-analysis/flt2dec_harnesses.py'
+      - 'scripts/kani-std-analysis/test_flt2dec_harnesses.py'
 
 defaults:
   run:
@@ -35,10 +37,10 @@ jobs:
       WORKER_INDEX: ${{ matrix.partition }}
       # Total number of workers running this step
       WORKER_TOTAL: 4
-      # Cap parallel harness verification on ubuntu-latest: its 4-core/16 GB
-      # runners get OOM-killed when 4 memory-hungry harnesses (up to ~10 GB
-      # each, e.g. the ffi::c_str ones) run concurrently.
-      KANI_JOBS: ${{ matrix.os == 'ubuntu-latest' && 2 || '' }}
+      # The same catalog assigns every excluded proof to a dedicated job on each OS.
+      KANI_SEPARATE_FLT2DEC: "true"
+      # Run one verifier per runner to bound proof concurrency.
+      KANI_JOBS: 1
     
     steps:
       - name: Remove unnecessary software to free up disk space
@@ -61,10 +63,91 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get install -y jq
       
-      # Step 3: Run Kani on the std library (default configuration)
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust --tap diffblue/cbmc
+
+      # Step 3: Run Kani on the std library
       - name: Run Kani Verification
-        run: head/scripts/run-kani.sh --path ${{github.workspace}}/head
+        run: |
+          # Run one proof at a time on each runner.
+          export KANI_JOBS=1
+          export RAYON_NUM_THREADS=1
+          head/scripts/run-kani.sh --path ${{github.workspace}}/head \
+            --kani-args --harness-timeout 30m --fail-fast
    
+  flt2dec_matrix:
+    name: Prepare flt2dec proof groups
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check proof routing
+        run: python3 -I -m unittest discover -s scripts/kani-std-analysis -p test_flt2dec_harnesses.py
+      - name: Build proof matrix
+        id: groups
+        run: |
+          flt2dec_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py --matrix)
+          printf 'matrix=%s\n' "$flt2dec_matrix" >> "$GITHUB_OUTPUT"
+
+  check-flt2dec:
+    name: Verify flt2dec (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: flt2dec_matrix
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix) }}
+    env:
+      KANI_JOBS: 1
+      RAYON_NUM_THREADS: 1
+      KANI_HARNESS_TIMEOUT: ${{ matrix.group.timeout_minutes }}m
+      KANI_OBJECT_BITS: ${{ (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
+      # Keep encoding experiments scoped to the diagnostic probes.
+      KANI_SYMEX_CACHE_DEREFERENCES: ${{ matrix.group.kind == 'probe' && 'true' || 'false' }}
+      # Dragon's fixed limb indices can use the default array field splitting.
+      KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.group.kind == 'probe' && startsWith(matrix.group.name, 'grisu-') && 'false' || 'true' }}
+      # Use SAT arithmetic refinement for the full Grisu shortest domain.
+      KANI_ARITHMETIC_REFINEMENT: ${{ startsWith(matrix.group.name, 'grisu-shortest-') && startsWith(matrix.group.kind, 'generator-') && 'true' || 'false' }}
+      # Test datatype-free SMT encoding on the two Grisu shortest probes first.
+      KANI_FLAT_SMT_Z3: ${{ matrix.group.kind == 'probe' && startsWith(matrix.group.name, 'grisu-shortest-') && 'true' || 'false' }}
+      HARNESS_GROUP: ${{ matrix.group.name }}
+      HARNESS_KIND: ${{ matrix.group.kind }}
+    steps:
+      - name: Remove unnecessary software to free up disk space
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          path: head
+          submodules: true
+
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust --tap diffblue/cbmc
+
+      - name: Verify selected proof groups
+        run: |
+          # Keep every group within four hours of proof budgets per job:
+          # two 120-minute or four 60-minute generators, or eight 30-minute cases.
+          harness_names=$(python3 -I head/scripts/kani-std-analysis/flt2dec_harnesses.py --group "$HARNESS_GROUP")
+          harness_args=()
+          while IFS= read -r harness; do
+            [[ -n "$harness" ]] || exit 1
+            harness_args+=(--harness "$harness")
+          done <<< "$harness_names"
+          output_format=terse
+          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == probe ]]; then
+            output_format=regular
+          fi
+          printf 'Selected %s harnesses\n' "$(( ${#harness_args[@]} / 2 ))"
+          head/scripts/run-kani.sh --path "${GITHUB_WORKSPACE}/head" \
+            --kani-args --jobs 1 --harness-timeout "$KANI_HARNESS_TIMEOUT" --fail-fast --output-format="$output_format" \
+            --exact "${harness_args[@]}"
+
   kani_autoharness:
     name: Verify std library using autoharness
     runs-on: ${{ matrix.os }}
@@ -93,6 +176,10 @@ jobs:
         with:
           submodules: true
 
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust --tap diffblue/cbmc
+
       # Step 2: Run Kani autoharness on the std library for selected functions.
       # Uses "--include-pattern" to make sure we do not try to run across all
       # possible functions as that may take a lot longer than expected. Instead,
@@ -103,6 +190,8 @@ jobs:
       #   core_arch::x86:: functions that are known to verify successfully.
       - name: Run Kani Verification
         run: |
+          python3 -I -B -m unittest discover \
+            -s scripts/kani-std-analysis -p test_log_parser.py
           scripts/run-kani.sh --run autoharness --kani-args \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::unchecked_disjoint_bitor" \
@@ -207,9 +296,9 @@ jobs:
             --exclude-pattern time::Duration::from_secs_f \
             --include-pattern unicode::unicode_data::conversions::to_ \
             --exclude-pattern ::precondition_check \
-            --harness-timeout 10m \
+            --harness-timeout 30m --fail-fast \
             --default-unwind 1000 \
-            --jobs=3 --output-format=terse | tee autoharness-verification.log
+            --jobs=1 --output-format=terse | tee autoharness-verification.log
           gzip autoharness-verification.log
 
       - name: Upload Autoharness Verification Log
@@ -254,6 +343,10 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
+
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust --tap diffblue/cbmc
 
       # Step 2: Run list on the std library
       - name: Run Kani Metrics

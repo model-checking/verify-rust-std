@@ -146,6 +146,10 @@ macro_rules! define_bignum {
                 use crate::{cmp, iter};
 
                 let mut sz = cmp::max(self.size, other.size);
+                #[cfg(kani)]
+                {
+                    sz = crate::num::bignum::kani_loop_size(sz);
+                }
                 let mut carry = false;
                 for (a, b) in iter::zip(&mut self.base[..sz], &other.base[..sz]) {
                     let (v, c) = (*a).carrying_add(*b, carry);
@@ -181,6 +185,8 @@ macro_rules! define_bignum {
                 use crate::{cmp, iter};
 
                 let sz = cmp::max(self.size, other.size);
+                #[cfg(kani)]
+                let sz = crate::num::bignum::kani_loop_size(sz);
                 let mut noborrow = true;
                 for (a, b) in iter::zip(&mut self.base[..sz], &other.base[..sz]) {
                     let (v, c) = (*a).carrying_add(!*b, noborrow);
@@ -196,6 +202,10 @@ macro_rules! define_bignum {
             /// mutable reference.
             pub fn mul_small(&mut self, other: $ty) -> &mut $name {
                 let mut sz = self.size;
+                #[cfg(kani)]
+                {
+                    sz = crate::num::bignum::kani_loop_size(sz);
+                }
                 let mut carry = 0;
                 for a in &mut self.base[..sz] {
                     let (v, c) = (*a).carrying_mul(other, carry);
@@ -386,6 +396,222 @@ macro_rules! define_bignum {
 pub type Digit32 = u32;
 
 define_bignum!(Big32x40: type=Digit32, n=40);
+
+// Proofs can expose fixed count bits while asserting equality with this identity.
+// The arithmetic loops still run, and normal builds contain no instrumentation.
+#[cfg(kani)]
+pub(crate) fn kani_loop_size(size: usize) -> usize {
+    size
+}
+
+#[cfg(kani)]
+impl crate::kani::Arbitrary for Big32x40 {
+    fn any() -> Self {
+        Self { size: crate::kani::any(), base: crate::kani::any() }
+    }
+}
+
+#[cfg(kani)]
+impl Big32x40 {
+    pub(crate) fn kani_with_arbitrary_limbs(size: usize) -> Self {
+        Self { size, base: crate::kani::any() }
+    }
+
+    pub(crate) fn kani_size(&self) -> usize {
+        self.size
+    }
+
+    pub(crate) fn kani_limbs_mut(&mut self) -> &mut [u32; 40] {
+        &mut self.base
+    }
+
+    pub(crate) fn kani_valid_storage(&self) -> bool {
+        let size = kani_loop_size(self.size);
+        // Constant indices avoid unfolding a symbolic slice iterator in every
+        // contract invocation. Eager Boolean operations preserve the predicate.
+        macro_rules! inactive_limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((size > $index) | (self.base[$index] == 0)))+
+            };
+        }
+
+        size <= self.base.len()
+            && inactive_limbs_are_zero!(
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+            )
+    }
+
+    // The equivalence proof in dragon_verify checks these constant-index
+    // models for every in-bounds storage size and arbitrary limb contents.
+    pub(crate) fn kani_cmp_model(&self, other: &Self) -> crate::cmp::Ordering {
+        use crate::cmp::Ordering::{Equal, Greater, Less};
+
+        assert!(self.size <= self.base.len() && other.size <= other.base.len());
+        let size = kani_loop_size(self.size);
+        let other_size = kani_loop_size(other.size);
+
+        macro_rules! compare_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let less = false;
+                let greater = false;
+                $(
+                    let active = (size > $index) | (other_size > $index);
+                    let equal = self.base[$index] == other.base[$index];
+                    let preserve = !active | equal;
+                    let less = (active & (self.base[$index] < other.base[$index]))
+                        | (preserve & less);
+                    let greater = (active & (self.base[$index] > other.base[$index]))
+                        | (preserve & greater);
+                )+
+                if less { Less } else if greater { Greater } else { Equal }
+            }};
+        }
+
+        // Like Ord::cmp, inspect both arrays through the larger active size.
+        // A differing higher limb supersedes every lower limb's ordering.
+        // Eager Boolean operations avoid a branch at each constant limb index.
+        compare_limbs!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        )
+    }
+
+    pub(crate) fn kani_is_zero_model(&self) -> bool {
+        assert!(self.size <= self.base.len());
+        let size = kani_loop_size(self.size);
+
+        macro_rules! limbs_are_zero {
+            ($($index:literal),+ $(,)?) => {
+                true $(& ((size <= $index) | (self.base[$index] == 0)))+
+            };
+        }
+
+        limbs_are_zero!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        )
+    }
+
+    pub(crate) fn kani_same_storage(&self, other: &Self) -> bool {
+        macro_rules! equal_limbs {
+            ($($index:literal),+ $(,)?) => {
+                true $(& (self.base[$index] == other.base[$index]))+
+            };
+        }
+
+        (self.size == other.size)
+            & equal_limbs!(
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+            )
+    }
+
+    // Independent equivalence proofs compare every stored limb and the size.
+    // Addition and multiplication reserve one limb for a possible carry.
+    // Their size bounds are asserted here, including at generator call sites.
+    pub(crate) fn kani_add_model<'a>(&'a mut self, other: &Self) -> &'a mut Self {
+        assert!(self.size < self.base.len() && other.size < other.base.len());
+        let mut sz = kani_loop_size(crate::cmp::max(self.size, other.size));
+
+        macro_rules! add_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let carry = false;
+                $(
+                    let carry = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_add(other.base[$index], carry);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        carry
+                    };
+                )+
+                carry
+            }};
+        }
+
+        let carry = add_limbs!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        );
+        if carry {
+            self.base[sz] = 1;
+            sz += 1;
+        }
+        self.size = sz;
+        self
+    }
+
+    pub(crate) fn kani_sub_model<'a>(&'a mut self, other: &Self) -> &'a mut Self {
+        assert!(self.size <= self.base.len() && other.size <= other.base.len());
+        assert!(self.kani_cmp_model(other) != crate::cmp::Ordering::Less);
+        let sz = kani_loop_size(crate::cmp::max(self.size, other.size));
+
+        macro_rules! subtract_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let noborrow = true;
+                $(
+                    let noborrow = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_add(!other.base[$index], noborrow);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        noborrow
+                    };
+                )+
+                noborrow
+            }};
+        }
+
+        let noborrow = subtract_limbs!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        );
+        assert!(noborrow);
+        self.size = sz;
+        self
+    }
+
+    pub(crate) fn kani_mul_small_model(&mut self, other: u32) -> &mut Self {
+        assert!(self.size < self.base.len());
+        let mut sz = kani_loop_size(self.size);
+
+        macro_rules! multiply_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let carry = 0;
+                $(
+                    let carry = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_mul(other, carry);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        carry
+                    };
+                )+
+                carry
+            }};
+        }
+
+        let carry = multiply_limbs!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        );
+        if carry > 0 {
+            self.base[sz] = carry;
+            sz += 1;
+        }
+        self.size = sz;
+        self
+    }
+
+    // Contract proofs include every storage size, including the empty zero
+    // representation. Leading zero limbs within the active prefix are valid.
+    pub(crate) fn kani_any_valid() -> Self {
+        let value: Self = crate::kani::any();
+        crate::kani::assume(value.kani_valid_storage());
+        value
+    }
+}
 
 // this one is used for testing only.
 #[doc(hidden)]
