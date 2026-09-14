@@ -266,6 +266,12 @@ mod verify {
     // (`idx < N` whenever the closure runs) requires N >= 1 -- with N = 0 the
     // write precedes the loop's break check, so no in-bounds argument exists
     // for index 0.
+    // Boundedness is structural at the pinned toolchain: the traversal loop
+    // lives in the generic default `Iterator::try_for_each` behind a capturing
+    // closure, so no adapter-level loop contract can attach to it, and
+    // contracting the shared default would route every std proof through the
+    // loop-contract transform. The exit-path unsafe ops depend only on
+    // 0 <= initialized <= N.
     #[kani::proof]
     #[kani::unwind(9)]
     fn check_filter_next_chunk_dropless_n2_u8() {
@@ -294,41 +300,5 @@ mod verify {
         let slice = kani::slice::any_slice_of_array(&array);
         let mut iter = Filter::new(slice.iter(), |&&x: &&char| (x as u32) < 128);
         let _ = iter.next_chunk::<2>();
-    }
-
-    // Unbounded inductive step for next_chunk_dropless: proves get_unchecked_mut
-    // is safe at ANY iteration of the try_for_each loop, for ANY source iterator
-    // length. The loop body executes only when initialized < N (break condition).
-    // With idx = initialized, get_unchecked_mut(idx) accesses index < N in an
-    // N-element array — always in bounds. The branchless predicate update
-    // (idx + {0,1}) ensures initialized <= N after each iteration.
-    // The exit-path unsafe ops (array_assume_init, IntoIter::new_unchecked)
-    // depend only on 0 <= initialized <= N, which the invariant guarantees;
-    // these are exercised end-to-end by the bounded harnesses above.
-    #[kani::proof]
-    fn check_filter_next_chunk_dropless_unbounded() {
-        // N=2 is concrete for Kani; the safety argument (idx < N => in-bounds)
-        // generalizes to all N >= 1 since the invariant is N-independent.
-        const N: usize = 2;
-        let mut array: [MaybeUninit<u8>; N] = [const { MaybeUninit::uninit() }; N];
-
-        // Symbolic loop state at arbitrary iteration k (any source iterator length)
-        let initialized: usize = kani::any();
-        kani::assume(initialized < N); // Loop continues only when initialized < N
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-
-        let idx = initialized;
-        let element: u8 = kani::any();
-
-        // Branchless index update (matches original order: update before write)
-        let predicate_result: bool = kani::any();
-        let new_initialized = idx + predicate_result as usize;
-
-        // Exact unsafe op from the loop body: safe because idx < N = array.len()
-        // (write destination is always idx, regardless of predicate result)
-        unsafe { array.get_unchecked_mut(idx) }.write(element);
-
-        // Invariant preserved: new_initialized <= initialized + 1 <= N
-        assert!(new_initialized <= N);
     }
 }

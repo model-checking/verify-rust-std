@@ -334,6 +334,33 @@ mod verify {
         // Drop exercises Buffer::drop
     }
 
+    // push / as_array_ref / as_uninit_array_mut / drop over the FULL reachable
+    // Buffer state space: `start` is havoced across its entire invariant range
+    // (start <= N, with buffer[start..start + N] initialized — the struct's
+    // documented invariant), so both push branches (the in-place shift for
+    // start < N and the wrap-around copy for start == N) are proven at every
+    // reachable offset. The next()-driven harnesses reach only the first
+    // states; this one covers all of them, for any number of prior pushes and
+    // hence any source length.
+    #[kani::proof]
+    fn check_map_windows_push_arbitrary_state_u8() {
+        const N: usize = 2;
+        let start: usize = kani::any();
+        kani::assume(start <= N);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut storage: [[MaybeUninit<u8>; N]; 2] = [[MaybeUninit::uninit(); N]; 2];
+        for k in 0..N {
+            let idx = start + k;
+            storage[idx / N][idx % N] = MaybeUninit::new(kani::any());
+        }
+        let mut buf = Buffer { buffer: storage, start };
+        let _window: &[u8; N] = buf.as_array_ref();
+        let _uninit = buf.as_uninit_array_mut();
+        buf.push(kani::any());
+        assert!(buf.start <= N);
+        // Scope end runs Buffer::drop from the arbitrary post-push state.
+    }
+
     // A Clone type with real drop glue: exercises the Buffer push/drop paths that
     // Copy-only element types skip (drop of overwritten ring slots and of the
     // initialized tail when MapWindows is dropped).
@@ -356,6 +383,27 @@ mod verify {
         let _ = mw.next(); // buffer init: N clones pushed
         let _ = mw.next(); // ring wrap: overwritten slot's drop glue runs
         // MapWindows drop runs Buffer::drop over the initialized window
+    }
+
+    // The arbitrary-state push proof with real drop glue: the shifted-out
+    // element's drop_in_place and Buffer::drop both run from every reachable
+    // `start`.
+    #[kani::proof]
+    fn check_map_windows_push_arbitrary_state_droptoken() {
+        const N: usize = 2;
+        let start: usize = kani::any();
+        kani::assume(start <= N);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut storage: [[MaybeUninit<DropToken>; N]; 2] =
+            [[const { MaybeUninit::uninit() }; N], [const { MaybeUninit::uninit() }; N]];
+        for k in 0..N {
+            let idx = start + k;
+            storage[idx / N][idx % N] = MaybeUninit::new(DropToken(kani::any()));
+        }
+        let mut buf = Buffer { buffer: storage, start };
+        buf.push(DropToken(kani::any()));
+        assert!(buf.start <= N);
+        // Scope end runs Buffer::drop (real glue) from the post-push state.
     }
 
     // Drop glue that panics: verifies the Buffer drop path unwinds without UB

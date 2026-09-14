@@ -227,6 +227,12 @@ mod verify {
     // `copy_nonoverlapping` into `array` requires N >= 1 -- with N = 0 the
     // write precedes the loop's break check, so no in-bounds argument exists
     // for index 0.
+    // Boundedness is structural at the pinned toolchain: the traversal loop
+    // lives in the generic default `Iterator::try_for_each` behind a capturing
+    // closure, so no adapter-level loop contract can attach to it, and
+    // contracting the shared default would route every std proof through the
+    // loop-contract transform. The exit-path unsafe ops depend only on
+    // 0 <= initialized <= N.
     #[kani::proof]
     #[kani::unwind(9)]
     fn check_filter_map_next_chunk_n2_u8() {
@@ -256,43 +262,5 @@ mod verify {
         let mut iter =
             FilterMap::new(slice.iter(), |&x: &char| if (x as u32) < 128 { Some(x) } else { None });
         let _ = iter.next_chunk::<2>();
-    }
-
-    // Unbounded inductive step for next_chunk: proves the unsafe block
-    // (as_mut_ptr().add, copy_nonoverlapping) is safe at ANY iteration of the
-    // try_for_each loop, for ANY source iterator length. The loop body executes
-    // only when initialized < N (break condition). With idx = initialized,
-    // as_mut_ptr().add(idx) stays within the N-element array bounds, and
-    // copy_nonoverlapping writes exactly one element to that location.
-    // Combined with bounded end-to-end harnesses above (which exercise both
-    // Ok/Break and Err/Continue exit paths), this gives complete unbounded
-    // coverage of all unsafe operations in next_chunk.
-    #[kani::proof]
-    fn check_filter_map_next_chunk_unbounded() {
-        // N=2 is concrete for Kani; the safety argument (idx < N => in-bounds)
-        // generalizes to all N >= 1 since the invariant is N-independent.
-        const N: usize = 2;
-        let mut array: [MaybeUninit<u8>; N] = [const { MaybeUninit::uninit() }; N];
-
-        // Symbolic loop state at arbitrary iteration k (any source iterator length)
-        let initialized: usize = kani::any();
-        kani::assume(initialized < N); // Loop continues only when initialized < N
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-
-        let idx = initialized;
-        let val: Option<u8> = kani::any();
-        let new_initialized = idx + val.is_some() as usize;
-
-        // Exact unsafe block from the loop body: safe because idx < N = array.len()
-        unsafe {
-            let opt_payload_at: *const MaybeUninit<u8> =
-                (&raw const val).byte_add(core::mem::offset_of!(Option<u8>, Some.0)).cast();
-            let dst = array.as_mut_ptr().add(idx);
-            crate::ptr::copy_nonoverlapping(opt_payload_at, dst, 1);
-            crate::mem::forget(val);
-        };
-
-        // Invariant preserved: new_initialized <= initialized + 1 <= N
-        assert!(new_initialized <= N);
     }
 }

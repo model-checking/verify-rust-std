@@ -237,6 +237,8 @@ where
         // Safety argument: i tracks the consumed element count and stays within
         // inner_len. Combined with the while condition (inner_len - i >= N),
         // this ensures i + local < inner_len = iter.size() for all accesses.
+        #[cfg_attr(kani, kani::loop_invariant(i <= inner_len))]
+        #[cfg_attr(kani, kani::loop_modifies(&i, &accum))]
         while inner_len - i >= N {
             let chunk = crate::array::from_fn(|local| {
                 // SAFETY: The method consumes the iterator and the loop condition ensures that
@@ -307,25 +309,22 @@ mod verify {
     }
 
     // fold (TRANC specialized — uses __iterator_get_unchecked in a loop)
-    // End-to-end bounded harness: exercises the full TRANC fold path.
-    // The while loop's safety (i + local < inner_len) is enforced by
-    // the condition (inner_len - i >= N) and local < N.
+    // Arbitrary-length: the fold while-loop carries a source-level loop
+    // contract (invariant i <= inner_len, explicit loop_modifies), so no
+    // unwind cap is needed; the backing slice length is symbolic.
     #[kani::proof]
-    #[kani::unwind(9)]
     fn check_array_chunks_fold_n2_u8() {
-        const MAX_LEN: usize = 8;
+        const MAX_LEN: usize = 5000;
         let array: [u8; MAX_LEN] = kani::any();
         let slice = kani::slice::any_slice_of_array(&array);
         let chunks = ArrayChunks::<_, 2>::new(slice.iter());
         // Exercises TRANC fold path — proves absence of UB in get_unchecked loop.
-        Iterator::fold(chunks, (), |(), _| ());
+        // Scalar accumulator: loop_modifies targets must lower to scalar/slice
+        // assigns; a ZST accumulator crashes CBMC's l2 renaming.
+        Iterator::fold(chunks, 0u32, |acc, _| acc);
     }
 
-    // Note: only the N=2 u8 fold harness is kept, and it is bounded (unwind 9).
-    // The TRANC fold path's `from_fn` MaybeUninit loop conflicts with
-    // loop-contract mode for other element types and chunk sizes, so no
-    // source-level loop invariant is applied here — the safety argument above
-    // stands in its place. The loop safety logic (i + local < inner_len) is
-    // identical for all N and T, so this single bounded harness suffices to
-    // exercise it.
+    // Note: only the N=2 u8 fold harness is kept. The loop safety logic
+    // (i + local < inner_len) is identical for all N and T, so this single
+    // harness suffices to exercise it.
 }

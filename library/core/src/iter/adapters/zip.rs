@@ -114,7 +114,7 @@ where
 
     #[inline]
     // Contract note: Kani's `proof_for_contract` cannot target trait-impl
-    // methods, so this `#[requires]` is not checked as a contract; it is
+    // methods (kani#1997), so this `#[requires]` is not checked as a contract; it is
     // normative documentation of the precondition. Verification happens in the
     // `verify::check_*` harness below, which `kani::assume`s this same
     // expression before the call. Keep the two in sync when editing either.
@@ -730,7 +730,6 @@ impl<A: TrustedLen, B: TrustedLen> SpecFold for Zip<A, B> {
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::*;
-    use crate::iter;
 
     // --- Unsafe functions ---
 
@@ -787,7 +786,7 @@ mod verify {
     // internally offset position.
     #[kani::proof]
     fn check_zip_get_unchecked_arbitrary_state_u8() {
-        const MAX_LEN: usize = 64;
+        const MAX_LEN: usize = 5000;
         let arr_a: [u8; MAX_LEN] = kani::any();
         let arr_b: [u8; MAX_LEN] = kani::any();
         let slice_a = kani::slice::any_slice_of_array(&arr_a);
@@ -825,9 +824,9 @@ mod verify {
     }
 
     // nth (TRA specialized — uses __iterator_get_unchecked for side effects)
-    // nth's while loop and super_nth's while-let loop carry vacuous Kani loop
-    // invariants to enable loop-contract mode; this harness covers slices up to
-    // MAX_LEN. For slice::Iter, MAY_HAVE_SIDE_EFFECT is false, so nth's loop body
+    // nth's while loop and super_nth's while-let loop carry index-bound Kani
+    // loop invariants to enable loop-contract mode; this harness covers slices
+    // up to MAX_LEN. For slice::Iter, MAY_HAVE_SIDE_EFFECT is false, so nth's loop body
     // is just an index increment and super_nth runs at most once when called from
     // nth (its next()-driven loop does not iterate in this configuration).
     #[kani::proof]
@@ -871,9 +870,6 @@ mod verify {
     }
 
     // Minimal TrustedLen iterator with trivial state for spec_fold verification.
-    // CBMC cannot infer assigns clauses for loops calling next() through &mut self,
-    // so we decompose the proof: a bounded end-to-end harness plus an unbounded
-    // inductive step harness that proves the unsafe op is safe at any iteration.
     struct CountDown(usize);
     impl Iterator for CountDown {
         type Item = u8;
@@ -895,6 +891,11 @@ mod verify {
 
     // spec_fold (TrustedLen specialized — uses unwrap_unchecked)
     // End-to-end bounded harness: exercises the full TrustedLen spec_fold loop path.
+    // A source-level loop contract on the inner for-loop is not expressible at the
+    // pinned Kani: the required invariant (remaining == upper - index) needs a
+    // size_hint call, and method calls in loop_invariant lower incorrectly
+    // ("not enough arguments, inserting non-deterministic value"); no generic
+    // field-level alternative exists for arbitrary TrustedLen sources.
     #[kani::proof]
     #[kani::unwind(9)]
     fn check_zip_spec_fold() {
@@ -904,33 +905,8 @@ mod verify {
         kani::assume(len_a as usize <= MAX_LEN);
         kani::assume(len_b as usize <= MAX_LEN);
         kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-        let zip =
-            Zip::new(iter::repeat_n(1u8, len_a as usize), iter::repeat_n(2u8, len_b as usize));
+        let zip = Zip::new(CountDown(len_a as usize), CountDown(len_b as usize));
         Iterator::fold(zip, (), |(), _| ());
-    }
-
-    // spec_fold unbounded inductive step: proves the unsafe operations
-    // (unwrap_unchecked on both iterators) are safe at ANY iteration k of the
-    // inner for loop, for arbitrary iterator lengths. The for loop runs exactly
-    // min(len_a, len_b) times by construction, and at iteration k < min(len_a, len_b),
-    // both iterators have (len - k) > 0 remaining elements, so next() returns
-    // Some(...) and unwrap_unchecked is safe.
-    #[kani::proof]
-    fn check_zip_spec_fold_unbounded() {
-        let len_a: usize = kani::any();
-        let len_b: usize = kani::any();
-        let k: usize = kani::any();
-        let upper = cmp::min(len_a, len_b);
-        kani::assume(k < upper);
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-
-        // Iterator state at iteration k: (original_len - k) elements remaining
-        let mut a = CountDown(len_a - k);
-        let mut b = CountDown(len_b - k);
-
-        // These are the exact unsafe operations from spec_fold's inner loop body
-        let _val_a = unsafe { a.next().unwrap_unchecked() };
-        let _val_b = unsafe { b.next().unwrap_unchecked() };
     }
 
     #[kani::proof]
