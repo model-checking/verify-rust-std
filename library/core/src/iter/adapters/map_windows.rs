@@ -356,8 +356,12 @@ mod verify {
         let mut buf = Buffer { buffer: storage, start };
         let _window: &[u8; N] = buf.as_array_ref();
         let _uninit = buf.as_uninit_array_mut();
-        buf.push(kani::any());
-        assert!(buf.start <= N);
+        let pushed: u8 = kani::any();
+        buf.push(pushed);
+        // Effect assertions: push either advances start by one or wraps it to
+        // the front, and the pushed element becomes the back of the window.
+        assert!(if start == N { buf.start == 0 } else { buf.start == start + 1 });
+        assert!(buf.as_array_ref()[N - 1] == pushed);
         // Scope end runs Buffer::drop from the arbitrary post-push state.
     }
 
@@ -401,8 +405,12 @@ mod verify {
             storage[idx / N][idx % N] = MaybeUninit::new(DropToken(kani::any()));
         }
         let mut buf = Buffer { buffer: storage, start };
-        buf.push(DropToken(kani::any()));
-        assert!(buf.start <= N);
+        let pushed_val: u8 = kani::any();
+        buf.push(DropToken(pushed_val));
+        // Effect assertions: same advance-or-wrap relation as the u8 variant,
+        // and the pushed token's payload is at the back of the window.
+        assert!(if start == N { buf.start == 0 } else { buf.start == start + 1 });
+        assert!(buf.as_array_ref()[N - 1].0 == pushed_val);
         // Scope end runs Buffer::drop (real glue) from the post-push state.
     }
 
