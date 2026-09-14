@@ -10,6 +10,8 @@ on:
       - 'library/**'
       - '.github/workflows/kani.yml'
       - 'scripts/run-kani.sh'
+      - 'scripts/kani-std-analysis/flt2dec_harnesses.py'
+      - 'scripts/kani-std-analysis/test_flt2dec_harnesses.py'
 
 defaults:
   run:
@@ -35,6 +37,8 @@ jobs:
       WORKER_INDEX: ${{ matrix.partition }}
       # Total number of workers running this step
       WORKER_TOTAL: 4
+      # The same catalog assigns every excluded proof to a dedicated job on each OS.
+      KANI_SEPARATE_FLT2DEC: "true"
     
     steps:
       - name: Remove unnecessary software to free up disk space
@@ -64,344 +68,47 @@ jobs:
       # Step 3: Run Kani on the std library
       - name: Run Kani Verification
         run: |
-          # Exponent groups can span partitions. Run one proof at a time.
+          # Run one proof at a time on each runner.
           export KANI_JOBS=1
           export RAYON_NUM_THREADS=1
           head/scripts/run-kani.sh --path ${{github.workspace}}/head \
             --kani-args --harness-timeout 30m --fail-fast
    
-  check-flt2dec:
-    name: Verify flt2dec (${{ matrix.name }})
+  flt2dec_matrix:
+    name: Prepare flt2dec proof groups
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check proof routing
+        run: python3 -I -m unittest discover -s scripts/kani-std-analysis -p test_flt2dec_harnesses.py
+      - name: Build proof matrix
+        id: groups
+        run: |
+          flt2dec_matrix=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py --matrix)
+          printf 'matrix=%s\n' "$flt2dec_matrix" >> "$GITHUB_OUTPUT"
+
+  check-flt2dec:
+    name: Verify flt2dec (${{ matrix.group.name }}, ${{ matrix.os }})
+    needs: flt2dec_matrix
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: dragon-exact-f32
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f32
-          - name: dragon-exact-f64-00-03
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f64
-            first: 0
-            last: 3
-          - name: dragon-exact-f64-04-07
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f64
-            first: 4
-            last: 7
-          - name: dragon-exact-f64-08-11
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f64
-            first: 8
-            last: 11
-          - name: dragon-exact-f64-12-15
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f64
-            first: 12
-            last: 15
-          - name: dragon-exact-f64-16-19
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f64
-            first: 16
-            last: 19
-          - name: dragon-exact-f64-20-23
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f64
-            first: 20
-            last: 23
-          - name: dragon-exact-f64-24-27
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f64
-            first: 24
-            last: 27
-          - name: dragon-exact-f64-28-31
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_exact
-            kind: generator-f64
-            first: 28
-            last: 31
-          - name: dragon-shortest-f32
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f32
-          - name: dragon-shortest-f64-00-03
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f64
-            first: 0
-            last: 3
-          - name: dragon-shortest-f64-04-07
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f64
-            first: 4
-            last: 7
-          - name: dragon-shortest-f64-08-11
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f64
-            first: 8
-            last: 11
-          - name: dragon-shortest-f64-12-15
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f64
-            first: 12
-            last: 15
-          - name: dragon-shortest-f64-16-19
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f64
-            first: 16
-            last: 19
-          - name: dragon-shortest-f64-20-23
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f64
-            first: 20
-            last: 23
-          - name: dragon-shortest-f64-24-27
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f64
-            first: 24
-            last: 27
-          - name: dragon-shortest-f64-28-31
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_format_shortest
-            kind: generator-f64
-            first: 28
-            last: 31
-          - name: grisu-exact-f32
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f32
-          - name: grisu-exact-f64-00-03
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f64
-            first: 0
-            last: 3
-          - name: grisu-exact-f64-04-07
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f64
-            first: 4
-            last: 7
-          - name: grisu-exact-f64-08-11
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f64
-            first: 8
-            last: 11
-          - name: grisu-exact-f64-12-15
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f64
-            first: 12
-            last: 15
-          - name: grisu-exact-f64-16-19
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f64
-            first: 16
-            last: 19
-          - name: grisu-exact-f64-20-23
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f64
-            first: 20
-            last: 23
-          - name: grisu-exact-f64-24-27
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f64
-            first: 24
-            last: 27
-          - name: grisu-exact-f64-28-31
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_exact_opt
-            kind: generator-f64
-            first: 28
-            last: 31
-          - name: grisu-shortest-f32
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f32
-          - name: grisu-shortest-f64-00-03
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f64
-            first: 0
-            last: 3
-          - name: grisu-shortest-f64-04-07
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f64
-            first: 4
-            last: 7
-          - name: grisu-shortest-f64-08-11
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f64
-            first: 8
-            last: 11
-          - name: grisu-shortest-f64-12-15
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f64
-            first: 12
-            last: 15
-          - name: grisu-shortest-f64-16-19
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f64
-            first: 16
-            last: 19
-          - name: grisu-shortest-f64-20-23
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f64
-            first: 20
-            last: 23
-          - name: grisu-shortest-f64-24-27
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f64
-            first: 24
-            last: 27
-          - name: grisu-shortest-f64-28-31
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_format_shortest_opt
-            kind: generator-f64
-            first: 28
-            last: 31
-          - name: division-contract
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_div_2pow10_contract
-            kind: contract
-          - name: limb-division-contract
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_div_rem_digit_contract
-            kind: contract
-          - name: bigint-small-division-contract
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_div_rem_small_contract
-            kind: contract
-          - name: rounding-contract
-            module: num::flt2dec::rounding_verify
-            proof: check_round_up_contract
-            kind: contract
-          - name: grisu-exact-rounding-contract
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_round_exact_contract
-            kind: contract
-          - name: grisu-shortest-rounding-contract
-            module: num::flt2dec::strategy::grisu::grisu_verify
-            proof: check_round_shortest_contract
-            kind: contract
-          - name: comparison-equivalence
-            module: num::flt2dec::strategy::dragon::dragon_verify
-            proof: check_comparison_models_agree
-            kind: equivalence
-          - name: bit-scan-equivalence
-            module: num::flt2dec::bit_scan_verify
-            proof: check_leading_zeros_models_agree
-            kind: equivalence
-          - name: estimator-equivalence-00-07
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 0
-            last: 7
-          - name: estimator-equivalence-08-15
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 8
-            last: 15
-          - name: estimator-equivalence-16-23
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 16
-            last: 23
-          - name: estimator-equivalence-24-31
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 24
-            last: 31
-          - name: estimator-equivalence-32-39
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 32
-            last: 39
-          - name: estimator-equivalence-40-47
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 40
-            last: 47
-          - name: estimator-equivalence-48-55
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 48
-            last: 55
-          - name: estimator-equivalence-56-63
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 56
-            last: 63
-          - name: estimator-equivalence-64-64
-            module: num::flt2dec::estimator_verify
-            proof: check_estimator_model_agrees
-            kind: equivalence
-            first: 64
-            last: 64
-          - name: dragon-exact-fixed-exponent
-            module: num::flt2dec::strategy::dragon::dragon_verify::f64_exp_1023
-            proof: check_format_exact
-            kind: fixed-exponent
-          - name: dragon-shortest-fixed-exponent
-            module: num::flt2dec::strategy::dragon::dragon_verify::f64_exp_1023
-            proof: check_format_shortest
-            kind: fixed-exponent
-          - name: grisu-exact-fixed-exponent
-            module: num::flt2dec::strategy::grisu::grisu_verify::f64_exp_1023
-            proof: check_format_exact_opt
-            kind: fixed-exponent
-          - name: grisu-shortest-fixed-exponent
-            module: num::flt2dec::strategy::grisu::grisu_verify::f64_exp_1023
-            proof: check_format_shortest_opt
-            kind: fixed-exponent
+      matrix: ${{ fromJSON(needs.flt2dec_matrix.outputs.matrix) }}
     env:
       KANI_JOBS: 1
       RAYON_NUM_THREADS: 1
-      KANI_HARNESS_TIMEOUT: ${{ (matrix.kind == 'contract' || matrix.kind == 'equivalence') && '30m' || '60m' }}
-      KANI_OBJECT_BITS: ${{ (matrix.kind == 'contract' || matrix.kind == 'equivalence') && '12' || '14' }}
+      KANI_HARNESS_TIMEOUT: ${{ (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '30m' || '60m' }}
+      KANI_OBJECT_BITS: ${{ (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
       # Compare encoding cost on the four probes before changing full-domain jobs.
-      KANI_SYMEX_CACHE_DEREFERENCES: ${{ matrix.kind == 'fixed-exponent' && 'true' || 'false' }}
-      KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.kind == 'fixed-exponent' && 'false' || 'true' }}
-      HARNESS_MODULE: ${{ matrix.module }}
-      HARNESS_PROOF: ${{ matrix.proof }}
-      HARNESS_KIND: ${{ matrix.kind }}
-      HARNESS_FIRST: ${{ matrix.first }}
-      HARNESS_LAST: ${{ matrix.last }}
+      KANI_SYMEX_CACHE_DEREFERENCES: ${{ matrix.group.kind == 'fixed-exponent' && 'true' || 'false' }}
+      KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.group.kind == 'fixed-exponent' && 'false' || 'true' }}
+      HARNESS_GROUP: ${{ matrix.group.name }}
+      HARNESS_KIND: ${{ matrix.group.kind }}
     steps:
       - name: Remove unnecessary software to free up disk space
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
 
@@ -411,29 +118,20 @@ jobs:
           path: head
           submodules: true
 
+      - name: Trust CBMC Homebrew tap
+        if: runner.os == 'macOS'
+        run: brew trust --tap diffblue/cbmc
+
       - name: Verify selected proof groups
         run: |
           # Keep every group within four hours of proof budgets per job:
           # four 60-minute generators or eight 30-minute equivalence cases.
+          harness_names=$(python3 -I head/scripts/kani-std-analysis/flt2dec_harnesses.py --group "$HARNESS_GROUP")
           harness_args=()
-          if [[ "$HARNESS_KIND" == generator-f32 ]]; then
-            for group in {0..3}; do
-              printf -v group_name 'f32_%02d' "$group"
-              harness_args+=(--harness "$HARNESS_MODULE::$group_name::$HARNESS_PROOF")
-            done
-          elif [[ "$HARNESS_KIND" == generator-f64 ]]; then
-            for ((group=HARNESS_FIRST; group<=HARNESS_LAST; group++)); do
-              printf -v group_name 'f64_%02d' "$group"
-              harness_args+=(--harness "$HARNESS_MODULE::$group_name::$HARNESS_PROOF")
-            done
-          elif [[ "$HARNESS_KIND" == equivalence && -n "${HARNESS_FIRST:-}" ]]; then
-            for ((group=HARNESS_FIRST; group<=HARNESS_LAST; group++)); do
-              printf -v group_name '%s_%02d' "$HARNESS_PROOF" "$group"
-              harness_args+=(--harness "$HARNESS_MODULE::$group_name")
-            done
-          else
-            harness_args+=(--harness "$HARNESS_MODULE::$HARNESS_PROOF")
-          fi
+          while IFS= read -r harness; do
+            [[ -n "$harness" ]] || exit 1
+            harness_args+=(--harness "$harness")
+          done <<< "$harness_names"
           output_format=terse
           if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == fixed-exponent ]]; then
             output_format=regular

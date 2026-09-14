@@ -202,11 +202,20 @@ get_harnesses() {
     fi
     # Extract the harnesses inside "standard-harnesses" and "contract-harnesses" 
     # into an array called ALL_HARNESSES and the length of that array into HARNESS_COUNT
-    ALL_HARNESSES=($(jq -r '
-        ([.["standard-harnesses"] | to_entries | .[] | .value[]] + 
-            [.["contract-harnesses"] | to_entries | .[] | .value[]]) | 
-        .[]
-    ' $WORK_DIR/kani-list.json))
+    if [[ "${KANI_SEPARATE_FLT2DEC:-false}" == true ]]; then
+        # Dedicated jobs verify these exact names on both operating systems.
+        # Fail if any expected target is absent instead of silently dropping it.
+        local remaining_harnesses
+        remaining_harnesses=$(python3 -I "$WORK_DIR/scripts/kani-std-analysis/flt2dec_harnesses.py" \
+            --remaining "$WORK_DIR/kani-list.json")
+        ALL_HARNESSES=($remaining_harnesses)
+    else
+        ALL_HARNESSES=($(jq -r '
+            ([.["standard-harnesses"] | to_entries | .[] | .value[]] +
+                [.["contract-harnesses"] | to_entries | .[] | .value[]]) |
+            .[]
+        ' "$WORK_DIR/kani-list.json"))
+    fi
     HARNESS_COUNT=${#ALL_HARNESSES[@]}
 }
 
@@ -214,7 +223,12 @@ get_harnesses() {
 run_verification_subset() {
     local kani_path="$1"
     local harnesses=("${@:2}")  # All arguments after kani_path are harness names
-    
+
+    if (( ${#harnesses[@]} == 0 )); then
+        echo "No harnesses assigned to this partition."
+        return
+    fi
+
     # Build the --harness arguments
     local harness_args=""
     for harness in "${harnesses[@]}"; do
@@ -227,7 +241,7 @@ run_verification_subset() {
         $unstable_args \
         --no-assert-contracts \
         $harness_args --exact \
-        -j \
+        --jobs "${KANI_JOBS:-1}" \
         --output-format=terse \
         "${command_args[@]}" \
         --cbmc-args "${kani_cbmc_args[@]}"
