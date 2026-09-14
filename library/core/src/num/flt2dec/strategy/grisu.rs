@@ -166,6 +166,31 @@ pub fn format_shortest_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
 ) -> Option<(/*digits*/ &'a [u8], /*exp*/ i16)> {
+    let rounding = generate_shortest(d, buf);
+    round_and_weed(
+        rounding.digits,
+        rounding.exp,
+        rounding.remainder,
+        rounding.threshold,
+        rounding.plus1v,
+        rounding.ten_kappa,
+        rounding.ulp,
+    )
+}
+
+// Keep the initialized prefix and numeric state together for one final call.
+// Generation keeps its existing stopping conditions and argument order.
+struct ShortestRounding<'a> {
+    digits: &'a mut [u8],
+    exp: i16,
+    remainder: u64,
+    threshold: u64,
+    plus1v: u64,
+    ten_kappa: u64,
+    ulp: u64,
+}
+
+fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> ShortestRounding<'a> {
     assert!(d.mant > 0);
     assert!(d.minus > 0);
     assert!(d.plus > 0);
@@ -273,16 +298,16 @@ pub fn format_shortest_opt<'a>(
         if plus1rem < delta1 {
             // `plus1 % 10^kappa < delta1 = plus1 - minus1`; we've found the correct `kappa`.
             let ten_kappa = (ten_kappa as u64) << e; // scale 10^kappa back to the shared exponent
-            return round_and_weed(
+            return ShortestRounding {
                 // SAFETY: we initialized that memory above.
-                unsafe { buf[..i].assume_init_mut() },
+                digits: unsafe { buf[..i].assume_init_mut() },
                 exp,
-                plus1rem,
-                delta1,
-                plus1 - v.f,
+                remainder: plus1rem,
+                threshold: delta1,
+                plus1v: plus1 - v.f,
                 ten_kappa,
-                1,
-            );
+                ulp: 1,
+            };
         }
 
         // break the loop when we have rendered all integral digits.
@@ -322,16 +347,16 @@ pub fn format_shortest_opt<'a>(
 
         if r < threshold {
             let ten_kappa = 1 << e; // implicit divisor
-            return round_and_weed(
+            return ShortestRounding {
                 // SAFETY: we initialized that memory above.
-                unsafe { buf[..i].assume_init_mut() },
+                digits: unsafe { buf[..i].assume_init_mut() },
                 exp,
-                r,
+                remainder: r,
                 threshold,
-                (plus1 - v.f) * ulp,
+                plus1v: (plus1 - v.f) * ulp,
                 ten_kappa,
                 ulp,
-            );
+            };
         }
 
         // restore invariants
