@@ -103,9 +103,9 @@ jobs:
       RAYON_NUM_THREADS: 1
       KANI_HARNESS_TIMEOUT: ${{ (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '30m' || '60m' }}
       KANI_OBJECT_BITS: ${{ (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
-      # Compare encoding cost on the four probes before changing full-domain jobs.
-      KANI_SYMEX_CACHE_DEREFERENCES: ${{ matrix.group.kind == 'fixed-exponent' && 'true' || 'false' }}
-      KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.group.kind == 'fixed-exponent' && 'false' || 'true' }}
+      # Compare encoding cost on the probes before changing full-domain jobs.
+      KANI_SYMEX_CACHE_DEREFERENCES: ${{ matrix.group.kind == 'probe' && 'true' || 'false' }}
+      KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.group.kind == 'probe' && 'false' || 'true' }}
       HARNESS_GROUP: ${{ matrix.group.name }}
       HARNESS_KIND: ${{ matrix.group.kind }}
     steps:
@@ -135,7 +135,7 @@ jobs:
             harness_args+=(--harness "$harness")
           done <<< "$harness_names"
           output_format=terse
-          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == fixed-exponent ]]; then
+          if [[ "$HARNESS_KIND" == contract || "$HARNESS_KIND" == equivalence || "$HARNESS_KIND" == probe ]]; then
             output_format=regular
           fi
           printf 'Selected %s harnesses\n' "$(( ${#harness_args[@]} / 2 ))"

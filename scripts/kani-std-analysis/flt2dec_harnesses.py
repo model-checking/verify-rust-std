@@ -29,8 +29,13 @@ def proof_groups():
             add(f"{name}-f64-{first:02d}-{first + 3:02d}", "generator-f64", [
                 f"{module}::f64_{group:02d}::{proof}" for group in range(first, first + 4)
             ])
-        add(f"{name}-fixed-exponent", "fixed-exponent", [
+        add(f"{name}-fixed-exponent", "probe", [
             f"{module}::f64_exp_1023::{proof}"
+        ])
+
+    for mode in ("exact", "shortest"):
+        add(f"grisu-{mode}-cached-power-39", "probe", [
+            f"{GRISU}::f64_cached_power_39::check_format_{mode}_opt"
         ])
 
     for name, module, proof, kind in [

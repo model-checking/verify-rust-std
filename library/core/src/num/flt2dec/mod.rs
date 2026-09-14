@@ -707,6 +707,17 @@ pub mod flt2dec_verify {
         finite_decoded(decode(f64::from_bits(bits)).1)
     }
 
+    // Additional diagnostics can span several exponents without fixing any
+    // significand bits. The complete finite partitions remain required above.
+    pub(crate) fn arbitrary_finite_f64_range<const FIRST: u64, const END: u64>() -> Decoded {
+        assert!(FIRST > 0 && FIRST < END && END <= 0x7ff0_0000_0000_0000);
+        let bits: u64 = kani::any();
+        kani::assume(bits >= FIRST && bits < END);
+        kani::cover(bits == FIRST, "cached-power probe includes its first input");
+        kani::cover(bits == END - 1, "cached-power probe includes its last input");
+        finite_decoded(decode(f64::from_bits(bits)).1)
+    }
+
     fn finite_decoded(decoded: FullDecoded) -> Decoded {
         match decoded {
             FullDecoded::Finite(d) => d,

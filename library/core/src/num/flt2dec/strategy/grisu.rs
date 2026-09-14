@@ -122,9 +122,18 @@ pub fn cached_power(alpha: i16, gamma: i16) -> (i16, Fp) {
     let range = (CACHED_POW10.len() as i32) - 1;
     let domain = (CACHED_POW10_LAST_E - CACHED_POW10_FIRST_E) as i32;
     let idx = ((gamma as i32) - offset) * range / domain;
+    #[cfg(kani)]
+    let idx = proof_cached_power_index(idx);
     let (f, e, k) = CACHED_POW10[idx as usize];
     debug_assert!(alpha <= e && e <= gamma);
     (k, Fp { f, e })
+}
+
+// Diagnostics can expose a constant table entry after asserting its index.
+// The original index calculation and table lookup still execute.
+#[cfg(kani)]
+fn proof_cached_power_index(index: i32) -> i32 {
+    index
 }
 
 /// Given `x > 0`, returns `(k, 10^k)` such that `10^k <= x < 10^(k+1)`.
@@ -843,7 +852,7 @@ pub mod grisu_verify {
     use crate::kani;
     use crate::num::flt2dec::flt2dec_verify::{
         arbitrary_finite_f32, arbitrary_finite_f64, arbitrary_finite_f64_exponent,
-        for_each_finite_partition,
+        arbitrary_finite_f64_range, for_each_finite_partition,
     };
 
     // The direct strategy harnesses execute the real generator bodies. Exact
@@ -1145,15 +1154,32 @@ pub mod grisu_verify {
         Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
     }
 
+    struct CachedPowerIndex(i32);
+
+    impl CachedPowerIndex {
+        fn check(&self, actual: i32) -> i32 {
+            assert_eq!(actual, self.0);
+            self.0
+        }
+    }
+
+    fn checked_cached_power_39(index: i32) -> i32 {
+        CachedPowerIndex(39).check(index)
+    }
+
     // Call the real generator loops and compose the final-rounding proof. The
     // wrapper harness below checks a separate obligation.
     macro_rules! check_partition {
         ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
+            check_partition!($name, $decode::<$group>(), $cover_fallback);
+        };
+        ($name:ident, $decoded:expr, $cover_fallback:literal $(, $cached_index:path)?) => {
             mod $name {
                 use super::*;
 
                 #[kani::proof]
                 #[kani::unwind(19)]
+                $(#[kani::stub(proof_cached_power_index, $cached_index)])?
                 #[kani::stub(
                     u64::leading_zeros,
                     crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
@@ -1166,7 +1192,7 @@ pub mod grisu_verify {
                 #[kani::stub_verified(round_shortest_contract)]
                 #[kani::solver(kissat)]
                 fn check_format_shortest_opt() {
-                    let d = $decode::<$group>();
+                    let d = $decoded;
                     let len = usize::from(kani::any::<u8>());
                     kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
                     let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
@@ -1191,6 +1217,7 @@ pub mod grisu_verify {
                 // rounding contract retains its own 33-iteration proof bound.
                 #[kani::proof]
                 #[kani::unwind(19)]
+                $(#[kani::stub(proof_cached_power_index, $cached_index)])?
                 #[kani::stub(
                     u64::leading_zeros,
                     crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
@@ -1203,7 +1230,7 @@ pub mod grisu_verify {
                 #[kani::stub_verified(round_exact_contract)]
                 #[kani::solver(kissat)]
                 fn check_format_exact_opt() {
-                    let d = $decode::<$group>();
+                    let d = $decoded;
                     let limit: i16 = kani::any();
                     let len = usize::from(kani::any::<u8>());
                     kani::assume(len > 0 && len <= PROOF_BUFLEN);
@@ -1228,6 +1255,15 @@ pub mod grisu_verify {
 
     for_each_finite_partition!(check_partition);
     check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent, 1023, false);
+
+    // All positive f64 values in [2^-8, 2^18), with every significand bit symbolic.
+    // These additional probes assert the cached index instead of assuming it.
+    check_partition!(
+        f64_cached_power_39,
+        arbitrary_finite_f64_range::<0x3f70_0000_0000_0000, 0x4110_0000_0000_0000>(),
+        false,
+        checked_cached_power_39
+    );
 
     // Wholesale havoc stub for the dragon fallback (modelled as an opaque op that
     // writes a digit and returns an in-bounds slice of `buf`).
