@@ -901,20 +901,20 @@ pub mod grisu_verify {
         }
     }
 
-    // Shortest rounding keeps its input immutable and returns only metadata.
+    // Quantify the other prefix bytes inside the proof. The adapter checks the
+    // actual prefix and passes the final digit, which is the only byte changed.
     #[kani::requires(
         len > 0 && len <= PROOF_BUFLEN
-            && crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |digit| digit < u8::MAX)
-            && digits[len - 1] >= b'0' && digits[len - 1] <= b'9'
+            && digit >= b'0' && digit <= b'9'
             && remainder < threshold && ten_kappa > 0
             && ulp <= threshold / 4 && ulp <= plus1v && plus1v <= u64::MAX - ulp
-            && weed_stops_before_zero(digits[len - 1], remainder, threshold, plus1v, ten_kappa, ulp)
+            && weed_stops_before_zero(digit, remainder, threshold, plus1v, ten_kappa, ulp)
     )]
     #[kani::ensures(|result| result.as_ref().is_none_or(|&(written, output_exp)| {
         written == len && output_exp == exp
     }))]
     fn round_shortest_contract(
-        digits: [u8; PROOF_BUFLEN],
+        digit: u8,
         len: usize,
         exp: i16,
         remainder: u64,
@@ -923,6 +923,11 @@ pub mod grisu_verify {
         ten_kappa: u64,
         ulp: u64,
     ) -> Option<(usize, i16)> {
+        let mut digits: [u8; PROOF_BUFLEN] = kani::any();
+        digits[len - 1] = digit;
+        kani::assume(crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |byte| {
+            byte < u8::MAX
+        }));
         let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
         let start = buf.as_mut_ptr().cast::<u8>();
         // SAFETY: the contract bounds len by both distinct arrays' capacities.
@@ -941,10 +946,7 @@ pub mod grisu_verify {
             assert_eq!(output.as_ptr(), start.cast_const());
             let checksum = crate::num::flt2dec::rounding_verify::prefix_checksum(output);
             kani::cover(checksum == 0, "shortest rounding returns readable bytes");
-            kani::cover(
-                output[len - 1] < digits[len - 1],
-                "shortest rounding can decrease the final digit",
-            );
+            kani::cover(output[len - 1] < digit, "shortest rounding can decrease the final digit");
             (output.len(), output_exp)
         })
     }
@@ -959,11 +961,19 @@ pub mod grisu_verify {
         ulp: u64,
     ) -> Option<(&[u8], i16)> {
         let len = buf.len();
-        assert!(len <= PROOF_BUFLEN);
-        let mut digits = [0; PROOF_BUFLEN];
-        digits[..len].copy_from_slice(buf);
-        let result =
-            round_shortest_contract(digits, len, exp, remainder, threshold, plus1v, ten_kappa, ulp);
+        assert!(len > 0 && len <= PROOF_BUFLEN);
+        // Read and check every actual byte before invoking the numeric summary.
+        assert!(crate::num::flt2dec::rounding_verify::bytes_below_max(buf));
+        let result = round_shortest_contract(
+            buf[len - 1],
+            len,
+            exp,
+            remainder,
+            threshold,
+            plus1v,
+            ten_kappa,
+            ulp,
+        );
         // Overapproximate output values within the initialized input prefix.
         let output: [u8; PROOF_BUFLEN] = kani::any();
         buf.copy_from_slice(&output[..len]);
@@ -976,10 +986,10 @@ pub mod grisu_verify {
     #[kani::unwind(9)]
     #[kani::solver(kissat)]
     fn check_round_shortest_contract() {
-        let digits: [u8; PROOF_BUFLEN] = kani::any();
+        let digit: u8 = kani::any();
         let len = usize::from(kani::any::<u8>());
         let result = round_shortest_contract(
-            digits,
+            digit,
             len,
             kani::any(),
             kani::any(),
