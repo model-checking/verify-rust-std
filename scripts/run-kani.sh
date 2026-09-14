@@ -25,6 +25,9 @@ fi
 if [[ "${KANI_ARRAY_FIELD_SENSITIVITY:-true}" == false ]]; then
     kani_cbmc_args+=(--no-array-field-sensitivity)
 fi
+if [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
+    kani_cbmc_args+=(--refine-arithmetic)
+fi
 path=""
 run_command="verify-std"
 with_autoharness="false"
