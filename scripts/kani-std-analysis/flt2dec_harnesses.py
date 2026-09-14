@@ -42,6 +42,7 @@ def proof_groups():
     for name, module, proof, kind in [
         ("division-contract", DRAGON, "check_div_2pow10_contract", "contract"),
         ("limb-division-contract", DRAGON, "check_div_rem_digit_contract", "contract"),
+        ("limb-multiplication-contract", DRAGON, "check_carrying_mul_add_contract", "contract"),
         ("bigint-small-division-contract", DRAGON, "check_div_rem_small_contract", "contract"),
         ("rounding-contract", "num::flt2dec::rounding_verify", "check_round_up_contract", "contract"),
         ("grisu-exact-rounding-contract", GRISU, "check_round_exact_contract", "contract"),

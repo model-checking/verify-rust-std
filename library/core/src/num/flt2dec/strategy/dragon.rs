@@ -506,6 +506,9 @@ pub mod dragon_verify {
         ($name:ident, $size:literal) => {
             #[kani::proof]
             #[kani::unwind(41)]
+            #[kani::stub(u32::carrying_mul, stub_carrying_mul)]
+            #[kani::stub(u32::carrying_mul_add, stub_carrying_mul_add)]
+            #[kani::stub_verified(carrying_mul_add_contract)]
             #[kani::solver(minisat)]
             fn $name() {
                 check_mul_small_model_agrees::<$size>();
@@ -554,6 +557,53 @@ pub mod dragon_verify {
     check_mul_size!(check_mul_small_model_agrees_37, 37);
     check_mul_size!(check_mul_small_model_agrees_38, 38);
     check_mul_size!(check_mul_small_model_agrees_39, 39);
+
+    // Prove the exact two-limb result once before composing longer carry chains.
+    #[kani::ensures(|result| {
+        (((result.1 as u64) << 32) | result.0 as u64)
+            == (digit as u64)
+                .wrapping_mul(multiplier as u64)
+                .wrapping_add(carry as u64)
+                .wrapping_add(addend as u64)
+    })]
+    fn carrying_mul_add_contract(
+        digit: u32,
+        multiplier: u32,
+        carry: u32,
+        addend: u32,
+    ) -> (u32, u32) {
+        digit.carrying_mul_add(multiplier, carry, addend)
+    }
+
+    fn stub_carrying_mul_add(digit: u32, multiplier: u32, carry: u32, addend: u32) -> (u32, u32) {
+        carrying_mul_add_contract(digit, multiplier, carry, addend)
+    }
+
+    fn stub_carrying_mul(digit: u32, multiplier: u32, carry: u32) -> (u32, u32) {
+        carrying_mul_add_contract(digit, multiplier, carry, 0)
+    }
+
+    #[kani::proof_for_contract(carrying_mul_add_contract)]
+    #[kani::solver(z3)]
+    fn check_carrying_mul_add_contract() {
+        let digit: u32 = kani::any();
+        let multiplier: u32 = kani::any();
+        let carry: u32 = kani::any();
+        let addend: u32 = kani::any();
+        let result = carrying_mul_add_contract(digit, multiplier, carry, addend);
+        kani::cover(
+            digit == 0 && multiplier == 0 && addend == 0 && carry == 0,
+            "limb multiplication accepts all zero inputs",
+        );
+        kani::cover(
+            digit == u32::MAX && multiplier == u32::MAX && addend == u32::MAX && carry == u32::MAX,
+            "limb multiplication accepts all maximum inputs",
+        );
+        kani::cover(
+            result == (u32::MAX, u32::MAX),
+            "limb multiplication reaches the full two-limb result",
+        );
+    }
 
     // Bigint division needs the remainder bound to justify the next limb's
     // division. Prove that scalar obligation separately; the storage contract
@@ -827,6 +877,9 @@ pub mod dragon_verify {
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(u32::carrying_mul, stub_carrying_mul)]
+                #[kani::stub(u32::carrying_mul_add, stub_carrying_mul_add)]
+                #[kani::stub_verified(carrying_mul_add_contract)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
@@ -868,6 +921,9 @@ pub mod dragon_verify {
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(u32::carrying_mul, stub_carrying_mul)]
+                #[kani::stub(u32::carrying_mul_add, stub_carrying_mul_add)]
+                #[kani::stub_verified(carrying_mul_add_contract)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
