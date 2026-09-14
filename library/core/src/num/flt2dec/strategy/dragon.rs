@@ -506,7 +506,7 @@ pub mod dragon_verify {
         ($name:ident, $size:literal) => {
             #[kani::proof]
             #[kani::unwind(41)]
-            #[kani::solver(kissat)]
+            #[kani::solver(z3)]
             fn $name() {
                 check_mul_small_model_agrees::<$size>();
             }
