@@ -574,14 +574,6 @@ pub mod dragon_verify {
         digit.carrying_mul_add(multiplier, carry, addend)
     }
 
-    fn stub_carrying_mul_add(digit: u32, multiplier: u32, carry: u32, addend: u32) -> (u32, u32) {
-        carrying_mul_add_contract(digit, multiplier, carry, addend)
-    }
-
-    fn stub_carrying_mul(digit: u32, multiplier: u32, carry: u32) -> (u32, u32) {
-        carrying_mul_add_contract(digit, multiplier, carry, 0)
-    }
-
     // The standalone contract harness also proves this deterministic model
     // equal to the real primitive for all four u32 inputs. Sharing its
     // expression on both sides preserves equal carry prefixes syntactically.
@@ -899,9 +891,8 @@ pub mod dragon_verify {
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
-                #[kani::stub(u32::carrying_mul, stub_carrying_mul)]
-                #[kani::stub(u32::carrying_mul_add, stub_carrying_mul_add)]
-                #[kani::stub_verified(carrying_mul_add_contract)]
+                #[kani::stub(u32::carrying_mul, carrying_mul_model)]
+                #[kani::stub(u32::carrying_mul_add, carrying_mul_add_model)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
@@ -943,9 +934,8 @@ pub mod dragon_verify {
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
-                #[kani::stub(u32::carrying_mul, stub_carrying_mul)]
-                #[kani::stub(u32::carrying_mul_add, stub_carrying_mul_add)]
-                #[kani::stub_verified(carrying_mul_add_contract)]
+                #[kani::stub(u32::carrying_mul, carrying_mul_model)]
+                #[kani::stub(u32::carrying_mul_add, carrying_mul_add_model)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,

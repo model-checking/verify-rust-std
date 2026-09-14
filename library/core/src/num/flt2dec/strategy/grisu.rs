@@ -881,11 +881,12 @@ pub mod grisu_verify {
     const PROOF_BUFLEN: usize = 32;
     const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
 
-    // Decode gives minus = 1 and plus = 1 or 2. Its largest significand has
-    // 53 bits before the interval scaling. Callers prove these conditions
-    // from the real decoder, without restricting any finite float bits.
+    // Decode gives minus = 1. Only normal powers of two have plus = 2,
+    // with the f32 or f64 significand shifted by two. Callers prove these
+    // conditions from the real decoder, without restricting finite float bits.
     #[kani::requires(
-        mant >= 2 && minus == 1 && (plus == 1 || plus == 2)
+        mant >= 2 && minus == 1
+            && (plus == 1 || (plus == 2 && (mant == 1 << 25 || mant == 1 << 54)))
             && exp >= -1076 && exp <= 970
             && mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53)
     )]
@@ -942,6 +943,11 @@ pub mod grisu_verify {
                     && delta >= 4
                     && (delta as u128) << 53 >= upper as u128
                     && 4 * (upper - v) as u128 <= 3 * delta as u128
+                    // A centered target stops rounding before digit zero.
+                    // Otherwise, the lower endpoint must stay off decimal
+                    // boundaries through all 16 possible fractional digits.
+                    && ((2 * (plus - v) as u128) < delta as u128
+                        || (minus - 1) & ((1u64 << (e - 16)) - 1) != 0)
                     && delta as u128 * scale >= 1u128 << e
             }
     }
@@ -970,6 +976,8 @@ pub mod grisu_verify {
         kani::cover(exp == -1076, "scaling includes the smallest decoded exponent");
         kani::cover(exp == 970, "scaling includes the largest decoded exponent");
         kani::cover(plus == 2, "scaling includes unequal neighbor intervals");
+        kani::cover(mant == 1 << 25 && plus == 2, "scaling includes normal f32 powers of two");
+        kani::cover(mant == 1 << 54 && plus == 2, "scaling includes normal f64 powers of two");
         kani::cover(result.3 == ALPHA, "scaling reaches the smallest target exponent");
         kani::cover(result.3 == GAMMA, "scaling reaches the largest target exponent");
     }
