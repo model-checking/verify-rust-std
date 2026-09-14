@@ -15,10 +15,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 79)
-        self.assertEqual(len({group["name"] for group in self.groups}), 79)
-        self.assertEqual(len(self.dedicated), 277)
-        self.assertEqual(len(set(self.dedicated)), 277)
+        self.assertEqual(len(self.groups), 95)
+        self.assertEqual(len({group["name"] for group in self.groups}), 95)
+        self.assertEqual(len(self.dedicated), 342)
+        self.assertEqual(len(set(self.dedicated)), 342)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
@@ -47,6 +47,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
                     if group["name"].startswith("decimal-division-")
                     for harness in group["harnesses"]]
         self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in division}, set(range(10)))
+        scaling = [harness for group in self.groups
+                   if group["name"].startswith("grisu-shortest-scaling-contract-")
+                   for harness in group["harnesses"]]
+        self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in scaling}, set(range(66)))
 
     def test_only_exact_catalog_names_are_removed(self):
         retained = ["num::flt2dec::check_wrapper", "num::flt2dec::check_future_proof",

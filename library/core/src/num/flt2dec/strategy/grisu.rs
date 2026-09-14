@@ -962,25 +962,126 @@ pub mod grisu_verify {
         }
     }
 
-    #[kani::proof_for_contract(scale_shortest_contract)]
-    #[kani::stub(u64::leading_zeros, crate::num::flt2dec::bit_scan_verify::leading_zeros_u64)]
-    #[kani::stub(u32::leading_zeros, crate::num::flt2dec::bit_scan_verify::leading_zeros_u32)]
-    #[kani::solver(z3)]
-    fn check_scale_shortest_contract() {
-        let mant = kani::any();
-        let minus = kani::any();
-        let plus = kani::any();
-        let exp = kani::any();
-        let result = scale_shortest_contract(mant, minus, plus, exp);
-        kani::cover(mant == 2 && exp == -1075, "scaling includes the smallest f64 subnormal");
-        kani::cover(exp == -1076, "scaling includes the smallest decoded exponent");
-        kani::cover(exp == 970, "scaling includes the largest decoded exponent");
-        kani::cover(plus == 2, "scaling includes unequal neighbor intervals");
-        kani::cover(mant == 1 << 25 && plus == 2, "scaling includes normal f32 powers of two");
-        kani::cover(mant == 1 << 54 && plus == 2, "scaling includes normal f64 powers of two");
-        kani::cover(result.3 == ALPHA, "scaling reaches the smallest target exponent");
-        kani::cover(result.3 == GAMMA, "scaling reaches the largest target exponent");
+    // The contract bounds mant + plus by [3, 2^54 + 2], so normalization
+    // shifts by 9 through 62 bits. Together with exp in [-1076, 970], every
+    // normalized exponent lies in [-1138, 961]. These 66 ranges cover it.
+    // Reconstructing exp from the actual shift preserves every valid input
+    // while reducing the cached powers considered by each standalone proof.
+    macro_rules! check_scale_shortest_partition {
+        ($name:ident, $group:literal) => {
+            #[kani::proof_for_contract(scale_shortest_contract)]
+            #[kani::stub(
+                u64::leading_zeros,
+                crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+            )]
+            #[kani::stub(
+                u32::leading_zeros,
+                crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+            )]
+            #[kani::solver(z3)]
+            fn $name() {
+                let mant: u64 = kani::any();
+                let minus = kani::any();
+                let plus: u64 = kani::any();
+                let normalized_exp: i16 = -1138 + $group * 32 + i16::from(kani::any::<u8>() & 31);
+                let shift = mant.wrapping_add(plus).leading_zeros() as i16;
+                let exp = normalized_exp + shift;
+                let result = scale_shortest_contract(mant, minus, plus, exp);
+                kani::cover(
+                    mant == 2 && exp == -1075,
+                    "scaling includes the smallest f64 subnormal",
+                );
+                kani::cover(exp == -1076, "scaling includes the smallest decoded exponent");
+                kani::cover(exp == 970, "scaling includes the largest decoded exponent");
+                kani::cover(plus == 2, "scaling includes unequal neighbor intervals");
+                kani::cover(
+                    mant == 1 << 25 && plus == 2,
+                    "scaling includes normal f32 powers of two",
+                );
+                kani::cover(
+                    mant == 1 << 54 && plus == 2,
+                    "scaling includes normal f64 powers of two",
+                );
+                kani::cover(result.3 == ALPHA, "scaling reaches the smallest target exponent");
+                kani::cover(result.3 == GAMMA, "scaling reaches the largest target exponent");
+                kani::cover(
+                    normalized_exp == -1138 + $group * 32,
+                    "scaling reaches the first normalized exponent in its range",
+                );
+                kani::cover(
+                    normalized_exp == if $group == 65 { 961 } else { -1107 + $group * 32 },
+                    "scaling reaches the last normalized exponent in its range",
+                );
+            }
+        };
     }
+
+    check_scale_shortest_partition!(check_scale_shortest_00, 0);
+    check_scale_shortest_partition!(check_scale_shortest_01, 1);
+    check_scale_shortest_partition!(check_scale_shortest_02, 2);
+    check_scale_shortest_partition!(check_scale_shortest_03, 3);
+    check_scale_shortest_partition!(check_scale_shortest_04, 4);
+    check_scale_shortest_partition!(check_scale_shortest_05, 5);
+    check_scale_shortest_partition!(check_scale_shortest_06, 6);
+    check_scale_shortest_partition!(check_scale_shortest_07, 7);
+    check_scale_shortest_partition!(check_scale_shortest_08, 8);
+    check_scale_shortest_partition!(check_scale_shortest_09, 9);
+    check_scale_shortest_partition!(check_scale_shortest_10, 10);
+    check_scale_shortest_partition!(check_scale_shortest_11, 11);
+    check_scale_shortest_partition!(check_scale_shortest_12, 12);
+    check_scale_shortest_partition!(check_scale_shortest_13, 13);
+    check_scale_shortest_partition!(check_scale_shortest_14, 14);
+    check_scale_shortest_partition!(check_scale_shortest_15, 15);
+    check_scale_shortest_partition!(check_scale_shortest_16, 16);
+    check_scale_shortest_partition!(check_scale_shortest_17, 17);
+    check_scale_shortest_partition!(check_scale_shortest_18, 18);
+    check_scale_shortest_partition!(check_scale_shortest_19, 19);
+    check_scale_shortest_partition!(check_scale_shortest_20, 20);
+    check_scale_shortest_partition!(check_scale_shortest_21, 21);
+    check_scale_shortest_partition!(check_scale_shortest_22, 22);
+    check_scale_shortest_partition!(check_scale_shortest_23, 23);
+    check_scale_shortest_partition!(check_scale_shortest_24, 24);
+    check_scale_shortest_partition!(check_scale_shortest_25, 25);
+    check_scale_shortest_partition!(check_scale_shortest_26, 26);
+    check_scale_shortest_partition!(check_scale_shortest_27, 27);
+    check_scale_shortest_partition!(check_scale_shortest_28, 28);
+    check_scale_shortest_partition!(check_scale_shortest_29, 29);
+    check_scale_shortest_partition!(check_scale_shortest_30, 30);
+    check_scale_shortest_partition!(check_scale_shortest_31, 31);
+    check_scale_shortest_partition!(check_scale_shortest_32, 32);
+    check_scale_shortest_partition!(check_scale_shortest_33, 33);
+    check_scale_shortest_partition!(check_scale_shortest_34, 34);
+    check_scale_shortest_partition!(check_scale_shortest_35, 35);
+    check_scale_shortest_partition!(check_scale_shortest_36, 36);
+    check_scale_shortest_partition!(check_scale_shortest_37, 37);
+    check_scale_shortest_partition!(check_scale_shortest_38, 38);
+    check_scale_shortest_partition!(check_scale_shortest_39, 39);
+    check_scale_shortest_partition!(check_scale_shortest_40, 40);
+    check_scale_shortest_partition!(check_scale_shortest_41, 41);
+    check_scale_shortest_partition!(check_scale_shortest_42, 42);
+    check_scale_shortest_partition!(check_scale_shortest_43, 43);
+    check_scale_shortest_partition!(check_scale_shortest_44, 44);
+    check_scale_shortest_partition!(check_scale_shortest_45, 45);
+    check_scale_shortest_partition!(check_scale_shortest_46, 46);
+    check_scale_shortest_partition!(check_scale_shortest_47, 47);
+    check_scale_shortest_partition!(check_scale_shortest_48, 48);
+    check_scale_shortest_partition!(check_scale_shortest_49, 49);
+    check_scale_shortest_partition!(check_scale_shortest_50, 50);
+    check_scale_shortest_partition!(check_scale_shortest_51, 51);
+    check_scale_shortest_partition!(check_scale_shortest_52, 52);
+    check_scale_shortest_partition!(check_scale_shortest_53, 53);
+    check_scale_shortest_partition!(check_scale_shortest_54, 54);
+    check_scale_shortest_partition!(check_scale_shortest_55, 55);
+    check_scale_shortest_partition!(check_scale_shortest_56, 56);
+    check_scale_shortest_partition!(check_scale_shortest_57, 57);
+    check_scale_shortest_partition!(check_scale_shortest_58, 58);
+    check_scale_shortest_partition!(check_scale_shortest_59, 59);
+    check_scale_shortest_partition!(check_scale_shortest_60, 60);
+    check_scale_shortest_partition!(check_scale_shortest_61, 61);
+    check_scale_shortest_partition!(check_scale_shortest_62, 62);
+    check_scale_shortest_partition!(check_scale_shortest_63, 63);
+    check_scale_shortest_partition!(check_scale_shortest_64, 64);
+    check_scale_shortest_partition!(check_scale_shortest_65, 65);
 
     // At digit one the loop must stop. If its remainder would already exceed
     // threshold, the loop's threshold check forces an earlier stop. With digit

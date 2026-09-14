@@ -54,9 +54,11 @@ def proof_groups():
     ]:
         add(name, kind, [f"{module}::{proof}"], 30)
 
-    add("grisu-shortest-scaling-contract", "contract", [
-        f"{GRISU}::check_scale_shortest_contract"
-    ], 60)
+    for first in range(0, 66, 4):
+        last = min(first + 3, 65)
+        add(f"grisu-shortest-scaling-contract-{first:02d}-{last:02d}", "contract", [
+            f"{GRISU}::check_scale_shortest_{group:02d}" for group in range(first, last + 1)
+        ], 60)
 
     for first in range(0, 40, 8):
         add(f"small-multiplication-equivalence-{first:02d}-{first + 7:02d}", "equivalence", [
