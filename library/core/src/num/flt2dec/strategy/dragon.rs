@@ -484,12 +484,9 @@ pub mod dragon_verify {
         assert!(actual.kani_same_storage(&modeled));
     }
 
-    #[kani::proof]
-    #[kani::unwind(41)]
-    #[kani::solver(kissat)]
-    fn check_mul_small_model_agrees() {
-        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
-        kani::assume(source.kani_size() < 40);
+    fn check_mul_small_model_agrees<const SIZE: usize>() {
+        assert!(SIZE < 40);
+        let source = Big::kani_with_arbitrary_limbs(SIZE);
         let multiplier: u32 = kani::any();
         kani::cover(source.kani_size() == 0, "multiplication accepts empty storage");
         kani::cover(source.kani_size() == 39, "multiplication accepts the largest model input");
@@ -504,6 +501,59 @@ pub mod dragon_verify {
         assert!(actual.kani_same_storage(&modeled));
         kani::cover(actual.kani_size() == 40, "multiplication can append a carry limb");
     }
+
+    macro_rules! check_mul_size {
+        ($name:ident, $size:literal) => {
+            #[kani::proof]
+            #[kani::unwind(41)]
+            #[kani::solver(kissat)]
+            fn $name() {
+                check_mul_small_model_agrees::<$size>();
+            }
+        };
+    }
+
+    // Together these cases retain every storage size accepted by the model.
+    check_mul_size!(check_mul_small_model_agrees_00, 0);
+    check_mul_size!(check_mul_small_model_agrees_01, 1);
+    check_mul_size!(check_mul_small_model_agrees_02, 2);
+    check_mul_size!(check_mul_small_model_agrees_03, 3);
+    check_mul_size!(check_mul_small_model_agrees_04, 4);
+    check_mul_size!(check_mul_small_model_agrees_05, 5);
+    check_mul_size!(check_mul_small_model_agrees_06, 6);
+    check_mul_size!(check_mul_small_model_agrees_07, 7);
+    check_mul_size!(check_mul_small_model_agrees_08, 8);
+    check_mul_size!(check_mul_small_model_agrees_09, 9);
+    check_mul_size!(check_mul_small_model_agrees_10, 10);
+    check_mul_size!(check_mul_small_model_agrees_11, 11);
+    check_mul_size!(check_mul_small_model_agrees_12, 12);
+    check_mul_size!(check_mul_small_model_agrees_13, 13);
+    check_mul_size!(check_mul_small_model_agrees_14, 14);
+    check_mul_size!(check_mul_small_model_agrees_15, 15);
+    check_mul_size!(check_mul_small_model_agrees_16, 16);
+    check_mul_size!(check_mul_small_model_agrees_17, 17);
+    check_mul_size!(check_mul_small_model_agrees_18, 18);
+    check_mul_size!(check_mul_small_model_agrees_19, 19);
+    check_mul_size!(check_mul_small_model_agrees_20, 20);
+    check_mul_size!(check_mul_small_model_agrees_21, 21);
+    check_mul_size!(check_mul_small_model_agrees_22, 22);
+    check_mul_size!(check_mul_small_model_agrees_23, 23);
+    check_mul_size!(check_mul_small_model_agrees_24, 24);
+    check_mul_size!(check_mul_small_model_agrees_25, 25);
+    check_mul_size!(check_mul_small_model_agrees_26, 26);
+    check_mul_size!(check_mul_small_model_agrees_27, 27);
+    check_mul_size!(check_mul_small_model_agrees_28, 28);
+    check_mul_size!(check_mul_small_model_agrees_29, 29);
+    check_mul_size!(check_mul_small_model_agrees_30, 30);
+    check_mul_size!(check_mul_small_model_agrees_31, 31);
+    check_mul_size!(check_mul_small_model_agrees_32, 32);
+    check_mul_size!(check_mul_small_model_agrees_33, 33);
+    check_mul_size!(check_mul_small_model_agrees_34, 34);
+    check_mul_size!(check_mul_small_model_agrees_35, 35);
+    check_mul_size!(check_mul_small_model_agrees_36, 36);
+    check_mul_size!(check_mul_small_model_agrees_37, 37);
+    check_mul_size!(check_mul_small_model_agrees_38, 38);
+    check_mul_size!(check_mul_small_model_agrees_39, 39);
 
     // Bigint division needs the remainder bound to justify the next limb's
     // division. Prove that scalar obligation separately; the storage contract

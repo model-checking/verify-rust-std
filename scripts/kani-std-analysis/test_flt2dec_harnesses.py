@@ -15,10 +15,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 71)
-        self.assertEqual(len({group["name"] for group in self.groups}), 71)
-        self.assertEqual(len(self.dedicated), 226)
-        self.assertEqual(len(set(self.dedicated)), 226)
+        self.assertEqual(len(self.groups), 75)
+        self.assertEqual(len({group["name"] for group in self.groups}), 75)
+        self.assertEqual(len(self.dedicated), 265)
+        self.assertEqual(len(set(self.dedicated)), 265)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
@@ -27,7 +27,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
                 self.assertIn(minutes, (30, 60, 120))
                 self.assertLessEqual(minutes * len(group["harnesses"]), 240)
 
-    def test_all_float_partitions_and_estimator_cases_remain(self):
+    def test_all_float_partitions_and_equivalence_cases_remain(self):
         generators = [group for group in self.groups if group["kind"].startswith("generator-")]
         self.assertEqual(sum(len(group["harnesses"]) for group in generators), 144)
         for family in ("dragon-exact", "dragon-shortest", "grisu-exact", "grisu-shortest"):
@@ -39,6 +39,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
         cases = [harness for group in self.groups if group["name"].startswith("estimator-")
                  for harness in group["harnesses"]]
         self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in cases}, set(range(65)))
+        multiplication = [harness for group in self.groups
+                          if group["name"].startswith("small-multiplication-")
+                          for harness in group["harnesses"]]
+        self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in multiplication}, set(range(40)))
 
     def test_only_exact_catalog_names_are_removed(self):
         retained = ["num::flt2dec::check_wrapper", "num::flt2dec::check_future_proof",

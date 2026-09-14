@@ -49,10 +49,15 @@ def proof_groups():
         ("comparison-equivalence", DRAGON, "check_comparison_models_agree", "equivalence"),
         ("addition-equivalence", DRAGON, "check_add_model_agrees", "equivalence"),
         ("subtraction-equivalence", DRAGON, "check_sub_model_agrees", "equivalence"),
-        ("small-multiplication-equivalence", DRAGON, "check_mul_small_model_agrees", "equivalence"),
         ("bit-scan-equivalence", "num::flt2dec::bit_scan_verify", "check_leading_zeros_models_agree", "equivalence"),
     ]:
         add(name, kind, [f"{module}::{proof}"], 30)
+
+    for first in range(0, 40, 8):
+        add(f"small-multiplication-equivalence-{first:02d}-{first + 7:02d}", "equivalence", [
+            f"{DRAGON}::check_mul_small_model_agrees_{size:02d}"
+            for size in range(first, first + 8)
+        ], 30)
 
     for first in range(0, 65, 8):
         last = min(first + 7, 64)
