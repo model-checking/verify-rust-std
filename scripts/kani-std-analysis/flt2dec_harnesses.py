@@ -13,30 +13,31 @@ OPERATING_SYSTEMS = ["ubuntu-latest", "macos-latest"]
 def proof_groups():
     groups = []
 
-    def add(name, kind, harnesses):
-        groups.append({"name": name, "kind": kind, "harnesses": harnesses})
+    def add(name, kind, harnesses, timeout_minutes):
+        groups.append({"name": name, "kind": kind, "harnesses": harnesses,
+                       "timeout_minutes": timeout_minutes})
 
-    for name, module, proof in [
-        ("dragon-exact", DRAGON, "check_format_exact"),
-        ("dragon-shortest", DRAGON, "check_format_shortest"),
-        ("grisu-exact", GRISU, "check_format_exact_opt"),
-        ("grisu-shortest", GRISU, "check_format_shortest_opt"),
+    for name, module, proof, batch_size, timeout_minutes in [
+        ("dragon-exact", DRAGON, "check_format_exact", 4, 60),
+        ("dragon-shortest", DRAGON, "check_format_shortest", 4, 60),
+        ("grisu-exact", GRISU, "check_format_exact_opt", 4, 60),
+        ("grisu-shortest", GRISU, "check_format_shortest_opt", 2, 120),
     ]:
-        add(f"{name}-f32", "generator-f32", [
-            f"{module}::f32_{group:02d}::{proof}" for group in range(4)
-        ])
-        for first in range(0, 32, 4):
-            add(f"{name}-f64-{first:02d}-{first + 3:02d}", "generator-f64", [
-                f"{module}::f64_{group:02d}::{proof}" for group in range(first, first + 4)
-            ])
+        for width, count in ((32, 4), (64, 32)):
+            for first in range(0, count, batch_size):
+                last = first + batch_size - 1
+                partition = f"f{width}" if count == batch_size else f"f{width}-{first:02d}-{last:02d}"
+                add(f"{name}-{partition}", f"generator-f{width}", [
+                    f"{module}::f{width}_{group:02d}::{proof}" for group in range(first, last + 1)
+                ], timeout_minutes)
         add(f"{name}-fixed-exponent", "probe", [
             f"{module}::f64_exp_1023::{proof}"
-        ])
+        ], timeout_minutes)
 
     for mode in ("exact", "shortest"):
         add(f"grisu-{mode}-cached-power-39", "probe", [
             f"{GRISU}::f64_cached_power_39::check_format_{mode}_opt"
-        ])
+        ], 120 if mode == "shortest" else 60)
 
     for name, module, proof, kind in [
         ("division-contract", DRAGON, "check_div_2pow10_contract", "contract"),
@@ -51,14 +52,14 @@ def proof_groups():
         ("small-multiplication-equivalence", DRAGON, "check_mul_small_model_agrees", "equivalence"),
         ("bit-scan-equivalence", "num::flt2dec::bit_scan_verify", "check_leading_zeros_models_agree", "equivalence"),
     ]:
-        add(name, kind, [f"{module}::{proof}"])
+        add(name, kind, [f"{module}::{proof}"], 30)
 
     for first in range(0, 65, 8):
         last = min(first + 7, 64)
         add(f"estimator-equivalence-{first:02d}-{last:02d}", "equivalence", [
             f"num::flt2dec::estimator_verify::check_estimator_model_agrees_{bits:02d}"
             for bits in range(first, last + 1)
-        ])
+        ], 30)
     return groups
 
 
