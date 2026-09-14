@@ -28,6 +28,8 @@ static POW5TO256: [Digit; 19] = [
 
 #[doc(hidden)]
 pub fn mul_pow10(x: &mut Big, n: usize) -> &mut Big {
+    #[cfg(kani)]
+    let n = dragon_verify::proof_pow10_exponent(n);
     debug_assert!(n < 512);
     // Save ourself the left shift for the smallest cases.
     if n < 8 {
@@ -549,9 +551,113 @@ pub mod dragon_verify {
         0
     }
 
+    // Identity instrumentation lets each proof expose constant exponent bits
+    // before expanding the original multiplication body. The replacement
+    // checks equality on every call, so an invalid prefix fails verification.
+    pub(super) fn proof_pow10_exponent(n: usize) -> usize {
+        n
+    }
+
+    struct FixedExponentBits(usize);
+    struct VariableExponentBits(usize);
+
+    struct Pow10Prefix {
+        fixed: FixedExponentBits,
+        variable: VariableExponentBits,
+    }
+
+    impl Pow10Prefix {
+        const fn for_range(range: crate::ops::RangeInclusive<usize>) -> Self {
+            let lower = *range.start();
+            let upper = *range.end();
+            assert!(lower <= upper);
+            let different = lower ^ upper;
+            let variable = if different == 0 { 0 } else { usize::MAX >> different.leading_zeros() };
+            Self {
+                fixed: FixedExponentBits(lower & !variable),
+                variable: VariableExponentBits(variable),
+            }
+        }
+
+        fn check(&self, n: usize) -> usize {
+            let encoded = self.fixed.0 | (n & self.variable.0);
+            assert_eq!(encoded, n);
+            encoded
+        }
+    }
+
+    // For normal inputs with exponent field e, the estimator uses a binary
+    // exponent sum between e - bias and e - bias + 1. Group zero also includes
+    // subnormals, down to -149 for f32 and -1074 for f64. Applying the original
+    // integer scaling formula to those endpoints gives these magnitude ranges.
+    // They only choose an encoding; check() proves it equals the actual value.
+    const F32_POW10_PREFIXES: [Pow10Prefix; 4] = [
+        Pow10Prefix::for_range(19..=45),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(19..=38),
+    ];
+
+    const F64_POW10_PREFIXES: [Pow10Prefix; 32] = [
+        Pow10Prefix::for_range(289..=324),
+        Pow10Prefix::for_range(270..=289),
+        Pow10Prefix::for_range(251..=270),
+        Pow10Prefix::for_range(231..=251),
+        Pow10Prefix::for_range(212..=231),
+        Pow10Prefix::for_range(193..=212),
+        Pow10Prefix::for_range(174..=193),
+        Pow10Prefix::for_range(154..=174),
+        Pow10Prefix::for_range(135..=154),
+        Pow10Prefix::for_range(116..=135),
+        Pow10Prefix::for_range(97..=116),
+        Pow10Prefix::for_range(77..=97),
+        Pow10Prefix::for_range(58..=77),
+        Pow10Prefix::for_range(39..=58),
+        Pow10Prefix::for_range(19..=39),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(19..=38),
+        Pow10Prefix::for_range(38..=58),
+        Pow10Prefix::for_range(58..=77),
+        Pow10Prefix::for_range(77..=96),
+        Pow10Prefix::for_range(96..=115),
+        Pow10Prefix::for_range(115..=135),
+        Pow10Prefix::for_range(135..=154),
+        Pow10Prefix::for_range(154..=173),
+        Pow10Prefix::for_range(173..=192),
+        Pow10Prefix::for_range(192..=212),
+        Pow10Prefix::for_range(212..=231),
+        Pow10Prefix::for_range(231..=250),
+        Pow10Prefix::for_range(250..=270),
+        Pow10Prefix::for_range(270..=289),
+        Pow10Prefix::for_range(289..=308),
+    ];
+
+    fn checked_pow10_f32<const GROUP: usize>(n: usize) -> usize {
+        F32_POW10_PREFIXES[GROUP].check(n)
+    }
+
+    fn checked_pow10_f64<const GROUP: usize>(n: usize) -> usize {
+        F64_POW10_PREFIXES[GROUP].check(n)
+    }
+
+    fn checked_pow10_unit<const EXPONENT: usize>(n: usize) -> usize {
+        assert_eq!(EXPONENT, 1023);
+        Pow10Prefix::for_range(0..=0).check(n)
+    }
+
     macro_rules! check_partition {
         ($name:ident, arbitrary_finite_f32, $group:literal, $cover_fallback:literal) => {
-            check_partition!($name, arbitrary_finite_f32, $group, $cover_fallback, 19, 33);
+            check_partition!(
+                $name,
+                arbitrary_finite_f32,
+                $group,
+                $cover_fallback,
+                19,
+                33,
+                crate::num::flt2dec::estimator_verify::estimate_scaling_factor,
+                checked_pow10_f32
+            );
         };
         ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
             check_partition!($name, $decode, $group, $cover_fallback, 41, 41);
@@ -567,18 +673,24 @@ pub mod dragon_verify {
                 $cover_fallback,
                 $shortest_unwind,
                 $exact_unwind,
-                crate::num::flt2dec::estimator_verify::estimate_scaling_factor
+                crate::num::flt2dec::estimator_verify::estimate_scaling_factor,
+                checked_pow10_f64
             );
         };
         (
             $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
-            $shortest_unwind:literal, $exact_unwind:literal, $estimate:path
+            $shortest_unwind:literal, $exact_unwind:literal, $estimate:path, $pow10:ident
         ) => {
             mod $name {
                 use super::*;
 
+                fn stub_pow10_exponent(n: usize) -> usize {
+                    $pow10::<$group>(n)
+                }
+
                 #[kani::proof]
                 #[kani::unwind($shortest_unwind)]
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
@@ -613,6 +725,7 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($exact_unwind)]
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
@@ -661,6 +774,7 @@ pub mod dragon_verify {
         false,
         19,
         33,
-        estimate_unit_scale
+        estimate_unit_scale,
+        checked_pow10_unit
     );
 }
