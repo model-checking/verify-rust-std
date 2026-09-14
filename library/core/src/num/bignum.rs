@@ -489,6 +489,117 @@ impl Big32x40 {
         )
     }
 
+    pub(crate) fn kani_same_storage(&self, other: &Self) -> bool {
+        macro_rules! equal_limbs {
+            ($($index:literal),+ $(,)?) => {
+                true $(& (self.base[$index] == other.base[$index]))+
+            };
+        }
+
+        (self.size == other.size)
+            & equal_limbs!(
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+            )
+    }
+
+    // Independent equivalence proofs compare every stored limb and the size.
+    // Addition and multiplication reserve one limb for a possible carry.
+    // Their size bounds are asserted here, including at generator call sites.
+    pub(crate) fn kani_add_model<'a>(&'a mut self, other: &Self) -> &'a mut Self {
+        assert!(self.size < self.base.len() && other.size < other.base.len());
+        let mut sz = kani_loop_size(crate::cmp::max(self.size, other.size));
+
+        macro_rules! add_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let carry = false;
+                $(
+                    let carry = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_add(other.base[$index], carry);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        carry
+                    };
+                )+
+                carry
+            }};
+        }
+
+        let carry = add_limbs!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        );
+        if carry {
+            self.base[sz] = 1;
+            sz += 1;
+        }
+        self.size = sz;
+        self
+    }
+
+    pub(crate) fn kani_sub_model<'a>(&'a mut self, other: &Self) -> &'a mut Self {
+        assert!(self.size <= self.base.len() && other.size <= other.base.len());
+        assert!(self.kani_cmp_model(other) != crate::cmp::Ordering::Less);
+        let sz = kani_loop_size(crate::cmp::max(self.size, other.size));
+
+        macro_rules! subtract_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let noborrow = true;
+                $(
+                    let noborrow = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_add(!other.base[$index], noborrow);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        noborrow
+                    };
+                )+
+                noborrow
+            }};
+        }
+
+        let noborrow = subtract_limbs!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        );
+        assert!(noborrow);
+        self.size = sz;
+        self
+    }
+
+    pub(crate) fn kani_mul_small_model(&mut self, other: u32) -> &mut Self {
+        assert!(self.size < self.base.len());
+        let mut sz = kani_loop_size(self.size);
+
+        macro_rules! multiply_limbs {
+            ($($index:literal),+ $(,)?) => {{
+                let carry = 0;
+                $(
+                    let carry = if $index < sz {
+                        let (value, next) = self.base[$index].carrying_mul(other, carry);
+                        self.base[$index] = value;
+                        next
+                    } else {
+                        carry
+                    };
+                )+
+                carry
+            }};
+        }
+
+        let carry = multiply_limbs!(
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        );
+        if carry > 0 {
+            self.base[sz] = carry;
+            sz += 1;
+        }
+        self.size = sz;
+        self
+    }
+
     // Contract proofs include every storage size, including the empty zero
     // representation. Leading zero limbs within the active prefix are valid.
     pub(crate) fn kani_any_valid() -> Self {

@@ -15,10 +15,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 59)
-        self.assertEqual(len({group["name"] for group in self.groups}), 59)
-        self.assertEqual(len(self.dedicated), 223)
-        self.assertEqual(len(set(self.dedicated)), 223)
+        self.assertEqual(len(self.groups), 62)
+        self.assertEqual(len({group["name"] for group in self.groups}), 62)
+        self.assertEqual(len(self.dedicated), 226)
+        self.assertEqual(len(set(self.dedicated)), 226)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = 30 if group["kind"] in ("contract", "equivalence") else 60

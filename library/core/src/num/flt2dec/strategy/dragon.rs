@@ -446,6 +446,65 @@ pub mod dragon_verify {
         );
     }
 
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_add_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let other = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() < 40 && other.kani_size() < 40);
+        kani::cover(source.kani_size() == 0, "addition accepts empty storage");
+        kani::cover(source.kani_size() == 39, "addition accepts the largest model input");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.add(&other) as *mut Big == actual_start);
+        assert!(modeled.kani_add_model(&other) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(actual.kani_size() == 40, "addition can append a carry limb");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_sub_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let other = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() <= 40 && other.kani_size() <= 40);
+        kani::assume(source.kani_cmp_model(&other) != Ordering::Less);
+        kani::cover(source.kani_size() == 0, "subtraction accepts empty storage");
+        kani::cover(source.kani_size() == 40, "subtraction accepts all limbs");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.sub(&other) as *mut Big == actual_start);
+        assert!(modeled.kani_sub_model(&other) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_mul_small_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() < 40);
+        let multiplier: u32 = kani::any();
+        kani::cover(source.kani_size() == 0, "multiplication accepts empty storage");
+        kani::cover(source.kani_size() == 39, "multiplication accepts the largest model input");
+        kani::cover(multiplier == 0, "multiplication accepts zero");
+        kani::cover(multiplier == u32::MAX, "multiplication accepts the largest digit");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.mul_small(multiplier) as *mut Big == actual_start);
+        assert!(modeled.kani_mul_small_model(multiplier) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(actual.kani_size() == 40, "multiplication can append a carry limb");
+    }
+
     // Bigint division needs the remainder bound to justify the next limb's
     // division. Prove that scalar obligation separately; the storage contract
     // below does not depend on the quotient's numeric value.
@@ -711,7 +770,12 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($shortest_unwind)]
-                $(#[kani::stub(crate::num::bignum::kani_loop_size, $shortest_limbs)])?
+                $(
+                    #[kani::stub(crate::num::bignum::kani_loop_size, $shortest_limbs)]
+                    #[kani::stub(Big::add, Big::kani_add_model)]
+                    #[kani::stub(Big::sub, Big::kani_sub_model)]
+                    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
@@ -747,7 +811,12 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($exact_unwind)]
-                $(#[kani::stub(crate::num::bignum::kani_loop_size, $exact_limbs)])?
+                $(
+                    #[kani::stub(crate::num::bignum::kani_loop_size, $exact_limbs)]
+                    #[kani::stub(Big::add, Big::kani_add_model)]
+                    #[kani::stub(Big::sub, Big::kani_sub_model)]
+                    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(

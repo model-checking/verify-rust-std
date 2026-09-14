@@ -46,6 +46,9 @@ def proof_groups():
         ("grisu-exact-rounding-contract", GRISU, "check_round_exact_contract", "contract"),
         ("grisu-shortest-rounding-contract", GRISU, "check_round_shortest_contract", "contract"),
         ("comparison-equivalence", DRAGON, "check_comparison_models_agree", "equivalence"),
+        ("addition-equivalence", DRAGON, "check_add_model_agrees", "equivalence"),
+        ("subtraction-equivalence", DRAGON, "check_sub_model_agrees", "equivalence"),
+        ("small-multiplication-equivalence", DRAGON, "check_mul_small_model_agrees", "equivalence"),
         ("bit-scan-equivalence", "num::flt2dec::bit_scan_verify", "check_leading_zeros_models_agree", "equivalence"),
     ]:
         add(name, kind, [f"{module}::{proof}"])
