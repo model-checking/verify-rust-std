@@ -41,17 +41,13 @@ check-cfg = [
     'cfg(target_has_reliable_f16_math)',
     'cfg(target_has_reliable_f128)',
     'cfg(target_has_reliable_f128_math)',
-<<<<<<< HEAD
     'cfg(llvm_enzyme)',
     'cfg(kani)',
     'cfg(flux)',
     'cfg(rapx)',
-=======
     # Prevents use of a static variable for providing platform specific RawOsError
     # functionality
     'cfg(no_io_statics)',
-
->>>>>>> subtree/library
 ]
 
 [package.metadata.flux]

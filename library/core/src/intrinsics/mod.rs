@@ -53,20 +53,15 @@
     issue = "none"
 )]
 
-<<<<<<< HEAD
 use safety::{ensures, requires};
 
-use crate::ffi::va_list::{VaArgSafe, VaList};
+use crate::ffi::{VaArgSafe, VaList};
 #[cfg(kani)]
 use crate::kani;
 use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
+use crate::num::imp::libm;
 #[cfg(kani)]
 use crate::ub_checks;
-=======
-use crate::ffi::{VaArgSafe, VaList};
-use crate::marker::{ConstParamTy, DiscriminantKind, PointeeSized, Tuple};
-use crate::num::imp::libm;
->>>>>>> subtree/library
 use crate::{mem, ptr};
 
 mod bounds;
@@ -4006,7 +4001,6 @@ pub const unsafe fn va_end(ap: &mut VaList<'_>) {
     /* deliberately does nothing */
 }
 
-<<<<<<< HEAD
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
@@ -4687,7 +4681,8 @@ mod verify {
     fn supported_status(status: AllocationStatus) -> bool {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
-=======
+}
+
 /// Returns the return address of the caller function (after inlining) in a best-effort manner or a null pointer if it is not supported on the current backend.
 /// Returning an accurate value is a quality-of-implementation concern, but no hard guarantees are
 /// made about the return value: formally, the intrinsic non-deterministically returns
@@ -4699,5 +4694,4 @@ mod verify {
 #[rustc_nounwind]
 pub fn return_address() -> *const () {
     core::ptr::null()
->>>>>>> subtree/library
 }

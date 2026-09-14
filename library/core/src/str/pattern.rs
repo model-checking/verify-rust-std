@@ -2025,14 +2025,9 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
 ///
 /// Both slices must have the same length.
 #[cfg(any(
-<<<<<<< HEAD
     all(target_arch = "x86_64", any(kani, target_feature = "sse2")),
-    all(target_arch = "loongarch64", target_feature = "lsx")
-=======
-    all(target_arch = "x86_64", target_feature = "sse2"),
     all(target_arch = "loongarch64", target_feature = "lsx"),
     all(target_arch = "aarch64", target_feature = "neon")
->>>>>>> subtree/library
 ))]
 #[inline]
 #[requires(x.len() == y.len())]

@@ -486,20 +486,6 @@ macro_rules! iterator {
         #[unstable(feature = "trusted_len", issue = "37572")]
         unsafe impl<T> TrustedLen for $name<'_, T> {}
 
-<<<<<<< HEAD
-        impl<'a, T> UncheckedIterator for $name<'a, T> {
-            #[inline]
-            #[safety::requires(!is_empty!(self))]
-            unsafe fn next_unchecked(&mut self) -> $elem {
-                // SAFETY: The caller promised there's at least one more item.
-                unsafe {
-                    self.post_inc_start(1).$into_ref()
-                }
-            }
-        }
-
-=======
->>>>>>> subtree/library
         #[stable(feature = "default_iters", since = "1.70.0")]
         impl<T> Default for $name<'_, T> {
             /// Creates an empty slice iterator.

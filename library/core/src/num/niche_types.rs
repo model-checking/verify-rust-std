@@ -14,14 +14,10 @@ macro_rules! define_valid_range_type {
         $(#[$m:meta])*
         $vis:vis struct $name:ident($int:ident is $pat:pat);
     )+) => {$(
-<<<<<<< HEAD
         #[cfg_attr(flux, flux::opaque)]
         #[cfg_attr(flux, flux::refined_by(val: int))]
         #[cfg_attr(flux, flux::invariant($low <= cast(val) && cast(val) <= $high))]
-        #[derive(Clone, Copy, Eq)]
-=======
         #[derive(Clone, Copy)]
->>>>>>> subtree/library
         #[repr(transparent)]
         $(#[$m])*
         $vis struct $name(pattern_type!($int is $pat));

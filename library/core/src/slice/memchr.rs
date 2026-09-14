@@ -25,7 +25,6 @@ const fn contains_zero_byte(x: usize) -> bool {
 #[inline]
 #[must_use]
 pub const fn memchr(x: u8, text: &[u8]) -> Option<usize> {
-<<<<<<< HEAD
     // For Kani, always use the byte-by-byte loop: it is semantically
     // equivalent to the word-at-a-time `memchr_aligned` (see comment there)
     // but symbolically executes with a fraction of the cost, and `memchr` is
@@ -36,22 +35,17 @@ pub const fn memchr(x: u8, text: &[u8]) -> Option<usize> {
     #[cfg(not(kani))]
     {
         // Fast path for small slices.
-        if text.len() < 2 * USIZE_BYTES {
-            return memchr_naive(x, text);
+        let result = if text.len() < 2 * USIZE_BYTES {
+            memchr_naive(x, text)
+        } else {
+            memchr_aligned(x, text)
+        };
+        if let Some(index) = result {
+            // SAFETY: Both implementations only return an index from within `text`.
+            unsafe { crate::hint::assert_unchecked(index < text.len()) };
         }
-
-        memchr_aligned(x, text)
+        result
     }
-=======
-    // Fast path for small slices.
-    let result =
-        if text.len() < 2 * USIZE_BYTES { memchr_naive(x, text) } else { memchr_aligned(x, text) };
-    if let Some(index) = result {
-        // SAFETY: Both implementations only return an index from within `text`.
-        unsafe { crate::hint::assert_unchecked(index < text.len()) };
-    }
-    result
->>>>>>> subtree/library
 }
 
 #[inline]

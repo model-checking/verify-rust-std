@@ -6,12 +6,9 @@ use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::{
     FusedIterator, TrustedFused, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce,
 };
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-=======
 use crate::num::NonZero;
->>>>>>> subtree/library
 use crate::ops::Try;
 
 /// An iterator that yields `None` forever after the underlying iterator

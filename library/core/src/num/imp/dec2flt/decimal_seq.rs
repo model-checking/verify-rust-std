@@ -9,19 +9,15 @@
 //! algorithm can be found in "ParseNumberF64 by Simple Decimal Conversion",
 //! available online: <https://nigeltao.github.io/blog/2020/parse-number-f64-simple.html>.
 
-<<<<<<< HEAD:library/core/src/num/dec2flt/decimal_seq.rs
 use safety::ensures;
+
+use dec2flt::common::{ByteSlice, is_8digits};
 
 #[cfg(kani)]
 use crate::forall;
 #[cfg(kani)]
 use crate::kani;
-use crate::num::dec2flt::common::{ByteSlice, is_8digits};
-=======
-use dec2flt::common::{ByteSlice, is_8digits};
-
 use crate::num::imp::dec2flt;
->>>>>>> subtree/library:library/core/src/num/imp/dec2flt/decimal_seq.rs
 
 /// A decimal floating-point number, represented as a sequence of decimal digits.
 #[derive(Clone, Debug, PartialEq)]

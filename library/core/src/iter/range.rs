@@ -770,15 +770,6 @@ const impl Step for char {
         Some(unsafe { char::from_u32_unchecked(res) })
     }
 
-<<<<<<< HEAD
-    #[requires({
-        (start as u32).checked_add(count as u32).is_some_and(|dist|
-            (start as u32) >= 0xD800 ||
-            dist < 0xD800 ||
-            dist.checked_add(0x800).is_some()
-         )
-    })]
-=======
     // Note: These char overflowing implementations were chosen for
     // code simplicity. Alternative impls were examined, and some
     // yielded marginally simpler assembly, but none resulted in the same
@@ -802,7 +793,13 @@ const impl Step for char {
         }
     }
 
->>>>>>> subtree/library
+    #[requires({
+        (start as u32).checked_add(count as u32).is_some_and(|dist|
+            (start as u32) >= 0xD800 ||
+            dist < 0xD800 ||
+            dist.checked_add(0x800).is_some()
+         )
+    })]
     #[inline]
     unsafe fn forward_unchecked(start: char, count: usize) -> char {
         let start = start as u32;

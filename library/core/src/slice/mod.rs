@@ -696,12 +696,9 @@ impl<T> [T] {
     #[must_use]
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
-<<<<<<< HEAD
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(InBound(index_access(self, index))))]
-=======
     #[rustc_no_writable]
->>>>>>> subtree/library
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
         I: [const] SliceIndex<Self>,
@@ -1364,16 +1361,12 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
-<<<<<<< HEAD
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(N, "[1,)")))]
     #[cfg_attr(rapx, rapx::requires(ValidNum(len(self) % N == 0)))]
-    pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
-=======
     pub const unsafe fn as_chunks_unchecked<#[rustc_panics_when_zero] const N: usize>(
         &self,
     ) -> &[[T; N]] {
->>>>>>> subtree/library
         assert_unsafe_precondition!(
             check_language_ub,
             "slice::as_chunks_unchecked requires `N != 0` and the slice to split exactly into `N`-element chunks",
@@ -1431,12 +1424,8 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
-<<<<<<< HEAD
     #[cfg_attr(rapx, rapx::verify)]
-    pub const fn as_chunks<const N: usize>(&self) -> (&[[T; N]], &[T]) {
-=======
     pub const fn as_chunks<#[rustc_panics_when_zero] const N: usize>(&self) -> (&[[T; N]], &[T]) {
->>>>>>> subtree/library
         assert!(N != 0, "chunk size must be non-zero");
         let len_rounded_down = self.len() / N * N;
         // SAFETY: The rounded-down value is always the same or smaller than the
@@ -1483,12 +1472,8 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
-<<<<<<< HEAD
     #[cfg_attr(rapx, rapx::verify)]
-    pub const fn as_rchunks<const N: usize>(&self) -> (&[T], &[[T; N]]) {
-=======
     pub const fn as_rchunks<#[rustc_panics_when_zero] const N: usize>(&self) -> (&[T], &[[T; N]]) {
->>>>>>> subtree/library
         assert!(N != 0, "chunk size must be non-zero");
         let len = self.len() / N;
         let (remainder, multiple_of_n) = self.split_at(self.len() - len * N);
@@ -1543,16 +1528,12 @@ impl<T> [T] {
     #[inline]
     #[must_use]
     #[track_caller]
-<<<<<<< HEAD
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(N, "[1,)")))]
     #[cfg_attr(rapx, rapx::requires(ValidNum(len(self) % N == 0)))]
-    pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
-=======
     pub const unsafe fn as_chunks_unchecked_mut<#[rustc_panics_when_zero] const N: usize>(
         &mut self,
     ) -> &mut [[T; N]] {
->>>>>>> subtree/library
         assert_unsafe_precondition!(
             check_language_ub,
             "slice::as_chunks_unchecked requires `N != 0` and the slice to split exactly into `N`-element chunks",
@@ -1606,14 +1587,10 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[must_use]
-<<<<<<< HEAD
     #[cfg_attr(rapx, rapx::verify)]
-    pub const fn as_chunks_mut<const N: usize>(&mut self) -> (&mut [[T; N]], &mut [T]) {
-=======
     pub const fn as_chunks_mut<#[rustc_panics_when_zero] const N: usize>(
         &mut self,
     ) -> (&mut [[T; N]], &mut [T]) {
->>>>>>> subtree/library
         assert!(N != 0, "chunk size must be non-zero");
         let len_rounded_down = self.len() / N * N;
         // SAFETY: The rounded-down value is always the same or smaller than the
@@ -3046,12 +3023,8 @@ impl<T> [T] {
     #[rustc_const_unstable(feature = "const_binary_search", issue = "159532")]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-<<<<<<< HEAD
     #[cfg_attr(rapx, rapx::verify)]
-    pub fn binary_search_by<'a, F>(&'a self, mut f: F) -> Result<usize, usize>
-=======
     pub const fn binary_search_by<'a, F>(&'a self, mut f: F) -> Result<usize, usize>
->>>>>>> subtree/library
     where
         F: [const] FnMut(&'a T) -> Ordering + [const] Destruct,
     {

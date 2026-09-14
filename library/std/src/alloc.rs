@@ -68,15 +68,9 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![stable(feature = "alloc_module", since = "1.28.0")]
 
-<<<<<<< HEAD
 #[cfg(kani)]
 use core::kani;
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use core::{hint, mem, ptr};
 
-=======
->>>>>>> subtree/library
 #[stable(feature = "alloc_module", since = "1.28.0")]
 #[doc(inline)]
 pub use alloc_crate::alloc::*;
@@ -465,21 +459,16 @@ pub fn rust_oom(layout: Layout) -> ! {
 #[allow(unused_attributes)]
 #[unstable(feature = "alloc_internals", issue = "none")]
 pub mod __default_lib_allocator {
-<<<<<<< HEAD
     #[cfg(kani)]
     use core::kani;
 
     use safety::requires;
 
-    use super::{GlobalAlloc, Layout, System};
-=======
     use super::Layout;
     // We call the system functions directly to avoid any overheads introduced
     // by the roundtrip through `impl Allocator for System` and
     // `impl<A: GlobalAllocator> GlobalAlloc for A`.
     use crate::sys::alloc as imp;
-
->>>>>>> subtree/library
     // These magic symbol names are used as a fallback for implementing the
     // `__rust_alloc` etc symbols (see `src/liballoc/alloc.rs`) when there is
     // no `#[global_allocator]` attribute.

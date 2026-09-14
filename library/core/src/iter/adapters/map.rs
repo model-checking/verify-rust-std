@@ -3,13 +3,9 @@ use safety::requires;
 use crate::fmt;
 use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
-<<<<<<< HEAD
-use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, UncheckedIterator};
+use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen};
 #[cfg(kani)]
 use crate::kani;
-=======
-use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen};
->>>>>>> subtree/library
 use crate::num::NonZero;
 use crate::ops::Try;
 
@@ -203,23 +199,6 @@ where
 {
 }
 
-<<<<<<< HEAD
-impl<B, I, F> UncheckedIterator for Map<I, F>
-where
-    I: UncheckedIterator,
-    F: FnMut(I::Item) -> B,
-{
-    #[requires(self.iter.size_hint().0 > 0)]
-    unsafe fn next_unchecked(&mut self) -> B {
-        // SAFETY: `Map` is 1:1 with the inner iterator, so if the caller promised
-        // that there's an element left, the inner iterator has one too.
-        let item = unsafe { self.iter.next_unchecked() };
-        (self.f)(item)
-    }
-}
-
-=======
->>>>>>> subtree/library
 #[doc(hidden)]
 #[unstable(feature = "trusted_random_access", issue = "none")]
 unsafe impl<I, F> TrustedRandomAccess for Map<I, F> where I: TrustedRandomAccess {}

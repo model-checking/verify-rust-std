@@ -1194,13 +1194,9 @@ impl<T: PointeeSized> NonNull<T> {
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
     #[rustc_const_unstable(feature = "const_drop_in_place", issue = "109342")]
-<<<<<<< HEAD
     #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure self is aligned, initialized, and valid for read
     #[requires(ub_checks::can_write(self.as_ptr() as *mut()))] // Ensure self is valid for write
-    pub const unsafe fn drop_in_place(self)
-=======
     pub const unsafe fn drop_in_place(mut self)
->>>>>>> subtree/library
     where
         T: [const] Destruct,
     {

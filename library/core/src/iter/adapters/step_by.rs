@@ -1,17 +1,11 @@
 use crate::intrinsics;
-<<<<<<< HEAD
-use crate::iter::{TrustedLen, TrustedRandomAccess, from_fn};
+use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, from_fn};
 #[cfg(kani)]
 use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{Range, Try};
-use crate::ub_checks::Invariant;
-=======
-use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, from_fn};
-use crate::num::NonZero;
-use crate::ops::{Range, Try};
 use crate::range::RangeIter;
->>>>>>> subtree/library
+use crate::ub_checks::Invariant;
 
 /// An iterator for stepping iterators by a custom amount.
 ///

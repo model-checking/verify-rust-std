@@ -10,18 +10,13 @@ use safety::{Invariant, ensures, requires};
 use crate::cmp;
 use crate::error::Error;
 use crate::intrinsics::{unchecked_add, unchecked_mul, unchecked_sub};
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::mem::SizedTypeProperties;
-use crate::ptr::{Alignment, NonNull};
+use crate::mem::{Alignment, SizedTypeProperties};
+use crate::ptr::NonNull;
 // Used only for contract verification.
 #[allow(unused_imports)]
 use crate::ub_checks::Invariant;
-=======
-use crate::mem::{Alignment, SizedTypeProperties};
-use crate::ptr::NonNull;
->>>>>>> subtree/library
 use crate::{assert_unsafe_precondition, fmt, mem};
 
 /// Layout of a block of memory.
@@ -284,15 +279,11 @@ impl Layout {
     #[rustc_const_stable(feature = "layout_for_ptr", since = "1.99.0")]
     #[must_use]
     #[inline]
-<<<<<<< HEAD
     // TODO: we should try to capture the above constraints on T in a `requires` clause, and the
     // metadata helpers from https://github.com/model-checking/verify-rust-std/pull/37 may be able
     // to accomplish this.
     #[ensures(|result| result.align().is_power_of_two())]
-    pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
-=======
     pub const unsafe fn for_value_raw<T: ?Sized>(val: *const T) -> Self {
->>>>>>> subtree/library
         // SAFETY: we pass along the prerequisites of these functions to the caller
         let (size, alignment) = unsafe { (mem::size_of_val_raw(val), Alignment::of_val_raw(val)) };
         // SAFETY: see rationale in `new` for why this is using the unsafe variant

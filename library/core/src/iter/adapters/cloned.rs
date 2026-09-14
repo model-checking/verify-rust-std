@@ -4,13 +4,9 @@ use safety::requires;
 
 use crate::iter::adapters::zip::try_get_unchecked;
 use crate::iter::adapters::{SourceIter, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
-<<<<<<< HEAD
-use crate::iter::{FusedIterator, InPlaceIterable, TrustedLen, UncheckedIterator};
+use crate::iter::{FusedIterator, InPlaceIterable, TrustedLen};
 #[cfg(kani)]
 use crate::kani;
-=======
-use crate::iter::{FusedIterator, InPlaceIterable, TrustedLen};
->>>>>>> subtree/library
 use crate::ops::Try;
 
 /// An iterator that clones the elements of an underlying iterator.

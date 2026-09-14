@@ -428,13 +428,9 @@
 
 use crate::cmp::Ordering;
 use crate::intrinsics::const_eval_select;
-<<<<<<< HEAD
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{Destruct, FnPtr, PointeeSized};
-=======
 use crate::marker::{Destruct, PointeeSized};
->>>>>>> subtree/library
 use crate::mem::{self, MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::FnPtr;
@@ -2166,12 +2162,8 @@ pub const unsafe fn write_unaligned<T>(dst: *mut T, src: T) {
 #[rustc_const_unstable(feature = "const_volatile", issue = "159094")]
 #[track_caller]
 #[rustc_diagnostic_item = "ptr_read_volatile"]
-<<<<<<< HEAD
 #[safety::requires(ub_checks::can_dereference(src))]
-pub unsafe fn read_volatile<T>(src: *const T) -> T {
-=======
 pub const unsafe fn read_volatile<T>(src: *const T) -> T {
->>>>>>> subtree/library
     // SAFETY: the caller must uphold the safety contract for `volatile_load`.
     unsafe {
         ub_checks::assert_unsafe_precondition!(
@@ -2277,12 +2269,8 @@ pub const unsafe fn read_volatile<T>(src: *const T) -> T {
 #[rustc_const_unstable(feature = "const_volatile", issue = "159094")]
 #[rustc_diagnostic_item = "ptr_write_volatile"]
 #[track_caller]
-<<<<<<< HEAD
 #[safety::requires(ub_checks::can_write(dst))]
-pub unsafe fn write_volatile<T>(dst: *mut T, src: T) {
-=======
 pub const unsafe fn write_volatile<T>(dst: *mut T, src: T) {
->>>>>>> subtree/library
     // SAFETY: the caller must uphold the safety contract for `volatile_store`.
     unsafe {
         ub_checks::assert_unsafe_precondition!(
@@ -2924,7 +2912,11 @@ pub macro addr_of_mut($place:expr) {
     &raw mut $place
 }
 
-<<<<<<< HEAD
+/// Used in [`read_unaligned`] and [`write_unaligned`] to load and store `T`
+/// with alignment 1 rather than its usual `align_of::<T>()` alignment.
+#[repr(Rust, packed)]
+struct Unaligned<T>(T);
+
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
@@ -2999,9 +2991,3 @@ mod verify {
         check_align_offset(p);
     }
 }
-=======
-/// Used in [`read_unaligned`] and [`write_unaligned`] to load and store `T`
-/// with alignment 1 rather than its usual `align_of::<T>()` alignment.
-#[repr(Rust, packed)]
-struct Unaligned<T>(T);
->>>>>>> subtree/library

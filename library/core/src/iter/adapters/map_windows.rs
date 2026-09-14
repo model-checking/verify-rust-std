@@ -1,10 +1,6 @@
 use crate::iter::FusedIterator;
-<<<<<<< HEAD
-use crate::mem::MaybeUninit;
-use crate::ub_checks::Invariant;
-=======
 use crate::mem::{ManuallyDrop, MaybeUninit, SizedTypeProperties};
->>>>>>> subtree/library
+use crate::ub_checks::Invariant;
 use crate::{fmt, ptr};
 
 /// An iterator over the mapped windows of another iterator.

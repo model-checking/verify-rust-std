@@ -8,14 +8,10 @@ use super::super::{
 };
 use super::TrustedLen;
 use crate::array;
-<<<<<<< HEAD
-use crate::cmp::{self, Ordering};
+use crate::cmp::{self, KeyAndValue, Ordering};
 #[cfg(kani)]
 use crate::kani;
-=======
-use crate::cmp::{self, KeyAndValue, Ordering};
 use crate::marker::Destruct;
->>>>>>> subtree/library
 use crate::num::NonZero;
 use crate::ops::{ChangeOutputType, ControlFlow, FromResidual, Residual, Try};
 
@@ -1769,16 +1765,11 @@ pub const trait Iterator {
     /// ```
     #[inline]
     #[unstable(feature = "iter_map_windows", issue = "87155")]
-<<<<<<< HEAD
-    #[rustc_non_const_trait_method]
     #[requires(N > 0)]
-    fn map_windows<F, R, const N: usize>(self, f: F) -> MapWindows<Self, F, N>
-=======
     fn map_windows<F, R, #[rustc_panics_when_zero] const N: usize>(
         self,
         f: F,
     ) -> MapWindows<Self, F, N>
->>>>>>> subtree/library
     where
         Self: Sized,
         F: FnMut(&[Self::Item; N]) -> R,

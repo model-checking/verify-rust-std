@@ -7,15 +7,9 @@ use safety::requires;
 
 use super::{from_raw_parts, from_raw_parts_mut};
 use crate::hint::assert_unchecked;
-<<<<<<< HEAD
-use crate::iter::{
-    FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce, UncheckedIterator,
-};
+use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
 #[cfg(kani)]
 use crate::kani;
-=======
-use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
->>>>>>> subtree/library
 use crate::marker::PhantomData;
 use crate::mem::{self, SizedTypeProperties};
 use crate::num::NonZero;

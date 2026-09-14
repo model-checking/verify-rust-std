@@ -32,12 +32,9 @@
 
 use crate::alloc::Layout;
 use crate::clone::TrivialClone;
-<<<<<<< HEAD
+use crate::cmp::Ordering;
 #[cfg(kani)]
 use crate::kani;
-=======
-use crate::cmp::Ordering;
->>>>>>> subtree/library
 use crate::marker::{Destruct, DiscriminantKind};
 use crate::panic::const_assert;
 use crate::ub_checks::assert_unsafe_precondition;

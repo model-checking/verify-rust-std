@@ -2,15 +2,9 @@ use safety::requires;
 
 use crate::cmp;
 use crate::fmt::{self, Debug};
-<<<<<<< HEAD
-use crate::iter::{
-    FusedIterator, InPlaceIterable, SourceIter, TrustedFused, TrustedLen, UncheckedIterator,
-};
+use crate::iter::{FusedIterator, InPlaceIterable, SourceIter, TrustedFused, TrustedLen};
 #[cfg(kani)]
 use crate::kani;
-=======
-use crate::iter::{FusedIterator, InPlaceIterable, SourceIter, TrustedFused, TrustedLen};
->>>>>>> subtree/library
 use crate::num::NonZero;
 
 /// An iterator that iterates two other iterators simultaneously.

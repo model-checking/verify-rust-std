@@ -12,14 +12,10 @@ use crate::kani;
 use crate::marker::PhantomData;
 use crate::ptr::NonNull;
 use crate::slice::memchr;
-<<<<<<< HEAD
 use crate::ub_checks::Invariant;
 #[allow(unused_imports)]
 use crate::ub_checks::can_dereference;
-use crate::{fmt, ops, slice, str};
-=======
 use crate::{fmt, ops, range, slice, str};
->>>>>>> subtree/library
 
 // FIXME: because this is doc(inline)d, we *have* to use intra-doc links because the actual link
 //   depends on where the item is being documented. however, since this is libcore, we can't

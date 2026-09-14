@@ -2,14 +2,11 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-<<<<<<< HEAD
 use safety::{ensures, requires};
 
+use crate::convert::{BoundedCastFromInt, CheckedCastFromInt};
 #[cfg(kani)]
 use crate::kani;
-=======
-use crate::convert::{BoundedCastFromInt, CheckedCastFromInt};
->>>>>>> subtree/library
 use crate::panic::const_panic;
 use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;

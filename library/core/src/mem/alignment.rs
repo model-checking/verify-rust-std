@@ -241,15 +241,11 @@ impl Alignment {
     /// Returns the alignment as a <code>[NonZero]<[usize]></code>.
     #[unstable(feature = "ptr_alignment_type", issue = "102070")]
     #[inline]
-<<<<<<< HEAD:library/core/src/ptr/alignment.rs
     #[ensures(|result| result.get().is_power_of_two())]
-    // uses the field directly instead of self.as_usize(): as_usize's body calls as_nonzero, so
-    // referencing it here would make the contract instrumentation infinitely recursive
+    // uses the field directly instead of self.as_usize(): as_usize's body calls as_nonzero_usize,
+    // so referencing it here would make the contract instrumentation infinitely recursive
     #[ensures(|result| result.get() == self._inner_repr_trick as usize)]
-    pub const fn as_nonzero(self) -> NonZero<usize> {
-=======
     pub const fn as_nonzero_usize(self) -> NonZero<usize> {
->>>>>>> subtree/library:library/core/src/mem/alignment.rs
         // This transmutes directly to avoid the UbCheck in `NonZero::new_unchecked`
         // since there's no way for the user to trip that check anyway -- the
         // validity invariant of the type would have to have been broken earlier --

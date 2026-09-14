@@ -1,22 +1,10 @@
-<<<<<<< HEAD
 use safety::requires;
 
 #[cfg(kani)]
 use crate::kani;
-use crate::num::TryFromIntError;
+use crate::num::{IntErrorKind, TryFromIntError};
 #[allow(unused_imports)]
 use crate::ub_checks::float_to_int_in_range;
-
-mod private {
-    /// This trait being unreachable from outside the crate
-    /// prevents other implementations of the `FloatToInt` trait,
-    /// which allows potentially adding more trait methods after the trait is `#[stable]`.
-    #[unstable(feature = "convert_float_to_int", issue = "67057")]
-    pub trait Sealed {}
-}
-=======
-use crate::num::{IntErrorKind, TryFromIntError};
->>>>>>> subtree/library
 
 /// Supporting trait for inherent methods of `f32` and `f64` such as `to_int_unchecked`.
 /// Typically doesn’t need to be used directly.
@@ -666,7 +654,6 @@ impl_nonzero_int_try_from_nonzero_int!(i64 => u8, u16, u32, u64, u128, usize);
 impl_nonzero_int_try_from_nonzero_int!(i128 => u8, u16, u32, u64, u128, usize);
 impl_nonzero_int_try_from_nonzero_int!(isize => u8, u16, u32, u64, u128, usize);
 
-<<<<<<< HEAD
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
@@ -926,7 +913,7 @@ mod verify {
         (f128 => u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize),
     );
 }
-=======
+
 /// Conversion between integers, wrapping around or saturating at the target type's boundaries.
 #[unstable(feature = "integer_casts", issue = "157388")]
 #[rustc_const_unstable(feature = "integer_casts", issue = "157388")]
@@ -1021,4 +1008,3 @@ macro_rules! impl_all_int_casts {
 }
 
 impl_all_int_casts!([u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize]);
->>>>>>> subtree/library
