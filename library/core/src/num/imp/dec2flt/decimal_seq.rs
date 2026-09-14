@@ -9,9 +9,8 @@
 //! algorithm can be found in "ParseNumberF64 by Simple Decimal Conversion",
 //! available online: <https://nigeltao.github.io/blog/2020/parse-number-f64-simple.html>.
 
-use safety::ensures;
-
 use dec2flt::common::{ByteSlice, is_8digits};
+use safety::ensures;
 
 #[cfg(kani)]
 use crate::forall;

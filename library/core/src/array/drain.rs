@@ -1,8 +1,3 @@
-use safety::requires;
-
-use crate::iter::{TrustedLen, UncheckedIterator};
-#[cfg(kani)]
-use crate::kani;
 use crate::marker::{Destruct, PhantomData};
 use crate::mem::{ManuallyDrop, SizedTypeProperties, conjure_zst, transmute};
 use crate::ptr::{NonNull, drop_in_place, from_raw_parts_mut, without_provenance_mut};
