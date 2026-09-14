@@ -1242,7 +1242,7 @@ pub mod grisu_verify {
                 #[kani::stub(round_and_weed, stub_round_and_weed)]
                 #[kani::stub(div_rem_pow10, div_rem_pow10_model)]
                 #[kani::stub_verified(round_shortest_contract)]
-                #[kani::solver(kissat)]
+                #[kani::solver(z3)]
                 fn check_format_shortest_opt() {
                     let d = $decoded;
                     let len = usize::from(kani::any::<u8>());
