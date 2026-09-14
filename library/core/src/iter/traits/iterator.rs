@@ -1765,6 +1765,7 @@ pub const trait Iterator {
     /// ```
     #[inline]
     #[unstable(feature = "iter_map_windows", issue = "87155")]
+    #[rustc_non_const_trait_method]
     #[requires(N > 0)]
     fn map_windows<F, R, #[rustc_panics_when_zero] const N: usize>(
         self,
