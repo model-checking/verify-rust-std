@@ -63,10 +63,10 @@
 //!    type, but not the all-important methods.
 //!
 //! So for example there is a [page for the primitive type
-//! `i32`](primitive::i32) that lists all the methods that can be called on
-//! 32-bit integers (very useful), and there is a [page for the module
-//! `std::i32`] that documents the constant values [`MIN`] and [`MAX`] (rarely
-//! useful).
+//! `char`](primitive::char) that lists all the methods that can be called on
+//! characters (very useful), and there is a [page for the module
+//! `std::char`](crate::char) that documents iterator and error types created by these methods
+//! (rarely useful).
 //!
 //! Note the documentation for the primitives [`str`] and [`[T]`][prim@slice] (also
 //! called 'slice'). Many method calls on [`String`] and [`Vec<T>`] are actually
@@ -180,9 +180,6 @@
 //!
 //!
 //! [I/O]: io
-//! [`MIN`]: i32::MIN
-//! [`MAX`]: i32::MAX
-//! [page for the module `std::i32`]: crate::i32
 //! [TCP]: net::TcpStream
 //! [The Rust Prelude]: prelude
 //! [UDP]: net::UdpSocket
@@ -263,14 +260,13 @@
     all(target_vendor = "fortanix", target_env = "sgx"),
     feature(slice_index_methods, coerce_unsized, sgx_platform)
 )]
+#![cfg_attr(all(test, target_os = "uefi"), feature(uefi_std))]
 #![cfg_attr(target_family = "wasm", feature(stdarch_wasm_atomic_wait))]
 #![cfg_attr(target_arch = "wasm64", feature(simd_wasm64))]
 #![cfg_attr(kani, feature(kani))]
 //
 // Language features:
 // tidy-alphabetical-start
-
-// stabilization was reverted after it hit beta
 #![feature(alloc_error_handler)]
 #![feature(allocator_internals)]
 #![feature(allow_internal_unsafe)]
@@ -280,7 +276,7 @@
 #![feature(cfg_sanitizer_cfi)]
 #![feature(cfg_target_thread_local)]
 #![feature(cfi_encoding)]
-#![feature(char_max_len)]
+#![feature(const_default)]
 #![feature(const_trait_impl)]
 #![feature(core_float_math)]
 #![feature(decl_macro)]
@@ -294,8 +290,6 @@
 #![feature(ffi_const)]
 #![feature(formatting_options)]
 #![feature(funnel_shifts)]
-#![feature(hash_map_internals)]
-#![feature(hash_map_macro)]
 #![feature(if_let_guard)]
 #![feature(intra_doc_pointers)]
 #![feature(iter_advance_by)]
@@ -317,6 +311,7 @@
 #![feature(staged_api)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance_lints)]
+#![feature(target_feature_inline_always)]
 #![feature(thread_local)]
 #![feature(try_blocks)]
 #![feature(try_trait_v2)]
@@ -332,9 +327,9 @@
 #![feature(char_internals)]
 #![feature(clone_to_uninit)]
 #![feature(const_convert)]
-#![feature(const_mul_add)]
 #![feature(core_intrinsics)]
 #![feature(core_io_borrowed_buf)]
+#![feature(cstr_display)]
 #![feature(drop_guard)]
 #![feature(duration_constants)]
 #![feature(error_generic_member_access)]
@@ -353,9 +348,7 @@
 #![feature(hint_must_use)]
 #![feature(int_from_ascii)]
 #![feature(ip)]
-#![feature(lazy_get)]
-#![feature(maybe_uninit_slice)]
-#![feature(maybe_uninit_write_slice)]
+#![feature(maybe_uninit_array_assume_init)]
 #![feature(panic_can_unwind)]
 #![feature(panic_internals)]
 #![feature(pin_coerce_unsized_trait)]
@@ -378,8 +371,8 @@
 //
 // Library features (alloc):
 // tidy-alphabetical-start
-#![feature(alloc_layout_extra)]
 #![feature(allocator_api)]
+#![feature(clone_from_ref)]
 #![feature(get_mut_unchecked)]
 #![feature(map_try_insert)]
 #![feature(slice_concat_trait)]
@@ -387,7 +380,6 @@
 #![feature(try_reserve_kind)]
 #![feature(try_with_capacity)]
 #![feature(unique_rc_arc)]
-#![feature(vec_into_raw_parts)]
 #![feature(wtf8_internals)]
 // tidy-alphabetical-end
 //
@@ -428,7 +420,7 @@
 #![default_lib_allocator]
 
 // The Rust prelude
-// The compiler expects the prelude definition to be defined before it's use statement.
+// The compiler expects the prelude definition to be defined before its use statement.
 pub mod prelude;
 
 // Explicitly import the prelude. The compiler uses this same unstable attribute
@@ -479,7 +471,9 @@ extern crate std as realstd;
 
 // The standard macros that are not built-in to the compiler.
 #[macro_use]
-mod macros;
+#[doc(hidden)]
+#[unstable(feature = "std_internals", issue = "none")]
+pub mod macros;
 
 // The runtime entry point and a few unstable public functions used by the
 // compiler
@@ -678,7 +672,7 @@ pub mod arch {
     pub use std_detect::is_loongarch_feature_detected;
     #[unstable(feature = "is_riscv_feature_detected", issue = "111192")]
     pub use std_detect::is_riscv_feature_detected;
-    #[unstable(feature = "stdarch_s390x_feature_detection", issue = "135413")]
+    #[stable(feature = "stdarch_s390x_feature_detection", since = "1.93.0")]
     pub use std_detect::is_s390x_feature_detected;
     #[stable(feature = "simd_x86", since = "1.27.0")]
     pub use std_detect::is_x86_feature_detected;
@@ -692,9 +686,7 @@ pub mod arch {
 #[stable(feature = "simd_x86", since = "1.27.0")]
 pub use std_detect::is_x86_feature_detected;
 
-// Platform-abstraction modules
 mod sys;
-mod sys_common;
 
 pub mod alloc;
 
@@ -724,9 +716,9 @@ pub use core::todo;
 // Re-export built-in macros defined through core.
 #[stable(feature = "builtin_macro_prelude", since = "1.38.0")]
 pub use core::{
-    assert, assert_matches, cfg, column, compile_error, concat, const_format_args, env, file,
-    format_args, format_args_nl, include, include_bytes, include_str, line, log_syntax,
-    module_path, option_env, stringify, trace_macros,
+    assert, cfg, column, compile_error, concat, const_format_args, env, file, format_args,
+    format_args_nl, include, include_bytes, include_str, line, log_syntax, module_path, option_env,
+    stringify, trace_macros,
 };
 // Re-export macros defined in core.
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -735,6 +727,8 @@ pub use core::{
     assert_eq, assert_ne, debug_assert, debug_assert_eq, debug_assert_ne, r#try, unimplemented,
     unreachable, write, writeln,
 };
+#[unstable(feature = "assert_matches", issue = "82775")]
+pub use core::{assert_matches, debug_assert_matches};
 
 // Re-export unstable derive macro defined through core.
 #[unstable(feature = "derive_from", issue = "144889")]

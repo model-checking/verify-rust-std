@@ -394,7 +394,14 @@ fn number_of_digits_decimal_left_shift(d: &DecimalSeq, mut shift: usize) -> usiz
     let pow5_b = (0x7FF & x_b) as usize;
     let pow5 = &TABLE_POW5[pow5_a..];
 
-    #[cfg_attr(kani, kani::loop_invariant(num_new_digits > 1 || shift <= 3 || shift >= 61))]
+    // FIXME(kani): the loop below is amenable to loop-contracts-based proofs (using, e.g., the
+    // loop invariant `num_new_digits > 1 || shift <= 3 || shift >= 61`), but Kani's loop-contract
+    // instrumentation currently mis-handles `for` loops whose pattern destructures the iterator
+    // element through a reference (`&p5`), yielding spurious dereference failures; see
+    // https://github.com/model-checking/kani/issues/4658. Until the fix
+    // (https://github.com/model-checking/kani/pull/4659) is part of the Kani version pinned here,
+    // rely on plain loop unwinding: the loop is bounded by `pow5_b - pow5_a`, which is at most 42
+    // for the reachable table entries.
     for (i, &p5) in pow5.iter().enumerate().take(pow5_b - pow5_a) {
         if i >= d.num_digits {
             return num_new_digits - 1;
@@ -436,6 +443,10 @@ pub mod decimal_seq_verify {
     }
 
     #[kani::proof]
+    // The unwind bound covers the loop in number_of_digits_decimal_left_shift, whose
+    // loop invariant is temporarily disabled (see the FIXME(kani) comment there): the
+    // loop runs at most `pow5_b - pow5_a` <= 42 iterations for the reachable TABLE entries.
+    #[kani::unwind(44)]
     fn check_number_of_digits_decimal_left_shift() {
         let mut a: DecimalSeq = kani::any();
         let shift: usize = kani::any_where(|x| *x > 0 && *x <= 60);
@@ -455,6 +466,8 @@ pub mod decimal_seq_verify {
     }
 
     #[kani::proof]
+    // See check_number_of_digits_decimal_left_shift for why the unwind bound is needed.
+    #[kani::unwind(44)]
     fn check_left_shift() {
         let mut a: DecimalSeq = kani::any();
         let shift: usize = kani::any_where(|x| *x > 0 && *x <= 60);

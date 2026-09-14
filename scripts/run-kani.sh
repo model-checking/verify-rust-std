@@ -237,6 +237,7 @@ run_verification_subset() {
 
     echo "Running verification for harnesses:"
     printf '%s\n' "${harnesses[@]}"
+    # Honor KANI_JOBS and default to one verifier per runner.
     "$kani_path" verify-std -Z unstable-options ./library \
         $unstable_args \
         --no-assert-contracts \

@@ -1,16 +1,10 @@
-#[path = "../unsupported/os.rs"]
 pub mod os;
-#[path = "../unsupported/pipe.rs"]
-pub mod pipe;
-pub mod time;
 
 #[expect(dead_code)]
 #[path = "../unsupported/common.rs"]
 mod unsupported_common;
 
-pub use unsupported_common::{
-    decode_error_kind, init, is_interrupted, unsupported, unsupported_err,
-};
+pub use unsupported_common::{init, unsupported, unsupported_err};
 
 use crate::arch::global_asm;
 use crate::ptr;

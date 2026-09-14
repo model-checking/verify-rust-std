@@ -170,7 +170,7 @@ impl Iterator for Vars {
 impl fmt::Debug for Vars {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { inner: VarsOs { inner } } = self;
-        f.debug_struct("Vars").field("inner", &inner.str_debug()).finish()
+        f.debug_struct("Vars").field("inner", inner).finish()
     }
 }
 
@@ -518,8 +518,8 @@ pub struct JoinPathsError {
 ///
 /// Returns an [`Err`] (containing an error message) if one of the input
 /// [`Path`]s contains an invalid character for constructing the `PATH`
-/// variable (a double quote on Windows or a colon on Unix), or if the system
-/// does not have a `PATH`-like variable (e.g. UEFI or WASI).
+/// variable (a double quote on Windows or a colon on Unix or semicolon on
+/// UEFI), or if the system does not have a `PATH`-like variable (e.g. WASI).
 ///
 /// # Examples
 ///
@@ -728,7 +728,7 @@ pub fn temp_dir() -> PathBuf {
 ///
 /// You expected to safely execute the current executable, but you're
 /// instead executing something completely different. The code you
-/// just executed run with your privileges.
+/// just executed runs with your privileges.
 ///
 /// This sort of behavior has been known to [lead to privilege escalation] when
 /// used incorrectly.
@@ -1097,7 +1097,7 @@ pub mod consts {
     /// * `"nto"`
     /// * `"redox"`
     /// * `"solaris"`
-    /// * `"solid_asp3`
+    /// * `"solid_asp3"`
     /// * `"vexos"`
     /// * `"vita"`
     /// * `"vxworks"`

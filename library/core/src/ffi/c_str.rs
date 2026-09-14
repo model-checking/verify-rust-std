@@ -22,18 +22,18 @@ use crate::{fmt, ops, slice, str};
 //   actually reference libstd or liballoc in intra-doc links. so, the best we can do is remove the
 //   links to `CString` and `String` for now until a solution is developed
 
-/// Representation of a borrowed C string.
+/// A dynamically-sized view of a C string.
 ///
-/// This type represents a borrowed reference to a nul-terminated
+/// The type `&CStr` represents a reference to a borrowed nul-terminated
 /// array of bytes. It can be constructed safely from a <code>&[[u8]]</code>
 /// slice, or unsafely from a raw `*const c_char`. It can be expressed as a
 /// literal in the form `c"Hello world"`.
 ///
-/// The `CStr` can then be converted to a Rust <code>&[str]</code> by performing
+/// The `&CStr` can then be converted to a Rust <code>&[str]</code> by performing
 /// UTF-8 validation, or into an owned `CString`.
 ///
 /// `&CStr` is to `CString` as <code>&[str]</code> is to `String`: the former
-/// in each pair are borrowed references; the latter are owned
+/// in each pair are borrowing references; the latter are owned
 /// strings.
 ///
 /// Note that this structure does **not** have a guaranteed layout (the `repr(transparent)`
@@ -696,6 +696,17 @@ impl CStr {
     pub fn display(&self) -> impl fmt::Display {
         crate::bstr::ByteStr::from_bytes(self.to_bytes())
     }
+
+    /// Returns the same string as a string slice `&CStr`.
+    ///
+    /// This method is redundant when used directly on `&CStr`, but
+    /// it helps dereferencing other string-like types to string slices,
+    /// for example references to `Box<CStr>` or `Arc<CStr>`.
+    #[inline]
+    #[unstable(feature = "str_as_str", issue = "130366")]
+    pub const fn as_c_str(&self) -> &CStr {
+        self
+    }
 }
 
 #[stable(feature = "c_string_eq_c_str", since = "1.90.0")]
@@ -890,7 +901,7 @@ mod verify {
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
     #[kani::proof]
-    #[kani::unwind(32)] // 7.3 seconds when 16; 33.1 seconds when 32
+    #[kani::unwind(33)]
     fn check_from_bytes_until_nul() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -987,9 +998,13 @@ mod verify {
 
     // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
     #[kani::proof]
-    #[kani::unwind(17)]
+    #[kani::unwind(9)]
     fn check_from_bytes_with_nul() {
-        const MAX_SIZE: usize = 16;
+        // FIXME(kani): reduced from 16 to 8 because CBMC 6.10 (as pinned by the current Kani
+        // version) needs ~10 GB for MAX_SIZE == 16, which exhausts the memory of the
+        // macos-latest CI runners and makes the harness exceed the 10-minute autoharness
+        // timeout there.
+        const MAX_SIZE: usize = 8;
         let string: [u8; MAX_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array(&string);
 

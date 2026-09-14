@@ -39,6 +39,8 @@ jobs:
       WORKER_TOTAL: 4
       # The same catalog assigns every excluded proof to a dedicated job on each OS.
       KANI_SEPARATE_FLT2DEC: "true"
+      # Run one verifier per runner to bound proof concurrency.
+      KANI_JOBS: 1
     
     steps:
       - name: Remove unnecessary software to free up disk space

@@ -10,7 +10,7 @@ use crate::os::windows::io::{
     AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, IntoRawHandle, OwnedHandle, RawHandle,
 };
 use crate::sealed::Sealed;
-use crate::sys_common::{AsInner, AsInnerMut, FromInner, IntoInner};
+use crate::sys::{AsInner, AsInnerMut, FromInner, IntoInner};
 use crate::{io, marker, process, ptr, sys};
 
 #[stable(feature = "process_extensions", since = "1.2.0")]
@@ -117,7 +117,7 @@ impl IntoRawHandle for process::ChildStderr {
 impl From<OwnedHandle> for process::ChildStdin {
     fn from(handle: OwnedHandle) -> process::ChildStdin {
         let handle = sys::handle::Handle::from_inner(handle);
-        let pipe = sys::pipe::AnonPipe::from_inner(handle);
+        let pipe = sys::process::ChildPipe::from_inner(handle);
         process::ChildStdin::from_inner(pipe)
     }
 }
@@ -130,7 +130,7 @@ impl From<OwnedHandle> for process::ChildStdin {
 impl From<OwnedHandle> for process::ChildStdout {
     fn from(handle: OwnedHandle) -> process::ChildStdout {
         let handle = sys::handle::Handle::from_inner(handle);
-        let pipe = sys::pipe::AnonPipe::from_inner(handle);
+        let pipe = sys::process::ChildPipe::from_inner(handle);
         process::ChildStdout::from_inner(pipe)
     }
 }
@@ -143,7 +143,7 @@ impl From<OwnedHandle> for process::ChildStdout {
 impl From<OwnedHandle> for process::ChildStderr {
     fn from(handle: OwnedHandle) -> process::ChildStderr {
         let handle = sys::handle::Handle::from_inner(handle);
-        let pipe = sys::pipe::AnonPipe::from_inner(handle);
+        let pipe = sys::process::ChildPipe::from_inner(handle);
         process::ChildStderr::from_inner(pipe)
     }
 }
@@ -365,6 +365,20 @@ pub trait CommandExt: Sealed {
     /// [1]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
     #[unstable(feature = "windows_process_extensions_startupinfo", issue = "141010")]
     fn startupinfo_force_feedback(&mut self, enabled: Option<bool>) -> &mut process::Command;
+
+    /// If this flag is set to `true`, each inheritable handle in the calling
+    /// process is inherited by the new process. If the flag is `false`, the
+    /// handles are not inherited.
+    ///
+    /// The default value for this flag is `true`.
+    ///
+    /// **Note** that inherited handles have the same value and access rights
+    /// as the original handles. For additional discussion of inheritable handles,
+    /// see the [Remarks][1] section of the `CreateProcessW` documentation.
+    ///
+    /// [1]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw#remarks
+    #[unstable(feature = "windows_process_extensions_inherit_handles", issue = "146407")]
+    fn inherit_handles(&mut self, inherit_handles: bool) -> &mut process::Command;
 }
 
 #[stable(feature = "windows_process_extensions", since = "1.16.0")]
@@ -419,6 +433,11 @@ impl CommandExt for process::Command {
 
     fn startupinfo_force_feedback(&mut self, enabled: Option<bool>) -> &mut process::Command {
         self.as_inner_mut().startupinfo_force_feedback(enabled);
+        self
+    }
+
+    fn inherit_handles(&mut self, inherit_handles: bool) -> &mut process::Command {
+        self.as_inner_mut().inherit_handles(inherit_handles);
         self
     }
 }

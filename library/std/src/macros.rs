@@ -347,109 +347,70 @@ macro_rules! eprintln {
 /// [`debug!`]: https://docs.rs/log/*/log/macro.debug.html
 /// [`log`]: https://crates.io/crates/log
 #[macro_export]
+#[allow_internal_unstable(std_internals)]
 #[cfg_attr(not(test), rustc_diagnostic_item = "dbg_macro")]
 #[stable(feature = "dbg_macro", since = "1.32.0")]
 macro_rules! dbg {
-    // NOTE: We cannot use `concat!` to make a static string as a format argument
-    // of `eprintln!` because `file!` could contain a `{` or
-    // `$val` expression could be a block (`{ .. }`), in which case the `eprintln!`
-    // will be malformed.
     () => {
         $crate::eprintln!("[{}:{}:{}]", $crate::file!(), $crate::line!(), $crate::column!())
     };
-    ($val:expr $(,)?) => {
+    ($($val:expr),+ $(,)?) => {
+        $crate::macros::dbg_internal!(() () ($($val),+))
+    };
+}
+
+/// Internal macro that processes a list of expressions and produces a chain of
+/// nested `match`es, one for each expression, before finally calling `eprint!`
+/// with the collected information and returning all the evaluated expressions
+/// in a tuple.
+///
+/// E.g. `dbg_internal!(() () (1, 2))` expands into
+/// ```rust, ignore
+/// match 1 {
+///     tmp_1 => match 2 {
+///         tmp_2 => {
+///             eprint!("...", &tmp_1, &tmp_2, /* some other arguments */);
+///             (tmp_1, tmp_2)
+///         }
+///     }
+/// }
+/// ```
+///
+/// This is necessary so that `dbg!` outputs don't get torn, see #136703.
+#[doc(hidden)]
+#[rustc_macro_transparency = "semiopaque"]
+pub macro dbg_internal {
+    (($($piece:literal),+) ($($processed:expr => $bound:expr),+) ()) => {{
+        $crate::eprint!(
+            $crate::concat!($($piece),+),
+            $(
+                $crate::stringify!($processed),
+                // The `&T: Debug` check happens here (not in the format literal desugaring)
+                // to avoid format literal related messages and suggestions.
+                &&$bound as &dyn $crate::fmt::Debug
+            ),+,
+            // The location returned here is that of the macro invocation, so
+            // it will be the same for all expressions. Thus, label these
+            // arguments so that they can be reused in every piece of the
+            // formatting template.
+            file=$crate::file!(),
+            line=$crate::line!(),
+            column=$crate::column!()
+        );
+        // Comma separate the variables only when necessary so that this will
+        // not yield a tuple for a single expression, but rather just parenthesize
+        // the expression.
+        ($($bound),+)
+    }},
+    (($($piece:literal),*) ($($processed:expr => $bound:expr),*) ($val:expr $(,$rest:expr)*)) => {
         // Use of `match` here is intentional because it affects the lifetimes
         // of temporaries - https://stackoverflow.com/a/48732525/1063961
         match $val {
-            tmp => {
-                $crate::eprintln!("[{}:{}:{}] {} = {:#?}",
-                    $crate::file!(),
-                    $crate::line!(),
-                    $crate::column!(),
-                    $crate::stringify!($val),
-                    // The `&T: Debug` check happens here (not in the format literal desugaring)
-                    // to avoid format literal related messages and suggestions.
-                    &&tmp as &dyn $crate::fmt::Debug,
-                );
-                tmp
-            }
+            tmp => $crate::macros::dbg_internal!(
+                ($($piece,)* "[{file}:{line}:{column}] {} = {:#?}\n")
+                ($($processed => $bound,)* $val => tmp)
+                ($($rest),*)
+            ),
         }
-    };
-    ($($val:expr),+ $(,)?) => {
-        ($($crate::dbg!($val)),+,)
-    };
-}
-
-#[doc(hidden)]
-#[macro_export]
-#[allow_internal_unstable(hash_map_internals)]
-#[unstable(feature = "hash_map_internals", issue = "none")]
-macro_rules! repetition_utils {
-    (@count $($tokens:tt),*) => {{
-        [$($crate::repetition_utils!(@replace $tokens => ())),*].len()
-    }};
-
-    (@replace $x:tt => $y:tt) => { $y }
-}
-
-/// Creates a [`HashMap`] containing the arguments.
-///
-/// `hash_map!` allows specifying the entries that make
-/// up the [`HashMap`] where the key and value are separated by a `=>`.
-///
-/// The entries are separated by commas with a trailing comma being allowed.
-///
-/// It is semantically equivalent to using repeated [`HashMap::insert`]
-/// on a newly created hashmap.
-///
-/// `hash_map!` will attempt to avoid repeated reallocations by
-/// using [`HashMap::with_capacity`].
-///
-/// # Examples
-///
-/// ```rust
-/// #![feature(hash_map_macro)]
-///
-/// let map = hash_map! {
-///     "key" => "value",
-///     "key1" => "value1"
-/// };
-///
-/// assert_eq!(map.get("key"), Some(&"value"));
-/// assert_eq!(map.get("key1"), Some(&"value1"));
-/// assert!(map.get("brrrrrrooooommm").is_none());
-/// ```
-///
-/// And with a trailing comma
-///
-///```rust
-/// #![feature(hash_map_macro)]
-///
-/// let map = hash_map! {
-///     "key" => "value", // notice the ,
-/// };
-///
-/// assert_eq!(map.get("key"), Some(&"value"));
-/// ```
-///
-/// The key and value are moved into the HashMap.
-///
-/// [`HashMap`]: crate::collections::HashMap
-/// [`HashMap::insert`]: crate::collections::HashMap::insert
-/// [`HashMap::with_capacity`]: crate::collections::HashMap::with_capacity
-#[macro_export]
-#[allow_internal_unstable(hash_map_internals)]
-#[unstable(feature = "hash_map_macro", issue = "144032")]
-macro_rules! hash_map {
-    () => {{
-        $crate::collections::HashMap::new()
-    }};
-
-    ( $( $key:expr => $value:expr ),* $(,)? ) => {{
-        let mut map = $crate::collections::HashMap::with_capacity(
-            const { $crate::repetition_utils!(@count $($key),*) }
-        );
-        $( map.insert($key, $value); )*
-        map
-    }}
+    },
 }

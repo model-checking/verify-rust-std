@@ -13,6 +13,9 @@ fn main() {
         println!("cargo:rustc-cfg=netbsd10");
     }
 
+    // Needed for `#![doc(auto_cfg(hide(no_global_oom_handling)))]` attribute.
+    println!("cargo::rustc-check-cfg=cfg(no_global_oom_handling)");
+
     println!("cargo:rustc-check-cfg=cfg(restricted_std)");
     if target_os == "linux"
         || target_os == "android"
@@ -30,6 +33,7 @@ fn main() {
         || target_os == "windows"
         || target_os == "fuchsia"
         || (target_vendor == "fortanix" && target_env == "sgx")
+        || target_os == "motor"
         || target_os == "hermit"
         || target_os == "trusty"
         || target_os == "l4re"

@@ -2,7 +2,8 @@
 use crate::ffi::OsStr;
 use crate::io;
 use crate::path::{Path, PathBuf, Prefix};
-use crate::sys::{helpers, unsupported_err};
+use crate::sys::pal::helpers;
+use crate::sys::unsupported_err;
 
 const FORWARD_SLASH: u8 = b'/';
 const COLON: u8 = b':';
@@ -21,6 +22,7 @@ pub fn parse_prefix(_: &OsStr) -> Option<Prefix<'_>> {
     None
 }
 
+pub const HAS_PREFIXES: bool = true;
 pub const MAIN_SEP_STR: &str = "\\";
 pub const MAIN_SEP: char = '\\';
 
