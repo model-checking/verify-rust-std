@@ -1,4 +1,4 @@
-#![allow(internal_features)]
+#![allow(internal_features, unused_features)]
 #![feature(stdarch_internal)]
 #![cfg_attr(target_arch = "arm", feature(stdarch_arm_feature_detection))]
 #![cfg_attr(
@@ -150,14 +150,22 @@ fn aarch64_linux() {
 fn aarch64_windows() {
     println!("asimd: {:?}", is_aarch64_feature_detected!("asimd"));
     println!("fp: {:?}", is_aarch64_feature_detected!("fp"));
+    println!("fp16: {:?}", is_aarch64_feature_detected!("fp16"));
     println!("crc: {:?}", is_aarch64_feature_detected!("crc"));
     println!("lse: {:?}", is_aarch64_feature_detected!("lse"));
+    println!("lse2: {:?}", is_aarch64_feature_detected!("lse2"));
+    println!("rdm: {:?}", is_aarch64_feature_detected!("rdm"));
     println!("dotprod: {:?}", is_aarch64_feature_detected!("dotprod"));
+    println!("i8mm: {:?}", is_aarch64_feature_detected!("i8mm"));
+    println!("bf16: {:?}", is_aarch64_feature_detected!("bf16"));
     println!("jsconv: {:?}", is_aarch64_feature_detected!("jsconv"));
     println!("rcpc: {:?}", is_aarch64_feature_detected!("rcpc"));
     println!("aes: {:?}", is_aarch64_feature_detected!("aes"));
     println!("pmull: {:?}", is_aarch64_feature_detected!("pmull"));
     println!("sha2: {:?}", is_aarch64_feature_detected!("sha2"));
+    println!("sha3: {:?}", is_aarch64_feature_detected!("sha3"));
+    println!("f32mm: {:?}", is_aarch64_feature_detected!("f32mm"));
+    println!("f64mm: {:?}", is_aarch64_feature_detected!("f64mm"));
 }
 
 #[test]

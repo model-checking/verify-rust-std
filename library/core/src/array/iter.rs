@@ -27,14 +27,19 @@ pub struct IntoIter<T, const N: usize> {
 
 impl<T, const N: usize> IntoIter<T, N> {
     #[inline]
-    fn unsize(&self) -> &InnerUnsized<T> {
+    #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+    const fn unsize(&self) -> &InnerUnsized<T> {
         self.inner.deref()
     }
     #[inline]
-    fn unsize_mut(&mut self) -> &mut InnerUnsized<T> {
+    #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+    const fn unsize_mut(&mut self) -> &mut InnerUnsized<T> {
         self.inner.deref_mut()
     }
 }
+
+#[stable(feature = "boxed_array_value_iter", since = "1.99.0")]
+impl<T, const N: usize> !Iterator for [T; N] {}
 
 // Note: the `#[rustc_skip_during_method_dispatch(array)]` on `trait IntoIterator`
 // hides this implementation from explicit `.into_iter()` calls on editions < 2021,
@@ -225,7 +230,8 @@ impl<T, const N: usize> IntoIter<T, N> {
     /// Returns a mutable slice of all elements that have not been yielded yet.
     #[stable(feature = "array_value_iter", since = "1.51.0")]
     #[inline]
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
+    #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+    pub const fn as_mut_slice(&mut self) -> &mut [T] {
         self.unsize_mut().as_mut_slice()
     }
 }
@@ -369,8 +375,8 @@ unsafe impl<T, const N: usize> TrustedLen for IntoIter<T, N> {}
 
 #[doc(hidden)]
 #[unstable(issue = "none", feature = "std_internals")]
-#[rustc_unsafe_specialization_marker]
-pub trait NonDrop {}
+#[unsafe(rustc_allow_lifetime_dependent_specialization)]
+trait NonDrop {}
 
 // T: Copy as approximation for !Drop since get_unchecked does not advance self.alive
 // and thus we can't implement drop-handling

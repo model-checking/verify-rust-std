@@ -25,13 +25,18 @@ impl Float for f8 {
     const NEG_ZERO: Self = Self(0b1_0000_000);
     const ONE: Self = Self(0b0_0111_000);
     const NEG_ONE: Self = Self(0b1_0111_000);
-    const MAX: Self = Self(0b0_1110_111);
-    const MIN: Self = Self(0b1_1110_111);
     const INFINITY: Self = Self(0b0_1111_000);
     const NEG_INFINITY: Self = Self(0b1_1111_000);
+    const MAX: Self = Self(0b0_1110_111);
+    const MIN: Self = Self(0b1_1110_111);
+
     const NAN: Self = Self(0b0_1111_100);
+    const SNAN: Self = Self(0b0_1111_001);
     const NEG_NAN: Self = Self(0b1_1111_100);
+    const NEG_SNAN: Self = Self(0b1_1111_001);
+
     const MIN_POSITIVE_NORMAL: Self = Self(1 << Self::SIG_BITS);
+    const MIN_POSITIVE_SUBNORMAL: Self = Self(1);
     // FIXME: incorrect values
     const EPSILON: Self = Self::ZERO;
     const PI: Self = Self::ZERO;
@@ -44,6 +49,7 @@ impl Float for f8 {
     const SIG_MASK: Self::Int = 0b0_0000_111;
     const EXP_MASK: Self::Int = 0b0_1111_000;
     const IMPLICIT_BIT: Self::Int = 0b0_0001_000;
+    const SIG_TOP_BIT: Self::Int = Self::IMPLICIT_BIT >> 1;
 
     fn to_bits(self) -> Self::Int {
         self.0
@@ -51,6 +57,14 @@ impl Float for f8 {
 
     fn to_bits_signed(self) -> Self::SignedInt {
         self.0 as i8
+    }
+
+    fn eq_repr(self, rhs: Self) -> bool {
+        if self.is_nan() && rhs.is_nan() {
+            true
+        } else {
+            self.to_bits() == rhs.to_bits()
+        }
     }
 
     fn is_nan(self) -> bool {

@@ -114,14 +114,15 @@
 //!
 //! You might instead, if you don't want to handle the error, simply
 //! assert success with [`expect`]. This will panic if the
-//! write fails, providing a marginally useful message indicating why:
+//! write fails, providing a message explaining why the write was expected
+//! to succeed:
 //!
 //! ```no_run
 //! use std::fs::File;
 //! use std::io::prelude::*;
 //!
 //! let mut file = File::create("valuable_data.txt").unwrap();
-//! file.write_all(b"important message").expect("failed to write message");
+//! file.write_all(b"important message").expect("writing to the file should succeed");
 //! ```
 //!
 //! You might also simply assert success:
@@ -912,8 +913,6 @@ impl<T, E> Result<T, E> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(result_option_map_or_default)]
-    ///
     /// let x: Result<_, &str> = Ok("foo");
     /// let y: Result<&str, _> = Err("bar");
     ///
@@ -923,7 +922,7 @@ impl<T, E> Result<T, E> {
     ///
     /// [default value]: Default::default
     #[inline]
-    #[unstable(feature = "result_option_map_or_default", issue = "138099")]
+    #[stable(feature = "result_option_map_or_default", since = "1.98.0")]
     #[rustc_const_unstable(feature = "const_result_trait_fn", issue = "144211")]
     pub const fn map_or_default<U, F>(self, f: F) -> U
     where
@@ -980,7 +979,7 @@ impl<T, E> Result<T, E> {
     ///     .parse::<u8>()
     ///     .inspect(|x| println!("original: {x}"))
     ///     .map(|x| x.pow(3))
-    ///     .expect("failed to parse number");
+    ///     .expect("literal `4` should parse as a `u8`");
     /// ```
     #[inline]
     #[stable(feature = "result_option_inspect", since = "1.76.0")]
@@ -1682,7 +1681,12 @@ impl<T, E> Result<T, E> {
     #[inline]
     #[track_caller]
     #[stable(feature = "option_result_unwrap_unchecked", since = "1.58.0")]
-    pub unsafe fn unwrap_err_unchecked(self) -> E {
+    #[rustc_const_unstable(feature = "const_result_unwrap_unchecked", issue = "148714")]
+    pub const unsafe fn unwrap_err_unchecked(self) -> E
+    where
+        T: [const] Destruct,
+        E: [const] Destruct,
+    {
         match self {
             // SAFETY: the safety contract must be upheld by the caller.
             Ok(_) => unsafe { hint::unreachable_unchecked() },
@@ -2159,7 +2163,7 @@ impl<A, E, V: FromIterator<A>> FromIterator<Result<A, E>> for Result<V, E> {
 
 #[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
 #[rustc_const_unstable(feature = "const_try", issue = "74935")]
-impl<T, E> const ops::Try for Result<T, E> {
+const impl<T, E> ops::Try for Result<T, E> {
     type Output = T;
     type Residual = Result<convert::Infallible, E>;
 
@@ -2179,7 +2183,7 @@ impl<T, E> const ops::Try for Result<T, E> {
 
 #[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
 #[rustc_const_unstable(feature = "const_try", issue = "74935")]
-impl<T, E, F: [const] From<E>> const ops::FromResidual<Result<convert::Infallible, E>>
+const impl<T, E, F: [const] From<E>> ops::FromResidual<Result<convert::Infallible, E>>
     for Result<T, F>
 {
     #[inline]
@@ -2193,7 +2197,7 @@ impl<T, E, F: [const] From<E>> const ops::FromResidual<Result<convert::Infallibl
 #[diagnostic::do_not_recommend]
 #[unstable(feature = "try_trait_v2_yeet", issue = "96374")]
 #[rustc_const_unstable(feature = "const_try", issue = "74935")]
-impl<T, E, F: [const] From<E>> const ops::FromResidual<ops::Yeet<E>> for Result<T, F> {
+const impl<T, E, F: [const] From<E>> ops::FromResidual<ops::Yeet<E>> for Result<T, F> {
     #[inline]
     fn from_residual(ops::Yeet(e): ops::Yeet<E>) -> Self {
         Err(From::from(e))
@@ -2202,6 +2206,6 @@ impl<T, E, F: [const] From<E>> const ops::FromResidual<ops::Yeet<E>> for Result<
 
 #[unstable(feature = "try_trait_v2_residual", issue = "91285")]
 #[rustc_const_unstable(feature = "const_try", issue = "74935")]
-impl<T, E> const ops::Residual<T> for Result<convert::Infallible, E> {
+const impl<T, E> ops::Residual<T> for Result<convert::Infallible, E> {
     type TryType = Result<T, E>;
 }

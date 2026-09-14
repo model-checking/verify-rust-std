@@ -39,12 +39,9 @@ auto trait Freeze {}
 
 impl<T: PointeeSized> Copy for *mut T {}
 
-#[lang = "drop_in_place"]
+#[lang = "drop_glue"]
 #[inline]
-#[allow(unconditional_recursion)]
-pub unsafe fn drop_in_place<T: PointeeSized>(to_drop: *mut T) {
-    drop_in_place(to_drop);
-}
+pub unsafe fn drop_glue<T: PointeeSized>(_to_drop: &mut T) {}
 
 // Frame unwind info registration
 //
@@ -90,12 +87,12 @@ pub mod eh_frames {
 
     unsafe extern "C" fn init() {
         // register unwind info on module startup
-        __register_frame_info(&__EH_FRAME_BEGIN__ as *const u8, &mut OBJ as *mut _ as *mut u8);
+        __register_frame_info(&__EH_FRAME_BEGIN__ as *const u8, &raw mut OBJ as *mut u8);
     }
 
     unsafe extern "C" fn uninit() {
         // unregister on shutdown
-        __deregister_frame_info(&__EH_FRAME_BEGIN__ as *const u8, &mut OBJ as *mut _ as *mut u8);
+        __deregister_frame_info(&__EH_FRAME_BEGIN__ as *const u8, &raw mut OBJ as *mut u8);
     }
 
     // MinGW-specific init/uninit routine registration

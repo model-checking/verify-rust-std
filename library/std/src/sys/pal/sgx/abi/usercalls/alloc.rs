@@ -8,7 +8,6 @@ use crate::cell::UnsafeCell;
 use crate::convert::TryInto;
 use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::ops::{CoerceUnsized, Deref, DerefMut, Index, IndexMut};
-use crate::pin::PinCoerceUnsized;
 use crate::ptr::{self, NonNull};
 use crate::slice::SliceIndex;
 use crate::{cmp, intrinsics, slice};
@@ -152,7 +151,7 @@ unsafe impl<T: UserSafeSized> UserSafe for [T] {
         let elem_size = size_of::<T>();
         assert_eq!(size % elem_size, 0);
         let len = size / elem_size;
-        ptr::slice_from_raw_parts_mut(ptr as _, len)
+        ptr.cast::<T>().cast_slice(len)
     }
 }
 
@@ -772,9 +771,6 @@ where
 
 #[unstable(feature = "sgx_platform", issue = "56975")]
 impl<T: CoerceUnsized<U>, U> CoerceUnsized<UserRef<U>> for UserRef<T> {}
-
-#[unstable(feature = "pin_coerce_unsized_trait", issue = "150112")]
-unsafe impl<T: ?Sized> PinCoerceUnsized for UserRef<T> {}
 
 #[unstable(feature = "sgx_platform", issue = "56975")]
 impl<T, I> Index<I> for UserRef<[T]>

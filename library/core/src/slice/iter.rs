@@ -7,9 +7,7 @@ use safety::requires;
 
 use super::{from_raw_parts, from_raw_parts_mut};
 use crate::hint::assert_unchecked;
-use crate::iter::{
-    FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce, UncheckedIterator,
-};
+use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
 #[cfg(kani)]
 use crate::kani;
 use crate::marker::PhantomData;
@@ -182,14 +180,14 @@ impl<T> Invariant for Iter<'_, T> {
     fn is_safe(&self) -> bool {
         let ty_size = crate::mem::size_of::<T>();
         // Use `abs_diff` since `end_or_len` may be smaller than `ptr` if `T` is a ZST.
-        let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
+        let distance = self.ptr.addr().get().abs_diff(self.end_or_len.addr());
         if ty_size == 0 || distance == 0 {
             self.ptr.is_aligned()
         } else {
             let slice_ptr: *const [T] =
                 crate::ptr::from_raw_parts(self.ptr.as_ptr(), distance / ty_size);
             crate::ub_checks::same_allocation(self.ptr.as_ptr(), self.end_or_len)
-                && self.ptr.addr().get() <= self.end_or_len as usize
+                && self.ptr.addr().get() <= self.end_or_len.addr()
                 && distance % ty_size == 0
                 && crate::ub_checks::can_dereference(slice_ptr)
         }
@@ -243,14 +241,14 @@ impl<T> Invariant for IterMut<'_, T> {
     /// and `self.end_or_len`.
     fn is_safe(&self) -> bool {
         let ty_size = crate::mem::size_of::<T>();
-        let distance = self.ptr.addr().get().abs_diff(self.end_or_len as usize);
+        let distance = self.ptr.addr().get().abs_diff(self.end_or_len.addr());
         if ty_size == 0 || distance == 0 {
             self.ptr.is_aligned()
         } else {
             let slice_ptr: *mut [T] =
                 crate::ptr::from_raw_parts_mut(self.ptr.as_ptr(), distance / ty_size);
             crate::ub_checks::same_allocation(self.ptr.as_ptr(), self.end_or_len)
-                && self.ptr.addr().get() <= self.end_or_len as usize
+                && self.ptr.addr().get() <= self.end_or_len.addr()
                 && distance % ty_size == 0
                 && crate::ub_checks::can_dereference(slice_ptr)
                 && crate::ub_checks::can_write(slice_ptr)
@@ -480,7 +478,7 @@ impl<'a, T: 'a, P: FnMut(&T) -> bool> Split<'a, T, P> {
     /// ```
     #[unstable(feature = "split_as_slice", issue = "96137")]
     pub fn as_slice(&self) -> &'a [T] {
-        if self.finished { &[] } else { &self.v }
+        if self.finished { &[] } else { self.v }
     }
 }
 
@@ -2234,7 +2232,7 @@ unsafe impl<T> Sync for ChunksExactMut<'_, T> where T: Sync {}
 ///
 /// [`array_windows`]: slice::array_windows
 /// [slices]: slice
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 #[stable(feature = "array_windows", since = "1.94.0")]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct ArrayWindows<'a, T: 'a, const N: usize> {
@@ -2245,6 +2243,14 @@ impl<'a, T: 'a, const N: usize> ArrayWindows<'a, T, N> {
     #[inline]
     pub(super) const fn new(slice: &'a [T]) -> Self {
         Self { v: slice }
+    }
+}
+
+// FIXME(#26925) Remove in favor of `#[derive(Clone)]`
+#[stable(feature = "array_windows", since = "1.94.0")]
+impl<T, const N: usize> Clone for ArrayWindows<'_, T, N> {
+    fn clone(&self) -> Self {
+        Self { v: self.v }
     }
 }
 
@@ -2283,6 +2289,14 @@ impl<'a, T, const N: usize> Iterator for ArrayWindows<'a, T, N> {
     fn last(self) -> Option<Self::Item> {
         self.v.last_chunk()
     }
+
+    unsafe fn __iterator_get_unchecked(&mut self, idx: usize) -> Self::Item {
+        // SAFETY: since the caller guarantees that `idx` is in bounds,
+        // which means that `idx` cannot overflow an `isize`, and the
+        // "slice" created by `cast_array` is a subslice of `self.v`
+        // thus is guaranteed to be valid for the lifetime `'a` of `self.v`.
+        unsafe { &*self.v.as_ptr().add(idx).cast_array() }
+    }
 }
 
 #[stable(feature = "array_windows", since = "1.94.0")]
@@ -2309,6 +2323,22 @@ impl<T, const N: usize> ExactSizeIterator for ArrayWindows<'_, T, N> {
     fn is_empty(&self) -> bool {
         self.v.len() < N
     }
+}
+
+#[unstable(feature = "trusted_len", issue = "37572")]
+unsafe impl<T, const N: usize> TrustedLen for ArrayWindows<'_, T, N> {}
+
+#[stable(feature = "array_windows", since = "1.94.0")]
+impl<T, const N: usize> FusedIterator for ArrayWindows<'_, T, N> {}
+
+#[doc(hidden)]
+#[unstable(feature = "trusted_random_access", issue = "none")]
+unsafe impl<T, const N: usize> TrustedRandomAccess for ArrayWindows<'_, T, N> {}
+
+#[doc(hidden)]
+#[unstable(feature = "trusted_random_access", issue = "none")]
+unsafe impl<T, const N: usize> TrustedRandomAccessNoCoerce for ArrayWindows<'_, T, N> {
+    const MAY_HAVE_SIDE_EFFECT: bool = false;
 }
 
 /// An iterator over a slice in (non-overlapping) chunks (`chunk_size` elements at a
@@ -3081,6 +3111,20 @@ where
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         if self.slice.is_empty() { (0, Some(0)) } else { (1, Some(self.slice.len())) }
+    }
+
+    #[inline]
+    fn count(mut self) -> usize {
+        let Some((mut previous, rest)) = self.slice.split_first() else {
+            return 0;
+        };
+
+        let mut count = 1;
+        for current in rest {
+            count += usize::from(!(self.predicate)(previous, current));
+            previous = current;
+        }
+        count
     }
 
     #[inline]
