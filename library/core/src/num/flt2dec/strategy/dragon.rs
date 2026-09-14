@@ -606,7 +606,13 @@ pub mod dragon_verify {
         let carry: u32 = kani::any();
         let addend: u32 = kani::any();
         let result = carrying_mul_add_contract(digit, multiplier, carry, addend);
-        assert_eq!(result, carrying_mul_add_model(digit, multiplier, carry, addend));
+        let modeled = carrying_mul_add_model(digit, multiplier, carry, addend);
+        // First check the complete 64-bit value. Packing two u32 limbs is
+        // injective, so the subsequent limb comparison follows directly.
+        let result_bits = ((result.1 as u64) << 32) | result.0 as u64;
+        let modeled_bits = ((modeled.1 as u64) << 32) | modeled.0 as u64;
+        assert_eq!(result_bits, modeled_bits);
+        assert_eq!(result, modeled);
         kani::cover(
             digit == 0 && multiplier == 0 && addend == 0 && carry == 0,
             "limb multiplication accepts all zero inputs",
