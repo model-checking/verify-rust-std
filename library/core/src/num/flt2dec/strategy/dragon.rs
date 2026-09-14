@@ -557,6 +557,10 @@ pub mod dragon_verify {
                 #[kani::proof]
                 #[kani::unwind($shortest_unwind)]
                 #[kani::stub(
+                    crate::num::flt2dec::estimator::estimate_scaling_factor,
+                    crate::num::flt2dec::estimator_verify::estimate_scaling_factor
+                )]
+                #[kani::stub(
                     u64::leading_zeros,
                     crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
                 )]
@@ -589,6 +593,10 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($exact_unwind)]
+                #[kani::stub(
+                    crate::num::flt2dec::estimator::estimate_scaling_factor,
+                    crate::num::flt2dec::estimator_verify::estimate_scaling_factor
+                )]
                 #[kani::stub(
                     u64::leading_zeros,
                     crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
