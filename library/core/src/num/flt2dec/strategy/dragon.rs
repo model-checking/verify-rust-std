@@ -506,9 +506,8 @@ pub mod dragon_verify {
         ($name:ident, $size:literal) => {
             #[kani::proof]
             #[kani::unwind(41)]
-            #[kani::stub(u32::carrying_mul, stub_carrying_mul)]
-            #[kani::stub(u32::carrying_mul_add, stub_carrying_mul_add)]
-            #[kani::stub_verified(carrying_mul_add_contract)]
+            #[kani::stub(u32::carrying_mul, carrying_mul_model)]
+            #[kani::stub(u32::carrying_mul_add, carrying_mul_add_model)]
             #[kani::solver(z3)]
             fn $name() {
                 check_mul_small_model_agrees::<$size>();
@@ -583,6 +582,22 @@ pub mod dragon_verify {
         carrying_mul_add_contract(digit, multiplier, carry, 0)
     }
 
+    // The standalone contract harness also proves this deterministic model
+    // equal to the real primitive for all four u32 inputs. Sharing its
+    // expression on both sides preserves equal carry prefixes syntactically.
+    // (2^32 - 1)^2 + 2 * (2^32 - 1) = u64::MAX, so this sum cannot wrap.
+    fn carrying_mul_add_model(digit: u32, multiplier: u32, carry: u32, addend: u32) -> (u32, u32) {
+        let sum = (digit as u64)
+            .wrapping_mul(multiplier as u64)
+            .wrapping_add(carry as u64)
+            .wrapping_add(addend as u64);
+        (sum as u32, (sum >> 32) as u32)
+    }
+
+    fn carrying_mul_model(digit: u32, multiplier: u32, carry: u32) -> (u32, u32) {
+        carrying_mul_add_model(digit, multiplier, carry, 0)
+    }
+
     #[kani::proof_for_contract(carrying_mul_add_contract)]
     #[kani::solver(z3)]
     fn check_carrying_mul_add_contract() {
@@ -591,6 +606,7 @@ pub mod dragon_verify {
         let carry: u32 = kani::any();
         let addend: u32 = kani::any();
         let result = carrying_mul_add_contract(digit, multiplier, carry, addend);
+        assert_eq!(result, carrying_mul_add_model(digit, multiplier, carry, addend));
         kani::cover(
             digit == 0 && multiplier == 0 && addend == 0 && carry == 0,
             "limb multiplication accepts all zero inputs",
