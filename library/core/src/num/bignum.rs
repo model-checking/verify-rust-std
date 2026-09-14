@@ -146,6 +146,10 @@ macro_rules! define_bignum {
                 use crate::{cmp, iter};
 
                 let mut sz = cmp::max(self.size, other.size);
+                #[cfg(kani)]
+                {
+                    sz = crate::num::bignum::kani_loop_size(sz);
+                }
                 let mut carry = false;
                 for (a, b) in iter::zip(&mut self.base[..sz], &other.base[..sz]) {
                     let (v, c) = (*a).carrying_add(*b, carry);
@@ -181,6 +185,8 @@ macro_rules! define_bignum {
                 use crate::{cmp, iter};
 
                 let sz = cmp::max(self.size, other.size);
+                #[cfg(kani)]
+                let sz = crate::num::bignum::kani_loop_size(sz);
                 let mut noborrow = true;
                 for (a, b) in iter::zip(&mut self.base[..sz], &other.base[..sz]) {
                     let (v, c) = (*a).carrying_add(!*b, noborrow);
@@ -196,6 +202,10 @@ macro_rules! define_bignum {
             /// mutable reference.
             pub fn mul_small(&mut self, other: $ty) -> &mut $name {
                 let mut sz = self.size;
+                #[cfg(kani)]
+                {
+                    sz = crate::num::bignum::kani_loop_size(sz);
+                }
                 let mut carry = 0;
                 for a in &mut self.base[..sz] {
                     let (v, c) = (*a).carrying_mul(other, carry);
@@ -386,6 +396,13 @@ macro_rules! define_bignum {
 pub type Digit32 = u32;
 
 define_bignum!(Big32x40: type=Digit32, n=40);
+
+// Proofs can expose fixed count bits while asserting equality with this identity.
+// The arithmetic loops still run, and normal builds contain no instrumentation.
+#[cfg(kani)]
+pub(crate) fn kani_loop_size(size: usize) -> usize {
+    size
+}
 
 #[cfg(kani)]
 impl crate::kani::Arbitrary for Big32x40 {

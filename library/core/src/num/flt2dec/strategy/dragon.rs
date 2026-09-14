@@ -646,6 +646,26 @@ pub mod dragon_verify {
         Pow10Prefix::for_range(0..=0).check(n)
     }
 
+    struct LimbCountMask(usize);
+
+    impl LimbCountMask {
+        fn check(&self, size: usize) -> usize {
+            let encoded = size & self.0;
+            assert_eq!(encoded, size);
+            encoded
+        }
+    }
+
+    // Only the two unit-exponent diagnostics use these checked count encodings.
+    // A count outside the mask fails an assertion, without excluding any input.
+    fn unit_shortest_limb_count(size: usize) -> usize {
+        LimbCountMask(3).check(size)
+    }
+
+    fn unit_exact_limb_count(size: usize) -> usize {
+        LimbCountMask(7).check(size)
+    }
+
     macro_rules! check_partition {
         ($name:ident, arbitrary_finite_f32, $group:literal, $cover_fallback:literal) => {
             check_partition!(
@@ -680,6 +700,7 @@ pub mod dragon_verify {
         (
             $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
             $shortest_unwind:literal, $exact_unwind:literal, $estimate:path, $pow10:ident
+            $(, $shortest_limbs:path, $exact_limbs:path)?
         ) => {
             mod $name {
                 use super::*;
@@ -690,6 +711,7 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($shortest_unwind)]
+                $(#[kani::stub(crate::num::bignum::kani_loop_size, $shortest_limbs)])?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
@@ -725,6 +747,7 @@ pub mod dragon_verify {
 
                 #[kani::proof]
                 #[kani::unwind($exact_unwind)]
+                $(#[kani::stub(crate::num::bignum::kani_loop_size, $exact_limbs)])?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
                 #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
@@ -775,6 +798,8 @@ pub mod dragon_verify {
         19,
         33,
         estimate_unit_scale,
-        checked_pow10_unit
+        checked_pow10_unit,
+        unit_shortest_limb_count,
+        unit_exact_limb_count
     );
 }
