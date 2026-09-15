@@ -1,5 +1,6 @@
 #![unstable(feature = "ptr_metadata", issue = "81513")]
 
+use crate::clone::TrivialClone;
 use crate::fmt;
 use crate::hash::{Hash, Hasher};
 use crate::intrinsics::{aggregate_raw_ptr, ptr_metadata};
@@ -54,7 +55,7 @@ use crate::ptr::NonNull;
 /// [`to_raw_parts`]: *const::to_raw_parts
 #[lang = "pointee_trait"]
 #[rustc_deny_explicit_impl]
-#[rustc_do_not_implement_via_object]
+#[rustc_dyn_incompatible_trait]
 pub trait Pointee: PointeeSized {
     /// The type for metadata in pointers and references to `Self`.
     #[lang = "metadata_type"]
@@ -230,6 +231,9 @@ impl<Dyn: PointeeSized> Clone for DynMetadata<Dyn> {
         *self
     }
 }
+
+#[doc(hidden)]
+unsafe impl<Dyn: PointeeSized> TrivialClone for DynMetadata<Dyn> {}
 
 impl<Dyn: PointeeSized> Eq for DynMetadata<Dyn> {}
 

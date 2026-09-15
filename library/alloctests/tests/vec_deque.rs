@@ -1,5 +1,6 @@
+use core::cell::Cell;
 use core::num::NonZero;
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::collections::TryReserveErrorKind::*;
 use std::collections::VecDeque;
 use std::collections::vec_deque::Drain;
@@ -1848,4 +1849,501 @@ fn test_truncate_front() {
     assert_eq!(v.as_slices(), ([9].as_slice(), [0, 1, 2, 3, 4, 5, 6].as_slice()));
     v.truncate_front(5);
     assert_eq!(v.as_slices(), ([2, 3, 4, 5, 6].as_slice(), [].as_slice()));
+}
+
+#[test]
+fn test_extend_from_within() {
+    let mut v = VecDeque::with_capacity(8);
+    v.extend(0..6);
+    v.truncate_front(4);
+    assert_eq!(v, [2, 3, 4, 5]);
+    v.extend_from_within(1..4);
+    assert_eq!(v, [2, 3, 4, 5, 3, 4, 5]);
+    // check it really wrapped
+    assert_eq!(v.as_slices(), ([2, 3, 4, 5, 3, 4].as_slice(), [5].as_slice()));
+    v.extend_from_within(1..=2);
+    assert_eq!(v, [2, 3, 4, 5, 3, 4, 5, 3, 4]);
+    v.extend_from_within(..3);
+    assert_eq!(v, [2, 3, 4, 5, 3, 4, 5, 3, 4, 2, 3, 4]);
+}
+
+/// Struct that allows tracking clone and drop calls and can be set to panic on calling clone.
+struct CloneTracker<'a> {
+    id: usize,
+    // Counters can be set to None if not needed.
+    clone: Option<&'a Cell<u32>>,
+    drop: Option<&'a Cell<u32>>,
+    panic: bool,
+}
+
+impl<'a> CloneTracker<'a> {
+    pub const DUMMY: Self = Self { id: 999, clone: None, drop: None, panic: false };
+}
+
+impl<'a> Clone for CloneTracker<'a> {
+    fn clone(&self) -> Self {
+        if self.panic {
+            panic!();
+        }
+
+        if let Some(clone_count) = self.clone {
+            clone_count.update(|c| c + 1);
+        }
+
+        Self { id: self.id, clone: self.clone, drop: self.drop, panic: false }
+    }
+}
+
+impl<'a> Drop for CloneTracker<'a> {
+    fn drop(&mut self) {
+        if let Some(drop_count) = self.drop {
+            drop_count.update(|c| c + 1);
+        }
+    }
+}
+
+#[test]
+fn test_extend_from_within_clone() {
+    let clone_counts = [const { Cell::new(0) }; 4];
+    let mut v = VecDeque::with_capacity(10);
+    // insert 2 dummy elements to have the buffer wrap later
+    v.extend([CloneTracker::DUMMY; 2]);
+    v.extend(clone_counts.iter().enumerate().map(|(id, clone_count)| CloneTracker {
+        id,
+        clone: Some(clone_count),
+        drop: None,
+        panic: false,
+    }));
+    // remove the dummy elements
+    v.truncate_front(4);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 2, 3]);
+
+    v.extend_from_within(2..);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 2, 3, 2, 3]);
+    // elements at index 2 and 3 should have been cloned once
+    assert_eq!(clone_counts.each_ref().map(Cell::get), [0, 0, 1, 1]);
+    // it is important that the deque wraps because of this operation, we want to test if wrapping is handled correctly
+    v.extend_from_within(1..5);
+    // total length is 10, 8 in the first part and 2 in the second part
+    assert_eq!(v.as_slices().0.len(), 8);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 2, 3, 2, 3, 1, 2, 3, 2]);
+    // the new elements are from indices 1, 2, 3 and 2, those elements should have their clone count
+    // incremented (clone count at index 2 gets incremented twice so ends up at 3)
+    assert_eq!(clone_counts.each_ref().map(Cell::get), [0, 1, 3, 2]);
+}
+
+#[test]
+#[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
+fn test_extend_from_within_clone_panic() {
+    let clone_counts = [const { Cell::new(0) }; 4];
+    let drop_count = Cell::new(0);
+    let mut v = VecDeque::with_capacity(8);
+    // insert 2 dummy elements to have the buffer wrap later
+    v.extend([CloneTracker::DUMMY; 2]);
+    v.extend(clone_counts.iter().enumerate().map(|(id, clone_count)| CloneTracker {
+        id,
+        clone: Some(clone_count),
+        drop: Some(&drop_count),
+        panic: false,
+    }));
+    // remove the dummy elements
+    v.truncate_front(4);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 2, 3]);
+
+    // panic after wrapping
+    v[2].panic = true;
+    catch_unwind(AssertUnwindSafe(|| {
+        v.extend_from_within(..);
+    }))
+    .unwrap_err();
+    v[2].panic = false;
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 2, 3, 0, 1]);
+    // the first 2 elements were cloned
+    assert_eq!(clone_counts.each_ref().map(Cell::get), [1, 1, 0, 0]);
+    // nothing should have been dropped
+    assert_eq!(drop_count.get(), 0);
+
+    v.truncate_front(2);
+    assert_eq!(drop_count.get(), 4);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1]);
+
+    // panic before wrapping
+    v[1].panic = true;
+    catch_unwind(AssertUnwindSafe(|| {
+        v.extend_from_within(..);
+    }))
+    .unwrap_err();
+    v[1].panic = false;
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 0]);
+    // only the first element was cloned
+    assert_eq!(clone_counts.each_ref().map(Cell::get), [2, 1, 0, 0]);
+    // nothing more should have been dropped
+    assert_eq!(drop_count.get(), 4);
+}
+
+#[test]
+fn test_prepend_from_within() {
+    let mut v = VecDeque::with_capacity(8);
+    v.extend(0..6);
+    v.truncate_front(4);
+    v.prepend_from_within(..=0);
+    assert_eq!(v.as_slices(), ([2, 2, 3, 4, 5].as_slice(), [].as_slice()));
+    v.prepend_from_within(2..);
+    assert_eq!(v.as_slices(), ([3, 4].as_slice(), [5, 2, 2, 3, 4, 5].as_slice()));
+    v.prepend_from_within(..);
+    assert_eq!(v, [[3, 4, 5, 2, 2, 3, 4, 5]; 2].as_flattened());
+}
+
+#[test]
+fn test_prepend_from_within_clone() {
+    let clone_counts = [const { Cell::new(0) }; 4];
+    // insert 2 dummy elements to have the buffer wrap later
+    let mut v = VecDeque::with_capacity(10);
+    v.extend([CloneTracker::DUMMY; 2]);
+    v.extend(clone_counts.iter().enumerate().map(|(id, clone_count)| CloneTracker {
+        id,
+        clone: Some(clone_count),
+        drop: None,
+        panic: false,
+    }));
+    // remove the dummy elements
+    v.truncate_front(4);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 2, 3]);
+
+    v.prepend_from_within(..2);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 0, 1, 2, 3]);
+    v.prepend_from_within(1..5);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [1, 0, 1, 2, 0, 1, 0, 1, 2, 3]);
+    // count the number of each element and subtract one (clone should have been called n-1 times if we have n elements)
+    // example: 0 appears 3 times so should have been cloned twice, 1 appears 4 times so cloned 3 times, etc
+    assert_eq!(clone_counts.each_ref().map(Cell::get), [2, 3, 1, 0]);
+}
+
+#[test]
+#[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
+fn test_prepend_from_within_clone_panic() {
+    let clone_counts = [const { Cell::new(0) }; 4];
+    let drop_count = Cell::new(0);
+    let mut v = VecDeque::with_capacity(8);
+    // insert 2 dummy elements to have the buffer wrap later
+    v.extend([CloneTracker::DUMMY; 2]);
+    v.extend(clone_counts.iter().enumerate().map(|(id, clone_count)| CloneTracker {
+        id,
+        clone: Some(clone_count),
+        drop: Some(&drop_count),
+        panic: false,
+    }));
+    // remove the dummy elements
+    v.truncate_front(4);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [0, 1, 2, 3]);
+
+    // panic after wrapping
+    v[1].panic = true;
+    catch_unwind(AssertUnwindSafe(|| {
+        v.prepend_from_within(..);
+    }))
+    .unwrap_err();
+    v[1].panic = false;
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [2, 3, 0, 1, 2, 3]);
+    // the last 2 elements were cloned
+    assert_eq!(clone_counts.each_ref().map(Cell::get), [0, 0, 1, 1]);
+    // nothing should have been dropped
+    assert_eq!(drop_count.get(), 0);
+
+    v.truncate_front(2);
+    assert_eq!(drop_count.get(), 4);
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [2, 3]);
+
+    // panic before wrapping
+    v[0].panic = true;
+    catch_unwind(AssertUnwindSafe(|| {
+        v.prepend_from_within(..);
+    }))
+    .unwrap_err();
+    v[0].panic = false;
+    assert_eq!(v.iter().map(|tr| tr.id).collect::<Vec<_>>(), [3, 2, 3]);
+    // only the first element was cloned
+    assert_eq!(clone_counts.each_ref().map(Cell::get), [0, 0, 1, 2]);
+    // nothing more should have been dropped
+    assert_eq!(drop_count.get(), 4);
+}
+
+#[test]
+fn test_extend_and_prepend_from_within() {
+    let mut v = ('0'..='9').map(String::from).collect::<VecDeque<_>>();
+    v.truncate_front(5);
+    v.extend_from_within(4..);
+    v.prepend_from_within(..2);
+    assert_eq!(v.iter().map(|s| &**s).collect::<String>(), "56567899");
+    v.clear();
+    v.extend(['1', '2', '3'].map(String::from));
+    v.prepend_from_within(..);
+    v.extend_from_within(..);
+    assert_eq!(v.iter().map(|s| &**s).collect::<String>(), "123123123123");
+}
+
+#[test]
+fn test_extend_front() {
+    let mut v = VecDeque::new();
+    v.extend_front(0..3);
+    assert_eq!(v, [2, 1, 0]);
+    v.extend_front(3..6);
+    assert_eq!(v, [5, 4, 3, 2, 1, 0]);
+    v.prepend([1; 4]);
+    assert_eq!(v, [1, 1, 1, 1, 5, 4, 3, 2, 1, 0]);
+
+    let mut v = VecDeque::with_capacity(8);
+    let cap = v.capacity();
+    v.extend(0..4);
+    v.truncate_front(2);
+    v.extend_front(4..8);
+    assert_eq!(v.as_slices(), ([7, 6].as_slice(), [5, 4, 2, 3].as_slice()));
+    assert_eq!(v.capacity(), cap);
+
+    let mut v = VecDeque::new();
+    v.extend_front([]);
+    v.extend_front(None);
+    v.extend_front(vec![]);
+    v.prepend([]);
+    v.prepend(None);
+    v.prepend(vec![]);
+    assert_eq!(v.capacity(), 0);
+    v.extend_front(Some(123));
+    assert_eq!(v, [123]);
+}
+
+#[test]
+fn test_extend_front_specialization_vec_into_iter() {
+    // trigger 4 code paths: all combinations of prepend and extend_front, wrap and no wrap
+    let mut v = VecDeque::with_capacity(4);
+    v.prepend(vec![1, 2, 3]);
+    assert_eq!(v, [1, 2, 3]);
+    v.pop_back();
+    // this should wrap around the physical buffer
+    v.prepend(vec![-1, 0]);
+    // check it really wrapped
+    assert_eq!(v.as_slices(), ([-1].as_slice(), [0, 1, 2].as_slice()));
+
+    let mut v = VecDeque::with_capacity(4);
+    v.extend_front(vec![1, 2, 3]);
+    assert_eq!(v, [3, 2, 1]);
+    v.pop_back();
+    // this should wrap around the physical buffer
+    v.extend_front(vec![4, 5]);
+    // check it really wrapped
+    assert_eq!(v.as_slices(), ([5].as_slice(), [4, 3, 2].as_slice()));
+}
+
+#[test]
+fn test_extend_front_specialization_copy_slice() {
+    // trigger 4 code paths: all combinations of prepend and extend_front, wrap and no wrap
+    let mut v = VecDeque::with_capacity(4);
+    v.prepend([1, 2, 3].as_slice().iter().copied());
+    assert_eq!(v, [1, 2, 3]);
+    v.pop_back();
+    // this should wrap around the physical buffer
+    v.prepend([-1, 0].as_slice().iter().copied());
+    // check it really wrapped
+    assert_eq!(v.as_slices(), ([-1].as_slice(), [0, 1, 2].as_slice()));
+
+    let mut v = VecDeque::with_capacity(4);
+    v.extend_front([1, 2, 3].as_slice().iter().copied());
+    assert_eq!(v, [3, 2, 1]);
+    v.pop_back();
+    // this should wrap around the physical buffer
+    v.extend_front([4, 5].as_slice().iter().copied());
+    // check it really wrapped
+    assert_eq!(v.as_slices(), ([5].as_slice(), [4, 3, 2].as_slice()));
+}
+
+#[test]
+fn test_extend_front_specialization_deque_drain() {
+    // trigger 8 code paths: all combinations of prepend and extend_front, wrap and no wrap (src deque), wrap and no wrap (dst deque)
+
+    /// Get deque containing `[1, 2, 3, 4]`, possibly wrapping in the middle (between the 2 and 3).
+    fn test_deque(wrap: bool) -> VecDeque<i32> {
+        if wrap {
+            let mut v = VecDeque::with_capacity(4);
+            v.extend([3, 4]);
+            v.prepend([1, 2]);
+            assert_eq!(v.as_slices(), ([1, 2].as_slice(), [3, 4].as_slice()));
+            v
+        } else {
+            VecDeque::from([1, 2, 3, 4])
+        }
+    }
+
+    // prepend, v2.head == 0
+
+    let mut v1 = VecDeque::with_capacity(7);
+
+    let mut v2 = test_deque(false);
+    v1.prepend(v2.drain(..));
+    // drain removes all elements but keeps the buffer
+    assert_eq!(v2, []);
+    assert!(v2.capacity() >= 4);
+
+    assert_eq!(v1, [1, 2, 3, 4]);
+    v1.pop_back();
+
+    let mut v2 = test_deque(false);
+    // this should wrap around the physical buffer
+    v1.prepend(v2.drain(..));
+    // drain removes all elements but keeps the buffer
+    assert_eq!(v2, []);
+    assert!(v2.capacity() >= 4);
+
+    // check it really wrapped
+    assert_eq!(v1.as_slices(), ([1].as_slice(), [2, 3, 4, 1, 2, 3].as_slice()));
+
+    // extend_front, v2.head == 0
+
+    let mut v1 = VecDeque::with_capacity(7);
+
+    let mut v2 = test_deque(false);
+    v1.extend_front(v2.drain(..));
+    // drain removes all elements but keeps the buffer
+    assert_eq!(v2, []);
+    assert!(v2.capacity() >= 4);
+
+    assert_eq!(v1, [4, 3, 2, 1]);
+    v1.pop_back();
+
+    let mut v2 = test_deque(false);
+    // this should wrap around the physical buffer
+    v1.extend_front(v2.drain(..));
+    // drain removes all elements but keeps the buffer
+    assert_eq!(v2, []);
+    assert!(v2.capacity() >= 4);
+
+    // check it really wrapped
+    assert_eq!(v1.as_slices(), ([4].as_slice(), [3, 2, 1, 4, 3, 2].as_slice()));
+
+    // prepend, v2.head != 0
+
+    let mut v1 = VecDeque::with_capacity(7);
+
+    let mut v2 = test_deque(true);
+    v1.prepend(v2.drain(..));
+    // drain removes all elements but keeps the buffer
+    assert_eq!(v2, []);
+    assert!(v2.capacity() >= 4);
+
+    assert_eq!(v1, [1, 2, 3, 4]);
+    v1.pop_back();
+
+    let mut v2 = test_deque(true);
+    // this should wrap around the physical buffer
+    v1.prepend(v2.drain(..));
+    // drain removes all elements but keeps the buffer
+    assert_eq!(v2, []);
+    assert!(v2.capacity() >= 4);
+
+    // check it really wrapped
+    assert_eq!(v1.as_slices(), ([1].as_slice(), [2, 3, 4, 1, 2, 3].as_slice()));
+
+    // extend_front, v2.head != 0
+
+    let mut v1 = VecDeque::with_capacity(7);
+
+    let mut v2 = test_deque(true);
+    v1.extend_front(v2.drain(..));
+    // drain removes all elements but keeps the buffer
+    assert_eq!(v2, []);
+    assert!(v2.capacity() >= 4);
+
+    assert_eq!(v1, [4, 3, 2, 1]);
+    v1.pop_back();
+
+    let mut v2 = test_deque(true);
+    // this should wrap around the physical buffer
+    v1.extend_front(v2.drain(..));
+    // drain removes all elements but keeps the buffer
+    assert_eq!(v2, []);
+    assert!(v2.capacity() >= 4);
+
+    // check it really wrapped
+    assert_eq!(v1.as_slices(), ([4].as_slice(), [3, 2, 1, 4, 3, 2].as_slice()));
+}
+
+#[test]
+fn test_splice() {
+    let mut v = VecDeque::from(vec![1, 2, 3, 4, 5]);
+    let a = [10, 11, 12];
+    v.splice(2..4, a);
+    assert_eq!(v, &[1, 2, 10, 11, 12, 5]);
+    v.splice(1..3, Some(20));
+    assert_eq!(v, &[1, 20, 11, 12, 5]);
+}
+
+#[test]
+fn test_splice_inclusive_range() {
+    let mut v = VecDeque::from(vec![1, 2, 3, 4, 5]);
+    let a = [10, 11, 12];
+    let t1: Vec<_> = v.splice(2..=3, a).collect();
+    assert_eq!(v, &[1, 2, 10, 11, 12, 5]);
+    assert_eq!(t1, &[3, 4]);
+    let t2: Vec<_> = v.splice(1..=2, Some(20)).collect();
+    assert_eq!(v, &[1, 20, 11, 12, 5]);
+    assert_eq!(t2, &[2, 10]);
+}
+
+#[test]
+fn test_splice_inclusive_range2() {
+    let mut v = VecDeque::from(vec![1, 2, 10, 11, 12, 5]);
+    let t2: Vec<_> = v.splice(1..=2, Some(20)).collect();
+    assert_eq!(v, &[1, 20, 11, 12, 5]);
+    assert_eq!(t2, &[2, 10]);
+}
+
+#[test]
+#[should_panic]
+fn test_splice_out_of_bounds() {
+    let mut v = VecDeque::from(vec![1, 2, 3, 4, 5]);
+    let a = [10, 11, 12];
+    v.splice(5..6, a);
+}
+
+#[test]
+#[should_panic]
+fn test_splice_inclusive_out_of_bounds() {
+    let mut v = VecDeque::from(vec![1, 2, 3, 4, 5]);
+    let a = [10, 11, 12];
+    v.splice(5..=5, a);
+}
+
+#[test]
+fn test_splice_items_zero_sized() {
+    let mut vec = VecDeque::from(vec![(), (), ()]);
+    let vec2 = VecDeque::from(vec![]);
+    let t: Vec<_> = vec.splice(1..2, vec2.iter().cloned()).collect();
+    assert_eq!(vec, &[(), ()]);
+    assert_eq!(t, &[()]);
+}
+
+#[test]
+fn test_splice_unbounded() {
+    let mut vec = VecDeque::from(vec![1, 2, 3, 4, 5]);
+    let t: Vec<_> = vec.splice(.., None).collect();
+    assert_eq!(vec, &[]);
+    assert_eq!(t, &[1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn test_splice_forget() {
+    let mut v = VecDeque::from(vec![1, 2, 3, 4, 5]);
+    let a = [10, 11, 12];
+    std::mem::forget(v.splice(2..4, a));
+    assert_eq!(v, &[1, 2]);
+}
+
+#[test]
+fn test_splice_wrapping() {
+    let mut vec = VecDeque::with_capacity(10);
+    vec.push_front(7u8);
+    vec.push_back(9);
+
+    vec.splice(1..1, [8]);
+
+    assert_eq!(Vec::from(vec), [7, 8, 9]);
 }

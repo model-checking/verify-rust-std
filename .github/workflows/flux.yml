@@ -8,8 +8,8 @@ on:
     branches: [main]
 
 env:
-  FLUX_VERSION: "6b080b32801f923bfb590ac48e729de38f829f21"
-  FIXPOINT_VERSION: "nightly-10-15-2025"
+  FLUX_VERSION: "9c1b5e278791f57eed1fd109816bbe180423fa9d"
+  FIXPOINT_VERSION: "nightly-2026-07-20"
 
 jobs:
   check-flux-on-core:

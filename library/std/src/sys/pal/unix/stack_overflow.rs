@@ -8,8 +8,8 @@ pub struct Handler {
 }
 
 impl Handler {
-    pub unsafe fn new(thread_name: Option<Box<str>>) -> Handler {
-        make_handler(false, thread_name)
+    pub unsafe fn new() -> Handler {
+        make_handler(false)
     }
 
     fn null() -> Handler {
@@ -69,7 +69,6 @@ mod imp {
     use super::Handler;
     use super::thread_info::{delete_current_info, set_current_info, with_current_info};
     use crate::ops::Range;
-    use crate::sync::OnceLock;
     use crate::sync::atomic::{Atomic, AtomicBool, AtomicPtr, AtomicUsize, Ordering};
     use crate::sys::pal::unix::os;
     use crate::{io, mem, ptr};
@@ -118,8 +117,15 @@ mod imp {
                 if let Some(thread_info) = thread_info
                     && thread_info.guard_page_range.contains(&fault_addr)
                 {
-                    let name = thread_info.thread_name.as_deref().unwrap_or("<unknown>");
-                    let tid = crate::thread::current_os_id();
+                    // Hey you! Yes, you modifying the stack overflow message!
+                    // Please make sure that all functions called here are
+                    // actually async-signal-safe. If they're not, try retrieving
+                    // the information beforehand and storing it in `ThreadInfo`.
+                    // Thank you!
+                    // - says Jonas after having had to watch his carefully
+                    //   written code get made unsound again.
+                    let tid = thread_info.tid;
+                    let name = thread_info.name.as_deref().unwrap_or("<unknown>");
                     rtprintpanic!("\nthread '{name}' ({tid}) has overflowed its stack\n");
                     rtabort!("stack overflow");
                 }
@@ -165,17 +171,19 @@ mod imp {
                 if !NEED_ALTSTACK.load(Ordering::Relaxed) {
                     // haven't set up our sigaltstack yet
                     NEED_ALTSTACK.store(true, Ordering::Release);
-                    let handler = unsafe { make_handler(true, None) };
+                    let handler = unsafe { make_handler(true) };
                     MAIN_ALTSTACK.store(handler.data, Ordering::Relaxed);
                     mem::forget(handler);
 
                     if let Some(guard_page_range) = guard_page_range.take() {
-                        set_current_info(guard_page_range, Some(Box::from("main")));
+                        set_current_info(guard_page_range);
                     }
                 }
 
                 action.sa_flags = SA_SIGINFO | SA_ONSTACK;
-                action.sa_sigaction = signal_handler as sighandler_t;
+                action.sa_sigaction = signal_handler
+                    as unsafe extern "C" fn(i32, *mut libc::siginfo_t, *mut libc::c_void)
+                    as sighandler_t;
                 // SAFETY: only overriding signals if the default is set
                 unsafe { sigaction(signal, &action, ptr::null_mut()) };
             }
@@ -239,14 +247,14 @@ mod imp {
     /// # Safety
     /// Mutates the alternate signal stack
     #[forbid(unsafe_op_in_unsafe_fn)]
-    pub unsafe fn make_handler(main_thread: bool, thread_name: Option<Box<str>>) -> Handler {
+    pub unsafe fn make_handler(main_thread: bool) -> Handler {
         if cfg!(panic = "immediate-abort") || !NEED_ALTSTACK.load(Ordering::Acquire) {
             return Handler::null();
         }
 
         if !main_thread {
             if let Some(guard_page_range) = unsafe { current_guard() } {
-                set_current_info(guard_page_range, thread_name);
+                set_current_info(guard_page_range);
             }
         }
 
@@ -406,6 +414,10 @@ mod imp {
             } else if cfg!(all(target_os = "linux", target_env = "musl")) {
                 install_main_guard_linux_musl(page_size)
             } else if cfg!(target_os = "freebsd") {
+                #[cfg(not(target_os = "freebsd"))]
+                return None;
+                // The FreeBSD code cannot be checked on non-BSDs.
+                #[cfg(target_os = "freebsd")]
                 install_main_guard_freebsd(page_size)
             } else if cfg!(any(target_os = "netbsd", target_os = "openbsd")) {
                 install_main_guard_bsds(page_size)
@@ -442,6 +454,7 @@ mod imp {
     }
 
     #[forbid(unsafe_op_in_unsafe_fn)]
+    #[cfg(target_os = "freebsd")]
     unsafe fn install_main_guard_freebsd(page_size: usize) -> Option<Range<usize>> {
         // FreeBSD's stack autogrows, and optionally includes a guard page
         // at the bottom. If we try to remap the bottom of the stack
@@ -453,38 +466,23 @@ mod imp {
         // by the security.bsd.stack_guard_page sysctl.
         // By default it is 1, checking once is enough since it is
         // a boot time config value.
-        static PAGES: OnceLock<usize> = OnceLock::new();
+        static PAGES: crate::sync::OnceLock<usize> = crate::sync::OnceLock::new();
 
         let pages = PAGES.get_or_init(|| {
-            use crate::sys::weak::dlsym;
-            dlsym!(
-                fn sysctlbyname(
-                    name: *const libc::c_char,
-                    oldp: *mut libc::c_void,
-                    oldlenp: *mut libc::size_t,
-                    newp: *const libc::c_void,
-                    newlen: libc::size_t,
-                ) -> libc::c_int;
-            );
             let mut guard: usize = 0;
             let mut size = size_of_val(&guard);
             let oid = c"security.bsd.stack_guard_page";
-            match sysctlbyname.get() {
-                Some(fcn)
-                    if unsafe {
-                        fcn(
-                            oid.as_ptr(),
-                            (&raw mut guard).cast(),
-                            &raw mut size,
-                            ptr::null_mut(),
-                            0,
-                        ) == 0
-                    } =>
-                {
-                    guard
-                }
-                _ => 1,
-            }
+
+            let r = unsafe {
+                libc::sysctlbyname(
+                    oid.as_ptr(),
+                    (&raw mut guard).cast(),
+                    &raw mut size,
+                    ptr::null_mut(),
+                    0,
+                )
+            };
+            if r == 0 { guard } else { 1 }
         });
         Some(guardaddr..guardaddr + pages * page_size)
     }
@@ -642,10 +640,7 @@ mod imp {
 
     pub unsafe fn cleanup() {}
 
-    pub unsafe fn make_handler(
-        _main_thread: bool,
-        _thread_name: Option<Box<str>>,
-    ) -> super::Handler {
+    pub unsafe fn make_handler(_main_thread: bool) -> super::Handler {
         super::Handler::null()
     }
 
@@ -729,10 +724,7 @@ mod imp {
 
     pub unsafe fn cleanup() {}
 
-    pub unsafe fn make_handler(
-        main_thread: bool,
-        _thread_name: Option<Box<str>>,
-    ) -> super::Handler {
+    pub unsafe fn make_handler(main_thread: bool) -> super::Handler {
         if !main_thread {
             reserve_stack();
         }

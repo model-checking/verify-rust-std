@@ -52,6 +52,38 @@ import re
 import sys
 
 
+# Standard-library crates live under `library/<crate>/`. The directory name
+# uses hyphens for some crates (e.g. `compiler-builtins`) whereas the crate
+# identifier the scanner reports uses underscores.
+library_crate_pattern = re.compile(r'/library/([^/]+)/')
+
+
+def crate_from_file(file_name, known_crates):
+    """Best-effort mapping from a source file path to its crate name.
+
+    Used as a fallback for the `crate` field when a harness cannot be matched
+    to an entry in the scanner's per-crate function tables. This happens for
+    manual, non-contract harnesses: there is no reliable way to recover their
+    target function name (see `read_kani_list`), so the scanner lookup misses
+    and the crate would otherwise be reported as null even though the harness
+    plainly lives in a known standard-library crate.
+
+    The result is only accepted when it names a crate the scanner actually
+    reported (`known_crates`). A `library/` path segment that does not
+    correspond to a real standard-library crate (a dependency's own `library/`
+    directory, or Kani's internal `kani_build/library/kani_core/` scaffolding)
+    is skipped, so the crate stays null rather than being given a value the
+    rest of the pipeline never assigns.
+    """
+    if file_name is None:
+        return None
+    for match in library_crate_pattern.finditer(file_name):
+        crate = match.group(1).replace('-', '_')
+        if crate in known_crates:
+            return crate
+    return None
+
+
 def read_scanner_results(scanner_results_dir):
     """Parse information produced by Kani's scanner tool."""
     crate_pattern = re.compile(r'^.*/(.+)_scan_functions.csv$')
@@ -93,6 +125,12 @@ def read_kani_list(kani_list_file, scanner_data):
     with open(kani_list_file, 'r') as f:
         harnesses = json.load(f)
 
+    # Crates the scanner actually reported, used to validate the file-path
+    # fallback in `crate_from_file`.
+    known_crates = {crate
+                    for info in scanner_data.values()
+                    for crate in info}
+
     # There is no reasonable way to reliably deduce which function a
     # non-contract harness is targeting for verification, so we apply a bunch
     # of patterns that we know are being used. We expect that, over time,
@@ -130,7 +168,7 @@ def read_kani_list(kani_list_file, scanner_data):
             if fn_info is None:
                 standard_harnesses[h] = {
                         'file_name': file_name,
-                        'crate': None,
+                        'crate': crate_from_file(file_name, known_crates),
                         'function': fn,
                         'target_safeness': None,
                         'public_target': None
@@ -164,7 +202,7 @@ def read_kani_list(kani_list_file, scanner_data):
             assert contract_harnesses.get(h) is None
             contract_harnesses[h] = {
                     'file_name': file_name,
-                    'crate': None,
+                    'crate': crate_from_file(file_name, known_crates),
                     'target_safeness': None,
                     'public_target': None
                 }

@@ -1,11 +1,21 @@
 use crate::common::intrinsic::Intrinsic;
 
 use super::argument::Argument;
+use super::compare::INTRINSIC_DELIMITER;
 use super::indentation::Indentation;
 use super::intrinsic_helpers::IntrinsicTypeDefinition;
 
 // The number of times each intrinsic will be called.
 const PASSES: u32 = 20;
+const COMMON_HEADERS: [&str; 7] = [
+    "iostream",
+    "string",
+    "cstring",
+    "iomanip",
+    "sstream",
+    "type_traits",
+    "cassert",
+];
 
 pub fn generate_c_test_loop<T: IntrinsicTypeDefinition + Sized>(
     w: &mut impl std::io::Write,
@@ -47,7 +57,15 @@ pub fn generate_c_constraint_blocks<'a, T: IntrinsicTypeDefinition + 'a>(
         let ty = current.ty.c_type();
 
         writeln!(w, "{indentation}{{")?;
-        writeln!(w, "{body_indentation}{ty} {} = {i};", current.name)?;
+
+        // TODO: Move to actually specifying the enum value
+        // instead of typecasting integers, for better clarity
+        // of generated code.
+        writeln!(
+            w,
+            "{body_indentation}const {ty} {} = ({ty}){i};",
+            current.generate_name()
+        )?;
 
         generate_c_constraint_blocks(
             w,
@@ -99,31 +117,9 @@ pub fn write_mod_cpp<T: IntrinsicTypeDefinition>(
 ) -> std::io::Result<()> {
     write!(w, "{notice}")?;
 
-    for header in platform_headers {
+    for header in COMMON_HEADERS.iter().chain(platform_headers.iter()) {
         writeln!(w, "#include <{header}>")?;
     }
-
-    writeln!(
-        w,
-        r#"
-#include <iostream>
-#include <cstring>
-#include <iomanip>
-#include <sstream>
-
-template<typename T1, typename T2> T1 cast(T2 x) {{
-  static_assert(sizeof(T1) == sizeof(T2), "sizeof T1 and T2 must be the same");
-  T1 ret{{}};
-  memcpy(&ret, &x, sizeof(T1));
-  return ret;
-}}
-
-std::ostream& operator<<(std::ostream& os, float16_t value);
-
-
-
-"#
-    )?;
 
     writeln!(w, "{}", forward_declarations)?;
 
@@ -137,32 +133,12 @@ std::ostream& operator<<(std::ostream& os, float16_t value);
 pub fn write_main_cpp<'a>(
     w: &mut impl std::io::Write,
     arch_specific_definitions: &str,
+    arch_specific_headers: &[&str],
     intrinsics: impl Iterator<Item = &'a str> + Clone,
 ) -> std::io::Result<()> {
-    writeln!(w, "#include <iostream>")?;
-    writeln!(w, "#include <string>")?;
-
-    for header in ["arm_neon.h", "arm_acle.h", "arm_fp16.h"] {
+    for header in COMMON_HEADERS.iter().chain(arch_specific_headers.iter()) {
         writeln!(w, "#include <{header}>")?;
     }
-
-    writeln!(
-        w,
-        r#"
-#include <cstring>
-#include <iomanip>
-#include <sstream>
-
-std::ostream& operator<<(std::ostream& os, float16_t value) {{
-    uint16_t temp = 0;
-    memcpy(&temp, &value, sizeof(float16_t));
-    std::stringstream ss;
-    ss << "0x" << std::setfill('0') << std::setw(4) << std::hex << temp;
-    os << ss.str();
-    return os;
-}}
-"#
-    )?;
 
     // NOTE: It's assumed that this value contains the required `ifdef`s.
     writeln!(w, "{arch_specific_definitions }")?;
@@ -172,22 +148,17 @@ std::ostream& operator<<(std::ostream& os, float16_t value) {{
     }
 
     writeln!(w, "int main(int argc, char **argv) {{")?;
-    writeln!(w, "    std::string intrinsic_name = argv[1];")?;
-
-    writeln!(w, "    if (false) {{")?;
 
     for intrinsic in intrinsics {
-        writeln!(w, "    }} else if (intrinsic_name == \"{intrinsic}\") {{")?;
-        writeln!(w, "        return run_{intrinsic}();")?;
+        writeln!(
+            w,
+            "    std::cout << \"{INTRINSIC_DELIMITER}\" << std::endl;"
+        )?;
+        writeln!(w, "    std::cout << \"{intrinsic}\" << std::endl;")?;
+        writeln!(w, "    run_{intrinsic}();\n")?;
     }
 
-    writeln!(w, "    }} else {{")?;
-    writeln!(
-        w,
-        "        std::cerr << \"Unknown command: \" << intrinsic_name << \"\\n\";"
-    )?;
-    writeln!(w, "        return -1;")?;
-    writeln!(w, "    }}")?;
+    writeln!(w, "    return 0;")?;
 
     writeln!(w, "}}")?;
 
