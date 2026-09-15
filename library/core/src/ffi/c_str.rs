@@ -1220,8 +1220,15 @@ mod verify {
         assert!(c_str.is_safe());
     }
 
-    // impl ops::Index<ops::RangeFrom<usize>> for CStr — in-bounds tail slicing
-    #[kani::proof_for_contract(<CStr as ops::Index<ops::RangeFrom<usize>>>::index)]
+    // impl ops::Index<ops::RangeFrom<usize>> for CStr — in-bounds tail slicing.
+    // Verified as a plain proof rather than proof_for_contract: at the pinned
+    // Kani, a pfc target on a generic trait's method (Index<RangeFrom<usize>>)
+    // fails to resolve (model-checking/kani#1997) — "unable to find
+    // implementation of associated function Index::index for CStr". The two
+    // #[ensures] postconditions on `index` are asserted directly on the result
+    // below. (Non-generic trait pfc, e.g. CloneToUninit, still resolves and is
+    // kept in contract form.)
+    #[kani::proof]
     #[kani::unwind(17)] // bounded at 16: at 32 this harness took 263s.
     fn check_index_range_from_contract() {
         const MAX_SIZE: usize = 16;
