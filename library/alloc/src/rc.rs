@@ -1414,18 +1414,7 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_raw", since = "1.17.0")]
-    #[requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).value };
-            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-            ptr::addr_eq(ptr, rebuilt_ptr)
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).get() >= 1 }
-        })]
+    #[requires(unsafe { rc_raw_valid(ptr) })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr, Global) }
     }
@@ -1486,23 +1475,15 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_mutate_strong_count", since = "1.53.0")]
-    #[requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).value };
-            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-            ptr::addr_eq(ptr, rebuilt_ptr)
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).get() >= 1 }
+    #[requires(unsafe { rc_raw_valid(ptr) })]
+    #[ensures(|_: &()| {
+            let (strong_ptr, strong_before) = old({
+                let strong_ptr = unsafe { rc_strong_ptr(ptr) };
+                (strong_ptr, unsafe { (*strong_ptr).get() })
+            });
+            strong_before.checked_add(1) == Some(unsafe { (*strong_ptr).get() })
         })]
-    #[cfg_attr(kani, kani::modifies({
-        let offset = unsafe { data_offset(ptr) };
-        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-        unsafe { &raw const *strong_ptr }
-    }))]
+    #[cfg_attr(kani, kani::modifies(unsafe { rc_strong_ptr(ptr) }))]
     pub unsafe fn increment_strong_count(ptr: *const T) {
         unsafe { Self::increment_strong_count_in(ptr, Global) }
     }
@@ -1540,23 +1521,21 @@ impl<T: ?Sized> Rc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_mutate_strong_count", since = "1.53.0")]
-    #[requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).value };
-            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-            ptr::addr_eq(ptr, rebuilt_ptr)
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).get() >= 1 }
+    #[requires(unsafe { rc_raw_valid(ptr) })]
+    // A final decrement may destroy the value and deallocate the allocation.
+    // Since the current Kani function-contract API has no `frees` clause, the
+    // postcondition constrains only non-final decrements whose allocation survives.
+    #[ensures(|_: &()| {
+            let (strong_ptr, strong_before) = old({
+                let strong_ptr = unsafe { rc_strong_ptr(ptr) };
+                (strong_ptr, unsafe { (*strong_ptr).get() })
+            });
+            strong_before == 1 || {
+                let strong_after = unsafe { (*strong_ptr).get() };
+                strong_before.checked_sub(1) == Some(strong_after)
+            }
         })]
-    #[cfg_attr(kani, kani::modifies({
-        let offset = unsafe { data_offset(ptr) };
-        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-        unsafe { &raw const *strong_ptr }
-    }))]
+    #[cfg_attr(kani, kani::modifies(unsafe { rc_strong_ptr(ptr) }))]
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         unsafe { Self::decrement_strong_count_in(ptr, Global) }
     }
@@ -1697,18 +1676,7 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// }
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).value };
-            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-            ptr::addr_eq(ptr, rebuilt_ptr)
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).get() >= 1 }
-        })]
+    #[requires(unsafe { rc_raw_valid(ptr) })]
     #[ensures(|result: &Self| {
             let result_ptr = Rc::<T, A>::as_ptr(result);
             ptr::addr_eq(result_ptr, ptr)
@@ -1821,23 +1789,15 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).value };
-            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-            ptr::addr_eq(ptr, rebuilt_ptr)
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).get() >= 1 }
+    #[requires(unsafe { rc_raw_valid(ptr) })]
+    #[ensures(|_: &()| {
+            let (strong_ptr, strong_before) = old({
+                let strong_ptr = unsafe { rc_strong_ptr(ptr) };
+                (strong_ptr, unsafe { (*strong_ptr).get() })
+            });
+            strong_before.checked_add(1) == Some(unsafe { (*strong_ptr).get() })
         })]
-    #[cfg_attr(kani, kani::modifies({
-        let offset = unsafe { data_offset(ptr) };
-        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-        unsafe { &raw const *strong_ptr }
-    }))]
+    #[cfg_attr(kani, kani::modifies(unsafe { rc_strong_ptr(ptr) }))]
     pub unsafe fn increment_strong_count_in(ptr: *const T, alloc: A)
     where
         A: Clone,
@@ -1884,23 +1844,21 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[requires({
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).value };
-            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-            ptr::addr_eq(ptr, rebuilt_ptr)
-                && kani::mem::checked_size_of_raw(ptr)
-                    == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                && kani::mem::checked_align_of_raw(ptr)
-                    == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                && unsafe { (*strong_ptr).get() >= 1 }
+    #[requires(unsafe { rc_raw_valid(ptr) })]
+    // A final decrement may destroy the value and deallocate the allocation.
+    // Since the current Kani function-contract API has no `frees` clause, the
+    // postcondition constrains only non-final decrements whose allocation survives.
+    #[ensures(|_: &()| {
+            let (strong_ptr, strong_before) = old({
+                let strong_ptr = unsafe { rc_strong_ptr(ptr) };
+                (strong_ptr, unsafe { (*strong_ptr).get() })
+            });
+            strong_before == 1 || {
+                let strong_after = unsafe { (*strong_ptr).get() };
+                strong_before.checked_sub(1) == Some(strong_after)
+            }
         })]
-    #[cfg_attr(kani, kani::modifies({
-        let offset = unsafe { data_offset(ptr) };
-        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-        unsafe { &raw const *strong_ptr }
-    }))]
+    #[cfg_attr(kani, kani::modifies(unsafe { rc_strong_ptr(ptr) }))]
     pub unsafe fn decrement_strong_count_in(ptr: *const T, alloc: A) {
         unsafe { drop(Rc::from_raw_in(ptr, alloc)) };
     }
@@ -2004,6 +1962,8 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "get_mut_unchecked", issue = "63292")]
+    // `can_write` models writable storage; aliasing, active borrows, and exact
+    // pointee-type obligations are caller guarantees beyond this contract model.
     #[requires({
             let inner = this.ptr.as_ptr();
             let value = unsafe { &raw mut (*inner).value };
@@ -3350,42 +3310,16 @@ impl<T: ?Sized> Weak<T> {
     /// [`new`]: Weak::new
     #[inline]
     #[stable(feature = "weak_into_raw", since = "1.45.0")]
-    #[requires({
-            let is_sentinel = is_dangling(ptr);
-            if is_sentinel {
-                true
-            } else {
-                let offset = unsafe { data_offset(ptr) };
-                let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
-                let rebuilt_ptr = unsafe { &raw const (*inner).value };
-                let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-                let weak_ptr = unsafe { strong_ptr.add(1) };
-                kani::mem::same_allocation(ptr.cast::<u8>(), inner.cast::<u8>())
-                    && ptr::addr_eq(ptr, rebuilt_ptr)
-                    && kani::mem::checked_size_of_raw(ptr)
-                        == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                    && kani::mem::checked_align_of_raw(ptr)
-                        == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-            }
-        })]
-    #[requires({
-            let is_sentinel = is_dangling(ptr);
-            is_sentinel || {
-                let offset = unsafe { data_offset(ptr) };
-                let weak_ptr = unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
-                unsafe { (*weak_ptr).get() > 0 }
-            }
-        })]
+    // `is_dangling` recognizes the `usize::MAX` sentinel used by `Weak::new`,
+    // not an arbitrary dangling allocation pointer. The sentinel has no backing
+    // `RcInner`, so allocation and reference-count checks apply only otherwise.
+    #[requires(unsafe { weak_raw_valid(ptr) })]
     #[ensures(|result: &Self| {
-            old(is_dangling(ptr))
-                || unsafe { (*result.ptr.as_ptr().cast::<Cell<usize>>().add(1)).get() }
-                    == old({
-                        let offset = unsafe { data_offset(ptr) };
-                        let weak_ptr =
-                            unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
-                        unsafe { (*weak_ptr).get() }
-                    })
-        })]
+        let result_ptr = result.as_ptr();
+        ptr::addr_eq(result_ptr, ptr)
+            && old(unsafe { weak_raw_count_snapshot(ptr) })
+                == unsafe { weak_raw_count_snapshot(result_ptr) }
+    })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr, Global) }
     }
@@ -3558,38 +3492,16 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
     /// [`new`]: Weak::new
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[requires({
-            let is_sentinel = is_dangling(ptr);
-            if is_sentinel {
-                true
-            } else {
-                let offset = unsafe { data_offset(ptr) };
-                let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
-                let rebuilt_ptr = unsafe { &raw const (*inner).value };
-                let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
-                let weak_ptr = unsafe { strong_ptr.add(1) };
-
-                kani::mem::same_allocation(ptr.cast::<u8>(), inner.cast::<u8>())
-                    && ptr::addr_eq(ptr, rebuilt_ptr)
-                    && kani::mem::checked_size_of_raw(ptr)
-                        == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-                    && kani::mem::checked_align_of_raw(ptr)
-                        == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-                    && kani::mem::can_dereference(strong_ptr)
-                    && kani::mem::can_dereference(weak_ptr)
-                    && unsafe { (*weak_ptr).get() > 0 }
-            }
-        })]
+    // `is_dangling` recognizes the `usize::MAX` sentinel used by `Weak::new_in`,
+    // not an arbitrary dangling allocation pointer. The sentinel has no backing
+    // `RcInner`, so allocation and reference-count checks apply only otherwise.
+    #[requires(unsafe { weak_raw_valid(ptr) })]
     #[ensures(|result: &Self| {
-            old(is_dangling(ptr))
-                || unsafe { (*result.ptr.as_ptr().cast::<Cell<usize>>().add(1)).get() }
-                    == old({
-                        let offset = unsafe { data_offset(ptr) };
-                        let weak_ptr =
-                            unsafe { (ptr.byte_sub(offset) as *const Cell<usize>).add(1) };
-                        unsafe { (*weak_ptr).get() }
-                    })
-        })]
+        let result_ptr = result.as_ptr();
+        ptr::addr_eq(result_ptr, ptr)
+            && old(unsafe { weak_raw_count_snapshot(ptr) })
+                == unsafe { weak_raw_count_snapshot(result_ptr) }
+    })]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         // See Weak::as_ptr for context on how the input pointer is derived.
 
@@ -3969,6 +3881,91 @@ unsafe fn data_offset<T: ?Sized>(ptr: *const T) -> usize {
     // satisfy the requirements of align_of_val_raw; this is an implementation
     // detail of the language that must not be relied upon outside of std.
     unsafe { data_offset_align(align_of_val_raw(ptr)) }
+}
+
+// These helpers are used only from Kani contracts.
+#[cfg(kani)]
+#[inline]
+unsafe fn rc_raw_parts<T: ?Sized>(
+    ptr: *const T,
+) -> (*const RcInner<T>, *const T, *const Cell<usize>) {
+    let offset = unsafe { data_offset(ptr) };
+    let inner = unsafe { ptr.byte_sub(offset) as *const RcInner<T> };
+    let value = unsafe { &raw const (*inner).value };
+    let strong = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+    (inner, value, strong)
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn rc_raw_layout_valid<T: ?Sized>(ptr: *const T) -> bool {
+    let (_, value, _) = unsafe { rc_raw_parts(ptr) };
+    ptr::addr_eq(ptr, value)
+        && kani::mem::checked_size_of_raw(ptr) == Some(unsafe { mem::size_of_val_raw(value) })
+        && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { align_of_val_raw(value) })
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn rc_raw_valid<T: ?Sized>(ptr: *const T) -> bool {
+    let strong = unsafe { rc_strong_ptr(ptr) };
+    (unsafe { rc_raw_layout_valid(ptr) })
+        && kani::mem::can_dereference(strong)
+        && (unsafe { (*strong).get() >= 1 })
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn rc_strong_ptr<T: ?Sized>(ptr: *const T) -> *const Cell<usize> {
+    unsafe { rc_raw_parts(ptr).2 }
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn rc_weak_ptr<T: ?Sized>(ptr: *const T) -> *const Cell<usize> {
+    unsafe { rc_strong_ptr(ptr).add(1) }
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn weak_raw_count_valid<T: ?Sized>(ptr: *const T) -> bool {
+    let weak = unsafe { rc_weak_ptr(ptr) };
+    kani::mem::can_dereference(weak) && (unsafe { (*weak).get() > 0 })
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn weak_raw_layout_valid<T: ?Sized>(ptr: *const T) -> bool {
+    let (inner, value, _) = unsafe { rc_raw_parts(ptr) };
+    kani::mem::same_allocation(ptr.cast::<u8>(), inner.cast::<u8>())
+        && ptr::addr_eq(ptr, value)
+        && kani::mem::checked_size_of_raw(ptr) == Some(unsafe { mem::size_of_val_raw(value) })
+        && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { align_of_val_raw(value) })
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn weak_raw_valid<T: ?Sized>(ptr: *const T) -> bool {
+    if is_dangling(ptr) {
+        true
+    } else {
+        unsafe {
+            weak_raw_layout_valid(ptr)
+                && kani::mem::can_dereference(rc_strong_ptr(ptr))
+                && weak_raw_count_valid(ptr)
+        }
+    }
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn weak_raw_count_snapshot<T: ?Sized>(ptr: *const T) -> Option<usize> {
+    if is_dangling(ptr) {
+        None
+    } else {
+        let weak = unsafe { rc_weak_ptr(ptr) };
+        Some(unsafe { (*weak).get() })
+    }
 }
 
 #[inline]
@@ -4681,32 +4678,48 @@ unsafe impl<T: ?Sized + Allocator, A: Allocator> Allocator for Rc<T, A> {
 #[unstable(feature = "kani", issue = "none")]
 mod kani_rc_harness_helpers {
     use super::*;
-    use crate::alloc::alloc;
+
+    pub(super) fn modifies_slice<T>(ptr: *mut T, len: usize) -> *mut [T] {
+        if len == 0 || mem::size_of::<T>() == 0 {
+            ptr::slice_from_raw_parts_mut(ptr::null_mut(), 0)
+        } else {
+            ptr::slice_from_raw_parts_mut(ptr, len)
+        }
+    }
 
     pub(super) fn verifier_nondet_vec<T>() -> Vec<T> {
-        let cap: usize = kani::any();
-        let elem_layout = Layout::new::<T>();
-        kani::assume(elem_layout.repeat(cap).is_ok());
-        let mut v = Vec::<T>::with_capacity(cap);
+        let sz: usize = kani::any();
+        // This is a CI tractability measure, not a workaround for a failing proof.
+        kani::assume(sz < 100);
+
+        let layout = Layout::array::<T>(sz);
+        kani::assume(layout.is_ok());
+        let byte_len = layout.unwrap().size();
+
+        let mut v = Vec::<T>::with_capacity(sz);
+        let data = v.as_mut_ptr().cast::<u8>();
+        let mut i = 0usize;
+
+        #[safety::loop_invariant(i <= byte_len)]
+        #[safety::loop_invariant(
+            i == 0
+                || core::ub_checks::can_dereference(
+                    ptr::slice_from_raw_parts(data, i)
+                )
+        )]
+        #[kani::loop_modifies(&i, modifies_slice(data, byte_len))]
+        while i < byte_len {
+            unsafe {
+                data.add(i).write(kani::any::<u8>());
+            }
+            i += 1;
+        }
+
         unsafe {
-            let sz: usize = kani::any();
-            kani::assume(sz <= cap);
-            // The harnesses use symbolic, otherwise unbounded vector lengths. The full Rc
-            // suite contains enough harnesses that shared CI runners cannot verify it
-            // reliably without this uniform length bound. This is a CI tractability measure,
-            // not a workaround for a failing proof: removing the assumption restores the
-            // unbounded inputs, for which all harnesses complete successfully locally.
-            kani::assume(sz <= 100);
-            ptr::write_bytes(
-                v.as_mut_ptr().cast::<u8>(),
-                kani::any::<u8>(),
-                mem::size_of::<T>() * sz,
-            );
             let initialized = ptr::slice_from_raw_parts(v.as_ptr(), sz);
-            // Constrain only the harness-generated bytes to form valid `T`
-            // values before `set_len`, as required by its safety contract.
-            // This does not assume any property or result of the boxed function
-            // under verification, so it is not assuming the proof conclusion.
+            // The loop initializes every byte independently. Restrict those
+            // byte patterns to representations that form valid `T` values
+            // before making them part of the Vec.
             kani::assume(core::ub_checks::can_dereference(initialized));
             v.set_len(sz);
         }
@@ -4720,8 +4733,7 @@ mod kani_rc_harness_helpers {
     }
 
     pub(super) fn nondet_rc_slice<T>(vec: &Vec<T>) -> &[T] {
-        let len = vec.len();
-        kani::assume(rc_slice_layout_ok::<T>(len));
+        kani::assume(rc_slice_layout_ok::<T>(vec.len()));
         vec.as_slice()
     }
 
@@ -5354,6 +5366,16 @@ mod verify {
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u64, [u64]);
     gen_weak_from_raw_unsized_harness!(harness_weak_from_raw_vec_u128, [u128]);
 
+    #[kani::proof_for_contract(Weak::<u8>::from_raw)]
+    pub fn harness_weak_from_raw_sentinel() {
+        let weak: Weak<u8> = Weak::new();
+        let ptr: *const u8 = weak.into_raw();
+        assert!(is_dangling(ptr));
+        let recovered: Weak<u8> = unsafe { Weak::from_raw(ptr) };
+        assert!(recovered.upgrade().is_none());
+        kani::cover(true, "Weak::from_raw accepts the sentinel produced by Weak::new");
+    }
+
     // Weak::from_raw_in harnesses.
     macro_rules! gen_weak_from_raw_in_sized_harness {
         ($name:ident, $ty:ty) => {
@@ -5408,6 +5430,17 @@ mod verify {
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u32, [u32]);
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u64, [u64]);
     gen_weak_from_raw_in_unsized_harness!(harness_weak_from_raw_in_vec_u128, [u128]);
+
+    #[kani::proof_for_contract(Weak::<u8, Global>::from_raw_in)]
+    pub fn harness_weak_from_raw_in_sentinel() {
+        let weak: Weak<u8, Global> = Weak::new_in(Global);
+        let (ptr, alloc): (*const u8, Global) = weak.into_raw_with_allocator();
+        assert!(is_dangling(ptr));
+        let recovered: Weak<u8, Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
+
+        assert!(recovered.upgrade().is_none());
+        kani::cover(true, "Weak::from_raw_in accepts the sentinel produced by Weak::new_in");
+    }
 
     // === SAFE FUNCTIONS (54 — all required) ===
 
