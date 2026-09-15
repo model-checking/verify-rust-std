@@ -35,6 +35,10 @@ jobs:
       WORKER_INDEX: ${{ matrix.partition }}
       # Total number of workers running this step
       WORKER_TOTAL: 4
+      # Cap parallel harness verification on ubuntu-latest: its 4-core/16 GB
+      # runners get OOM-killed when 4 memory-hungry harnesses (up to ~10 GB
+      # each, e.g. the ffi::c_str ones) run concurrently.
+      KANI_JOBS: ${{ matrix.os == 'ubuntu-latest' && 2 || '' }}
     
     steps:
       - name: Remove unnecessary software to free up disk space

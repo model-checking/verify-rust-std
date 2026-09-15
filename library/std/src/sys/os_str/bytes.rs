@@ -4,11 +4,11 @@
 use core::clone::CloneToUninit;
 
 use crate::borrow::Cow;
+use crate::bstr::ByteStr;
 use crate::collections::TryReserveError;
-use crate::fmt::Write;
 use crate::rc::Rc;
 use crate::sync::Arc;
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner};
 use crate::{fmt, mem, str};
 
 #[cfg(test)]
@@ -64,25 +64,7 @@ impl fmt::Debug for Slice {
 
 impl fmt::Display for Slice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // If we're the empty string then our iterator won't actually yield
-        // anything, so perform the formatting manually
-        if self.inner.is_empty() {
-            return "".fmt(f);
-        }
-
-        for chunk in self.inner.utf8_chunks() {
-            let valid = chunk.valid();
-            // If we successfully decoded the whole chunk as a valid string then
-            // we can return a direct formatting of the string which will also
-            // respect various formatting flags if possible.
-            if chunk.invalid().is_empty() {
-                return valid.fmt(f);
-            }
-
-            f.write_str(valid)?;
-            f.write_char(char::REPLACEMENT_CHARACTER)?;
-        }
-        Ok(())
+        fmt::Display::fmt(ByteStr::new(&self.inner), f)
     }
 }
 
@@ -319,12 +301,6 @@ impl Slice {
     #[inline]
     pub fn clone_into(&self, buf: &mut Buf) {
         self.inner.clone_into(&mut buf.inner)
-    }
-
-    #[inline]
-    pub fn into_box(&self) -> Box<Slice> {
-        let boxed: Box<[u8]> = self.inner.into();
-        unsafe { mem::transmute(boxed) }
     }
 
     #[inline]
