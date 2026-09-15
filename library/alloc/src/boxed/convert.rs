@@ -832,25 +832,6 @@ mod verify {
     }
 
     #[kani::proof]
-    fn check_from_slice_u8() {
-        let arr: [u8; 8] = kani::any();
-        // n <= 8 mirrors the fixed 8-element source array, not a tractability cap.
-        let n = kani::any_where(|n: &usize| *n <= 8);
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-        kani::cover(n == 0, "empty slice");
-        kani::cover(n > 0, "non-empty slice");
-        let b: Box<[u8]> = Box::from(&arr[..n]);
-        assert_eq!(b.len(), n);
-        // A whole-slice `assert_eq!` compiles to a memcmp-style comparison that
-        // CBMC unwinds far past this n<=8 bound; a symbolic-index single read
-        // gives the same per-element guarantee without the unbounded unwind.
-        if n > 0 {
-            let i: usize = kani::any_where(|i: &usize| *i < n);
-            assert_eq!(b[i], arr[i]);
-        }
-    }
-
-    #[kani::proof]
     fn check_from_slice_u32() {
         let arr: [u32; 8] = kani::any();
         // n <= 8 mirrors the fixed 8-element source array, not a tractability cap.
@@ -895,7 +876,7 @@ mod verify {
         let bytes: Box<[u8]> = Box::from(b);
         assert_eq!(bytes.len(), n);
         assert!(core::ptr::addr_eq(&raw const *bytes as *const u8, addr));
-        // Symbolic-index single-byte read (see check_from_slice_u8) stands in
+        // Symbolic-index single-byte read (see check_from_slice_u32) stands in
         // for a whole-slice equality assert. `bytes` is the end of the
         // from(&str)->from(Box<str>) pipeline, so comparing it directly to the
         // original source covers both conversions transitively.

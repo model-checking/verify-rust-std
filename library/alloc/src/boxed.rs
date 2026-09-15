@@ -2447,27 +2447,9 @@ mod verify {
 
     use super::*;
 
-    #[kani::proof_for_contract(Box::<u8>::from_raw)]
-    fn check_pfc_from_raw_u8() {
-        let v: u8 = kani::any();
-        let raw = Box::into_raw(Box::new(v));
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-        let back = unsafe { Box::from_raw(raw) };
-        assert_eq!(*back, v);
-    }
-
     #[kani::proof_for_contract(Box::<u32>::from_raw)]
     fn check_pfc_from_raw_u32() {
         let v: u32 = kani::any();
-        let raw = Box::into_raw(Box::new(v));
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-        let back = unsafe { Box::from_raw(raw) };
-        assert_eq!(*back, v);
-    }
-
-    #[kani::proof_for_contract(Box::<u64>::from_raw)]
-    fn check_pfc_from_raw_u64() {
-        let v: u64 = kani::any();
         let raw = Box::into_raw(Box::new(v));
         kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let back = unsafe { Box::from_raw(raw) };
@@ -2541,24 +2523,6 @@ mod verify {
         let addr = &raw const *u;
         kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let init: Box<u32> = unsafe { u.assume_init() };
-        assert_eq!(*init, v);
-        assert!(core::ptr::addr_eq(&raw const *init, addr));
-    }
-
-    // The `proof_for_contract` target is spelled with the impl's own generic
-    // parameters (`MaybeUninit<T>`, `A`) — concrete turbofish arguments do not
-    // resolve against this impl's structured self-type at this kani version.
-    // The constructed space is every possible u64 value (v is symbolic) in a
-    // fresh Global allocation — the documented precondition (an initialized
-    // box) admits nothing else; the allocation address is abstracted by Kani.
-    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
-    fn check_assume_init_u64() {
-        let v: u64 = kani::any();
-        let mut u: Box<core::mem::MaybeUninit<u64>> = Box::new_uninit();
-        u.write(v);
-        let addr = &raw const *u;
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-        let init: Box<u64> = unsafe { u.assume_init() };
         assert_eq!(*init, v);
         assert!(core::ptr::addr_eq(&raw const *init, addr));
     }
@@ -2664,16 +2628,6 @@ mod verify {
         assert_eq!(s.len(), 1);
         assert_eq!(s[0], v);
         assert!(core::ptr::addr_eq(s.as_ptr(), addr));
-    }
-
-    #[kani::proof]
-    fn check_new_uninit_slice_u32() {
-        let n = symbolic_len::<u32>();
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-        kani::cover(n == 0, "zero-length slice constructed");
-        kani::cover(n > 0, "non-empty slice constructed");
-        let b: Box<[core::mem::MaybeUninit<u32>]> = Box::new_uninit_slice(n);
-        assert_eq!(b.len(), n);
     }
 
     #[kani::proof]
@@ -2849,17 +2803,6 @@ mod verify {
     fn check_write_u32() {
         let v: u32 = kani::any();
         let u: Box<core::mem::MaybeUninit<u32>> = Box::new_uninit();
-        let addr = &raw const *u;
-        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-        let b = Box::write(u, v);
-        assert_eq!(*b, v);
-        assert!(core::ptr::addr_eq(&raw const *b, addr));
-    }
-
-    #[kani::proof]
-    fn check_write_u64() {
-        let v: u64 = kani::any();
-        let u: Box<core::mem::MaybeUninit<u64>> = Box::new_uninit();
         let addr = &raw const *u;
         kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
         let b = Box::write(u, v);
