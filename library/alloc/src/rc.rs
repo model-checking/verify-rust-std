@@ -3985,7 +3985,7 @@ unsafe fn rc_raw_layout_valid<T: ?Sized>(ptr: *const T) -> bool {
     let (_, value, _) = unsafe { rc_raw_parts(ptr) };
     ptr::addr_eq(ptr, value)
         && kani::mem::checked_size_of_raw(ptr) == Some(unsafe { mem::size_of_val_raw(value) })
-        && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { align_of_val_raw(value) })
+        && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { mem::align_of_val_raw(value) })
 }
 
 #[cfg(kani)]
@@ -4023,7 +4023,7 @@ unsafe fn weak_raw_layout_valid<T: ?Sized>(ptr: *const T) -> bool {
     kani::mem::same_allocation(ptr.cast::<u8>(), inner.cast::<u8>())
         && ptr::addr_eq(ptr, value)
         && kani::mem::checked_size_of_raw(ptr) == Some(unsafe { mem::size_of_val_raw(value) })
-        && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { align_of_val_raw(value) })
+        && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { mem::align_of_val_raw(value) })
 }
 
 #[cfg(kani)]
