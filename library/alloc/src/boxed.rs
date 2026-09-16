@@ -3235,9 +3235,7 @@ mod verify {
     gen_box_write_vec_harness!(harness_box_write_vec_u8, u8);
 
     // Each module has its own target and proof entry points. Shared setup covers
-    // ordinary allocation, ZSTs and slice metadata. Vtable metadata is checked
-    // separately for the raw-pointer/allocator round trip and Box::drop.
-    // Round trips transfer ownership back to Box so cleanup checks deallocation.
+    // ordinary allocation, ZSTs and slice metadata.
     macro_rules! box_pointer_harnesses {
         ($module:ident, $target:literal, |$boxed:ident| $body:block $(, $dyn_harness:ident)?) => {
             mod $module {
@@ -3280,9 +3278,13 @@ mod verify {
         "Checks Box::into_raw_with_allocator.",
         |boxed| {
             let expected = &*boxed as *const _;
+            let expected_layout = Layout::for_value(&*boxed);
             let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
-            assert!(ptr::eq(ptr, expected));
-            let _recovered = unsafe { Box::from_raw_in(ptr, alloc) };
+            assert!(ptr::addr_eq(ptr, expected));
+            let recovered = unsafe { Box::from_raw_in(ptr, alloc) };
+            let layout = Layout::for_value(&*recovered);
+            assert_eq!(layout.size(), expected_layout.size());
+            assert_eq!(layout.align(), expected_layout.align());
         },
         dyn_any
     );
