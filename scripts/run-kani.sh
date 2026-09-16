@@ -213,11 +213,18 @@ run_verification_subset() {
 
     echo "Running verification for harnesses:"
     printf '%s\n' "${harnesses[@]}"
+    # Use KANI_JOBS to cap the number of parallel harnesses; some harnesses peak
+    # at close to 10 GB of memory, so running one per core can exhaust the
+    # memory of smaller CI runners (e.g., 4-core/16 GB ubuntu-latest).
+    local jobs_arg="-j"
+    if [[ -n "${KANI_JOBS:-}" ]]; then
+        jobs_arg="--jobs=${KANI_JOBS}"
+    fi
     "$kani_path" verify-std -Z unstable-options ./library \
         $unstable_args \
         --no-assert-contracts \
         $harness_args --exact \
-        -j \
+        $jobs_arg \
         --output-format=terse \
         "${command_args[@]}" \
         --cbmc-args --object-bits 12

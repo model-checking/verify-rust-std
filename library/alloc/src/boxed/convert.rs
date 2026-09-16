@@ -1,13 +1,11 @@
 use core::any::Any;
-#[cfg(not(no_global_oom_handling))]
-use core::clone::TrivialClone;
 use core::error::Error;
+#[cfg(not(no_global_oom_handling))]
+use core::fmt;
 #[cfg(kani)]
 use core::kani;
 use core::mem;
 use core::pin::Pin;
-#[cfg(not(no_global_oom_handling))]
-use core::{fmt, ptr};
 
 use safety::{ensures, requires};
 
@@ -15,10 +13,6 @@ use crate::alloc::Allocator;
 #[cfg(not(no_global_oom_handling))]
 use crate::borrow::Cow;
 use crate::boxed::Box;
-#[cfg(not(no_global_oom_handling))]
-use crate::raw_vec::RawVec;
-#[cfg(not(no_global_oom_handling))]
-use crate::str::from_boxed_utf8_unchecked;
 #[cfg(not(no_global_oom_handling))]
 use crate::string::String;
 #[cfg(not(no_global_oom_handling))]
@@ -66,35 +60,6 @@ where
     }
 }
 
-/// Specialization trait used for `From<&[T]>`.
-#[cfg(not(no_global_oom_handling))]
-trait BoxFromSlice<T> {
-    fn from_slice(slice: &[T]) -> Self;
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T: Clone> BoxFromSlice<T> for Box<[T]> {
-    #[inline]
-    default fn from_slice(slice: &[T]) -> Self {
-        slice.to_vec().into_boxed_slice()
-    }
-}
-
-#[cfg(not(no_global_oom_handling))]
-impl<T: TrivialClone> BoxFromSlice<T> for Box<[T]> {
-    #[inline]
-    fn from_slice(slice: &[T]) -> Self {
-        let len = slice.len();
-        let buf = RawVec::with_capacity(len);
-        // SAFETY: since `T` implements `TrivialClone`, this is sound and
-        // equivalent to the above.
-        unsafe {
-            ptr::copy_nonoverlapping(slice.as_ptr(), buf.ptr(), len);
-            buf.into_box(slice.len()).assume_init()
-        }
-    }
-}
-
 #[cfg(not(no_global_oom_handling))]
 #[stable(feature = "box_from_slice", since = "1.17.0")]
 impl<T: Clone> From<&[T]> for Box<[T]> {
@@ -113,7 +78,7 @@ impl<T: Clone> From<&[T]> for Box<[T]> {
     /// ```
     #[inline]
     fn from(slice: &[T]) -> Box<[T]> {
-        <Self as BoxFromSlice<T>>::from_slice(slice)
+        Box::clone_from_ref(slice)
     }
 }
 
@@ -174,7 +139,7 @@ impl From<&str> for Box<str> {
     /// ```
     #[inline]
     fn from(s: &str) -> Box<str> {
-        unsafe { from_boxed_utf8_unchecked(Box::from(s.as_bytes())) }
+        Box::clone_from_ref(s)
     }
 }
 
