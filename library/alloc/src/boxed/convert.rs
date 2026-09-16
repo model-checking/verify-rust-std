@@ -768,10 +768,11 @@ impl dyn Error + Send + Sync {
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
+    use core::fmt;
+
     use super::super::kani_box_harness_helpers::*;
     use super::*;
     use crate::string::String;
-    use core::fmt;
 
     // Kani cannot resolve proof_for_contract on generic trait-object methods.
     // Mirror the three downcast_unchecked contracts here; these checks exercise
@@ -942,26 +943,27 @@ mod verify {
         kani::cover(!value.is_empty(), "Box<str> to bytes handles nonempty input");
     }
 
-    /// Checks BoxFromSlice::from_slice's TrivialClone specialization for u8.
+    /// Checks From<&[u8]> through CloneToUninit's TrivialClone slice specialization.
     #[kani::proof]
     fn harness_box_from_slice_trivial_clone() {
         let source = verifier_nondet_vec_box::<u8>();
-        let boxed = <Box<[u8]> as BoxFromSlice<u8>>::from_slice(&source);
+        let boxed = Box::<[u8]>::from(source.as_slice());
         assert_eq!(boxed.len(), source.len());
         // A symbolic index checks copying without iterating over the unbounded length.
         if !source.is_empty() {
             let index = kani::any_where(|i: &usize| *i < source.len());
             assert_eq!(boxed[index], source[index]);
         }
-        kani::cover(source.is_empty(), "BoxFromSlice trivial clone handles empty input");
-        kani::cover(!source.is_empty(), "BoxFromSlice trivial clone copies an element");
+        kani::cover(source.is_empty(), "Box::from slice trivial clone handles empty input");
+        kani::cover(!source.is_empty(), "Box::from slice trivial clone copies an element");
     }
 
-    // No Copy implementation: this forces the generic Clone specialization.
+    // Deriving Clone alone does not implement TrivialClone, so CopySpec uses
+    // its generic element-wise Clone implementation.
     #[derive(Clone)]
     struct CloneOnly(u8);
 
-    /// Checks BoxFromSlice::from_slice's generic Clone implementation.
+    /// Checks From<&[CloneOnly]> through CloneToUninit's generic slice clone.
     #[kani::proof]
     #[kani::unwind(3)]
     fn harness_box_from_slice_clone() {
@@ -970,14 +972,14 @@ mod verify {
         // symbolic lengths without a small fixed cap.
         let values = [CloneOnly(kani::any()), CloneOnly(kani::any())];
         let source = kani::slice::any_slice_of_array(&values);
-        let boxed = <Box<[CloneOnly]> as BoxFromSlice<CloneOnly>>::from_slice(source);
+        let boxed = Box::<[CloneOnly]>::from(source);
         assert_eq!(boxed.len(), source.len());
         if !source.is_empty() {
             let index = kani::any_where(|i: &usize| *i < source.len());
             assert_eq!(boxed[index].0, source[index].0);
         }
-        kani::cover(source.is_empty(), "BoxFromSlice clone handles empty input");
-        kani::cover(!source.is_empty(), "BoxFromSlice clone copies an element");
+        kani::cover(source.is_empty(), "Box::from slice clone handles empty input");
+        kani::cover(!source.is_empty(), "Box::from slice clone copies an element");
     }
 
     // Symbolic lengths cover success (len == N) and failure for fixed N = 100.

@@ -15,6 +15,7 @@ use core::marker::Unsize;
 use core::mem::{self, SizedTypeProperties};
 use core::ops::{Deref, DerefMut};
 use core::ptr::{self, NonNull, Pointee};
+
 use safety::requires;
 
 use crate::alloc::{self, Layout, LayoutError};
