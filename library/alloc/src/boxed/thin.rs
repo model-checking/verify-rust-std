@@ -15,6 +15,7 @@ use core::marker::Unsize;
 use core::mem::{self, SizedTypeProperties};
 use core::ops::{Deref, DerefMut};
 use core::ptr::{self, NonNull, Pointee};
+use safety::requires;
 
 use crate::alloc::{self, Layout, LayoutError};
 
@@ -360,6 +361,10 @@ impl<H> WithHeader<H> {
     // Safety:
     // - Assumes that either `value` can be dereferenced, or is the
     //   `NonNull::dangling()` we use when both `T` and `H` are ZSTs.
+    #[requires(
+        value.cast::<u8>() == self.0.as_ptr()
+            && core::ub_checks::can_dereference(value)
+    )]
     unsafe fn drop<T: ?Sized>(&self, value: *mut T) {
         struct DropGuard<H> {
             ptr: NonNull<u8>,
@@ -433,11 +438,7 @@ impl<T: ?Sized + Error> Error for ThinBox<T> {
     }
 }
 
-// ==============================================================
-// Challenge 29: Verify safety of Boxed functions harnesses
-// ==============================================================
-
-// === SAFE FUNCTIONS ===
+// Challenge 29
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -446,674 +447,170 @@ mod verify {
 
     use super::*;
 
-    macro_rules! gen_thinbox_deref_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the requested sized type.
-                let value: $ty = kani::any();
+    // Each expansion has a separate named target, with sized, ZST, slice
+    // and vtable metadata. The u128 trait-object payload exercises padding when
+    // value alignment exceeds metadata alignment on the verification target.
+    macro_rules! thinbox_harnesses {
+        ($module:ident, $target:literal, |$thin:ident| $body:block) => {
+            mod $module {
+                use super::*;
 
-                // Move that value into a `ThinBox` using the sized constructor.
-                let thin: ThinBox<$ty> = ThinBox::new(value);
+                #[doc = $target]
+                fn check<T: ?Sized>($thin: ThinBox<T>) {
+                    $body
+                    kani::cover(true, $target);
+                }
 
-                // Dereference the thin box through the `Deref` implementation.
-                let _: &$ty = core::ops::Deref::deref(&thin);
+                #[kani::proof]
+                fn sized() { check(ThinBox::new(kani::any::<i32>())); }
+
+                #[kani::proof]
+                fn zst() { check(ThinBox::new(())); }
+
+                #[kani::proof]
+                fn slice() {
+                    check(ThinBox::<[u8]>::new_unsize(kani::any::<[u8; 4]>()));
+                }
+
+                #[kani::proof]
+                fn dyn_any() {
+                    check(ThinBox::<dyn Any>::new_unsize(kani::any::<u128>()));
+                }
             }
         };
     }
 
-    macro_rules! gen_thinbox_deref_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value that will be unsized into `dyn Any`.
-                let value: $src_ty = kani::any();
+    thinbox_harnesses!(harness_thinbox_deref, "Checks ThinBox::deref.", |thin| {
+        let expected_data = thin.ptr.0.as_ptr();
+        let expected_metadata = unsafe { *thin.with_header().header() };
+        let value = Deref::deref(&thin);
+        assert_eq!(ptr::from_ref(value).cast::<u8>(), expected_data.cast_const());
+        assert_eq!(ptr::metadata(value), expected_metadata);
+    });
+    thinbox_harnesses!(harness_thinbox_deref_mut, "Checks ThinBox::deref_mut.", |thin| {
+        let mut thin = thin;
+        let expected_data = thin.ptr.0.as_ptr();
+        let expected_metadata = unsafe { *thin.with_header().header() };
+        let value = DerefMut::deref_mut(&mut thin);
+        assert_eq!(ptr::from_mut(value).cast::<u8>(), expected_data);
+        assert_eq!(ptr::metadata(value), expected_metadata);
+    });
+    thinbox_harnesses!(harness_thinbox_drop, "Checks <ThinBox<T> as Drop>::drop.", |thin| {
+        drop(thin);
+    });
+    thinbox_harnesses!(harness_thinbox_meta, "Checks ThinBox::meta.", |thin| {
+        let expected = unsafe { *thin.with_header().header() };
+        assert_eq!(thin.meta(), expected);
+    });
+    thinbox_harnesses!(harness_thinbox_with_header, "Checks ThinBox::with_header.", |thin| {
+        assert_eq!(thin.with_header().value(), thin.ptr.0.as_ptr());
+    });
+    thinbox_harnesses!(harness_with_header_header, "Checks WithHeader::header.", |thin| {
+        let header = thin.with_header().header();
+        assert!(header.is_aligned());
+        assert!(core::ub_checks::can_dereference(header));
+        assert_eq!(unsafe { header.add(1) }.cast::<u8>(), thin.ptr.0.as_ptr());
+    });
 
-                // Build a thin box whose pointee metadata is trait-object metadata.
-                let thin: ThinBox<dyn Any> = ThinBox::<dyn Any>::new_unsize(value);
+    // Constructor harnesses have distinct targets. Rewrapping transfers the
+    // allocation to ThinBox so cleanup also checks the stored metadata/layout.
+    fn into_thin<T: ?Sized>(header: WithHeader<<T as Pointee>::Metadata>) -> ThinBox<T> {
+        ThinBox { ptr: WithOpaqueHeader(header.0), _marker: PhantomData }
+    }
 
-                // Dereference the thin box through the `Deref` implementation.
-                let _: &dyn Any = core::ops::Deref::deref(&thin);
+    macro_rules! header_constructors {
+        ($module:ident, $dst:ty, $value:expr) => {
+            mod $module {
+                use super::*;
+
+                /// Checks WithHeader::new.
+                #[kani::proof]
+                fn new() {
+                    let value = $value;
+                    let metadata = ptr::metadata(&value as &$dst);
+                    let layout = Layout::for_value(&value);
+                    let thin = into_thin::<$dst>(WithHeader::new(metadata, value));
+                    assert_eq!(ptr::metadata(&*thin), metadata);
+                    assert_eq!(Layout::for_value(&*thin), layout);
+                    kani::cover(true, "WithHeader::new preserves metadata and value layout");
+                }
+
+                /// Checks WithHeader::try_new, retaining its fallible result.
+                #[kani::proof]
+                fn try_new() {
+                    let value = $value;
+                    let metadata = ptr::metadata(&value as &$dst);
+                    let layout = Layout::for_value(&value);
+                    if let Ok(header) = WithHeader::try_new(metadata, value) {
+                        let thin = into_thin::<$dst>(header);
+                        assert_eq!(ptr::metadata(&*thin), metadata);
+                        assert_eq!(Layout::for_value(&*thin), layout);
+                        kani::cover(
+                            true,
+                            "WithHeader::try_new preserves metadata and value layout",
+                        );
+                    }
+                    kani::cover(true, "WithHeader::try_new returns");
+                }
             }
         };
     }
 
-    macro_rules! gen_thinbox_deref_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a non-empty array that will be unsized into a slice.
-                let value: [$elem; 4] = [kani::any::<$elem>(); 4];
+    header_constructors!(harness_with_header_sized, i32, kani::any::<i32>());
+    header_constructors!(harness_with_header_zst, (), ());
+    header_constructors!(harness_with_header_slice, [u8], kani::any::<[u8; 4]>());
+    header_constructors!(harness_with_header_dyn_any, dyn Any, kani::any::<u128>());
 
-                // Build a thin box whose pointee metadata is slice length metadata.
-                let thin: ThinBox<[$elem]> = ThinBox::<[$elem]>::new_unsize(value);
-
-                // Dereference the thin box through the `Deref` implementation.
-                let _: &[$elem] = core::ops::Deref::deref(&thin);
-            }
-        };
+    /// Checks WithHeader::new_unsize_zst with slice metadata.
+    #[kani::proof]
+    fn harness_with_header_new_unsize_zst_slice() {
+        let header = WithHeader::<usize>::new_unsize_zst::<[u8], [u8; 0]>([]);
+        let thin = into_thin::<[u8]>(header);
+        assert!(thin.is_empty());
+        kani::cover(true, "WithHeader::new_unsize_zst preserves empty slice metadata");
     }
 
-    gen_thinbox_deref_harness!(harness_thinbox_deref_i8, i8);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_i16, i16);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_i32, i32);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_i64, i64);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_i128, i128);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_u8, u8);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_u16, u16);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_u32, u32);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_u64, u64);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_u128, u128);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_bool, bool);
-    gen_thinbox_deref_harness!(harness_thinbox_deref_unit, ());
-    gen_thinbox_deref_harness!(harness_thinbox_deref_array, [u8; 4]);
-    gen_thinbox_deref_dyn_any_harness!(harness_thinbox_deref_dyn_any, i32);
-
-    gen_thinbox_deref_slice_harness!(harness_thinbox_deref_slice_u8, u8);
-    gen_thinbox_deref_slice_harness!(harness_thinbox_deref_slice_u16, u16);
-    gen_thinbox_deref_slice_harness!(harness_thinbox_deref_slice_u32, u32);
-    gen_thinbox_deref_slice_harness!(harness_thinbox_deref_slice_u64, u64);
-    gen_thinbox_deref_slice_harness!(harness_thinbox_deref_slice_u128, u128);
-
-    macro_rules! gen_thinbox_deref_mut_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the requested sized type.
-                let value: $ty = kani::any();
-
-                // Move that value into a mutable `ThinBox` using the sized constructor.
-                let mut thin: ThinBox<$ty> = ThinBox::new(value);
-
-                // Mutably dereference the thin box through the `DerefMut` implementation.
-                let _: &mut $ty = core::ops::DerefMut::deref_mut(&mut thin);
-            }
-        };
+    /// Checks WithHeader::new_unsize_zst with vtable metadata.
+    #[kani::proof]
+    fn harness_with_header_new_unsize_zst_dyn_any() {
+        let header =
+            WithHeader::<<dyn Any as Pointee>::Metadata>::new_unsize_zst::<dyn Any, ()>(());
+        let metadata = unsafe { *header.header() };
+        assert_eq!(metadata.size_of(), size_of::<()>());
+        assert_eq!(metadata.align_of(), mem::align_of::<()>());
+        kani::cover(true, "WithHeader::new_unsize_zst preserves unit size and alignment");
     }
 
-    macro_rules! gen_thinbox_deref_mut_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value that will be unsized into `dyn Any`.
-                let value: $src_ty = kani::any();
-
-                // Build a mutable thin box whose pointee metadata is trait-object metadata.
-                let mut thin: ThinBox<dyn Any> = ThinBox::<dyn Any>::new_unsize(value);
-
-                // Mutably dereference the thin box through the `DerefMut` implementation.
-                let _: &mut dyn Any = core::ops::DerefMut::deref_mut(&mut thin);
-            }
-        };
+    // Non-ZST drop uses ordinary proofs because Kani contracts cannot express
+    // permission to free the allocation created by the harness. Explicitly
+    // check the requires clause before executing the real body; these are body
+    // checks, not proof_for_contract evidence. Keep them in sync with requires.
+    // WithHeader has no Drop impl, so cleanup does not call the target again.
+    #[kani::proof]
+    fn harness_with_header_drop_sized() {
+        let header = WithHeader::new((), kani::any::<i32>());
+        let value = header.value().cast::<i32>();
+        assert_eq!(value.cast::<u8>(), header.0.as_ptr());
+        assert!(core::ub_checks::can_dereference(value));
+        unsafe { header.drop(value) };
+        kani::cover(true, "WithHeader::drop completes for a sized value");
     }
 
-    macro_rules! gen_thinbox_deref_mut_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a non-empty array that will be unsized into a slice.
-                let value: [$elem; 4] = [kani::any::<$elem>(); 4];
-
-                // Build a mutable thin box whose pointee metadata is slice length metadata.
-                let mut thin: ThinBox<[$elem]> = ThinBox::<[$elem]>::new_unsize(value);
-
-                // Mutably dereference the thin box through the `DerefMut` implementation.
-                let _: &mut [$elem] = core::ops::DerefMut::deref_mut(&mut thin);
-            }
-        };
+    // ZST drop does not deallocate, so it retains direct contract checking.
+    #[kani::proof_for_contract(WithHeader::drop)]
+    fn harness_with_header_drop_zst() {
+        let header = WithHeader::new((), ());
+        unsafe { header.drop(header.value().cast::<()>()) };
+        kani::cover(true, "WithHeader::drop completes for a ZST");
     }
 
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_i8, i8);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_i16, i16);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_i32, i32);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_i64, i64);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_i128, i128);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_u8, u8);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_u16, u16);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_u32, u32);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_u64, u64);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_u128, u128);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_bool, bool);
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_unit, ());
-    gen_thinbox_deref_mut_harness!(harness_thinbox_deref_mut_array, [u8; 4]);
-    gen_thinbox_deref_mut_dyn_any_harness!(harness_thinbox_deref_mut_dyn_any, i32);
-
-    gen_thinbox_deref_mut_slice_harness!(harness_thinbox_deref_mut_slice_u8, u8);
-    gen_thinbox_deref_mut_slice_harness!(harness_thinbox_deref_mut_slice_u16, u16);
-    gen_thinbox_deref_mut_slice_harness!(harness_thinbox_deref_mut_slice_u32, u32);
-    gen_thinbox_deref_mut_slice_harness!(harness_thinbox_deref_mut_slice_u64, u64);
-    gen_thinbox_deref_mut_slice_harness!(harness_thinbox_deref_mut_slice_u128, u128);
-
-    macro_rules! gen_thinbox_drop_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the requested sized type.
-                let value: $ty = kani::any();
-
-                // Move that value into a `ThinBox` using the sized constructor.
-                let thin: ThinBox<$ty> = ThinBox::new(value);
-
-                // Drop the thin box through the normal safe surface.
-                core::mem::drop(thin);
-            }
-        };
+    #[kani::proof]
+    fn harness_with_header_drop_slice() {
+        let header = WithHeader::new(2usize, kani::any::<[u128; 2]>());
+        let value = ptr::slice_from_raw_parts_mut(header.value().cast::<u128>(), 2);
+        assert_eq!(value.cast::<u8>(), header.0.as_ptr());
+        assert!(core::ub_checks::can_dereference(value));
+        unsafe { header.drop(value) };
+        kani::cover(true, "WithHeader::drop completes for a slice");
     }
-
-    macro_rules! gen_thinbox_drop_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value that will be unsized into `dyn Any`.
-                let value: $src_ty = kani::any();
-
-                // Build a thin box whose pointee metadata is trait-object metadata.
-                let thin: ThinBox<dyn Any> = ThinBox::<dyn Any>::new_unsize(value);
-
-                // Drop the thin box through the normal safe surface.
-                core::mem::drop(thin);
-            }
-        };
-    }
-
-    macro_rules! gen_thinbox_drop_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a non-empty array that will be unsized into a slice.
-                let value: [$elem; 4] = [kani::any::<$elem>(); 4];
-
-                // Build a thin box whose pointee metadata is slice length metadata.
-                let thin: ThinBox<[$elem]> = ThinBox::<[$elem]>::new_unsize(value);
-
-                // Drop the thin box through the normal safe surface.
-                core::mem::drop(thin);
-            }
-        };
-    }
-
-    gen_thinbox_drop_harness!(harness_thinbox_drop_i8, i8);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_i16, i16);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_i32, i32);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_i64, i64);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_i128, i128);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_u8, u8);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_u16, u16);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_u32, u32);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_u64, u64);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_u128, u128);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_bool, bool);
-    gen_thinbox_drop_harness!(harness_thinbox_drop_unit, ());
-    gen_thinbox_drop_harness!(harness_thinbox_drop_array, [u8; 4]);
-    gen_thinbox_drop_dyn_any_harness!(harness_thinbox_drop_dyn_any, i32);
-
-    gen_thinbox_drop_slice_harness!(harness_thinbox_drop_slice_u8, u8);
-    gen_thinbox_drop_slice_harness!(harness_thinbox_drop_slice_u16, u16);
-    gen_thinbox_drop_slice_harness!(harness_thinbox_drop_slice_u32, u32);
-    gen_thinbox_drop_slice_harness!(harness_thinbox_drop_slice_u64, u64);
-    gen_thinbox_drop_slice_harness!(harness_thinbox_drop_slice_u128, u128);
-
-    macro_rules! gen_thinbox_meta_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the requested sized type.
-                let value: $ty = kani::any();
-
-                // Move that value into a `ThinBox` using the sized constructor.
-                let thin: ThinBox<$ty> = ThinBox::new(value);
-
-                // Read the metadata stored in the thin box header.
-                let _metadata: <$ty as Pointee>::Metadata = thin.meta();
-            }
-        };
-    }
-
-    macro_rules! gen_thinbox_meta_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value that will be unsized into `dyn Any`.
-                let value: $src_ty = kani::any();
-
-                // Build a thin box whose pointee metadata is trait-object metadata.
-                let thin: ThinBox<dyn Any> = ThinBox::<dyn Any>::new_unsize(value);
-
-                // Read the trait-object metadata stored in the thin box header.
-                let _metadata: <dyn Any as Pointee>::Metadata = thin.meta();
-            }
-        };
-    }
-
-    macro_rules! gen_thinbox_meta_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a non-empty array that will be unsized into a slice.
-                let value: [$elem; 4] = [kani::any::<$elem>(); 4];
-
-                // Build a thin box whose pointee metadata is slice length metadata.
-                let thin: ThinBox<[$elem]> = ThinBox::<[$elem]>::new_unsize(value);
-
-                // Read the slice metadata stored in the thin box header.
-                let _metadata: <[$elem] as Pointee>::Metadata = thin.meta();
-            }
-        };
-    }
-
-    gen_thinbox_meta_harness!(harness_thinbox_meta_i8, i8);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_i16, i16);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_i32, i32);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_i64, i64);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_i128, i128);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_u8, u8);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_u16, u16);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_u32, u32);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_u64, u64);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_u128, u128);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_bool, bool);
-    gen_thinbox_meta_harness!(harness_thinbox_meta_unit, ());
-    gen_thinbox_meta_harness!(harness_thinbox_meta_array, [u8; 4]);
-    gen_thinbox_meta_dyn_any_harness!(harness_thinbox_meta_dyn_any, i32);
-
-    gen_thinbox_meta_slice_harness!(harness_thinbox_meta_slice_u8, u8);
-    gen_thinbox_meta_slice_harness!(harness_thinbox_meta_slice_u16, u16);
-    gen_thinbox_meta_slice_harness!(harness_thinbox_meta_slice_u32, u32);
-    gen_thinbox_meta_slice_harness!(harness_thinbox_meta_slice_u64, u64);
-    gen_thinbox_meta_slice_harness!(harness_thinbox_meta_slice_u128, u128);
-
-    macro_rules! gen_thinbox_with_header_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the requested sized type.
-                let value: $ty = kani::any();
-
-                // Move that value into a `ThinBox` using the sized constructor.
-                let thin: ThinBox<$ty> = ThinBox::new(value);
-
-                // Recover the typed header view from the opaque thin-box representation.
-                let _header = thin.with_header();
-            }
-        };
-    }
-
-    macro_rules! gen_thinbox_with_header_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value that will be unsized into `dyn Any`.
-                let value: $src_ty = kani::any();
-
-                // Build a thin box whose header stores trait-object metadata.
-                let thin: ThinBox<dyn Any> = ThinBox::<dyn Any>::new_unsize(value);
-
-                // Recover the typed header view from the opaque thin-box representation.
-                let _header = thin.with_header();
-            }
-        };
-    }
-
-    macro_rules! gen_thinbox_with_header_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a non-empty array that will be unsized into a slice.
-                let value: [$elem; 4] = [kani::any::<$elem>(); 4];
-
-                // Build a thin box whose header stores slice length metadata.
-                let thin: ThinBox<[$elem]> = ThinBox::<[$elem]>::new_unsize(value);
-
-                // Recover the typed header view from the opaque thin-box representation.
-                let _header = thin.with_header();
-            }
-        };
-    }
-
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_i8, i8);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_i16, i16);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_i32, i32);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_i64, i64);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_i128, i128);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_u8, u8);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_u16, u16);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_u32, u32);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_u64, u64);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_u128, u128);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_bool, bool);
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_unit, ());
-    gen_thinbox_with_header_harness!(harness_thinbox_with_header_array, [u8; 4]);
-    gen_thinbox_with_header_dyn_any_harness!(harness_thinbox_with_header_dyn_any, i32);
-
-    gen_thinbox_with_header_slice_harness!(harness_thinbox_with_header_slice_u8, u8);
-    gen_thinbox_with_header_slice_harness!(harness_thinbox_with_header_slice_u16, u16);
-    gen_thinbox_with_header_slice_harness!(harness_thinbox_with_header_slice_u32, u32);
-    gen_thinbox_with_header_slice_harness!(harness_thinbox_with_header_slice_u64, u64);
-    gen_thinbox_with_header_slice_harness!(harness_thinbox_with_header_slice_u128, u128);
-
-    macro_rules! gen_with_header_new_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the requested sized type.
-                let value: $ty = kani::any();
-
-                // Compute the metadata header that belongs to this sized value.
-                let header: <$ty as Pointee>::Metadata = ptr::metadata(&value);
-
-                // Build the raw header/value allocation used by `ThinBox`.
-                let with_header: WithHeader<<$ty as Pointee>::Metadata> =
-                    WithHeader::new(header, value);
-
-                // Rewrap the raw allocation as a `ThinBox` so normal drop cleans it up.
-                let _thin: ThinBox<$ty> =
-                    ThinBox { ptr: WithOpaqueHeader(with_header.0), _marker: PhantomData };
-            }
-        };
-    }
-
-    macro_rules! gen_with_header_new_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value that will be represented as `dyn Any`.
-                let value: $src_ty = kani::any();
-
-                // Compute the trait-object metadata header for the erased pointee type.
-                let header: <dyn Any as Pointee>::Metadata = ptr::metadata(&value as &dyn Any);
-
-                // Build the raw header/value allocation used by `ThinBox<dyn Any>`.
-                let with_header: WithHeader<<dyn Any as Pointee>::Metadata> =
-                    WithHeader::new(header, value);
-
-                // Rewrap the raw allocation as a `ThinBox<dyn Any>` so normal drop cleans it up.
-                let _thin: ThinBox<dyn Any> =
-                    ThinBox { ptr: WithOpaqueHeader(with_header.0), _marker: PhantomData };
-            }
-        };
-    }
-
-    macro_rules! gen_with_header_new_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a non-empty array that will be represented as a slice.
-                let value: [$elem; 4] = [kani::any::<$elem>(); 4];
-
-                // Compute the slice-length metadata header for the unsized pointee type.
-                let header: <[$elem] as Pointee>::Metadata = ptr::metadata(&value as &[$elem]);
-
-                // Build the raw header/value allocation used by `ThinBox<[$elem]>`.
-                let with_header: WithHeader<<[$elem] as Pointee>::Metadata> =
-                    WithHeader::new(header, value);
-
-                // Rewrap the raw allocation as a `ThinBox<[$elem]>` so normal drop cleans it up.
-                let _thin: ThinBox<[$elem]> =
-                    ThinBox { ptr: WithOpaqueHeader(with_header.0), _marker: PhantomData };
-            }
-        };
-    }
-
-    gen_with_header_new_harness!(harness_with_header_new_i8, i8);
-    gen_with_header_new_harness!(harness_with_header_new_i16, i16);
-    gen_with_header_new_harness!(harness_with_header_new_i32, i32);
-    gen_with_header_new_harness!(harness_with_header_new_i64, i64);
-    gen_with_header_new_harness!(harness_with_header_new_i128, i128);
-    gen_with_header_new_harness!(harness_with_header_new_u8, u8);
-    gen_with_header_new_harness!(harness_with_header_new_u16, u16);
-    gen_with_header_new_harness!(harness_with_header_new_u32, u32);
-    gen_with_header_new_harness!(harness_with_header_new_u64, u64);
-    gen_with_header_new_harness!(harness_with_header_new_u128, u128);
-    gen_with_header_new_harness!(harness_with_header_new_bool, bool);
-    gen_with_header_new_harness!(harness_with_header_new_unit, ());
-    gen_with_header_new_harness!(harness_with_header_new_array, [u8; 4]);
-    gen_with_header_new_dyn_any_harness!(harness_with_header_new_dyn_any, i32);
-
-    gen_with_header_new_slice_harness!(harness_with_header_new_slice_u8, u8);
-    gen_with_header_new_slice_harness!(harness_with_header_new_slice_u16, u16);
-    gen_with_header_new_slice_harness!(harness_with_header_new_slice_u32, u32);
-    gen_with_header_new_slice_harness!(harness_with_header_new_slice_u64, u64);
-    gen_with_header_new_slice_harness!(harness_with_header_new_slice_u128, u128);
-
-    macro_rules! gen_with_header_try_new_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the requested sized type.
-                let value: $ty = kani::any();
-
-                // Compute the metadata header that belongs to this sized value.
-                let header: <$ty as Pointee>::Metadata = ptr::metadata(&value);
-
-                // Build the fallible raw header/value allocation used by `ThinBox`.
-                let result: Result<
-                    WithHeader<<$ty as Pointee>::Metadata>,
-                    core::alloc::AllocError,
-                > = WithHeader::try_new(header, value);
-
-                // Rewrap successful allocations as `ThinBox` so normal drop cleans them up.
-                let _result: Result<ThinBox<$ty>, core::alloc::AllocError> =
-                    result.map(|with_header| ThinBox {
-                        ptr: WithOpaqueHeader(with_header.0),
-                        _marker: PhantomData,
-                    });
-            }
-        };
-    }
-
-    macro_rules! gen_with_header_try_new_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value that will be represented as `dyn Any`.
-                let value: $src_ty = kani::any();
-
-                // Compute the trait-object metadata header for the erased pointee type.
-                let header: <dyn Any as Pointee>::Metadata = ptr::metadata(&value as &dyn Any);
-
-                // Build the fallible raw header/value allocation used by `ThinBox<dyn Any>`.
-                let result: Result<
-                    WithHeader<<dyn Any as Pointee>::Metadata>,
-                    core::alloc::AllocError,
-                > = WithHeader::try_new(header, value);
-
-                // Rewrap successful allocations as `ThinBox<dyn Any>` so normal drop cleans them up.
-                let _result: Result<ThinBox<dyn Any>, core::alloc::AllocError> =
-                    result.map(|with_header| ThinBox {
-                        ptr: WithOpaqueHeader(with_header.0),
-                        _marker: PhantomData,
-                    });
-            }
-        };
-    }
-
-    macro_rules! gen_with_header_try_new_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a non-empty array that will be represented as a slice.
-                let value: [$elem; 4] = [kani::any::<$elem>(); 4];
-
-                // Compute the slice-length metadata header for the unsized pointee type.
-                let header: <[$elem] as Pointee>::Metadata = ptr::metadata(&value as &[$elem]);
-
-                // Build the fallible raw header/value allocation used by `ThinBox<[$elem]>`.
-                let result: Result<
-                    WithHeader<<[$elem] as Pointee>::Metadata>,
-                    core::alloc::AllocError,
-                > = WithHeader::try_new(header, value);
-
-                // Rewrap successful allocations as `ThinBox<[$elem]>` so normal drop cleans them up.
-                let _result: Result<ThinBox<[$elem]>, core::alloc::AllocError> =
-                    result.map(|with_header| ThinBox {
-                        ptr: WithOpaqueHeader(with_header.0),
-                        _marker: PhantomData,
-                    });
-            }
-        };
-    }
-
-    gen_with_header_try_new_harness!(harness_with_header_try_new_i8, i8);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_i16, i16);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_i32, i32);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_i64, i64);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_i128, i128);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_u8, u8);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_u16, u16);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_u32, u32);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_u64, u64);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_u128, u128);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_bool, bool);
-    gen_with_header_try_new_harness!(harness_with_header_try_new_unit, ());
-    gen_with_header_try_new_harness!(harness_with_header_try_new_array, [u8; 4]);
-    gen_with_header_try_new_dyn_any_harness!(harness_with_header_try_new_dyn_any, i32);
-
-    gen_with_header_try_new_slice_harness!(harness_with_header_try_new_slice_u8, u8);
-    gen_with_header_try_new_slice_harness!(harness_with_header_try_new_slice_u16, u16);
-    gen_with_header_try_new_slice_harness!(harness_with_header_try_new_slice_u32, u32);
-    gen_with_header_try_new_slice_harness!(harness_with_header_try_new_slice_u64, u64);
-    gen_with_header_try_new_slice_harness!(harness_with_header_try_new_slice_u128, u128);
-    // `WithHeader<H>::new_unsize_zst<Dyn, T>` is the special constructor used
-    // when a zero-sized source `T` is unsized into some `Dyn`.
-    macro_rules! gen_with_header_new_unsize_zst_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a zero-length array that can be unsized into a slice.
-                let value: [$elem; 0] = [];
-
-                // Build the special ZST-unsizing header/value representation.
-                let _with_header: WithHeader<<[$elem] as Pointee>::Metadata> =
-                    WithHeader::new_unsize_zst::<[$elem], [$elem; 0]>(value);
-            }
-        };
-    }
-
-    macro_rules! gen_with_header_new_unsize_zst_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a zero-sized concrete value that can be unsized into `dyn Any`.
-                let value: $src_ty = <$src_ty>::default();
-
-                // Build the special ZST-unsizing header/value representation.
-                let _with_header: WithHeader<<dyn Any as Pointee>::Metadata> =
-                    WithHeader::new_unsize_zst::<dyn Any, $src_ty>(value);
-            }
-        };
-    }
-
-    gen_with_header_new_unsize_zst_slice_harness!(harness_with_header_new_unsize_zst_slice_u8, u8);
-    gen_with_header_new_unsize_zst_slice_harness!(
-        harness_with_header_new_unsize_zst_slice_u16,
-        u16
-    );
-    gen_with_header_new_unsize_zst_slice_harness!(
-        harness_with_header_new_unsize_zst_slice_u32,
-        u32
-    );
-    gen_with_header_new_unsize_zst_slice_harness!(
-        harness_with_header_new_unsize_zst_slice_u64,
-        u64
-    );
-    // Kani currently cannot prove the alignment returned by `const_allocate`
-    // for a ZST slice source whose alignment is stricter than pointer-sized
-    // metadata, such as `[u128; 0] -> [u128]`. The implementation computes a
-    // correctly aligned value address, but the verifier loses that fact across
-    // the const allocation model and reports `value_ptr.is_aligned()` as
-    // possibly false.
-    gen_with_header_new_unsize_zst_dyn_any_harness!(harness_with_header_new_unsize_zst_dyn_any, ());
-
-    macro_rules! gen_with_header_header_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the requested sized type.
-                let value: $ty = kani::any();
-
-                // Compute the metadata header that belongs to this sized value.
-                let header: <$ty as Pointee>::Metadata = ptr::metadata(&value);
-
-                // Build the raw header/value allocation used by `ThinBox`.
-                let with_header: WithHeader<<$ty as Pointee>::Metadata> =
-                    WithHeader::new(header, value);
-
-                // Recover the header pointer from the stored value pointer.
-                let _header_ptr: *mut <$ty as Pointee>::Metadata = with_header.header();
-
-                // Rewrap the raw allocation as a `ThinBox` so normal drop cleans it up.
-                let _thin: ThinBox<$ty> =
-                    ThinBox { ptr: WithOpaqueHeader(with_header.0), _marker: PhantomData };
-            }
-        };
-    }
-
-    macro_rules! gen_with_header_header_dyn_any_harness {
-        ($name:ident, $src_ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value that will be represented as `dyn Any`.
-                let value: $src_ty = kani::any();
-
-                // Compute the trait-object metadata header for the erased pointee type.
-                let header: <dyn Any as Pointee>::Metadata = ptr::metadata(&value as &dyn Any);
-
-                // Build the raw header/value allocation used by `ThinBox<dyn Any>`.
-                let with_header: WithHeader<<dyn Any as Pointee>::Metadata> =
-                    WithHeader::new(header, value);
-
-                // Recover the header pointer from the stored value pointer.
-                let _header_ptr: *mut <dyn Any as Pointee>::Metadata = with_header.header();
-
-                // Rewrap the raw allocation as a `ThinBox<dyn Any>` so normal drop cleans it up.
-                let _thin: ThinBox<dyn Any> =
-                    ThinBox { ptr: WithOpaqueHeader(with_header.0), _marker: PhantomData };
-            }
-        };
-    }
-
-    macro_rules! gen_with_header_header_slice_harness {
-        ($name:ident, $elem:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build a non-empty array that will be represented as a slice.
-                let value: [$elem; 4] = [kani::any::<$elem>(); 4];
-
-                // Compute the slice-length metadata header for the unsized pointee type.
-                let header: <[$elem] as Pointee>::Metadata = ptr::metadata(&value as &[$elem]);
-
-                // Build the raw header/value allocation used by `ThinBox<[$elem]>`.
-                let with_header: WithHeader<<[$elem] as Pointee>::Metadata> =
-                    WithHeader::new(header, value);
-
-                // Recover the header pointer from the stored value pointer.
-                let _header_ptr: *mut <[$elem] as Pointee>::Metadata = with_header.header();
-
-                // Rewrap the raw allocation as a `ThinBox<[$elem]>` so normal drop cleans it up.
-                let _thin: ThinBox<[$elem]> =
-                    ThinBox { ptr: WithOpaqueHeader(with_header.0), _marker: PhantomData };
-            }
-        };
-    }
-
-    gen_with_header_header_harness!(harness_with_header_header_i8, i8);
-    gen_with_header_header_harness!(harness_with_header_header_i16, i16);
-    gen_with_header_header_harness!(harness_with_header_header_i32, i32);
-    gen_with_header_header_harness!(harness_with_header_header_i64, i64);
-    gen_with_header_header_harness!(harness_with_header_header_i128, i128);
-    gen_with_header_header_harness!(harness_with_header_header_u8, u8);
-    gen_with_header_header_harness!(harness_with_header_header_u16, u16);
-    gen_with_header_header_harness!(harness_with_header_header_u32, u32);
-    gen_with_header_header_harness!(harness_with_header_header_u64, u64);
-    gen_with_header_header_harness!(harness_with_header_header_u128, u128);
-    gen_with_header_header_harness!(harness_with_header_header_bool, bool);
-    gen_with_header_header_harness!(harness_with_header_header_unit, ());
-    gen_with_header_header_harness!(harness_with_header_header_array, [u8; 4]);
-    gen_with_header_header_dyn_any_harness!(harness_with_header_header_dyn_any, i32);
-
-    gen_with_header_header_slice_harness!(harness_with_header_header_slice_u8, u8);
-    gen_with_header_header_slice_harness!(harness_with_header_header_slice_u16, u16);
-    gen_with_header_header_slice_harness!(harness_with_header_header_slice_u32, u32);
-    gen_with_header_header_slice_harness!(harness_with_header_header_slice_u64, u64);
-    gen_with_header_header_slice_harness!(harness_with_header_header_slice_u128, u128);
 }

@@ -798,709 +798,253 @@ impl dyn Error + Send + Sync {
     }
 }
 
-// ==============================================================
-// Challenge 29: Verify safety of Boxed functions harnesses
-// ==============================================================
-
-#[cfg(kani)]
-#[unstable(feature = "kani", issue = "none")]
-mod kani_box_convert_harness_helpers {
-    use core::fmt;
-
-    use super::*;
-
-    pub trait VerifierErrorWitness {
-        fn verifier_any() -> Self;
-    }
-
-    macro_rules! gen_verifier_error_type {
-        ($name:ident) => {
-            #[derive(Debug)]
-            pub struct $name;
-
-            impl fmt::Display for $name {
-                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    write!(f, stringify!($name))
-                }
-            }
-
-            impl Error for $name {}
-
-            impl VerifierErrorWitness for $name {
-                fn verifier_any() -> Self {
-                    $name
-                }
-            }
-        };
-        ($name:ident, $field:ty) => {
-            #[derive(Debug)]
-            pub struct $name(pub $field);
-
-            impl fmt::Display for $name {
-                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    write!(f, stringify!($name))
-                }
-            }
-
-            impl Error for $name {}
-
-            impl VerifierErrorWitness for $name {
-                fn verifier_any() -> Self {
-                    $name(kani::any())
-                }
-            }
-        };
-    }
-
-    gen_verifier_error_type!(UnitError);
-    gen_verifier_error_type!(ByteError, u8);
-    gen_verifier_error_type!(BoolError, bool);
-    gen_verifier_error_type!(ArrayError, [u8; 4]);
-    gen_verifier_error_type!(MismatchError, u8);
-}
-
-// === UNSAFE FUNCTIONS ===
+// Challenge 29
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {
     use super::super::kani_box_harness_helpers::*;
-    use super::kani_box_convert_harness_helpers::*;
     use super::*;
     use crate::string::String;
+    use core::fmt;
 
-    // `proof_for_contract` currently fails to resolve targets such as
-    // `Box<dyn Any>::downcast_unchecked::<T>`. This is not a failure to find
-    // the method itself: Kani sees the inherent impl, but it does not bind the
-    // full target path to a single contract target when the receiver is a
-    // trait-object instantiation and the method is also generic. The failure
-    // happens during target-path resolution, before contract checking starts.
-    // These harnesses therefore use plain `#[kani::proof]`, mirror the
-    // contract precondition with `erased.is::<T>()`, and assert its
-    // `can_dereference` postcondition after the call. They verify the concrete
-    // function body under the contract, but are not machine-linked to its
-    // attributes, so contract changes must also be reflected here manually.
-    macro_rules! gen_downcast_unchecked_harness {
-        ($name:ident, $ty:ty) => {
+    // Kani cannot resolve proof_for_contract on generic trait-object methods.
+    // Mirror the three downcast_unchecked contracts here; these checks exercise
+    // the body but must be kept manually synchronized with the attributes.
+    macro_rules! unchecked_downcast {
+        ($name:ident, $object:ty, $ty:ty) => {
             #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the target type.
-                let value: $ty = kani::any();
-
-                // Erase the concrete type behind a `dyn Any` box.
-                let erased: Box<dyn Any> = Box::new(value);
-
-                // Restate the contract precondition that the erased value is really a `$ty`.
+            fn $name() {
+                let erased: Box<$object> = Box::new(kani::any::<$ty>());
                 kani::assume(erased.is::<$ty>());
-
-                // Perform the unchecked downcast back to the concrete box type.
-                let downcasted: Box<$ty> =
-                    unsafe { Box::<dyn Any>::downcast_unchecked::<$ty>(erased) };
-
-                // Check the contract postcondition on the returned box.
-                assert!(core::ub_checks::can_dereference(&*downcasted as *const $ty));
+                let result = unsafe { erased.downcast_unchecked::<$ty>() };
+                assert!(core::ub_checks::can_dereference(&*result as *const $ty));
+                kani::cover(true, "Box::downcast_unchecked returns the requested type");
             }
         };
     }
 
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_i8, i8);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_i16, i16);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_i32, i32);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_i64, i64);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_i128, i128);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_u8, u8);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_u16, u16);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_u32, u32);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_u64, u64);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_u128, u128);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_bool, bool);
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_unit, ());
-    gen_downcast_unchecked_harness!(harness_box_dyn_any_downcast_unchecked_array, [u8; 4]);
-
-    // `proof_for_contract` currently fails to resolve targets such as
-    // `Box<dyn Any + Send>::downcast_unchecked::<T>`. This is not a failure to
-    // find the method itself: Kani sees the inherent impl, but it does not
-    // bind the full target path to a single contract target when the receiver
-    // is a trait-object instantiation and the method is also generic. The
-    // failure happens during target-path resolution, before contract checking
-    // starts. These harnesses therefore use plain `#[kani::proof]`, mirror the
-    // contract precondition with `erased.is::<T>()`, and assert its
-    // `can_dereference` postcondition after the call. They remain manually
-    // synchronized with the contract attributes.
-    macro_rules! gen_downcast_unchecked_send_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the target type.
-                let value: $ty = kani::any();
-
-                // Erase the concrete type behind a `dyn Any + Send` box.
-                let erased: Box<dyn Any + Send> = Box::new(value);
-
-                // Restate the contract precondition that the erased value is really a `$ty`.
-                kani::assume(erased.is::<$ty>());
-
-                // Perform the unchecked downcast back to the concrete box type.
-                let downcasted: Box<$ty> =
-                    unsafe { Box::<dyn Any + Send>::downcast_unchecked::<$ty>(erased) };
-
-                // Check the contract postcondition on the returned box.
-                assert!(core::ub_checks::can_dereference(&*downcasted as *const $ty));
-            }
-        };
-    }
-
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_i8, i8);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_i16, i16);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_i32, i32);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_i64, i64);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_i128, i128);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_u8, u8);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_u16, u16);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_u32, u32);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_u64, u64);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_u128, u128);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_bool, bool);
-    gen_downcast_unchecked_send_harness!(harness_box_dyn_any_send_downcast_unchecked_unit, ());
-    gen_downcast_unchecked_send_harness!(
-        harness_box_dyn_any_send_downcast_unchecked_array,
-        [u8; 4]
-    );
-
-    // `proof_for_contract` currently fails to resolve targets such as
-    // `Box<dyn Any + Send + Sync>::downcast_unchecked::<T>`. This is not a
-    // failure to find the method itself: Kani sees the inherent impl, but it
-    // does not bind the full target path to a single contract target when the
-    // receiver is a trait-object instantiation and the method is also generic.
-    // The failure happens during target-path resolution, before contract
-    // checking starts. These harnesses therefore use plain `#[kani::proof]`
-    // and restate the contract's key precondition explicitly with
-    // `erased.is::<T>()` and assert the contract's `can_dereference`
-    // postcondition after the call. They remain manually synchronized with the
-    // contract attributes.
-    macro_rules! gen_downcast_unchecked_send_sync_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic concrete value of the target type.
-                let value: $ty = kani::any();
-
-                // Erase the concrete type behind a `dyn Any + Send + Sync` box.
-                let erased: Box<dyn Any + Send + Sync> = Box::new(value);
-
-                // Restate the contract precondition that the erased value is really a `$ty`.
-                kani::assume(erased.is::<$ty>());
-
-                // Perform the unchecked downcast back to the concrete box type.
-                let downcasted: Box<$ty> =
-                    unsafe { Box::<dyn Any + Send + Sync>::downcast_unchecked::<$ty>(erased) };
-
-                // Check the contract postcondition on the returned box.
-                assert!(core::ub_checks::can_dereference(&*downcasted as *const $ty));
-            }
-        };
-    }
-
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_i8,
-        i8
-    );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_i16,
-        i16
-    );
-    gen_downcast_unchecked_send_sync_harness!(
+    unchecked_downcast!(harness_box_dyn_any_downcast_unchecked_i32, dyn Any, i32);
+    unchecked_downcast!(harness_box_dyn_any_downcast_unchecked_unit, dyn Any, ());
+    unchecked_downcast!(harness_box_dyn_any_send_downcast_unchecked_i32, dyn Any + Send, i32);
+    unchecked_downcast!(harness_box_dyn_any_send_downcast_unchecked_unit, dyn Any + Send, ());
+    unchecked_downcast!(
         harness_box_dyn_any_send_sync_downcast_unchecked_i32,
+        dyn Any + Send + Sync,
         i32
     );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_i64,
-        i64
-    );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_i128,
-        i128
-    );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_u8,
-        u8
-    );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_u16,
-        u16
-    );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_u32,
-        u32
-    );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_u64,
-        u64
-    );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_u128,
-        u128
-    );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_bool,
-        bool
-    );
-    gen_downcast_unchecked_send_sync_harness!(
+    unchecked_downcast!(
         harness_box_dyn_any_send_sync_downcast_unchecked_unit,
+        dyn Any + Send + Sync,
         ()
     );
-    gen_downcast_unchecked_send_sync_harness!(
-        harness_box_dyn_any_send_sync_downcast_unchecked_array,
-        [u8; 4]
-    );
 
-    // === SAFE FUNCTIONS ===
-
-    macro_rules! gen_box_from_str_harness {
-        ($name:ident, $value:expr) => {
+    // Checks the named Box<dyn Any...>::downcast or <dyn Error...>::downcast.
+    // A symbolic choice checks both branches, including the Error wrappers that
+    // restore Send/Sync on failure after delegating to dyn Error::downcast.
+    macro_rules! checked_downcast {
+        ($name:ident, $object:ty, $ty:ty, $value:expr, $mismatch:expr) => {
             #[kani::proof]
-            pub fn $name() {
-                // Convert the input string slice into a boxed string through `From<&str>`.
-                let _boxed: Box<str> = Box::<str>::from($value);
+            fn $name() {
+                let matches: bool = kani::any();
+                let erased: Box<$object> =
+                    if matches { Box::new($value) } else { Box::new($mismatch) };
+                assert_eq!(erased.downcast::<$ty>().is_ok(), matches);
+                kani::cover(matches, "Box::downcast succeeds for matching type");
+                kani::cover(!matches, "Box::downcast returns Err for mismatched type");
             }
         };
     }
 
-    gen_box_from_str_harness!(harness_box_from_str_empty, "");
-    gen_box_from_str_harness!(harness_box_from_str_nonempty, "test");
-
-    macro_rules! gen_box_from_box_str_to_u8_slice_harness {
-        ($name:ident, $value:expr) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Build the original boxed string whose backing allocation will be reinterpreted.
-                let boxed: Box<str> = Box::<str>::from($value);
-
-                // Convert the boxed string into a boxed byte slice through `From<Box<str, A>>`.
-                let _boxed_bytes: Box<[u8]> = <Box<[u8]>>::from(boxed);
-            }
-        };
-    }
-
-    gen_box_from_box_str_to_u8_slice_harness!(harness_box_from_box_str_to_u8_slice_empty, "");
-    gen_box_from_box_str_to_u8_slice_harness!(
-        harness_box_from_box_str_to_u8_slice_nonempty,
-        "test"
+    checked_downcast!(
+        harness_box_dyn_any_downcast_i32,
+        dyn Any,
+        i32,
+        kani::any::<i32>(),
+        String::from("mismatch")
+    );
+    checked_downcast!(harness_box_dyn_any_downcast_unit, dyn Any, (), (), String::from("mismatch"));
+    checked_downcast!(
+        harness_box_dyn_any_send_downcast_i32,
+        dyn Any + Send,
+        i32,
+        kani::any::<i32>(),
+        String::from("mismatch")
+    );
+    checked_downcast!(
+        harness_box_dyn_any_send_downcast_unit,
+        dyn Any + Send,
+        (),
+        (),
+        String::from("mismatch")
+    );
+    checked_downcast!(
+        harness_box_dyn_any_send_sync_downcast_i32,
+        dyn Any + Send + Sync,
+        i32,
+        kani::any::<i32>(),
+        String::from("mismatch")
+    );
+    checked_downcast!(
+        harness_box_dyn_any_send_sync_downcast_unit,
+        dyn Any + Send + Sync,
+        (),
+        (),
+        String::from("mismatch")
     );
 
-    // `<Box<[T; N]> as TryFrom<Box<[T]>>>::try_from` branches only on
-    // `boxed_slice.len() == N`.
-    // The harness builds `boxed_slice` from a nondeterministic `Vec<T>`, so
-    // the slice length is symbolic. With `N` fixed to 100, Kani explores:
-    // - `vec.len() == 100`: the conversion takes the `Ok(...)` path and
-    //   reinterprets the boxed slice in place as `Box<[T; 100]>`.
-    // - `vec.len() != 100`: the length check fails and the conversion returns
-    //   `Err(boxed_slice)` without reinterpreting the allocation as an array.
-    macro_rules! gen_box_try_from_box_slice_to_array_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic vector whose length determines the boxed slice metadata.
-                let vec: Vec<$ty> = verifier_nondet_vec_box::<$ty>();
+    #[derive(Debug)]
+    struct Witness<T>(T);
 
-                // Convert the vector into the boxed slice consumed by `TryFrom`.
-                let boxed_slice: Box<[$ty]> = vec.into_boxed_slice();
-
-                // Fix the target array length used by the conversion attempt.
-                const N: usize = 100;
-
-                // Attempt the in-place conversion from a boxed slice into a boxed array.
-                let _result: Result<Box<[$ty; N]>, Box<[$ty]>> =
-                    <Box<[$ty; N]>>::try_from(boxed_slice);
-            }
-        };
+    impl<T: fmt::Debug> fmt::Display for Witness<T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("witness")
+        }
     }
 
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_i8, i8);
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_i16, i16);
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_i32, i32);
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_i64, i64);
-    gen_box_try_from_box_slice_to_array_harness!(
-        harness_box_try_from_box_slice_to_array_i128,
-        i128
+    impl<T: fmt::Debug> Error for Witness<T> {}
+
+    checked_downcast!(
+        harness_box_dyn_error_downcast_byte,
+        dyn Error,
+        Witness<u8>,
+        Witness(kani::any::<u8>()),
+        fmt::Error
     );
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_u8, u8);
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_u16, u16);
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_u32, u32);
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_u64, u64);
-    gen_box_try_from_box_slice_to_array_harness!(
-        harness_box_try_from_box_slice_to_array_u128,
-        u128
+    checked_downcast!(
+        harness_box_dyn_error_downcast_unit,
+        dyn Error,
+        Witness<()>,
+        Witness(()),
+        fmt::Error
     );
-    gen_box_try_from_box_slice_to_array_harness!(harness_box_try_from_box_slice_to_array_unit, ());
-    gen_box_try_from_box_slice_to_array_harness!(
-        harness_box_try_from_box_slice_to_array_array,
-        [u8; 4]
+    checked_downcast!(
+        harness_box_dyn_error_send_downcast_byte,
+        dyn Error + Send,
+        Witness<u8>,
+        Witness(kani::any::<u8>()),
+        fmt::Error
     );
-
-    // `<Box<[T; N]> as TryFrom<Vec<T>>>::try_from` branches explicitly only on
-    // `vec.len() == N`.
-    // The harness keeps the input vector length nondeterministic, so with `N`
-    // fixed to 100, Kani explores:
-    // - `vec.len() == 100`: the conversion first turns the vector into
-    //   `Box<[T]>`, then reinterprets that boxed slice in place as
-    //   `Box<[T; 100]>`.
-    // - `vec.len() != 100`: the length check fails and the function returns
-    //   `Err(vec)` without attempting the boxed-slice-to-array reinterpretation.
-    macro_rules! gen_box_try_from_vec_to_array_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a symbolic vector whose length drives the `TryFrom` branch.
-                let vec: Vec<$ty> = verifier_nondet_vec_box::<$ty>();
-
-                // Fix the target array length used by the conversion attempt.
-                const N: usize = 100;
-
-                // Attempt the conversion from a vector directly into a boxed array.
-                let _result: Result<Box<[$ty; N]>, Vec<$ty>> = <Box<[$ty; N]>>::try_from(vec);
-            }
-        };
-    }
-
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_i8, i8);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_i16, i16);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_i32, i32);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_i64, i64);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_i128, i128);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_u8, u8);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_u16, u16);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_u32, u32);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_u64, u64);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_u128, u128);
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_unit, ());
-    gen_box_try_from_vec_to_array_harness!(harness_box_try_from_vec_to_array_array, [u8; 4]);
-
-    // `Box<dyn Any, A>::downcast::<T>` branches only on `self.is::<T>()`.
-    // The safe wrapper uses that runtime type test to protect the internal
-    // delegation to `downcast_unchecked::<T>()`:
-    // - when `self.is::<T>()` is true, the function takes the `Ok(...)` path
-    //   and forwards to the unchecked downcast, which is safe because the
-    //   erased value is known to have the requested concrete type;
-    // - when `self.is::<T>()` is false, the function returns `Err(self)` and
-    //   never attempts the unchecked reinterpretation.
-    // These harnesses cover both outcomes explicitly by constructing:
-    // - a matching erased box whose concrete type is exactly `$ty`;
-    // - a non-matching erased box whose concrete type is `String`.
-    macro_rules! gen_box_dyn_any_downcast_harness {
-        ($name:ident, $ty:ty) => {
-            mod $name {
-                use super::*;
-
-                #[kani::proof]
-                pub fn ok_path() {
-                    // Create a symbolic concrete value of the requested target type.
-                    let value: $ty = kani::any();
-
-                    // Erase that concrete value behind a `dyn Any` box.
-                    let erased: Box<dyn Any> = Box::new(value);
-
-                    // Attempt the downcast with the matching target type.
-                    let _result: Result<Box<$ty>, Box<dyn Any>> = erased.downcast::<$ty>();
-                }
-
-                #[kani::proof]
-                pub fn err_path() {
-                    // Create a concrete string used to force a mismatched erased type.
-                    let value: String = String::from("mismatch");
-
-                    // Erase that string behind a `dyn Any` box.
-                    let erased: Box<dyn Any> = Box::new(value);
-
-                    // Attempt the downcast with a target type that does not match `String`.
-                    let _result: Result<Box<$ty>, Box<dyn Any>> = erased.downcast::<$ty>();
-                }
-            }
-        };
-    }
-
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_i8, i8);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_i16, i16);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_i32, i32);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_i64, i64);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_i128, i128);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_u8, u8);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_u16, u16);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_u32, u32);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_u64, u64);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_u128, u128);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_unit, ());
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_bool, bool);
-    gen_box_dyn_any_downcast_harness!(harness_box_dyn_any_downcast_array, [u8; 4]);
-
-    // `Box<dyn Any + Send, A>::downcast::<T>` branches only on `self.is::<T>()`.
-    // The safe wrapper uses that runtime type test to protect the internal
-    // delegation to `downcast_unchecked::<T>()`:
-    // - when `self.is::<T>()` is true, the function takes the `Ok(...)` path
-    //   and forwards to the unchecked downcast, which is safe because the
-    //   erased value is known to have the requested concrete type;
-    // - when `self.is::<T>()` is false, the function returns `Err(self)` and
-    //   never attempts the unchecked reinterpretation.
-    // These harnesses cover both outcomes explicitly by constructing:
-    // - a matching erased box whose concrete type is exactly `$ty`;
-    // - a non-matching erased box whose concrete type is `String`.
-    macro_rules! gen_box_dyn_any_send_downcast_harness {
-        ($name:ident, $ty:ty) => {
-            mod $name {
-                use super::*;
-
-                #[kani::proof]
-                pub fn ok_path() {
-                    // Create a symbolic concrete value of the requested target type.
-                    let value: $ty = kani::any();
-
-                    // Erase that concrete value behind a `dyn Any + Send` box.
-                    let erased: Box<dyn Any + Send> = Box::new(value);
-
-                    // Attempt the downcast with the matching target type.
-                    let _result: Result<Box<$ty>, Box<dyn Any + Send>> = erased.downcast::<$ty>();
-                }
-
-                #[kani::proof]
-                pub fn err_path() {
-                    // Create a concrete string used to force a mismatched erased type.
-                    let value: String = String::from("mismatch");
-
-                    // Erase that string behind a `dyn Any + Send` box.
-                    let erased: Box<dyn Any + Send> = Box::new(value);
-
-                    // Attempt the downcast with a target type that does not match `String`.
-                    let _result: Result<Box<$ty>, Box<dyn Any + Send>> = erased.downcast::<$ty>();
-                }
-            }
-        };
-    }
-
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_i8, i8);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_i16, i16);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_i32, i32);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_i64, i64);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_i128, i128);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_u8, u8);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_u16, u16);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_u32, u32);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_u64, u64);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_u128, u128);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_unit, ());
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_bool, bool);
-    gen_box_dyn_any_send_downcast_harness!(harness_box_dyn_any_send_downcast_array, [u8; 4]);
-
-    // `Box<dyn Any + Send + Sync, A>::downcast::<T>` branches only on
-    // `self.is::<T>()`.
-    // The safe wrapper uses that runtime type test to protect the internal
-    // delegation to `downcast_unchecked::<T>()`:
-    // - when `self.is::<T>()` is true, the function takes the `Ok(...)` path
-    //   and forwards to the unchecked downcast, which is safe because the
-    //   erased value is known to have the requested concrete type;
-    // - when `self.is::<T>()` is false, the function returns `Err(self)` and
-    //   never attempts the unchecked reinterpretation.
-    // These harnesses cover both outcomes explicitly by constructing:
-    // - a matching erased box whose concrete type is exactly `$ty`;
-    // - a non-matching erased box whose concrete type is `String`.
-    macro_rules! gen_box_dyn_any_send_sync_downcast_harness {
-        ($name:ident, $ty:ty) => {
-            mod $name {
-                use super::*;
-
-                #[kani::proof]
-                pub fn ok_path() {
-                    // Create a symbolic concrete value of the requested target type.
-                    let value: $ty = kani::any();
-
-                    // Erase that concrete value behind a `dyn Any + Send + Sync` box.
-                    let erased: Box<dyn Any + Send + Sync> = Box::new(value);
-
-                    // Attempt the downcast with the matching target type.
-                    let _result: Result<Box<$ty>, Box<dyn Any + Send + Sync>> =
-                        erased.downcast::<$ty>();
-                }
-
-                #[kani::proof]
-                pub fn err_path() {
-                    // Create a concrete string used to force a mismatched erased type.
-                    let value: String = String::from("mismatch");
-
-                    // Erase that string behind a `dyn Any + Send + Sync` box.
-                    let erased: Box<dyn Any + Send + Sync> = Box::new(value);
-
-                    // Attempt the downcast with a target type that does not match `String`.
-                    let _result: Result<Box<$ty>, Box<dyn Any + Send + Sync>> =
-                        erased.downcast::<$ty>();
-                }
-            }
-        };
-    }
-
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_i8, i8);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_i16, i16);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_i32, i32);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_i64, i64);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_i128, i128);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_u8, u8);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_u16, u16);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_u32, u32);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_u64, u64);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_u128, u128);
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_unit, ());
-    gen_box_dyn_any_send_sync_downcast_harness!(harness_box_dyn_any_send_sync_downcast_bool, bool);
-    gen_box_dyn_any_send_sync_downcast_harness!(
-        harness_box_dyn_any_send_sync_downcast_array,
-        [u8; 4]
+    checked_downcast!(
+        harness_box_dyn_error_send_downcast_unit,
+        dyn Error + Send,
+        Witness<()>,
+        Witness(()),
+        fmt::Error
     );
-
-    // `<dyn Error>::downcast::<T>` branches only on `self.is::<T>()`.
-    // The safe wrapper uses that runtime type test to protect the raw pointer
-    // reinterpretation in the `Ok(...)` path:
-    // - when `self.is::<T>()` is true, the function extracts the raw
-    //   `dyn Error` pointer from the box and reinterprets it as `*mut T`,
-    //   which is safe because the erased value is known to have concrete type
-    //   `T`;
-    // - when `self.is::<T>()` is false, the function returns `Err(self)` and
-    //   never performs the pointer reinterpretation.
-    macro_rules! gen_box_dyn_error_downcast_harness {
-        ($name:ident, $ty:ty) => {
-            mod $name {
-                use super::*;
-
-                #[kani::proof]
-                pub fn ok_path() {
-                    // Create a concrete error value of the requested target type.
-                    let value: $ty = <$ty as VerifierErrorWitness>::verifier_any();
-
-                    // Erase that concrete error behind a `dyn Error` box.
-                    let erased: Box<dyn Error> = Box::new(value);
-
-                    // Attempt the downcast with the matching target type.
-                    let _result: Result<Box<$ty>, Box<dyn Error>> = erased.downcast::<$ty>();
-                }
-
-                #[kani::proof]
-                pub fn err_path() {
-                    // Create a mismatched concrete error value.
-                    let value: MismatchError = MismatchError(kani::any());
-
-                    // Erase that mismatched value behind a `dyn Error` box.
-                    let erased: Box<dyn Error> = Box::new(value);
-
-                    // Attempt the downcast with a target type that does not match `MismatchError`.
-                    let _result: Result<Box<$ty>, Box<dyn Error>> = erased.downcast::<$ty>();
-                }
-            }
-        };
-    }
-
-    gen_box_dyn_error_downcast_harness!(harness_box_dyn_error_downcast_unit, UnitError);
-    gen_box_dyn_error_downcast_harness!(harness_box_dyn_error_downcast_byte, ByteError);
-    gen_box_dyn_error_downcast_harness!(harness_box_dyn_error_downcast_bool, BoolError);
-    gen_box_dyn_error_downcast_harness!(harness_box_dyn_error_downcast_array, ArrayError);
-
-    // `<dyn Error + Send>::downcast::<T>` delegates to `<dyn Error>::downcast`
-    // after first coercing `Box<dyn Error + Send>` into `Box<dyn Error>`.
-    // Its explicit branch behavior is therefore still determined by
-    // `self.is::<T>()` inside the shared `dyn Error` downcast logic:
-    // - when the erased error really has concrete type `T`, the delegated
-    //   `dyn Error` downcast returns `Ok(Box<T>)`;
-    // - otherwise the delegated call returns `Err(Box<dyn Error>)`, and this
-    //   wrapper re-applies the `Send` marker with `mem::transmute`.
-    macro_rules! gen_box_dyn_error_send_downcast_harness {
-        ($name:ident, $ty:ty) => {
-            mod $name {
-                use super::*;
-
-                #[kani::proof]
-                pub fn ok_path() {
-                    // Create a concrete error value of the requested target type.
-                    let value: $ty = <$ty as VerifierErrorWitness>::verifier_any();
-
-                    // Erase that concrete error behind a `dyn Error + Send` box.
-                    let erased: Box<dyn Error + Send> = Box::new(value);
-
-                    // Attempt the downcast with the matching target type.
-                    let _result: Result<Box<$ty>, Box<dyn Error + Send>> = erased.downcast::<$ty>();
-                }
-
-                #[kani::proof]
-                pub fn err_path() {
-                    // Create a mismatched concrete error value.
-                    let value: MismatchError = MismatchError(kani::any());
-
-                    // Erase that mismatched value behind a `dyn Error + Send` box.
-                    let erased: Box<dyn Error + Send> = Box::new(value);
-
-                    // Attempt the downcast with a target type that does not match `MismatchError`.
-                    let _result: Result<Box<$ty>, Box<dyn Error + Send>> = erased.downcast::<$ty>();
-                }
-            }
-        };
-    }
-
-    gen_box_dyn_error_send_downcast_harness!(harness_box_dyn_error_send_downcast_unit, UnitError);
-    gen_box_dyn_error_send_downcast_harness!(harness_box_dyn_error_send_downcast_byte, ByteError);
-    gen_box_dyn_error_send_downcast_harness!(harness_box_dyn_error_send_downcast_bool, BoolError);
-    gen_box_dyn_error_send_downcast_harness!(harness_box_dyn_error_send_downcast_array, ArrayError);
-
-    // `<dyn Error + Send + Sync>::downcast::<T>` also delegates to
-    // `<dyn Error>::downcast` after coercing the boxed trait object to
-    // `Box<dyn Error>`.
-    // The branch structure is therefore again inherited from the shared
-    // `dyn Error` downcast logic:
-    // - when the erased error really has concrete type `T`, the delegated
-    //   `dyn Error` downcast returns `Ok(Box<T>)`;
-    // - otherwise the delegated call returns `Err(Box<dyn Error>)`, and this
-    //   wrapper re-applies the `Send + Sync` markers with `mem::transmute`.
-    macro_rules! gen_box_dyn_error_send_sync_downcast_harness {
-        ($name:ident, $ty:ty) => {
-            mod $name {
-                use super::*;
-
-                #[kani::proof]
-                pub fn ok_path() {
-                    // Create a concrete error value of the requested target type.
-                    let value: $ty = <$ty as VerifierErrorWitness>::verifier_any();
-
-                    // Erase that concrete error behind a `dyn Error + Send + Sync` box.
-                    let erased: Box<dyn Error + Send + Sync> = Box::new(value);
-
-                    // Attempt the downcast with the matching target type.
-                    let _result: Result<Box<$ty>, Box<dyn Error + Send + Sync>> =
-                        erased.downcast::<$ty>();
-                }
-
-                #[kani::proof]
-                pub fn err_path() {
-                    // Create a mismatched concrete error value.
-                    let value: MismatchError = MismatchError(kani::any());
-
-                    // Erase that mismatched value behind a `dyn Error + Send + Sync` box.
-                    let erased: Box<dyn Error + Send + Sync> = Box::new(value);
-
-                    // Attempt the downcast with a target type that does not match `MismatchError`.
-                    let _result: Result<Box<$ty>, Box<dyn Error + Send + Sync>> =
-                        erased.downcast::<$ty>();
-                }
-            }
-        };
-    }
-
-    gen_box_dyn_error_send_sync_downcast_harness!(
-        harness_box_dyn_error_send_sync_downcast_unit,
-        UnitError
-    );
-    gen_box_dyn_error_send_sync_downcast_harness!(
+    checked_downcast!(
         harness_box_dyn_error_send_sync_downcast_byte,
-        ByteError
+        dyn Error + Send + Sync,
+        Witness<u8>,
+        Witness(kani::any::<u8>()),
+        fmt::Error
     );
-    gen_box_dyn_error_send_sync_downcast_harness!(
-        harness_box_dyn_error_send_sync_downcast_bool,
-        BoolError
+    checked_downcast!(
+        harness_box_dyn_error_send_sync_downcast_unit,
+        dyn Error + Send + Sync,
+        Witness<()>,
+        Witness(()),
+        fmt::Error
     );
-    gen_box_dyn_error_send_sync_downcast_harness!(
-        harness_box_dyn_error_send_sync_downcast_array,
-        ArrayError
-    );
+
+    /// Checks <Box<str> as From<&str>>::from for empty and nonempty input.
+    #[kani::proof]
+    fn harness_box_from_str() {
+        let value = if kani::any() { "" } else { "test" };
+        let boxed = Box::<str>::from(value);
+        assert_eq!(boxed.len(), value.len());
+        // Compare an arbitrary byte without introducing a memcmp loop.
+        if !value.is_empty() {
+            let index = kani::any_where(|i: &usize| *i < value.len());
+            assert_eq!(boxed.as_bytes()[index], value.as_bytes()[index]);
+        }
+        kani::cover(value.is_empty(), "Box::from str handles empty input");
+        kani::cover(!value.is_empty(), "Box::from str handles nonempty input");
+    }
+
+    /// Checks <Box<[u8]> as From<Box<str>>>::from.
+    #[kani::proof]
+    fn harness_box_from_box_str_to_u8_slice() {
+        let value = if kani::any() { "" } else { "test" };
+        let bytes = Box::<[u8]>::from(Box::<str>::from(value));
+        assert_eq!(bytes.len(), value.len());
+        // Compare an arbitrary byte without introducing a memcmp loop.
+        if !value.is_empty() {
+            let index = kani::any_where(|i: &usize| *i < value.len());
+            assert_eq!(bytes[index], value.as_bytes()[index]);
+        }
+        kani::cover(value.is_empty(), "Box<str> to bytes handles empty input");
+        kani::cover(!value.is_empty(), "Box<str> to bytes handles nonempty input");
+    }
+
+    /// Checks BoxFromSlice::from_slice's TrivialClone specialization for u8.
+    #[kani::proof]
+    fn harness_box_from_slice_trivial_clone() {
+        let source = verifier_nondet_vec_box::<u8>();
+        let boxed = <Box<[u8]> as BoxFromSlice<u8>>::from_slice(&source);
+        assert_eq!(boxed.len(), source.len());
+        // A symbolic index checks copying without iterating over the unbounded length.
+        if !source.is_empty() {
+            let index = kani::any_where(|i: &usize| *i < source.len());
+            assert_eq!(boxed[index], source[index]);
+        }
+        kani::cover(source.is_empty(), "BoxFromSlice trivial clone handles empty input");
+        kani::cover(!source.is_empty(), "BoxFromSlice trivial clone copies an element");
+    }
+
+    // No Copy implementation: this forces the generic Clone specialization.
+    #[derive(Clone)]
+    struct CloneOnly(u8);
+
+    /// Checks BoxFromSlice::from_slice's generic Clone implementation.
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn harness_box_from_slice_clone() {
+        // This element-wise clone path uses a bounded, independently symbolic
+        // payload, including an empty slice. Other slice harnesses retain their
+        // symbolic lengths without a small fixed cap.
+        let values = [CloneOnly(kani::any()), CloneOnly(kani::any())];
+        let source = kani::slice::any_slice_of_array(&values);
+        let boxed = <Box<[CloneOnly]> as BoxFromSlice<CloneOnly>>::from_slice(source);
+        assert_eq!(boxed.len(), source.len());
+        if !source.is_empty() {
+            let index = kani::any_where(|i: &usize| *i < source.len());
+            assert_eq!(boxed[index].0, source[index].0);
+        }
+        kani::cover(source.is_empty(), "BoxFromSlice clone handles empty input");
+        kani::cover(!source.is_empty(), "BoxFromSlice clone copies an element");
+    }
+
+    // Symbolic lengths cover success (len == N) and failure for fixed N = 100.
+    macro_rules! slice_to_array {
+        ($name:ident, $ty:ty) => {
+            mod $name {
+                use super::*;
+                const N: usize = 100;
+
+                /// Checks TryFrom<Box<[T]>> for Box<[T; N]>.
+                #[kani::proof]
+                fn boxed_slice() {
+                    let boxed = verifier_nondet_vec_box::<$ty>().into_boxed_slice();
+                    let matches = boxed.len() == N;
+                    assert_eq!(Box::<[$ty; N]>::try_from(boxed).is_ok(), matches);
+                    kani::cover(matches, "Box slice to array accepts matching length");
+                    kani::cover(!matches, "Box slice to array rejects mismatched length");
+                }
+
+                /// Checks TryFrom<Vec<T>> for Box<[T; N]>.
+                #[kani::proof]
+                fn vector() {
+                    let vec = verifier_nondet_vec_box::<$ty>();
+                    let matches = vec.len() == N;
+                    assert_eq!(Box::<[$ty; N]>::try_from(vec).is_ok(), matches);
+                    kani::cover(matches, "Box Vec to array accepts matching length");
+                    kani::cover(!matches, "Box Vec to array rejects mismatched length");
+                }
+            }
+        };
+    }
+
+    slice_to_array!(harness_box_try_from_array_i32, i32);
+    slice_to_array!(harness_box_try_from_array_unit, ());
 }
