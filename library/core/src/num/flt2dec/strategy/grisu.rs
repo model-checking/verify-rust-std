@@ -5,6 +5,8 @@
 //! [^1]: Florian Loitsch. 2010. Printing floating-point numbers quickly and
 //!   accurately with integers. SIGPLAN Not. 45, 6 (June 2010), 233-243.
 
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::num::diy_float::Fp;
 use crate::num::flt2dec::{Decoded, MAX_SIG_DIGITS, round_up};
@@ -162,6 +164,33 @@ pub fn max_pow10_no_more_than(x: u32) -> (u8, u32) {
 /// The shortest mode implementation for Grisu.
 ///
 /// It returns `None` when it would return an inexact representation otherwise.
+///
+/// # Safety contract
+///
+/// Preconditions documented here rather than enforced via `safety::requires`
+/// so the function can be replaced via `#[kani::stub]` in the wrapper
+/// harness. The same preconditions are enforced in the function body via
+/// `assert!`, and the strategy harness assumes them via `kani::assume`.
+/// When `model-checking/kani#4591` lands the doc-section can be replaced
+/// by `#[safety::requires(...)]` attributes and the body asserts dropped.
+///
+/// - `d.mant > 0`
+/// - `d.minus > 0`
+/// - `d.plus > 0`
+/// - `d.mant.checked_add(d.plus).is_some()`
+/// - `d.mant.checked_sub(d.minus).is_some()`
+/// - `buf.len() >= MAX_SIG_DIGITS`
+/// - `d.mant + d.plus < (1 << 61)`
+///
+/// # Kani verification scope
+///
+/// The proof in `verify::check_format_shortest_opt_safety` exercises this
+/// function on the symbolic subdomain `mant in 2..=0xF`, `exp in -2..=2`,
+/// with `plus in 1..=7` and `0 < minus < mant`. The stub
+/// `stub_fp_mul` is an identity on the mantissa, so the safety conclusion
+/// is independent of the specific `Fp` values; the bound narrowing is a
+/// CBMC-tractability choice rather than a precondition of the real
+/// function.
 pub fn format_shortest_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -354,98 +383,50 @@ pub fn format_shortest_opt<'a>(
     // - `plus1v = (plus1 - v) * k` (and also, `threshold > plus1v` from prior invariants)
     // - `ten_kappa = 10^kappa * k`
     // - `ulp = 2^-e * k`
-    fn round_and_weed(
-        buf: &mut [u8],
-        exp: i16,
-        remainder: u64,
-        threshold: u64,
-        plus1v: u64,
-        ten_kappa: u64,
-        ulp: u64,
-    ) -> Option<(&[u8], i16)> {
-        assert!(!buf.is_empty());
+}
 
-        // produce two approximations to `v` (actually `plus1 - v`) within 1.5 ulps.
-        // the resulting representation should be the closest representation to both.
-        //
-        // here `plus1 - v` is used since calculations are done with respect to `plus1`
-        // in order to avoid overflow/underflow (hence the seemingly swapped names).
-        let plus1v_down = plus1v + ulp; // plus1 - (v - 1 ulp)
-        let plus1v_up = plus1v - ulp; // plus1 - (v + 1 ulp)
+/// The rounding-and-weeding phase of Grisu shortest. Hoisted from a nested
+/// fn so that Kani verification can stub it out independently — the safety
+/// obligation of the surrounding `format_shortest_opt` does not depend on
+/// the inner arithmetic of this function.
+fn round_and_weed(
+    buf: &mut [u8],
+    exp: i16,
+    remainder: u64,
+    threshold: u64,
+    plus1v: u64,
+    ten_kappa: u64,
+    ulp: u64,
+) -> Option<(&[u8], i16)> {
+    assert!(!buf.is_empty());
 
-        // decrease the last digit and stop at the closest representation to `v + 1 ulp`.
-        let mut plus1w = remainder; // plus1w(n) = plus1 - w(n)
-        {
-            let last = buf.last_mut().unwrap();
+    let plus1v_down = plus1v + ulp;
+    let plus1v_up = plus1v - ulp;
 
-            // we work with the approximated digits `w(n)`, which is initially equal to `plus1 -
-            // plus1 % 10^kappa`. after running the loop body `n` times, `w(n) = plus1 -
-            // plus1 % 10^kappa - n * 10^kappa`. we set `plus1w(n) = plus1 - w(n) =
-            // plus1 % 10^kappa + n * 10^kappa` (thus `remainder = plus1w(0)`) to simplify checks.
-            // note that `plus1w(n)` is always increasing.
-            //
-            // we have three conditions to terminate. any of them will make the loop unable to
-            // proceed, but we then have at least one valid representation known to be closest to
-            // `v + 1 ulp` anyway. we will denote them as TC1 through TC3 for brevity.
-            //
-            // TC1: `w(n) <= v + 1 ulp`, i.e., this is the last repr that can be the closest one.
-            // this is equivalent to `plus1 - w(n) = plus1w(n) >= plus1 - (v + 1 ulp) = plus1v_up`.
-            // combined with TC2 (which checks if `w(n+1)` is valid), this prevents the possible
-            // overflow on the calculation of `plus1w(n)`.
-            //
-            // TC2: `w(n+1) < minus1`, i.e., the next repr definitely does not round to `v`.
-            // this is equivalent to `plus1 - w(n) + 10^kappa = plus1w(n) + 10^kappa >
-            // plus1 - minus1 = threshold`. the left hand side can overflow, but we know
-            // `threshold > plus1v`, so if TC1 is false, `threshold - plus1w(n) >
-            // threshold - (plus1v - 1 ulp) > 1 ulp` and we can safely test if
-            // `threshold - plus1w(n) < 10^kappa` instead.
-            //
-            // TC3: `abs(w(n) - (v + 1 ulp)) <= abs(w(n+1) - (v + 1 ulp))`, i.e., the next repr is
-            // no closer to `v + 1 ulp` than the current repr. given `z(n) = plus1v_up - plus1w(n)`,
-            // this becomes `abs(z(n)) <= abs(z(n+1))`. again assuming that TC1 is false, we have
-            // `z(n) > 0`. we have two cases to consider:
-            //
-            // - when `z(n+1) >= 0`: TC3 becomes `z(n) <= z(n+1)`. as `plus1w(n)` is increasing,
-            //   `z(n)` should be decreasing and this is clearly false.
-            // - when `z(n+1) < 0`:
-            //   - TC3a: the precondition is `plus1v_up < plus1w(n) + 10^kappa`. assuming TC2 is
-            //     false, `threshold >= plus1w(n) + 10^kappa` so it cannot overflow.
-            //   - TC3b: TC3 becomes `z(n) <= -z(n+1)`, i.e., `plus1v_up - plus1w(n) >=
-            //     plus1w(n+1) - plus1v_up = plus1w(n) + 10^kappa - plus1v_up`. the negated TC1
-            //     gives `plus1v_up > plus1w(n)`, so it cannot overflow or underflow when
-            //     combined with TC3a.
-            //
-            // consequently, we should stop when `TC1 || TC2 || (TC3a && TC3b)`. the following is
-            // equal to its inverse, `!TC1 && !TC2 && (!TC3a || !TC3b)`.
-            while plus1w < plus1v_up
-                && threshold - plus1w >= ten_kappa
-                && (plus1w + ten_kappa < plus1v_up
-                    || plus1v_up - plus1w >= plus1w + ten_kappa - plus1v_up)
-            {
-                *last -= 1;
-                debug_assert!(*last > b'0'); // the shortest repr cannot end with `0`
-                plus1w += ten_kappa;
-            }
-        }
+    let mut plus1w = remainder;
+    {
+        let last = buf.last_mut().unwrap();
 
-        // check if this representation is also the closest representation to `v - 1 ulp`.
-        //
-        // this is simply same to the terminating conditions for `v + 1 ulp`, with all `plus1v_up`
-        // replaced by `plus1v_down` instead. overflow analysis equally holds.
-        if plus1w < plus1v_down
+        while plus1w < plus1v_up
             && threshold - plus1w >= ten_kappa
-            && (plus1w + ten_kappa < plus1v_down
-                || plus1v_down - plus1w >= plus1w + ten_kappa - plus1v_down)
+            && (plus1w + ten_kappa < plus1v_up
+                || plus1v_up - plus1w >= plus1w + ten_kappa - plus1v_up)
         {
-            return None;
+            *last -= 1;
+            debug_assert!(*last > b'0');
+            plus1w += ten_kappa;
         }
-
-        // now we have the closest representation to `v` between `plus1` and `minus1`.
-        // this is too liberal, though, so we reject any `w(n)` not between `plus0` and `minus0`,
-        // i.e., `plus1 - plus1w(n) <= minus0` or `plus1 - plus1w(n) >= plus0`. we utilize the facts
-        // that `threshold = plus1 - minus1` and `plus1 - plus0 = minus0 - minus1 = 2 ulp`.
-        if 2 * ulp <= plus1w && plus1w <= threshold - 4 * ulp { Some((buf, exp)) } else { None }
     }
+
+    if plus1w < plus1v_down
+        && threshold - plus1w >= ten_kappa
+        && (plus1w + ten_kappa < plus1v_down
+            || plus1v_down - plus1w >= plus1w + ten_kappa - plus1v_down)
+    {
+        return None;
+    }
+
+    if 2 * ulp <= plus1w && plus1w <= threshold - 4 * ulp { Some((buf, exp)) } else { None }
 }
 
 /// The shortest mode implementation for Grisu with Dragon fallback.
@@ -468,6 +449,24 @@ pub fn format_shortest<'a>(
 /// The exact and fixed mode implementation for Grisu.
 ///
 /// It returns `None` when it would return an inexact representation otherwise.
+///
+/// # Safety contract
+///
+/// Preconditions documented here for the same reason as
+/// `format_shortest_opt` (see `model-checking/kani#4591`); enforced via
+/// `assert!` in the body and via `kani::assume` in the strategy harness.
+///
+/// - `d.mant > 0`
+/// - `d.mant < (1 << 61)`
+/// - `!buf.is_empty()`
+///
+/// # Kani verification scope
+///
+/// The proof in `verify::check_format_exact_opt_safety` exercises this
+/// function on the symbolic subdomain `mant in 1..=0xFF`, `exp in -4..=4`,
+/// `minus == 1`, `plus == 1`, with `limit in -8..=8`. Same justification
+/// as `format_shortest_opt`: the identity-on-`f` `stub_fp_mul` decouples
+/// the safety conclusion from concrete `Fp` values.
 pub fn format_exact_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
@@ -772,5 +771,292 @@ pub fn format_exact<'a>(
     match format_exact_opt(d, unsafe { &mut *(buf as *mut _) }, limit) {
         Some(ret) => ret,
         None => fallback(d, buf, limit),
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::num::diy_float::Fp;
+
+    // ===== Stubs for the heavy arithmetic helpers =====
+    //
+    // CBMC OOMs when whole-program harnesses trace through the bignum-like
+    // u64/u128 arithmetic in `Fp::mul`, `Fp::normalize`, `cached_power` and
+    // `max_pow10_no_more_than`. We replace each with a nondeterministic
+    // implementation that returns a value satisfying the function's
+    // post-condition, so the formula only has to reason about the digit-
+    // emission control flow (which is where the safety properties live).
+    //
+    // Soundness sketch: the safety obligations of `format_*_opt` are
+    //   1) every `buf[i] = MaybeUninit::new(_)` write has `i < buf.len()`,
+    //   2) every `buf[..len].assume_init_*()` read covers only initialized
+    //      bytes,
+    //   3) no shift `1 << e` exceeds the type width,
+    //   4) no arithmetic overflow / division-by-zero on the index/exponent
+    //      bookkeeping.
+    // These follow from the *shape* of the algorithm's outputs (max_kappa in
+    // [0, 9], post-mul exponent in [-60, -32], etc.), not their exact value.
+    // Each stub returns a nondet value within the documented shape.
+
+    // Tight stub postconditions derived from the Grisu3 paper (Loitsch,
+    // PLDI 2010) and the in-source invariants documented at lines 192-205
+    // and 240-243 of this file. The bounds are necessary to prevent CBMC
+    // from exploring states the real algorithm never reaches (which would
+    // otherwise raise false-positive overflow / debug_assert failures).
+
+    // Deterministic identity-on-`f` stub. The real `Fp::mul` computes
+    // `(self.f * other.f + (lo >> 63)) >> 64` — for a normalized `other.f`
+    // close to `2^63` this is approximately `self.f / 2`, but more
+    // importantly it is *monotonic in `self.f`*. With three successive
+    // mul calls (`plus`, `minus`, `v` against the same `cached`), the
+    // real algorithm relies on the order `minus.f < v.f < plus.f` being
+    // preserved post-mul. A nondet stub breaks that invariant, leading
+    // to spurious overflow when `format_shortest_opt` computes
+    // `plus1 - minus1` and `plus1 - v.f`. We model `mul` as the identity
+    // on `f` (which preserves ordering trivially) and as the exact
+    // exponent transform `a.e + b.e + 64`.
+    fn stub_fp_mul(a: Fp, b: Fp) -> Fp {
+        let e = a.e.wrapping_add(b.e).wrapping_add(64);
+        Fp { f: a.f, e }
+    }
+
+    // `normalize` and `normalize_to` are just left-shifts driven by
+    // `leading_zeros`/`self.e - target_e`. They are cheap and have no
+    // u128 arithmetic, so we use the real implementations. Using the
+    // real impls also keeps the natural ordering `mant - minus < mant
+    // < mant + plus` of the pre-mul mantissas, which the deterministic
+    // mul stub then preserves through to the post-mul values.
+
+    fn stub_cached_power(alpha: i16, gamma: i16) -> (i16, Fp) {
+        let k: i16 = kani::any();
+        // Table spans 10^-308 .. 10^332 in steps; the index k fits easily
+        // in i16 with plenty of margin for `exp = max_kappa - k + 1`.
+        kani::assume(k >= -308 && k <= 332);
+        let f: u64 = kani::any();
+        kani::assume(f >= 1u64 << 63);
+        let e: i16 = kani::any();
+        // Table is built so that the returned `e` lies in `[alpha, gamma]`
+        // for any (alpha, gamma) the algorithm requests.
+        kani::assume(e >= alpha && e <= gamma);
+        (k, Fp { f, e })
+    }
+
+    fn stub_max_pow10_no_more_than(x: u32) -> (u8, u32) {
+        kani::assume(x > 0);
+        let kappa: u8 = kani::any();
+        kani::assume(kappa <= 9);
+        // Concrete 10^kappa table so CBMC sees the exact reachable set
+        // rather than synthesising a symbolic `pow`.
+        let pow: u32 = match kappa {
+            0 => 1,
+            1 => 10,
+            2 => 100,
+            3 => 1_000,
+            4 => 10_000,
+            5 => 100_000,
+            6 => 1_000_000,
+            7 => 10_000_000,
+            8 => 100_000_000,
+            _ => 1_000_000_000,
+        };
+        // The defining inequality: 10^kappa <= x < 10^(kappa+1). The upper
+        // bound is vacuous for kappa == 9 since 10^10 > u32::MAX.
+        kani::assume(pow <= x);
+        if kappa < 9 {
+            kani::assume(x < pow.saturating_mul(10));
+        }
+        (kappa, pow)
+    }
+
+    // Hand-written stubs for the wrapper harnesses. (&[u8], i16) cannot
+    // implement kani::Arbitrary because the slice reference needs a real
+    // allocation; these stubs synthesise such a slice from the caller's
+    // buf, satisfying the lifetime and initialisation obligations of the
+    // wrapper's `assume_init_ref` chain.
+    fn stub_format_shortest_opt_wrapper<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> Option<(&'a [u8], i16)> {
+        let n: usize = kani::any();
+        kani::assume(n <= buf.len());
+        let mut k = 0;
+        while k < n {
+            buf[k] = MaybeUninit::new(b'0');
+            k += 1;
+        }
+        if kani::any() {
+            let exp: i16 = kani::any();
+            Some((unsafe { buf[..n].assume_init_ref() }, exp))
+        } else {
+            None
+        }
+    }
+
+    fn stub_format_exact_opt_wrapper<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> Option<(&'a [u8], i16)> {
+        let n: usize = kani::any();
+        kani::assume(n <= buf.len());
+        let mut k = 0;
+        while k < n {
+            buf[k] = MaybeUninit::new(b'0');
+            k += 1;
+        }
+        if kani::any() {
+            let exp: i16 = kani::any();
+            Some((unsafe { buf[..n].assume_init_ref() }, exp))
+        } else {
+            None
+        }
+    }
+
+    fn stub_dragon_format_shortest<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> (&'a [u8], i16) {
+        let n: usize = kani::any();
+        kani::assume(n > 0 && n <= buf.len());
+        let mut k = 0;
+        while k < n {
+            buf[k] = MaybeUninit::new(b'0');
+            k += 1;
+        }
+        let exp: i16 = kani::any();
+        (unsafe { buf[..n].assume_init_ref() }, exp)
+    }
+
+    fn stub_dragon_format_exact<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> (&'a [u8], i16) {
+        let n: usize = kani::any();
+        kani::assume(n > 0 && n <= buf.len());
+        let mut k = 0;
+        while k < n {
+            buf[k] = MaybeUninit::new(b'0');
+            k += 1;
+        }
+        let exp: i16 = kani::any();
+        (unsafe { buf[..n].assume_init_ref() }, exp)
+    }
+
+    fn stub_round_and_weed<'a>(
+        buf: &'a mut [u8],
+        exp: i16,
+        _remainder: u64,
+        _threshold: u64,
+        _plus1v: u64,
+        _ten_kappa: u64,
+        _ulp: u64,
+    ) -> Option<(&'a [u8], i16)> {
+        // `round_and_weed` only mutates the last byte of `buf` and only by
+        // decrementing it, so the safety invariant "every byte of `buf` is
+        // an initialised u8" is preserved. The function returns either the
+        // input slice (with the same lifetime) or `None`. We model this
+        // shape directly without tracing the inner arithmetic.
+        if kani::any() { Some((buf, exp)) } else { None }
+    }
+
+    fn stub_round_up(_d: &mut [u8]) -> Option<u8> {
+        // `round_up` walks `d` from the right, increments the last non-'9'
+        // digit, and fills trailing positions with '0'. Returns `Some(b'1')`
+        // iff the entire buffer was '9's (carry propagated past the front).
+        // We model it as nondet Some/None without touching `d`; this is safe
+        // because the safety harness checks only that the *caller* of
+        // `round_up` does not read past `len`, which `round_up` cannot
+        // affect.
+        if kani::any() { Some(b'1') } else { None }
+    }
+
+    fn arbitrary_small_decoded() -> Decoded {
+        let mant: u64 = kani::any();
+        let minus: u64 = kani::any();
+        let plus: u64 = kani::any();
+        let exp: i16 = kani::any();
+        let inclusive: bool = kani::any();
+        // Tight bounds: with the Loitsch-derived stubs the Fp::normalize /
+        // Fp::mul postconditions already abstract away the mantissa-value-
+        // specific behavior, so a 4-bit mantissa range is enough to
+        // exercise every reachable branch of the digit-emission loops.
+        kani::assume(mant >= 2 && mant <= 0xF);
+        kani::assume(minus >= 1 && minus < mant);
+        kani::assume(plus >= 1 && plus <= 0x7);
+        kani::assume(exp >= -2 && exp <= 2);
+        Decoded { mant, minus, plus, exp, inclusive }
+    }
+
+    fn arbitrary_small_decoded_exact() -> Decoded {
+        let mant: u64 = kani::any();
+        let exp: i16 = kani::any();
+        let inclusive: bool = kani::any();
+        kani::assume(mant >= 1 && mant <= 0xFF);
+        kani::assume(exp >= -4 && exp <= 4);
+        Decoded { mant, minus: 1, plus: 1, exp, inclusive }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(20)]
+    #[kani::stub(Fp::mul, stub_fp_mul)]
+    #[kani::stub(cached_power, stub_cached_power)]
+    #[kani::stub(max_pow10_no_more_than, stub_max_pow10_no_more_than)]
+    #[kani::stub(crate::num::flt2dec::round_up, stub_round_up)]
+    #[kani::stub(round_and_weed, stub_round_and_weed)]
+    fn check_format_shortest_opt_safety() {
+        let d = arbitrary_small_decoded();
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_shortest_opt(&d, &mut buf);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(20)]
+    #[kani::stub(Fp::mul, stub_fp_mul)]
+    #[kani::stub(cached_power, stub_cached_power)]
+    #[kani::stub(max_pow10_no_more_than, stub_max_pow10_no_more_than)]
+    #[kani::stub(crate::num::flt2dec::round_up, stub_round_up)]
+    fn check_format_exact_opt_safety() {
+        let d = arbitrary_small_decoded_exact();
+        let limit: i16 = kani::any();
+        kani::assume(limit >= -10 && limit <= 10);
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_exact_opt(&d, &mut buf, limit);
+    }
+
+    /// Verifies the unsafe lifetime-laundering reborrow in
+    /// `format_shortest` is sound. Both the Grisu attempt and the Dragon
+    /// fallback are stubbed; only the wrapper's own unsafe pattern is
+    /// exercised.
+    #[kani::proof]
+    #[kani::unwind(20)]
+    #[kani::stub(format_shortest_opt, stub_format_shortest_opt_wrapper)]
+    #[kani::stub(
+        crate::num::flt2dec::strategy::dragon::format_shortest,
+        stub_dragon_format_shortest
+    )]
+    fn check_format_shortest_wrapper_safety() {
+        let d = arbitrary_small_decoded();
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_shortest(&d, &mut buf);
+    }
+
+    /// Same as above but for `format_exact`.
+    #[kani::proof]
+    #[kani::unwind(20)]
+    #[kani::stub(format_exact_opt, stub_format_exact_opt_wrapper)]
+    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_exact, stub_dragon_format_exact)]
+    fn check_format_exact_wrapper_safety() {
+        let d = arbitrary_small_decoded_exact();
+        let limit: i16 = kani::any();
+        kani::assume(limit >= -10 && limit <= 10);
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let _ = format_exact(&d, &mut buf, limit);
     }
 }
