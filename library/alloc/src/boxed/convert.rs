@@ -2,8 +2,14 @@ use core::any::Any;
 use core::error::Error;
 #[cfg(not(no_global_oom_handling))]
 use core::fmt;
+#[cfg(kani)]
+use core::kani;
 use core::mem;
 use core::pin::Pin;
+#[cfg(kani)]
+use core::ub_checks;
+
+use safety::{ensures, requires};
 
 use crate::alloc::Allocator;
 #[cfg(not(no_global_oom_handling))]
@@ -244,6 +250,7 @@ impl<T, const N: usize> From<[T; N]> for Box<[T]> {
 /// # Safety
 ///
 /// `boxed_slice.len()` must be exactly `N`.
+#[requires(boxed_slice.len() == N)]
 unsafe fn boxed_slice_as_array_unchecked<T, A: Allocator, const N: usize>(
     boxed_slice: Box<[T], A>,
 ) -> Box<[T; N], A> {
@@ -360,6 +367,8 @@ impl<A: Allocator> Box<dyn Any, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -419,6 +428,8 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -478,6 +489,8 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         unsafe {
@@ -744,5 +757,187 @@ impl dyn Error + Send + Sync {
             // Reapply the `Send + Sync` markers.
             mem::transmute::<Box<dyn Error>, Box<dyn Error + Send + Sync>>(s)
         })
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    #![allow(missing_docs)]
+
+    use core::any::Any;
+    use core::error::Error;
+    use core::{fmt, kani};
+
+    use super::boxed_slice_as_array_unchecked;
+    use crate::boxed::Box;
+    use crate::vec::Vec;
+
+    #[derive(Debug)]
+    struct ProbeError(i32);
+
+    impl fmt::Display for ProbeError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "probe")
+        }
+    }
+
+    impl Error for ProbeError {}
+
+    #[derive(Debug)]
+    struct OtherError;
+
+    impl fmt::Display for OtherError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "other")
+        }
+    }
+
+    impl Error for OtherError {}
+
+    // Clone but not Copy, so slice conversion exercises element cloning.
+    #[derive(Clone)]
+    struct CloneCell(u8);
+
+    // The challenge table lists `<dyn Error>::downcast_unchecked`. That API
+    // does not exist: unchecked downcast lives on `Box<dyn Any (+ Send) (+ Sync)>`.
+    // Kani cannot `proof_for_contract` these three methods: the resolver sees
+    // multiple `downcast_unchecked` impls on `Box` and rejects every path.
+    // Contracts remain on the methods; harnesses check the bodies under `is::<T>()`.
+
+    #[kani::proof]
+    pub fn check_downcast_unchecked_any() {
+        let value: i32 = kani::any();
+        let erased: Box<dyn Any> = Box::new(value);
+        let boxed = unsafe { erased.downcast_unchecked::<i32>() };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_unchecked_any_send() {
+        let value: i32 = kani::any();
+        let erased: Box<dyn Any + Send> = Box::new(value);
+        let boxed = unsafe { erased.downcast_unchecked::<i32>() };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_unchecked_any_send_sync() {
+        let value: bool = kani::any();
+        let erased: Box<dyn Any + Send + Sync> = Box::new(value);
+        let boxed = unsafe { erased.downcast_unchecked::<bool>() };
+        assert!(*boxed == value);
+    }
+
+    #[kani::proof]
+    pub fn check_from_slice_trivial_clone() {
+        let data: [u8; 2] = kani::any();
+        let boxed = Box::<[u8]>::from(&data[..]);
+        assert!(&*boxed == &data);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(3)]
+    pub fn check_from_slice_clone() {
+        let data = [CloneCell(kani::any())];
+        let boxed = Box::<[CloneCell]>::from(&data[..]);
+        assert!(boxed.len() == 1);
+        assert!(boxed[0].0 == data[0].0);
+    }
+
+    #[kani::proof]
+    pub fn check_from_str() {
+        let boxed: Box<str> = Box::from("xy");
+        assert!(&*boxed == "xy");
+    }
+
+    #[kani::proof]
+    pub fn check_from_box_str_to_bytes() {
+        let boxed: Box<str> = Box::from("xy");
+        let bytes: Box<[u8]> = Box::from(boxed);
+        assert!(&*bytes == b"xy");
+    }
+
+    #[kani::proof]
+    pub fn check_try_from_boxed_slice() {
+        let data: [i32; 2] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let boxed: Box<[i32]> = Box::from(slice);
+        let len = boxed.len();
+        match Box::<[i32; 2]>::try_from(boxed) {
+            Ok(_arr) => assert!(len == 2),
+            Err(rest) => assert!(rest.len() != 2),
+        }
+    }
+
+    #[kani::proof]
+    pub fn check_try_from_vec() {
+        let data: [i32; 2] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&data);
+        let vec: Vec<i32> = slice.to_vec();
+        let len = vec.len();
+        match Box::<[i32; 2]>::try_from(vec) {
+            Ok(_arr) => assert!(len == 2),
+            Err(rest) => assert!(rest.len() != 2),
+        }
+    }
+
+    #[kani::proof_for_contract(boxed_slice_as_array_unchecked)]
+    pub fn check_boxed_slice_as_array_unchecked() {
+        let data: [u8; 2] = kani::any();
+        let boxed: Box<[u8]> = Box::from(data);
+        let arr = unsafe { boxed_slice_as_array_unchecked::<u8, _, 2>(boxed) };
+        assert!(arr[0] == data[0] && arr[1] == data[1]);
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_any() {
+        let value: i32 = kani::any();
+        let ok: Box<dyn Any> = Box::new(value);
+        assert!(ok.downcast::<i32>().is_ok());
+        let err: Box<dyn Any> = Box::new(value);
+        assert!(err.downcast::<u8>().is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_any_send() {
+        let value: i32 = kani::any();
+        let ok: Box<dyn Any + Send> = Box::new(value);
+        assert!(ok.downcast::<i32>().is_ok());
+        let err: Box<dyn Any + Send> = Box::new(value);
+        assert!(err.downcast::<u8>().is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_any_send_sync() {
+        let value: i32 = kani::any();
+        let ok: Box<dyn Any + Send + Sync> = Box::new(value);
+        assert!(ok.downcast::<i32>().is_ok());
+        let err: Box<dyn Any + Send + Sync> = Box::new(value);
+        assert!(err.downcast::<bool>().is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_error() {
+        let ok: Box<dyn Error> = Box::new(ProbeError(kani::any()));
+        assert!(ok.downcast::<ProbeError>().is_ok());
+        let err: Box<dyn Error> = Box::new(ProbeError(0));
+        assert!(err.downcast::<OtherError>().is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_error_send() {
+        let ok: Box<dyn Error + Send> = Box::new(ProbeError(kani::any()));
+        assert!(ok.downcast::<ProbeError>().is_ok());
+        let err: Box<dyn Error + Send> = Box::new(ProbeError(0));
+        assert!(err.downcast::<OtherError>().is_err());
+    }
+
+    #[kani::proof]
+    pub fn check_downcast_error_send_sync() {
+        let ok: Box<dyn Error + Send + Sync> = Box::new(ProbeError(kani::any()));
+        assert!(ok.downcast::<ProbeError>().is_ok());
+        let err: Box<dyn Error + Send + Sync> = Box::new(ProbeError(0));
+        assert!(err.downcast::<OtherError>().is_err());
     }
 }

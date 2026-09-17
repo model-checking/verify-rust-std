@@ -6,6 +6,8 @@ use core::error::Error;
 use core::fmt::{self, Debug, Display, Formatter};
 #[cfg(not(no_global_oom_handling))]
 use core::intrinsics::{const_allocate, const_make_global};
+#[cfg(kani)]
+use core::kani;
 use core::marker::PhantomData;
 #[cfg(not(no_global_oom_handling))]
 use core::marker::Unsize;
@@ -13,6 +15,10 @@ use core::marker::Unsize;
 use core::mem::{self, SizedTypeProperties};
 use core::ops::{Deref, DerefMut};
 use core::ptr::{self, NonNull, Pointee};
+#[cfg(kani)]
+use core::ub_checks;
+
+use safety::requires;
 
 use crate::alloc::{self, Layout, LayoutError};
 
@@ -358,6 +364,7 @@ impl<H> WithHeader<H> {
     // Safety:
     // - Assumes that either `value` can be dereferenced, or is the
     //   `NonNull::dangling()` we use when both `T` and `H` are ZSTs.
+    #[requires(ub_checks::can_dereference(value))]
     unsafe fn drop<T: ?Sized>(&self, value: *mut T) {
         struct DropGuard<H> {
             ptr: NonNull<u8>,
@@ -428,5 +435,95 @@ impl<H> WithHeader<H> {
 impl<T: ?Sized + Error> Error for ThinBox<T> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.deref().source()
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    #![allow(missing_docs)]
+
+    use core::any::Any;
+    use core::kani;
+    use core::ops::{Deref, DerefMut};
+
+    use super::{ThinBox, WithHeader};
+
+    #[kani::proof]
+    pub fn check_deref() {
+        let value: i32 = kani::any();
+        let thin = ThinBox::new(value);
+        assert!(*thin.deref() == value);
+    }
+
+    #[kani::proof]
+    pub fn check_deref_mut() {
+        let value: i32 = kani::any();
+        let mut thin = ThinBox::new(value);
+        *thin.deref_mut() = value.wrapping_add(1);
+        assert!(*thin == value.wrapping_add(1));
+    }
+
+    #[kani::proof]
+    pub fn check_drop() {
+        drop(ThinBox::new(kani::any::<i32>()));
+        drop(ThinBox::new(()));
+    }
+
+    #[kani::proof]
+    pub fn check_meta() {
+        let thin = ThinBox::new(kani::any::<i32>());
+        let _ = thin.meta();
+    }
+
+    #[kani::proof]
+    pub fn check_with_header() {
+        let thin = ThinBox::new(kani::any::<u8>());
+        let _ = thin.with_header();
+    }
+
+    #[kani::proof]
+    pub fn check_withheader_new() {
+        let value: i32 = kani::any();
+        let header = WithHeader::<()>::new((), value);
+        unsafe {
+            assert!(*header.value().cast::<i32>() == value);
+            WithHeader::<()>::drop::<i32>(&header, header.value().cast());
+        }
+    }
+
+    #[kani::proof]
+    pub fn check_withheader_try_new() {
+        let value: u8 = kani::any();
+        let header = WithHeader::<()>::try_new((), value).expect("alloc");
+        unsafe {
+            assert!(*header.value().cast::<u8>() == value);
+            WithHeader::<()>::drop::<u8>(&header, header.value().cast());
+        }
+    }
+
+    #[kani::proof]
+    pub fn check_withheader_new_unsize_zst() {
+        let thin = ThinBox::<[i32]>::new_unsize([0i32; 0]);
+        assert!(thin.deref().is_empty());
+    }
+
+    #[kani::proof]
+    pub fn check_withheader_header() {
+        let thin = ThinBox::new(kani::any::<i32>());
+        let _ = thin.with_header().header();
+    }
+
+    #[kani::proof]
+    pub fn check_deref_unsize_slice() {
+        let thin = ThinBox::<[u8]>::new_unsize([kani::any::<u8>(), kani::any::<u8>()]);
+        assert!(thin.deref().len() == 2);
+    }
+
+    #[kani::proof]
+    pub fn check_deref_dyn_any() {
+        let value: i32 = kani::any();
+        let thin: ThinBox<dyn Any> = ThinBox::new_unsize(value);
+        assert!(*thin.deref().downcast_ref::<i32>().expect("type") == value);
     }
 }
