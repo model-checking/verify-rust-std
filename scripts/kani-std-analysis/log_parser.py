@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Parse log file of multi-threaded Kani run (terse output) into JSON.
+Parse log file of a Kani run (terse output) into JSON.
 Given a run of Kani on the standard library with `--jobs=<N>
 --output-format=terse` (and, typically, `autoharness`) enabled this produces
 a machine-processable JSON result via
@@ -465,7 +465,7 @@ def parse_autoharness_info(lines, i):
 
 def parse_log_lines(
         lines, contract_harnesses, standard_harnesses, scanner_data):
-    """Parse (terse) output from multi-threaded Kani run while considering list
+    """Parse (terse) output from a Kani run while considering list
     and scanner data."""
     # Regular expressions for matching patterns
     start_work_autoharness_contract_pattern = re.compile(
@@ -485,6 +485,7 @@ def parse_log_lines(
     active_threads = {}  # thread_id -> list of result lines
     all_results = []
     thread_id = None
+    autoharness_info = {}
 
     i = 0
     while i < len(lines):
@@ -493,6 +494,13 @@ def parse_log_lines(
 
         line = lines[i].rstrip()
         i += 1
+
+        # A single worker omits thread labels, including the result marker.
+        # Associate its output with thread 0 from the start of the harness.
+        if line.startswith(('Checking harness ',
+                            'Autoharness: Checking function ')):
+            line = f'Thread 0: {line}'
+            thread_id = 0
 
         # Check if a thread is starting work
         if start_match := start_work_autoharness_contract_pattern.search(line):

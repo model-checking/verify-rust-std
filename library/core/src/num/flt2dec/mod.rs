@@ -666,3 +666,286 @@ where
         }
     }
 }
+
+#[cfg(kani)]
+mod bit_scan_verify;
+#[cfg(kani)]
+mod estimator_verify;
+#[cfg(kani)]
+mod rounding_verify;
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod flt2dec_verify {
+    use super::*;
+    use crate::kani;
+
+    // Use the real decoder so the exponent, rounding interval, and tie-breaking
+    // flag stay related. Choosing these fields independently admits values that
+    // neither primitive float type can produce. The sign does not affect Decoded.
+    pub(crate) fn arbitrary_finite_f32<const GROUP: u32>() -> Decoded {
+        assert!(GROUP < 4);
+        let bits = (GROUP << 29) | (kani::any::<u32>() & 0x1fff_ffff);
+        kani::assume(bits > 0 && bits < 0x7f80_0000);
+        finite_decoded(decode(f32::from_bits(bits)).1)
+    }
+
+    pub(crate) fn arbitrary_finite_f64<const GROUP: u64>() -> Decoded {
+        assert!(GROUP < 32);
+        let bits = (GROUP << 58) | (kani::any::<u64>() & 0x03ff_ffff_ffff_ffff);
+        kani::assume(bits > 0 && bits < 0x7ff0_0000_0000_0000);
+        finite_decoded(decode(f64::from_bits(bits)).1)
+    }
+
+    // Additional CI probes test whether fixing the exponent makes the real
+    // arithmetic tractable. Every significand bit remains symbolic, and the
+    // exhaustive groups below remain part of the required verification.
+    pub(crate) fn arbitrary_finite_f64_exponent<const EXPONENT: u64>() -> Decoded {
+        assert!(EXPONENT < 0x7ff);
+        let bits = (EXPONENT << 52) | (kani::any::<u64>() & 0x000f_ffff_ffff_ffff);
+        kani::assume(bits > 0);
+        finite_decoded(decode(f64::from_bits(bits)).1)
+    }
+
+    // Additional diagnostics can span several exponents without fixing any
+    // significand bits. The complete finite partitions remain required above.
+    pub(crate) fn arbitrary_finite_f64_range<const FIRST: u64, const END: u64>() -> Decoded {
+        assert!(FIRST > 0 && FIRST < END && END <= 0x7ff0_0000_0000_0000);
+        let bits: u64 = kani::any();
+        kani::assume(bits >= FIRST && bits < END);
+        kani::cover(bits == FIRST, "cached-power probe includes its first input");
+        kani::cover(bits == END - 1, "cached-power probe includes its last input");
+        finite_decoded(decode(f64::from_bits(bits)).1)
+    }
+
+    fn finite_decoded(decoded: FullDecoded) -> Decoded {
+        match decoded {
+            FullDecoded::Finite(d) => d,
+            FullDecoded::Nan | FullDecoded::Infinite | FullDecoded::Zero => {
+                unreachable!("the input bits represent a positive finite nonzero float")
+            }
+        }
+    }
+
+    // Exhaust the high exponent bits: 4 groups for f32 and 32 for f64.
+    // The remaining exponent bits and every significand bit stay symbolic.
+    // Their union is the original positive finite nonzero input domain,
+    // including subnormals. Every strategy instantiates the complete list.
+    // Fallback reachability is existential over the union. Check it in f64
+    // group 16; individual groups need not contain a fallback case.
+    macro_rules! for_each_finite_partition {
+        ($proof:ident) => {
+            $proof!(f32_00, arbitrary_finite_f32, 0, false);
+            $proof!(f32_01, arbitrary_finite_f32, 1, false);
+            $proof!(f32_02, arbitrary_finite_f32, 2, false);
+            $proof!(f32_03, arbitrary_finite_f32, 3, false);
+            $proof!(f64_00, arbitrary_finite_f64, 0, false);
+            $proof!(f64_01, arbitrary_finite_f64, 1, false);
+            $proof!(f64_02, arbitrary_finite_f64, 2, false);
+            $proof!(f64_03, arbitrary_finite_f64, 3, false);
+            $proof!(f64_04, arbitrary_finite_f64, 4, false);
+            $proof!(f64_05, arbitrary_finite_f64, 5, false);
+            $proof!(f64_06, arbitrary_finite_f64, 6, false);
+            $proof!(f64_07, arbitrary_finite_f64, 7, false);
+            $proof!(f64_08, arbitrary_finite_f64, 8, false);
+            $proof!(f64_09, arbitrary_finite_f64, 9, false);
+            $proof!(f64_10, arbitrary_finite_f64, 10, false);
+            $proof!(f64_11, arbitrary_finite_f64, 11, false);
+            $proof!(f64_12, arbitrary_finite_f64, 12, false);
+            $proof!(f64_13, arbitrary_finite_f64, 13, false);
+            $proof!(f64_14, arbitrary_finite_f64, 14, false);
+            $proof!(f64_15, arbitrary_finite_f64, 15, false);
+            $proof!(f64_16, arbitrary_finite_f64, 16, true);
+            $proof!(f64_17, arbitrary_finite_f64, 17, false);
+            $proof!(f64_18, arbitrary_finite_f64, 18, false);
+            $proof!(f64_19, arbitrary_finite_f64, 19, false);
+            $proof!(f64_20, arbitrary_finite_f64, 20, false);
+            $proof!(f64_21, arbitrary_finite_f64, 21, false);
+            $proof!(f64_22, arbitrary_finite_f64, 22, false);
+            $proof!(f64_23, arbitrary_finite_f64, 23, false);
+            $proof!(f64_24, arbitrary_finite_f64, 24, false);
+            $proof!(f64_25, arbitrary_finite_f64, 25, false);
+            $proof!(f64_26, arbitrary_finite_f64, 26, false);
+            $proof!(f64_27, arbitrary_finite_f64, 27, false);
+            $proof!(f64_28, arbitrary_finite_f64, 28, false);
+            $proof!(f64_29, arbitrary_finite_f64, 29, false);
+            $proof!(f64_30, arbitrary_finite_f64, 30, false);
+            $proof!(f64_31, arbitrary_finite_f64, 31, false);
+        };
+    }
+    pub(crate) use for_each_finite_partition;
+
+    // Upper bound on the (symbolic) digit-buffer length used by the proofs of
+    // `digits_to_dec_str` / `digits_to_exp_str`.  Their `assume_init` safety
+    // obligations depend only on control flow driven by `buf.len()`, `exp`, and
+    // the digit-count arguments, and every length-dependent branch is a
+    // comparison against a small value (`buf.len() == 1` in `digits_to_exp_str`,
+    // `exp < buf.len()` and `frac_digits > buf.len() - exp` in
+    // `digits_to_dec_str`), so a symbolic length in `1..=4` reaches every branch
+    // and therefore every distinct set of initialized `parts`; a longer buffer
+    // only adds digits to a `Part::Copy` slice.
+    const PROOF_BUFLEN: usize = 4;
+
+    // A digit buffer of symbolic length `1..=PROOF_BUFLEN` whose first digit is
+    // nonzero, as the callees require.
+    fn any_digits(buf: &[u8; PROOF_BUFLEN]) -> &[u8] {
+        kani::assume(buf[0] > b'0');
+        let n: usize = kani::any();
+        kani::assume(n >= 1 && n <= PROOF_BUFLEN);
+        &buf[..n]
+    }
+
+    // `digits_to_dec_str` writes 2, 3, or 4 `parts` depending on `exp` and
+    // `frac_digits`, then `assume_init_ref`s exactly the prefix it wrote.  Kani
+    // checks that no uninitialized `Part` is ever read and that no UB occurs.
+    #[kani::proof]
+    fn check_digits_to_dec_str() {
+        let buf: [u8; PROOF_BUFLEN] = kani::any();
+        let exp: i16 = kani::any();
+        let frac_digits: usize = kani::any();
+        let mut parts: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = digits_to_dec_str(any_digits(&buf), exp, frac_digits, &mut parts);
+    }
+
+    // `digits_to_exp_str` writes a variable prefix of up to 6 `parts` and
+    // `assume_init_ref`s `parts[..n + 2]` for the `n` it actually wrote; the
+    // `buf.len() == 1` case takes its own (3-part) path.
+    #[kani::proof]
+    fn check_digits_to_exp_str() {
+        let buf: [u8; PROOF_BUFLEN] = kani::any();
+        let exp: i16 = kani::any();
+        let min_ndigits: usize = kani::any();
+        let upper: bool = kani::any();
+        let mut parts: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
+        let _ = digits_to_exp_str(any_digits(&buf), exp, min_ndigits, upper, &mut parts);
+    }
+
+    // An arbitrary sign-formatting option.
+    fn any_sign() -> Sign {
+        if kani::any() { Sign::Minus } else { Sign::MinusPlus }
+    }
+
+    // A stub digit generator standing in for `grisu`/`dragon` `format_shortest`.
+    // It writes one arbitrary nonzero digit into the scratch buffer and returns
+    // it with an arbitrary exponent.  This isolates the `to_shortest_*`
+    // functions' own `unsafe` (the `assume_init` on `parts` and the delegation
+    // to the already-verified `digits_to_*_str`) from the loopy strategy code,
+    // which is verified separately.  A generic `fn` is required here rather than
+    // a closure so it satisfies the higher-ranked lifetime in the `F` bound.
+    fn stub_shortest<'a>(_d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> (&'a [u8], i16) {
+        let digit: u8 = kani::any();
+        kani::assume(digit > b'0');
+        buf[0] = MaybeUninit::new(digit);
+        let exp: i16 = kani::any();
+        // SAFETY: we just initialized the element `..1`.
+        (unsafe { buf[..1].assume_init_ref() }, exp)
+    }
+
+    // `to_shortest_str` handles NaN/Inf/Zero by writing `parts[..1]` and the
+    // finite case by delegating to `digits_to_dec_str`.  An arbitrary `f64`
+    // reaches every `FullDecoded` arm.
+    #[kani::proof]
+    fn check_to_shortest_str() {
+        let v: f64 = kani::any();
+        let sign = any_sign();
+        let frac_digits: usize = kani::any();
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = to_shortest_str(stub_shortest, v, sign, frac_digits, &mut buf, &mut parts);
+    }
+
+    // `to_shortest_exp_str` is the exponential-form analogue; its finite arm
+    // delegates to `digits_to_dec_str` or `digits_to_exp_str` per `dec_bounds`.
+    #[kani::proof]
+    fn check_to_shortest_exp_str() {
+        let v: f64 = kani::any();
+        let sign = any_sign();
+        let lo: i16 = kani::any();
+        let hi: i16 = kani::any();
+        kani::assume(lo <= hi);
+        let upper: bool = kani::any();
+        let mut buf: [MaybeUninit<u8>; MAX_SIG_DIGITS] =
+            [const { MaybeUninit::uninit() }; MAX_SIG_DIGITS];
+        let mut parts: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
+        let _ = to_shortest_exp_str(stub_shortest, v, sign, (lo, hi), upper, &mut buf, &mut parts);
+    }
+
+    // For `f64`, `decode` bottoms out at `decoded.exp == -1076` (normal-min,
+    // which subtracts 2 from `integer_decode`'s minimum of `-1074`), where
+    // `estimate_max_buf_len` returns 828.  1024 (the size the real `fmt` callers
+    // use) covers every reachable decoded exponent for the
+    // `buf.len() >= maxlen` assertions in both `to_exact_*` functions.
+    const PROOF_EXACT_BUFLEN: usize = 1024;
+
+    // Stub `format_exact` for `to_exact_exp_str`, which always passes the result
+    // to `digits_to_exp_str` (it calls the generator with `limit = i16::MIN`, so
+    // the real one never returns an empty buffer here).  Returns one nonzero
+    // digit with an arbitrary exponent.
+    fn stub_exact_full<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> (&'a [u8], i16) {
+        let digit: u8 = kani::any();
+        kani::assume(digit > b'0');
+        buf[0] = MaybeUninit::new(digit);
+        let exp: i16 = kani::any();
+        // SAFETY: we just initialized the element `..1`.
+        (unsafe { buf[..1].assume_init_ref() }, exp)
+    }
+
+    // Stub `format_exact` for `to_exact_fixed_str`, which branches on
+    // `exp <= limit`.  That arm requires an empty result (the source
+    // `debug_assert_eq!`s `buf.len() == 0`); the other arm needs a valid nonzero
+    // digit with `exp > limit`.  Couple the result to `limit` so both caller
+    // arms are exercised soundly.
+    fn stub_exact_limited<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        limit: i16,
+    ) -> (&'a [u8], i16) {
+        if kani::any() {
+            let exp: i16 = kani::any();
+            kani::assume(exp <= limit);
+            // SAFETY: an empty prefix is trivially initialized.
+            (unsafe { buf[..0].assume_init_ref() }, exp)
+        } else {
+            let digit: u8 = kani::any();
+            kani::assume(digit > b'0');
+            buf[0] = MaybeUninit::new(digit);
+            let exp: i16 = kani::any();
+            kani::assume(exp > limit);
+            // SAFETY: we just initialized the element `..1`.
+            (unsafe { buf[..1].assume_init_ref() }, exp)
+        }
+    }
+
+    // `to_exact_exp_str` writes `parts[..1]` for NaN/Inf, `parts[..3]`/`parts[..1]`
+    // for zero, and delegates to `digits_to_exp_str` for finite values.
+    #[kani::proof]
+    fn check_to_exact_exp_str() {
+        let v: f64 = kani::any();
+        let sign = any_sign();
+        let ndigits: usize = kani::any();
+        kani::assume(ndigits > 0);
+        let upper: bool = kani::any();
+        let mut buf: [MaybeUninit<u8>; PROOF_EXACT_BUFLEN] =
+            [const { MaybeUninit::uninit() }; PROOF_EXACT_BUFLEN];
+        let mut parts: [MaybeUninit<Part<'_>>; 6] = [const { MaybeUninit::uninit() }; 6];
+        let _ = to_exact_exp_str(stub_exact_full, v, sign, ndigits, upper, &mut buf, &mut parts);
+    }
+
+    // `to_exact_fixed_str` additionally has a finite sub-branch (`exp <= limit`)
+    // that renders like zero; `stub_exact_limited` reaches both sub-branches.
+    #[kani::proof]
+    fn check_to_exact_fixed_str() {
+        let v: f64 = kani::any();
+        let sign = any_sign();
+        let frac_digits: usize = kani::any();
+        let mut buf: [MaybeUninit<u8>; PROOF_EXACT_BUFLEN] =
+            [const { MaybeUninit::uninit() }; PROOF_EXACT_BUFLEN];
+        let mut parts: [MaybeUninit<Part<'_>>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = to_exact_fixed_str(stub_exact_limited, v, sign, frac_digits, &mut buf, &mut parts);
+    }
+}

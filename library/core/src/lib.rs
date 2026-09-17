@@ -75,6 +75,8 @@
 #![no_core]
 #![rustc_coherence_is_core]
 #![rustc_preserve_ub_checks]
+// Composed Kani stubs require more macro expansion depth.
+#![cfg_attr(kani, recursion_limit = "256")]
 //
 // Lints:
 #![deny(rust_2021_incompatible_or_patterns)]

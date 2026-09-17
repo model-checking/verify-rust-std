@@ -122,9 +122,18 @@ pub fn cached_power(alpha: i16, gamma: i16) -> (i16, Fp) {
     let range = (CACHED_POW10.len() as i32) - 1;
     let domain = (CACHED_POW10_LAST_E - CACHED_POW10_FIRST_E) as i32;
     let idx = ((gamma as i32) - offset) * range / domain;
+    #[cfg(kani)]
+    let idx = proof_cached_power_index(idx);
     let (f, e, k) = CACHED_POW10[idx as usize];
     debug_assert!(alpha <= e && e <= gamma);
     (k, Fp { f, e })
+}
+
+// Diagnostics can expose a constant table entry after asserting its index.
+// The original index calculation and table lookup still execute.
+#[cfg(kani)]
+fn proof_cached_power_index(index: i32) -> i32 {
+    index
 }
 
 /// Given `x > 0`, returns `(k, 10^k)` such that `10^k <= x < 10^(k+1)`.
@@ -166,14 +175,44 @@ pub fn format_shortest_opt<'a>(
     d: &Decoded,
     buf: &'a mut [MaybeUninit<u8>],
 ) -> Option<(/*digits*/ &'a [u8], /*exp*/ i16)> {
-    assert!(d.mant > 0);
-    assert!(d.minus > 0);
-    assert!(d.plus > 0);
-    assert!(d.mant.checked_add(d.plus).is_some());
-    assert!(d.mant.checked_sub(d.minus).is_some());
-    assert!(buf.len() >= MAX_SIG_DIGITS);
-    assert!(d.mant + d.plus < (1 << 61)); // we need at least three bits of additional precision
+    let rounding = generate_shortest(d, buf);
+    round_and_weed(
+        rounding.digits,
+        rounding.exp,
+        rounding.remainder,
+        rounding.threshold,
+        rounding.plus1v,
+        rounding.ten_kappa,
+        rounding.ulp,
+    )
+}
 
+// Keep the initialized prefix and numeric state together for one final call.
+// Generation keeps its existing stopping conditions and argument order.
+struct ShortestRounding<'a> {
+    digits: &'a mut [u8],
+    exp: i16,
+    remainder: u64,
+    threshold: u64,
+    plus1v: u64,
+    ten_kappa: u64,
+    ulp: u64,
+}
+
+#[inline]
+fn div_rem_pow10(value: u32, divisor: u32) -> (u32, u32) {
+    (value / divisor, value % divisor)
+}
+
+struct ShortestScaled {
+    plus: Fp,
+    minus: Fp,
+    v: Fp,
+    minusk: i16,
+}
+
+#[inline]
+fn scale_shortest(d: &Decoded) -> ShortestScaled {
     // start with the normalized values with the shared exponent
     let plus = Fp { f: d.mant + d.plus, e: d.exp }.normalize();
     let minus = Fp { f: d.mant - d.minus, e: d.exp }.normalize_to(plus.e);
@@ -199,6 +238,19 @@ pub fn format_shortest_opt<'a>(
     let plus = plus.mul(cached);
     let minus = minus.mul(cached);
     let v = v.mul(cached);
+    ShortestScaled { plus, minus, v, minusk }
+}
+
+fn generate_shortest<'a>(d: &Decoded, buf: &'a mut [MaybeUninit<u8>]) -> ShortestRounding<'a> {
+    assert!(d.mant > 0);
+    assert!(d.minus > 0);
+    assert!(d.plus > 0);
+    assert!(d.mant.checked_add(d.plus).is_some());
+    assert!(d.mant.checked_sub(d.minus).is_some());
+    assert!(buf.len() >= MAX_SIG_DIGITS);
+    assert!(d.mant + d.plus < (1 << 61)); // we need at least three bits of additional precision
+
+    let ShortestScaled { plus, minus, v, minusk } = scale_shortest(d);
     debug_assert_eq!(plus.e, minus.e);
     debug_assert_eq!(plus.e, v.e);
 
@@ -263,8 +315,7 @@ pub fn format_shortest_opt<'a>(
         //   (it follows that `remainder = plus1int % 10^(kappa+1)`)
 
         // divide `remainder` by `10^kappa`. both are scaled by `2^-e`.
-        let q = remainder / ten_kappa;
-        let r = remainder % ten_kappa;
+        let (q, r) = div_rem_pow10(remainder, ten_kappa);
         debug_assert!(q < 10);
         buf[i] = MaybeUninit::new(b'0' + q as u8);
         i += 1;
@@ -273,16 +324,16 @@ pub fn format_shortest_opt<'a>(
         if plus1rem < delta1 {
             // `plus1 % 10^kappa < delta1 = plus1 - minus1`; we've found the correct `kappa`.
             let ten_kappa = (ten_kappa as u64) << e; // scale 10^kappa back to the shared exponent
-            return round_and_weed(
+            return ShortestRounding {
                 // SAFETY: we initialized that memory above.
-                unsafe { buf[..i].assume_init_mut() },
+                digits: unsafe { buf[..i].assume_init_mut() },
                 exp,
-                plus1rem,
-                delta1,
-                plus1 - v.f,
+                remainder: plus1rem,
+                threshold: delta1,
+                plus1v: plus1 - v.f,
                 ten_kappa,
-                1,
-            );
+                ulp: 1,
+            };
         }
 
         // break the loop when we have rendered all integral digits.
@@ -322,130 +373,130 @@ pub fn format_shortest_opt<'a>(
 
         if r < threshold {
             let ten_kappa = 1 << e; // implicit divisor
-            return round_and_weed(
+            return ShortestRounding {
                 // SAFETY: we initialized that memory above.
-                unsafe { buf[..i].assume_init_mut() },
+                digits: unsafe { buf[..i].assume_init_mut() },
                 exp,
-                r,
+                remainder: r,
                 threshold,
-                (plus1 - v.f) * ulp,
+                plus1v: (plus1 - v.f) * ulp,
                 ten_kappa,
                 ulp,
-            );
+            };
         }
 
         // restore invariants
         remainder = r;
     }
+}
 
-    // we've generated all significant digits of `plus1`, but not sure if it's the optimal one.
-    // for example, if `minus1` is 3.14153... and `plus1` is 3.14158..., there are 5 different
-    // shortest representation from 3.14154 to 3.14158 but we only have the greatest one.
-    // we have to successively decrease the last digit and check if this is the optimal repr.
-    // there are at most 9 candidates (..1 to ..9), so this is fairly quick. ("rounding" phase)
+// we've generated all significant digits of `plus1`, but not sure if it's the optimal one.
+// for example, if `minus1` is 3.14153... and `plus1` is 3.14158..., there are 5 different
+// shortest representation from 3.14154 to 3.14158 but we only have the greatest one.
+// we have to successively decrease the last digit and check if this is the optimal repr.
+// there are at most 9 candidates (..1 to ..9), so this is fairly quick. ("rounding" phase)
+//
+// the function checks if this "optimal" repr is actually within the ulp ranges,
+// and also, it is possible that the "second-to-optimal" repr can actually be optimal
+// due to the rounding error. in either cases this returns `None`. ("weeding" phase)
+//
+// all arguments here are scaled by the common (but implicit) value `k`, so that:
+// - `remainder = (plus1 % 10^kappa) * k`
+// - `threshold = (plus1 - minus1) * k` (and also, `remainder < threshold`)
+// - `plus1v = (plus1 - v) * k` (and also, `threshold > plus1v` from prior invariants)
+// - `ten_kappa = 10^kappa * k`
+// - `ulp = 2^-e * k`
+fn round_and_weed(
+    buf: &mut [u8],
+    exp: i16,
+    remainder: u64,
+    threshold: u64,
+    plus1v: u64,
+    ten_kappa: u64,
+    ulp: u64,
+) -> Option<(&[u8], i16)> {
+    assert!(!buf.is_empty());
+
+    // produce two approximations to `v` (actually `plus1 - v`) within 1.5 ulps.
+    // the resulting representation should be the closest representation to both.
     //
-    // the function checks if this "optimal" repr is actually within the ulp ranges,
-    // and also, it is possible that the "second-to-optimal" repr can actually be optimal
-    // due to the rounding error. in either cases this returns `None`. ("weeding" phase)
-    //
-    // all arguments here are scaled by the common (but implicit) value `k`, so that:
-    // - `remainder = (plus1 % 10^kappa) * k`
-    // - `threshold = (plus1 - minus1) * k` (and also, `remainder < threshold`)
-    // - `plus1v = (plus1 - v) * k` (and also, `threshold > plus1v` from prior invariants)
-    // - `ten_kappa = 10^kappa * k`
-    // - `ulp = 2^-e * k`
-    fn round_and_weed(
-        buf: &mut [u8],
-        exp: i16,
-        remainder: u64,
-        threshold: u64,
-        plus1v: u64,
-        ten_kappa: u64,
-        ulp: u64,
-    ) -> Option<(&[u8], i16)> {
-        assert!(!buf.is_empty());
+    // here `plus1 - v` is used since calculations are done with respect to `plus1`
+    // in order to avoid overflow/underflow (hence the seemingly swapped names).
+    let plus1v_down = plus1v + ulp; // plus1 - (v - 1 ulp)
+    let plus1v_up = plus1v - ulp; // plus1 - (v + 1 ulp)
 
-        // produce two approximations to `v` (actually `plus1 - v`) within 1.5 ulps.
-        // the resulting representation should be the closest representation to both.
+    // decrease the last digit and stop at the closest representation to `v + 1 ulp`.
+    let mut plus1w = remainder; // plus1w(n) = plus1 - w(n)
+    {
+        let last = buf.last_mut().unwrap();
+
+        // we work with the approximated digits `w(n)`, which is initially equal to `plus1 -
+        // plus1 % 10^kappa`. after running the loop body `n` times, `w(n) = plus1 -
+        // plus1 % 10^kappa - n * 10^kappa`. we set `plus1w(n) = plus1 - w(n) =
+        // plus1 % 10^kappa + n * 10^kappa` (thus `remainder = plus1w(0)`) to simplify checks.
+        // note that `plus1w(n)` is always increasing.
         //
-        // here `plus1 - v` is used since calculations are done with respect to `plus1`
-        // in order to avoid overflow/underflow (hence the seemingly swapped names).
-        let plus1v_down = plus1v + ulp; // plus1 - (v - 1 ulp)
-        let plus1v_up = plus1v - ulp; // plus1 - (v + 1 ulp)
-
-        // decrease the last digit and stop at the closest representation to `v + 1 ulp`.
-        let mut plus1w = remainder; // plus1w(n) = plus1 - w(n)
-        {
-            let last = buf.last_mut().unwrap();
-
-            // we work with the approximated digits `w(n)`, which is initially equal to `plus1 -
-            // plus1 % 10^kappa`. after running the loop body `n` times, `w(n) = plus1 -
-            // plus1 % 10^kappa - n * 10^kappa`. we set `plus1w(n) = plus1 - w(n) =
-            // plus1 % 10^kappa + n * 10^kappa` (thus `remainder = plus1w(0)`) to simplify checks.
-            // note that `plus1w(n)` is always increasing.
-            //
-            // we have three conditions to terminate. any of them will make the loop unable to
-            // proceed, but we then have at least one valid representation known to be closest to
-            // `v + 1 ulp` anyway. we will denote them as TC1 through TC3 for brevity.
-            //
-            // TC1: `w(n) <= v + 1 ulp`, i.e., this is the last repr that can be the closest one.
-            // this is equivalent to `plus1 - w(n) = plus1w(n) >= plus1 - (v + 1 ulp) = plus1v_up`.
-            // combined with TC2 (which checks if `w(n+1)` is valid), this prevents the possible
-            // overflow on the calculation of `plus1w(n)`.
-            //
-            // TC2: `w(n+1) < minus1`, i.e., the next repr definitely does not round to `v`.
-            // this is equivalent to `plus1 - w(n) + 10^kappa = plus1w(n) + 10^kappa >
-            // plus1 - minus1 = threshold`. the left hand side can overflow, but we know
-            // `threshold > plus1v`, so if TC1 is false, `threshold - plus1w(n) >
-            // threshold - (plus1v - 1 ulp) > 1 ulp` and we can safely test if
-            // `threshold - plus1w(n) < 10^kappa` instead.
-            //
-            // TC3: `abs(w(n) - (v + 1 ulp)) <= abs(w(n+1) - (v + 1 ulp))`, i.e., the next repr is
-            // no closer to `v + 1 ulp` than the current repr. given `z(n) = plus1v_up - plus1w(n)`,
-            // this becomes `abs(z(n)) <= abs(z(n+1))`. again assuming that TC1 is false, we have
-            // `z(n) > 0`. we have two cases to consider:
-            //
-            // - when `z(n+1) >= 0`: TC3 becomes `z(n) <= z(n+1)`. as `plus1w(n)` is increasing,
-            //   `z(n)` should be decreasing and this is clearly false.
-            // - when `z(n+1) < 0`:
-            //   - TC3a: the precondition is `plus1v_up < plus1w(n) + 10^kappa`. assuming TC2 is
-            //     false, `threshold >= plus1w(n) + 10^kappa` so it cannot overflow.
-            //   - TC3b: TC3 becomes `z(n) <= -z(n+1)`, i.e., `plus1v_up - plus1w(n) >=
-            //     plus1w(n+1) - plus1v_up = plus1w(n) + 10^kappa - plus1v_up`. the negated TC1
-            //     gives `plus1v_up > plus1w(n)`, so it cannot overflow or underflow when
-            //     combined with TC3a.
-            //
-            // consequently, we should stop when `TC1 || TC2 || (TC3a && TC3b)`. the following is
-            // equal to its inverse, `!TC1 && !TC2 && (!TC3a || !TC3b)`.
-            while plus1w < plus1v_up
-                && threshold - plus1w >= ten_kappa
-                && (plus1w + ten_kappa < plus1v_up
-                    || plus1v_up - plus1w >= plus1w + ten_kappa - plus1v_up)
-            {
-                *last -= 1;
-                debug_assert!(*last > b'0'); // the shortest repr cannot end with `0`
-                plus1w += ten_kappa;
-            }
-        }
-
-        // check if this representation is also the closest representation to `v - 1 ulp`.
+        // we have three conditions to terminate. any of them will make the loop unable to
+        // proceed, but we then have at least one valid representation known to be closest to
+        // `v + 1 ulp` anyway. we will denote them as TC1 through TC3 for brevity.
         //
-        // this is simply same to the terminating conditions for `v + 1 ulp`, with all `plus1v_up`
-        // replaced by `plus1v_down` instead. overflow analysis equally holds.
-        if plus1w < plus1v_down
+        // TC1: `w(n) <= v + 1 ulp`, i.e., this is the last repr that can be the closest one.
+        // this is equivalent to `plus1 - w(n) = plus1w(n) >= plus1 - (v + 1 ulp) = plus1v_up`.
+        // combined with TC2 (which checks if `w(n+1)` is valid), this prevents the possible
+        // overflow on the calculation of `plus1w(n)`.
+        //
+        // TC2: `w(n+1) < minus1`, i.e., the next repr definitely does not round to `v`.
+        // this is equivalent to `plus1 - w(n) + 10^kappa = plus1w(n) + 10^kappa >
+        // plus1 - minus1 = threshold`. the left hand side can overflow, but we know
+        // `threshold > plus1v`, so if TC1 is false, `threshold - plus1w(n) >
+        // threshold - (plus1v - 1 ulp) > 1 ulp` and we can safely test if
+        // `threshold - plus1w(n) < 10^kappa` instead.
+        //
+        // TC3: `abs(w(n) - (v + 1 ulp)) <= abs(w(n+1) - (v + 1 ulp))`, i.e., the next repr is
+        // no closer to `v + 1 ulp` than the current repr. given `z(n) = plus1v_up - plus1w(n)`,
+        // this becomes `abs(z(n)) <= abs(z(n+1))`. again assuming that TC1 is false, we have
+        // `z(n) > 0`. we have two cases to consider:
+        //
+        // - when `z(n+1) >= 0`: TC3 becomes `z(n) <= z(n+1)`. as `plus1w(n)` is increasing,
+        //   `z(n)` should be decreasing and this is clearly false.
+        // - when `z(n+1) < 0`:
+        //   - TC3a: the precondition is `plus1v_up < plus1w(n) + 10^kappa`. assuming TC2 is
+        //     false, `threshold >= plus1w(n) + 10^kappa` so it cannot overflow.
+        //   - TC3b: TC3 becomes `z(n) <= -z(n+1)`, i.e., `plus1v_up - plus1w(n) >=
+        //     plus1w(n+1) - plus1v_up = plus1w(n) + 10^kappa - plus1v_up`. the negated TC1
+        //     gives `plus1v_up > plus1w(n)`, so it cannot overflow or underflow when
+        //     combined with TC3a.
+        //
+        // consequently, we should stop when `TC1 || TC2 || (TC3a && TC3b)`. the following is
+        // equal to its inverse, `!TC1 && !TC2 && (!TC3a || !TC3b)`.
+        while plus1w < plus1v_up
             && threshold - plus1w >= ten_kappa
-            && (plus1w + ten_kappa < plus1v_down
-                || plus1v_down - plus1w >= plus1w + ten_kappa - plus1v_down)
+            && (plus1w + ten_kappa < plus1v_up
+                || plus1v_up - plus1w >= plus1w + ten_kappa - plus1v_up)
         {
-            return None;
+            *last -= 1;
+            debug_assert!(*last > b'0'); // the shortest repr cannot end with `0`
+            plus1w += ten_kappa;
         }
-
-        // now we have the closest representation to `v` between `plus1` and `minus1`.
-        // this is too liberal, though, so we reject any `w(n)` not between `plus0` and `minus0`,
-        // i.e., `plus1 - plus1w(n) <= minus0` or `plus1 - plus1w(n) >= plus0`. we utilize the facts
-        // that `threshold = plus1 - minus1` and `plus1 - plus0 = minus0 - minus1 = 2 ulp`.
-        if 2 * ulp <= plus1w && plus1w <= threshold - 4 * ulp { Some((buf, exp)) } else { None }
     }
+
+    // check if this representation is also the closest representation to `v - 1 ulp`.
+    //
+    // this is simply same to the terminating conditions for `v + 1 ulp`, with all `plus1v_up`
+    // replaced by `plus1v_down` instead. overflow analysis equally holds.
+    if plus1w < plus1v_down
+        && threshold - plus1w >= ten_kappa
+        && (plus1w + ten_kappa < plus1v_down
+            || plus1v_down - plus1w >= plus1w + ten_kappa - plus1v_down)
+    {
+        return None;
+    }
+
+    // now we have the closest representation to `v` between `plus1` and `minus1`.
+    // this is too liberal, though, so we reject any `w(n)` not between `plus0` and `minus0`,
+    // i.e., `plus1 - plus1w(n) <= minus0` or `plus1 - plus1w(n) >= plus0`. we utilize the facts
+    // that `threshold = plus1 - minus1` and `plus1 - plus0 = minus0 - minus1 = 2 ulp`.
+    if 2 * ulp <= plus1w && plus1w <= threshold - 4 * ulp { Some((buf, exp)) } else { None }
 }
 
 /// The shortest mode implementation for Grisu with Dragon fallback.
@@ -473,6 +524,34 @@ pub fn format_exact_opt<'a>(
     buf: &'a mut [MaybeUninit<u8>],
     limit: i16,
 ) -> Option<(/*digits*/ &'a [u8], /*exp*/ i16)> {
+    generate_exact(d, buf, limit).and_then(|rounding| {
+        // SAFETY: generation initialized the recorded prefix, or selected an
+        // empty prefix. No buffer writes occur between generation and rounding.
+        unsafe {
+            possibly_round(
+                buf,
+                rounding.len,
+                rounding.exp,
+                limit,
+                rounding.remainder,
+                rounding.ten_kappa,
+                rounding.ulp,
+            )
+        }
+    })
+}
+
+// Keep the rounding state separate from generation so every exit shares one
+// final call. This also avoids repeating its proof contract at each loop step.
+struct ExactRounding {
+    len: usize,
+    exp: i16,
+    remainder: u64,
+    ten_kappa: u64,
+    ulp: u64,
+}
+
+fn generate_exact(d: &Decoded, buf: &mut [MaybeUninit<u8>], limit: i16) -> Option<ExactRounding> {
     assert!(d.mant > 0);
     assert!(d.mant < (1 << 61)); // we need at least three bits of additional precision
     assert!(!buf.is_empty());
@@ -536,10 +615,14 @@ pub fn format_exact_opt<'a>(
         // this will increase the false negative rate, but only very, *very* slightly;
         // it can only matter noticeably when the mantissa is bigger than 60 bits.
         //
-        // SAFETY: `len=0`, so the obligation of having initialized this memory is trivial.
-        return unsafe {
-            possibly_round(buf, 0, exp, limit, v.f / 10, (max_ten_kappa as u64) << e, err << e)
-        };
+        // The empty prefix needs no initialization.
+        return Some(ExactRounding {
+            len: 0,
+            exp,
+            remainder: v.f / 10,
+            ten_kappa: (max_ten_kappa as u64) << e,
+            ulp: err << e,
+        });
     } else if ((exp as i32 - limit as i32) as usize) < buf.len() {
         (exp - limit) as usize
     } else {
@@ -569,10 +652,14 @@ pub fn format_exact_opt<'a>(
         // is the buffer full? run the rounding pass with the remainder.
         if i == len {
             let vrem = ((r as u64) << e) + vfrac; // == (v % 10^kappa) * 2^e
-            // SAFETY: we have initialized `len` many bytes.
-            return unsafe {
-                possibly_round(buf, len, exp, limit, vrem, (ten_kappa as u64) << e, err << e)
-            };
+            // We have initialized `len` many bytes.
+            return Some(ExactRounding {
+                len,
+                exp,
+                remainder: vrem,
+                ten_kappa: (ten_kappa as u64) << e,
+                ulp: err << e,
+            });
         }
 
         // break the loop when we have rendered all integral digits.
@@ -622,8 +709,8 @@ pub fn format_exact_opt<'a>(
 
         // is the buffer full? run the rounding pass with the remainder.
         if i == len {
-            // SAFETY: we have initialized `len` many bytes.
-            return unsafe { possibly_round(buf, len, exp, limit, r, 1 << e, err) };
+            // We have initialized `len` many bytes.
+            return Some(ExactRounding { len, exp, remainder: r, ten_kappa: 1 << e, ulp: err });
         }
 
         // restore invariants
@@ -631,130 +718,130 @@ pub fn format_exact_opt<'a>(
     }
 
     // further calculation is useless (`possibly_round` definitely fails), so we give up.
-    return None;
+    None
+}
 
-    // we've generated all requested digits of `v`, which should be also same to corresponding
-    // digits of `v - 1 ulp`. now we check if there is a unique representation shared by
-    // both `v - 1 ulp` and `v + 1 ulp`; this can be either same to generated digits, or
-    // to the rounded-up version of those digits. if the range contains multiple representations
-    // of the same length, we cannot be sure and should return `None` instead.
+// we've generated all requested digits of `v`, which should be also same to corresponding
+// digits of `v - 1 ulp`. now we check if there is a unique representation shared by
+// both `v - 1 ulp` and `v + 1 ulp`; this can be either same to generated digits, or
+// to the rounded-up version of those digits. if the range contains multiple representations
+// of the same length, we cannot be sure and should return `None` instead.
+//
+// all arguments here are scaled by the common (but implicit) value `k`, so that:
+// - `remainder = (v % 10^kappa) * k`
+// - `ten_kappa = 10^kappa * k`
+// - `ulp = 2^-e * k`
+//
+// SAFETY: the first `len` bytes of `buf` must be initialized.
+unsafe fn possibly_round(
+    buf: &mut [MaybeUninit<u8>],
+    mut len: usize,
+    mut exp: i16,
+    limit: i16,
+    remainder: u64,
+    ten_kappa: u64,
+    ulp: u64,
+) -> Option<(&[u8], i16)> {
+    debug_assert!(remainder < ten_kappa);
+
+    //           10^kappa
+    //    :   :   :<->:   :
+    //    :   :   :   :   :
+    //    :|1 ulp|1 ulp|  :
+    //    :|<--->|<--->|  :
+    // ----|-----|-----|----
+    //     |     v     |
+    // v - 1 ulp   v + 1 ulp
     //
-    // all arguments here are scaled by the common (but implicit) value `k`, so that:
-    // - `remainder = (v % 10^kappa) * k`
-    // - `ten_kappa = 10^kappa * k`
-    // - `ulp = 2^-e * k`
+    // (for the reference, the dotted line indicates the exact value for
+    // possible representations in given number of digits.)
     //
-    // SAFETY: the first `len` bytes of `buf` must be initialized.
-    unsafe fn possibly_round(
-        buf: &mut [MaybeUninit<u8>],
-        mut len: usize,
-        mut exp: i16,
-        limit: i16,
-        remainder: u64,
-        ten_kappa: u64,
-        ulp: u64,
-    ) -> Option<(&[u8], i16)> {
-        debug_assert!(remainder < ten_kappa);
-
-        //           10^kappa
-        //    :   :   :<->:   :
-        //    :   :   :   :   :
-        //    :|1 ulp|1 ulp|  :
-        //    :|<--->|<--->|  :
-        // ----|-----|-----|----
-        //     |     v     |
-        // v - 1 ulp   v + 1 ulp
-        //
-        // (for the reference, the dotted line indicates the exact value for
-        // possible representations in given number of digits.)
-        //
-        // error is too large that there are at least three possible representations
-        // between `v - 1 ulp` and `v + 1 ulp`. we cannot determine which one is correct.
-        if ulp >= ten_kappa {
-            return None;
-        }
-
-        //    10^kappa
-        //   :<------->:
-        //   :         :
-        //   : |1 ulp|1 ulp|
-        //   : |<--->|<--->|
-        // ----|-----|-----|----
-        //     |     v     |
-        // v - 1 ulp   v + 1 ulp
-        //
-        // in fact, 1/2 ulp is enough to introduce two possible representations.
-        // (remember that we need a unique representation for both `v - 1 ulp` and `v + 1 ulp`.)
-        // this won't overflow, as `ulp < ten_kappa` from the first check.
-        if ten_kappa - ulp <= ulp {
-            return None;
-        }
-
-        //     remainder
-        //       :<->|                           :
-        //       :   |                           :
-        //       :<--------- 10^kappa ---------->:
-        //     | :   |                           :
-        //     |1 ulp|1 ulp|                     :
-        //     |<--->|<--->|                     :
-        // ----|-----|-----|------------------------
-        //     |     v     |
-        // v - 1 ulp   v + 1 ulp
-        //
-        // if `v + 1 ulp` is closer to the rounded-down representation (which is already in `buf`),
-        // then we can safely return. note that `v - 1 ulp` *can* be less than the current
-        // representation, but as `1 ulp < 10^kappa / 2`, this condition is enough:
-        // the distance between `v - 1 ulp` and the current representation
-        // cannot exceed `10^kappa / 2`.
-        //
-        // the condition equals to `remainder + ulp < 10^kappa / 2`.
-        // since this can easily overflow, first check if `remainder < 10^kappa / 2`.
-        // we've already verified that `ulp < 10^kappa / 2`, so as long as
-        // `10^kappa` did not overflow after all, the second check is fine.
-        if ten_kappa - remainder > remainder && ten_kappa - 2 * remainder >= 2 * ulp {
-            // SAFETY: our caller initialized that memory.
-            return Some((unsafe { buf[..len].assume_init_ref() }, exp));
-        }
-
-        //   :<------- remainder ------>|   :
-        //   :                          |   :
-        //   :<--------- 10^kappa --------->:
-        //   :                    |     |   : |
-        //   :                    |1 ulp|1 ulp|
-        //   :                    |<--->|<--->|
-        // -----------------------|-----|-----|-----
-        //                        |     v     |
-        //                    v - 1 ulp   v + 1 ulp
-        //
-        // on the other hands, if `v - 1 ulp` is closer to the rounded-up representation,
-        // we should round up and return. for the same reason we don't need to check `v + 1 ulp`.
-        //
-        // the condition equals to `remainder - ulp >= 10^kappa / 2`.
-        // again we first check if `remainder > ulp` (note that this is not `remainder >= ulp`,
-        // as `10^kappa` is never zero). also note that `remainder - ulp <= 10^kappa`,
-        // so the second check does not overflow.
-        if remainder > ulp && ten_kappa - (remainder - ulp) <= remainder - ulp {
-            if let Some(c) =
-                // SAFETY: our caller must have initialized that memory.
-                round_up(unsafe { buf[..len].assume_init_mut() })
-            {
-                // only add an additional digit when we've been requested the fixed precision.
-                // we also need to check that, if the original buffer was empty,
-                // the additional digit can only be added when `exp == limit` (edge case).
-                exp += 1;
-                if exp > limit && len < buf.len() {
-                    buf[len] = MaybeUninit::new(c);
-                    len += 1;
-                }
-            }
-            // SAFETY: we and our caller initialized that memory.
-            return Some((unsafe { buf[..len].assume_init_ref() }, exp));
-        }
-
-        // otherwise we are doomed (i.e., some values between `v - 1 ulp` and `v + 1 ulp` are
-        // rounding down and others are rounding up) and give up.
-        None
+    // error is too large that there are at least three possible representations
+    // between `v - 1 ulp` and `v + 1 ulp`. we cannot determine which one is correct.
+    if ulp >= ten_kappa {
+        return None;
     }
+
+    //    10^kappa
+    //   :<------->:
+    //   :         :
+    //   : |1 ulp|1 ulp|
+    //   : |<--->|<--->|
+    // ----|-----|-----|----
+    //     |     v     |
+    // v - 1 ulp   v + 1 ulp
+    //
+    // in fact, 1/2 ulp is enough to introduce two possible representations.
+    // (remember that we need a unique representation for both `v - 1 ulp` and `v + 1 ulp`.)
+    // this won't overflow, as `ulp < ten_kappa` from the first check.
+    if ten_kappa - ulp <= ulp {
+        return None;
+    }
+
+    //     remainder
+    //       :<->|                           :
+    //       :   |                           :
+    //       :<--------- 10^kappa ---------->:
+    //     | :   |                           :
+    //     |1 ulp|1 ulp|                     :
+    //     |<--->|<--->|                     :
+    // ----|-----|-----|------------------------
+    //     |     v     |
+    // v - 1 ulp   v + 1 ulp
+    //
+    // if `v + 1 ulp` is closer to the rounded-down representation (which is already in `buf`),
+    // then we can safely return. note that `v - 1 ulp` *can* be less than the current
+    // representation, but as `1 ulp < 10^kappa / 2`, this condition is enough:
+    // the distance between `v - 1 ulp` and the current representation
+    // cannot exceed `10^kappa / 2`.
+    //
+    // the condition equals to `remainder + ulp < 10^kappa / 2`.
+    // since this can easily overflow, first check if `remainder < 10^kappa / 2`.
+    // we've already verified that `ulp < 10^kappa / 2`, so as long as
+    // `10^kappa` did not overflow after all, the second check is fine.
+    if ten_kappa - remainder > remainder && ten_kappa - 2 * remainder >= 2 * ulp {
+        // SAFETY: our caller initialized that memory.
+        return Some((unsafe { buf[..len].assume_init_ref() }, exp));
+    }
+
+    //   :<------- remainder ------>|   :
+    //   :                          |   :
+    //   :<--------- 10^kappa --------->:
+    //   :                    |     |   : |
+    //   :                    |1 ulp|1 ulp|
+    //   :                    |<--->|<--->|
+    // -----------------------|-----|-----|-----
+    //                        |     v     |
+    //                    v - 1 ulp   v + 1 ulp
+    //
+    // on the other hands, if `v - 1 ulp` is closer to the rounded-up representation,
+    // we should round up and return. for the same reason we don't need to check `v + 1 ulp`.
+    //
+    // the condition equals to `remainder - ulp >= 10^kappa / 2`.
+    // again we first check if `remainder > ulp` (note that this is not `remainder >= ulp`,
+    // as `10^kappa` is never zero). also note that `remainder - ulp <= 10^kappa`,
+    // so the second check does not overflow.
+    if remainder > ulp && ten_kappa - (remainder - ulp) <= remainder - ulp {
+        if let Some(c) =
+            // SAFETY: our caller must have initialized that memory.
+            round_up(unsafe { buf[..len].assume_init_mut() })
+        {
+            // only add an additional digit when we've been requested the fixed precision.
+            // we also need to check that, if the original buffer was empty,
+            // the additional digit can only be added when `exp == limit` (edge case).
+            exp += 1;
+            if exp > limit && len < buf.len() {
+                buf[len] = MaybeUninit::new(c);
+                len += 1;
+            }
+        }
+        // SAFETY: we and our caller initialized that memory.
+        return Some((unsafe { buf[..len].assume_init_ref() }, exp));
+    }
+
+    // otherwise we are doomed (i.e., some values between `v - 1 ulp` and `v + 1 ulp` are
+    // rounding down and others are rounding up) and give up.
+    None
 }
 
 /// The exact and fixed mode implementation for Grisu with Dragon fallback.
@@ -772,5 +859,789 @@ pub fn format_exact<'a>(
     match format_exact_opt(d, unsafe { &mut *(buf as *mut _) }, limit) {
         Some(ret) => ret,
         None => fallback(d, buf, limit),
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod grisu_verify {
+    use super::*;
+    use crate::kani;
+    use crate::num::flt2dec::flt2dec_verify::{
+        arbitrary_finite_f32, arbitrary_finite_f64, arbitrary_finite_f64_exponent,
+        arbitrary_finite_f64_range, for_each_finite_partition,
+    };
+
+    // The direct strategy harnesses execute the real generator bodies. Exact
+    // and shortest modes compose separately proved final-rounding contracts.
+    // Buffer lengths are symbolic: shortest mode includes the minimum legal
+    // buffer, and exact mode includes both one-byte and multi-digit buffers.
+    // These are bounded harnesses; a successful run covers lengths up to 32,
+    // not arbitrary slice lengths. Unwinding assertions remain enabled.
+    const PROOF_BUFLEN: usize = 32;
+    const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
+
+    // Decode gives minus = 1. Only normal powers of two have plus = 2,
+    // with the f32 or f64 significand shifted by two. Callers prove these
+    // conditions from the real decoder, without restricting finite float bits.
+    #[kani::requires(
+        mant >= 2 && minus == 1
+            && (plus == 1 || (plus == 2 && (mant == 1 << 25 || mant == 1 << 54)))
+            && exp >= -1076 && exp <= 970
+            && mant as u128 + plus as u128 <= ((minus as u128 + plus as u128) << 53)
+    )]
+    #[kani::ensures(|result| shortest_scaling_valid(*result))]
+    fn scale_shortest_contract(
+        mant: u64,
+        minus: u64,
+        plus: u64,
+        exp: i16,
+    ) -> (u64, u64, u64, i16, i16) {
+        let d = Decoded { mant, minus, plus, exp, inclusive: false };
+        let ShortestScaled { plus, minus, v, minusk } = scale_shortest(&d);
+        assert_eq!(plus.e, minus.e);
+        assert_eq!(plus.e, v.e);
+        (plus.f, minus.f, v.f, plus.e, minusk)
+    }
+
+    fn shortest_scaling_valid(state: (u64, u64, u64, i16, i16)) -> bool {
+        let (plus, minus, v, exp, minusk) = state;
+        exp >= ALPHA
+            && exp <= GAMMA
+            && minusk >= -308
+            && minusk <= 332
+            && plus >= 1 << 62
+            && plus < u64::MAX
+            && minus > 1
+            && minus <= v
+            && v <= plus
+            && {
+                let upper = plus + 1;
+                let delta = upper - (minus - 1);
+                let e = -exp as usize;
+                let (max_kappa, _) = max_pow10_no_more_than((upper >> e) as u32);
+                // After max_kappa + 1 integral digits, this factor is the
+                // scale at digit 17. A threshold reaching 2^e exceeds every
+                // fractional remainder, so the real loop ends by that digit.
+                let scale: u128 = match max_kappa {
+                    0 => 10_000_000_000_000_000,
+                    1 => 1_000_000_000_000_000,
+                    2 => 100_000_000_000_000,
+                    3 => 10_000_000_000_000,
+                    4 => 1_000_000_000_000,
+                    5 => 100_000_000_000,
+                    6 => 10_000_000_000,
+                    7 => 1_000_000_000,
+                    8 => 100_000_000,
+                    9 => 10_000_000,
+                    _ => 0,
+                };
+                // Normalization and multiplication preserve the relative
+                // interval width. Two outward ulps absorb their rounding
+                // errors. These postconditions must be proved in CI.
+                scale > 0
+                    && delta >= 4
+                    && (delta as u128) << 53 >= upper as u128
+                    && 4 * (upper - v) as u128 <= 3 * delta as u128
+                    // A centered target stops rounding before digit zero.
+                    // Otherwise, the lower endpoint must stay off decimal
+                    // boundaries through all 16 possible fractional digits.
+                    && ((2 * (plus - v) as u128) < delta as u128
+                        || (minus - 1) & ((1u64 << (e - 16)) - 1) != 0)
+                    && delta as u128 * scale >= 1u128 << e
+            }
+    }
+
+    fn stub_scale_shortest(d: &Decoded) -> ShortestScaled {
+        let (plus, minus, v, exp, minusk) = scale_shortest_contract(d.mant, d.minus, d.plus, d.exp);
+        ShortestScaled {
+            plus: Fp { f: plus, e: exp },
+            minus: Fp { f: minus, e: exp },
+            v: Fp { f: v, e: exp },
+            minusk,
+        }
+    }
+
+    // The contract bounds mant + plus by [3, 2^54 + 2], so normalization
+    // shifts by 9 through 62 bits. Together with exp in [-1076, 970], every
+    // normalized exponent lies in [-1138, 961]. These 66 ranges cover it.
+    // Reconstructing exp from the actual shift preserves every valid input
+    // while reducing the cached powers considered by each standalone proof.
+    macro_rules! check_scale_shortest_partition {
+        ($name:ident, $index_guide:ident, $group:literal) => {
+            fn $index_guide(index: i32) -> i32 {
+                // Each 32-exponent range selects at most three cached powers.
+                // Expose that range after checking the real calculated index.
+                let last_exp: i32 = if $group == 65 { 961 } else { -1107 + $group * 32 };
+                let gamma = i32::from(GAMMA) - last_exp - 64;
+                let offset = i32::from(CACHED_POW10_FIRST_E);
+                let range = CACHED_POW10.len() as i32 - 1;
+                let domain = i32::from(CACHED_POW10_LAST_E - CACHED_POW10_FIRST_E);
+                let first_index = (gamma - offset) * range / domain;
+                let guided_index = first_index + ((index - first_index) & 3);
+                assert_eq!(guided_index, index);
+                guided_index
+            }
+
+            #[kani::proof_for_contract(scale_shortest_contract)]
+            #[kani::stub(proof_cached_power_index, $index_guide)]
+            #[kani::stub(
+                u64::leading_zeros,
+                crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+            )]
+            #[kani::stub(
+                u32::leading_zeros,
+                crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+            )]
+            #[kani::solver(z3)]
+            fn $name() {
+                let mant: u64 = kani::any();
+                let minus = kani::any();
+                let plus: u64 = kani::any();
+                let normalized_exp: i16 = -1138 + $group * 32 + i16::from(kani::any::<u8>() & 31);
+                let shift = mant.wrapping_add(plus).leading_zeros() as i16;
+                let exp = normalized_exp + shift;
+                let result = scale_shortest_contract(mant, minus, plus, exp);
+                kani::cover(
+                    mant == 2 && exp == -1075,
+                    "scaling includes the smallest f64 subnormal",
+                );
+                kani::cover(exp == -1076, "scaling includes the smallest decoded exponent");
+                kani::cover(exp == 970, "scaling includes the largest decoded exponent");
+                kani::cover(plus == 2, "scaling includes unequal neighbor intervals");
+                kani::cover(
+                    mant == 1 << 25 && plus == 2,
+                    "scaling includes normal f32 powers of two",
+                );
+                kani::cover(
+                    mant == 1 << 54 && plus == 2,
+                    "scaling includes normal f64 powers of two",
+                );
+                kani::cover(result.3 == ALPHA, "scaling reaches the smallest target exponent");
+                kani::cover(result.3 == GAMMA, "scaling reaches the largest target exponent");
+                kani::cover(
+                    normalized_exp == -1138 + $group * 32,
+                    "scaling reaches the first normalized exponent in its range",
+                );
+                kani::cover(
+                    normalized_exp == if $group == 65 { 961 } else { -1107 + $group * 32 },
+                    "scaling reaches the last normalized exponent in its range",
+                );
+            }
+        };
+    }
+
+    check_scale_shortest_partition!(check_scale_shortest_00, scaling_cache_index_00, 0);
+    check_scale_shortest_partition!(check_scale_shortest_01, scaling_cache_index_01, 1);
+    check_scale_shortest_partition!(check_scale_shortest_02, scaling_cache_index_02, 2);
+    check_scale_shortest_partition!(check_scale_shortest_03, scaling_cache_index_03, 3);
+    check_scale_shortest_partition!(check_scale_shortest_04, scaling_cache_index_04, 4);
+    check_scale_shortest_partition!(check_scale_shortest_05, scaling_cache_index_05, 5);
+    check_scale_shortest_partition!(check_scale_shortest_06, scaling_cache_index_06, 6);
+    check_scale_shortest_partition!(check_scale_shortest_07, scaling_cache_index_07, 7);
+    check_scale_shortest_partition!(check_scale_shortest_08, scaling_cache_index_08, 8);
+    check_scale_shortest_partition!(check_scale_shortest_09, scaling_cache_index_09, 9);
+    check_scale_shortest_partition!(check_scale_shortest_10, scaling_cache_index_10, 10);
+    check_scale_shortest_partition!(check_scale_shortest_11, scaling_cache_index_11, 11);
+    check_scale_shortest_partition!(check_scale_shortest_12, scaling_cache_index_12, 12);
+    check_scale_shortest_partition!(check_scale_shortest_13, scaling_cache_index_13, 13);
+    check_scale_shortest_partition!(check_scale_shortest_14, scaling_cache_index_14, 14);
+    check_scale_shortest_partition!(check_scale_shortest_15, scaling_cache_index_15, 15);
+    check_scale_shortest_partition!(check_scale_shortest_16, scaling_cache_index_16, 16);
+    check_scale_shortest_partition!(check_scale_shortest_17, scaling_cache_index_17, 17);
+    check_scale_shortest_partition!(check_scale_shortest_18, scaling_cache_index_18, 18);
+    check_scale_shortest_partition!(check_scale_shortest_19, scaling_cache_index_19, 19);
+    check_scale_shortest_partition!(check_scale_shortest_20, scaling_cache_index_20, 20);
+    check_scale_shortest_partition!(check_scale_shortest_21, scaling_cache_index_21, 21);
+    check_scale_shortest_partition!(check_scale_shortest_22, scaling_cache_index_22, 22);
+    check_scale_shortest_partition!(check_scale_shortest_23, scaling_cache_index_23, 23);
+    check_scale_shortest_partition!(check_scale_shortest_24, scaling_cache_index_24, 24);
+    check_scale_shortest_partition!(check_scale_shortest_25, scaling_cache_index_25, 25);
+    check_scale_shortest_partition!(check_scale_shortest_26, scaling_cache_index_26, 26);
+    check_scale_shortest_partition!(check_scale_shortest_27, scaling_cache_index_27, 27);
+    check_scale_shortest_partition!(check_scale_shortest_28, scaling_cache_index_28, 28);
+    check_scale_shortest_partition!(check_scale_shortest_29, scaling_cache_index_29, 29);
+    check_scale_shortest_partition!(check_scale_shortest_30, scaling_cache_index_30, 30);
+    check_scale_shortest_partition!(check_scale_shortest_31, scaling_cache_index_31, 31);
+    check_scale_shortest_partition!(check_scale_shortest_32, scaling_cache_index_32, 32);
+    check_scale_shortest_partition!(check_scale_shortest_33, scaling_cache_index_33, 33);
+    check_scale_shortest_partition!(check_scale_shortest_34, scaling_cache_index_34, 34);
+    check_scale_shortest_partition!(check_scale_shortest_35, scaling_cache_index_35, 35);
+    check_scale_shortest_partition!(check_scale_shortest_36, scaling_cache_index_36, 36);
+    check_scale_shortest_partition!(check_scale_shortest_37, scaling_cache_index_37, 37);
+    check_scale_shortest_partition!(check_scale_shortest_38, scaling_cache_index_38, 38);
+    check_scale_shortest_partition!(check_scale_shortest_39, scaling_cache_index_39, 39);
+    check_scale_shortest_partition!(check_scale_shortest_40, scaling_cache_index_40, 40);
+    check_scale_shortest_partition!(check_scale_shortest_41, scaling_cache_index_41, 41);
+    check_scale_shortest_partition!(check_scale_shortest_42, scaling_cache_index_42, 42);
+    check_scale_shortest_partition!(check_scale_shortest_43, scaling_cache_index_43, 43);
+    check_scale_shortest_partition!(check_scale_shortest_44, scaling_cache_index_44, 44);
+    check_scale_shortest_partition!(check_scale_shortest_45, scaling_cache_index_45, 45);
+    check_scale_shortest_partition!(check_scale_shortest_46, scaling_cache_index_46, 46);
+    check_scale_shortest_partition!(check_scale_shortest_47, scaling_cache_index_47, 47);
+    check_scale_shortest_partition!(check_scale_shortest_48, scaling_cache_index_48, 48);
+    check_scale_shortest_partition!(check_scale_shortest_49, scaling_cache_index_49, 49);
+    check_scale_shortest_partition!(check_scale_shortest_50, scaling_cache_index_50, 50);
+    check_scale_shortest_partition!(check_scale_shortest_51, scaling_cache_index_51, 51);
+    check_scale_shortest_partition!(check_scale_shortest_52, scaling_cache_index_52, 52);
+    check_scale_shortest_partition!(check_scale_shortest_53, scaling_cache_index_53, 53);
+    check_scale_shortest_partition!(check_scale_shortest_54, scaling_cache_index_54, 54);
+    check_scale_shortest_partition!(check_scale_shortest_55, scaling_cache_index_55, 55);
+    check_scale_shortest_partition!(check_scale_shortest_56, scaling_cache_index_56, 56);
+    check_scale_shortest_partition!(check_scale_shortest_57, scaling_cache_index_57, 57);
+    check_scale_shortest_partition!(check_scale_shortest_58, scaling_cache_index_58, 58);
+    check_scale_shortest_partition!(check_scale_shortest_59, scaling_cache_index_59, 59);
+    check_scale_shortest_partition!(check_scale_shortest_60, scaling_cache_index_60, 60);
+    check_scale_shortest_partition!(check_scale_shortest_61, scaling_cache_index_61, 61);
+    check_scale_shortest_partition!(check_scale_shortest_62, scaling_cache_index_62, 62);
+    check_scale_shortest_partition!(check_scale_shortest_63, scaling_cache_index_63, 63);
+    check_scale_shortest_partition!(check_scale_shortest_64, scaling_cache_index_64, 64);
+    check_scale_shortest_partition!(check_scale_shortest_65, scaling_cache_index_65, 65);
+
+    // At digit one the loop must stop. If its remainder would already exceed
+    // threshold, the loop's threshold check forces an earlier stop. With digit
+    // zero this checks the initial state, which must not decrement at all.
+    // Callers establish this numeric condition before using the helper model.
+    fn weed_stops_before_zero(
+        digit: u8,
+        remainder: u64,
+        threshold: u64,
+        plus1v: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> bool {
+        // The caller bounds digit by nine. Saturation preserves comparison
+        // with threshold: an overflowing mathematical sum exceeds every u64.
+        // Repeated additions also match the real loop's remainder updates.
+        let after_1 = remainder.saturating_add(ten_kappa);
+        let after_2 = after_1.saturating_add(ten_kappa);
+        let after_3 = after_2.saturating_add(ten_kappa);
+        let after_4 = after_3.saturating_add(ten_kappa);
+        let after_5 = after_4.saturating_add(ten_kappa);
+        let after_6 = after_5.saturating_add(ten_kappa);
+        let after_7 = after_6.saturating_add(ten_kappa);
+        let after_8 = after_7.saturating_add(ten_kappa);
+        let terminal = match digit {
+            b'0' | b'1' => remainder,
+            b'2' => after_1,
+            b'3' => after_2,
+            b'4' => after_3,
+            b'5' => after_4,
+            b'6' => after_5,
+            b'7' => after_6,
+            b'8' => after_7,
+            _ => after_8,
+        };
+        if terminal >= threshold {
+            true
+        } else {
+            let remainder = terminal;
+            let target = plus1v - ulp;
+            !(remainder < target
+                && threshold - remainder >= ten_kappa
+                && (remainder + ten_kappa < target
+                    || target - remainder >= remainder + ten_kappa - target))
+        }
+    }
+
+    // Quantify the other prefix bytes inside the proof. The adapter checks the
+    // actual prefix and passes the final digit, which is the only byte changed.
+    #[kani::requires(
+        len > 0 && len <= PROOF_BUFLEN
+            && digit >= b'0' && digit <= b'9'
+            && remainder < threshold && ten_kappa > 0
+            && ulp <= threshold / 4 && ulp <= plus1v && plus1v <= u64::MAX - ulp
+            && weed_stops_before_zero(digit, remainder, threshold, plus1v, ten_kappa, ulp)
+    )]
+    #[kani::ensures(|result| result.as_ref().is_none_or(|&(written, output_exp)| {
+        written == len && output_exp == exp
+    }))]
+    fn round_shortest_contract(
+        digit: u8,
+        len: usize,
+        exp: i16,
+        remainder: u64,
+        threshold: u64,
+        plus1v: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> Option<(usize, i16)> {
+        let mut digits: [u8; PROOF_BUFLEN] = kani::any();
+        digits[len - 1] = digit;
+        kani::assume(crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |byte| {
+            byte < u8::MAX
+        }));
+        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+        let start = buf.as_mut_ptr().cast::<u8>();
+        // SAFETY: the contract bounds len by both distinct arrays' capacities.
+        unsafe { crate::ptr::copy_nonoverlapping(digits.as_ptr(), start, len) };
+        round_and_weed(
+            // SAFETY: the copy initialized exactly this prefix.
+            unsafe { buf[..len].assume_init_mut() },
+            exp,
+            remainder,
+            threshold,
+            plus1v,
+            ten_kappa,
+            ulp,
+        )
+        .map(|(output, output_exp)| {
+            assert_eq!(output.as_ptr(), start.cast_const());
+            let checksum = crate::num::flt2dec::rounding_verify::prefix_checksum(output);
+            kani::cover(checksum == 0, "shortest rounding returns readable bytes");
+            kani::cover(output[len - 1] < digit, "shortest rounding can decrease the final digit");
+            (output.len(), output_exp)
+        })
+    }
+
+    fn stub_round_and_weed(
+        buf: &mut [u8],
+        exp: i16,
+        remainder: u64,
+        threshold: u64,
+        plus1v: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> Option<(&[u8], i16)> {
+        let len = buf.len();
+        assert!(len > 0 && len <= PROOF_BUFLEN);
+        // Read and check every actual byte before invoking the numeric summary.
+        assert!(crate::num::flt2dec::rounding_verify::bytes_below_max(buf));
+        let result = round_shortest_contract(
+            buf[len - 1],
+            len,
+            exp,
+            remainder,
+            threshold,
+            plus1v,
+            ten_kappa,
+            ulp,
+        );
+        // Overapproximate output values within the initialized input prefix.
+        let output: [u8; PROOF_BUFLEN] = kani::any();
+        buf.copy_from_slice(&output[..len]);
+        result.map(|(written, output_exp)| (&buf[..written], output_exp))
+    }
+
+    // The last digit is at most nine and the numeric precondition makes the
+    // loop stop before decrementing one, so at most eight iterations execute.
+    #[kani::proof_for_contract(round_shortest_contract)]
+    #[kani::unwind(9)]
+    #[kani::solver(kissat)]
+    fn check_round_shortest_contract() {
+        let digit: u8 = kani::any();
+        let len = usize::from(kani::any::<u8>());
+        let result = round_shortest_contract(
+            digit,
+            len,
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+        );
+        kani::cover(len == 1 && result.is_some(), "shortest rounding accepts a single digit");
+        kani::cover(
+            len == PROOF_BUFLEN && result.is_some(),
+            "shortest rounding accepts a full buffer",
+        );
+        kani::cover(result.is_none(), "shortest rounding can request the Dragon fallback");
+    }
+
+    // Keep uninitialized padding in this proof: only the initialized input
+    // prefix is copied before executing the real final-rounding helper.
+    #[kani::requires(
+        len <= capacity && capacity <= PROOF_BUFLEN
+            && exp < i16::MAX && remainder < ten_kappa
+    )]
+    #[kani::ensures(|result| result.as_ref().is_none_or(|&(written, _)| {
+        written >= len && written <= capacity && written - len <= 1
+    }))]
+    fn round_exact_contract(
+        len: usize,
+        capacity: usize,
+        exp: i16,
+        limit: i16,
+        remainder: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> Option<(usize, i16)> {
+        // Quantify every prefix allowed by the adapter's byte check here.
+        // The postcondition does not depend on its values, so callers pass
+        // only the numeric state after checking their actual input bytes.
+        let digits: [u8; PROOF_BUFLEN] = kani::any();
+        kani::assume(crate::num::flt2dec::rounding_verify::prefix_all(&digits, len, |digit| {
+            digit < u8::MAX
+        }));
+        let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+        let start = buf.as_mut_ptr().cast::<u8>();
+        // SAFETY: the contract bounds len by both distinct arrays' capacities.
+        // This initializes exactly the prefix required by possibly_round.
+        unsafe { crate::ptr::copy_nonoverlapping(digits.as_ptr(), start, len) };
+        // SAFETY: the copy above initialized the first len bytes.
+        unsafe { possibly_round(&mut buf[..capacity], len, exp, limit, remainder, ten_kappa, ulp) }
+            .map(|(output, output_exp)| {
+                assert_eq!(output.as_ptr(), start.cast_const());
+                // Read every returned byte, including any appended carry. This
+                // checks initialization instead of merely inspecting slice metadata.
+                let checksum = crate::num::flt2dec::rounding_verify::prefix_checksum(output);
+                kani::cover(checksum == 0, "final rounding returns readable output bytes");
+                (output.len(), output_exp)
+            })
+    }
+
+    // The verified contract overapproximates byte values and the decision to
+    // return None. It can write only the input prefix or a proved output prefix;
+    // unused padding in the generator's buffer remains uninitialized.
+    unsafe fn stub_possibly_round(
+        buf: &mut [MaybeUninit<u8>],
+        len: usize,
+        exp: i16,
+        limit: i16,
+        remainder: u64,
+        ten_kappa: u64,
+        ulp: u64,
+    ) -> Option<(&[u8], i16)> {
+        assert!(len <= buf.len() && buf.len() <= PROOF_BUFLEN);
+        // SAFETY: this adapter has possibly_round's initialized-prefix contract.
+        // Read every active byte before the model can write to this buffer.
+        let digits = unsafe { buf[..len].assume_init_ref() };
+        assert!(crate::num::flt2dec::rounding_verify::bytes_below_max(digits));
+        let result = round_exact_contract(len, buf.len(), exp, limit, remainder, ten_kappa, ulp);
+        let written = result.map_or(len, |(written, _)| written);
+        assert!(written <= buf.len());
+        // The contract proves metadata and initialized output, without a byte
+        // value postcondition. Model those bytes here so the verified call has
+        // an empty write set instead of repeatedly havocing an array.
+        let output: [u8; PROOF_BUFLEN] = kani::any();
+        // SAFETY: the contract bounds written by both distinct arrays. All
+        // source bytes are initialized; this initializes only the active prefix.
+        unsafe {
+            crate::ptr::copy_nonoverlapping(output.as_ptr(), buf.as_mut_ptr().cast(), written)
+        };
+        result.map(|(written, output_exp)| {
+            // SAFETY: the copy above initialized this prefix.
+            (unsafe { buf[..written].assume_init_ref() }, output_exp)
+        })
+    }
+
+    #[kani::proof_for_contract(round_exact_contract)]
+    #[kani::unwind(33)]
+    #[kani::stub(
+        crate::num::flt2dec::round_up,
+        crate::num::flt2dec::rounding_verify::stub_round_up
+    )]
+    #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
+    #[kani::solver(kissat)]
+    fn check_round_exact_contract() {
+        let len = usize::from(kani::any::<u8>());
+        let capacity = usize::from(kani::any::<u8>());
+        let result = round_exact_contract(
+            len,
+            capacity,
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+        );
+        kani::cover(len == 0 && result.is_some(), "final rounding accepts an empty prefix");
+        kani::cover(
+            len == PROOF_BUFLEN && result.is_some(),
+            "final rounding accepts a full buffer",
+        );
+        kani::cover(result.is_none(), "final rounding can request the Dragon fallback");
+        kani::cover(
+            result.is_some_and(|(written, _)| written > len),
+            "final rounding can append an initialized carry",
+        );
+    }
+
+    // An arbitrary `Decoded` satisfying every precondition the `grisu` entry
+    // points assert.  `mant + plus < 2^61` (and the `checked_add`/`checked_sub`
+    // assumptions) keep the scaled `Fp` arithmetic inside `u64`.
+    fn arbitrary_decoded() -> Decoded {
+        let mant: u64 = kani::any();
+        let minus: u64 = kani::any();
+        let plus: u64 = kani::any();
+        kani::assume(mant > 0);
+        kani::assume(minus > 0);
+        kani::assume(plus > 0);
+        kani::assume(mant.checked_add(plus).is_some());
+        kani::assume(mant.checked_sub(minus).is_some());
+        kani::assume(mant + plus < (1 << 61));
+        let exp: i16 = kani::any();
+        // `[-1076, 970]` is the exponent range of `decode()`; 971 is unreachable.
+        kani::assume(exp >= -1076 && exp <= 970);
+        Decoded { mant, minus, plus, exp, inclusive: kani::any() }
+    }
+
+    // An arbitrary input for the exact-mode proofs: the full documented
+    // precondition of `format_exact_opt` (`0 < mant < 2^61`), with `exp`
+    // bounded to the decoder image so `cached_power` stays in its table domain.
+    fn arbitrary_decoded_exact() -> Decoded {
+        let mant: u64 = kani::any();
+        kani::assume(mant > 0 && mant < (1 << 61));
+        let exp: i16 = kani::any();
+        kani::assume(exp >= -1076 && exp <= 970);
+        Decoded { mant, minus: 1, plus: 1, exp, inclusive: kani::any() }
+    }
+
+    // Keep each division's literal divisor visible to the verifier. Each arm
+    // has a separate equivalence proof over every u32 dividend. The default
+    // arm checks the divisor domain at every generator call.
+    fn div_rem_pow10_model(value: u32, divisor: u32) -> (u32, u32) {
+        match divisor {
+            1 => (value, 0),
+            10 => (value / 10, value % 10),
+            100 => (value / 100, value % 100),
+            1_000 => (value / 1_000, value % 1_000),
+            10_000 => (value / 10_000, value % 10_000),
+            100_000 => (value / 100_000, value % 100_000),
+            1_000_000 => (value / 1_000_000, value % 1_000_000),
+            10_000_000 => (value / 10_000_000, value % 10_000_000),
+            100_000_000 => (value / 100_000_000, value % 100_000_000),
+            1_000_000_000 => (value / 1_000_000_000, value % 1_000_000_000),
+            _ => panic!("Grisu integral divisor must be a power of ten"),
+        }
+    }
+
+    macro_rules! check_decimal_divisor {
+        ($name:ident, $divisor:literal) => {
+            #[kani::proof]
+            #[kani::solver(kissat)]
+            fn $name() {
+                let value: u32 = kani::any();
+                assert_eq!(div_rem_pow10(value, $divisor), div_rem_pow10_model(value, $divisor));
+                kani::cover(value == 0, "decimal division includes zero");
+                kani::cover(value == u32::MAX, "decimal division includes the largest dividend");
+                kani::cover(
+                    value == $divisor - 1,
+                    "decimal division includes the largest remainder",
+                );
+            }
+        };
+    }
+
+    check_decimal_divisor!(check_decimal_division_model_agrees_00, 1);
+    check_decimal_divisor!(check_decimal_division_model_agrees_01, 10);
+    check_decimal_divisor!(check_decimal_division_model_agrees_02, 100);
+    check_decimal_divisor!(check_decimal_division_model_agrees_03, 1_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_04, 10_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_05, 100_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_06, 1_000_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_07, 10_000_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_08, 100_000_000);
+    check_decimal_divisor!(check_decimal_division_model_agrees_09, 1_000_000_000);
+
+    struct CachedPowerIndex(i32);
+
+    impl CachedPowerIndex {
+        fn check(&self, actual: i32) -> i32 {
+            assert_eq!(actual, self.0);
+            self.0
+        }
+    }
+
+    fn checked_cached_power_39(index: i32) -> i32 {
+        CachedPowerIndex(39).check(index)
+    }
+
+    // Call the real generator loops and compose the final-rounding proof. The
+    // wrapper harness below checks a separate obligation.
+    macro_rules! check_partition {
+        ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
+            check_partition!($name, $decode::<$group>(), $cover_fallback => scale_shortest_contract);
+        };
+        ($name:ident, $decoded:expr, $cover_fallback:literal $(, $cached_index:path)? $(=> $scaling_contract:path)?) => {
+            mod $name {
+                use super::*;
+
+                #[kani::proof]
+                #[kani::unwind(19)]
+                $(#[kani::stub(proof_cached_power_index, $cached_index)])?
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(round_and_weed, stub_round_and_weed)]
+                #[kani::stub(div_rem_pow10, div_rem_pow10_model)]
+                #[kani::stub_verified(round_shortest_contract)]
+                $(
+                    #[kani::stub(scale_shortest, stub_scale_shortest)]
+                    #[kani::stub_verified($scaling_contract)]
+                )?
+                #[kani::solver(minisat)]
+                fn check_format_shortest_opt() {
+                    let d = $decoded;
+                    let len = usize::from(kani::any::<u8>());
+                    kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == MAX_SIG_DIGITS, "shortest uses the minimum buffer");
+                    kani::cover(len == PROOF_BUFLEN, "shortest uses the largest proof buffer");
+                    let result = format_shortest_opt(&d, &mut buf[..len]);
+                    if $cover_fallback {
+                        kani::cover(result.is_none(), "shortest can request the Dragon fallback");
+                    }
+                    let _ = result.map(|(digits, _)| {
+                        kani::cover(digits.len() > 1, "shortest produces multiple digits");
+                        assert!(!digits.is_empty());
+                        assert!(digits.len() <= len);
+                        assert_eq!(digits.as_ptr(), start);
+                    });
+                }
+
+                // Integral extraction takes at most ten iterations. Fractional
+                // extraction stops once err = 10^18 >= 2^59: the cached power
+                // gives e <= 60, hence maxerr = 2^(e - 1) <= 2^59. The separate
+                // rounding contract retains its own 33-iteration proof bound.
+                #[kani::proof]
+                #[kani::unwind(19)]
+                $(#[kani::stub(proof_cached_power_index, $cached_index)])?
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(possibly_round, stub_possibly_round)]
+                #[kani::stub_verified(round_exact_contract)]
+                #[kani::solver(kissat)]
+                fn check_format_exact_opt() {
+                    let d = $decoded;
+                    let limit: i16 = kani::any();
+                    let len = usize::from(kani::any::<u8>());
+                    kani::assume(len > 0 && len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == 1, "exact uses a one-byte buffer");
+                    kani::cover(len == PROOF_BUFLEN, "exact uses the largest proof buffer");
+                    let result = format_exact_opt(&d, &mut buf[..len], limit);
+                    if $cover_fallback {
+                        kani::cover(result.is_none(), "exact can request the Dragon fallback");
+                    }
+                    let _ = result.map(|(digits, _)| {
+                        kani::cover(digits.is_empty(), "exact can return an empty prefix");
+                        kani::cover(digits.len() > 1, "exact produces multiple digits");
+                        assert!(digits.len() <= len);
+                        assert_eq!(digits.as_ptr(), start);
+                    });
+                }
+            }
+        };
+    }
+
+    for_each_finite_partition!(check_partition);
+    check_partition!(f64_exp_1023, arbitrary_finite_f64_exponent::<1023>(), false);
+
+    // All positive f64 values in [2^-8, 2^18), with every significand bit symbolic.
+    // These additional probes assert the cached index instead of assuming it.
+    check_partition!(
+        f64_cached_power_39,
+        arbitrary_finite_f64_range::<0x3f70_0000_0000_0000, 0x4110_0000_0000_0000>(),
+        false,
+        checked_cached_power_39
+    );
+
+    // Wholesale havoc stub for the dragon fallback (modelled as an opaque op that
+    // writes a digit and returns an in-bounds slice of `buf`).
+    fn stub_dragon_format_exact<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> (&'a [u8], i16) {
+        let digit: u8 = kani::any();
+        kani::assume(digit >= b'0' && digit <= b'9');
+        buf[0] = MaybeUninit::new(digit);
+        // SAFETY: we just initialized element 0.
+        (unsafe { buf[..1].assume_init_ref() }, kani::any())
+    }
+
+    // Wholesale havoc stub for `format_exact_opt`: nondeterministically returns
+    // `None` (released its borrow of `buf`) or `Some` slice of `buf`.  Modelling
+    // both callees as opaque isolates the WRAPPER's only `unsafe`: the
+    // lifetime-laundering reborrow `&mut *(buf as *mut _)`, whose soundness rests
+    // on `buf` being reused only on the `None` path.
+    fn stub_format_exact_opt<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+        _limit: i16,
+    ) -> Option<(&'a [u8], i16)> {
+        if kani::any() {
+            let digit: u8 = kani::any();
+            kani::assume(digit >= b'0' && digit <= b'9');
+            buf[0] = MaybeUninit::new(digit);
+            // SAFETY: we just initialized element 0.
+            Some((unsafe { buf[..1].assume_init_ref() }, kani::any()))
+        } else {
+            // The real function writes digits before it gives up; model that
+            // dirtying so the wrapper's reuse of `buf` on the `None` path is
+            // exercised against a modified buffer.
+            buf[0] = MaybeUninit::new(kani::any());
+            None
+        }
+    }
+
+    #[kani::proof]
+    #[kani::stub(format_exact_opt, stub_format_exact_opt)]
+    #[kani::stub(crate::num::flt2dec::strategy::dragon::format_exact, stub_dragon_format_exact)]
+    fn check_format_exact() {
+        let d = arbitrary_decoded_exact();
+        let limit: i16 = kani::any();
+        let mut buf: [MaybeUninit<u8>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = format_exact(&d, &mut buf, limit);
+    }
+
+    // Wholesale havoc stubs for `format_shortest`'s callees (no `limit` arg).
+    fn stub_dragon_format_shortest<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> (&'a [u8], i16) {
+        let digit: u8 = kani::any();
+        kani::assume(digit >= b'0' && digit <= b'9');
+        buf[0] = MaybeUninit::new(digit);
+        // SAFETY: we just initialized element 0.
+        (unsafe { buf[..1].assume_init_ref() }, kani::any())
+    }
+
+    fn stub_format_shortest_opt<'a>(
+        _d: &Decoded,
+        buf: &'a mut [MaybeUninit<u8>],
+    ) -> Option<(&'a [u8], i16)> {
+        if kani::any() {
+            let digit: u8 = kani::any();
+            kani::assume(digit >= b'0' && digit <= b'9');
+            buf[0] = MaybeUninit::new(digit);
+            // SAFETY: we just initialized element 0.
+            Some((unsafe { buf[..1].assume_init_ref() }, kani::any()))
+        } else {
+            // The real function writes digits before it gives up; model that
+            // dirtying so the wrapper's reuse of `buf` on the `None` path is
+            // exercised against a modified buffer.
+            buf[0] = MaybeUninit::new(kani::any());
+            None
+        }
+    }
+
+    // `format_shortest` mirrors `format_exact`: its only `unsafe` is the
+    // lifetime-laundering reborrow, verified by modelling both callees as opaque.
+    #[kani::proof]
+    #[kani::stub(format_shortest_opt, stub_format_shortest_opt)]
+    #[kani::stub(
+        crate::num::flt2dec::strategy::dragon::format_shortest,
+        stub_dragon_format_shortest
+    )]
+    fn check_format_shortest() {
+        let d = arbitrary_decoded();
+        let mut buf: [MaybeUninit<u8>; 4] = [const { MaybeUninit::uninit() }; 4];
+        let _ = format_shortest(&d, &mut buf);
     }
 }

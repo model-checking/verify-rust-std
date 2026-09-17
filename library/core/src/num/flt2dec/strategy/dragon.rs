@@ -28,6 +28,8 @@ static POW5TO256: [Digit; 19] = [
 
 #[doc(hidden)]
 pub fn mul_pow10(x: &mut Big, n: usize) -> &mut Big {
+    #[cfg(kani)]
+    let n = dragon_verify::proof_pow10_exponent(n);
     debug_assert!(n < 512);
     // Save ourself the left shift for the smallest cases.
     if n < 8 {
@@ -386,4 +388,605 @@ pub fn format_exact<'a>(
 
     // SAFETY: we initialized that memory above.
     (unsafe { buf[..len].assume_init_ref() }, k)
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+pub mod dragon_verify {
+    use super::*;
+    use crate::kani;
+    use crate::num::flt2dec::flt2dec_verify::{
+        arbitrary_finite_f32, arbitrary_finite_f64, arbitrary_finite_f64_exponent,
+        for_each_finite_partition,
+    };
+
+    // Keep exact comparison semantics and the generator's digit writes. The
+    // comparison models have a separate equivalence proof; exact mode also
+    // uses the division contract below for initial fixup. Neither termination
+    // nor the buffer index is assumed. Bigint unwind assertions remain enabled.
+    // Lengths above 32 require a separate proof; these harnesses are bounded.
+    const PROOF_BUFLEN: usize = 32;
+    const _: () = assert!(PROOF_BUFLEN <= u8::MAX as usize);
+
+    // The models assert the size bounds checked by the independent equivalence
+    // proof, then compute exact results with constant limb indices.
+    fn stub_cmp(left: &Big, right: &Big) -> Ordering {
+        left.kani_cmp_model(right)
+    }
+
+    fn stub_is_zero(value: &Big) -> bool {
+        value.kani_is_zero_model()
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_comparison_models_agree() {
+        // These methods only need size bounds. Inactive limbs may be arbitrary;
+        // unlike arithmetic contracts, this proof needs no zero-tail invariant.
+        // Six symbolic bits represent every permitted size, 0 through 40, while
+        // keeping unused upper index bits concrete during symbolic execution.
+        let left = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let right = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        // This is exactly the domain asserted by both models at their call sites.
+        kani::assume(left.kani_size() <= 40 && right.kani_size() <= 40);
+        assert!(left.cmp(&right) == left.kani_cmp_model(&right));
+        assert!(left.is_zero() == left.kani_is_zero_model());
+        let ordering = left.kani_cmp_model(&right);
+        kani::cover(ordering == Ordering::Less, "comparison can be less");
+        kani::cover(ordering == Ordering::Equal, "comparison can be equal");
+        kani::cover(ordering == Ordering::Greater, "comparison can be greater");
+        kani::cover(left.kani_is_zero_model(), "zero testing accepts zero");
+        kani::cover(!left.kani_is_zero_model(), "zero testing accepts nonzero limbs");
+        kani::cover(left.kani_size() == 0, "comparison accepts empty zero storage");
+        kani::cover(left.kani_size() == 40, "comparison accepts all bigint limbs");
+        kani::cover(
+            left.kani_size() == 0 && !left.kani_valid_storage(),
+            "comparison models accept arbitrary inactive limbs",
+        );
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_add_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let other = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() < 40 && other.kani_size() < 40);
+        kani::cover(source.kani_size() == 0, "addition accepts empty storage");
+        kani::cover(source.kani_size() == 39, "addition accepts the largest model input");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.add(&other) as *mut Big == actual_start);
+        assert!(modeled.kani_add_model(&other) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(actual.kani_size() == 40, "addition can append a carry limb");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_sub_model_agrees() {
+        let source = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        let other = Big::kani_with_arbitrary_limbs(usize::from(kani::any::<u8>() & 0x3f));
+        kani::assume(source.kani_size() <= 40 && other.kani_size() <= 40);
+        kani::assume(source.kani_cmp_model(&other) != Ordering::Less);
+        kani::cover(source.kani_size() == 0, "subtraction accepts empty storage");
+        kani::cover(source.kani_size() == 40, "subtraction accepts all limbs");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.sub(&other) as *mut Big == actual_start);
+        assert!(modeled.kani_sub_model(&other) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+    }
+
+    fn check_mul_small_model_agrees<const SIZE: usize>() {
+        assert!(SIZE < 40);
+        let source = Big::kani_with_arbitrary_limbs(SIZE);
+        let multiplier: u32 = kani::any();
+        kani::cover(source.kani_size() == 0, "multiplication accepts empty storage");
+        kani::cover(source.kani_size() == 39, "multiplication accepts the largest model input");
+        kani::cover(multiplier == 0, "multiplication accepts zero");
+        kani::cover(multiplier == u32::MAX, "multiplication accepts the largest digit");
+        let mut actual = source.clone();
+        let mut modeled = source;
+        let actual_start = &mut actual as *mut Big;
+        let modeled_start = &mut modeled as *mut Big;
+        assert!(actual.mul_small(multiplier) as *mut Big == actual_start);
+        assert!(modeled.kani_mul_small_model(multiplier) as *mut Big == modeled_start);
+        assert!(actual.kani_same_storage(&modeled));
+        kani::cover(actual.kani_size() == 40, "multiplication can append a carry limb");
+    }
+
+    macro_rules! check_mul_size {
+        ($name:ident, $size:literal) => {
+            #[kani::proof]
+            #[kani::unwind(41)]
+            #[kani::stub(u32::carrying_mul, carrying_mul_model)]
+            #[kani::stub(u32::carrying_mul_add, carrying_mul_add_model)]
+            #[kani::solver(z3)]
+            fn $name() {
+                check_mul_small_model_agrees::<$size>();
+            }
+        };
+    }
+
+    // Together these cases retain every storage size accepted by the model.
+    check_mul_size!(check_mul_small_model_agrees_00, 0);
+    check_mul_size!(check_mul_small_model_agrees_01, 1);
+    check_mul_size!(check_mul_small_model_agrees_02, 2);
+    check_mul_size!(check_mul_small_model_agrees_03, 3);
+    check_mul_size!(check_mul_small_model_agrees_04, 4);
+    check_mul_size!(check_mul_small_model_agrees_05, 5);
+    check_mul_size!(check_mul_small_model_agrees_06, 6);
+    check_mul_size!(check_mul_small_model_agrees_07, 7);
+    check_mul_size!(check_mul_small_model_agrees_08, 8);
+    check_mul_size!(check_mul_small_model_agrees_09, 9);
+    check_mul_size!(check_mul_small_model_agrees_10, 10);
+    check_mul_size!(check_mul_small_model_agrees_11, 11);
+    check_mul_size!(check_mul_small_model_agrees_12, 12);
+    check_mul_size!(check_mul_small_model_agrees_13, 13);
+    check_mul_size!(check_mul_small_model_agrees_14, 14);
+    check_mul_size!(check_mul_small_model_agrees_15, 15);
+    check_mul_size!(check_mul_small_model_agrees_16, 16);
+    check_mul_size!(check_mul_small_model_agrees_17, 17);
+    check_mul_size!(check_mul_small_model_agrees_18, 18);
+    check_mul_size!(check_mul_small_model_agrees_19, 19);
+    check_mul_size!(check_mul_small_model_agrees_20, 20);
+    check_mul_size!(check_mul_small_model_agrees_21, 21);
+    check_mul_size!(check_mul_small_model_agrees_22, 22);
+    check_mul_size!(check_mul_small_model_agrees_23, 23);
+    check_mul_size!(check_mul_small_model_agrees_24, 24);
+    check_mul_size!(check_mul_small_model_agrees_25, 25);
+    check_mul_size!(check_mul_small_model_agrees_26, 26);
+    check_mul_size!(check_mul_small_model_agrees_27, 27);
+    check_mul_size!(check_mul_small_model_agrees_28, 28);
+    check_mul_size!(check_mul_small_model_agrees_29, 29);
+    check_mul_size!(check_mul_small_model_agrees_30, 30);
+    check_mul_size!(check_mul_small_model_agrees_31, 31);
+    check_mul_size!(check_mul_small_model_agrees_32, 32);
+    check_mul_size!(check_mul_small_model_agrees_33, 33);
+    check_mul_size!(check_mul_small_model_agrees_34, 34);
+    check_mul_size!(check_mul_small_model_agrees_35, 35);
+    check_mul_size!(check_mul_small_model_agrees_36, 36);
+    check_mul_size!(check_mul_small_model_agrees_37, 37);
+    check_mul_size!(check_mul_small_model_agrees_38, 38);
+    check_mul_size!(check_mul_small_model_agrees_39, 39);
+
+    // Prove the exact two-limb result once before composing longer carry chains.
+    #[kani::ensures(|result| {
+        (((result.1 as u64) << 32) | result.0 as u64)
+            == (digit as u64)
+                .wrapping_mul(multiplier as u64)
+                .wrapping_add(carry as u64)
+                .wrapping_add(addend as u64)
+    })]
+    fn carrying_mul_add_contract(
+        digit: u32,
+        multiplier: u32,
+        carry: u32,
+        addend: u32,
+    ) -> (u32, u32) {
+        digit.carrying_mul_add(multiplier, carry, addend)
+    }
+
+    // The standalone contract harness also proves this deterministic model
+    // equal to the real primitive for all four u32 inputs. Sharing its
+    // expression on both sides preserves equal carry prefixes syntactically.
+    // (2^32 - 1)^2 + 2 * (2^32 - 1) = u64::MAX, so this sum cannot wrap.
+    fn carrying_mul_add_model(digit: u32, multiplier: u32, carry: u32, addend: u32) -> (u32, u32) {
+        let sum = (digit as u64)
+            .wrapping_mul(multiplier as u64)
+            .wrapping_add(carry as u64)
+            .wrapping_add(addend as u64);
+        (sum as u32, (sum >> 32) as u32)
+    }
+
+    fn carrying_mul_model(digit: u32, multiplier: u32, carry: u32) -> (u32, u32) {
+        carrying_mul_add_model(digit, multiplier, carry, 0)
+    }
+
+    #[kani::proof_for_contract(carrying_mul_add_contract)]
+    #[kani::solver(z3)]
+    fn check_carrying_mul_add_contract() {
+        let digit: u32 = kani::any();
+        let multiplier: u32 = kani::any();
+        let carry: u32 = kani::any();
+        let addend: u32 = kani::any();
+        let result = carrying_mul_add_contract(digit, multiplier, carry, addend);
+        let modeled = carrying_mul_add_model(digit, multiplier, carry, addend);
+        // First check the complete 64-bit value. Packing two u32 limbs is
+        // injective, so the subsequent limb comparison follows directly.
+        let result_bits = ((result.1 as u64) << 32) | result.0 as u64;
+        let modeled_bits = ((modeled.1 as u64) << 32) | modeled.0 as u64;
+        assert_eq!(result_bits, modeled_bits);
+        assert_eq!(result, modeled);
+        kani::cover(
+            digit == 0 && multiplier == 0 && addend == 0 && carry == 0,
+            "limb multiplication accepts all zero inputs",
+        );
+        kani::cover(
+            digit == u32::MAX && multiplier == u32::MAX && addend == u32::MAX && carry == u32::MAX,
+            "limb multiplication accepts all maximum inputs",
+        );
+        kani::cover(
+            result == (u32::MAX, u32::MAX),
+            "limb multiplication reaches the full two-limb result",
+        );
+    }
+
+    // Bigint division needs the remainder bound to justify the next limb's
+    // division. Prove that scalar obligation separately; the storage contract
+    // below does not depend on the quotient's numeric value.
+    #[kani::requires(borrow < divisor)]
+    #[kani::ensures(|result| result.1 < divisor)]
+    fn div_rem_digit_contract(digit: u32, divisor: u32, borrow: u32) -> (u32, u32) {
+        <u32 as crate::num::bignum::FullOps>::full_div_rem(digit, divisor, borrow)
+    }
+
+    // Keep ordinary stub substitution separate from verified contract dispatch.
+    fn stub_div_rem_digit(digit: u32, divisor: u32, borrow: u32) -> (u32, u32) {
+        div_rem_digit_contract(digit, divisor, borrow)
+    }
+
+    #[kani::proof_for_contract(div_rem_digit_contract)]
+    #[kani::solver(kissat)]
+    fn check_div_rem_digit_contract() {
+        let digit: u32 = kani::any();
+        let divisor: u32 = kani::any();
+        let borrow: u32 = kani::any();
+        let (_, remainder) = div_rem_digit_contract(digit, divisor, borrow);
+        kani::cover(divisor == 1, "limb division accepts the unit divisor");
+        kani::cover(divisor == u32::MAX, "limb division accepts the largest divisor");
+        kani::cover(borrow == divisor - 1, "limb division accepts the largest borrow");
+        kani::cover(remainder == 0, "limb division can have no remainder");
+    }
+
+    // Verify the limb loop separately from the outer power-of-ten loop.
+    // Only limbs are writable, so stubs retain the caller's size expression.
+    #[kani::requires(divisor > 0 && value.kani_valid_storage())]
+    #[kani::ensures(|result| {
+        value.kani_valid_storage()
+            && value.kani_size() == old(value.kani_size())
+            && *result < divisor
+    })]
+    #[kani::modifies(value.kani_limbs_mut())]
+    fn div_rem_small_contract(value: &mut Big, divisor: u32) -> u32 {
+        value.div_rem_small(divisor).1
+    }
+
+    fn stub_div_rem_small(value: &mut Big, divisor: u32) -> (&mut Big, u32) {
+        let remainder = div_rem_small_contract(value, divisor);
+        (value, remainder)
+    }
+
+    #[kani::proof_for_contract(div_rem_small_contract)]
+    #[kani::stub(
+        <u32 as crate::num::bignum::FullOps>::full_div_rem,
+        stub_div_rem_digit
+    )]
+    #[kani::stub_verified(div_rem_digit_contract)]
+    #[kani::unwind(41)]
+    #[kani::solver(kissat)]
+    fn check_div_rem_small_contract() {
+        let mut value = Big::kani_any_valid();
+        let divisor: u32 = kani::any();
+        let _ = div_rem_small_contract(&mut value, divisor);
+        kani::cover(divisor == 1, "bigint division accepts the unit divisor");
+        kani::cover(divisor == u32::MAX, "bigint division accepts the largest divisor");
+        kani::cover(value.kani_size() == 0, "bigint division accepts empty zero storage");
+        kani::cover(value.kani_size() == 40, "bigint division accepts all limbs");
+    }
+
+    // Division preserves the bigint's allocated prefix and unused zero limbs.
+    // Its numeric result is overapproximated; the generator still performs the
+    // real addition, exact comparison semantics, and subsequent digit extraction.
+    // Read size without constructing a slice: old expressions must not panic.
+    #[kani::requires(n <= PROOF_BUFLEN && value.kani_valid_storage())]
+    #[kani::ensures(|_| {
+        value.kani_valid_storage() && value.kani_size() == old(value.kani_size())
+    })]
+    #[kani::modifies(value.kani_limbs_mut())]
+    fn div_2pow10_contract(value: &mut Big, n: usize) {
+        let _ = div_2pow10(value, n);
+    }
+
+    fn stub_div_2pow10(value: &mut Big, n: usize) -> &mut Big {
+        div_2pow10_contract(value, n);
+        value
+    }
+
+    #[kani::proof_for_contract(div_2pow10_contract)]
+    #[kani::stub(Big::div_rem_small, stub_div_rem_small)]
+    #[kani::stub_verified(div_rem_small_contract)]
+    #[kani::unwind(5)]
+    #[kani::solver(kissat)]
+    fn check_div_2pow10_contract() {
+        let mut value = Big::kani_any_valid();
+        let n: usize = kani::any();
+        div_2pow10_contract(&mut value, n);
+        kani::cover(n == 0, "division accepts the minimum power");
+        kani::cover(n == PROOF_BUFLEN, "division accepts the maximum proof power");
+        kani::cover(value.kani_size() == 0, "division accepts empty zero storage");
+        kani::cover(value.kani_size() == 40, "division accepts all bigint limbs");
+    }
+
+    // Only the additional [1, 2) probes use this adapter. Check the scaling
+    // value against the independently proved model for the actual arguments,
+    // then expose the literal zero before expanding bigint multiplication.
+    // A nonzero estimate fails the proof; it is never assumed away.
+    fn estimate_unit_scale(mant: u64, exp: i16) -> i16 {
+        assert_eq!(crate::num::flt2dec::estimator_verify::estimate_scaling_factor(mant, exp), 0);
+        0
+    }
+
+    // Identity instrumentation lets each proof expose constant exponent bits
+    // before expanding the original multiplication body. The replacement
+    // checks equality on every call, so an invalid prefix fails verification.
+    pub(super) fn proof_pow10_exponent(n: usize) -> usize {
+        n
+    }
+
+    struct FixedExponentBits(usize);
+    struct VariableExponentBits(usize);
+
+    struct Pow10Prefix {
+        fixed: FixedExponentBits,
+        variable: VariableExponentBits,
+    }
+
+    impl Pow10Prefix {
+        const fn for_range(range: crate::ops::RangeInclusive<usize>) -> Self {
+            let lower = *range.start();
+            let upper = *range.end();
+            assert!(lower <= upper);
+            let different = lower ^ upper;
+            let variable = if different == 0 { 0 } else { usize::MAX >> different.leading_zeros() };
+            Self {
+                fixed: FixedExponentBits(lower & !variable),
+                variable: VariableExponentBits(variable),
+            }
+        }
+
+        fn check(&self, n: usize) -> usize {
+            let encoded = self.fixed.0 | (n & self.variable.0);
+            assert_eq!(encoded, n);
+            encoded
+        }
+    }
+
+    // For normal inputs with exponent field e, the estimator uses a binary
+    // exponent sum between e - bias and e - bias + 1. Group zero also includes
+    // subnormals, down to -149 for f32 and -1074 for f64. Applying the original
+    // integer scaling formula to those endpoints gives these magnitude ranges.
+    // They only choose an encoding; check() proves it equals the actual value.
+    const F32_POW10_PREFIXES: [Pow10Prefix; 4] = [
+        Pow10Prefix::for_range(19..=45),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(19..=38),
+    ];
+
+    const F64_POW10_PREFIXES: [Pow10Prefix; 32] = [
+        Pow10Prefix::for_range(289..=324),
+        Pow10Prefix::for_range(270..=289),
+        Pow10Prefix::for_range(251..=270),
+        Pow10Prefix::for_range(231..=251),
+        Pow10Prefix::for_range(212..=231),
+        Pow10Prefix::for_range(193..=212),
+        Pow10Prefix::for_range(174..=193),
+        Pow10Prefix::for_range(154..=174),
+        Pow10Prefix::for_range(135..=154),
+        Pow10Prefix::for_range(116..=135),
+        Pow10Prefix::for_range(97..=116),
+        Pow10Prefix::for_range(77..=97),
+        Pow10Prefix::for_range(58..=77),
+        Pow10Prefix::for_range(39..=58),
+        Pow10Prefix::for_range(19..=39),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(0..=19),
+        Pow10Prefix::for_range(19..=38),
+        Pow10Prefix::for_range(38..=58),
+        Pow10Prefix::for_range(58..=77),
+        Pow10Prefix::for_range(77..=96),
+        Pow10Prefix::for_range(96..=115),
+        Pow10Prefix::for_range(115..=135),
+        Pow10Prefix::for_range(135..=154),
+        Pow10Prefix::for_range(154..=173),
+        Pow10Prefix::for_range(173..=192),
+        Pow10Prefix::for_range(192..=212),
+        Pow10Prefix::for_range(212..=231),
+        Pow10Prefix::for_range(231..=250),
+        Pow10Prefix::for_range(250..=270),
+        Pow10Prefix::for_range(270..=289),
+        Pow10Prefix::for_range(289..=308),
+    ];
+
+    fn checked_pow10_f32<const GROUP: usize>(n: usize) -> usize {
+        F32_POW10_PREFIXES[GROUP].check(n)
+    }
+
+    fn checked_pow10_f64<const GROUP: usize>(n: usize) -> usize {
+        F64_POW10_PREFIXES[GROUP].check(n)
+    }
+
+    fn checked_pow10_unit<const EXPONENT: usize>(n: usize) -> usize {
+        assert_eq!(EXPONENT, 1023);
+        Pow10Prefix::for_range(0..=0).check(n)
+    }
+
+    struct LimbCountMask(usize);
+
+    impl LimbCountMask {
+        fn check(&self, size: usize) -> usize {
+            let encoded = size & self.0;
+            assert_eq!(encoded, size);
+            encoded
+        }
+    }
+
+    // Only the two unit-exponent diagnostics use these checked count encodings.
+    // A count outside the mask fails an assertion, without excluding any input.
+    fn unit_shortest_limb_count(size: usize) -> usize {
+        LimbCountMask(3).check(size)
+    }
+
+    fn unit_exact_limb_count(size: usize) -> usize {
+        LimbCountMask(7).check(size)
+    }
+
+    macro_rules! check_partition {
+        ($name:ident, arbitrary_finite_f32, $group:literal, $cover_fallback:literal) => {
+            check_partition!(
+                $name,
+                arbitrary_finite_f32,
+                $group,
+                $cover_fallback,
+                19,
+                33,
+                crate::num::flt2dec::estimator_verify::estimate_scaling_factor,
+                checked_pow10_f32
+            );
+        };
+        ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
+            check_partition!($name, $decode, $group, $cover_fallback, 41, 41);
+        };
+        (
+            $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
+            $shortest_unwind:literal, $exact_unwind:literal
+        ) => {
+            check_partition!(
+                $name,
+                $decode,
+                $group,
+                $cover_fallback,
+                $shortest_unwind,
+                $exact_unwind,
+                crate::num::flt2dec::estimator_verify::estimate_scaling_factor,
+                checked_pow10_f64
+            );
+        };
+        (
+            $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
+            $shortest_unwind:literal, $exact_unwind:literal, $estimate:path, $pow10:ident
+            $(, $shortest_limbs:path, $exact_limbs:path)?
+        ) => {
+            mod $name {
+                use super::*;
+
+                fn stub_pow10_exponent(n: usize) -> usize {
+                    $pow10::<$group>(n)
+                }
+
+                #[kani::proof]
+                #[kani::unwind($shortest_unwind)]
+                $(
+                    #[kani::stub(crate::num::bignum::kani_loop_size, $shortest_limbs)]
+                    #[kani::stub(Big::add, Big::kani_add_model)]
+                    #[kani::stub(Big::sub, Big::kani_sub_model)]
+                    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                )?
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(u32::carrying_mul, carrying_mul_model)]
+                #[kani::stub(u32::carrying_mul_add, carrying_mul_add_model)]
+                #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::stub(
+                    crate::num::flt2dec::round_up,
+                    crate::num::flt2dec::rounding_verify::stub_round_up
+                )]
+                #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::solver(kissat)]
+                fn check_format_shortest() {
+                    let d = $decode::<$group>();
+                    let len = usize::from(kani::any::<u8>());
+                    kani::assume(len >= MAX_SIG_DIGITS && len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == MAX_SIG_DIGITS, "shortest uses the minimum buffer");
+                    kani::cover(len == PROOF_BUFLEN, "shortest uses the largest proof buffer");
+                    let (digits, _) = format_shortest(&d, &mut buf[..len]);
+                    kani::cover(digits.len() > 1, "shortest produces multiple digits");
+                    assert!(!digits.is_empty());
+                    assert!(digits.len() <= len);
+                    assert_eq!(digits.as_ptr(), start);
+                }
+
+                #[kani::proof]
+                #[kani::unwind($exact_unwind)]
+                $(
+                    #[kani::stub(crate::num::bignum::kani_loop_size, $exact_limbs)]
+                    #[kani::stub(Big::add, Big::kani_add_model)]
+                    #[kani::stub(Big::sub, Big::kani_sub_model)]
+                    #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
+                )?
+                #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(u32::carrying_mul, carrying_mul_model)]
+                #[kani::stub(u32::carrying_mul_add, carrying_mul_add_model)]
+                #[kani::stub(crate::num::flt2dec::estimator::estimate_scaling_factor, $estimate)]
+                #[kani::stub(
+                    u64::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u64
+                )]
+                #[kani::stub(
+                    u32::leading_zeros,
+                    crate::num::flt2dec::bit_scan_verify::leading_zeros_u32
+                )]
+                #[kani::stub(<Big as crate::cmp::Ord>::cmp, stub_cmp)]
+                #[kani::stub(Big::is_zero, stub_is_zero)]
+                #[kani::stub(
+                    crate::num::flt2dec::round_up,
+                    crate::num::flt2dec::rounding_verify::stub_round_up
+                )]
+                #[kani::stub_verified(crate::num::flt2dec::rounding_verify::round_up_contract)]
+                #[kani::stub(div_2pow10, stub_div_2pow10)]
+                #[kani::stub_verified(div_2pow10_contract)]
+                #[kani::solver(kissat)]
+                fn check_format_exact() {
+                    let d = $decode::<$group>();
+                    let limit: i16 = kani::any();
+                    let len = usize::from(kani::any::<u8>());
+                    kani::assume(len <= PROOF_BUFLEN);
+                    let mut buf = [const { MaybeUninit::uninit() }; PROOF_BUFLEN];
+                    let start = buf.as_ptr().cast::<u8>();
+                    kani::cover(len == 0, "exact accepts an empty buffer");
+                    kani::cover(len == PROOF_BUFLEN, "exact uses the largest proof buffer");
+                    let (digits, _) = format_exact(&d, &mut buf[..len], limit);
+                    kani::cover(digits.is_empty(), "exact can return an empty prefix");
+                    kani::cover(digits.len() > 1, "exact produces multiple digits");
+                    assert!(digits.len() <= len);
+                    assert_eq!(digits.as_ptr(), start);
+                }
+            }
+        };
+    }
+
+    for_each_finite_partition!(check_partition);
+    // These inputs need fewer bigint limbs. Keep enough iterations for the
+    // digit and rounding loops; unwinding assertions check every loop bound.
+    check_partition!(
+        f64_exp_1023,
+        arbitrary_finite_f64_exponent,
+        1023,
+        false,
+        19,
+        33,
+        estimate_unit_scale,
+        checked_pow10_unit,
+        unit_shortest_limb_count,
+        unit_exact_limb_count
+    );
 }
