@@ -147,3 +147,28 @@ where
         f.debug_struct("ExtractIf").field("peek", &peek).finish_non_exhaustive()
     }
 }
+
+#[cfg(kani)]
+mod verify {
+    use core::kani;
+
+    use crate::vec::Vec;
+
+    // ExtractIf::next: drains in place through `vec.as_mut_ptr().add(i)`, reading
+    // and writing the REAL pointer (no `can_write` assumption). The symbolic
+    // predicate exercises the drained and hole-shift (`del > 0`) branches; the
+    // implicit Drop exercises the backshift of the untouched tail. Bounded at 3:
+    // larger sizes exceed the CI-standard object-bits 12 object budget (measured).
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_extract_if_next_u8() {
+        let arr: [u8; 3] = kani::any();
+        let mut v: Vec<u8> = kani::slice::any_slice_of_array(&arr).to_vec();
+        kani::cover(v.len() > 1, "non-vacuity: a multi-element drain is reachable");
+        let mut ei = v.extract_if(.., |_x: &mut u8| kani::any::<bool>());
+        // Two steps exercise the drain path and the `del > 0` hole-shift; the implicit
+        // Drop then exercises the backshift-on-drop of the untouched tail.
+        let _ = ei.next();
+        let _ = ei.next();
+    }
+}

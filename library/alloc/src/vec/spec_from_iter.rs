@@ -62,3 +62,31 @@ impl<T> SpecFromIter<T, IntoIter<T>> for Vec<T> {
         vec
     }
 }
+
+#[cfg(kani)]
+mod verify {
+    use core::kani;
+
+    use super::SpecFromIter;
+    use crate::vec::{IntoIter, Vec};
+
+    // from_iter (IntoIter specialization): reuse-allocation path (from_parts /
+    // ptr::copy-to-front) — object-light, no reallocation. Real body,
+    // symbolic-length source; postcondition checks length and element value
+    // at a symbolic index.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_from_iter_intoiter_u8() {
+        let arr: [u8; 64] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let n = s.len();
+        let src: IntoIter<u8> = s.to_vec().into_iter();
+        let v: Vec<u8> = <Vec<u8> as SpecFromIter<u8, IntoIter<u8>>>::from_iter(src);
+        assert!(v.len() == n);
+        if n > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < n);
+            assert!(v[j] == s[j]);
+        }
+    }
+}

@@ -56,3 +56,49 @@ where
         unsafe { self.append_elements(slice) };
     }
 }
+
+#[cfg(kani)]
+mod verify {
+    use core::kani;
+
+    use super::SpecExtend;
+    use crate::vec::{IntoIter, Vec};
+
+    // spec_extend (IntoIter): routes to append_elements (bulk memcpy). Self is
+    // pre-sized so reserve() is a no-op — this is the copy path, not the
+    // element-by-element grow. Real body, symbolic-length source; postcondition
+    // checks length and element value at a symbolic index.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_spec_extend_intoiter_u8() {
+        let mut v: Vec<u8> = Vec::with_capacity(128);
+        let arr: [u8; 64] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let m = s.len();
+        let src: IntoIter<u8> = s.to_vec().into_iter();
+        v.spec_extend(src);
+        assert!(v.len() == m);
+        if m > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < m);
+            assert!(v[j] == s[j]);
+        }
+    }
+
+    // spec_extend (slice::Iter, TrivialClone specialization): same append_elements path.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_spec_extend_sliceiter_u8() {
+        let mut v: Vec<u8> = Vec::with_capacity(128);
+        let arr: [u8; 64] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let m = s.len();
+        v.spec_extend(s.iter());
+        assert!(v.len() == m);
+        if m > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < m);
+            assert!(v[j] == s[j]);
+        }
+    }
+}
