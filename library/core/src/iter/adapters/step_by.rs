@@ -1,3 +1,5 @@
+use safety::ensures;
+
 use crate::intrinsics;
 use crate::iter::{TrustedLen, TrustedRandomAccess, from_fn};
 #[cfg(kani)]
@@ -50,6 +52,10 @@ impl<I> StepBy<I> {
     /// The `step` that was originally passed to `Iterator::step_by(step)`,
     /// aka `self.step_minus_one + 1`.
     #[inline]
+    // Postcondition: the recovered step is `step_minus_one + 1` (subtraction form keeps
+    // the contract overflow-safe). No `#[requires]`: `original_step` is a safe fn whose
+    // internal `unsafe` rests on the StepBy type invariant, not a caller obligation.
+    #[ensures(|result| result.get() - 1 == old(self).step_minus_one)]
     fn original_step(&self) -> NonZero<usize> {
         // SAFETY: By type invariant, `step_minus_one` cannot be `MAX`, which
         // means the addition cannot overflow and the result cannot be zero.
@@ -589,3 +595,82 @@ spec_int_ranges_r!(u8 u16 u32 usize);
 spec_int_ranges!(u8 u16 usize);
 #[cfg(target_pointer_width = "16")]
 spec_int_ranges_r!(u8 u16 usize);
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // original_step (uses NonZero::new_unchecked + unchecked_add)
+    // Exercised through size_hint → spec_size_hint → original_step,
+    // forward iteration via next, and backward iteration via
+    // next_back → next_back_index → original_step.
+    #[kani::proof]
+    fn check_step_by_original_step_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let step: usize = kani::any();
+        kani::assume(step >= 1);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let sb = StepBy::new(slice.iter(), step);
+        // size_hint calls original_step internally
+        let _ = sb.size_hint();
+    }
+
+    // Single call on large array: next() delegates to iter.nth(step-1) which is safe,
+    // and exercises original_step() for the step calculation. The unsafe is only
+    // NonZero::new_unchecked + unchecked_add, independent of slice length.
+    #[kani::proof]
+    fn check_step_by_iterate_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let step: usize = kani::any();
+        kani::assume(step >= 1);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut sb = StepBy::new(slice.iter(), step);
+        let _ = sb.next();
+    }
+
+    // next_back exercises next_back_index → original_step
+    // Single call: next_back() computes next_back_index (uses original_step) then
+    // delegates to iter.nth_back(). The unsafe is in original_step, not the iteration.
+    #[kani::proof]
+    fn check_step_by_next_back_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let step: usize = kani::any();
+        kani::assume(step >= 1);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut sb = StepBy::new(slice.iter(), step);
+        let _ = sb.next_back();
+    }
+
+    #[kani::proof]
+    fn check_step_by_original_step_char() {
+        const MAX_LEN: usize = 50;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let step: usize = kani::any();
+        kani::assume(step >= 1);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let sb = StepBy::new(slice.iter(), step);
+        let _ = sb.size_hint();
+    }
+
+    // Direct contract proof for `original_step`. This is the one inherent method in the
+    // challenge, so (unlike the trait-impl `get_unchecked`/`next_unchecked` methods) a
+    // `#[kani::proof_for_contract]` can resolve it. The receiver is havoced over the StepBy
+    // type invariant (`step_minus_one < usize::MAX`, i.e. `is_safe()`), under which the
+    // internal `unchecked_add` + `new_unchecked` are UB-free; the `#[ensures]` pins the
+    // recovered value to `step_minus_one + 1`.
+    #[kani::proof_for_contract(StepBy::<Range<u8>>::original_step)]
+    fn check_step_by_original_step_contract() {
+        let sb = StepBy { iter: 0u8..0u8, step_minus_one: kani::any(), first_take: kani::any() };
+        kani::assume(sb.step_minus_one < usize::MAX);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let _ = sb.original_step();
+    }
+}
