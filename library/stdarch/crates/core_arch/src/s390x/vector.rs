@@ -281,16 +281,13 @@ unsafe extern "unadjusted" {
     #[link_name = "llvm.s390.vfenezbs"] fn vfenezbs(a: i8x16, b: i8x16) -> PackedTuple<i8x16, i32>;
     #[link_name = "llvm.s390.vfenezhs"] fn vfenezhs(a: i16x8, b: i16x8) -> PackedTuple<i16x8, i32>;
     #[link_name = "llvm.s390.vfenezfs"] fn vfenezfs(a: i32x4, b: i32x4) -> PackedTuple<i32x4, i32>;
+
+    #[link_name = "llvm.s390.vclfnhs"] fn vclfnhs(a: vector_signed_short, immarg: i32) -> vector_float;
+    #[link_name = "llvm.s390.vclfnls"] fn vclfnls(a: vector_signed_short, immarg: i32) -> vector_float;
+    #[link_name = "llvm.s390.vcfn"] fn vcfn(a: vector_signed_short, immarg: i32) -> vector_signed_short;
+    #[link_name = "llvm.s390.vcnf"] fn vcnf(a: vector_signed_short, immarg: i32) -> vector_signed_short;
+    #[link_name = "llvm.s390.vcrnfs"] fn vcrnfs(a: vector_float, b: vector_float, immarg: i32) -> vector_signed_short;
 }
-
-impl_from! { i8x16, u8x16,  i16x8, u16x8, i32x4, u32x4, i64x2, u64x2, f32x4, f64x2 }
-
-impl_neg! { i8x16 : 0 }
-impl_neg! { i16x8 : 0 }
-impl_neg! { i32x4 : 0 }
-impl_neg! { i64x2 : 0 }
-impl_neg! { f32x4 : 0f32 }
-impl_neg! { f64x2 : 0f64 }
 
 #[repr(simd)]
 struct ShuffleMask<const N: usize>([u32; N]);
@@ -438,6 +435,43 @@ enum FindImm {
 #[macro_use]
 mod sealed {
     use super::*;
+
+    #[unstable(feature = "stdarch_s390x", issue = "135681")]
+    pub trait VectorNeg {
+        unsafe fn vec_neg(self) -> Self;
+    }
+
+    macro_rules! impl_neg {
+        ($($v:ty)*) => {
+            $(
+                #[unstable(feature = "stdarch_s390x", issue = "135681")]
+                impl VectorNeg for $v {
+                    #[inline]
+                    #[target_feature(enable = "vector")]
+                    unsafe fn vec_neg(self) -> Self {
+                        simd_neg(self)
+                    }
+                }
+            )*
+        }
+    }
+
+    impl_neg! {
+        vector_signed_char
+        vector_unsigned_char
+
+        vector_signed_short
+        vector_unsigned_short
+
+        vector_signed_int
+        vector_unsigned_int
+
+        vector_signed_long_long
+        vector_unsigned_long_long
+
+        vector_float
+        vector_double
+    }
 
     #[unstable(feature = "stdarch_s390x", issue = "135681")]
     pub trait VectorAdd<Other> {
@@ -761,7 +795,7 @@ mod sealed {
             #[inline]
             #[target_feature(enable = "vector")]
             unsafe fn $name(v: s_t_l!($ty)) -> s_t_l!($ty) {
-                v.vec_max(-v)
+                v.vec_max(simd_neg(v))
             }
 
             impl_vec_trait! { [VectorAbs vec_abs] $name (s_t_l!($ty)) }
@@ -896,7 +930,7 @@ mod sealed {
     #[cfg_attr(test, assert_instr(vrepb, IMM2 = 1))]
     unsafe fn vrepb<const IMM2: u32>(a: vector_signed_char) -> vector_signed_char {
         static_assert_uimm_bits!(IMM2, 4);
-        simd_shuffle(a, a, const { u32x16::from_array([IMM2; 16]) })
+        simd_shuffle!(a, a, [IMM2; 16])
     }
 
     #[inline]
@@ -904,7 +938,7 @@ mod sealed {
     #[cfg_attr(test, assert_instr(vreph, IMM2 = 1))]
     unsafe fn vreph<const IMM2: u32>(a: vector_signed_short) -> vector_signed_short {
         static_assert_uimm_bits!(IMM2, 3);
-        simd_shuffle(a, a, const { u32x8::from_array([IMM2; 8]) })
+        simd_shuffle!(a, a, [IMM2; 8])
     }
 
     #[inline]
@@ -912,7 +946,7 @@ mod sealed {
     #[cfg_attr(test, assert_instr(vrepf, IMM2 = 1))]
     unsafe fn vrepf<const IMM2: u32>(a: vector_signed_int) -> vector_signed_int {
         static_assert_uimm_bits!(IMM2, 2);
-        simd_shuffle(a, a, const { u32x4::from_array([IMM2; 4]) })
+        simd_shuffle!(a, a, [IMM2; 4])
     }
 
     #[inline]
@@ -920,7 +954,7 @@ mod sealed {
     #[cfg_attr(test, assert_instr(vrepg, IMM2 = 1))]
     unsafe fn vrepg<const IMM2: u32>(a: vector_signed_long_long) -> vector_signed_long_long {
         static_assert_uimm_bits!(IMM2, 1);
-        simd_shuffle(a, a, const { u32x2::from_array([IMM2; 2]) })
+        simd_shuffle!(a, a, [IMM2; 2])
     }
 
     macro_rules! impl_vec_splat {
@@ -4055,6 +4089,14 @@ unsafe fn __lcbb<const BLOCK_BOUNDARY: u16>(ptr: *const u8) -> u32 {
     lcbb(ptr, const { validate_block_boundary(BLOCK_BOUNDARY) })
 }
 
+/// Vector Negate
+#[inline]
+#[target_feature(enable = "vector")]
+#[unstable(feature = "stdarch_s390x", issue = "135681")]
+pub unsafe fn vec_neg<T: sealed::VectorNeg>(a: T) -> T {
+    a.vec_neg()
+}
+
 /// Vector Add
 #[inline]
 #[target_feature(enable = "vector")]
@@ -5307,11 +5349,13 @@ pub unsafe fn vec_search_string_until_zero_cc<T: sealed::VectorSearchString>(
 #[inline]
 #[target_feature(enable = "vector-enhancements-1")]
 #[unstable(feature = "stdarch_s390x", issue = "135681")]
-// FIXME: this emits `vflls` where `vldeb` is expected
-// #[cfg_attr(all(test, target_feature = "vector-enhancements-1"), assert_instr(vldeb))]
+// NOTE: `vflls` and `vldeb` are equivalent; our disassmbler prefers vflls.
+#[cfg_attr(
+    all(test, target_feature = "vector-enhancements-1"),
+    assert_instr(vflls)
+)]
 pub unsafe fn vec_doublee(a: vector_float) -> vector_double {
-    let even = simd_shuffle::<_, _, f32x2>(a, a, const { u32x2::from_array([0, 2]) });
-    simd_as(even)
+    simd_as::<f32x2, vector_double>(simd_shuffle!(a, a, [0, 2]))
 }
 
 /// Vector Convert from double to float (even elements)
@@ -5322,11 +5366,7 @@ pub unsafe fn vec_doublee(a: vector_float) -> vector_double {
 // #[cfg_attr(all(test, target_feature = "vector-enhancements-1"), assert_instr(vledb))]
 pub unsafe fn vec_floate(a: vector_double) -> vector_float {
     let truncated: f32x2 = simd_as(a);
-    simd_shuffle(
-        truncated,
-        truncated,
-        const { u32x4::from_array([0, 0, 1, 1]) },
-    )
+    simd_shuffle!(truncated, truncated, [0, 0, 1, 1])
 }
 
 /// Vector Convert from int to float
@@ -5875,6 +5915,74 @@ pub unsafe fn vec_insert_and_zero<T: sealed::VectorInsertAndZero>(a: *const T::E
 #[unstable(feature = "stdarch_s390x", issue = "135681")]
 pub unsafe fn vec_promote<T: sealed::VectorPromote>(a: T::ElementType, b: i32) -> MaybeUninit<T> {
     T::vec_promote(a, b)
+}
+
+/// Converts the left-most half of `a` to a vector of single-precision numbers.
+/// The format of the source vector elements is specified by `B`.
+#[inline]
+#[target_feature(enable = "nnp-assist")]
+#[cfg_attr(test, assert_instr(vclfnh, B = 0))]
+#[unstable(feature = "stdarch_s390x", issue = "135681")]
+pub unsafe fn vec_extend_to_fp32_hi<const B: i32>(a: vector_signed_short) -> vector_float {
+    // On processors implementing the IBM z16 architecture, only the value 0 is supported.
+    static_assert_uimm_bits!(B, 4);
+
+    vclfnhs(a, B)
+}
+
+/// Converts the right-most half of `a` to a vector of single-precision numbers.
+/// The format of the source vector elements is specified by `B`.
+#[inline]
+#[target_feature(enable = "nnp-assist")]
+#[cfg_attr(test, assert_instr(vclfnl, B = 0))]
+#[unstable(feature = "stdarch_s390x", issue = "135681")]
+pub unsafe fn vec_extend_to_fp32_lo<const B: i32>(a: vector_signed_short) -> vector_float {
+    // On processors implementing the IBM z16 architecture, only the value 0 is supported.
+    static_assert_uimm_bits!(B, 4);
+
+    vclfnls(a, B)
+}
+
+/// Converts the elements of vector `a` to the 16-bit IEEE floating point format.
+/// The format of the source vector elements is specified by `B`.
+#[inline]
+#[target_feature(enable = "nnp-assist")]
+#[cfg_attr(test, assert_instr(vcfn, B = 0))]
+#[unstable(feature = "stdarch_s390x", issue = "135681")]
+pub unsafe fn vec_convert_to_fp16<const B: i32>(a: vector_signed_short) -> vector_signed_short {
+    // On processors implementing the IBM z16 architecture, only the value 0 is supported.
+    static_assert_uimm_bits!(B, 4);
+
+    vcfn(a, B)
+}
+
+/// Converts the elements of vector `a` to an internal floating point format.
+/// The format of the target vector elements is specified by `B`.
+#[inline]
+#[target_feature(enable = "nnp-assist")]
+#[cfg_attr(test, assert_instr(vcnf, B = 0))]
+#[unstable(feature = "stdarch_s390x", issue = "135681")]
+pub unsafe fn vec_convert_from_fp16<const B: i32>(a: vector_signed_short) -> vector_signed_short {
+    // On processors implementing the IBM z16 architecture, only the value 0 is supported.
+    static_assert_uimm_bits!(B, 4);
+
+    vcnf(a, B)
+}
+
+/// Converts the elements of single-precision vectors `a` and `b` to an internal floating point
+/// format with 16-bit sized elements. The format of the target vector elements is specified by `C`.
+#[inline]
+#[target_feature(enable = "nnp-assist")]
+#[unstable(feature = "stdarch_s390x", issue = "135681")]
+#[cfg_attr(test, assert_instr(vcrnf, C = 0))]
+pub unsafe fn vec_round_from_fp32<const C: i32>(
+    a: vector_float,
+    b: vector_float,
+) -> vector_signed_short {
+    // On processors implementing the IBM z16 architecture, only the value 0 is supported.
+    static_assert_uimm_bits!(C, 4);
+
+    vcrnfs(a, b, C)
 }
 
 #[cfg(test)]
