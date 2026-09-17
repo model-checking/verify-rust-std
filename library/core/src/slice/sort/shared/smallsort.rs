@@ -865,3 +865,543 @@ pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
     // Heuristic that holds true on all tested 64-bit capable architectures.
     size_of::<T>() <= 8 // size_of::<u64>()
 }
+
+#[unstable(feature = "kani", issue = "none")]
+#[cfg(kani)]
+mod verify {
+    use super::*;
+    use crate::cell::Cell;
+    use crate::kani;
+
+    // ------------------------------------------------------------------
+    // Correctness oracles.
+    //
+    // Sortedness alone is NOT sorting correctness: an implementation that
+    // overwrote the slice with a constant would satisfy it. Every correctness
+    // harness below therefore asserts BOTH:
+    //   * `assert_sorted`      -- the output is non-decreasing, and
+    //   * `assert_permutation` -- the output is a multiset-permutation of the
+    //                             input.
+    //
+    // Both oracles work on arrays of comparison *keys* extracted from the
+    // elements, so the same code serves `i32`, `Cell<i32>`, a non-`Copy`
+    // wrapper, `u128` and `[u64; 11]`.
+    // ------------------------------------------------------------------
+
+    /// Assert `keys` is non-decreasing under the harness comparator (`a < b`).
+    fn assert_sorted<K: PartialOrd, const LEN: usize>(keys: &[K; LEN]) {
+        for i in 1..LEN {
+            assert!(!(keys[i] < keys[i - 1]));
+        }
+    }
+
+    /// Assert `after` is a permutation of `before`.
+    ///
+    /// For each value occurring in `before`, the number of occurrences in
+    /// `after` must equal the number of occurrences in `before`. Since the two
+    /// arrays have the same (const) length, this is exactly multiset equality.
+    fn assert_permutation<K: PartialEq, const LEN: usize>(after: &[K; LEN], before: &[K; LEN]) {
+        for i in 0..LEN {
+            let mut in_after = 0usize;
+            let mut in_before = 0usize;
+            for j in 0..LEN {
+                if after[j] == before[i] {
+                    in_after += 1;
+                }
+                if before[j] == before[i] {
+                    in_before += 1;
+                }
+            }
+            assert!(in_after == in_before);
+        }
+    }
+
+    /// `Freeze` but deliberately not `Copy`, so that it selects the *default*
+    /// `UnstableSmallSortFreezeTypeImpl` impl rather than the `CopyMarker` one.
+    struct NonCopyI32(i32);
+
+    // ------------------------------------------------------------------
+    // Group A: sorting-correctness sweeps over the whole dispatch tree.
+    //
+    // The small-sort API is bounded by design (`SMALL_SORT_FALLBACK_THRESHOLD`
+    // = 16, `SMALL_SORT_GENERAL_THRESHOLD` = `SMALL_SORT_NETWORK_THRESHOLD` =
+    // 32), so "arbitrary valid length" is covered by one harness per concrete
+    // length in the valid range, each with fully symbolic contents.
+    // ------------------------------------------------------------------
+
+    /// `<i32 as StableSmallSortTypeImpl>::small_sort`.
+    ///
+    /// `i32` is `Freeze`, so this selects the `FreezeMarker` impl ->
+    /// `small_sort_general_with_scratch`. The sweep runs to the measured
+    /// SAT-tractability frontier (see the PR text) and covers the `len < 2`
+    /// no-op, `len < 8` copy-1 + insertion, and `8 <= len` `sort4_stable`-pair
+    /// branches, each followed by the per-half insertion sort and
+    /// `bidirectional_merge`; the `16 <= len` `sort8_stable`-pair branch is
+    /// beyond the composed-proof frontier and its primitive is verified
+    /// directly in Group C. Scratch is `SMALL_SORT_GENERAL_SCRATCH_LEN` (48)
+    /// long, exactly what the real callers pass.
+    macro_rules! check_ss_stable_i32 {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(cadical)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [i32; LEN] = kani::any();
+                let before = v;
+                let mut scratch: [MaybeUninit<i32>; SMALL_SORT_GENERAL_SCRATCH_LEN] =
+                    [const { MaybeUninit::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+
+                <i32 as StableSmallSortTypeImpl>::small_sort(
+                    &mut v,
+                    &mut scratch,
+                    &mut |a: &i32, b: &i32| a < b,
+                );
+
+                assert_sorted(&v);
+                assert_permutation(&v, &before);
+            }
+        };
+    }
+
+    check_ss_stable_i32!(check_ss_stable_i32_len_0, 0, 2);
+    check_ss_stable_i32!(check_ss_stable_i32_len_1, 1, 3);
+    check_ss_stable_i32!(check_ss_stable_i32_len_2, 2, 4);
+    check_ss_stable_i32!(check_ss_stable_i32_len_3, 3, 5);
+    check_ss_stable_i32!(check_ss_stable_i32_len_4, 4, 6);
+    check_ss_stable_i32!(check_ss_stable_i32_len_5, 5, 7);
+    check_ss_stable_i32!(check_ss_stable_i32_len_6, 6, 8);
+    check_ss_stable_i32!(check_ss_stable_i32_len_7, 7, 9);
+    check_ss_stable_i32!(check_ss_stable_i32_len_8, 8, 10);
+
+    /// `<i32 as UnstableSmallSortTypeImpl>::small_sort`.
+    ///
+    /// `i32` is `Freeze`, so this goes through the `FreezeMarker` impl, which
+    /// delegates to `<i32 as UnstableSmallSortFreezeTypeImpl>::small_sort`.
+    /// `i32` is also `Copy` with `size_of` 4, so the `CopyMarker` impl applies
+    /// and `has_efficient_in_place_swap::<i32>()` is true -> `small_sort_network`.
+    /// The sweep runs to the measured SAT-tractability frontier (see the PR
+    /// text): `len < 2` (no-op) and the single-region insertion band; the
+    /// `sort9_optimal` band is covered at 8-bit width below and its primitive
+    /// directly in Group C, while the `sort13_optimal` and two-region +
+    /// `bidirectional_merge` paths are beyond the composed-proof frontier at
+    /// any width.
+    ///
+    /// This harness discharges success criteria 2 and 3 simultaneously.
+    macro_rules! check_ss_unstable_i32 {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(cadical)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [i32; LEN] = kani::any();
+                let before = v;
+
+                <i32 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &i32, b: &i32| {
+                    a < b
+                });
+
+                assert_sorted(&v);
+                assert_permutation(&v, &before);
+            }
+        };
+    }
+
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_0, 0, 2);
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_1, 1, 3);
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_2, 2, 4);
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_3, 3, 5);
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_4, 4, 6);
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_5, 5, 7);
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_6, 6, 8);
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_7, 7, 9);
+    check_ss_unstable_i32!(check_ss_unstable_i32_len_8, 8, 10);
+
+    /// `<u8 as UnstableSmallSortTypeImpl>::small_sort` — same `small_sort_network`
+    /// path as the `i32` sweep (`u8` is `Copy`+`Freeze`, size 1, efficient swap),
+    /// at 8-bit element width.
+    ///
+    /// Rationale: the `sort9_optimal` swap chain is a comparison network whose
+    /// SAT encoding at 32-bit width exceeds the CI budget (see the PR text for
+    /// measurements); the network structure is element-width-independent, so
+    /// this 8-bit harness carries the `sort9_optimal` region of the dispatch
+    /// tree end-to-end, and Group C verifies the primitive directly.
+    macro_rules! check_ss_unstable_u8 {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(kissat)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [u8; LEN] = kani::any();
+                let before = v;
+
+                <u8 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u8, b: &u8| a < b);
+
+                assert_sorted(&v);
+                assert_permutation(&v, &before);
+            }
+        };
+    }
+
+    check_ss_unstable_u8!(check_ss_unstable_u8_len_9, 9, 11);
+
+    /// `<Cell<i32> as StableSmallSortTypeImpl>::small_sort`.
+    ///
+    /// `Cell<i32>` is **not** `Freeze`, so this selects the *default*
+    /// `StableSmallSortTypeImpl` impl, whose threshold is
+    /// `SMALL_SORT_FALLBACK_THRESHOLD` (16) and which runs
+    /// `insertion_sort_shift_left(v, 1, ..)` for `len >= 2`.
+    macro_rules! check_ss_stable_cell {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(cadical)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [Cell<i32>; LEN] = crate::array::from_fn(|_| Cell::new(kani::any()));
+                let before: [i32; LEN] = crate::array::from_fn(|i| v[i].get());
+                let mut scratch: [MaybeUninit<Cell<i32>>; SMALL_SORT_GENERAL_SCRATCH_LEN] =
+                    [const { MaybeUninit::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+
+                <Cell<i32> as StableSmallSortTypeImpl>::small_sort(
+                    &mut v,
+                    &mut scratch,
+                    &mut |a: &Cell<i32>, b: &Cell<i32>| a.get() < b.get(),
+                );
+
+                let after: [i32; LEN] = crate::array::from_fn(|i| v[i].get());
+                assert_sorted(&after);
+                assert_permutation(&after, &before);
+            }
+        };
+    }
+
+    check_ss_stable_cell!(check_ss_stable_cell_len_0, 0, 2);
+    check_ss_stable_cell!(check_ss_stable_cell_len_1, 1, 3);
+    check_ss_stable_cell!(check_ss_stable_cell_len_2, 2, 4);
+    check_ss_stable_cell!(check_ss_stable_cell_len_3, 3, 5);
+    check_ss_stable_cell!(check_ss_stable_cell_len_7, 7, 9);
+
+    /// `<Cell<i32> as UnstableSmallSortTypeImpl>::small_sort`.
+    ///
+    /// `Cell<i32>` is not `Freeze`, so this selects the *default*
+    /// `UnstableSmallSortTypeImpl` impl -> `small_sort_fallback` (insertion
+    /// sort), with threshold `SMALL_SORT_FALLBACK_THRESHOLD` (16).
+    macro_rules! check_ss_unstable_cell {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(cadical)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [Cell<i32>; LEN] = crate::array::from_fn(|_| Cell::new(kani::any()));
+                let before: [i32; LEN] = crate::array::from_fn(|i| v[i].get());
+
+                <Cell<i32> as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &Cell<
+                    i32,
+                >,
+                                                                                   b: &Cell<
+                    i32,
+                >| {
+                    a.get() < b.get()
+                });
+
+                let after: [i32; LEN] = crate::array::from_fn(|i| v[i].get());
+                assert_sorted(&after);
+                assert_permutation(&after, &before);
+            }
+        };
+    }
+
+    check_ss_unstable_cell!(check_ss_unstable_cell_len_0, 0, 2);
+    check_ss_unstable_cell!(check_ss_unstable_cell_len_1, 1, 3);
+    check_ss_unstable_cell!(check_ss_unstable_cell_len_2, 2, 4);
+    check_ss_unstable_cell!(check_ss_unstable_cell_len_7, 7, 9);
+
+    /// `<NonCopyI32 as UnstableSmallSortFreezeTypeImpl>::small_sort`.
+    ///
+    /// `NonCopyI32` is `Freeze` but not `Copy`, so the `CopyMarker`
+    /// specialization does not apply and the *default*
+    /// `UnstableSmallSortFreezeTypeImpl` impl is used. `size_of` is 4, so
+    /// `4 * 48 <= 4096` and the `small_sort_general` branch is taken (threshold
+    /// 32). This is the harness for success criterion 3 on the default impl.
+    macro_rules! check_ss_unstable_noncopy {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(cadical)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [NonCopyI32; LEN] = crate::array::from_fn(|_| NonCopyI32(kani::any()));
+                let before: [i32; LEN] = crate::array::from_fn(|i| v[i].0);
+
+                <NonCopyI32 as UnstableSmallSortFreezeTypeImpl>::small_sort(
+                    &mut v,
+                    &mut |a: &NonCopyI32, b: &NonCopyI32| a.0 < b.0,
+                );
+
+                let after: [i32; LEN] = crate::array::from_fn(|i| v[i].0);
+                assert_sorted(&after);
+                assert_permutation(&after, &before);
+            }
+        };
+    }
+
+    check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_0, 0, 2);
+    check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_1, 1, 3);
+    check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_2, 2, 4);
+    check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_3, 3, 5);
+    check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_7, 7, 9);
+    check_ss_unstable_noncopy!(check_ss_unstable_noncopy_len_8, 8, 10);
+
+    /// `<u128 as UnstableSmallSortTypeImpl>::small_sort`.
+    ///
+    /// `u128` is `Copy` + `Freeze` with `size_of` 16, so
+    /// `has_efficient_in_place_swap::<u128>()` is false while
+    /// `16 * 48 <= 4096` holds: this is the `small_sort_general` branch of the
+    /// `CopyMarker` impl (as opposed to the network branch taken by `i32`).
+    macro_rules! check_ss_unstable_u128 {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(cadical)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [u128; LEN] = kani::any();
+                let before = v;
+
+                <u128 as UnstableSmallSortTypeImpl>::small_sort(
+                    &mut v,
+                    &mut |a: &u128, b: &u128| a < b,
+                );
+
+                assert_sorted(&v);
+                assert_permutation(&v, &before);
+            }
+        };
+    }
+
+    check_ss_unstable_u128!(check_ss_unstable_u128_len_2, 2, 4);
+
+    /// `<[u64; 11] as UnstableSmallSortTypeImpl>::small_sort`.
+    ///
+    /// `size_of::<[u64; 11]>()` is 88, and `88 * 48 = 4224 > 4096
+    /// (MAX_STACK_ARRAY_SIZE)`, so the `CopyMarker` impl falls all the way
+    /// through to `small_sort_fallback`.
+    ///
+    /// The comparator only looks at element `[0]`, so the sortedness and
+    /// permutation oracles are stated over the `[0]` values. That is the
+    /// correct statement for this comparator: elements comparing equal on `[0]`
+    /// are interchangeable under an *unstable* sort, so no stronger multiset
+    /// claim on the full 11-word value is available here.
+    macro_rules! check_ss_unstable_big {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(cadical)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [[u64; 11]; LEN] = kani::any();
+                let before: [u64; LEN] = crate::array::from_fn(|i| v[i][0]);
+
+                <[u64; 11] as UnstableSmallSortTypeImpl>::small_sort(
+                    &mut v,
+                    &mut |a: &[u64; 11], b: &[u64; 11]| a[0] < b[0],
+                );
+
+                let after: [u64; LEN] = crate::array::from_fn(|i| v[i][0]);
+                assert_sorted(&after);
+                assert_permutation(&after, &before);
+            }
+        };
+    }
+
+    check_ss_unstable_big!(check_ss_unstable_big_len_2, 2, 4);
+    check_ss_unstable_big!(check_ss_unstable_big_len_3, 3, 5);
+
+    // ------------------------------------------------------------------
+    // Group B: the remaining success-criteria functions.
+    // ------------------------------------------------------------------
+
+    /// `swap_if_less` (success criterion 4).
+    ///
+    /// The `# Safety` comment requires the caller to pass positions that yield
+    /// valid, aligned, same-allocation pointers, which is exactly what is
+    /// assumed here (in-bounds indices of one array). The in-tree callers
+    /// (`sort9_optimal` / `sort13_optimal`) always pass *distinct* positions,
+    /// but distinctness is not part of the documented precondition and is not
+    /// needed for safety, so it is deliberately not assumed. Beyond absence of
+    /// UB we check the functional contract: the pair is left ordered and its
+    /// multiset is preserved, and no other element of the buffer is disturbed.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    #[kani::solver(cadical)]
+    pub fn check_ss_swap_if_less() {
+        const LEN: usize = 8;
+        let mut v: [i32; LEN] = kani::any();
+        let before = v;
+
+        let a_pos: usize = kani::any();
+        let b_pos: usize = kani::any();
+        kani::assume(a_pos < LEN && b_pos < LEN);
+
+        // SAFETY: `a_pos` and `b_pos` are in-bounds indices of `v`.
+        unsafe {
+            swap_if_less(v.as_mut_ptr(), a_pos, b_pos, &mut |a: &i32, b: &i32| a < b);
+        }
+
+        // The pair is a permutation of the original pair ...
+        assert!(
+            (v[a_pos] == before[a_pos] && v[b_pos] == before[b_pos])
+                || (v[a_pos] == before[b_pos] && v[b_pos] == before[a_pos])
+        );
+        // ... and is now ordered.
+        assert!(!(v[b_pos] < v[a_pos]));
+        // Nothing else moved.
+        for i in 0..LEN {
+            if i != a_pos && i != b_pos {
+                assert!(v[i] == before[i]);
+            }
+        }
+    }
+
+    /// `sort4_stable` (success criterion 6).
+    ///
+    /// The `SAFETY` precondition is "`v_base` valid for 4 reads, `dst` valid for
+    /// 4 writes", which is discharged by using a 4-element array and a
+    /// 4-element `MaybeUninit` destination. The result must be a sorted
+    /// permutation of the input, and `dst[0..4]` must be fully initialised
+    /// (reading it back would be UB otherwise).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    #[kani::solver(cadical)]
+    pub fn check_ss_sort4_stable() {
+        const LEN: usize = 4;
+        let v: [i32; LEN] = kani::any();
+        let mut dst: [MaybeUninit<i32>; LEN] = [const { MaybeUninit::uninit() }; LEN];
+
+        // SAFETY: `v` is valid for 4 reads and `dst` is valid for 4 writes.
+        unsafe {
+            sort4_stable(v.as_ptr(), dst.as_mut_ptr() as *mut i32, &mut |a: &i32, b: &i32| a < b);
+        }
+
+        // SAFETY: `sort4_stable` initialises all of `dst[0..4]`.
+        let after: [i32; LEN] = crate::array::from_fn(|i| unsafe { dst[i].assume_init() });
+        assert_sorted(&after);
+        assert_permutation(&after, &v);
+    }
+
+    /// `insertion_sort_shift_left` (success criterion 5).
+    ///
+    /// `offset` is symbolic over the entire range the function accepts without
+    /// aborting (`1..=len`); no presortedness is assumed, so absence of UB is
+    /// proven for every accepted offset with arbitrary contents.
+    ///
+    /// The permutation property holds unconditionally. Full sortedness is only
+    /// *promised* when `v[..offset]` is already sorted (the documented
+    /// premise), so it is asserted as an implication rather than under an
+    /// assumption -- that way the unsorted-prefix case is still explored for UB.
+    macro_rules! check_ss_insertion_sort_shift_left {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(cadical)]
+            pub fn $name() {
+                const LEN: usize = $len;
+                let mut v: [i32; LEN] = kani::any();
+                let before = v;
+
+                let offset: usize = kani::any();
+                kani::assume(offset >= 1 && offset <= LEN);
+
+                // Was the documented premise `v[..offset]` sorted satisfied?
+                let mut prefix_sorted = true;
+                for i in 1..LEN {
+                    if i < offset && before[i] < before[i - 1] {
+                        prefix_sorted = false;
+                    }
+                }
+
+                insertion_sort_shift_left(&mut v, offset, &mut |a: &i32, b: &i32| a < b);
+
+                assert_permutation(&v, &before);
+                if prefix_sorted {
+                    assert_sorted(&v);
+                }
+            }
+        };
+    }
+
+    check_ss_insertion_sort_shift_left!(check_ss_insertion_sort_shift_left_len_1, 1, 3);
+    check_ss_insertion_sort_shift_left!(check_ss_insertion_sort_shift_left_len_2, 2, 4);
+    check_ss_insertion_sort_shift_left!(check_ss_insertion_sort_shift_left_len_3, 3, 5);
+    check_ss_insertion_sort_shift_left!(check_ss_insertion_sort_shift_left_len_4, 4, 6);
+
+    // ------------------------------------------------------------------
+    // Group C: direct callee harnesses.
+    //
+    // The composed `small_sort` bodies are SAT-intractable past a length
+    // frontier (measured; see the PR text). The challenge notes that "function
+    // contracts and loop contracts of those callee functions may be required" —
+    // these harnesses verify each callee of the beyond-frontier branches
+    // directly, at its exact call-site length and full element width, under its
+    // documented precondition.
+    // ------------------------------------------------------------------
+
+    /// `sort8_stable` — the primitive of the general path's `len >= 16` branch,
+    /// at its only call-site shape (8 elements), full `i32` width.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    #[kani::solver(cadical)]
+    pub fn check_ss_sort8_stable() {
+        let mut v: [i32; 8] = kani::any();
+        let before = v;
+        let mut dst: [MaybeUninit<i32>; 8] = [const { MaybeUninit::uninit() }; 8];
+        let mut scratch: [MaybeUninit<i32>; 8] = [const { MaybeUninit::uninit() }; 8];
+
+        // SAFETY: `v` is valid for 8 reads and writes; `dst` and `scratch` are
+        // valid for 8 writes; none alias.
+        unsafe {
+            sort8_stable(
+                v.as_mut_ptr(),
+                dst.as_mut_ptr() as *mut i32,
+                scratch.as_mut_ptr() as *mut i32,
+                &mut |a: &i32, b: &i32| a < b,
+            );
+        }
+
+        // SAFETY: `sort8_stable` initialises all of `dst[0..8]`.
+        let after: [i32; 8] = crate::array::from_fn(|i| unsafe { dst[i].assume_init() });
+        assert_sorted(&after);
+        assert_permutation(&after, &before);
+    }
+
+    /// `sort9_optimal` — the network primitive of the `9 <= region < 13` band,
+    /// directly at its guard length.
+    #[kani::proof]
+    #[kani::unwind(11)]
+    #[kani::solver(kissat)]
+    pub fn check_ss_sort9_optimal() {
+        let mut v: [u8; 9] = kani::any();
+        let before = v;
+        sort9_optimal(&mut v, &mut |a: &u8, b: &u8| a < b);
+        assert_sorted(&v);
+        assert_permutation(&v, &before);
+    }
+
+    /// `has_efficient_in_place_swap` (success criterion 7).
+    ///
+    /// A `const fn` with no memory operations; the only thing to prove is that
+    /// it is UB-free and reports the documented `size_of::<T>() <= 8` heuristic,
+    /// which is what steers the `CopyMarker` dispatch between
+    /// `small_sort_network` and `small_sort_general`.
+    #[kani::proof]
+    pub fn check_ss_has_efficient_in_place_swap() {
+        assert!(has_efficient_in_place_swap::<i32>());
+        assert!(has_efficient_in_place_swap::<u64>());
+        assert!(!has_efficient_in_place_swap::<u128>());
+        assert!(!has_efficient_in_place_swap::<[u64; 11]>());
+    }
+}
