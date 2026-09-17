@@ -152,6 +152,7 @@ where
     I: UncheckedIterator<Item = &'a T>,
     T: Clone,
 {
+    #[requires(self.it.size_hint().0 > 0)]
     unsafe fn next_unchecked(&mut self) -> T {
         // SAFETY: `Cloned` is 1:1 with the inner iterator, so if the caller promised
         // that there's an element left, the inner iterator has one too.
@@ -192,4 +193,63 @@ where
 unsafe impl<I: InPlaceIterable> InPlaceIterable for Cloned<I> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig_slice: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    fn any_cloned_iter<'a, T: Clone>(orig_slice: &'a [T]) -> Cloned<crate::slice::Iter<'a, T>> {
+        Cloned::new(any_slice(orig_slice).iter())
+    }
+
+    macro_rules! check_get_unchecked {
+        ($harness:ident, $elem_ty:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = any_cloned_iter::<$elem_ty>(&array);
+                let idx = kani::any_where(|i: &usize| *i < it.it.size_hint().0);
+                let _ = unsafe { it.__iterator_get_unchecked(idx) };
+            }
+        };
+    }
+    check_get_unchecked!(check_cloned_get_unchecked_unit, (), isize::MAX as usize);
+    check_get_unchecked!(check_cloned_get_unchecked_u8, u8, u32::MAX as usize);
+    check_get_unchecked!(check_cloned_get_unchecked_char, char, 50);
+    check_get_unchecked!(check_cloned_get_unchecked_tup, (char, u8), 50);
+
+    // `next_unchecked` (UncheckedIterator): the precondition is that the iterator
+    // is non-empty; establish it by construction.
+    macro_rules! check_cloned_next_unchecked {
+        ($harness:ident, $elem_ty:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = any_cloned_iter::<$elem_ty>(&array);
+                kani::assume(it.it.size_hint().0 > 0);
+                let _ = unsafe { it.next_unchecked() };
+            }
+        };
+    }
+    check_cloned_next_unchecked!(check_cloned_next_unchecked_unit, (), isize::MAX as usize);
+    check_cloned_next_unchecked!(check_cloned_next_unchecked_u8, u8, u32::MAX as usize);
+    check_cloned_next_unchecked!(check_cloned_next_unchecked_char, char, 50);
+    check_cloned_next_unchecked!(check_cloned_next_unchecked_tup, (char, u8), 50);
 }

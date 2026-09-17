@@ -221,6 +221,89 @@ unsafe impl<I: InPlaceIterable, P> InPlaceIterable for Filter<I, P> {
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
 }
 
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|i: &usize| *i <= orig.len());
+            let first = kani::any_where(|i: &usize| *i <= last);
+            &orig[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|v| *v != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    // `Filter`'s predicate is `FnMut(&Self::Item)`; for `slice::Iter<T>` that is
+    // `FnMut(&&T)`. A nondeterministic predicate exercises both the kept and the
+    // filtered branch. A named fn pointer keeps the helper return type nameable.
+    fn maybe_keep<T>(_: &&T) -> bool {
+        kani::any()
+    }
+
+    // `next_chunk_dropless` writes every element (branchlessly) into a
+    // `MaybeUninit<[_; N]>` and bumps `initialized` only for kept elements,
+    // breaking once `initialized == N`; this proves the `get_unchecked_mut(idx)`
+    // writes and the final `array_assume_init` / `IntoIter` range stay in bounds.
+    //
+    // Boundedness: the chunk fill iterates through the generic default
+    // `Iterator::try_fold` (a while-let loop that calls a generic closure in
+    // iterator.rs), so this adapter cannot attach a loop contract to it. A
+    // fixed `MAX_LEN` only proves safety for sources up to that length. A
+    // predicate can reject arbitrarily many elements before accepting one;
+    // covering every value of `initialized` does not prove preservation of
+    // the buffer and iterator invariants across those extra iterations.
+    // These harnesses do not meet the challenge's unbounded requirement.
+    //
+    // N = 0 with a nonempty source remains an upstream defect in this snapshot:
+    // the closure writes through
+    // `array.get_unchecked_mut(idx)` before it compares `initialized < N`, so
+    // `next_chunk::<0>()` on a source that yields at least one element writes
+    // out of bounds into the zero-length array. Repo rules
+    // (doc/src/general-rules.md) do not permit a local change to the runtime
+    // logic unless it has been incorporated upstream. The defect is tracked
+    // at https://github.com/rust-lang/rust/issues/153803, with a proposed fix
+    // at https://github.com/rust-lang/rust/pull/153813.
+    // The separate empty-source N = 0 harness below does not cover this defect.
+    macro_rules! check_next_chunk_dropless {
+        ($harness:ident, $elem_ty:ty, $n:expr) => {
+            #[kani::proof]
+            #[kani::unwind(7)]
+            fn $harness() {
+                const MAX_LEN: usize = 6;
+                const N: usize = $n;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = Filter::new(
+                    any_slice(&array).iter(),
+                    maybe_keep::<$elem_ty> as fn(&&$elem_ty) -> bool,
+                );
+                let _ = it.next_chunk_dropless::<N>();
+            }
+        };
+    }
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_unit, (), 4);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_u8, u8, 4);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_char, char, 4);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_tup, (char, u8), 4);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_unit_n1, (), 1);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_u8_n1, u8, 1);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_char_n1, char, 1);
+    check_next_chunk_dropless!(check_filter_next_chunk_dropless_tup_n1, (char, u8), 1);
+
+    // With no source elements, the faulty write is unreachable. Exercise the
+    // zero-capacity result and its drop without claiming nonempty-source safety.
+    #[kani::proof]
+    fn check_filter_next_chunk_dropless_empty_n0() {
+        let mut it = Filter::new(crate::iter::empty::<u8>(), |_: &u8| kani::any::<bool>());
+        let _ = it.next_chunk_dropless::<0>();
+    }
+}
+
 trait SpecAssumeCount {
     /// # Safety
     ///
