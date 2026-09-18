@@ -109,7 +109,7 @@ fn write(handle_id: u32, data: &[u8], incomplete_utf8: &mut IncompleteUtf8) -> i
             let handle = Handle::from_raw_handle(handle);
             let ret = handle.write(data);
             let _ = handle.into_raw_handle(); // Don't close the handle
-            return ret;
+            ret
         }
     } else {
         write_console_utf16(data, incomplete_utf8, handle)
@@ -222,7 +222,7 @@ fn write_valid_utf8_to_console(handle: c::HANDLE, utf8: &str) -> io::Result<usiz
         // write the missing surrogate out now.
         // Buffering it would mean we have to lie about the number of bytes written.
         let first_code_unit_remaining = utf16[written];
-        if matches!(first_code_unit_remaining, 0xDCEE..=0xDFFF) {
+        if matches!(first_code_unit_remaining, 0xDC00..=0xDFFF) {
             // low surrogate
             // We just hope this works, and give up otherwise
             let _ = write_u16s(handle, &utf16[written..written + 1]);
@@ -234,7 +234,7 @@ fn write_valid_utf8_to_console(handle: c::HANDLE, utf8: &str) -> io::Result<usiz
             count += match ch {
                 0x0000..=0x007F => 1,
                 0x0080..=0x07FF => 2,
-                0xDCEE..=0xDFFF => 1, // Low surrogate. We already counted 3 bytes for the other.
+                0xDC00..=0xDFFF => 1, // Low surrogate. We already counted 3 bytes for the other.
                 _ => 3,
             };
         }
@@ -278,7 +278,7 @@ impl io::Read for Stdin {
             Ok(bytes_copied)
         } else if buf.len() - bytes_copied < 4 {
             // Not enough space to get a UTF-8 byte. We will use the incomplete UTF8.
-            let mut utf16_buf = [MaybeUninit::new(0); 1];
+            let mut utf16_buf = [MaybeUninit::new(0); 2];
             // Read one u16 character.
             let read = read_u16s_fixup_surrogates(handle, &mut utf16_buf, 1, &mut self.surrogate)?;
             // Read bytes, using the (now-empty) self.incomplete_utf8 as extra space.
@@ -305,8 +305,8 @@ impl io::Read for Stdin {
             // initialized.
             let utf16s = unsafe { utf16_buf[..read].assume_init_ref() };
             match utf16_to_utf8(utf16s, buf) {
-                Ok(value) => return Ok(bytes_copied + value),
-                Err(e) => return Err(e),
+                Ok(value) => Ok(bytes_copied + value),
+                Err(e) => Err(e),
             }
         }
     }

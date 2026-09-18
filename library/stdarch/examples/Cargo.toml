@@ -13,7 +13,7 @@ default-run = "hex"
 [dependencies]
 core_arch = { path = "../crates/core_arch" }
 quickcheck = "1.0"
-rand = "0.8"
+rand = "0.9.3"
 
 [[bin]]
 name = "hex"
@@ -22,6 +22,11 @@ path = "hex.rs"
 [[bin]]
 name = "connect5"
 path = "connect5.rs"
+
+# Hexagon-only: requires --target hexagon-unknown-linux-musl
+[[bin]]
+name = "gaussian"
+path = "gaussian.rs"
 
 [[example]]
 name = "wasm"

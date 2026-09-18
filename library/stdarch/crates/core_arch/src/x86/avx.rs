@@ -1097,6 +1097,9 @@ pub const fn _mm256_cvtsi256_si32(a: __m256i) -> i32 {
 
 /// Zeroes the contents of all XMM or YMM registers.
 ///
+/// This operation is purely a performance hint for the CPU and has no effect on the Abstract
+/// Machine state.
+///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_zeroall)
 #[inline]
 #[target_feature(enable = "avx")]
@@ -1108,6 +1111,9 @@ pub fn _mm256_zeroall() {
 
 /// Zeroes the upper 128 bits of all YMM registers;
 /// the lower 128-bits of the registers are unmodified.
+///
+/// This operation is purely a performance hint for the CPU and has no effect on the Abstract
+/// Machine state.
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_zeroupper)
 #[inline]
@@ -2426,7 +2432,6 @@ pub const fn _mm256_setzero_si256() -> __m256i {
 #[inline]
 #[target_feature(enable = "avx")]
 // This intrinsic has no corresponding instruction.
-#[cfg_attr(test, assert_instr(vinsertf128))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 #[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
 pub const fn _mm256_set_pd(a: f64, b: f64, c: f64, d: f64) -> __m256d {
@@ -3287,7 +3292,7 @@ pub const fn _mm256_cvtss_f32(a: __m256) -> f32 {
 
 // LLVM intrinsics used in the above functions
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+unsafe extern "unadjusted" {
     #[link_name = "llvm.x86.avx.round.pd.256"]
     fn roundpd256(a: __m256d, b: i32) -> __m256d;
     #[link_name = "llvm.x86.avx.round.ps.256"]
@@ -4008,13 +4013,11 @@ mod tests {
     }
 
     #[simd_test(enable = "avx")]
-    #[cfg_attr(miri, ignore)] // Register-level operation not supported by Miri
     fn test_mm256_zeroall() {
         _mm256_zeroall();
     }
 
     #[simd_test(enable = "avx")]
-    #[cfg_attr(miri, ignore)] // Register-level operation not supported by Miri
     fn test_mm256_zeroupper() {
         _mm256_zeroupper();
     }
@@ -4485,7 +4488,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx")]
-    #[cfg_attr(miri, ignore)] // Non-temporal store, which is not supported by Miri
+    #[cfg_attr(miri, ignore)] // Inline asm (for non-temporal store), which is not supported by Miri
     fn test_mm256_stream_si256() {
         let a = _mm256_setr_epi64x(1, 2, 3, 4);
         let mut r = _mm256_undefined_si256();
@@ -4497,7 +4500,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx")]
-    #[cfg_attr(miri, ignore)] // Non-temporal store, which is not supported by Miri
+    #[cfg_attr(miri, ignore)] // Inline asm (for non-temporal store), which is not supported by Miri
     fn test_mm256_stream_pd() {
         #[repr(align(32))]
         struct Memory {
@@ -4516,7 +4519,7 @@ mod tests {
     }
 
     #[simd_test(enable = "avx")]
-    #[cfg_attr(miri, ignore)] // Non-temporal store, which is not supported by Miri
+    #[cfg_attr(miri, ignore)] // Inline asm (for non-temporal store), which is not supported by Miri
     fn test_mm256_stream_ps() {
         #[repr(align(32))]
         struct Memory {

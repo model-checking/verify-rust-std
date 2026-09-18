@@ -207,7 +207,7 @@ impl<F: Float, I: Int> EitherPrim<Domain<F>, Domain<I>> {
     .into_prim_float()];
 
     /// Domain for `loggamma`
-    const LGAMMA: [Self; 1] = Self::STRICTLY_POSITIVE;
+    const LGAMMA: [Self; 1] = Self::UNBOUNDED1;
 
     /// Domain for `jn` and `yn`.
     // FIXME: the domain should provide some sort of "reasonable range" so we don't actually test
@@ -224,6 +224,47 @@ pub fn get_domain<F: Float, I: Int>(
     argnum: usize,
 ) -> EitherPrim<Domain<F>, Domain<I>> {
     let x = match id.base_name() {
+        // Basic arithmetic
+        BaseName::Add => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Sub => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Mul => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Div => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Powi => &EitherPrim::UNBOUNDED2[..],
+
+        // Comparison
+        BaseName::Eq => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Ne => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Gt => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Ge => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Lt => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Le => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Unord => &EitherPrim::UNBOUNDED2[..],
+
+        // Conversions
+        BaseName::Extend => &EitherPrim::UNBOUNDED1[..],
+        BaseName::Narrow => &EitherPrim::UNBOUNDED1[..],
+        BaseName::Ftoi => &EitherPrim::UNBOUNDED1[..],
+        BaseName::Itof => &EitherPrim::UNBOUNDED1[..],
+
+        // Integer ops
+        BaseName::Iadd => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Iaddo => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Isub => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Isubo => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Imul => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Imulo => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Idiv => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Imod => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Idivmod => &EitherPrim::UNBOUNDED2[..],
+        // Shifts technically aren't unbounded, but its range is restricted elsewhere in
+        // our test generators.
+        BaseName::Ashl => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Ashr => &EitherPrim::UNBOUNDED2[..],
+        BaseName::Lshr => &EitherPrim::UNBOUNDED2[..],
+        BaseName::LeadingZeros => &EitherPrim::UNBOUNDED1[..],
+        BaseName::TrailingZeros => &EitherPrim::UNBOUNDED1[..],
+
+        // Math functions
         BaseName::Acos => &EitherPrim::INVERSE_TRIG_PERIODIC[..],
         BaseName::Acosh => &EitherPrim::ACOSH[..],
         BaseName::Asin => &EitherPrim::INVERSE_TRIG_PERIODIC[..],

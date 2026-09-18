@@ -684,15 +684,14 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
     /// ```
     /// # #![feature(allocator_api)]
     /// # #![feature(btreemap_alloc)]
+    ///
     /// use std::collections::BTreeMap;
     /// use std::alloc::Global;
     ///
-    /// let mut map = BTreeMap::new_in(Global);
-    ///
-    /// // entries can now be inserted into the empty map
-    /// map.insert(1, "a");
+    /// let map: BTreeMap<i32, i32> = BTreeMap::new_in(Global);
     /// ```
     #[unstable(feature = "btreemap_alloc", issue = "32838")]
+    #[must_use]
     pub const fn new_in(alloc: A) -> BTreeMap<K, V, A> {
         BTreeMap { root: None, length: 0, alloc: ManuallyDrop::new(alloc), _marker: PhantomData }
     }
@@ -1060,7 +1059,7 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
     /// a mutable reference to the value in the entry.
     ///
     /// If the map already had this key present, nothing is updated, and
-    /// an error containing the occupied entry and the value is returned.
+    /// an error containing the occupied entry, key, and the value is returned.
     ///
     /// # Examples
     ///
@@ -1075,6 +1074,7 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
     /// let err = map.try_insert(37, "b").unwrap_err();
     /// assert_eq!(err.entry.key(), &37);
     /// assert_eq!(err.entry.get(), &"a");
+    /// assert_eq!(err.key, 37);
     /// assert_eq!(err.value, "b");
     /// ```
     #[unstable(feature = "map_try_insert", issue = "82766")]
@@ -1082,10 +1082,30 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
     where
         K: Ord,
     {
-        match self.entry(key) {
-            Occupied(entry) => Err(OccupiedError { entry, value }),
-            Vacant(entry) => Ok(entry.insert(value)),
-        }
+        let (map, dormant_map) = DormantMutRef::new(self);
+        let handle = match map.root {
+            Some(ref mut root) => match root.borrow_mut().search_tree(&key) {
+                Found(handle) => {
+                    let entry = OccupiedEntry {
+                        handle,
+                        dormant_map,
+                        alloc: (*map.alloc).clone(),
+                        _marker: PhantomData,
+                    };
+                    return Err(OccupiedError { entry, key, value });
+                }
+                GoDown(handle) => Some(handle),
+            },
+            None => None,
+        };
+        let entry = VacantEntry {
+            key,
+            handle,
+            dormant_map,
+            alloc: (*map.alloc).clone(),
+            _marker: PhantomData,
+        };
+        Ok(entry.insert(value))
     }
 
     /// Removes a key from the map, returning the value at the key if the key
@@ -1218,6 +1238,61 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
         K: Ord,
         A: Clone,
     {
+        let other = mem::replace(other, Self::new_in((*self.alloc).clone()));
+        self.merge(other, |_key, _self_val, other_val| other_val);
+    }
+
+    /// Moves all elements from `other` into `self`, leaving `other` empty.
+    ///
+    /// If a key from `other` is already present in `self`, then the `conflict`
+    /// closure is used to return a value to `self`. The `conflict`
+    /// closure takes in a borrow of `self`'s key, `self`'s value, and `other`'s value
+    /// in that order.
+    ///
+    /// An example of why one might use this method over [`append`]
+    /// is to combine `self`'s value with `other`'s value when their keys conflict.
+    ///
+    /// Similar to [`insert`], though, the key is not overwritten,
+    /// which matters for types that can be `==` without being identical.
+    ///
+    /// [`insert`]: BTreeMap::insert
+    /// [`append`]: BTreeMap::append
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(btree_merge)]
+    /// use std::collections::BTreeMap;
+    ///
+    /// let mut a = BTreeMap::new();
+    /// a.insert(1, String::from("a"));
+    /// a.insert(2, String::from("b"));
+    /// a.insert(3, String::from("c")); // Note: Key (3) also present in b.
+    ///
+    /// let mut b = BTreeMap::new();
+    /// b.insert(3, String::from("d")); // Note: Key (3) also present in a.
+    /// b.insert(4, String::from("e"));
+    /// b.insert(5, String::from("f"));
+    ///
+    /// // concatenate a's value and b's value
+    /// a.merge(b, |_, a_val, b_val| {
+    ///     format!("{a_val}{b_val}")
+    /// });
+    ///
+    /// assert_eq!(a.len(), 5); // all of b's keys in a
+    ///
+    /// assert_eq!(a[&1], "a");
+    /// assert_eq!(a[&2], "b");
+    /// assert_eq!(a[&3], "cd"); // Note: "c" has been combined with "d".
+    /// assert_eq!(a[&4], "e");
+    /// assert_eq!(a[&5], "f");
+    /// ```
+    #[unstable(feature = "btree_merge", issue = "152152")]
+    pub fn merge(&mut self, mut other: Self, mut conflict: impl FnMut(&K, V, V) -> V)
+    where
+        K: Ord,
+        A: Clone,
+    {
         // Do we have to append anything at all?
         if other.is_empty() {
             return;
@@ -1225,19 +1300,102 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
 
         // We can just swap `self` and `other` if `self` is empty.
         if self.is_empty() {
-            mem::swap(self, other);
+            mem::swap(self, &mut other);
             return;
         }
 
-        let self_iter = mem::replace(self, Self::new_in((*self.alloc).clone())).into_iter();
-        let other_iter = mem::replace(other, Self::new_in((*self.alloc).clone())).into_iter();
-        let root = self.root.get_or_insert_with(|| Root::new((*self.alloc).clone()));
-        root.append_from_sorted_iters(
-            self_iter,
-            other_iter,
-            &mut self.length,
-            (*self.alloc).clone(),
-        )
+        let mut other_iter = other.into_iter();
+        let (first_other_key, first_other_val) = other_iter.next().unwrap();
+
+        // find the first gap that has the smallest key greater than or equal to
+        // the first key from other
+        let mut self_cursor = self.lower_bound_mut(Bound::Included(&first_other_key));
+
+        if let Some((self_key, _)) = self_cursor.peek_next() {
+            match K::cmp(self_key, &first_other_key) {
+                Ordering::Equal => {
+                    // if `f` unwinds, the next entry is already removed leaving
+                    // the tree in valid state.
+                    // FIXME: Once `MaybeDangling` is implemented, we can optimize
+                    // this through using a drop handler and transmutating CursorMutKey<K, V>
+                    // to CursorMutKey<ManuallyDrop<K>, ManuallyDrop<V>> (see PR #152418)
+                    if let Some((k, v)) = self_cursor.remove_next() {
+                        // SAFETY: we remove the K, V out of the next entry,
+                        // apply 'f' to get a new (K, V), and insert it back
+                        // into the next entry that the cursor is pointing at
+                        let v = conflict(&k, v, first_other_val);
+                        unsafe { self_cursor.insert_after_unchecked(k, v) };
+                    }
+                }
+                Ordering::Greater =>
+                // SAFETY: we know our other_key's ordering is less than self_key,
+                // so inserting before will guarantee sorted order
+                unsafe {
+                    self_cursor.insert_before_unchecked(first_other_key, first_other_val);
+                },
+                Ordering::Less => {
+                    unreachable!("Cursor's peek_next should return None.");
+                }
+            }
+        } else {
+            // SAFETY: reaching here means our cursor is at the end
+            // self BTreeMap so we just insert other_key here
+            unsafe {
+                self_cursor.insert_before_unchecked(first_other_key, first_other_val);
+            }
+        }
+
+        for (other_key, other_val) in other_iter {
+            loop {
+                if let Some((self_key, _)) = self_cursor.peek_next() {
+                    match K::cmp(self_key, &other_key) {
+                        Ordering::Equal => {
+                            // if `f` unwinds, the next entry is already removed leaving
+                            // the tree in valid state.
+                            // FIXME: Once `MaybeDangling` is implemented, we can optimize
+                            // this through using a drop handler and transmutating CursorMutKey<K, V>
+                            // to CursorMutKey<ManuallyDrop<K>, ManuallyDrop<V>> (see PR #152418)
+                            if let Some((k, v)) = self_cursor.remove_next() {
+                                // SAFETY: we remove the K, V out of the next entry,
+                                // apply 'f' to get a new (K, V), and insert it back
+                                // into the next entry that the cursor is pointing at
+                                let v = conflict(&k, v, other_val);
+                                unsafe { self_cursor.insert_after_unchecked(k, v) };
+                            }
+                            break;
+                        }
+                        Ordering::Greater => {
+                            // SAFETY: we know our self_key's ordering is greater than other_key,
+                            // so inserting before will guarantee sorted order
+                            unsafe {
+                                self_cursor.insert_before_unchecked(other_key, other_val);
+                            }
+                            break;
+                        }
+                        Ordering::Less => {
+                            // FIXME: instead of doing a linear search here,
+                            // this can be optimized to search the tree by starting
+                            // from self_cursor and going towards the root and then
+                            // back down to the proper node -- that should probably
+                            // be a new method on Cursor*.
+                            self_cursor.next();
+                        }
+                    }
+                } else {
+                    // FIXME: If we get here, that means all of other's keys are greater than
+                    // self's keys. For performance, this should really do a bulk insertion of items
+                    // from other_iter into the end of self `BTreeMap`. Maybe this should be
+                    // a method for Cursor*?
+
+                    // SAFETY: reaching here means our cursor is at the end
+                    // self BTreeMap so we just insert other_key here
+                    unsafe {
+                        self_cursor.insert_before_unchecked(other_key, other_val);
+                    }
+                    break;
+                }
+            }
+        }
     }
 
     /// Constructs a double-ended iterator over a sub-range of elements in the map.
@@ -1414,7 +1572,7 @@ impl<K, V, A: Allocator + Clone> BTreeMap<K, V, A> {
 
         let right_root = left_root.split_off(key, (*self.alloc).clone());
 
-        let (new_left_len, right_len) = Root::calc_split_length(total_num, &left_root, &right_root);
+        let (new_left_len, right_len) = Root::calc_split_length(total_num, left_root, &right_root);
         self.length = new_left_len;
 
         BTreeMap {
@@ -1963,7 +2121,9 @@ impl<K, V> Default for Values<'_, K, V> {
     }
 }
 
-/// An iterator produced by calling `extract_if` on BTreeMap.
+/// This `struct` is created by the [`extract_if`] method on [`BTreeMap`].
+///
+/// [`extract_if`]: BTreeMap::extract_if
 #[stable(feature = "btree_extract_if", since = "1.91.0")]
 #[must_use = "iterators are lazy and do nothing unless consumed; \
     use `retain` or `extract_if().for_each(drop)` to remove and discard elements"]
@@ -2048,8 +2208,8 @@ impl<'a, K, V, R> ExtractIfInner<'a, K, V, R> {
             // On creation, we navigated directly to the left bound, so we need only check the
             // right bound here to decide whether to stop.
             match self.range.end_bound() {
-                Bound::Included(ref end) if (*k).le(end) => (),
-                Bound::Excluded(ref end) if (*k).lt(end) => (),
+                Bound::Included(end) if (*k).le(end) => (),
+                Bound::Excluded(end) if (*k).lt(end) => (),
                 Bound::Unbounded => (),
                 _ => return None,
             }
@@ -2434,7 +2594,8 @@ impl<K: Hash, V: Hash, A: Allocator + Clone> Hash for BTreeMap<K, V, A> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<K, V> Default for BTreeMap<K, V> {
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
+const impl<K, V> Default for BTreeMap<K, V> {
     /// Creates an empty `BTreeMap`.
     fn default() -> BTreeMap<K, V> {
         BTreeMap::new()

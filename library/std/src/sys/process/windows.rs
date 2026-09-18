@@ -5,7 +5,7 @@ mod tests;
 
 use core::ffi::c_void;
 
-use super::env::{CommandEnv, CommandEnvs};
+use super::env::{CommandEnv, CommandEnvs, CommandResolvedEnvs};
 use crate::collections::BTreeMap;
 use crate::env::consts::{EXE_EXTENSION, EXE_SUFFIX};
 use crate::ffi::{OsStr, OsString};
@@ -254,6 +254,10 @@ impl Command {
 
     pub fn get_env_clear(&self) -> bool {
         self.env.does_clear()
+    }
+
+    pub fn get_resolved_envs(&self) -> CommandResolvedEnvs {
+        CommandResolvedEnvs::new(self.env.capture())
     }
 
     pub fn get_current_dir(&self) -> Option<&Path> {
@@ -636,7 +640,24 @@ impl Stdio {
                 opts.read(stdio_id == c::STD_INPUT_HANDLE);
                 opts.write(stdio_id != c::STD_INPUT_HANDLE);
                 opts.inherit_handle(true);
-                File::open(Path::new(r"\\.\NUL"), &opts).map(|file| file.into_inner())
+                File::open(Path::new(r"\\.\NUL"), &opts).map(|file| file.into_inner()).map_err(
+                    |e| {
+                        // A raw `NotFound` here is easily mistaken for the program
+                        // being missing, so say what actually failed to open.
+                        // `spawn` only passes the three standard ids, but print
+                        // anything else as a number rather than mislabeling it.
+                        let stream = match stdio_id {
+                            c::STD_INPUT_HANDLE => "stdin".to_string(),
+                            c::STD_OUTPUT_HANDLE => "stdout".to_string(),
+                            c::STD_ERROR_HANDLE => "stderr".to_string(),
+                            id => format!("stdio handle {id}"),
+                        };
+                        Error::new(
+                            e.kind(),
+                            format!("failed to open NUL device for child {stream}: {e}"),
+                        )
+                    },
+                )
             }
         }
     }
@@ -975,4 +996,8 @@ impl<'a> fmt::Debug for CommandArgs<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.iter.clone()).finish()
     }
+}
+
+pub fn getpid() -> u32 {
+    unsafe { c::GetCurrentProcessId() }
 }

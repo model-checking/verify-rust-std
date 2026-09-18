@@ -23,6 +23,7 @@
     mips_target_feature,
     powerpc_target_feature,
     loongarch_target_feature,
+    hexagon_target_feature,
     wasm_target_feature,
     abi_unadjusted,
     rtm_target_feature,
@@ -32,13 +33,15 @@
     x86_amx_intrinsics,
     f16,
     aarch64_unstable_target_feature,
-    target_feature_inline_always,
     funnel_shifts,
     avx10_target_feature,
     const_trait_impl,
     const_cmp,
     const_eval_select,
-    maybe_uninit_as_bytes
+    maybe_uninit_as_bytes,
+    movrs_target_feature,
+    clflushopt_target_feature,
+    min_adt_const_params
 )]
 #![cfg_attr(test, feature(test, abi_vectorcall, stdarch_internal))]
 #![deny(clippy::missing_inline_in_public_items)]
@@ -57,7 +60,9 @@
     clippy::shadow_reuse,
     clippy::similar_names,
     clippy::unusual_byte_groupings,
-    clippy::wrong_self_convention
+    clippy::wrong_self_convention,
+    clippy::zero_prefixed_literal,
+    clippy::tabs_in_doc_comments
 )]
 #![cfg_attr(test, allow(unused_imports))]
 #![no_std]
@@ -68,7 +73,11 @@
 )]
 #![cfg_attr(
     test,
-    feature(stdarch_arm_feature_detection, stdarch_powerpc_feature_detection,)
+    feature(
+        stdarch_arm_feature_detection,
+        stdarch_mips_feature_detection,
+        stdarch_powerpc_feature_detection,
+    )
 )]
 
 #[cfg(test)]
