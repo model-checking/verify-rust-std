@@ -61,3 +61,35 @@ where
         vector
     }
 }
+
+#[cfg(kani)]
+mod verify {
+    use core::kani;
+
+    use super::SpecFromIterNested;
+    use crate::vec::Vec;
+
+    // from_iter (default, non-TrustedLen): unroll first + with_capacity(MIN_NON_ZERO_CAP=8)
+    // + spec_extend the rest. A from_fn (non-TrustedLen) source <= 4 stays under cap 8,
+    // so no reallocation fires here; the growth branch routes through extend_desugared
+    // (a Challenge 23 target) and exceeds the CI-standard object-bits 12 budget at
+    // larger sizes (measured). Real body; postcondition checks the produced length.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_from_iter_default_u8() {
+        let n: usize = kani::any();
+        kani::assume(n <= 4);
+        kani::cover(n == 4, "non-vacuity: the max-length source is reachable");
+        let mut i = 0usize;
+        let iter = core::iter::from_fn(move || {
+            if i < n {
+                i += 1;
+                Some(kani::any::<u8>())
+            } else {
+                None
+            }
+        });
+        let v: Vec<u8> = <Vec<u8> as SpecFromIterNested<u8, _>>::from_iter(iter);
+        assert!(v.len() == n);
+    }
+}

@@ -552,3 +552,314 @@ unsafe impl<T> AsVecIntoIter for IntoIter<T> {
         self
     }
 }
+
+#[cfg(kani)]
+mod verify {
+    use super::*;
+    use crate::vec::Vec;
+
+    // Symbolic-length Vec of u8 (length 0..=N). The backing size (64 for the
+    // iterator harnesses) bounds the length; loops below run a symbolic number
+    // of iterations up to that bound. Larger backings add solver time without
+    // covering new branches. (`kani::vec` is not exposed under verify-std, so
+    // the Vec is built via `kani::slice`.)
+    fn any_u8_vec<const N: usize>() -> Vec<u8> {
+        let arr: [u8; N] = kani::any();
+        kani::slice::any_slice_of_array(&arr).to_vec()
+    }
+
+    // A Drop-carrying element so drop harnesses exercise real drop glue.
+    // Fixed at 4 elements: drop obligations are per-element identical, so a
+    // larger vector adds solver time without new proof obligations.
+    struct DropToken(u8);
+    impl Drop for DropToken {
+        fn drop(&mut self) {
+            let _ = self.0;
+        }
+    }
+
+    // fold: verifies the REAL non-ZST body (the `while self.ptr != end`
+    // concrete-pointer loop) — no cfg(kani) body substitution. The counting
+    // accumulator asserts fold visits exactly `len` elements.
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_fold_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        kani::cover(n > 1, "non-vacuity: a multi-element fold is reachable");
+        let count = v.into_iter().fold(0usize, |acc, _| acc + 1);
+        assert!(count == n);
+    }
+
+    // try_fold: REAL body; a symbolic early-exit exercises the `?` short-circuit
+    // and the drop of the remaining elements. Postconditions: Ok consumed all;
+    // Err consumed at least one.
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_try_fold_u8() {
+        let mut it = any_u8_vec::<64>().into_iter();
+        let n = it.len();
+        kani::cover(n > 1, "non-vacuity: a multi-element try_fold is reachable");
+        let r: Result<u32, ()> =
+            it.try_fold(
+                0u32,
+                |acc, x| {
+                    if kani::any() { Err(()) } else { Ok(acc.wrapping_add(x as u32)) }
+                },
+            );
+        if r.is_ok() {
+            assert!(it.len() == 0);
+        } else {
+            assert!(it.len() < n);
+        }
+    }
+
+    // try_fold with drop glue: the early exit leaves unconsumed elements whose
+    // drop runs via IntoIter's Drop (drop_in_place over the remaining tail) —
+    // the double-drop-on-early-exit class the `ptr.add(1)`-before-`f` ordering
+    // in the body exists to prevent.
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_try_fold_droptoken() {
+        let mut it = vec![
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+        ]
+        .into_iter();
+        let n = it.len();
+        kani::cover(n > 1, "non-vacuity: a multi-element early-exit is reachable");
+        let r: Result<u32, ()> =
+            it.try_fold(
+                0u32,
+                |acc, t| {
+                    if kani::any() { Err(()) } else { Ok(acc.wrapping_add(t.0 as u32)) }
+                },
+            );
+        if r.is_ok() {
+            assert!(it.len() == 0);
+        } else {
+            assert!(it.len() < n);
+        }
+        // `it` drops here with its remaining tokens.
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_into_iter_next_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let first = if n > 0 { Some(v[0]) } else { None };
+        let mut it = v.into_iter();
+        let r = it.next();
+        assert!(r == first);
+        assert!(it.len() == n - (r.is_some() as usize));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_into_iter_next_back_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let last = if n > 0 { Some(v[n - 1]) } else { None };
+        let mut it = v.into_iter();
+        let r = it.next_back();
+        assert!(r == last);
+        assert!(it.len() == n - (r.is_some() as usize));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_into_iter_size_hint_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let it = v.into_iter();
+        let (lo, hi) = it.size_hint();
+        assert!(lo == n);
+        assert!(hi == Some(n));
+    }
+
+    // unwind 72: covers the <=64 drop loop + NonZero::new's 8-byte zero-check
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_advance_by_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let mut it = v.into_iter();
+        let k: usize = kani::any();
+        let r = it.advance_by(k);
+        if k <= n {
+            assert!(r.is_ok());
+            assert!(it.len() == n - k);
+        } else {
+            assert!(r.is_err());
+            assert!(it.len() == 0);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_advance_back_by_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let mut it = v.into_iter();
+        let k: usize = kani::any();
+        let r = it.advance_back_by(k);
+        if k <= n {
+            assert!(r.is_ok());
+            assert!(it.len() == n - k);
+        } else {
+            assert!(r.is_err());
+            assert!(it.len() == 0);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_into_iter_next_chunk_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let mut it = v.into_iter();
+        match it.next_chunk::<2>() {
+            Ok(_) => {
+                assert!(n >= 2);
+                assert!(it.len() == n - 2);
+            }
+            Err(_) => {
+                assert!(n < 2);
+                assert!(it.len() == 0);
+            }
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_into_iter_as_slice_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let it = v.into_iter();
+        assert!(it.as_slice().len() == n);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_into_iter_as_mut_slice_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let mut it = v.into_iter();
+        assert!(it.as_mut_slice().len() == n);
+    }
+
+    // __iterator_get_unchecked: the #[requires(i < self.len())] + kani::modifies
+    // contract already exists on this method. Kani cannot resolve a generic
+    // trait-impl method as a proof_for_contract target (kani#1997), so this
+    // harness is the mirroring assume-guarded proof: the assume mirrors the
+    // #[requires]; the assert checks the read's value against the source slice.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_into_iter_get_unchecked_u8() {
+        let arr: [u8; 64] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let mut it = s.to_vec().into_iter();
+        let len = it.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any();
+        kani::assume(i < len);
+        kani::cover(i == len - 1, "non-vacuity: the maximal valid index is reachable");
+        // SAFETY: i < len mirrors the documented #[requires] precondition.
+        let x = unsafe { it.__iterator_get_unchecked(i) };
+        assert!(x == s[i]);
+    }
+
+    // Drop: destroys the remaining elements (drop_in_place) + RawVec dealloc.
+    // vec![..] list form builds the Vec without the reallocation path.
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_drop_droptoken() {
+        let mut it = vec![
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+        ]
+        .into_iter();
+        let _ = it.advance_by(kani::any()); // consume a symbolic prefix
+        // `it` drops here: drop_in_place over the symbolic-count remaining + dealloc
+    }
+
+    // forget_allocation_drop_remaining: drops remaining elements, keeps the allocation.
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_forget_allocation_drop_remaining() {
+        let mut it = vec![
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+        ]
+        .into_iter();
+        let _ = it.next();
+        it.forget_allocation_drop_remaining();
+        assert!(it.len() == 0);
+    }
+
+    // into_vecdeque: reinterprets the IntoIter allocation as a VecDeque.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_into_iter_into_vecdeque_u8() {
+        let v = any_u8_vec::<64>();
+        let n = v.len();
+        let it = v.into_iter();
+        let dq = it.into_vecdeque();
+        assert!(dq.len() == n);
+    }
+
+    // --- ZST arm: every method above has a structurally separate `T::IS_ZST`
+    // branch (end walks by bytes, ptr frozen). These three harnesses cover that
+    // arm for the iteration core; this is branch coverage of distinct pointer
+    // arithmetic, not an extra width instantiation. ---
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_next_zst() {
+        let n: usize = kani::any();
+        kani::assume(n <= 64);
+        kani::cover(n == 64, "non-vacuity: the full-length ZST case is reachable");
+        let v: Vec<()> = vec![(); n];
+        let mut it = v.into_iter();
+        let r = it.next();
+        assert!(r.is_some() == (n > 0));
+        assert!(it.len() == n - (r.is_some() as usize));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_fold_zst() {
+        let n: usize = kani::any();
+        kani::assume(n <= 64);
+        kani::cover(n == 64, "non-vacuity: the full-length ZST fold is reachable");
+        let v: Vec<()> = vec![(); n];
+        let count = v.into_iter().fold(0usize, |acc, _| acc + 1);
+        assert!(count == n);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_advance_by_zst() {
+        let n: usize = kani::any();
+        kani::assume(n <= 64);
+        kani::cover(n == 64, "non-vacuity: the full-length ZST advance is reachable");
+        let v: Vec<()> = vec![(); n];
+        let mut it = v.into_iter();
+        let k: usize = kani::any();
+        let r = it.advance_by(k);
+        if k <= n {
+            assert!(r.is_ok());
+            assert!(it.len() == n - k);
+        } else {
+            assert!(r.is_err());
+            assert!(it.len() == 0);
+        }
+    }
+}
