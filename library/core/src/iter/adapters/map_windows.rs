@@ -1,4 +1,6 @@
 use crate::iter::FusedIterator;
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::MaybeUninit;
 use crate::ub_checks::Invariant;
 use crate::{fmt, ptr};
@@ -296,4 +298,159 @@ impl<T, const N: usize> Invariant for Buffer<T, N> {
     fn is_safe(&self) -> bool {
         self.start + N <= 2 * N
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    fn any_buffer<T: Copy + kani::Arbitrary, const N: usize>() -> (Buffer<T, N>, [T; N]) {
+        // Symbolize a valid starting position for the active window.
+        let start = kani::any_where(|start: &usize| *start <= N);
+
+        // Symbolize the values that occupy the active window.
+        let values: [T; N] = kani::any();
+        let mut storage = [[MaybeUninit::uninit(); N]; 2];
+
+        // Initialize exactly storage[start .. start + N] without raw pointers.
+        for offset in 0..N {
+            let index = start + offset;
+            if index < N {
+                storage[0][index].write(values[offset]);
+            } else {
+                storage[1][index - N].write(values[offset]);
+            }
+        }
+
+        (Buffer { buffer: storage, start }, values)
+    }
+
+    // Harnesses for `as_array_ref` for Buffer
+    macro_rules! generate_buffer_as_array_ref_harness {
+        ($name:ident, $ty:ty, $n:expr) => {
+            #[kani::proof]
+            fn $name() {
+                // Build a symbolic Buffer satisfying its representation invariant.
+                let (buffer, expected) = any_buffer::<$ty, $n>();
+
+                // Call the safe function under test.
+                let window = buffer.as_array_ref();
+            }
+        };
+    }
+
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_u8_n1, u8, 1);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_u8_n2, u8, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_u8_n4, u8, 4);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_u16, u16, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_u32, u32, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_u64, u64, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_u128, u128, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_i8, i8, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_i16, i16, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_i32, i32, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_i64, i64, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_i128, i128, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_bool, bool, 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_unit, (), 2);
+    generate_buffer_as_array_ref_harness!(harness_buffer_as_array_ref_array, [u8; 4], 2);
+
+    // Harnesses for `as_uninit_array_mut` for Buffer
+    macro_rules! generate_buffer_as_uninit_array_mut_harness {
+        ($name:ident, $ty:ty, $n:expr) => {
+            #[kani::proof]
+            fn $name() {
+                // Build a valid symbolic Buffer without raw pointers.
+                let (mut buffer, _) = any_buffer::<$ty, $n>();
+
+                // Symbolize a fully initialized replacement window.
+                let replacement: [$ty; $n] = kani::any();
+
+                // Write through the safe function's returned MaybeUninit reference.
+                buffer.as_uninit_array_mut().write(replacement);
+            }
+        };
+    }
+
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_u8_n1, u8, 1);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_u8_n2, u8, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_u8_n4, u8, 4);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_u16, u16, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_u32, u32, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_u64, u64, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_u128, u128, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_i8, i8, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_i16, i16, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_i32, i32, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_i64, i64, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_i128, i128, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_bool, bool, 2);
+    generate_buffer_as_uninit_array_mut_harness!(harness_buffer_as_uninit_array_mut_unit, (), 2);
+    generate_buffer_as_uninit_array_mut_harness!(
+        harness_buffer_as_uninit_array_mut_array,
+        [u8; 4],
+        2
+    );
+
+    // Harnesses for `push` for Buffer.
+    macro_rules! generate_buffer_push_harness {
+        ($name:ident, $ty:ty, $n:expr) => {
+            #[kani::proof]
+            fn $name() {
+                // Build a valid Buffer with a symbolic active-window position.
+                let (mut buffer, before) = any_buffer::<$ty, $n>();
+                // Symbolize the item appended to the window.
+                let next: $ty = kani::any();
+                // Call the safe function under test.
+                buffer.push(next);
+            }
+        };
+    }
+
+    generate_buffer_push_harness!(harness_buffer_push_u8_n1, u8, 1);
+    generate_buffer_push_harness!(harness_buffer_push_u8_n2, u8, 2);
+    generate_buffer_push_harness!(harness_buffer_push_u8_n4, u8, 4);
+    generate_buffer_push_harness!(harness_buffer_push_u16, u16, 2);
+    generate_buffer_push_harness!(harness_buffer_push_u32, u32, 2);
+    generate_buffer_push_harness!(harness_buffer_push_u64, u64, 2);
+    generate_buffer_push_harness!(harness_buffer_push_u128, u128, 2);
+    generate_buffer_push_harness!(harness_buffer_push_i8, i8, 2);
+    generate_buffer_push_harness!(harness_buffer_push_i16, i16, 2);
+    generate_buffer_push_harness!(harness_buffer_push_i32, i32, 2);
+    generate_buffer_push_harness!(harness_buffer_push_i64, i64, 2);
+    generate_buffer_push_harness!(harness_buffer_push_i128, i128, 2);
+    generate_buffer_push_harness!(harness_buffer_push_bool, bool, 2);
+    generate_buffer_push_harness!(harness_buffer_push_unit, (), 2);
+    generate_buffer_push_harness!(harness_buffer_push_array, [u8; 4], 2);
+
+    // Harnesses for `Drop::drop` for Buffer.
+    macro_rules! generate_buffer_drop_harness {
+        ($name:ident, $ty:ty, $n:expr) => {
+            #[kani::proof]
+            fn $name() {
+                // Build a valid Buffer with a symbolic active-window position.
+                let (buffer, _) = any_buffer::<$ty, $n>();
+
+                // Invoke Buffer::drop through the safe drop function.
+                crate::mem::drop(buffer);
+            }
+        };
+    }
+
+    generate_buffer_drop_harness!(harness_buffer_drop_u8_n1, u8, 1);
+    generate_buffer_drop_harness!(harness_buffer_drop_u8_n2, u8, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_u8_n4, u8, 4);
+    generate_buffer_drop_harness!(harness_buffer_drop_u16, u16, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_u32, u32, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_u64, u64, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_u128, u128, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_i8, i8, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_i16, i16, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_i32, i32, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_i64, i64, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_i128, i128, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_bool, bool, 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_unit, (), 2);
+    generate_buffer_drop_harness!(harness_buffer_drop_array, [u8; 4], 2);
 }

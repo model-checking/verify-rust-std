@@ -478,3 +478,69 @@ fn and_then_or_clear<T, U>(opt: &mut Option<T>, f: impl FnOnce(&mut T) -> Option
     }
     x
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for Fuse
+    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
+    macro_rules! generate_fuse_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Generate a symbolic logical length with no explicit upper bound.
+                let len: usize = kani::any();
+                // Generate a symbolic access index.
+                let idx: usize = kani::any();
+                // Generate an arbitrary inner item.
+                let value: $ty = kani::any();
+                // Record the index actually received by the inner iterator.
+                let observed_idx = crate::cell::Cell::new(usize::MAX);
+
+                // Build a lazy iterator of length `len` without allocating `len` elements.
+                let source = (0..len).map(|position| {
+                    // Record which inner element the target actually requested.
+                    observed_idx.set(position);
+                    value
+                });
+                // Construct an active `Fuse<I>` whose inner state is `Some(source)`.
+                let mut iter = Fuse::new(source);
+
+                // Express the target's `idx < self.size()` precondition.
+                kani::assume(idx < iter.size_hint().0);
+                // Save observable iterator state before random access.
+                let size_before = iter.size_hint();
+                assert!(iter.iter.is_some());
+
+                // Call the target `Fuse<I>` implementation through the trait path.
+                let result =
+                    unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+
+                // Check that the target forwarded `idx` exactly.
+                assert_eq!(observed_idx.get(), idx);
+                // Check that the inner item was forwarded unchanged.
+                assert_eq!(result, value);
+                // Check that random access kept the inner iterator active.
+                assert!(iter.iter.is_some());
+                // Check that random access did not consume the iterator.
+                assert_eq!(iter.size_hint(), size_before);
+            }
+        };
+    }
+
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i8, i8);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i16, i16);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i32, i32);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i64, i64);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_i128, i128);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u8, u8);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u16, u16);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u32, u32);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u64, u64);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_u128, u128);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_array, [u8; 4]);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_bool, bool);
+    generate_fuse_get_unchecked_harness!(harness_fuse_get_unchecked_unit, ());
+}
