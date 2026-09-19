@@ -204,6 +204,10 @@ use core::pin::{Pin, PinCoerceUnsized};
 use core::ptr::{self, NonNull, Unique};
 use core::task::{Context, Poll};
 
+use safety::{ensures, requires};
+#[cfg(kani)]
+use {crate::vec::Vec, core::kani};
+
 #[cfg(not(no_global_oom_handling))]
 use crate::alloc::handle_alloc_error;
 use crate::alloc::{AllocError, Allocator, Global, Layout};
@@ -1143,6 +1147,13 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    #[requires({
+        let ptr = (&*self) as *const mem::MaybeUninit<T> as *const T;
+        core::ub_checks::can_dereference(ptr)
+    })]
+    #[ensures(|result: &Box<T, A>| {
+        core::ub_checks::can_dereference(&**result as *const T)
+    })]
     pub unsafe fn assume_init(self) -> Box<T, A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut T, alloc) }
@@ -1210,6 +1221,13 @@ impl<T, A: Allocator> Box<[mem::MaybeUninit<T>], A> {
     /// ```
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[inline]
+    #[requires({
+        let ptr = (&*self) as *const [mem::MaybeUninit<T>] as *const [T];
+        core::ub_checks::can_dereference(ptr)
+    })]
+    #[ensures(|result: &Box<[T], A>| {
+        core::ub_checks::can_dereference(&**result as *const [T])
+    })]
     pub unsafe fn assume_init(self) -> Box<[T], A> {
         let (raw, alloc) = Box::into_raw_with_allocator(self);
         unsafe { Box::from_raw_in(raw as *mut [T], alloc) }
@@ -1262,6 +1280,16 @@ impl<T: ?Sized> Box<T> {
     #[stable(feature = "box_raw", since = "1.4.0")]
     #[inline]
     #[must_use = "call `drop(Box::from_raw(ptr))` if you intend to drop the `Box`"]
+    #[requires({
+        let align = kani::mem::checked_align_of_raw(raw);
+        let size = kani::mem::checked_size_of_raw(raw);
+
+        !raw.is_null()
+            && align.is_some()
+            && size.map_or(false, |size| size <= isize::MAX as usize)
+            && core::ub_checks::can_dereference(raw)
+    })]
+    #[ensures(|result: &Self| (&**result) as *const T == raw as *const T)]
     pub unsafe fn from_raw(raw: *mut T) -> Self {
         unsafe { Self::from_raw_in(raw, Global) }
     }
@@ -1316,6 +1344,19 @@ impl<T: ?Sized> Box<T> {
     #[unstable(feature = "box_vec_non_null", issue = "130364")]
     #[inline]
     #[must_use = "call `drop(Box::from_non_null(ptr))` if you intend to drop the `Box`"]
+    #[requires({
+        let raw = ptr.as_ptr();
+        let align = kani::mem::checked_align_of_raw(raw);
+        let size = kani::mem::checked_size_of_raw(raw);
+
+        align.is_some()
+            && size.map_or(false, |size| size <= isize::MAX as usize)
+            && core::ub_checks::can_dereference(raw)
+    })]
+    #[ensures(|result: &Self| {
+        let raw = ptr.as_ptr();
+        (&**result) as *const T == raw
+    })]
     pub unsafe fn from_non_null(ptr: NonNull<T>) -> Self {
         unsafe { Self::from_raw(ptr.as_ptr()) }
     }
@@ -1489,6 +1530,16 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// [memory layout]: self#memory-layout
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[inline]
+    #[requires({
+        let align = kani::mem::checked_align_of_raw(raw);
+        let size = kani::mem::checked_size_of_raw(raw);
+
+        !raw.is_null()
+            && align.is_some()
+            && size.map_or(false, |size| size <= isize::MAX as usize)
+            && core::ub_checks::can_dereference(raw)
+    })]
+    #[ensures(|result: &Self| (&**result) as *const T == raw)]
     pub unsafe fn from_raw_in(raw: *mut T, alloc: A) -> Self {
         Box(unsafe { Unique::new_unchecked(raw) }, alloc)
     }
@@ -1542,6 +1593,16 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", issue = "130364")]
     #[inline]
+    #[requires({
+        let ptr = raw.as_ptr();
+        let align = kani::mem::checked_align_of_raw(ptr);
+        let size = kani::mem::checked_size_of_raw(ptr);
+
+        align.is_some()
+            && size.map_or(false, |size| size <= isize::MAX as usize)
+            && core::ub_checks::can_dereference(ptr)
+    })]
+    #[ensures(|result: &Self| (&**result) as *const T == raw.as_ptr())]
     pub unsafe fn from_non_null_in(raw: NonNull<T>, alloc: A) -> Self {
         // SAFETY: guaranteed by the caller.
         unsafe { Box::from_raw_in(raw.as_ptr(), alloc) }
@@ -2413,4 +2474,957 @@ unsafe impl<T: ?Sized + Allocator, A: Allocator> Allocator for Box<T, A> {
         // SAFETY: the safety contract must be upheld by the caller
         unsafe { (**self).shrink(ptr, old_layout, new_layout) }
     }
+}
+
+// Challenge 29
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod kani_box_harness_helpers {
+    use super::*;
+
+    pub(super) fn verifier_nondet_vec<T>() -> Vec<T> {
+        let cap: usize = kani::any();
+        let elem_layout = Layout::new::<T>();
+        kani::assume(elem_layout.repeat(cap).is_ok());
+        let mut v = Vec::<T>::with_capacity(cap);
+        unsafe {
+            let sz: usize = kani::any();
+            kani::assume(sz <= cap);
+            ptr::write_bytes(
+                v.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * sz,
+            );
+            let initialized = ptr::slice_from_raw_parts(v.as_ptr(), sz);
+            // Constrain only the harness-generated bytes to form valid `T`
+            // values before `set_len`, as required by its safety contract.
+            // This does not assume any property or result of the boxed function
+            // under verification, so it is not assuming the proof conclusion.
+            kani::assume(core::ub_checks::can_dereference(initialized));
+            v.set_len(sz);
+        }
+        v
+    }
+
+    pub(super) fn box_slice_layout_ok<T>(len: usize) -> bool {
+        Layout::array::<T>(len).is_ok()
+    }
+
+    pub(super) fn verifier_nondet_vec_box<T>() -> Vec<T> {
+        let vec = verifier_nondet_vec();
+        kani::assume(box_slice_layout_ok::<T>(vec.len()));
+        vec
+    }
+
+    pub(super) fn verifier_nondet_box_uninit_slice<T>() -> Box<[mem::MaybeUninit<T>], Global> {
+        let len = kani::any_where(|l: &usize| box_slice_layout_ok::<T>(*l));
+        let mut boxed = Box::<[T]>::new_uninit_slice(len);
+        unsafe {
+            ptr::write_bytes(
+                boxed.as_mut_ptr().cast::<u8>(),
+                kani::any::<u8>(),
+                mem::size_of::<T>() * len,
+            );
+        }
+        boxed
+    }
+}
+
+// === UNSAFE FUNCTIONS ===
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::any::Any;
+    use core::marker::PhantomPinned;
+
+    use super::kani_box_harness_helpers::*;
+    use super::*;
+
+    macro_rules! gen_assume_init_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+            pub fn $name() {
+                let value: $ty = kani::any::<$ty>();
+                let expected = value.clone();
+                let mut uninit: Box<mem::MaybeUninit<$ty>, Global> =
+                    Box::<$ty, Global>::new_uninit_in(Global);
+                (*uninit).write(value);
+                let init: Box<$ty, Global> = unsafe { uninit.assume_init() };
+                assert_eq!(&*init, &expected);
+                kani::cover(true, "Box::assume_init returns the initialized value");
+            }
+        };
+    }
+
+    gen_assume_init_harness!(harness_box_assume_init_i32, i32);
+    gen_assume_init_harness!(harness_box_assume_init_unit, ());
+    gen_assume_init_harness!(harness_box_assume_init_bool, bool);
+
+    macro_rules! gen_assume_init_slice_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[core::mem::MaybeUninit<T>], A>::assume_init)]
+            pub fn $name() {
+                let uninit: Box<[mem::MaybeUninit<$elem>], Global> =
+                    verifier_nondet_box_uninit_slice::<$elem>();
+                let expected_data = (&*uninit).as_ptr() as *const $elem;
+                let expected_len = uninit.len();
+                let result: Box<[$elem], Global> = unsafe { uninit.assume_init() };
+                assert_eq!((&*result).as_ptr(), expected_data);
+                assert_eq!(result.len(), expected_len);
+                kani::cover(true, "Box::assume_init slice preserves pointer and length");
+            }
+        };
+    }
+
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_u8, u8);
+    // Multi-byte elements exercise slice layout scaling and alignment.
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_u32, u32);
+    gen_assume_init_slice_harness!(harness_box_assume_init_slice_unit, ());
+
+    /// Checks slice assume_init with bool's restricted valid bit patterns.
+    #[kani::proof_for_contract(Box::<[core::mem::MaybeUninit<T>], A>::assume_init)]
+    fn harness_box_assume_init_slice_bool() {
+        let len = kani::any_where(|len: &usize| box_slice_layout_ok::<bool>(*len));
+        let value: bool = kani::any();
+        let mut uninit = Box::<[bool]>::new_uninit_slice(len);
+        let expected_data = uninit.as_ptr().cast::<bool>();
+        // Construct only valid 0/1 bytes before exposing a &[bool]. As in the
+        // other slice generators, the length is symbolic and the fill repeats.
+        unsafe { ptr::write_bytes(uninit.as_mut_ptr(), value as u8, len) };
+        let result = unsafe { uninit.assume_init() };
+        assert_eq!(result.as_ptr(), expected_data);
+        assert_eq!(result.len(), len);
+        if len != 0 {
+            let index = kani::any_where(|i: &usize| *i < len);
+            assert_eq!(result[index], value);
+        }
+        kani::cover(len == 0, "Box::assume_init bool slice accepts empty input");
+        kani::cover(len != 0, "Box::assume_init bool slice preserves valid bool values");
+    }
+
+    macro_rules! gen_from_raw_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<$ty>::from_raw)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let boxed: Box<$ty> = Box::new(value);
+                let ptr: *mut $ty = Box::into_raw(boxed);
+                let recovered: Box<$ty> = unsafe { Box::from_raw(ptr) };
+                assert!(ptr::eq(&*recovered, ptr));
+                kani::cover(true, "Box::from_raw returns under its contract preconditions");
+            }
+        };
+    }
+
+    macro_rules! gen_from_raw_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[$elem]>::from_raw)]
+            pub fn $name() {
+                let boxed: Box<[$elem]> = verifier_nondet_vec_box::<$elem>().into_boxed_slice();
+                let ptr: *mut [$elem] = Box::into_raw(boxed);
+                let recovered: Box<[$elem]> = unsafe { Box::from_raw(ptr) };
+                assert!(ptr::eq(&*recovered, ptr));
+                kani::cover(true, "Box::from_raw returns under its contract preconditions");
+            }
+        };
+    }
+
+    gen_from_raw_sized_harness!(harness_box_from_raw_i32, i32);
+    gen_from_raw_sized_harness!(harness_box_from_raw_unit, ());
+
+    gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u8, u8);
+    gen_from_raw_unsized_harness!(harness_box_from_raw_vec_u32, u32);
+
+    macro_rules! gen_from_non_null_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<$ty>::from_non_null)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let boxed: Box<$ty> = Box::new(value);
+                let ptr: NonNull<$ty> = Box::into_non_null(boxed);
+                let recovered: Box<$ty> = unsafe { Box::from_non_null(ptr) };
+                assert!(ptr::eq(&*recovered, ptr.as_ptr()));
+                kani::cover(true, "Box::from_non_null returns under its contract preconditions");
+            }
+        };
+    }
+
+    macro_rules! gen_from_non_null_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[$elem]>::from_non_null)]
+            pub fn $name() {
+                let boxed: Box<[$elem]> = verifier_nondet_vec_box::<$elem>().into_boxed_slice();
+                let ptr: NonNull<[$elem]> = Box::into_non_null(boxed);
+                let recovered: Box<[$elem]> = unsafe { Box::from_non_null(ptr) };
+                assert!(ptr::eq(&*recovered, ptr.as_ptr()));
+                kani::cover(true, "Box::from_non_null returns under its contract preconditions");
+            }
+        };
+    }
+
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_i32, i32);
+    gen_from_non_null_sized_harness!(harness_box_from_non_null_unit, ());
+
+    gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u8, u8);
+    gen_from_non_null_unsized_harness!(harness_box_from_non_null_vec_u32, u32);
+
+    // These harnesses allocate raw memory directly instead of using higher-level
+    // Box constructors. `proof_for_contract` requires a single top-level call to
+    // `Box::from_raw_in`, while helpers such as `Box::new_in`,
+    // `Box::new_uninit_slice_in`, and `Vec::into_boxed_slice` eventually route
+    // through `Box::from_raw_in` during setup.
+
+    macro_rules! gen_from_raw_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<$ty, Global>::from_raw_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let ptr: *mut $ty = if mem::size_of::<$ty>() == 0 {
+                    // ZST boxes use a non-null dangling pointer and never allocate.
+                    mem::forget(value);
+                    NonNull::<$ty>::dangling().as_ptr()
+                } else {
+                    let layout = Layout::new::<$ty>();
+                    let ptr = match Global.allocate(layout) {
+                        Ok(memory) => memory.cast::<$ty>().as_ptr(),
+                        Err(_) => handle_alloc_error(layout),
+                    };
+                    unsafe { ptr.write(value) };
+                    ptr
+                };
+                let alloc = Global;
+                let recovered: Box<$ty, Global> = unsafe { Box::from_raw_in(ptr, alloc) };
+                assert!(ptr::eq(&*recovered, ptr));
+                kani::cover(true, "Box::from_raw_in returns under its contract preconditions");
+            }
+        };
+    }
+
+    macro_rules! gen_from_raw_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[$elem], Global>::from_raw_in)]
+            pub fn $name() {
+                // Keep the slice length symbolic so this remains an unbound
+                // unsized harness, while still ruling out impossible layouts.
+                let len: usize = kani::any_where(|len: &usize| box_slice_layout_ok::<$elem>(*len));
+                let data: *mut $elem = if len == 0 {
+                    NonNull::<$elem>::dangling().as_ptr()
+                } else {
+                    let layout = Layout::array::<$elem>(len).unwrap();
+                    let ptr = match Global.allocate(layout) {
+                        Ok(memory) => memory.cast::<$elem>().as_ptr(),
+                        Err(_) => handle_alloc_error(layout),
+                    };
+                    unsafe {
+                        ptr::write_bytes(
+                            ptr.cast::<u8>(),
+                            kani::any::<u8>(),
+                            mem::size_of::<$elem>() * len,
+                        );
+                    }
+                    ptr
+                };
+                let ptr: *mut [$elem] = ptr::slice_from_raw_parts_mut(data, len);
+                let alloc = Global;
+                let recovered: Box<[$elem], Global> = unsafe { Box::from_raw_in(ptr, alloc) };
+                assert!(ptr::eq(&*recovered, ptr));
+                kani::cover(true, "Box::from_raw_in returns under its contract preconditions");
+            }
+        };
+    }
+
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_i32, i32);
+    gen_from_raw_in_sized_harness!(harness_box_from_raw_in_unit, ());
+
+    gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u8, u8);
+    gen_from_raw_in_unsized_harness!(harness_box_from_raw_in_vec_u32, u32);
+
+    macro_rules! gen_from_non_null_in_sized_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Box::<$ty, Global>::from_non_null_in)]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+                let (ptr, alloc): (NonNull<$ty>, Global) = Box::into_non_null_with_allocator(boxed);
+                let recovered: Box<$ty, Global> = unsafe { Box::from_non_null_in(ptr, alloc) };
+                assert!(ptr::eq(&*recovered, ptr.as_ptr()));
+                kani::cover(true, "Box::from_non_null_in returns under its contract preconditions");
+            }
+        };
+    }
+
+    macro_rules! gen_from_non_null_in_unsized_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof_for_contract(Box::<[$elem], Global>::from_non_null_in)]
+            pub fn $name() {
+                let boxed: Box<[$elem], Global> =
+                    verifier_nondet_vec_box::<$elem>().into_boxed_slice();
+                let (ptr, alloc): (NonNull<[$elem]>, Global) =
+                    Box::into_non_null_with_allocator(boxed);
+                let recovered: Box<[$elem], Global> = unsafe { Box::from_non_null_in(ptr, alloc) };
+                assert!(ptr::eq(&*recovered, ptr.as_ptr()));
+                kani::cover(true, "Box::from_non_null_in returns under its contract preconditions");
+            }
+        };
+    }
+
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_i32, i32);
+    gen_from_non_null_in_sized_harness!(harness_box_from_non_null_in_unit, ());
+
+    gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u8, u8);
+    gen_from_non_null_in_unsized_harness!(harness_box_from_non_null_in_vec_u32, u32);
+
+    // === SAFE FUNCTIONS ===
+
+    // Checks Box::new_in.
+    macro_rules! gen_box_new_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let boxed = Box::<$ty, Global>::new_in(value, Global);
+                assert_eq!(*boxed, value);
+                kani::cover(true, "Box::new_in preserves the value");
+            }
+        };
+    }
+
+    // Checks Box::new_in.
+    macro_rules! gen_box_new_in_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let expected = (vec.as_ptr(), vec.len(), vec.capacity());
+                let boxed = Box::<Vec<$elem>, Global>::new_in(vec, Global);
+                assert_eq!((boxed.as_ptr(), boxed.len(), boxed.capacity()), expected);
+                kani::cover(true, "Box::new_in preserves the Vec buffer, length and capacity");
+            }
+        };
+    }
+
+    gen_box_new_in_harness!(harness_box_new_in_i32, i32);
+    gen_box_new_in_harness!(harness_box_new_in_unit, ());
+
+    gen_box_new_in_vec_harness!(harness_box_new_in_vec_u8, u8);
+
+    // Checks Box::try_new_in.
+    macro_rules! gen_box_try_new_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                if let Ok(boxed) = Box::<$ty, Global>::try_new_in(value, Global) {
+                    assert_eq!(*boxed, value);
+                    kani::cover(true, "Box::try_new_in succeeds and preserves the value");
+                }
+                kani::cover(true, "Box::try_new_in returns");
+            }
+        };
+    }
+
+    // Checks Box::try_new_in.
+    macro_rules! gen_box_try_new_in_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let expected = (vec.as_ptr(), vec.len(), vec.capacity());
+                if let Ok(boxed) = Box::<Vec<$elem>, Global>::try_new_in(vec, Global) {
+                    assert_eq!((boxed.as_ptr(), boxed.len(), boxed.capacity()), expected);
+                    kani::cover(
+                        true,
+                        "Box::try_new_in preserves the Vec buffer, length and capacity",
+                    );
+                }
+                kani::cover(true, "Box::try_new_in Vec returns");
+            }
+        };
+    }
+
+    gen_box_try_new_in_harness!(harness_box_try_new_in_i32, i32);
+    gen_box_try_new_in_harness!(harness_box_try_new_in_unit, ());
+
+    gen_box_try_new_in_vec_harness!(harness_box_try_new_in_vec_u8, u8);
+
+    // Checks Box::try_new_uninit_in.
+    macro_rules! gen_box_try_new_uninit_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                if let Ok(boxed) = Box::<$ty, Global>::try_new_uninit_in(Global) {
+                    assert!(boxed.as_ptr().is_aligned());
+                    assert!(!boxed.as_ptr().is_null());
+                    kani::cover(true, "Box::try_new_uninit_in returns aligned storage");
+                }
+                kani::cover(true, "Box::try_new_uninit_in returns");
+            }
+        };
+    }
+
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_i32, i32);
+    gen_box_try_new_uninit_in_harness!(harness_box_try_new_uninit_in_unit, ());
+
+    // Checks Box::try_new_zeroed_in.
+    macro_rules! gen_box_try_new_zeroed_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                if let Ok(boxed) = Box::<$ty, Global>::try_new_zeroed_in(Global) {
+                    // The instantiated i32 and () types admit an all-zero representation.
+                    assert_eq!(unsafe { boxed.assume_init() }.as_ref(), &<$ty>::default());
+                    kani::cover(true, "Box::try_new_zeroed_in initializes the value to zero");
+                }
+                kani::cover(true, "Box::try_new_zeroed_in returns");
+            }
+        };
+    }
+
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_i32, i32);
+    gen_box_try_new_zeroed_in_harness!(harness_box_try_new_zeroed_in_unit, ());
+
+    // Checks Box::into_boxed_slice.
+    macro_rules! gen_box_into_boxed_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let boxed: Box<$ty, Global> = Box::<$ty, Global>::new_in(value, Global);
+                let expected = &*boxed as *const $ty;
+                let slice = Box::<$ty, Global>::into_boxed_slice(boxed);
+                assert_eq!(slice.len(), 1);
+                assert_eq!(slice.as_ptr(), expected);
+                assert_eq!(slice[0], value);
+                kani::cover(true, "Box::into_boxed_slice preserves pointer and value");
+            }
+        };
+    }
+
+    // Checks Box::into_boxed_slice.
+    macro_rules! gen_box_into_boxed_slice_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let boxed: Box<Vec<$elem>, Global> =
+                    Box::<Vec<$elem>, Global>::new_in(value, Global);
+                let expected = &*boxed as *const Vec<$elem>;
+                let buffer = (boxed.as_ptr(), boxed.len(), boxed.capacity());
+                let slice = Box::<Vec<$elem>, Global>::into_boxed_slice(boxed);
+                assert_eq!(slice.len(), 1);
+                assert_eq!(slice.as_ptr(), expected);
+                assert_eq!((slice[0].as_ptr(), slice[0].len(), slice[0].capacity()), buffer);
+                kani::cover(true, "Box::into_boxed_slice preserves the Vec payload");
+            }
+        };
+    }
+
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_u8, u8);
+    gen_box_into_boxed_slice_harness!(harness_box_into_boxed_slice_unit, ());
+
+    gen_box_into_boxed_slice_vec_harness!(harness_box_into_boxed_slice_vec_u8, u8);
+
+    // Checks Box::new_uninit_slice.
+    macro_rules! gen_box_new_uninit_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len: usize = kani::any_where(|l: &usize| box_slice_layout_ok::<$ty>(*l));
+                let boxed: Box<[mem::MaybeUninit<$ty>]> = Box::<[$ty]>::new_uninit_slice(len);
+                assert_eq!(boxed.len(), len);
+                assert!(boxed.as_ptr().is_aligned());
+                kani::cover(len == 0, "Box::new_uninit_slice returns an empty slice");
+                kani::cover(len != 0, "Box::new_uninit_slice returns a nonempty slice");
+            }
+        };
+    }
+
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_u8, u8);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_u32, u32);
+    gen_box_new_uninit_slice_harness!(harness_box_new_uninit_slice_unit, ());
+
+    // Checks Box::new_zeroed_slice.
+    macro_rules! gen_box_new_zeroed_slice_harness {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len: usize = kani::any_where(|l: &usize| box_slice_layout_ok::<$elem_ty>(*l));
+                let boxed: Box<[mem::MaybeUninit<$elem_ty>]> =
+                    Box::<[$elem_ty]>::new_zeroed_slice(len);
+                assert_eq!(boxed.len(), len);
+                assert!(boxed.as_ptr().is_aligned());
+                if len != 0 {
+                    let index = kani::any_where(|i: &usize| *i < len);
+                    // All instantiated element types admit zero initialization.
+                    assert_eq!(unsafe { boxed[index].assume_init() }, <$elem_ty>::default());
+                }
+                kani::cover(len == 0, "Box::new_zeroed_slice returns an empty slice");
+                kani::cover(len != 0, "Box::new_zeroed_slice returns a nonempty slice");
+            }
+        };
+    }
+
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_u8, u8);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_u32, u32);
+    gen_box_new_zeroed_slice_harness!(harness_box_new_zeroed_slice_unit, ());
+
+    // Checks Box::try_new_uninit_slice.
+    macro_rules! gen_box_try_new_uninit_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len: usize = kani::any();
+                let result: Result<Box<[mem::MaybeUninit<$ty>]>, AllocError> =
+                    Box::<[$ty]>::try_new_uninit_slice(len);
+                let layout_ok = box_slice_layout_ok::<$ty>(len);
+                assert!(layout_ok || result.is_err());
+                // ZSTs cannot have a layout-overflow error.
+                if mem::size_of::<$ty>() != 0 {
+                    kani::cover(
+                        !layout_ok && result.is_err(),
+                        "slice constructor rejects layout overflow",
+                    );
+                }
+                if let Ok(boxed) = result {
+                    assert_eq!(boxed.len(), len);
+                    assert!(boxed.as_ptr().is_aligned());
+                    kani::cover(len == 0, "Box::try_new_uninit_slice succeeds for an empty slice");
+                    kani::cover(
+                        len != 0,
+                        "Box::try_new_uninit_slice succeeds for a nonempty slice",
+                    );
+                }
+                kani::cover(true, "Box::try_new_uninit_slice returns");
+            }
+        };
+    }
+
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_u8, u8);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_u32, u32);
+    gen_box_try_new_uninit_slice_harness!(harness_box_try_new_uninit_slice_unit, ());
+
+    // Checks Box::try_new_zeroed_slice.
+    macro_rules! gen_box_try_new_zeroed_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len: usize = kani::any();
+                let result: Result<Box<[mem::MaybeUninit<$ty>]>, AllocError> =
+                    Box::<[$ty]>::try_new_zeroed_slice(len);
+                let layout_ok = box_slice_layout_ok::<$ty>(len);
+                assert!(layout_ok || result.is_err());
+                // ZSTs cannot have a layout-overflow error.
+                if mem::size_of::<$ty>() != 0 {
+                    kani::cover(
+                        !layout_ok && result.is_err(),
+                        "slice constructor rejects layout overflow",
+                    );
+                }
+                if let Ok(boxed) = result {
+                    assert_eq!(boxed.len(), len);
+                    assert!(boxed.as_ptr().is_aligned());
+                    if len != 0 {
+                        let index = kani::any_where(|i: &usize| *i < len);
+                        // All instantiated element types admit zero initialization.
+                        assert_eq!(unsafe { boxed[index].assume_init() }, <$ty>::default());
+                    }
+                    kani::cover(len == 0, "Box::try_new_zeroed_slice succeeds for an empty slice");
+                    kani::cover(
+                        len != 0,
+                        "Box::try_new_zeroed_slice succeeds for a nonempty slice",
+                    );
+                }
+                kani::cover(true, "Box::try_new_zeroed_slice returns");
+            }
+        };
+    }
+
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_u8, u8);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_u32, u32);
+    gen_box_try_new_zeroed_slice_harness!(harness_box_try_new_zeroed_slice_unit, ());
+
+    // Symbolic lengths exercise both len == N and len != N for fixed N = 100.
+    // Checks Box::into_array.
+    macro_rules! gen_box_into_array_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let vec: Vec<$ty> = verifier_nondet_vec_box::<$ty>();
+                let boxed: Box<[$ty]> = vec.into_boxed_slice();
+                const N: usize = 100;
+                let matches = boxed.len() == N;
+                assert_eq!(boxed.into_array::<N>().is_some(), matches);
+                kani::cover(matches, "Box::into_array accepts matching length");
+                kani::cover(!matches, "Box::into_array rejects mismatched length");
+            }
+        };
+    }
+
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u8, u8);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_u32, u32);
+    gen_box_into_array_slice_harness!(harness_box_into_array_slice_unit, ());
+
+    // Checks Box::new_uninit_slice_in.
+    macro_rules! gen_box_new_uninit_slice_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len: usize = kani::any_where(|l: &usize| box_slice_layout_ok::<$ty>(*l));
+                let boxed: Box<[mem::MaybeUninit<$ty>], Global> =
+                    Box::<[$ty], Global>::new_uninit_slice_in(len, Global);
+                assert_eq!(boxed.len(), len);
+                assert!(boxed.as_ptr().is_aligned());
+                kani::cover(len == 0, "Box::new_uninit_slice_in returns an empty slice");
+                kani::cover(len != 0, "Box::new_uninit_slice_in returns a nonempty slice");
+            }
+        };
+    }
+
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_u8, u8);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_u32, u32);
+    gen_box_new_uninit_slice_in_harness!(harness_box_new_uninit_slice_in_unit, ());
+
+    // Checks Box::new_zeroed_slice_in.
+    macro_rules! gen_box_new_zeroed_slice_in_harness {
+        ($name:ident, $elem_ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                type T = $elem_ty;
+                let len: usize = kani::any_where(|l: &usize| box_slice_layout_ok::<T>(*l));
+                let boxed: Box<[mem::MaybeUninit<T>], Global> =
+                    Box::<[T], Global>::new_zeroed_slice_in(len, Global);
+                assert_eq!(boxed.len(), len);
+                assert!(boxed.as_ptr().is_aligned());
+                if len != 0 {
+                    let index = kani::any_where(|i: &usize| *i < len);
+                    // All instantiated element types admit zero initialization.
+                    assert_eq!(unsafe { boxed[index].assume_init() }, <T>::default());
+                }
+                kani::cover(len == 0, "Box::new_zeroed_slice_in returns an empty slice");
+                kani::cover(len != 0, "Box::new_zeroed_slice_in returns a nonempty slice");
+            }
+        };
+    }
+
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_u8, u8);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_u32, u32);
+    gen_box_new_zeroed_slice_in_harness!(harness_box_new_zeroed_slice_in_unit, ());
+
+    // Checks Box::try_new_uninit_slice_in.
+    macro_rules! gen_box_try_new_uninit_slice_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len: usize = kani::any();
+                let result: Result<Box<[mem::MaybeUninit<$ty>], Global>, AllocError> =
+                    Box::<[$ty], Global>::try_new_uninit_slice_in(len, Global);
+                let layout_ok = box_slice_layout_ok::<$ty>(len);
+                assert!(layout_ok || result.is_err());
+                // ZSTs cannot have a layout-overflow error.
+                if mem::size_of::<$ty>() != 0 {
+                    kani::cover(
+                        !layout_ok && result.is_err(),
+                        "slice constructor rejects layout overflow",
+                    );
+                }
+                if let Ok(boxed) = result {
+                    assert_eq!(boxed.len(), len);
+                    assert!(boxed.as_ptr().is_aligned());
+                    kani::cover(
+                        len == 0,
+                        "Box::try_new_uninit_slice_in succeeds for an empty slice",
+                    );
+                    kani::cover(
+                        len != 0,
+                        "Box::try_new_uninit_slice_in succeeds for a nonempty slice",
+                    );
+                }
+                kani::cover(true, "Box::try_new_uninit_slice_in returns");
+            }
+        };
+    }
+
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_u8, u8);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_u32, u32);
+    gen_box_try_new_uninit_slice_in_harness!(harness_box_try_new_uninit_slice_in_unit, ());
+
+    // Checks Box::try_new_zeroed_slice_in.
+    macro_rules! gen_box_try_new_zeroed_slice_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let len: usize = kani::any();
+                let result: Result<Box<[mem::MaybeUninit<$ty>], Global>, AllocError> =
+                    Box::<[$ty], Global>::try_new_zeroed_slice_in(len, Global);
+                let layout_ok = box_slice_layout_ok::<$ty>(len);
+                assert!(layout_ok || result.is_err());
+                // ZSTs cannot have a layout-overflow error.
+                if mem::size_of::<$ty>() != 0 {
+                    kani::cover(
+                        !layout_ok && result.is_err(),
+                        "slice constructor rejects layout overflow",
+                    );
+                }
+                if let Ok(boxed) = result {
+                    assert_eq!(boxed.len(), len);
+                    assert!(boxed.as_ptr().is_aligned());
+                    if len != 0 {
+                        let index = kani::any_where(|i: &usize| *i < len);
+                        // All instantiated element types admit zero initialization.
+                        assert_eq!(unsafe { boxed[index].assume_init() }, <$ty>::default());
+                    }
+                    kani::cover(
+                        len == 0,
+                        "Box::try_new_zeroed_slice_in succeeds for an empty slice",
+                    );
+                    kani::cover(
+                        len != 0,
+                        "Box::try_new_zeroed_slice_in succeeds for a nonempty slice",
+                    );
+                }
+                kani::cover(true, "Box::try_new_zeroed_slice_in returns");
+            }
+        };
+    }
+
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_u8, u8);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_u32, u32);
+    gen_box_try_new_zeroed_slice_in_harness!(harness_box_try_new_zeroed_slice_in_unit, ());
+
+    // Checks Box::write.
+    macro_rules! gen_box_write_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let boxed: Box<mem::MaybeUninit<$ty>, Global> =
+                    Box::<$ty, Global>::new_uninit_in(Global);
+                let expected = boxed.as_ptr();
+                let written = Box::write(boxed, value);
+                assert_eq!(&*written as *const $ty, expected);
+                assert_eq!(*written, value);
+                kani::cover(true, "Box::write preserves the allocation and stores the value");
+            }
+        };
+    }
+
+    // Checks Box::write.
+    macro_rules! gen_box_write_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let boxed: Box<mem::MaybeUninit<Vec<$elem>>, Global> =
+                    Box::<Vec<$elem>, Global>::new_uninit_in(Global);
+                let expected = boxed.as_ptr();
+                let buffer = (value.as_ptr(), value.len(), value.capacity());
+                let written = Box::write(boxed, value);
+                assert_eq!(&*written as *const Vec<$elem>, expected);
+                assert_eq!((written.as_ptr(), written.len(), written.capacity()), buffer);
+                kani::cover(true, "Box::write preserves the allocation and Vec payload");
+            }
+        };
+    }
+
+    gen_box_write_harness!(harness_box_write_i32, i32);
+    gen_box_write_harness!(harness_box_write_unit, ());
+    gen_box_write_harness!(harness_box_write_bool, bool);
+
+    gen_box_write_vec_harness!(harness_box_write_vec_u8, u8);
+
+    // Each module has its own target and proof entry points. Shared setup covers
+    // ordinary allocation, ZSTs and slice metadata.
+    macro_rules! box_pointer_harnesses {
+        ($module:ident, $target:literal, |$boxed:ident| $body:block $(, $dyn_harness:ident)?) => {
+            mod $module {
+                use super::*;
+
+                #[doc = $target]
+                fn check<T: ?Sized>($boxed: Box<T>) {
+                    $body
+                    kani::cover(true, $target);
+                }
+
+                #[kani::proof]
+                fn sized() { check(Box::new(kani::any::<i32>())); }
+
+                #[kani::proof]
+                fn zst() { check(Box::new(())); }
+
+                #[kani::proof]
+                fn slice() { check(verifier_nondet_vec_box::<u8>().into_boxed_slice()); }
+
+                $(
+                    #[kani::proof]
+                    fn $dyn_harness() {
+                        let boxed: Box<dyn Any> = Box::new(kani::any::<i32>());
+                        check(boxed);
+                    }
+                )?
+            }
+        };
+    }
+
+    box_pointer_harnesses!(harness_box_into_non_null, "Checks Box::into_non_null.", |boxed| {
+        let expected = &*boxed as *const _;
+        let ptr = Box::into_non_null(boxed);
+        assert!(ptr::eq(ptr.as_ptr(), expected));
+        let _recovered = unsafe { Box::from_non_null(ptr) };
+    });
+    box_pointer_harnesses!(
+        harness_box_into_raw_with_allocator,
+        "Checks Box::into_raw_with_allocator.",
+        |boxed| {
+            let expected = &*boxed as *const _;
+            let expected_layout = Layout::for_value(&*boxed);
+            let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
+            assert!(ptr::addr_eq(ptr, expected));
+            let recovered = unsafe { Box::from_raw_in(ptr, alloc) };
+            let layout = Layout::for_value(&*recovered);
+            assert_eq!(layout.size(), expected_layout.size());
+            assert_eq!(layout.align(), expected_layout.align());
+        },
+        dyn_any
+    );
+    box_pointer_harnesses!(
+        harness_box_into_non_null_with_allocator,
+        "Checks Box::into_non_null_with_allocator.",
+        |boxed| {
+            let expected = &*boxed as *const _;
+            let (ptr, alloc) = Box::into_non_null_with_allocator(boxed);
+            assert!(ptr::eq(ptr.as_ptr(), expected));
+            let _recovered = unsafe { Box::from_non_null_in(ptr, alloc) };
+        }
+    );
+    box_pointer_harnesses!(harness_box_into_unique, "Checks Box::into_unique.", |boxed| {
+        let expected = &*boxed as *const _;
+        let (ptr, alloc) = Box::into_unique(boxed);
+        assert!(ptr::eq(ptr.as_ptr(), expected));
+        let _recovered = unsafe { Box::from_raw_in(ptr.as_ptr(), alloc) };
+    });
+    box_pointer_harnesses!(harness_box_leak, "Checks Box::leak.", |boxed| {
+        let expected = &*boxed as *const _;
+        let leaked = Box::leak(boxed);
+        assert!(ptr::eq(leaked, expected));
+        let _recovered = unsafe { Box::from_raw(&raw mut *leaked) };
+    });
+    box_pointer_harnesses!(harness_box_into_pin, "Checks Box::into_pin.", |boxed| {
+        let expected = &*boxed as *const _;
+        let pinned = Box::into_pin(boxed);
+        assert!(ptr::eq(&*pinned, expected));
+    });
+    box_pointer_harnesses!(
+        harness_box_drop,
+        "Checks <Box<T> as Drop>::drop.",
+        |boxed| {
+            drop(boxed);
+        },
+        dyn_any
+    );
+
+    /// Checks Box::into_pin for a !Unpin pointee, preserving its address.
+    #[kani::proof]
+    fn harness_box_into_pin_not_unpin() {
+        struct NotUnpin(u8, PhantomPinned);
+        let value = kani::any();
+        let boxed = Box::new(NotUnpin(value, PhantomPinned));
+        let address = &*boxed as *const NotUnpin;
+        let pinned = Box::into_pin(boxed);
+        assert_eq!(&*pinned as *const NotUnpin, address);
+        assert_eq!(pinned.0, value);
+        kani::cover(true, "Box::into_pin preserves the !Unpin value and address");
+    }
+
+    /// Checks Box::drop's no-deallocation branch with nontrivial slice metadata.
+    #[kani::proof]
+    fn harness_box_drop_zst_slice() {
+        drop(verifier_nondet_vec_box::<()>().into_boxed_slice());
+        kani::cover(true, "Box::drop completes for a ZST slice");
+    }
+
+    // Checks <Box<T> as Default>::default.
+    macro_rules! gen_box_default_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let boxed: Box<$ty> = Box::<$ty>::default();
+                assert_eq!(*boxed, <$ty>::default());
+                kani::cover(true, "Box::default returns the default value");
+            }
+        };
+    }
+
+    gen_box_default_harness!(harness_box_default_i32, i32);
+    gen_box_default_harness!(harness_box_default_unit, ());
+    gen_box_default_harness!(harness_box_default_vec_u8, Vec<u8>);
+
+    // Checks <Box<str> as Default>::default.
+    macro_rules! gen_box_str_default_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let boxed: Box<$ty> = Box::<$ty>::default();
+                assert!(boxed.is_empty());
+                kani::cover(true, "Box<str>::default returns an empty string");
+            }
+        };
+    }
+
+    gen_box_str_default_harness!(harness_box_default_str, str);
+
+    // Checks <Box<T> as Clone>::clone.
+    macro_rules! gen_box_clone_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: $ty = kani::any();
+                let boxed: Box<$ty, Global> = Box::new_in(value, Global);
+                let cloned: Box<$ty, Global> = Clone::clone(&boxed);
+                assert_eq!(*cloned, *boxed);
+                kani::cover(true, "Box::clone preserves the value");
+            }
+        };
+    }
+
+    // Checks <Box<T> as Clone>::clone.
+    macro_rules! gen_box_clone_vec_harness {
+        ($name:ident, $elem:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let value: Vec<$elem> = verifier_nondet_vec::<$elem>();
+                let boxed: Box<Vec<$elem>, Global> = Box::new_in(value, Global);
+                let cloned: Box<Vec<$elem>, Global> = Clone::clone(&boxed);
+                assert_eq!(cloned.len(), boxed.len());
+                if !boxed.is_empty() {
+                    let index = kani::any_where(|i: &usize| *i < boxed.len());
+                    assert_eq!(cloned[index], boxed[index]);
+                }
+                kani::cover(boxed.is_empty(), "Box::clone preserves an empty Vec");
+                kani::cover(!boxed.is_empty(), "Box::clone preserves a nonempty Vec");
+            }
+        };
+    }
+
+    gen_box_clone_harness!(harness_box_clone_i32, i32);
+    gen_box_clone_harness!(harness_box_clone_unit, ());
+
+    gen_box_clone_vec_harness!(harness_box_clone_vec_u8, u8);
+
+    // Checks <Box<str> as Clone>::clone.
+    macro_rules! gen_box_str_clone_harness {
+        ($name:ident, $value:expr) => {
+            #[kani::proof]
+            pub fn $name() {
+                let boxed: Box<str> = Box::<str>::from($value);
+                let cloned: Box<str> = Clone::clone(&boxed);
+                assert_eq!(&*cloned, &*boxed);
+                kani::cover(true, "Box<str>::clone preserves the string");
+            }
+        };
+    }
+
+    gen_box_str_clone_harness!(harness_box_clone_str_empty, "");
+    gen_box_str_clone_harness!(harness_box_clone_str_nonempty, "test");
 }
