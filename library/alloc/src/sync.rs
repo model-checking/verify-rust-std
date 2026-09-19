@@ -1663,16 +1663,7 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "rc_raw", since = "1.17.0")]
-    #[requires({
-        let offset = unsafe { data_offset(ptr) };
-        let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-        let rebuilt_ptr = unsafe { &raw const (*inner).data };
-
-        kani::mem::checked_align_of_raw(ptr).is_some()
-            && kani::mem::checked_size_of_raw(ptr).is_some()
-            && ptr == rebuilt_ptr
-            && unsafe { (*inner).strong.load(Relaxed) >= 1 }
-    })]
+    #[requires(unsafe { arc_raw_valid(ptr) })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Arc::from_raw_in(ptr, Global) }
     }
@@ -1735,23 +1726,15 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "arc_mutate_strong_count", since = "1.51.0")]
-    #[requires(!ptr.is_null())]
-    #[requires(kani::mem::can_dereference(ptr))]
-    #[requires({
-        let offset = unsafe { data_offset(ptr) };
-        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
-        kani::mem::can_dereference(arc_ptr)
+    #[requires(unsafe { arc_raw_valid(ptr) })]
+    #[ensures(|_: &()| {
+        let (strong_ptr, strong_before) = old({
+            let strong_ptr = unsafe { arc_strong_ptr(ptr) };
+            (strong_ptr, unsafe { (*strong_ptr).load(Relaxed) })
+        });
+        strong_before.checked_add(1) == Some(unsafe { (*strong_ptr).load(Relaxed) })
     })]
-    #[requires({
-        let offset = unsafe { data_offset(ptr) };
-        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
-        kani::mem::can_dereference(arc_ptr) && unsafe { (*arc_ptr).strong.load(Relaxed) >= 1 }
-    })]
-    #[cfg_attr(kani, kani::modifies({
-        let offset = unsafe { data_offset(ptr) };
-        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
-        unsafe { &raw const (*arc_ptr).strong }
-    }))]
+    #[cfg_attr(kani, kani::modifies(unsafe { arc_strong_ptr(ptr) }))]
     pub unsafe fn increment_strong_count(ptr: *const T) {
         unsafe { Arc::increment_strong_count_in(ptr, Global) }
     }
@@ -1792,29 +1775,21 @@ impl<T: ?Sized> Arc<T> {
     /// ```
     #[inline]
     #[stable(feature = "arc_mutate_strong_count", since = "1.51.0")]
-    #[requires({
-        let offset = unsafe { data_offset(ptr) };
-        let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
-        let inner = inner_mut as *const ArcInner<T>;
-        let rebuilt_ptr = unsafe { &raw const (*inner).data };
-        let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
-        let into_raw_roundtrip_ptr = {
-            let arc = unsafe { Arc::<T>::from_raw(ptr) };
-            Arc::<T>::into_raw(arc)
-        };
-        ptr == rebuilt_ptr
-            && ptr == into_raw_roundtrip_ptr
-            && kani::mem::checked_size_of_raw(ptr)
-                == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-            && kani::mem::checked_align_of_raw(ptr)
-                == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-            && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+    #[requires(unsafe { arc_raw_valid(ptr) })]
+    // A final decrement may destroy the value and deallocate the allocation.
+    // Since the current Kani function-contract API has no `frees` clause, the
+    // postcondition constrains only non-final decrements whose allocation survives.
+    #[ensures(|_: &()| {
+        let (strong_ptr, strong_before) = old({
+            let strong_ptr = unsafe { arc_strong_ptr(ptr) };
+            (strong_ptr, unsafe { (*strong_ptr).load(Relaxed) })
+        });
+        strong_before == 1 || {
+            let strong_after = unsafe { (*strong_ptr).load(Relaxed) };
+            strong_before.checked_sub(1) == Some(strong_after)
+        }
     })]
-    #[cfg_attr(kani, kani::modifies({
-        let offset = unsafe { data_offset(ptr) };
-        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
-        unsafe { &raw const (*arc_ptr).strong }
-    }))]
+    #[cfg_attr(kani, kani::modifies(unsafe { arc_strong_ptr(ptr) }))]
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         unsafe { Arc::decrement_strong_count_in(ptr, Global) }
     }
@@ -1957,18 +1932,15 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[requires({
-        let offset = unsafe { data_offset(ptr) };
-        let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-        let rebuilt_ptr = unsafe { &raw const (*inner).data };
-        ptr == rebuilt_ptr
-            && kani::mem::checked_size_of_raw(ptr)
-                == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-            && kani::mem::checked_align_of_raw(ptr)
-                == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-            && unsafe { (*inner).strong.load(Relaxed) >= 1 }
+    #[requires(unsafe { arc_raw_valid(ptr) })]
+    #[ensures(|result: &Self| {
+        let result_ptr = Arc::<T, A>::as_ptr(result);
+        ptr::eq(result_ptr, ptr)
+            && kani::mem::checked_size_of_raw(result_ptr)
+                == kani::mem::checked_size_of_raw(ptr)
+            && kani::mem::checked_align_of_raw(result_ptr)
+                == kani::mem::checked_align_of_raw(ptr)
     })]
-    #[ensures(|result: &Self| Arc::<T, A>::as_ptr(result) == ptr)]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         unsafe {
             let offset = data_offset(ptr);
@@ -2125,32 +2097,15 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[requires({
-        let offset = unsafe { data_offset(ptr) };
-        let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
-        let inner = inner_mut as *const ArcInner<T>;
-        let rebuilt_ptr = unsafe { &raw const (*inner).data };
-        let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
-
-        let into_raw_roundtrip_ptr = {
-            let arc = unsafe { Arc::<T, A>::from_raw_in(ptr, alloc.clone()) };
-            let (raw_ptr, _raw_alloc) = Arc::<T, A>::into_raw_with_allocator(arc);
-            raw_ptr
-        };
-
-        ptr == rebuilt_ptr
-            && ptr == into_raw_roundtrip_ptr
-            && kani::mem::checked_size_of_raw(ptr)
-                == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-            && kani::mem::checked_align_of_raw(ptr)
-                == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-            && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+    #[requires(unsafe { arc_raw_valid(ptr) })]
+    #[ensures(|_: &()| {
+        let (strong_ptr, strong_before) = old({
+            let strong_ptr = unsafe { arc_strong_ptr(ptr) };
+            (strong_ptr, unsafe { (*strong_ptr).load(Relaxed) })
+        });
+        strong_before.checked_add(1) == Some(unsafe { (*strong_ptr).load(Relaxed) })
     })]
-    #[cfg_attr(kani, kani::modifies({
-        let offset = unsafe { data_offset(ptr) };
-        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
-        unsafe { &raw const (*arc_ptr).strong }
-    }))]
+    #[cfg_attr(kani, kani::modifies(unsafe { arc_strong_ptr(ptr) }))]
     pub unsafe fn increment_strong_count_in(ptr: *const T, alloc: A)
     where
         A: Clone,
@@ -2200,26 +2155,21 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[requires({
-        let offset = unsafe { data_offset(ptr) };
-        let inner_mut = unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> };
-        let inner = inner_mut as *const ArcInner<T>;
-        let rebuilt_ptr = unsafe { &raw const (*inner).data };
-
-        let strong_ptr = unsafe { &raw mut (*inner_mut).strong };
-
-        ptr == rebuilt_ptr
-            && kani::mem::checked_size_of_raw(ptr)
-                == Some(unsafe { mem::size_of_val_raw(rebuilt_ptr) })
-            && kani::mem::checked_align_of_raw(ptr)
-                == Some(unsafe { align_of_val_raw(rebuilt_ptr) })
-            && unsafe { (*strong_ptr).load(Relaxed) >= 1 }
+    #[requires(unsafe { arc_raw_valid(ptr) })]
+    // A final decrement may destroy the value and deallocate the allocation.
+    // Since the current Kani function-contract API has no `frees` clause, the
+    // postcondition constrains only non-final decrements whose allocation survives.
+    #[ensures(|_: &()| {
+        let (strong_ptr, strong_before) = old({
+            let strong_ptr = unsafe { arc_strong_ptr(ptr) };
+            (strong_ptr, unsafe { (*strong_ptr).load(Relaxed) })
+        });
+        strong_before == 1 || {
+            let strong_after = unsafe { (*strong_ptr).load(Relaxed) };
+            strong_before.checked_sub(1) == Some(strong_after)
+        }
     })]
-    #[cfg_attr(kani, kani::modifies({
-        let offset = unsafe { data_offset(ptr) };
-        let arc_ptr = ptr.byte_sub(offset) as *const ArcInner<T>;
-        unsafe { &raw const (*arc_ptr).strong }
-    }))]
+    #[cfg_attr(kani, kani::modifies(unsafe { arc_strong_ptr(ptr) }))]
     pub unsafe fn decrement_strong_count_in(ptr: *const T, alloc: A) {
         unsafe { drop(Arc::from_raw_in(ptr, alloc)) };
     }
@@ -2828,7 +2778,7 @@ impl<T: ?Sized, A: Allocator> Arc<T, A> {
     #[ensures(|result: &&mut T| {
         let inner = old(this.ptr.as_ptr());
         let data = unsafe { &raw const (*inner).data };
-        core::ptr::addr_eq((*result) as *const T, data)
+        core::ptr::eq((*result) as *const T, data)
     })]
     pub unsafe fn get_mut_unchecked(this: &mut Self) -> &mut T {
         // We are careful to *not* create a reference covering the "count" fields, as
@@ -3062,6 +3012,9 @@ impl<A: Allocator> Arc<dyn Any + Send + Sync, A> {
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     #[requires((*self).is::<T>())]
+    #[ensures(|result: &Arc<T, A>| {
+        core::ub_checks::can_dereference(Arc::<T, A>::as_ptr(result))
+    })]
     pub unsafe fn downcast_unchecked<T>(self) -> Arc<T, A>
     where
         T: Any + Send + Sync,
@@ -3172,42 +3125,15 @@ impl<T: ?Sized> Weak<T> {
     /// [`upgrade`]: Weak::upgrade
     #[inline]
     #[stable(feature = "weak_into_raw", since = "1.45.0")]
-    #[requires({
-        let is_sentinel = is_dangling(ptr);
-        if is_sentinel {
-            true
-        } else {
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).data };
-            let weak = unsafe { &raw const (*inner).weak };
-
-            ptr == rebuilt_ptr
-                && kani::mem::can_dereference(weak)
-                && unsafe { (*inner).weak.load(Relaxed) > 0 }
-        }
-    })]
+    // `is_dangling` recognizes the `usize::MAX` sentinel used by `Weak::new`,
+    // not an arbitrary dangling allocation pointer. The sentinel has no backing
+    // `ArcInner`, so allocation and reference-count checks apply only otherwise.
+    #[requires(unsafe { weak_raw_valid(ptr) })]
     #[ensures(|result: &Self| {
-        if old(is_dangling(ptr)) {
-            (result.ptr.as_ptr().cast::<()>()).addr() == usize::MAX
-                && (result.as_ptr().cast::<()>()).addr() == usize::MAX
-        } else {
-            result.as_ptr() == ptr
-                && result.ptr.as_ptr()
-                    == old({
-                        let offset = unsafe { data_offset(ptr) };
-                        unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> }
-                    })
-        }
-    })]
-    #[ensures(|result: &Self| {
-        old(is_dangling(ptr))
-            || unsafe { (*result.ptr.as_ptr()).weak.load(Relaxed) }
-                == old({
-                    let offset = unsafe { data_offset(ptr) };
-                    let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-                    unsafe { (*inner).weak.load(Relaxed) }
-                })
+        let result_ptr = result.as_ptr();
+        ptr::eq(result_ptr, ptr)
+            && old(unsafe { weak_raw_count_snapshot(ptr) })
+                == unsafe { weak_raw_count_snapshot(result_ptr) }
     })]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         unsafe { Weak::from_raw_in(ptr, Global) }
@@ -3380,40 +3306,15 @@ impl<T: ?Sized, A: Allocator> Weak<T, A> {
     /// [`upgrade`]: Weak::upgrade
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
-    #[requires({
-        let is_sentinel = is_dangling(ptr);
-        is_sentinel || {
-            let offset = unsafe { data_offset(ptr) };
-            let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-            let rebuilt_ptr = unsafe { &raw const (*inner).data };
-            let weak = unsafe { &raw const (*inner).weak };
-
-            ptr == rebuilt_ptr
-                && kani::mem::can_dereference(weak)
-                && unsafe { (*inner).weak.load(Relaxed) > 0 }
-        }
-    })]
+    // `is_dangling` recognizes the `usize::MAX` sentinel used by `Weak::new_in`,
+    // not an arbitrary dangling allocation pointer. The sentinel has no backing
+    // `ArcInner`, so allocation and reference-count checks apply only otherwise.
+    #[requires(unsafe { weak_raw_valid(ptr) })]
     #[ensures(|result: &Self| {
-        if old(is_dangling(ptr)) {
-            (result.ptr.as_ptr().cast::<()>()).addr() == usize::MAX
-                && (result.as_ptr().cast::<()>()).addr() == usize::MAX
-        } else {
-            result.as_ptr() == ptr
-                && result.ptr.as_ptr()
-                    == old({
-                        let offset = unsafe { data_offset(ptr) };
-                        unsafe { ptr.byte_sub(offset) as *mut ArcInner<T> }
-                    })
-        }
-    })]
-    #[ensures(|result: &Self| {
-        old(is_dangling(ptr))
-            || unsafe { (*result.ptr.as_ptr()).weak.load(Relaxed) }
-                == old({
-                    let offset = unsafe { data_offset(ptr) };
-                    let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
-                    unsafe { (*inner).weak.load(Relaxed) }
-                })
+        let result_ptr = result.as_ptr();
+        ptr::eq(result_ptr, ptr)
+            && old(unsafe { weak_raw_count_snapshot(ptr) })
+                == unsafe { weak_raw_count_snapshot(result_ptr) }
     })]
     pub unsafe fn from_raw_in(ptr: *const T, alloc: A) -> Self {
         // See Weak::as_ptr for context on how the input pointer is derived.
@@ -4426,6 +4327,87 @@ unsafe fn data_offset<T: ?Sized>(ptr: *const T) -> usize {
     unsafe { data_offset_alignment(Alignment::of_val_raw(ptr)) }
 }
 
+// These helpers are used only from Kani contracts.
+#[cfg(kani)]
+#[inline]
+unsafe fn arc_raw_parts<T: ?Sized>(
+    ptr: *const T,
+) -> (*const ArcInner<T>, *const T, *const Atomic<usize>) {
+    let offset = unsafe { data_offset(ptr) };
+    let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+    let data = unsafe { &raw const (*inner).data };
+    let strong = unsafe { &raw const (*inner).strong };
+    (inner, data, strong)
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn arc_raw_layout_valid<T: ?Sized>(ptr: *const T) -> bool {
+    let (_, data, _) = unsafe { arc_raw_parts(ptr) };
+    ptr::addr_eq(ptr, data)
+        && kani::mem::checked_size_of_raw(ptr) == Some(unsafe { mem::size_of_val_raw(data) })
+        && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { mem::align_of_val_raw(data) })
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn arc_raw_valid<T: ?Sized>(ptr: *const T) -> bool {
+    let strong = unsafe { arc_strong_ptr(ptr) };
+    (unsafe { arc_raw_layout_valid(ptr) })
+        && kani::mem::can_dereference(strong)
+        && (unsafe { (*strong).load(Relaxed) >= 1 })
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn arc_strong_ptr<T: ?Sized>(ptr: *const T) -> *const Atomic<usize> {
+    unsafe { arc_raw_parts(ptr).2 }
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn arc_weak_ptr<T: ?Sized>(ptr: *const T) -> *const Atomic<usize> {
+    let offset = unsafe { data_offset(ptr) };
+    let inner = unsafe { ptr.byte_sub(offset) as *const ArcInner<T> };
+    unsafe { &raw const (*inner).weak }
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn weak_raw_layout_valid<T: ?Sized>(ptr: *const T) -> bool {
+    let (inner, data, _) = unsafe { arc_raw_parts(ptr) };
+
+    kani::mem::same_allocation(ptr.cast::<u8>(), inner.cast::<u8>())
+        && ptr::addr_eq(ptr, data)
+        && kani::mem::checked_size_of_raw(ptr) == Some(unsafe { mem::size_of_val_raw(data) })
+        && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { mem::align_of_val_raw(data) })
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn weak_raw_valid<T: ?Sized>(ptr: *const T) -> bool {
+    if is_dangling(ptr) {
+        true
+    } else {
+        let weak = unsafe { arc_weak_ptr(ptr) };
+
+        (unsafe { weak_raw_layout_valid(ptr) })
+            && kani::mem::can_dereference(weak)
+            && unsafe { (*weak).load(Relaxed) > 0 }
+    }
+}
+
+#[cfg(kani)]
+#[inline]
+unsafe fn weak_raw_count_snapshot<T: ?Sized>(ptr: *const T) -> Option<usize> {
+    if is_dangling(ptr) {
+        None
+    } else {
+        let weak = unsafe { arc_weak_ptr(ptr) };
+        Some(unsafe { (*weak).load(Relaxed) })
+    }
+}
+
 #[inline]
 fn data_offset_alignment(alignment: Alignment) -> usize {
     let layout = Layout::new::<ArcInner<()>>();
@@ -5208,6 +5190,27 @@ mod kani_arc_harness_helpers {
         kani::assume(arc_slice_layout_ok::<T>(vec.len()));
         vec
     }
+
+    // Verification-only model of `fetch_update` for `Weak::upgrade`.
+    // These harnesses are single-threaded and `checked_increment` is pure, so
+    // retries only repeat the same state. Model them with one load and at most
+    // one strong CAS. This is not valid for concurrent or liveness verification.
+    pub(super) fn fetch_update_no_retry<F>(
+        atomic: &core::sync::atomic::AtomicUsize,
+        set_order: core::sync::atomic::Ordering,
+        fetch_order: core::sync::atomic::Ordering,
+        mut f: F,
+    ) -> Result<usize, usize>
+    where
+        F: FnMut(usize) -> Option<usize>,
+    {
+        let prev = atomic.load(fetch_order);
+
+        match f(prev) {
+            Some(next) => atomic.compare_exchange(prev, next, set_order, fetch_order),
+            None => Err(prev),
+        }
+    }
 }
 
 #[cfg(kani)]
@@ -5752,8 +5755,12 @@ mod verify {
             #[kani::proof_for_contract(Weak::<$ty>::from_raw)]
             pub fn $name() {
                 let value: $ty = kani::any();
-                let strong: Arc<$ty> = Arc::new(value);
-                let weak: Weak<$ty> = Arc::downgrade(&strong);
+                let mut weak: Option<Weak<$ty>> = None;
+                let strong: Arc<$ty> = Arc::new_cyclic(|initial_weak| {
+                    weak = Some(initial_weak.clone());
+                    value
+                });
+                let weak = weak.unwrap();
                 let ptr: *const $ty = weak.into_raw();
                 let _recovered: Weak<$ty> = unsafe { Weak::from_raw(ptr) };
                 kani::cover(true, "Weak::from_raw contract call is reachable");
@@ -5767,7 +5774,12 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem]> = Arc::from(vec);
-                let weak: Weak<[$elem]> = Arc::downgrade(&strong);
+                // A fresh Arc owns the single implicit weak count. Reserve one
+                // additional count for the explicit Weak constructed below.
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let weak: Weak<[$elem]> = Weak { ptr: strong.ptr, alloc: Global };
                 let ptr: *const [$elem] = weak.into_raw();
                 let _recovered: Weak<[$elem]> = unsafe { Weak::from_raw(ptr) };
                 kani::cover(true, "Weak<[T]>::from_raw contract call is reachable");
@@ -5795,14 +5807,36 @@ mod verify {
     gen_weak_from_raw_unsized_harness!(harness_arc_weak_from_raw_vec_u64, u64);
     gen_weak_from_raw_unsized_harness!(harness_arc_weak_from_raw_vec_u128, u128);
 
+    #[kani::proof_for_contract(Weak::<u8>::from_raw)]
+    pub fn harness_arc_weak_from_raw_sentinel() {
+        let weak: Weak<u8> = Weak::new();
+        let ptr: *const u8 = weak.into_raw();
+        assert!(is_dangling(ptr));
+
+        let recovered: Weak<u8> = unsafe { Weak::from_raw(ptr) };
+
+        // `from_raw` must preserve the sentinel representation.
+        assert!(is_dangling(recovered.ptr.as_ptr()));
+        assert!(recovered.inner().is_none());
+
+        kani::cover(true, "Weak::from_raw accepts the sentinel produced by Weak::new");
+    }
+
     // Harness for Weak::from_raw_in.
     macro_rules! gen_weak_from_raw_in_sized_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof_for_contract(Weak::<$ty, Global>::from_raw_in)]
             pub fn $name() {
                 let value: $ty = kani::any();
-                let strong: Arc<$ty, Global> = Arc::new_in(value, Global);
-                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let mut weak: Option<Weak<$ty, Global>> = None;
+                let strong: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |initial_weak| {
+                        weak = Some(initial_weak.clone());
+                        value
+                    },
+                    Global,
+                );
+                let weak = weak.unwrap();
                 let (ptr, alloc): (*const $ty, Global) = weak.into_raw_with_allocator();
                 let _recovered: Weak<$ty, Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
                 kani::cover(true, "Weak::from_raw_in contract call is reachable");
@@ -5816,7 +5850,12 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                // A fresh Arc owns the single implicit weak count. Reserve one
+                // additional count for the explicit Weak constructed below.
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let weak: Weak<[$elem], Global> = Weak { ptr: strong.ptr, alloc: Global };
                 let (ptr, alloc): (*const [$elem], Global) = weak.into_raw_with_allocator();
                 let _recovered: Weak<[$elem], Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
                 kani::cover(true, "Weak<[T]>::from_raw_in contract call is reachable");
@@ -5843,6 +5882,21 @@ mod verify {
     gen_weak_from_raw_in_unsized_harness!(harness_arc_weak_from_raw_in_vec_u32, u32);
     gen_weak_from_raw_in_unsized_harness!(harness_arc_weak_from_raw_in_vec_u64, u64);
     gen_weak_from_raw_in_unsized_harness!(harness_arc_weak_from_raw_in_vec_u128, u128);
+
+    #[kani::proof_for_contract(Weak::<u8, Global>::from_raw_in)]
+    pub fn harness_arc_weak_from_raw_in_sentinel() {
+        let weak: Weak<u8, Global> = Weak::new_in(Global);
+        let (ptr, alloc): (*const u8, Global) = weak.into_raw_with_allocator();
+        assert!(is_dangling(ptr));
+
+        let recovered: Weak<u8, Global> = unsafe { Weak::from_raw_in(ptr, alloc) };
+
+        // `from_raw_in` must preserve the sentinel representation.
+        assert!(is_dangling(recovered.ptr.as_ptr()));
+        assert!(recovered.inner().is_none());
+
+        kani::cover(true, "Weak::from_raw_in accepts the sentinel produced by Weak::new_in");
+    }
 
     // === SAFE FUNCTIONS ===
 
@@ -6448,11 +6502,11 @@ mod verify {
     //   `try_unwrap(arc)` is called. The strong count is therefore greater than
     //   1, so `compare_exchange(1, 0, ...)` fails and the function immediately
     //   returns `Err(arc)` without reading or moving the stored value.
-    // - In `$weak_present`, `Arc::downgrade(&arc)` increases only the weak
-    //   count. The strong count remains 1, so the compare-exchange still
-    //   succeeds and the function takes the same `Ok(T)` path as `$unique`,
-    //   while also covering the case where the allocation must remain alive for
-    //   an outstanding weak handle after the strong value is unwrapped.
+    // - In `$weak_present`, `Arc::new_cyclic_in` creates one explicit weak
+    //   handle without adding a strong owner. The strong count remains 1, so
+    //   the compare-exchange still succeeds and the function takes the same
+    //   `Ok(T)` path as `$unique`, while the explicit weak keeps the allocation
+    //   alive after the strong value is unwrapped.
 
     // Harness for Arc::try_unwrap.
     macro_rules! gen_arc_try_unwrap_harness {
@@ -6471,27 +6525,22 @@ mod verify {
                 let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
                 let shared = Arc::clone(&arc);
                 let _result = Arc::<$ty, Global>::try_unwrap(arc);
-                // Expected property:
-                //
-                // With another strong reference alive, `try_unwrap` must return `Err`.
-                //
-                // TODO(Kani#4537): Re-enable this assertion once the repository's pinned Kani
-                // includes model-checking/kani#4542.
-                //
-                // The currently pinned Kani incorrectly reports a failed atomic
-                // `compare_exchange` as successful (kani#4537), causing `Arc::try_unwrap`
-                // to take the success path even when the strong count is > 1.
-                //
-                // This has already been fixed upstream in kani#4542:
-                // https://github.com/model-checking/kani/issues/4537
-                // assert!(_result.is_err());
+                // The remaining strong owner requires `try_unwrap` to return `Err`.
+                assert!(_result.is_err());
                 core::mem::forget(shared);
             }
 
             #[kani::proof]
             pub fn $weak_present() {
-                let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
-                let _weak = Arc::downgrade(&arc);
+                let mut weak = None;
+                let arc: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |initial_weak| {
+                        weak = Some(initial_weak.clone());
+                        $expr
+                    },
+                    Global,
+                );
+                let _weak = weak.unwrap();
                 let _result = Arc::<$ty, Global>::try_unwrap(arc);
             }
         };
@@ -6634,10 +6683,10 @@ mod verify {
     //   moving `T`. The remaining clone is forgotten so this harness stays
     //   focused on the `into_inner` shared branch instead of also proving the
     //   final `Arc::drop` destruction path.
-    // - In the weak-present harness, `Arc::downgrade(&arc)` increases only the
-    //   weak count. The strong count remains 1, so `fetch_sub` returns 1 and
-    //   the function still returns `Some(T)` while covering the case where an
-    //   outstanding `Weak` exists during the successful unwrap.
+    // - In the weak-present harness, `Arc::new_cyclic_in` creates an explicit
+    //   weak handle without adding a strong owner. The strong count remains 1,
+    //   so `fetch_sub` returns 1 and the function still returns `Some(T)` while
+    //   an outstanding `Weak` exists during the successful unwrap.
 
     // Harness for Arc::into_inner.
     macro_rules! gen_arc_into_inner_harness {
@@ -6661,8 +6710,15 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
-                let _weak = Arc::downgrade(&arc);
+                let mut weak = None;
+                let arc: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |initial_weak| {
+                        weak = Some(initial_weak.clone());
+                        $expr
+                    },
+                    Global,
+                );
+                let _weak = weak.unwrap();
                 let _result = Arc::<$ty, Global>::into_inner(arc);
             }
         };
@@ -7260,11 +7316,11 @@ mod verify {
     //    replaces `arc` with that new allocation.
     //
     // 3) No other strong `Arc`, but a user `Weak` is alive:
-    //    `Arc::downgrade(&arc)` increments the weak count, while `strong`
-    //    remains 1. The compare-exchange succeeds, then `weak.load(Relaxed)`
-    //    observes a value other than 1. `make_mut` byte-copies the value into
-    //    a new allocation and writes the new `Arc` back, leaving the old
-    //    allocation to be cleaned up through the remaining `Weak`.
+    //    the harness constructs one explicit weak while `strong` remains 1.
+    //    The compare-exchange succeeds, then `weak.load(Relaxed)` observes a
+    //    value other than 1. `make_mut` byte-copies the value into a new
+    //    allocation and writes the new `Arc` back, leaving the old allocation
+    //    to be cleaned up through the remaining `Weak`.
 
     // Harness for Arc::make_mut.
     macro_rules! gen_arc_make_mut_harness {
@@ -7283,29 +7339,22 @@ mod verify {
                 let mut arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
                 let shared: Arc<$ty, Global> = Arc::clone(&arc);
                 let _ = Arc::<$ty, Global>::make_mut(&mut arc);
-                // Expected property:
-                //
-                // With another strong reference alive, `make_mut` must perform
-                // clone-on-write, so `arc` and `shared` must no longer point to
-                // the same allocation.
-                //
-                // TODO(Kani#4537): Re-enable this assertion once the repository's pinned Kani
-                // includes model-checking/kani#4542.
-                //
-                // The currently pinned Kani incorrectly reports a failed atomic
-                // `compare_exchange` as successful (kani#4537), causing `Arc::make_mut`
-                // to skip the clone-on-write path even when the strong count is > 1.
-                //
-                // This has already been fixed upstream in kani#4542:
-                // https://github.com/model-checking/kani/pull/4542
-                // assert!(!Arc::ptr_eq(&arc, &shared));
+                // A shared value requires clone-on-write to use a new allocation.
+                assert!(!Arc::ptr_eq(&arc, &shared));
                 core::mem::forget(shared);
             }
 
             #[kani::proof]
             pub fn $weak_present() {
-                let mut arc: Arc<$ty, Global> = Arc::new_in($expr, Global);
-                let _weak: Weak<$ty, Global> = Arc::downgrade(&arc);
+                let mut weak = None;
+                let mut arc: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |initial_weak| {
+                        weak = Some(initial_weak.clone());
+                        $expr
+                    },
+                    Global,
+                );
+                let _weak: Weak<$ty, Global> = weak.unwrap();
                 let _ = Arc::<$ty, Global>::make_mut(&mut arc);
             }
         };
@@ -7326,22 +7375,8 @@ mod verify {
                 let mut arc: Arc<[$elem], Global> = Arc::from(vec);
                 let shared: Arc<[$elem], Global> = Arc::clone(&arc);
                 let _ = Arc::<[$elem], Global>::make_mut(&mut arc);
-                // Expected property:
-                //
-                // With another strong reference alive, `make_mut` must perform
-                // clone-on-write, so `arc` and `shared` must no longer point to
-                // the same allocation.
-                //
-                // TODO(Kani#4537): Re-enable this assertion once the repository's pinned Kani
-                // includes model-checking/kani#4542.
-                //
-                // The currently pinned Kani incorrectly reports a failed atomic
-                // `compare_exchange` as successful (kani#4537), causing `Arc::make_mut`
-                // to skip the clone-on-write path even when the strong count is > 1.
-                //
-                // This has already been fixed upstream in kani#4542:
-                // https://github.com/model-checking/kani/pull/4542
-                // assert!(!Arc::ptr_eq(&arc, &shared));
+                // A shared value requires clone-on-write to use a new allocation.
+                assert!(!Arc::ptr_eq(&arc, &shared));
                 core::mem::forget(shared);
             }
 
@@ -7349,7 +7384,10 @@ mod verify {
             pub fn $weak_present() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let mut arc: Arc<[$elem], Global> = Arc::from(vec);
-                let _weak: Weak<[$elem], Global> = Arc::downgrade(&arc);
+                let old_weak = arc.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let _weak: Weak<[$elem], Global> = Weak { ptr: arc.ptr, alloc: Global };
                 let _ = Arc::<[$elem], Global>::make_mut(&mut arc);
             }
         };
@@ -7502,26 +7540,19 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let mut arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
-                let weak: Weak<$ty, Global> = Arc::downgrade(&arc);
+                let value = kani::any::<$ty>();
+                let mut weak = None;
+                let mut arc: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |initial_weak| {
+                        weak = Some(initial_weak.clone());
+                        value
+                    },
+                    Global,
+                );
+                let weak: Weak<$ty, Global> = weak.unwrap();
                 let _result = Arc::<$ty, Global>::get_mut(&mut arc);
-                // Expected property:
-                //
-                // With an outstanding weak reference, `get_mut` must return `None`
-                // because the allocation is not uniquely owned.
-                //
-                // TODO(Kani#4537): Re-enable this assertion once the repository's pinned Kani
-                // includes model-checking/kani#4542.
-                //
-                // `Arc::is_unique`, which is used by `Arc::get_mut`, checks for outstanding
-                // weak references using an atomic `compare_exchange`. The currently pinned
-                // Kani incorrectly reports a failed `compare_exchange` as successful
-                // (kani#4537), which can cause `get_mut` to return `Some` even when a
-                // weak reference is present.
-                //
-                // This has already been fixed upstream in kani#4542:
-                // https://github.com/model-checking/kani/pull/4542
-                // assert!(_result.is_none());
+                // An outstanding weak reference prevents unique mutable access.
+                assert!(_result.is_none());
                 core::mem::forget(weak);
             }
         };
@@ -7549,25 +7580,13 @@ mod verify {
             pub fn $weak_present() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let mut arc: Arc<[$elem], Global> = Arc::from(vec);
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&arc);
+                let old_weak = arc.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let weak: Weak<[$elem], Global> = Weak { ptr: arc.ptr, alloc: Global };
                 let _result = Arc::<[$elem], Global>::get_mut(&mut arc);
-                // Expected property:
-                //
-                // With an outstanding weak reference, `get_mut` must return `None`
-                // because the allocation is not uniquely owned.
-                //
-                // TODO(Kani#4537): Re-enable this assertion once the repository's pinned Kani
-                // includes model-checking/kani#4542.
-                //
-                // `Arc::is_unique`, which is used by `Arc::get_mut`, checks for outstanding
-                // weak references using an atomic `compare_exchange`. The currently pinned
-                // Kani incorrectly reports a failed `compare_exchange` as successful
-                // (kani#4537), which can cause `get_mut` to return `Some` even when a
-                // weak reference is present.
-                //
-                // This has already been fixed upstream in kani#4542:
-                // https://github.com/model-checking/kani/pull/4542
-                // assert!(_result.is_none());
+                // An outstanding weak reference prevents unique mutable access.
+                assert!(_result.is_none());
                 core::mem::forget(weak);
             }
         };
@@ -7726,9 +7745,17 @@ mod verify {
 
             #[kani::proof]
             pub fn $weak_present() {
-                let arc: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
-                // Add a user-visible weak owner without increasing `strong`.
-                let weak: Weak<$ty, Global> = Arc::downgrade(&arc);
+                let value = kani::any::<$ty>();
+                let mut weak = None;
+                let arc: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |initial_weak| {
+                        weak = Some(initial_weak.clone());
+                        value
+                    },
+                    Global,
+                );
+                // Keep a user-visible weak owner without increasing `strong`.
+                let weak: Weak<$ty, Global> = weak.unwrap();
                 {
                     // Drop the last strong owner while the weak handle remains alive.
                     let _dropped = arc;
@@ -7768,8 +7795,11 @@ mod verify {
             pub fn $weak_present() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let arc: Arc<[$elem], Global> = Arc::from(vec);
+                let old_weak = arc.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
                 // Add a user-visible weak owner without increasing `strong`.
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&arc);
+                let weak: Weak<[$elem], Global> = Weak { ptr: arc.ptr, alloc: Global };
                 {
                     // Drop the last strong owner while the weak handle remains alive.
                     let _dropped = arc;
@@ -8054,9 +8084,8 @@ mod verify {
     //    pointer to its `data` field.
     //
     // Each harness pair below covers both branches:
-    // - `live`: build a real strong owner first, then call `Arc::downgrade`.
-    //   The resulting `Weak` points into a live allocation, so `is_dangling`
-    //   is false.
+    // - `live`: reserve an explicit weak count in a real Arc allocation and
+    //   construct the corresponding `Weak`, so `is_dangling` is false.
     // - `dangling`: build `Weak::new_in(Global)`, which stores only the
     //   sentinel and no backing allocation, so `is_dangling` is true.
 
@@ -8066,10 +8095,11 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
-
-                // `downgrade(&strong)` points to the same live allocation, so
-                // `Weak::as_ptr` must take the non-dangling branch.
-                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                // This explicit weak points to the live Arc allocation.
+                let weak: Weak<$ty, Global> = Weak { ptr: strong.ptr, alloc: Global };
                 let _ptr: *const $ty = Weak::<$ty, Global>::as_ptr(&weak);
             }
 
@@ -8089,10 +8119,11 @@ mod verify {
             pub fn $live() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
-
-                // `Arc::from(vec)` creates a real slice allocation, and the
-                // downgraded weak pointer keeps that allocation identity.
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                // Preserve the real slice allocation and its pointer metadata.
+                let weak: Weak<[$elem], Global> = Weak { ptr: strong.ptr, alloc: Global };
                 let _ptr: *const [$elem] = Weak::<[$elem], Global>::as_ptr(&weak);
             }
 
@@ -8203,8 +8234,8 @@ mod verify {
     // it wraps `self` in `ManuallyDrop`, calls `as_ptr()`, then reads out the
     // allocator. The behavior-relevant split therefore comes from `as_ptr()`:
     //
-    // 1) live weak (from `Arc::downgrade`) -> `as_ptr()` returns a payload
-    //    pointer into a real `ArcInner<T>` allocation;
+    // 1) live weak backed by a real `ArcInner<T>` allocation -> `as_ptr()`
+    //    returns its payload pointer;
     // 2) dangling weak (from `Weak::new_in`) -> `as_ptr()` returns the
     //    sentinel pointer.
     //
@@ -8218,10 +8249,11 @@ mod verify {
             #[kani::proof]
             pub fn $live() {
                 let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
-
-                // Live strong owner -> downgraded weak -> non-dangling `as_ptr()`
-                // when `into_raw_with_allocator` extracts the raw pointer.
-                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                // The explicit weak gives `as_ptr()` a non-dangling allocation.
+                let weak: Weak<$ty, Global> = Weak { ptr: strong.ptr, alloc: Global };
                 let (ptr, alloc): (*const $ty, Global) =
                     Weak::<$ty, Global>::into_raw_with_allocator(weak);
                 let _recovered: Weak<$ty, Global> =
@@ -8247,10 +8279,11 @@ mod verify {
             pub fn $live() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
-
-                // The downgraded weak preserves the real slice allocation, so
-                // `into_raw_with_allocator` extracts a non-sentinel slice pointer.
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                // Preserve the real slice allocation and its pointer metadata.
+                let weak: Weak<[$elem], Global> = Weak { ptr: strong.ptr, alloc: Global };
                 let (ptr, alloc): (*const [$elem], Global) =
                     Weak::<[$elem], Global>::into_raw_with_allocator(weak);
                 let _recovered: Weak<[$elem], Global> =
@@ -8362,84 +8395,116 @@ mod verify {
         u128
     );
 
-    // `Weak::upgrade` has three behavior-relevant input states.
+    // Harnesses for `Weak::upgrade`.
     //
-    // 1) dangling sentinel weak:
-    //    `self.inner()` returns `None`, so `upgrade()` returns `None`
-    //    immediately.
-    // 2) non-dangling weak, but strong count is already 0:
-    //    `self.inner()` succeeds, but `strong.fetch_update(..., checked_increment)`
-    //    observes 0 and fails, so `upgrade()` returns `None`.
-    // 3) non-dangling weak, and strong count is > 0:
-    //    `fetch_update` increments the strong count and `upgrade()` returns
-    //    `Some(Arc<T, A>)`.
-
-    // Harness for Weak::upgrade.
+    // `upgrade` has three relevant states:
+    // - live: the allocation has a positive strong count, so upgrading succeeds;
+    // - strong-zero: the allocation still exists, but upgrading returns `None`;
+    // - dangling: a sentinel `Weak` returns `None` through `self.inner()?`.
     macro_rules! gen_weak_upgrade_harness {
         ($live:ident, $strong_zero:ident, $dangling:ident, $ty:ty) => {
+            // Stub the whole retrying operation, not only its weak CAS, so CBMC does
+            // not retain the unbounded loop in the generated control-flow graph.
             #[kani::proof]
+            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
             pub fn $live() {
                 let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
-
-                // Live strong owner -> downgraded weak -> successful atomic
-                // increment inside `upgrade()`.
-                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
-                let _ = Weak::<$ty, Global>::upgrade(&weak);
+                // Construct one explicit `Weak` without calling `Arc::downgrade`.
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                assert_eq!(old_weak, 1);
+                let weak: Weak<$ty, Global> = Weak { ptr: strong.ptr, alloc: Global };
+                assert!(!is_dangling(weak.ptr.as_ptr()));
+                assert!(weak.inner().is_some());
+                let strong_before = weak.inner().unwrap().strong.load(Relaxed);
+                assert_eq!(strong_before, 1);
+                let result = weak.upgrade();
+                assert!(result.is_some());
+                let strong_after = weak.inner().unwrap().strong.load(Relaxed);
+                assert_eq!(strong_after, strong_before + 1);
             }
 
+            // With strong == 0, the update closure returns `None`, so the
+            // loop-free stub returns `Err(0)` without executing a CAS.
             #[kani::proof]
+            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
             pub fn $strong_zero() {
-                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
-                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
-
-                // The allocation is still kept alive by the weak pointer, but
-                // dropping `strong` takes the strong count to 0. `upgrade()`
-                // therefore follows the "strong already dead" path.
+                let strong: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |weak| {
+                        // `new_cyclic_in` invokes this closure while the allocation
+                        // exists but before the first strong reference is installed.
+                        assert!(!is_dangling(weak.ptr.as_ptr()));
+                        assert!(weak.inner().is_some());
+                        assert_eq!(weak.inner().unwrap().strong.load(Relaxed), 0);
+                        // With strong == 0, `checked_increment` returns `None`
+                        // before `fetch_update` can execute a CAS retry.
+                        let result = weak.upgrade();
+                        assert!(result.is_none());
+                        kani::any::<$ty>()
+                    },
+                    Global,
+                );
+                // Keep the returned Arc well-formed and let it drop normally.
                 drop(strong);
-                let _ = Weak::<$ty, Global>::upgrade(&weak);
             }
 
+            // A sentinel Weak returns through `self.inner()?`; applying the same
+            // stub keeps the unreachable retry loop out of this harness's model.
             #[kani::proof]
+            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
             pub fn $dangling() {
-                // Sentinel weak from `new_in` -> immediate `None`.
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
-                let _ = Weak::<$ty, Global>::upgrade(&weak);
+                // A sentinel Weak must return through `self.inner()?` before
+                // reaching `AtomicUsize::fetch_update`.
+                assert!(is_dangling(weak.ptr.as_ptr()));
+                assert!(weak.inner().is_none());
+                let result = Weak::<$ty, Global>::upgrade(&weak);
+                assert!(result.is_none());
             }
         };
     }
 
+    // Unsized cases use the same loop-free `fetch_update` model as the sized harnesses.
     macro_rules! gen_weak_upgrade_unsized_harness {
         ($live:ident, $strong_zero:ident, $dangling:ident, $elem:ty) => {
             #[kani::proof]
+            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
             pub fn $live() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
-
-                // The weak points to a real slice allocation whose strong count
-                // is still positive, so `upgrade()` can rebuild an `Arc<[E]>`.
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
-                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                // The weak points to a real slice allocation with a live strong owner.
+                let weak: Weak<[$elem], Global> = Weak { ptr: strong.ptr, alloc: Global };
+                assert!(Weak::<[$elem], Global>::upgrade(&weak).is_some());
             }
 
             #[kani::proof]
+            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
             pub fn $strong_zero() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
-
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let weak: Weak<[$elem], Global> = Weak { ptr: strong.ptr, alloc: Global };
                 // After the last strong owner is dropped, the weak still names
                 // the allocation, but `upgrade()` must observe strong == 0.
                 drop(strong);
-                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+                assert!(Weak::<[$elem], Global>::upgrade(&weak).is_none());
             }
 
             #[kani::proof]
+            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
             pub fn $dangling() {
-                // Array-to-slice coercion preserves the sentinel address, so
-                // this remains the dangling path for `upgrade()`.
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
-                let _ = Weak::<[$elem], Global>::upgrade(&weak);
+                // The unsizing coercion must preserve the sentinel address.
+                assert!(is_dangling(weak.ptr.as_ptr()));
+                // A sentinel Weak must take the early-return branch in upgrade.
+                assert!(weak.inner().is_none());
+                let result = Weak::<[$elem], Global>::upgrade(&weak);
+                assert!(result.is_none());
             }
         };
     }
@@ -8558,8 +8623,8 @@ mod verify {
     // 2) `is_dangling(self.ptr.as_ptr()) == false` -> `Some(WeakInner { strong, weak })`
     //
     // Coverage strategy:
-    // - `*_some`: create a live weak via `Arc::downgrade(&strong)` so the
-    //   pointer is non-sentinel.
+    // - `*_some`: reserve an explicit weak count in a live Arc allocation and
+    //   construct the corresponding non-sentinel `Weak`.
     // - `*_none`: create a sentinel weak via `Weak::new_in(Global)` so the
     //   pointer is dangling.
     //
@@ -8574,9 +8639,12 @@ mod verify {
         ($some:ident, $none:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $some() {
-                // Branch (2): downgrade from a live strong Arc.
+                // Branch (2): explicit weak backed by a live strong Arc.
                 let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
-                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let weak: Weak<$ty, Global> = Weak { ptr: strong.ptr, alloc: Global };
                 let _inner = Weak::<$ty, Global>::inner(&weak);
             }
 
@@ -8597,7 +8665,10 @@ mod verify {
                 // Branch (2): non-dangling unsized weak from a live `Arc<[E]>`.
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let weak: Weak<[$elem], Global> = Weak { ptr: strong.ptr, alloc: Global };
                 let _inner = Weak::<[$elem], Global>::inner(&weak);
             }
 
@@ -8693,11 +8764,20 @@ mod verify {
         ($live:ident, $after_drop:ident, $dangling:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $live() {
-                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
+                let value = kani::any::<$ty>();
+                let mut weak = None;
+                let strong: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |initial_weak| {
+                        weak = Some(initial_weak.clone());
+                        value
+                    },
+                    Global,
+                );
+                let weak: Weak<$ty, Global> = weak.unwrap();
                 {
                     // Create an explicit weak and let it drop while one strong
                     // owner is still alive.
-                    let _weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                    let _weak = weak;
                 }
                 // The implicit weak is still present via `strong`, so this does
                 // not take the last-weak branch.
@@ -8705,8 +8785,16 @@ mod verify {
 
             #[kani::proof]
             pub fn $after_drop() {
-                let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
-                let weak: Weak<$ty, Global> = Arc::downgrade(&strong);
+                let value = kani::any::<$ty>();
+                let mut weak = None;
+                let strong: Arc<$ty, Global> = Arc::new_cyclic_in(
+                    |initial_weak| {
+                        weak = Some(initial_weak.clone());
+                        value
+                    },
+                    Global,
+                );
+                let weak: Weak<$ty, Global> = weak.unwrap();
                 // Remove the implicit weak by dropping the last strong owner first.
                 drop(strong);
                 // This explicit weak is now the last one, so dropping it reaches
@@ -8733,9 +8821,13 @@ mod verify {
             pub fn $live() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let weak: Weak<[$elem], Global> = Weak { ptr: strong.ptr, alloc: Global };
                 {
                     // Drop one explicit weak while the strong owner still exists.
-                    let _weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                    let _weak = weak;
                 }
                 // The implicit weak is still present, so this is not the
                 // deallocation branch.
@@ -8745,7 +8837,10 @@ mod verify {
             pub fn $after_drop() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
-                let weak: Weak<[$elem], Global> = Arc::downgrade(&strong);
+                let old_weak = strong.inner().weak.fetch_add(1, Relaxed);
+                // A fresh Arc must have exactly one implicit weak reference.
+                assert_eq!(old_weak, 1);
+                let weak: Weak<[$elem], Global> = Weak { ptr: strong.ptr, alloc: Global };
                 // Dropping the last strong owner removes the implicit weak.
                 drop(strong);
                 // The explicit weak is now the last weak token.
