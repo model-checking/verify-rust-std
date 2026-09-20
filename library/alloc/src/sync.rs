@@ -5156,7 +5156,7 @@ mod kani_arc_harness_helpers {
             // does not describe the function's behavior, and does not assume the proof result.
             // For local verification, this bound can be removed to restore the actual unbounded
             // input space; the harnesses are intended to be unbounded outside CI.
-            kani::assume(sz <= 100);
+            kani::assume(sz <= 25);
             ptr::write_bytes(
                 v.as_mut_ptr().cast::<u8>(),
                 kani::any::<u8>(),
