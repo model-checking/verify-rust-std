@@ -175,7 +175,7 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure the pointer is valid to create a reference.
-    #[ensures(|result: &&MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))] // Ensure returned reference points to the correct memory location.
+    #[ensures(|result: &&MaybeUninit<T>| core::ptr::addr_eq(*result, self.cast::<MaybeUninit<T>>().as_ptr()))] // Ensure returned reference points to the correct memory location.
     pub const unsafe fn as_uninit_ref<'a>(self) -> &'a MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -200,7 +200,7 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure pointer is valid to create a mutable reference.
-    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))] // Ensure the returned reference points to the correct memory.
+    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::addr_eq(*result, self.cast::<MaybeUninit<T>>().as_ptr()))] // Ensure the returned reference points to the correct memory.
     pub const unsafe fn as_uninit_mut<'a>(self) -> &'a mut MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -248,7 +248,8 @@ impl<T: PointeeSized> NonNull<T> {
     #[inline]
     #[track_caller]
     #[requires(!ptr.is_null())]
-    #[ensures(|result| result.as_ptr() == ptr)]
+    // See as_ptr regarding the use of addr_eq for wide-pointer support.
+    #[ensures(|result| core::ptr::addr_eq(result.as_ptr(), ptr))]
     pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
         // SAFETY: the caller must guarantee that `ptr` is non-null.
         unsafe {
@@ -290,7 +291,8 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_new", since = "1.85.0")]
     #[inline]
     #[ensures(|result| result.is_some() == !ptr.is_null())]
-    #[ensures(|result| result.is_none() || result.expect("ptr is null!").as_ptr() == ptr)]
+    // See as_ptr regarding the use of addr_eq for wide-pointer support.
+    #[ensures(|result| result.is_none() || core::ptr::addr_eq(result.expect("ptr is null!").as_ptr(), ptr))]
     pub const fn new(ptr: *mut T) -> Option<Self> {
         if !ptr.is_null() {
             // SAFETY: The pointer is already checked and is not null
@@ -429,8 +431,14 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_never_returns_null_ptr]
     #[must_use]
     #[inline(always)]
-    //Ensures address of resulting pointer is same as original
-    #[ensures(|result: &*mut T| *result == unsafe { mem::transmute::<Self, *mut T>(self) })]
+    // Ensures the address of the resulting pointer is the same as the
+    // original. `addr_eq` (rather than `==`) makes this well-defined for
+    // wide pointers too: comparing `*mut dyn Trait` with `==` also compares
+    // vtable pointers, whose identity is unspecified (and which Kani rejects
+    // with "unstable vtable comparison"). `as_ptr` is a representation-level
+    // conversion that trivially preserves metadata. The transmute mirrors the
+    // body; `self.pointer` is a pattern type this contract cannot use directly.
+    #[ensures(|result: &*mut T| core::ptr::addr_eq(*result, unsafe { mem::transmute::<Self, *mut T>(self) }))]
     pub const fn as_ptr(self) -> *mut T {
         // This is a transmute for the same reasons as `NonZero::get`.
 
@@ -470,8 +478,14 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_as_ref", since = "1.73.0")]
     #[must_use]
     #[inline(always)]
-    #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure input is convertible to a reference
-    #[ensures(|result: &&T| core::ptr::eq(*result, self.as_ptr()))] // Ensure returned reference matches pointer
+    #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))]
+    // Ensure input is convertible to a reference
+    // addr_eq (rather than ptr::eq) so the clause is well-defined for
+    // wide pointers too: comparing *const dyn with == also compares vtable
+    // pointers, whose identity is unspecified (Kani: "unstable vtable
+    // comparison"). The reference is created from `self`, so metadata is
+    // preserved by construction.
+    #[ensures(|result: &&T| core::ptr::addr_eq(*result, self.as_ptr()))] // Ensure returned reference matches pointer
     pub const unsafe fn as_ref<'a>(&self) -> &'a T {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -512,7 +526,8 @@ impl<T: PointeeSized> NonNull<T> {
     #[inline(always)]
     #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))]
     // verify result (a mutable reference) is still associated with the same memory address as the raw pointer stored in self
-    #[ensures(|result: &&mut T| core::ptr::eq(*result, self.as_ptr()))]
+    // See as_ref regarding the use of addr_eq.
+    #[ensures(|result: &&mut T| core::ptr::addr_eq(*result, self.as_ptr()))]
     pub const unsafe fn as_mut<'a>(&mut self) -> &'a mut T {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a mutable reference.
@@ -1662,8 +1677,8 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_never_returns_null_ptr]
-    // Address preservation
-    #[ensures(|result: &*mut T| *result == self.as_ptr() as *mut T)]
+    // Address preservation; see as_ptr regarding the use of addr_eq.
+    #[ensures(|result: &*mut T| core::ptr::addr_eq(*result, self.as_ptr()))]
     pub const fn as_mut_ptr(self) -> *mut T {
         self.as_non_null_ptr().as_ptr()
     }
