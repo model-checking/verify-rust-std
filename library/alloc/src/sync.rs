@@ -7246,11 +7246,14 @@ mod verify {
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_i16, i16);
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_i32, i32);
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_i64, i64);
+    // These 128-bit clone harnesses time out on macOS CI; Ubuntu still verifies them.
+    #[cfg(not(target_os = "macos"))]
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_i128, i128);
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_u8, u8);
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_u16, u16);
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_u32, u32);
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_u64, u64);
+    #[cfg(not(target_os = "macos"))]
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_u128, u128);
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_unit, ());
     gen_arc_from_slice_clone_harness!(harness_arc_from_slice_clone_array, [u8; 4]);
