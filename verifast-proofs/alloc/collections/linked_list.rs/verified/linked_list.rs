@@ -12,6 +12,7 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use core::alloc::AllocatorClone;
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 use core::iter::FusedIterator;
@@ -1300,7 +1301,7 @@ impl<T, A: Allocator> LinkedList<T, A> {
         at: usize,
     ) -> Self
     where
-        A: Clone,
+        A: AllocatorClone,
     {
         // The split node is the new head node of the second part
         if let Some(mut split_node) = split_node {
@@ -1343,7 +1344,7 @@ impl<T, A: Allocator> LinkedList<T, A> {
         at: usize,
     ) -> Self
     where
-        A: Clone,
+        A: AllocatorClone,
     /*@
     req thread_token(?t) &*&
         (*self).alloc |-> ?alloc0 &*& Allocator::<A>(t, alloc0, ?alloc_id) &*&
@@ -1568,7 +1569,7 @@ impl<T, A: Allocator> LinkedList<T, A> {
     /// use std::alloc::System;
     /// use std::collections::LinkedList;
     ///
-    /// let list: LinkedList<u32, _> = LinkedList::new_in(System);
+    /// let list: LinkedList<i32, System> = LinkedList::new_in(System);
     /// ```
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
@@ -2115,7 +2116,7 @@ impl<T, A: Allocator> LinkedList<T, A> {
     /// *ptr += 4;
     /// assert_eq!(dl.front().unwrap(), &6);
     /// ```
-    #[stable(feature = "push_mut", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "push_mut", since = "1.95.0")]
     #[must_use = "if you don't need a reference to the value, use `LinkedList::push_front` instead"]
     pub fn push_front_mut<'a>(&'a mut self, elt: T) -> &'a mut T
     //@ req thread_token(?t) &*& [?qa]lifetime_token('a) &*& full_borrow('a, <LinkedList<T, A>>.full_borrow_content(t, self)) &*& <T>.own(t, elt);
@@ -2241,7 +2242,7 @@ impl<T, A: Allocator> LinkedList<T, A> {
     /// *ptr += 4;
     /// assert_eq!(dl.back().unwrap(), &6);
     /// ```
-    #[stable(feature = "push_mut", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "push_mut", since = "1.95.0")]
     #[must_use = "if you don't need a reference to the value, use `LinkedList::push_back` instead"]
     pub fn push_back_mut(&mut self, elt: T) -> &mut T {
         let mut node =
@@ -2302,7 +2303,7 @@ impl<T, A: Allocator> LinkedList<T, A> {
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn split_off(&mut self, at: usize) -> LinkedList<T, A>
     where
-        A: Clone,
+        A: AllocatorClone,
     //@ req thread_token(?t) &*& *self |-> ?self0 &*& <LinkedList<T, A>>.own(t, self0);
     //@ ens thread_token(t) &*& *self |-> ?self1 &*& <LinkedList<T, A>>.own(t, self1) &*& <LinkedList<T, A>>.own(t, result);
     //@ on_unwind_ens thread_token(t) &*& *self |-> ?self1 &*& <LinkedList<T, A>>.own(t, self1);
@@ -3775,7 +3776,7 @@ impl<'a, T, A: Allocator> CursorMut<'a, T, A> {
     #[unstable(feature = "linked_list_cursors", issue = "58533")]
     pub fn remove_current_as_list(&mut self) -> Option<LinkedList<T, A>>
     where
-        A: Clone,
+        A: AllocatorClone,
     {
         let mut unlinked_node = self.current?;
         unsafe {
@@ -3803,7 +3804,7 @@ impl<'a, T, A: Allocator> CursorMut<'a, T, A> {
     #[unstable(feature = "linked_list_cursors", issue = "58533")]
     pub fn split_after(&mut self) -> LinkedList<T, A>
     where
-        A: Clone,
+        A: AllocatorClone,
     {
         let split_off_idx = if self.index == self.list.len { 0 } else { self.index + 1 };
         if self.index == self.list.len {
@@ -3822,7 +3823,7 @@ impl<'a, T, A: Allocator> CursorMut<'a, T, A> {
     #[unstable(feature = "linked_list_cursors", issue = "58533")]
     pub fn split_before(&mut self) -> LinkedList<T, A>
     where
-        A: Clone,
+        A: AllocatorClone,
     {
         let split_off_idx = self.index;
         self.index = 0;
@@ -3969,7 +3970,9 @@ impl<'a, T, A: Allocator> CursorMut<'a, T, A> {
     }
 }
 
-/// An iterator produced by calling `extract_if` on LinkedList.
+/// This `struct` is created by the [`extract_if`] method on [`LinkedList`].
+///
+/// [`extract_if`]: LinkedList::extract_if
 #[stable(feature = "extract_if", since = "1.87.0")]
 #[must_use = "iterators are lazy and do nothing unless consumed; \
     use `extract_if().for_each(drop)` to remove and discard elements"]
@@ -4301,11 +4304,14 @@ impl<T: Clone, A: Allocator + Clone> Clone for LinkedList<T, A> {
     /// resources of `self`'s elements as well.
     fn clone_from(&mut self, source: &Self) {
         let mut source_iter = source.iter();
-        if self.len() > source.len() {
-            self.split_off(source.len());
-        }
-        for (elem, source_elem) in self.iter_mut().zip(&mut source_iter) {
+        for elem in self.iter_mut() {
+            let Some(source_elem) = source_iter.next() else {
+                break;
+            };
             elem.clone_from(source_elem);
+        }
+        while self.len() > source.len() {
+            self.pop_back();
         }
         if !source_iter.is_empty() {
             self.extend(source_iter.cloned());
