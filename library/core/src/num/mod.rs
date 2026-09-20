@@ -12,6 +12,13 @@ use crate::str::FromStr;
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{ascii, intrinsics, mem};
 
+// Flux defs are module-scoped; import the ascii-case helpers from `flux_info`.
+#[cfg(flux)]
+#[flux::defs {
+    use crate::flux_info::{is_ascii_lowercase, is_ascii_uppercase, to_ascii_lowercase, to_ascii_uppercase};
+}]
+const _: () = {};
+
 // FIXME(const-hack): Used because the `?` operator is not allowed in a const context.
 macro_rules! try_opt {
     ($e:expr) => {
@@ -1779,6 +1786,7 @@ macro_rules! from_str_int_impl {
             }
 
             #[inline]
+            #[cfg_attr(flux, flux::trusted(reason = "flux does not support subslice patterns (unsupported place `(*_1)[1:]`)"))]
             pub(super) const fn from_ascii_bytes_radix_impl(src: &[u8], radix: u32) -> Result<$int_ty, ParseIntError> {
                 use self::IntErrorKind::*;
                 use self::ParseIntError as PIE;

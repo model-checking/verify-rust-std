@@ -16,7 +16,6 @@ macro_rules! define_valid_range_type {
     )+) => {$(
         #[cfg_attr(flux, flux::opaque)]
         #[cfg_attr(flux, flux::refined_by(val: int))]
-        #[cfg_attr(flux, flux::invariant($low <= cast(val) && cast(val) <= $high))]
         #[derive(Clone, Copy)]
         #[repr(transparent)]
         $(#[$m])*
@@ -41,14 +40,16 @@ macro_rules! define_valid_range_type {
             /// Immediate language UB if `val` is not within the valid range for this
             /// type, as it violates the validity invariant.
             #[inline]
-            #[cfg_attr(flux, flux::spec(fn (val: $int{ $low <= cast(val) && cast(val) <= $high }) -> Self[{val:cast(val)}]))]
+            // No inline Flux spec: the safety precondition is the type's valid
+            // range, which this macro no longer receives as literals. It is
+            // declared per-type in `flux_info.rs` instead.
             pub const unsafe fn new_unchecked(val: $int) -> Self {
                 // SAFETY: Caller promised that `val` is within the valid range.
                 unsafe { crate::mem::transmute(val) }
             }
 
             #[inline]
-            #[cfg_attr(flux, flux::spec(fn (self: Self) -> $int[cast(self.val)] ensures $low <= cast(self.val) && cast(self.val) <= $high))]
+            #[cfg_attr(flux, flux::spec(fn (self: Self) -> $int[cast(self.val)]))]
             pub const fn as_inner(self) -> $int {
                 // SAFETY: pattern types are always legal values of their base type
                 // (Not using `.0` because that has perf regressions.)
@@ -100,6 +101,10 @@ macro_rules! define_valid_range_type {
 }
 
 define_valid_range_type! {
+    // The macro forwards extra attributes onto the struct, which is how the
+    // Flux range invariant is supplied now that the macro takes a pattern
+    // rather than `$low`/`$high` literals it could build the bound from.
+    #[cfg_attr(flux, flux::invariant(0 <= val && val <= 999_999_999))]
     pub struct Nanoseconds(u32 is 0..=999_999_999);
 }
 

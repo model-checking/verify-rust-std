@@ -16,6 +16,13 @@ macro_rules! pattern_type {
     };
 }
 
+// Flux defs are module-scoped; import `char_to_int` from `flux_info`.
+#[cfg(flux)]
+#[flux::defs {
+    use crate::flux_info::char_to_int;
+}]
+const _: () = {};
+
 // The Flux spec for the `trait RangePattern` below uses
 // [associated refinements](https://flux-rs.github.io/flux/tutorial/08-traits.html)
 // The `sub_one` method may only be safe for certain values,
