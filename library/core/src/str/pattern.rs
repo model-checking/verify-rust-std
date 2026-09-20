@@ -38,7 +38,12 @@
     issue = "27721"
 )]
 
-#[cfg(all(target_arch = "x86_64", any(kani, target_feature = "sse2")))]
+// Must match the `cfg` on `small_slice_eq`, the only user of these attributes.
+#[cfg(any(
+    all(target_arch = "x86_64", any(kani, target_feature = "sse2")),
+    all(target_arch = "loongarch64", target_feature = "lsx"),
+    all(target_arch = "aarch64", target_feature = "neon")
+))]
 use safety::{loop_invariant, requires};
 
 use crate::cmp::Ordering;
