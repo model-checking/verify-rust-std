@@ -6291,33 +6291,16 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                let _arc: Arc<$ty, Global> = Arc::<$ty, Global>::new_cyclic_in(
+                let arc: Arc<$ty, Global> = Arc::<$ty, Global>::new_cyclic_in(
                     |weak: &Weak<$ty, Global>| {
-                        let _ = weak.upgrade();
+                        assert!(!is_dangling(weak.ptr.as_ptr()));
+                        assert!(weak.inner().is_some());
+                        assert_eq!(weak.inner().unwrap().strong.load(Relaxed), 0);
                         kani::any::<$ty>()
                     },
                     Global,
                 );
-            }
-        };
-    }
-
-    // `new_cyclic_in` documents that safe code inside `data_fn` can clone the
-    // non-upgradeable `Weak` and store or drop those clones. This harness covers
-    // the self-referential case where the returned value keeps a cloned `Weak`,
-    // exercising the weak-count path in addition to the plain value path above.
-    macro_rules! gen_arc_new_cyclic_in_holds_weak_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                let _arc: Arc<HoldsWeak<$ty>, Global> =
-                    Arc::<HoldsWeak<$ty>, Global>::new_cyclic_in(
-                        |weak: &Weak<HoldsWeak<$ty>, Global>| HoldsWeak {
-                            _weak: weak.clone(),
-                            _value: kani::any::<$ty>(),
-                        },
-                        Global,
-                    );
+                assert_eq!(Arc::strong_count(&arc), 1);
             }
         };
     }
@@ -6336,7 +6319,20 @@ mod verify {
     gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_array, [u8; 4]);
     gen_arc_new_cyclic_in_harness!(harness_arc_new_cyclic_in_bool, bool);
 
-    gen_arc_new_cyclic_in_holds_weak_harness!(harness_arc_new_cyclic_in_holds_weak_u8, u8);
+    // `new_cyclic_in` documents that safe code inside `data_fn` can clone the
+    // non-upgradeable `Weak` and store or drop those clones. This harness covers
+    // the self-referential case where the returned value keeps a cloned `Weak`,
+    // exercising the weak-count path in addition to the plain value path above.
+    #[kani::proof]
+    pub fn harness_arc_new_cyclic_in_holds_weak() {
+        let _arc: Arc<HoldsWeak<u8>, Global> = Arc::<HoldsWeak<u8>, Global>::new_cyclic_in(
+            |weak: &Weak<HoldsWeak<u8>, Global>| HoldsWeak {
+                _weak: weak.clone(),
+                _value: kani::any::<u8>(),
+            },
+            Global,
+        );
+    }
 
     // Harness for Arc::pin_in.
     macro_rules! gen_arc_pin_in_harness {
@@ -7360,35 +7356,39 @@ mod verify {
         };
     }
 
+    // Use a bound to keep verification tractable; elements remain symbolic.
     macro_rules! gen_arc_make_mut_unsized_harness {
         ($unique:ident, $shared:ident, $weak_present:ident, $elem:ty) => {
             #[kani::proof]
             pub fn $unique() {
-                let vec = verifier_nondet_vec_arc::<$elem>();
-                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
-                let _ = Arc::<[$elem], Global>::make_mut(&mut arc);
+                let mut arc: Arc<[$elem], Global> = Arc::new_in(kani::any::<[$elem; 4]>(), Global);
+                let old_ptr = Arc::as_ptr(&arc);
+                let _ = Arc::make_mut(&mut arc);
+                assert!(core::ptr::eq(old_ptr, Arc::as_ptr(&arc)));
             }
 
             #[kani::proof]
             pub fn $shared() {
-                let vec = verifier_nondet_vec_arc::<$elem>();
-                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
-                let shared: Arc<[$elem], Global> = Arc::clone(&arc);
-                let _ = Arc::<[$elem], Global>::make_mut(&mut arc);
-                // A shared value requires clone-on-write to use a new allocation.
+                let mut arc: Arc<[$elem], Global> = Arc::new_in(kani::any::<[$elem; 4]>(), Global);
+                let shared = Arc::clone(&arc);
+                let _ = Arc::make_mut(&mut arc);
                 assert!(!Arc::ptr_eq(&arc, &shared));
                 core::mem::forget(shared);
             }
 
             #[kani::proof]
             pub fn $weak_present() {
-                let vec = verifier_nondet_vec_arc::<$elem>();
-                let mut arc: Arc<[$elem], Global> = Arc::from(vec);
+                let mut arc: Arc<[$elem], Global> = Arc::new_in(kani::any::<[$elem; 4]>(), Global);
                 let old_weak = arc.inner().weak.fetch_add(1, Relaxed);
-                // A fresh Arc must have exactly one implicit weak reference.
                 assert_eq!(old_weak, 1);
-                let _weak: Weak<[$elem], Global> = Weak { ptr: arc.ptr, alloc: Global };
-                let _ = Arc::<[$elem], Global>::make_mut(&mut arc);
+                let weak: Weak<[$elem], Global> = Weak { ptr: arc.ptr, alloc: Global };
+                let old_ptr = Weak::as_ptr(&weak);
+
+                let _ = Arc::make_mut(&mut arc);
+
+                assert!(!core::ptr::eq(old_ptr, Arc::as_ptr(&arc)));
+                assert_eq!(weak.inner().unwrap().strong.load(Relaxed), 0);
+                core::mem::forget(weak);
             }
         };
     }
