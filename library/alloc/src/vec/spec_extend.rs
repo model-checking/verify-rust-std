@@ -101,4 +101,30 @@ mod verify {
             assert!(v[j] == s[j]);
         }
     }
+
+    use crate::vec::kani_shapes::DropToken;
+
+    // spec_extend (IntoIter) over a Drop-carrying T: append_elements bulk-move +
+    // forget_remaining_elements is the move-without-double-drop obligation.
+    // Mirrors check_spec_extend_intoiter_u8.
+    fn check_spec_extend_intoiter_shape<T: kani::Arbitrary + Clone + PartialEq, const N: usize>() {
+        let mut v: Vec<T> = Vec::with_capacity(2 * N);
+        let arr: [T; N] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let m = s.len();
+        let src: IntoIter<T> = s.to_vec().into_iter();
+        v.spec_extend(src);
+        assert!(v.len() == m);
+        if m > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < m);
+            assert!(v[j] == s[j]);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_spec_extend_intoiter_droptoken() {
+        check_spec_extend_intoiter_shape::<DropToken, 8>();
+    }
 }

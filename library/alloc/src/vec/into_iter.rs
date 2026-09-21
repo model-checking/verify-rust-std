@@ -862,4 +862,85 @@ mod verify {
             assert!(it.len() == 0);
         }
     }
+
+    // --- Additive Option-A shape coverage. The per-type harnesses above are
+    // unchanged; each helper below is written once for arbitrary T and
+    // instantiated over the shapes whose property the method observes. Full
+    // conversion of the existing suite is deferred pending the generic-T ruling. ---
+    // `DropToken` aliased: this module already has its own local `DropToken`
+    // (a distinct, non-Arbitrary type used by the existing drop harnesses above).
+    use crate::vec::kani_shapes::{Al16, DropToken as ShapeDropToken, any_vec};
+
+    // next over arbitrary T: reads the first element back (validity + stride)
+    // and checks length bookkeeping. Mirrors check_into_iter_next_u8's body.
+    fn check_next_shape<T: kani::Arbitrary + Clone + PartialEq, const N: usize>() {
+        let v = any_vec::<T, N>();
+        let n = v.len();
+        let first = if n > 0 { Some(v[0].clone()) } else { None };
+        let mut it = v.into_iter();
+        let r = it.next();
+        assert!(r == first);
+        assert!(it.len() == n - (r.is_some() as usize));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_next_bool() {
+        check_next_shape::<bool, 8>();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_next_al16() {
+        check_next_shape::<Al16, 8>();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_next_droptoken() {
+        check_next_shape::<ShapeDropToken, 8>();
+    }
+
+    // next_back over arbitrary T: backward move-out — a drop geometry distinct
+    // from next and from IntoIter::drop. Mirrors check_into_iter_next_back_u8.
+    fn check_next_back_shape<T: kani::Arbitrary + Clone + PartialEq, const N: usize>() {
+        let v = any_vec::<T, N>();
+        let n = v.len();
+        let last = if n > 0 { Some(v[n - 1].clone()) } else { None };
+        let mut it = v.into_iter();
+        let r = it.next_back();
+        assert!(r == last);
+        assert!(it.len() == n - (r.is_some() as usize));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_next_back_droptoken() {
+        check_next_back_shape::<ShapeDropToken, 8>();
+    }
+
+    // __iterator_get_unchecked over arbitrary Copy T: the assume mirrors the
+    // existing #[requires(i < len)]; [u8; 3] adds the odd-stride (non-power-of-
+    // two) `add(i)` index arithmetic no other harness exercises. T: Copy is the
+    // method's own reach (TrustedRandomAccessNoCoerce requires NonDrop). Mirrors
+    // check_into_iter_get_unchecked_u8.
+    fn check_get_unchecked_shape<T: kani::Arbitrary + Copy + PartialEq, const N: usize>() {
+        let arr: [T; N] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let mut it = s.to_vec().into_iter();
+        let len = it.len();
+        kani::assume(len > 0);
+        let i: usize = kani::any();
+        kani::assume(i < len);
+        kani::cover(i == len - 1, "non-vacuity: the maximal valid index is reachable");
+        // SAFETY: i < len mirrors the documented #[requires] precondition.
+        let x = unsafe { it.__iterator_get_unchecked(i) };
+        assert!(x == s[i]);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_get_unchecked_arr3() {
+        check_get_unchecked_shape::<[u8; 3], 8>();
+    }
 }

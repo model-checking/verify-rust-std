@@ -122,6 +122,44 @@ pub use self::into_iter::IntoIter;
 
 mod into_iter;
 
+#[cfg(kani)]
+pub(crate) mod kani_shapes {
+    //! Element-type shapes for the additive Challenge-24 shape harnesses. Each
+    //! shape pins one property of `T` the IntoIter / spec_* code observes;
+    //! harnesses instantiate a shape only where the method's behaviour depends
+    //! on it. ZST is covered by the existing `Vec<()>` harnesses.
+    //!
+    //! | shape       | property pinned                                          |
+    //! |-------------|----------------------------------------------------------|
+    //! | `bool`      | validity invariant — move must preserve a valid pattern  |
+    //! | `[u8; 3]`   | size not a power of two (odd-stride pointer arithmetic)  |
+    //! | `Al16`      | over-alignment (align 16 / size 16; allocation + stride) |
+    //! | `DropToken` | real drop glue (`needs_drop`; double-drop / leak classes)|
+    use core::kani;
+
+    use crate::vec::Vec;
+
+    #[derive(kani::Arbitrary, Clone, Copy, PartialEq)]
+    #[repr(align(16))]
+    pub(crate) struct Al16(pub(crate) u64);
+
+    #[derive(kani::Arbitrary, Clone, PartialEq)]
+    pub(crate) struct DropToken(pub(crate) u8);
+    impl Drop for DropToken {
+        fn drop(&mut self) {
+            let _ = self.0;
+        }
+    }
+
+    /// Symbolic-length `Vec<T>` (length 0..=N) over a symbolic backing array.
+    /// (`kani::vec` is not exposed under verify-std, so the Vec is built via
+    /// `kani::slice`.)
+    pub(crate) fn any_vec<T: kani::Arbitrary + Clone, const N: usize>() -> Vec<T> {
+        let arr: [T; N] = kani::any();
+        kani::slice::any_slice_of_array(&arr).to_vec()
+    }
+}
+
 #[cfg(not(no_global_oom_handling))]
 use self::is_zero::IsZero;
 

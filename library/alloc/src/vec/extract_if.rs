@@ -171,4 +171,25 @@ mod verify {
         let _ = ei.next();
         let _ = ei.next();
     }
+
+    use crate::vec::kani_shapes::DropToken;
+
+    // ExtractIf::next over a Drop-carrying T: the implicit Drop backshift is the
+    // leak-amplification guard path. Bounded at 3 (object-bits 12 budget).
+    // Mirrors check_extract_if_next_u8. (No explicit assert: like the u8 form,
+    // this verifies absence of UB on the drain + drop path.)
+    fn check_extract_if_next_shape<T: kani::Arbitrary + Clone, const N: usize>() {
+        let arr: [T; N] = kani::any();
+        let mut v: Vec<T> = kani::slice::any_slice_of_array(&arr).to_vec();
+        kani::cover(v.len() > 1, "non-vacuity: a multi-element drain is reachable");
+        let mut ei = v.extract_if(.., |_x: &mut T| kani::any::<bool>());
+        let _ = ei.next();
+        let _ = ei.next();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_extract_if_next_droptoken() {
+        check_extract_if_next_shape::<DropToken, 3>();
+    }
 }
