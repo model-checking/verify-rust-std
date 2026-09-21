@@ -81,6 +81,8 @@ use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 #[cfg(not(no_global_oom_handling))]
 use core::iter;
+#[cfg(kani)]
+use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::marker::Destruct;
 use core::marker::{Freeze, PhantomData};
@@ -642,6 +644,15 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    // Contract note: the allocation-provenance obligation (ptr from an
+    // allocation of exactly `capacity`) is not expressible as a predicate;
+    // the proof harness constructs genuinely valid parts and the remaining
+    // obligation is documented here rather than assumed. For ZSTs the
+    // capacity argument is ignored (RawVec reports usize::MAX), so both
+    // clauses apply only to sized element types.
+    #[safety::requires(core::mem::size_of::<T>() == 0 || length <= capacity)]
+    #[safety::ensures(|result: &Self| result.len() == length
+        && (core::mem::size_of::<T>() == 0 || result.capacity() == capacity))]
     pub unsafe fn from_raw_parts(ptr: *mut T, length: usize, capacity: usize) -> Self {
         unsafe { Self::from_raw_parts_in(ptr, length, capacity, Global) }
     }
@@ -744,6 +755,15 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[unstable(feature = "box_vec_non_null", issue = "130364")]
+    // Contract note: the allocation-provenance obligation (ptr from an
+    // allocation of exactly `capacity`) is not expressible as a predicate;
+    // the proof harness constructs genuinely valid parts and the remaining
+    // obligation is documented here rather than assumed. For ZSTs the
+    // capacity argument is ignored (RawVec reports usize::MAX), so both
+    // clauses apply only to sized element types.
+    #[safety::requires(core::mem::size_of::<T>() == 0 || length <= capacity)]
+    #[safety::ensures(|result: &Self| result.len() == length
+        && (core::mem::size_of::<T>() == 0 || result.capacity() == capacity))]
     pub unsafe fn from_parts(ptr: NonNull<T>, length: usize, capacity: usize) -> Self {
         unsafe { Self::from_parts_in(ptr, length, capacity, Global) }
     }
@@ -2093,6 +2113,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// [`spare_capacity_mut()`]: Vec::spare_capacity_mut
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    // Contract note: the initialization obligation (elements at old_len..new_len
+    // must be initialized) is not expressible as a predicate; the growth harness
+    // writes the spare region first (verify_set_len_grow).
+    #[safety::requires(new_len <= self.capacity())]
+    #[safety::ensures(|_| self.len() == new_len)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub unsafe fn set_len(&mut self, new_len: usize) {
         ub_checks::assert_unsafe_precondition!(
             check_library_ub,
@@ -2450,6 +2476,13 @@ impl<T, A: Allocator> Vec<T, A> {
         // SAFETY: previous `read` is always less than original_len.
         unsafe { ptr::drop_in_place(&mut *g.v.as_mut_ptr().add(read)) };
 
+        #[safety::loop_invariant(g.write < g.read && g.read <= g.original_len)]
+        #[cfg_attr(kani,
+                   core::kani::loop_modifies(
+                       unsafe { core::slice::from_raw_parts_mut(g.v.as_mut_ptr(), g.original_len) },
+                       &g.read,
+                       &g.write)
+        )]
         while g.read < g.original_len {
             // SAFETY: `read` is always less than original_len.
             let cur = unsafe { &mut *g.v.as_mut_ptr().add(g.read) };
@@ -4461,5 +4494,813 @@ mod verify {
         if k != index {
             assert!(vect[k] == arr[k]);
         }
+    }
+
+    // ---- Challenge 23 additions. The pre-existing verify_swap_remove above
+    // is unchanged. Inputs come from two builder families: `any_vec_u8::<N>`
+    // (bounded backing, symbolic length 0..=N — carries the length axis) and
+    // `any_vec_symcap` (symbolic unbounded capacity at length 1 — carries the
+    // capacity/reallocation axis). Bounds below that are narrower than these
+    // carry an in-code justification at their site. ----
+
+    #[derive(kani::Arbitrary, Clone, Copy, PartialEq)]
+    #[repr(align(16))]
+    struct Al16(u64);
+
+    #[derive(kani::Arbitrary, Clone, PartialEq)]
+    struct DropToken(u8);
+    impl Drop for DropToken {
+        fn drop(&mut self) {
+            let _ = self.0;
+        }
+    }
+
+    // Symbolic length 0..=N over a bounded backing array (loop-free build).
+    fn any_vec_u8<const N: usize>() -> Vec<u8> {
+        let arr: [u8; N] = kani::any();
+        let n: usize = kani::any();
+        kani::assume(n <= N);
+        kani::cover(n == N, "full backing length reachable");
+        let mut v = Vec::with_capacity(N);
+        // SAFETY: n <= N elements copied from the initialized backing.
+        unsafe {
+            core::ptr::copy_nonoverlapping(arr.as_ptr(), v.as_mut_ptr(), n);
+            v.set_len(n);
+        }
+        v
+    }
+
+    // Symbolic unbounded capacity, one initialized element. The bound keeps
+    // `Layout::array::<u8>(cap)` and the amortized-growth arithmetic in range.
+    fn any_vec_symcap() -> Vec<u8> {
+        let cap: usize = kani::any();
+        kani::assume(cap >= 1);
+        kani::assume(cap <= (isize::MAX as usize) / 4);
+        kani::cover(cap > 2, "multi-element capacity reachable");
+        let mut v = Vec::with_capacity(cap);
+        v.push(kani::any());
+        v
+    }
+
+    // Bounded builder over any element type: capacity N, symbolic length
+    // 0..=N, elements pushed individually (for element types without a
+    // byte-copy source).
+    fn any_bounded_vec<T: kani::Arbitrary, const N: usize>() -> Vec<T> {
+        let n: usize = kani::any();
+        kani::assume(n <= N);
+        let mut v: Vec<T> = Vec::with_capacity(N);
+        let mut i = 0usize;
+        while i < n {
+            v.push(kani::any());
+            i += 1;
+        }
+        v
+    }
+
+    // A loop contract's `loop_modifies` region must be bounded at this Kani
+    // pin: a symbolic-unbounded slice region overflows CBMC's contract
+    // write-set machinery ("no offset bits overflow on CAR upper bound
+    // computation"). Symbolic length therefore comes from `any_vec_u8::<N>`
+    // (loop-contract-free copy, N up to 64 for loop-free functions); unbounded
+    // capacity from `any_vec_symcap`; loop-bearing functions run at a small
+    // bounded length.
+
+    // retain_mut: exercises the real in-place loop, which carries the
+    // loop_invariant/loop_modifies contract at its `while` in the body above.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_retain_mut_mixed() {
+        let mut v = any_vec_u8::<4>();
+        let n = v.len();
+        v.retain_mut(|x| {
+            let keep: bool = kani::any();
+            if keep {
+                *x = x.wrapping_add(1);
+            }
+            keep
+        });
+        assert!(v.len() <= n);
+        kani::cover(v.len() < n, "a removal is reachable");
+    }
+
+    #[kani::proof_for_contract(Vec::from_raw_parts)]
+    fn verify_from_raw_parts_contract() {
+        // Symbolic length 0..=64 (including 0 and == capacity); the contract's
+        // ensures is the checked property, so no re-assert here. The symbolic-
+        // capacity axis of this constructor family is exercised by
+        // verify_into_raw_parts_with_alloc.
+        let v = any_vec_u8::<64>();
+        let mut v = core::mem::ManuallyDrop::new(v);
+        let (p, l, c) = (v.as_mut_ptr(), v.len(), v.capacity());
+        kani::cover(l == 0, "empty round-trip reachable");
+        kani::cover(l == c, "full round-trip reachable");
+        // SAFETY: parts come from a live Vec; the requires holds.
+        let _v2 = unsafe { Vec::from_raw_parts(p, l, c) };
+    }
+
+    #[kani::proof_for_contract(Vec::from_parts)]
+    fn verify_from_parts_contract() {
+        let v = any_vec_u8::<64>();
+        let mut v = core::mem::ManuallyDrop::new(v);
+        let (l, c) = (v.len(), v.capacity());
+        let p = unsafe { core::ptr::NonNull::new_unchecked(v.as_mut_ptr()) };
+        kani::cover(l == 0, "empty round-trip reachable");
+        kani::cover(l == c, "full round-trip reachable");
+        // SAFETY: parts come from a live Vec.
+        let _v2 = unsafe { Vec::from_parts(p, l, c) };
+    }
+
+    #[kani::proof]
+    fn verify_from_parts_in() {
+        let v = any_vec_symcap();
+        let mut v = core::mem::ManuallyDrop::new(v);
+        let (l, c) = (v.len(), v.capacity());
+        let p = unsafe { core::ptr::NonNull::new_unchecked(v.as_mut_ptr()) };
+        // SAFETY: parts from a live Vec; Global is its allocator.
+        let v2 = unsafe { Vec::from_parts_in(p, l, c, crate::alloc::Global) };
+        assert!(v2.len() == l && v2.capacity() == c);
+    }
+
+    #[kani::proof]
+    fn verify_into_raw_parts_with_alloc() {
+        let v = any_vec_symcap();
+        let (l0, c0) = (v.len(), v.capacity());
+        let (p, l, c, alloc) = v.into_raw_parts_with_alloc();
+        assert!(l == l0 && c == c0);
+        // SAFETY: round-trip through the same parts + allocator.
+        let v2 = unsafe { Vec::from_raw_parts_in(p, l, c, alloc) };
+        assert!(v2.len() == l0);
+    }
+
+    // into_boxed_slice: shrink-to-len reallocation at symbolic capacity.
+    #[kani::proof]
+    fn verify_into_boxed_slice() {
+        let v = any_vec_symcap();
+        let n = v.len();
+        let b = v.into_boxed_slice();
+        assert!(b.len() == n);
+    }
+
+    // leak: symbolic length (the returned slice length is the property).
+    #[kani::proof]
+    fn verify_leak() {
+        let v = any_vec_u8::<64>();
+        let n = v.len();
+        let s: &mut [u8] = v.leak();
+        assert!(s.len() == n);
+        if n > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < n);
+            kani::cover(j == n - 1, "last leaked element reachable");
+            s[j] = s[j].wrapping_add(1);
+        }
+        // Allocation intentionally leaked — that is leak()'s semantics.
+    }
+
+    // into_flattened: Vec<[u8;2]> needs a per-element init loop (non-u8 source);
+    // outer len <= 4 bounded (justified: the flatten arithmetic len*N/cap*N is
+    // exercised at every occupancy of the backing).
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_into_flattened() {
+        let v = any_bounded_vec::<[u8; 2], 4>();
+        let n = v.len();
+        kani::cover(n == 4, "max outer length reachable");
+        let f: Vec<u8> = v.into_flattened();
+        assert!(f.len() == n * 2);
+    }
+
+    // try_from (impl TryFrom<Vec<u8>> for [u8; 4]): both arms at symbolic length.
+    #[kani::proof]
+    fn verify_try_from_array() {
+        let v = any_vec_u8::<64>();
+        let n = v.len();
+        let r: Result<[u8; 4], Vec<u8>> = v.try_into();
+        if n == 4 {
+            assert!(r.is_ok());
+        } else {
+            let back = r.unwrap_err();
+            assert!(back.len() == n);
+        }
+        kani::cover(n == 4, "success arm reachable");
+        kani::cover(n != 4, "failure arm reachable");
+    }
+
+    // push: symcap so the grow-vs-no-grow arms are both reachable (cap symbolic).
+    #[kani::proof]
+    fn verify_push() {
+        let mut v = any_vec_symcap();
+        let n = v.len();
+        let x: u8 = kani::any();
+        let c0 = v.capacity();
+        v.push(x);
+        assert!(v.len() == n + 1);
+        assert!(v[n] == x);
+        kani::cover(v.capacity() == c0, "no-grow arm reachable");
+        kani::cover(v.capacity() > c0, "grow arm reachable");
+    }
+
+    #[kani::proof]
+    fn verify_push_within_capacity_both_arms() {
+        let mut v = any_vec_symcap();
+        let n = v.len();
+        let x: u8 = kani::any();
+        match v.push_within_capacity(x) {
+            Ok(slot) => {
+                assert!(*slot == x);
+                assert!(v.len() == n + 1);
+            }
+            Err(back) => {
+                assert!(back == x);
+                assert!(v.len() == n);
+            }
+        }
+        kani::cover(v.len() == n + 1, "Ok arm reachable");
+        kani::cover(v.len() == n, "Err (full) arm reachable");
+    }
+
+    #[kani::proof]
+    fn verify_pop() {
+        let mut v = any_vec_u8::<64>();
+        let n = v.len();
+        let last = if n > 0 { Some(v[n - 1]) } else { None };
+        let r = v.pop();
+        assert!(r == last);
+        assert!(v.len() == n - (r.is_some() as usize));
+    }
+
+    // N=32 (not 64): the post-shift probe assertion makes this the most
+    // expensive harness in the suite, and at N=64 it exceeds the autoharness
+    // job's 10-minute per-harness timeout on the macOS runner (measured).
+    // The length axis at 64 is carried by remove/swap_remove/pop above.
+    #[kani::proof]
+    fn verify_insert() {
+        let mut v = any_vec_u8::<32>();
+        let n = v.len();
+        let i: usize = kani::any();
+        kani::assume(i <= n);
+        kani::cover(i == n, "append-position insert reachable");
+        kani::cover(i == 0 && n > 0, "front insert with shift reachable");
+        // Snapshot a symbolic pre-element to verify the shift lands correctly.
+        let (probe, old): (usize, u8) = if n > 0 {
+            let p: usize = kani::any();
+            kani::assume(p < n);
+            (p, v[p])
+        } else {
+            (0, 0)
+        };
+        let x: u8 = kani::any();
+        v.insert(i, x);
+        assert!(v.len() == n + 1);
+        assert!(v[i] == x);
+        if n > 0 {
+            // Elements at/after i shift right by one; those before i stay put.
+            if probe < i {
+                assert!(v[probe] == old);
+            } else {
+                assert!(v[probe + 1] == old);
+            }
+        }
+    }
+
+    #[kani::proof]
+    fn verify_remove() {
+        let mut v = any_vec_u8::<64>();
+        let n = v.len();
+        kani::assume(n > 0);
+        let i: usize = kani::any();
+        kani::assume(i < n);
+        kani::cover(i == 0 && n > 1, "front removal with shift reachable");
+        let expected = v[i];
+        // Snapshot a symbolic element other than i to verify the back-shift.
+        let (probe, old, has_probe): (usize, u8, bool) = if n > 1 {
+            let p: usize = kani::any();
+            kani::assume(p < n && p != i);
+            (p, v[p], true)
+        } else {
+            (0, 0, false)
+        };
+        let r = v.remove(i);
+        assert!(r == expected);
+        assert!(v.len() == n - 1);
+        if has_probe {
+            // Elements after i shift left by one; those before i stay put.
+            if probe < i {
+                assert!(v[probe] == old);
+            } else {
+                assert!(v[probe - 1] == old);
+            }
+        }
+    }
+
+    #[kani::proof]
+    fn verify_swap_remove_symbolic() {
+        let mut v = any_vec_u8::<64>();
+        let n = v.len();
+        kani::assume(n > 0);
+        let i: usize = kani::any();
+        kani::assume(i < n);
+        kani::cover(i == n - 1, "last-index arm reachable");
+        let expected = v[i];
+        let last = v[n - 1];
+        let r = v.swap_remove(i);
+        assert!(r == expected);
+        assert!(v.len() == n - 1);
+        if i < n - 1 {
+            assert!(v[i] == last);
+        }
+    }
+
+    #[kani::proof]
+    fn verify_truncate() {
+        let mut v = any_vec_u8::<64>();
+        let n = v.len();
+        let k: usize = kani::any();
+        kani::cover(k < n, "shrinking truncate reachable");
+        kani::cover(k >= n, "no-op truncate reachable");
+        v.truncate(k);
+        assert!(v.len() == if k < n { k } else { n });
+    }
+
+    #[kani::proof]
+    fn verify_clear() {
+        let mut v = any_vec_u8::<64>();
+        let c = v.capacity();
+        v.clear();
+        assert!(v.len() == 0);
+        assert!(v.capacity() == c);
+    }
+
+    #[kani::proof_for_contract(Vec::set_len)]
+    fn verify_set_len_contract() {
+        // Built via from_raw_parts rather than any_vec_u8: proof_for_contract
+        // requires exactly one top-level call to set_len in the harness, and
+        // any_vec_u8 calls set_len internally to establish its symbolic length.
+        // The WHOLE backing is initialized, so both the shrink and the grow
+        // direction of set_len are contract-checked (k ranges over 0..=N with
+        // n the starting length).
+        const N: usize = 64;
+        let arr: [u8; N] = kani::any();
+        let n: usize = kani::any();
+        kani::assume(n <= N);
+        let mut v = Vec::with_capacity(N);
+        // SAFETY: all N backing elements are initialized.
+        unsafe { core::ptr::copy_nonoverlapping(arr.as_ptr(), v.as_mut_ptr(), N) };
+        let mut v = core::mem::ManuallyDrop::new(v);
+        let (p, c) = (v.as_mut_ptr(), v.capacity());
+        // SAFETY: parts come from a live Vec; all N elements initialized above.
+        let mut v = unsafe { Vec::from_raw_parts(p, n, c) };
+        let k: usize = kani::any();
+        kani::assume(k <= N);
+        kani::cover(k == 0, "shrink-to-empty reachable");
+        kani::cover(k > n, "grow direction reachable");
+        // SAFETY: k <= N <= capacity; all elements 0..N are initialized.
+        unsafe { v.set_len(k) };
+    }
+
+    // set_len GROWTH arm: const-capacity backing (cap=8) + a BOUNDED unwound
+    // spare-fill loop (no loop contract; symbolic-unbounded spare would trip
+    // the CBMC CAR limit). Initialize the whole spare region, then grow.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn verify_set_len_grow() {
+        let mut v = any_vec_u8::<8>();
+        let n = v.len();
+        let cap = v.capacity(); // 8
+        let spare = v.spare_capacity_mut();
+        for slot in spare.iter_mut() {
+            slot.write(kani::any());
+        }
+        // SAFETY: the whole spare region was just initialized; cap == capacity.
+        unsafe { v.set_len(cap) };
+        assert!(v.len() == cap);
+        kani::cover(cap > n, "genuine growth reachable");
+    }
+
+    #[kani::proof]
+    fn verify_deref_deref_mut() {
+        let mut v = any_vec_u8::<64>();
+        let n = v.len();
+        let s: &[u8] = &v;
+        assert!(s.len() == n);
+        let sm: &mut [u8] = &mut v;
+        assert!(sm.len() == n);
+        if n > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < n);
+            kani::cover(j == n - 1, "last element writable");
+            sm[j] = sm[j].wrapping_add(1);
+        }
+    }
+
+    #[kani::proof]
+    fn verify_spare_capacity_mut() {
+        let mut v = any_vec_symcap();
+        let (n, c) = (v.len(), v.capacity());
+        let spare = v.spare_capacity_mut();
+        assert!(spare.len() == c - n);
+    }
+
+    #[kani::proof]
+    fn verify_split_at_spare_mut() {
+        let mut v = any_vec_symcap();
+        let (n, c) = (v.len(), v.capacity());
+        let (init, spare) = v.split_at_spare_mut();
+        assert!(init.len() == n);
+        assert!(spare.len() == c - n);
+    }
+
+    // Private in-module helper with the length out-param.
+    #[kani::proof]
+    fn verify_split_at_spare_mut_with_len() {
+        let mut v = any_vec_symcap();
+        let (n, c) = (v.len(), v.capacity());
+        // SAFETY: view split only; no length change here.
+        let (init, spare, _len) = unsafe { v.split_at_spare_mut_with_len() };
+        assert!(init.len() == n);
+        assert!(spare.len() == c - n);
+    }
+
+    // split_off: symbolic length; tail allocation + memcpy.
+    #[kani::proof]
+    fn verify_split_off() {
+        let mut v = any_vec_u8::<64>();
+        let n = v.len();
+        let at: usize = kani::any();
+        kani::assume(at <= n);
+        kani::cover(at == 0, "split at front reachable");
+        kani::cover(at == n, "split at back reachable");
+        let tail = v.split_off(at);
+        assert!(v.len() == at);
+        assert!(tail.len() == n - at);
+    }
+
+    // drain: one O(1) next + guard drop (backshift memcpy) at symbolic length.
+    #[kani::proof]
+    fn verify_drain() {
+        let mut v = any_vec_u8::<64>();
+        let n = v.len();
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        kani::assume(a <= b && b <= n);
+        kani::cover(a == 0 && b == n, "full-range drain reachable");
+        kani::cover(a > 0 && b < n, "interior drain reachable");
+        {
+            let mut d = v.drain(a..b);
+            let _ = d.next();
+        } // Drain::drop backshifts the tail
+        assert!(v.len() == n - (b - a));
+    }
+
+    // extract_if: ExtractIf::next walks a fn-internal loop (its iterator
+    // behaviour is Challenge-24 scope); bounded backing 4 (justified) — this
+    // targets the Vec::extract_if constructor + the Drop backshift.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_extract_if_ctor_drop() {
+        let mut v = any_vec_u8::<4>();
+        let n = v.len();
+        {
+            let mut ei = v.extract_if(.., |x: &mut u8| {
+                let take: bool = kani::any();
+                if take {
+                    *x = x.wrapping_add(1);
+                }
+                take
+            });
+            let _ = ei.next();
+        } // ExtractIf::drop backshifts the untouched tail
+        assert!(v.len() <= n);
+        kani::cover(v.len() < n, "an extraction is reachable");
+    }
+
+    #[kani::proof]
+    fn verify_into_iter() {
+        let v = any_vec_u8::<64>();
+        let n = v.len();
+        let mut it = v.into_iter();
+        assert!(it.len() == n);
+        let first = it.next();
+        assert!(first.is_some() == (n > 0));
+        // remaining elements + allocation dropped by IntoIter::drop (u8: no glue)
+    }
+
+    // Vec::drop with a Drop-carrying element — per-element drop glue is an
+    // uncontracted loop; bounded backing 4 (justified: drop obligations are
+    // per-element identical; the u8 suite carries the length axis).
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_drop_droptoken() {
+        let n: usize = kani::any();
+        kani::assume(n <= 4);
+        kani::cover(n == 4, "full-length drop reachable");
+        let mut v: Vec<DropToken> = Vec::with_capacity(4);
+        let mut i = 0usize;
+        while i < n {
+            v.push(DropToken(kani::any()));
+            i += 1;
+        }
+        drop(v);
+    }
+
+    // ---- Growth family (append/extend). Loop-free harnesses first; the two
+    // real-body loop contracts (extend_with, dedup_by) follow. ----
+
+    use super::ExtendFromWithinSpec;
+
+    // append: bulk move (memcpy) + possible regrow; symbolic lengths.
+    #[kani::proof]
+    fn verify_append() {
+        let mut a = any_vec_u8::<32>();
+        let mut b = any_vec_u8::<32>();
+        let (na, nb) = (a.len(), b.len());
+        a.append(&mut b);
+        assert!(a.len() == na + nb);
+        assert!(b.len() == 0); // source emptied, not dropped
+        kani::cover(na + nb > 2, "multi-element append reachable");
+    }
+
+    // append_elements: private bulk copy into symbolic spare capacity.
+    #[kani::proof]
+    fn verify_append_elements() {
+        let mut dst = any_vec_symcap();
+        let src = any_vec_u8::<32>();
+        let (nd, ns) = (dst.len(), src.len());
+        kani::assume(ns <= dst.capacity() - nd); // copy path, not the grow path
+        kani::cover(ns > 1, "multi-element copy reachable");
+        // SAFETY: spare capacity checked above; src slice is live.
+        unsafe { dst.append_elements(&src[..] as *const [u8]) };
+        assert!(dst.len() == nd + ns);
+        if ns > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < ns);
+            kani::cover(j == ns - 1, "last copied element reachable");
+            assert!(dst[nd + j] == src[j]);
+        }
+    }
+
+    // extend_from_within: verified at a fixed shape with symbolic VALUES, so
+    // copied-value correctness is checked. Its public-wrapper machinery
+    // (reserve + slice::range + SpecExtendFromWithin dispatch) does not converge
+    // over a symbolic length at this pin (measured, all symbolic N tried). The
+    // sibling verify_spec_extend_from_within exercises the same
+    // ExtendFromWithinSpec copy at symbolic range/length (length postcondition;
+    // value-at-symbolic-range is not asserted there).
+    #[kani::proof]
+    fn verify_extend_from_within() {
+        let (x0, x1): (u8, u8) = (kani::any(), kani::any());
+        let mut v: Vec<u8> = Vec::new();
+        v.push(x0);
+        v.push(x1);
+        v.extend_from_within(0..2);
+        assert!(v.len() == 4);
+        assert!(v[2] == x0 && v[3] == x1); // copied prefix equals the source
+    }
+
+    #[kani::proof]
+    fn verify_spec_extend_from_within() {
+        let mut v = any_vec_u8::<8>();
+        let n = v.len();
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        kani::assume(a <= b && b <= n);
+        v.reserve(b - a); // the spec_ helper's caller-side precondition
+        // SAFETY: src range within len; capacity reserved above.
+        unsafe { ExtendFromWithinSpec::spec_extend_from_within(&mut v, a..b) };
+        assert!(v.len() == n + (b - a));
+    }
+
+    // extend_desugared minimal-realloc arm: non-TrustedLen source; the source
+    // iterator loop is uncontracted -> n <= 2 bounded (one growth + one write).
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_extend_desugared_realloc() {
+        let mut v: Vec<u8> = Vec::with_capacity(1);
+        v.push(kani::any()); // len == cap == 1
+        let n: usize = kani::any();
+        kani::assume(n <= 2);
+        kani::cover(n == 2, "post-growth write reachable");
+        let mut i = 0usize;
+        let it = core::iter::from_fn(move || {
+            if i < n {
+                i += 1;
+                Some(kani::any::<u8>())
+            } else {
+                None
+            }
+        });
+        v.extend(it);
+        assert!(v.len() == 1 + n);
+    }
+
+    // extend_desugared at symbolic capacity: growth reallocates symbolic->larger.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_extend_desugared_symcap_grow() {
+        let mut v = any_vec_symcap();
+        let n0 = v.len();
+        let spare = v.capacity() - v.len();
+        let n: usize = kani::any();
+        kani::assume(n <= 2);
+        kani::cover(n > spare, "symbolic-size reallocation reachable");
+        let mut i = 0usize;
+        let it = core::iter::from_fn(move || {
+            if i < n {
+                i += 1;
+                Some(kani::any::<u8>())
+            } else {
+                None
+            }
+        });
+        v.extend(it);
+        assert!(v.len() == n0 + n);
+    }
+
+    // extend_trusted: TrustedLen source into symbolic capacity.
+    #[kani::proof]
+    fn verify_extend_trusted() {
+        let mut v = any_vec_symcap();
+        let n0 = v.len();
+        let arr: [u8; 2] = kani::any();
+        v.extend(arr); // array IntoIter is TrustedLen -> extend_trusted
+        assert!(v.len() == n0 + 2);
+        assert!(v[n0] == arr[0] && v[n0 + 1] == arr[1]);
+    }
+
+    // extend_with's clone loop is verified over its REAL body at bounded N=4
+    // via unwind. A loop contract on it was measured CI-prohibitive at this pin
+    // (the advancing-raw-pointer write-set does not converge); retain_mut's
+    // in-place loop carries the demonstrated real-body loop contract instead.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_extend_with() {
+        let mut v = any_vec_u8::<4>();
+        let n0 = v.len();
+        let n: usize = kani::any();
+        kani::assume(n <= 4);
+        kani::cover(n == 4, "max extension reachable");
+        let x: u8 = kani::any();
+        v.extend_with(n, x);
+        assert!(v.len() == n0 + n);
+        if n > 0 {
+            assert!(v[n0 + n - 1] == x); // the separate last-element write path
+        }
+    }
+
+    // dedup_by's gap-runner loop is verified over its REAL body at bounded N=4
+    // via unwind (a loop contract on its FillGapOnDrop guard was measured
+    // CI-prohibitive at this pin); retain_mut carries the real-body loop contract.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_dedup_by() {
+        let mut v = any_vec_u8::<4>();
+        let n = v.len();
+        v.dedup_by(|a, b| {
+            kani::cover(true, "comparator invoked");
+            *a == *b
+        });
+        assert!(v.len() <= n);
+        kani::cover(v.len() < n, "a dedup removal is reachable");
+    }
+
+    // retain: the listed public wrapper (retain_mut carries the loop contract).
+    // Bounded N=4: routes through the contracted retain_mut loop.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn verify_retain() {
+        let mut v = any_vec_u8::<4>();
+        let n = v.len();
+        v.retain(|x| {
+            kani::cover(true, "predicate invoked");
+            *x < 128
+        });
+        assert!(v.len() <= n);
+    }
+
+    // swap_remove documented panic (index out of bounds) at symbolic length.
+    #[kani::proof]
+    #[kani::should_panic]
+    fn verify_swap_remove_oob_panics() {
+        let mut v = any_vec_u8::<64>();
+        let n = v.len();
+        let i: usize = kani::any();
+        kani::assume(i >= n);
+        kani::cover(i == n, "boundary index reachable");
+        let _ = v.swap_remove(i);
+    }
+
+    // ---- Element-type shape coverage: helpers written once for arbitrary T,
+    // instantiated over a drop-carrying and an over-aligned shape. Shape arms
+    // bound length <= 4 (per-element init for non-u8 types); the length axis
+    // is carried by the u8 harnesses above. ----
+
+    // Fixed length 3 at a concrete interior insert/remove position (symbolic
+    // VALUES): exercises insert's tail-shift and remove's back-shift for a
+    // drop-carrying / over-aligned T. A SYMBOLIC insert/remove position is
+    // CBMC-prohibitive for these element types (measured); the symbolic-position
+    // shift is covered by the u8 verify_insert / verify_remove harnesses.
+    fn shape_insert_remove<T: kani::Arbitrary + Clone + PartialEq>() {
+        let mut v: Vec<T> = Vec::with_capacity(4);
+        v.push(kani::any());
+        v.push(kani::any());
+        v.push(kani::any());
+        let x: T = kani::any();
+        v.insert(1, x.clone()); // interior insert shifts the tail
+        assert!(v[1] == x);
+        assert!(v.len() == 4);
+        let r = v.remove(1); // interior remove shifts the tail back
+        assert!(r == x);
+        assert!(v.len() == 3);
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_insert_remove_al16() {
+        shape_insert_remove::<Al16>();
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_insert_remove_droptoken() {
+        shape_insert_remove::<DropToken>();
+    }
+
+    fn shape_truncate_drop<T: kani::Arbitrary>() {
+        let mut v = any_bounded_vec::<T, 4>();
+        let n = v.len();
+        let k: usize = kani::any();
+        kani::cover(k < n, "dropping truncate reachable");
+        v.truncate(k);
+        assert!(v.len() == if k < n { k } else { n });
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_truncate_droptoken() {
+        shape_truncate_drop::<DropToken>();
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_truncate_al16() {
+        shape_truncate_drop::<Al16>();
+    }
+
+    fn shape_swap_remove<T: kani::Arbitrary + Clone + PartialEq>() {
+        let mut v = any_bounded_vec::<T, 4>();
+        let n = v.len();
+        kani::assume(n >= 1);
+        let idx: usize = kani::any();
+        kani::assume(idx < n);
+        kani::cover(idx == n - 1, "last-index arm reachable");
+        let expected = v[idx].clone();
+        let r = v.swap_remove(idx);
+        assert!(r == expected);
+        assert!(v.len() == n - 1);
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_swap_remove_droptoken() {
+        shape_swap_remove::<DropToken>();
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_retain_droptoken() {
+        let mut v = any_bounded_vec::<DropToken, 4>();
+        let n = v.len();
+        v.retain(|t| {
+            let keep: bool = kani::any();
+            let _ = t.0;
+            keep
+        });
+        assert!(v.len() <= n);
+        kani::cover(v.len() < n, "a drop-in-retain is reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_drain_droptoken() {
+        let mut v = any_bounded_vec::<DropToken, 4>();
+        let n = v.len();
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        kani::assume(a <= b && b <= n);
+        kani::cover(b > a, "a draining drop is reachable");
+        drop(v.drain(a..b));
+        assert!(v.len() == n - (b - a));
+    }
+
+    // ZST arm: Vec<()> capacity semantics + len bookkeeping.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_push_zst() {
+        let mut v: Vec<()> = Vec::new();
+        assert!(v.capacity() == usize::MAX);
+        let n: usize = kani::any();
+        kani::assume(n <= 4);
+        kani::cover(n == 4, "multiple ZST pushes reachable");
+        let mut i = 0usize;
+        while i < n {
+            v.push(());
+            i += 1;
+        }
+        assert!(v.len() == n);
     }
 }
