@@ -1900,6 +1900,10 @@ mod verify {
 
     type OwnedLeaf = NodeRef<marker::Owned, u8, u8, marker::Leaf>;
     type OwnedInternal = NodeRef<marker::Owned, u8, u8, marker::Internal>;
+    // Unit K/V fixtures preserve real node allocation, edge movement, and parent-link setup through
+    // production constructors and push operations, but intentionally do not verify non-ZST payload movement.
+    type UnitOwnedLeaf = NodeRef<marker::Owned, (), (), marker::Leaf>;
+    type UnitOwnedInternal = NodeRef<marker::Owned, (), (), marker::Internal>;
 
     fn leaf_with_len(len: usize) -> OwnedLeaf {
         assert!(len <= CAPACITY);
@@ -1929,6 +1933,17 @@ mod verify {
     fn verifier_nonempty_leaf() -> (OwnedLeaf, usize) {
         let len = kani::any_where(|len: &usize| *len > 0 && *len <= CAPACITY);
         (leaf_with_len(len), len)
+    }
+
+    fn internal_with_len(len: usize) -> OwnedInternal {
+        assert!(len <= CAPACITY);
+        let first_child = OwnedLeaf::new_leaf(Global).forget_type();
+        let mut internal = NodeRef::new_internal(first_child, Global);
+        for _ in 0..len {
+            let child = OwnedLeaf::new_leaf(Global).forget_type();
+            internal.borrow_mut().push(kani::any(), kani::any(), child);
+        }
+        internal
     }
 
     /// Constructs a height-one internal node with a Kani-selected length in
@@ -2345,8 +2360,6 @@ mod verify {
                 assert_eq!(split.left.height(), 0);
                 kani::cover(true, "insert_recursing reached the leaf-root split callback");
             });
-
-        kani::cover(true, "insert_recursing completed after splitting the leaf root");
     }
 
     // Rejects a third clone to bound Kani expansion; these fixed height-one paths expect exactly two.
@@ -2374,7 +2387,8 @@ mod verify {
         }
     }
 
-    // A full child leaf splits, ascends once, and is absorbed by an empty internal parent.
+    // Non-ZST companion: a full u8 leaf splits, follows its real parent backlink, and is absorbed
+    // by an empty parent. This exercises data-bearing split/ascent but not recursive parent splitting.
     #[kani::proof]
     #[kani::unwind(13)]
     fn harness_insert_recursing_parent_ascend() {
@@ -2409,36 +2423,34 @@ mod verify {
         );
     }
 
-    // Forces leaf split -> parent split -> root callback for a fixed height-one, rightmost insertion.
+    // Structural companion to `harness_insert_recursing_parent_ascend`: forces a leaf split to
+    // split its full parent and reach the root callback. Non-ZST payload movement is covered there.
     #[kani::proof]
-    #[kani::unwind(13)]
-    fn harness_insert_recursing_parent_split() {
-        // Build a nearly-full parent through real Internal::push calls.
-        let mut root = internal_with_len(CAPACITY - 1);
-        assert_eq!(root.len(), CAPACITY - 1);
-
-        // The final push fills the parent and installs a full rightmost target leaf.
-        let target = leaf_with_len(CAPACITY);
-        assert_eq!(target.len(), CAPACITY);
-        root.borrow_mut().push(kani::any(), kani::any(), target.forget_type());
+    #[kani::unwind(6)]
+    fn harness_insert_recursing_parent_split_unit() {
+        let mut root = insert_recursing_parent_split_unit_fixture();
         assert_eq!(root.len(), CAPACITY);
         assert_eq!(root.height(), 1);
 
-        // Re-read target through the parent edge so ascend uses the real parent link.
+        // Re-read the full rightmost child through its real parent edge, so ascend()
+        // uses the backlink installed by the production new_internal/push paths.
         let child = root.borrow_mut().last_edge().descend();
         assert_eq!(child.height(), 0);
         assert_eq!(child.len(), CAPACITY);
 
-        // SAFETY: a height-one root has leaf children.
+        // SAFETY: root has height one, so its children are leaves.
         let edge = unsafe { child.cast_to_leaf_unchecked().last_edge() };
 
         let clone_count = Cell::new(0u8);
         let callback_hit = Cell::new(false);
         let alloc = InsertRecursingAlloc { clones: &clone_count };
 
-        let _ = edge.insert_recursing(kani::any::<u8>(), kani::any::<u8>(), alloc, |split| {
+        let _handle = edge.insert_recursing((), (), alloc, |split| {
             callback_hit.set(true);
-            // Height one distinguishes the propagated parent split from the original leaf split.
+
+            // The original leaf split has height 0. Reaching the callback with
+            // height 1 therefore proves that the full parent also split and that
+            // insert_recursing entered its second propagation iteration.
             assert_eq!(split.left.height(), 1);
         });
 
@@ -2446,53 +2458,62 @@ mod verify {
         assert_eq!(clone_count.get(), 2);
         kani::cover(
             callback_hit.get() && clone_count.get() == 2,
-            "insert_recursing completed after splitting both leaf and parent",
+            "insert_recursing propagated a leaf split through a full parent to the root callback",
         );
     }
 
-    fn internal_with_len(len: usize) -> OwnedInternal {
-        assert!(len <= CAPACITY);
-        let first_child = OwnedLeaf::new_leaf(Global).forget_type();
-        let mut internal = NodeRef::new_internal(first_child, Global);
-        for _ in 0..len {
-            let child = OwnedLeaf::new_leaf(Global).forget_type();
-            internal.borrow_mut().push(kani::any(), kani::any(), child);
-        }
-        internal
-    }
-
-    fn verifier_internal_fixed<const N: usize>(len: usize) -> OwnedInternal {
-        assert!(N > 0 && N <= CAPACITY + 1 && len < N);
-
-        let first_child = OwnedLeaf::new_leaf(Global).forget_type();
-        let mut internal = NodeRef::new_internal(first_child, Global);
-
-        // Fixed allocation shape; only the reachable prefix is linked with real pushes.
-        let mut i = 1;
-        while i < N {
-            let child = OwnedLeaf::new_leaf(Global);
-            if i <= len {
-                internal.borrow_mut().push(
-                    kani::any::<u8>(),
-                    kani::any::<u8>(),
-                    child.forget_type(),
-                );
-            }
-            i += 1;
+    // Builds a full height-one parent whose rightmost leaf is also full, forcing a leaf split
+    // to propagate through a full parent. Pushes are source-unrolled intentionally to avoid
+    // consuming the unwind bound in fixture construction.
+    fn insert_recursing_parent_split_unit_fixture() -> UnitOwnedInternal {
+        const {
+            assert!(CAPACITY == 11);
         }
 
-        assert_eq!(internal.len(), len);
-        internal
-    }
+        let first_child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        let mut root = NodeRef::new_internal(first_child, Global);
 
-    fn internal_merge_fixture(left_len: usize, right_len: usize) -> OwnedInternal {
-        // A merge operand can have at most CAPACITY - 1 entries, so N = CAPACITY covers
-        // the complete reachable occupancy domain while keeping a fixed heap shape.
-        let mut parent = internal_pair_fixture::<CAPACITY>(left_len, right_len);
-        let spare = verifier_internal_fixed::<1>(0);
-        parent.borrow_mut().push(kani::any(), kani::any(), spare.forget_type());
-        assert_eq!(parent.len(), 2);
-        parent
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+
+        assert_eq!(root.len(), CAPACITY - 1);
+
+        let mut target = UnitOwnedLeaf::new_leaf(Global);
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+
+        assert_eq!(target.len(), CAPACITY);
+
+        root.borrow_mut().push((), (), target.forget_type());
+        assert_eq!(root.len(), CAPACITY);
+        root
     }
 
     #[kani::proof]
@@ -2511,12 +2532,64 @@ mod verify {
         kani::cover(true, "leaf do_merge completed");
     }
 
+    // Builds a height-one internal node with unit K/V through real new_leaf/new_internal/push paths.
+    // N fixes the allocation shape while `len` selects the linked prefix; payload movement is not tested.
+    fn verifier_internal_fixed_unit<const N: usize>(len: usize) -> UnitOwnedInternal {
+        assert!(N > 0 && N <= CAPACITY + 1 && len < N);
+
+        let first_child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        let mut internal = NodeRef::new_internal(first_child, Global);
+
+        let mut i = 1;
+        while i < N {
+            let child = UnitOwnedLeaf::new_leaf(Global);
+            if i <= len {
+                internal.borrow_mut().push((), (), child.forget_type());
+            }
+            i += 1;
+        }
+
+        assert_eq!(internal.len(), len);
+        internal
+    }
+
+    // Builds a height-two parent with exactly two internal children separated by one KV.
+    // Used by internal balancing harnesses that do not need a trailing parent edge to shift.
+    fn internal_pair_fixture_unit<const N: usize>(
+        left_len: usize,
+        right_len: usize,
+    ) -> UnitOwnedInternal {
+        let left = verifier_internal_fixed_unit::<N>(left_len);
+        let right = verifier_internal_fixed_unit::<N>(right_len);
+        let mut parent = NodeRef::new_internal(left.forget_type(), Global);
+        parent.borrow_mut().push((), (), right.forget_type());
+        assert_eq!(parent.height(), 2);
+        assert_eq!(parent.len(), 1);
+        parent
+    }
+
+    // Adds a third internal child so merging KV 0 also shifts parent edge 2 to edge 1 and repairs
+    // its backlink. Child K/V remain unit; non-ZST merge payload movement is covered by the leaf harness.
+    fn internal_merge_fixture_unit(left_len: usize, right_len: usize) -> UnitOwnedInternal {
+        let mut parent = internal_pair_fixture_unit::<CAPACITY>(left_len, right_len);
+        let spare: UnitOwnedInternal =
+            NodeRef::new_internal(UnitOwnedLeaf::new_leaf(Global).forget_type(), Global);
+        parent.borrow_mut().push((), (), spare.forget_type());
+        assert_eq!(parent.len(), 2);
+        parent
+    }
+
+    // Structural `do_merge` proof over the full legal occupancy domain. It verifies both the
+    // internal-child edge copy/backlink repair and the parent's trailing-edge shift/backlink repair.
+    // K/V are unit; non-ZST payload movement is covered by `harness_do_merge_leaf`. A fixed right
+    // edge is used as the moved-edge witness; arbitrary tracked edges are covered separately below.
     #[kani::proof]
-    #[kani::unwind(13)]
+    #[kani::unwind(12)]
     fn harness_do_merge_internal() {
-        // Full reachable occupancy domain for an internal merge.
-        let left_len = kani::any_where(|n: &usize| *n < CAPACITY);
-        let right_len = kani::any_where(|n: &usize| *n < CAPACITY);
+        // Full successful-merge occupancy domain, encoded with 8-bit symbols.
+        let left_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let right_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+
         kani::assume(left_len + 1 + right_len <= CAPACITY);
         kani::cover(
             left_len + 1 + right_len <= CAPACITY,
@@ -2524,67 +2597,55 @@ mod verify {
         );
 
         let new_left_len = left_len + 1 + right_len;
-        let check_right_idx = kani::any_where(|i: &usize| *i <= right_len);
-        let mut parent = internal_merge_fixture(left_len, right_len);
+        let mut parent = internal_merge_fixture_unit(left_len, right_len);
 
-        // Snapshot an arbitrary right grandchild; symbolic index covers every moved edge.
+        // Parent edge 2 must shift to edge 1 after merging KV 0.
+        let spare_before = parent.reborrow().last_edge().descend().node;
+
+        // Track right edge 0. Even a zero-length internal node has one initialized edge.
+        // do_merge must move this grandchild into the merged left internal node.
         let moved_child_before = {
             let right = unsafe { Handle::new_kv(parent.reborrow(), 0) }.right_edge().descend();
             let right = match right.force() {
                 ForceResult::Internal(node) => node,
                 ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
             };
-            unsafe { Handle::new_edge(right, check_right_idx) }.descend().node
+            unsafe { Handle::new_edge(right, 0) }.descend().node
         };
 
         let context = unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
         let shrunk_parent = context.merge_tracking_parent(Global);
 
+        // The parent started with two KVs. Removing KV 0 leaves the old KV 1 and
+        // shifts the old edge 2 (spare) to edge 1.
         assert_eq!(shrunk_parent.len(), 1);
+
+        let shrunk_parent_ptr = shrunk_parent.node;
+        let spare_after = shrunk_parent.reborrow().last_edge().descend();
+        assert_eq!(spare_after.node, spare_before);
+
+        let spare_back = spare_after.ascend().ok().unwrap();
+        assert_eq!(spare_back.idx(), 1);
+        assert_eq!(spare_back.into_node().node, shrunk_parent_ptr);
 
         let merged = match shrunk_parent.reborrow().first_edge().descend().force() {
             ForceResult::Internal(node) => node,
             ForceResult::Leaf(_) => panic!("internal merge returned a leaf"),
         };
+
         assert_eq!(merged.len(), new_left_len);
 
-        // Verify the internal edge copy and repaired child backlink.
-        let new_idx = left_len + 1 + check_right_idx;
+        // Right edge 0 must be appended immediately after all old left-child edges.
+        let new_idx = left_len + 1;
         let moved_after = unsafe { Handle::new_edge(merged, new_idx) }.descend();
         assert_eq!(moved_after.node, moved_child_before);
 
+        // Verify the internal-only backlink repair.
         let parent_edge = moved_after.ascend().ok().unwrap();
         assert_eq!(parent_edge.idx(), new_idx);
         assert_eq!(parent_edge.into_node().node, merged.node);
 
-        // Removing parent KV 0 must shift the old parent edge 2 to edge 1.
-        let spare = shrunk_parent.reborrow().last_edge().descend();
-        assert_eq!(spare.ascend().ok().unwrap().idx(), 1);
-
-        kani::cover(right_len == 0, "internal do_merge: empty right child");
-        kani::cover(
-            left_len == 0 && right_len == CAPACITY - 1,
-            "internal do_merge: maximal reachable right child",
-        );
-        kani::cover(
-            right_len == 0 && left_len == CAPACITY - 1,
-            "internal do_merge: maximal reachable left child",
-        );
         kani::cover(new_left_len == CAPACITY, "internal do_merge: merged child becomes full");
-        kani::cover(
-            check_right_idx == right_len,
-            "internal do_merge: checked the final moved edge",
-        );
-    }
-
-    fn internal_pair_fixture<const N: usize>(left_len: usize, right_len: usize) -> OwnedInternal {
-        let left = verifier_internal_fixed::<N>(left_len);
-        let right = verifier_internal_fixed::<N>(right_len);
-        let mut parent = NodeRef::new_internal(left.forget_type(), Global);
-        parent.borrow_mut().push(kani::any(), kani::any(), right.forget_type());
-        assert_eq!(parent.height(), 2);
-        assert_eq!(parent.len(), 1);
-        parent
     }
 
     #[kani::proof]
@@ -2612,12 +2673,14 @@ mod verify {
         kani::cover(true, "merge_tracking_child_edge completed");
     }
 
+    // Verifies arbitrary left/right tracked-edge translation through an internal merge, including
+    // child identity and the translated backlink. K/V are unit; payload movement is covered by the
+    // leaf harness, while parent trailing-edge shift/relink is covered by `harness_do_merge_internal`.
     #[kani::proof]
-    #[kani::unwind(13)]
+    #[kani::unwind(12)]
     fn harness_merge_tracking_child_edge_internal() {
-        // Full reachable occupancy domain for an internal merge.
-        let left_len = kani::any_where(|n: &usize| *n < CAPACITY);
-        let right_len = kani::any_where(|n: &usize| *n < CAPACITY);
+        let left_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let right_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
         kani::assume(left_len + 1 + right_len <= CAPACITY);
         kani::cover(
             left_len + 1 + right_len <= CAPACITY,
@@ -2625,7 +2688,7 @@ mod verify {
         );
 
         let track_left = kani::any::<bool>();
-        let track_idx = kani::any::<usize>();
+        let track_idx = usize::from(kani::any_where(|i: &u8| usize::from(*i) <= CAPACITY));
         kani::assume(if track_left { track_idx <= left_len } else { track_idx <= right_len });
         kani::cover(
             if track_left { track_idx <= left_len } else { track_idx <= right_len },
@@ -2634,9 +2697,8 @@ mod verify {
 
         let new_left_len = left_len + 1 + right_len;
         let expected_idx = if track_left { track_idx } else { left_len + 1 + track_idx };
-        let mut parent = internal_pair_fixture::<CAPACITY>(left_len, right_len);
+        let mut parent = internal_pair_fixture_unit::<CAPACITY>(left_len, right_len);
 
-        // Snapshot the exact grandchild represented by the tracked edge.
         let tracked_child_before = {
             let kv = unsafe { Handle::new_kv(parent.reborrow(), 0) };
             let child =
@@ -2653,10 +2715,8 @@ mod verify {
         let context = unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
         let tracked_edge = context.merge_tracking_child_edge(side, Global);
 
-        // Left edges keep their index; right edges move after the old left child and separator.
         assert_eq!(tracked_edge.idx(), expected_idx);
 
-        // Height two forces the internal edge-copy and parent-relink arm.
         let tracked_edge = match tracked_edge.force() {
             ForceResult::Internal(edge) => edge,
             ForceResult::Leaf(_) => panic!("internal merge returned an edge in a leaf"),
@@ -2665,37 +2725,12 @@ mod verify {
         let merged = tracked_edge.reborrow().into_node();
         assert_eq!(merged.len(), new_left_len);
 
-        // The translated edge must still point to the exact same grandchild.
         let tracked_child_after = tracked_edge.reborrow().descend();
         assert_eq!(tracked_child_after.node, tracked_child_before);
 
-        // The moved grandchild must backlink to the merged node at the translated index.
         let parent_edge = tracked_child_after.ascend().ok().unwrap();
         assert_eq!(parent_edge.idx(), expected_idx);
         assert_eq!(parent_edge.into_node().node, merged.node);
-
-        kani::cover(track_left, "internal merge_tracking_child_edge: tracked a left edge");
-        kani::cover(!track_left, "internal merge_tracking_child_edge: tracked a right edge");
-        kani::cover(
-            left_len == CAPACITY - 1 && right_len == 0,
-            "internal merge_tracking_child_edge: maximal reachable left child",
-        );
-        kani::cover(
-            left_len == 0 && right_len == CAPACITY - 1,
-            "internal merge_tracking_child_edge: maximal reachable right child",
-        );
-        kani::cover(
-            new_left_len == CAPACITY,
-            "internal merge_tracking_child_edge: merged child becomes full",
-        );
-        kani::cover(
-            track_left && track_idx == left_len,
-            "internal merge_tracking_child_edge: tracked the final left edge",
-        );
-        kani::cover(
-            !track_left && track_idx == right_len,
-            "internal merge_tracking_child_edge: tracked the final right edge",
-        );
     }
 
     #[kani::proof]
@@ -2710,16 +2745,21 @@ mod verify {
         kani::cover(true, "steal_left completed");
     }
 
+    // Verifies the single-entry left steal and the wrapper's returned tracked-edge translation:
+    // the stolen final-left edge becomes right edge 0, while an arbitrary old right edge shifts
+    // right by one with identity and backlink preserved. K/V are unit.
     #[kani::proof]
     #[kani::unwind(13)]
     fn harness_steal_left_internal() {
-        // Full reachable occupancy: non-empty source and room for one entry in the destination.
-        let left_len = kani::any_where(|n: &usize| *n > 0 && *n <= CAPACITY);
-        let right_len = kani::any_where(|n: &usize| *n < CAPACITY);
-        let track_idx = kani::any_where(|i: &usize| *i <= right_len);
-        let mut parent = internal_pair_fixture::<{ CAPACITY + 1 }>(left_len, right_len);
+        // Source is non-empty; destination has room for the one stolen entry.
+        let left_len = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= CAPACITY
+        }));
+        let right_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let track_idx = usize::from(kani::any_where(|i: &u8| usize::from(*i) <= right_len));
+        let mut parent = internal_pair_fixture_unit::<{ CAPACITY + 1 }>(left_len, right_len);
 
-        // The final left edge is stolen; the tracked right edge shifts right by one.
+        // The old final left edge is stolen; an arbitrary old right edge shifts right by one.
         let (stolen_before, tracked_before) = {
             let kv = unsafe { Handle::new_kv(parent.reborrow(), 0) };
             let left = match kv.left_edge().descend().force() {
@@ -2739,6 +2779,7 @@ mod verify {
             let context =
                 unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
             let tracked_edge = context.steal_left(track_idx);
+
             assert_eq!(tracked_edge.idx(), track_idx + 1);
 
             let tracked_edge = match tracked_edge.force() {
@@ -2749,14 +2790,14 @@ mod verify {
             let right_after = tracked_edge.reborrow().into_node();
             assert_eq!(right_after.len(), right_len + 1);
 
-            // Every old right edge shifts right by one and keeps its child identity/backlink.
+            // Every pre-existing right edge shifts right by one.
             let tracked_after = tracked_edge.reborrow().descend();
             assert_eq!(tracked_after.node, tracked_before);
             let tracked_parent = tracked_after.ascend().ok().unwrap();
             assert_eq!(tracked_parent.idx(), track_idx + 1);
             assert_eq!(tracked_parent.into_node().node, right_after.node);
 
-            // The old final left edge becomes right edge 0 and is relinked.
+            // The old final left edge becomes right edge 0.
             let stolen_after = unsafe { Handle::new_edge(right_after, 0) }.descend();
             assert_eq!(stolen_after.node, stolen_before);
             let stolen_parent = stolen_after.ascend().ok().unwrap();
@@ -2769,14 +2810,6 @@ mod verify {
             ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
         };
         assert_eq!(left_after.len(), left_len - 1);
-
-        kani::cover(left_len == CAPACITY, "internal steal_left: full source child");
-        kani::cover(right_len == CAPACITY - 1, "internal steal_left: destination becomes full");
-        kani::cover(
-            left_len == CAPACITY && right_len == CAPACITY - 1,
-            "internal steal_left: maximal source and destination occupancies",
-        );
-        kani::cover(track_idx == right_len, "internal steal_left: tracked the final right edge");
     }
 
     #[kani::proof]
@@ -2791,16 +2824,21 @@ mod verify {
         kani::cover(true, "steal_right completed");
     }
 
+    // Verifies the single-entry right steal and the wrapper's returned tracked edge: an arbitrary
+    // old left edge stays put, right edge 0 is appended to the left child, and old right edge 1
+    // shifts to edge 0 with identity and backlinks preserved. K/V are unit.
     #[kani::proof]
-    #[kani::unwind(13)]
+    #[kani::unwind(12)]
     fn harness_steal_right_internal() {
-        // Full reachable occupancy: non-empty source and room for one entry in the destination.
-        let left_len = kani::any_where(|n: &usize| *n < CAPACITY);
-        let right_len = kani::any_where(|n: &usize| *n > 0 && *n <= CAPACITY);
-        let track_idx = kani::any_where(|i: &usize| *i <= left_len);
-        let mut parent = internal_pair_fixture::<{ CAPACITY + 1 }>(left_len, right_len);
+        // Source is non-empty; destination has room for the one stolen entry.
+        let left_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let right_len = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= CAPACITY
+        }));
+        let track_idx = usize::from(kani::any_where(|i: &u8| usize::from(*i) <= left_len));
+        let mut parent = internal_pair_fixture_unit::<{ CAPACITY + 1 }>(left_len, right_len);
 
-        // Right edge 0 moves to the left; right edge 1 becomes right edge 0.
+        // The tracked left edge stays put, right edge 0 is stolen, and old right edge 1 shifts to 0.
         let (tracked_before, stolen_before, shifted_before) = {
             let kv = unsafe { Handle::new_kv(parent.reborrow(), 0) };
             let left = match kv.left_edge().descend().force() {
@@ -2821,6 +2859,7 @@ mod verify {
             let context =
                 unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
             let tracked_edge = context.steal_right(track_idx);
+
             assert_eq!(tracked_edge.idx(), track_idx);
 
             let tracked_edge = match tracked_edge.force() {
@@ -2831,14 +2870,14 @@ mod verify {
             let left_after = tracked_edge.reborrow().into_node();
             assert_eq!(left_after.len(), left_len + 1);
 
-            // The tracked left edge does not move.
+            // The tracked old left edge does not move.
             let tracked_after = tracked_edge.reborrow().descend();
             assert_eq!(tracked_after.node, tracked_before);
             let tracked_parent = tracked_after.ascend().ok().unwrap();
             assert_eq!(tracked_parent.idx(), track_idx);
             assert_eq!(tracked_parent.into_node().node, left_after.node);
 
-            // Old right edge 0 is appended to the left child and relinked.
+            // Old right edge 0 is appended after the old left edges.
             let stolen_idx = left_len + 1;
             let stolen_after = unsafe { Handle::new_edge(left_after, stolen_idx) }.descend();
             assert_eq!(stolen_after.node, stolen_before);
@@ -2853,20 +2892,12 @@ mod verify {
         };
         assert_eq!(right_after.len(), right_len - 1);
 
-        // Old right edge 1 becomes edge 0 and its backlink is repaired.
+        // Old right edge 1 becomes right edge 0.
         let shifted_after = unsafe { Handle::new_edge(right_after, 0) }.descend();
         assert_eq!(shifted_after.node, shifted_before);
         let shifted_parent = shifted_after.ascend().ok().unwrap();
         assert_eq!(shifted_parent.idx(), 0);
         assert_eq!(shifted_parent.into_node().node, right_after.node);
-
-        kani::cover(right_len == CAPACITY, "internal steal_right: full source child");
-        kani::cover(left_len == CAPACITY - 1, "internal steal_right: destination becomes full");
-        kani::cover(
-            left_len == CAPACITY - 1 && right_len == CAPACITY,
-            "internal steal_right: maximal source and destination occupancies",
-        );
-        kani::cover(track_idx == left_len, "internal steal_right: tracked the final left edge");
     }
 
     #[kani::proof]
@@ -2887,30 +2918,39 @@ mod verify {
         kani::cover(true, "bulk_steal_left completed");
     }
 
+    // Verifies arbitrary-count internal left stealing over the full legal occupancy domain.
+    // An arbitrary moved left edge and an arbitrary pre-existing right edge retain identity and
+    // receive the expected translated backlinks. K/V are unit; payload movement is not checked here.
     #[kani::proof]
     #[kani::unwind(13)]
     fn harness_bulk_steal_left_internal() {
-        // Full reachable occupancy with a symbolic positive steal count.
-        let left_len = kani::any_where(|n: &usize| *n > 0 && *n <= CAPACITY);
-        let right_len = kani::any_where(|n: &usize| *n < CAPACITY);
-        let count = kani::any_where(|n: &usize| *n > 0 && *n <= left_len);
+        // Full legal source/destination occupancy domain with a symbolic positive count.
+        let left_len = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= CAPACITY
+        }));
+        let right_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let count = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= left_len
+        }));
+
         kani::assume(count <= CAPACITY - right_len);
         kani::cover(
             count <= CAPACITY - right_len,
             "internal bulk_steal_left: destination-capacity precondition is reachable",
         );
 
-        let moved_offset = kani::any_where(|i: &usize| *i < count);
-        let check_right_idx = kani::any_where(|i: &usize| *i <= right_len);
+        // Keep arbitrary witnesses for both important classes of edge movement.
+        let moved_offset = usize::from(kani::any_where(|i: &u8| usize::from(*i) < count));
+        let check_right_idx = usize::from(kani::any_where(|i: &u8| usize::from(*i) <= right_len));
 
         let new_left_len = left_len - count;
         let new_right_len = right_len + count;
         let moved_src_idx = new_left_len + 1 + moved_offset;
         let shifted_dst_idx = count + check_right_idx;
 
-        let mut parent = internal_pair_fixture::<{ CAPACITY + 1 }>(left_len, right_len);
+        let mut parent = internal_pair_fixture_unit::<{ CAPACITY + 1 }>(left_len, right_len);
 
-        // Snapshot one arbitrary stolen left edge and one arbitrary pre-existing right edge.
+        // Snapshot an arbitrary stolen left edge and an arbitrary old right edge.
         let (moved_before, shifted_before) = {
             let kv = unsafe { Handle::new_kv(parent.reborrow(), 0) };
             let left = match kv.left_edge().descend().force() {
@@ -2944,7 +2984,7 @@ mod verify {
         assert_eq!(left_after.len(), new_left_len);
         assert_eq!(right_after.len(), new_right_len);
 
-        // Stolen left edges become the first `count` right edges.
+        // The stolen left edges become the first `count` right edges.
         let moved_after = unsafe { Handle::new_edge(right_after, moved_offset) }.descend();
         assert_eq!(moved_after.node, moved_before);
         let moved_parent = moved_after.ascend().ok().unwrap();
@@ -2957,25 +2997,6 @@ mod verify {
         let shifted_parent = shifted_after.ascend().ok().unwrap();
         assert_eq!(shifted_parent.idx(), shifted_dst_idx);
         assert_eq!(shifted_parent.into_node().node, right_after.node);
-
-        kani::cover(count == 1, "internal bulk_steal_left: stole one entry");
-        kani::cover(count == left_len, "internal bulk_steal_left: emptied the source child");
-        kani::cover(
-            count == CAPACITY,
-            "internal bulk_steal_left: stole the maximum possible count",
-        );
-        kani::cover(
-            new_right_len == CAPACITY,
-            "internal bulk_steal_left: destination becomes full",
-        );
-        kani::cover(
-            moved_offset + 1 == count,
-            "internal bulk_steal_left: checked the final moved edge",
-        );
-        kani::cover(
-            check_right_idx == right_len,
-            "internal bulk_steal_left: checked the final shifted right edge",
-        );
     }
 
     #[kani::proof]
@@ -2996,30 +3017,40 @@ mod verify {
         kani::cover(true, "bulk_steal_right completed");
     }
 
+    // Verifies arbitrary-count internal right stealing over the full legal occupancy domain.
+    // An arbitrary moved right edge and an arbitrary surviving right edge retain identity and
+    // receive the expected translated backlinks. K/V are unit; payload movement is not checked here.
     #[kani::proof]
-    #[kani::unwind(13)]
+    #[kani::unwind(12)]
     fn harness_bulk_steal_right_internal() {
-        // Full reachable occupancy with a symbolic positive steal count.
-        let left_len = kani::any_where(|n: &usize| *n < CAPACITY);
-        let right_len = kani::any_where(|n: &usize| *n > 0 && *n <= CAPACITY);
-        let count = kani::any_where(|n: &usize| *n > 0 && *n <= right_len);
+        // Full legal source/destination occupancy domain with a symbolic positive count.
+        let left_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let right_len = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= CAPACITY
+        }));
+        let count = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= right_len
+        }));
+
         kani::assume(count <= CAPACITY - left_len);
         kani::cover(
             count <= CAPACITY - left_len,
             "internal bulk_steal_right: destination-capacity precondition is reachable",
         );
 
-        let moved_offset = kani::any_where(|i: &usize| *i < count);
+        // Arbitrary stolen edge plus arbitrary surviving right edge.
+        let moved_offset = usize::from(kani::any_where(|i: &u8| usize::from(*i) < count));
 
         let new_left_len = left_len + count;
         let new_right_len = right_len - count;
-        let check_right_idx = kani::any_where(|i: &usize| *i <= new_right_len);
+        let check_right_idx =
+            usize::from(kani::any_where(|i: &u8| usize::from(*i) <= new_right_len));
         let moved_dst_idx = left_len + 1 + moved_offset;
         let shifted_src_idx = count + check_right_idx;
 
-        let mut parent = internal_pair_fixture::<{ CAPACITY + 1 }>(left_len, right_len);
+        let mut parent = internal_pair_fixture_unit::<{ CAPACITY + 1 }>(left_len, right_len);
 
-        // Snapshot one arbitrary stolen right edge and one right edge that survives the shift.
+        // Snapshot an arbitrary stolen right edge and an arbitrary right edge that survives the shift.
         let (moved_before, shifted_before) = {
             let right = unsafe { Handle::new_kv(parent.reborrow(), 0) }.right_edge().descend();
             let right = match right.force() {
@@ -3049,37 +3080,18 @@ mod verify {
         assert_eq!(left_after.len(), new_left_len);
         assert_eq!(right_after.len(), new_right_len);
 
-        // The first `count` right edges are appended to the left child.
+        // The first `count` old right edges are appended after the old left edges.
         let moved_after = unsafe { Handle::new_edge(left_after, moved_dst_idx) }.descend();
         assert_eq!(moved_after.node, moved_before);
         let moved_parent = moved_after.ascend().ok().unwrap();
         assert_eq!(moved_parent.idx(), moved_dst_idx);
         assert_eq!(moved_parent.into_node().node, left_after.node);
 
-        // The remaining right edges shift left by `count`.
+        // Every right edge that remains shifts left by `count`.
         let shifted_after = unsafe { Handle::new_edge(right_after, check_right_idx) }.descend();
         assert_eq!(shifted_after.node, shifted_before);
         let shifted_parent = shifted_after.ascend().ok().unwrap();
         assert_eq!(shifted_parent.idx(), check_right_idx);
         assert_eq!(shifted_parent.into_node().node, right_after.node);
-
-        kani::cover(count == 1, "internal bulk_steal_right: stole one entry");
-        kani::cover(count == right_len, "internal bulk_steal_right: emptied the source child");
-        kani::cover(
-            count == CAPACITY,
-            "internal bulk_steal_right: stole the maximum possible count",
-        );
-        kani::cover(
-            new_left_len == CAPACITY,
-            "internal bulk_steal_right: destination becomes full",
-        );
-        kani::cover(
-            moved_offset + 1 == count,
-            "internal bulk_steal_right: checked the final moved edge",
-        );
-        kani::cover(
-            check_right_idx == new_right_len,
-            "internal bulk_steal_right: checked the final surviving right edge",
-        );
     }
 }
