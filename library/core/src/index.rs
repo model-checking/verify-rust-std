@@ -78,6 +78,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<usize> {
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         &mut (*slice)[cmp::min(self.0, slice.len() - 1)]
     }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, len: usize) -> bool {
+        len > 0
+    }
 }
 
 #[unstable(feature = "sliceindex_wrappers", issue = "146179")]
@@ -120,6 +125,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<range::Range<usize>> {
         let start = cmp::min(self.0.start, slice.len());
         let end = cmp::min(self.0.end, slice.len());
         (start..end).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, len: usize) -> bool {
+        cmp::min(self.0.start, len) <= cmp::min(self.0.end, len)
     }
 }
 
@@ -164,6 +174,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<ops::Range<usize>> {
         let end = cmp::min(self.0.end, slice.len());
         (start..end).index_mut(slice)
     }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, len: usize) -> bool {
+        cmp::min(self.0.start, len) <= cmp::min(self.0.end, len)
+    }
 }
 
 #[unstable(feature = "sliceindex_wrappers", issue = "146179")]
@@ -206,6 +221,17 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<range::RangeInclusive<usize>> {
         let start = cmp::min(self.0.start, slice.len() - 1);
         let end = cmp::min(self.0.last, slice.len() - 1);
         (start..=end).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, len: usize) -> bool {
+        if len == 0 {
+            false
+        } else {
+            let start = cmp::min(self.0.start, len - 1);
+            let end = cmp::min(self.0.last, len - 1);
+            start <= end + 1
+        }
     }
 }
 
@@ -250,6 +276,17 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<ops::RangeInclusive<usize>> {
         let end = cmp::min(self.0.end, slice.len() - 1);
         (start..=end).index_mut(slice)
     }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, len: usize) -> bool {
+        if len == 0 {
+            false
+        } else {
+            let start = cmp::min(*self.0.start(), len - 1);
+            let end = cmp::min(*self.0.end(), len - 1);
+            start <= end + 1
+        }
+    }
 }
 
 #[unstable(feature = "sliceindex_wrappers", issue = "146179")]
@@ -280,6 +317,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<range::RangeFrom<usize>> {
 
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         (cmp::min(self.0.start, slice.len())..).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, _len: usize) -> bool {
+        true
     }
 }
 
@@ -312,6 +354,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<ops::RangeFrom<usize>> {
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         (cmp::min(self.0.start, slice.len())..).index_mut(slice)
     }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, _len: usize) -> bool {
+        true
+    }
 }
 
 #[unstable(feature = "sliceindex_wrappers", issue = "146179")]
@@ -342,6 +389,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<range::RangeTo<usize>> {
 
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         (..cmp::min(self.0.end, slice.len())).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, _len: usize) -> bool {
+        true
     }
 }
 
@@ -374,6 +426,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<range::RangeToInclusive<usize>> {
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         (..=cmp::min(self.0.last, slice.len() - 1)).index_mut(slice)
     }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, len: usize) -> bool {
+        len > 0
+    }
 }
 
 #[unstable(feature = "sliceindex_wrappers", issue = "146179")]
@@ -405,6 +462,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<ops::RangeToInclusive<usize>> {
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         (..=cmp::min(self.0.end, slice.len() - 1)).index_mut(slice)
     }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, len: usize) -> bool {
+        len > 0
+    }
 }
 
 #[unstable(feature = "sliceindex_wrappers", issue = "146179")]
@@ -435,6 +497,11 @@ unsafe impl<T> SliceIndex<[T]> for Clamp<range::RangeFull> {
 
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         (..).index_mut(slice)
+    }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, _len: usize) -> bool {
+        true
     }
 }
 
@@ -468,5 +535,10 @@ unsafe impl<T> SliceIndex<[T]> for Last {
     fn index_mut(self, slice: &mut [T]) -> &mut Self::Output {
         // N.B., use intrinsic indexing
         &mut (*slice)[slice.len() - 1]
+    }
+
+    #[cfg(kani)]
+    fn kani_in_bounds(&self, len: usize) -> bool {
+        len > 0
     }
 }
