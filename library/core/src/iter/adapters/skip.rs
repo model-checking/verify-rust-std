@@ -293,3 +293,68 @@ where
 // I: TrustedLen would not.
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<I> TrustedLen for Skip<I> where I: Iterator + TrustedRandomAccess {}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig_slice: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|idx: &usize| *idx <= orig_slice.len());
+            let first = kani::any_where(|idx: &usize| *idx <= last);
+            &orig_slice[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|val| *val != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    fn any_skip_iter<'a, T>(orig_slice: &'a [T]) -> Skip<crate::slice::Iter<'a, T>> {
+        let slice = any_slice(orig_slice);
+        let n = kani::any_where(|offset: &usize| *offset <= slice.len());
+        Skip::new(slice.iter(), n)
+    }
+
+    macro_rules! check_get_unchecked {
+        ($harness:ident, $elem_ty:ty, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it = any_skip_iter::<$elem_ty>(&array);
+                let idx = kani::any_where(|i: &usize| *i < it.iter.size_hint().0 - it.n);
+                let _ = unsafe { it.__iterator_get_unchecked(idx) };
+            }
+        };
+    }
+    check_get_unchecked!(check_skip_get_unchecked_unit, (), isize::MAX as usize);
+    check_get_unchecked!(check_skip_get_unchecked_u8, u8, u32::MAX as usize);
+    check_get_unchecked!(check_skip_get_unchecked_char, char, 50);
+    check_get_unchecked!(check_skip_get_unchecked_tup, (char, u8), 50);
+
+    fn bump(x: &u8) -> u8 {
+        x.wrapping_add(1)
+    }
+
+    // `Map<slice::Iter, fn>` has `MAY_HAVE_SIDE_EFFECT = true` (map.rs pins
+    // the constant to `true` for every `Map`), so `__iterator_get_unchecked`
+    // compiles in the `idx == 0` prefix-dropping branch that the plain
+    // `slice::Iter` harnesses compile out.  `idx` stays symbolic, so the
+    // proof covers the branch both taken (`idx == 0`, dropping the `self.n`
+    // skipped items) and not taken.  The prefix loop runs `self.n` times, so
+    // this harness is bounded by `MAX_LEN`.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_skip_get_unchecked_side_effect() {
+        const MAX_LEN: usize = 5;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = any_slice(&array);
+        let n = kani::any_where(|offset: &usize| *offset <= slice.len());
+        let mut it = Skip::new(slice.iter().map(bump as fn(&u8) -> u8), n);
+        let idx = kani::any_where(|i: &usize| *i < it.iter.size_hint().0 - it.n);
+        let _ = unsafe { it.__iterator_get_unchecked(idx) };
+    }
+}

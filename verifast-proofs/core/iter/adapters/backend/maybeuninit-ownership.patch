@@ -1,0 +1,18 @@
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -436,6 +436,15 @@
+     struct MaybeUninit<T>;
+     
+     /*@
++
++    // MaybeUninit does not own or drop a contained T. Storage is tracked separately.
++    lem MaybeUninit_own_init<T>(t: thread_id_t, value: MaybeUninit<T>);
++        req true;
++        ens <MaybeUninit<T>>.own(t, value);
++
++    lem MaybeUninit_own_dispose<T>(t: thread_id_t, value: MaybeUninit<T>);
++        req <MaybeUninit<T>>.own(t, value);
++        ens true;
+     
+     fix MaybeUninit::inner<T>(v: MaybeUninit<T>) -> option<T>;
+     fix MaybeUninit::uninit<T>() -> MaybeUninit<T>;
