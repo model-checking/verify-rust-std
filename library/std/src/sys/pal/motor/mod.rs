@@ -1,9 +1,5 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
-pub mod os;
-
-pub use moto_rt::futex;
-
 use crate::io;
 
 pub(crate) fn map_motor_error(err: moto_rt::Error) -> io::Error {
@@ -44,5 +40,5 @@ pub fn unsupported_err() -> io::Error {
 }
 
 pub fn abort_internal() -> ! {
-    core::intrinsics::abort();
+    moto_rt::process::exit(-1)
 }

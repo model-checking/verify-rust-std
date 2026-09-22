@@ -84,6 +84,13 @@ impl Once {
         Once { inner: sys::Once::new() }
     }
 
+    /// Creates a new `Once` value that starts already completed.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn new_complete() -> Once {
+        Once { inner: sys::Once::new_complete() }
+    }
+
     /// Performs an initialization routine once and only once. The given closure
     /// will be executed if this is the first time `call_once` has been called,
     /// and otherwise the routine will *not* be invoked.
@@ -289,6 +296,7 @@ impl Once {
     /// If this [`Once`] has been poisoned because an initialization closure has
     /// panicked, this method will also panic. Use [`wait_force`](Self::wait_force)
     /// if this behavior is not desired.
+    #[inline]
     #[stable(feature = "once_wait", since = "1.86.0")]
     #[rustc_should_not_be_called_on_const_items]
     pub fn wait(&self) {
@@ -302,6 +310,7 @@ impl Once {
     ///
     /// If this [`Once`] has been poisoned, this function blocks until it
     /// becomes completed, unlike [`Once::wait()`], which panics in this case.
+    #[inline]
     #[stable(feature = "once_wait", since = "1.86.0")]
     #[rustc_should_not_be_called_on_const_items]
     pub fn wait_force(&self) {

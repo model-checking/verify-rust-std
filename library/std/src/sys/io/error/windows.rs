@@ -1,6 +1,9 @@
 use crate::sys::pal::{api, c};
 use crate::{io, ptr};
 
+#[cfg(test)]
+mod tests;
+
 pub fn errno() -> i32 {
     api::get_last_error().code as i32
 }
@@ -58,8 +61,11 @@ pub fn decode_error_kind(errno: i32) -> io::ErrorKind {
         c::ERROR_POSSIBLE_DEADLOCK => return Deadlock,
         c::ERROR_NOT_SAME_DEVICE => return CrossesDevices,
         c::ERROR_TOO_MANY_LINKS => return TooManyLinks,
+        c::ERROR_TOO_MANY_OPEN_FILES => return TooManyOpenFiles,
         c::ERROR_FILENAME_EXCED_RANGE => return InvalidFilename,
         c::ERROR_CANT_RESOLVE_FILENAME => return FilesystemLoop,
+        c::ERROR_IO_DEVICE => return InputOutputError,
+        c::ERROR_NEGATIVE_SEEK => return InvalidInput,
         _ => {}
     }
 
@@ -78,6 +84,11 @@ pub fn decode_error_kind(errno: i32) -> io::ErrorKind {
         c::WSAENETDOWN => NetworkDown,
         c::WSAENETUNREACH => NetworkUnreachable,
         c::WSAEDQUOT => QuotaExceeded,
+        c::WSAEMFILE => TooManyOpenFiles,
+        // Not a perfect mapping but this error is only returned when writing to
+        // a socket after shutting down the write-end. On Unix targets, EPIPE is
+        // returned in those cases.
+        c::WSAESHUTDOWN => BrokenPipe,
 
         _ => Uncategorized,
     }

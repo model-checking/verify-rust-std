@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(dead_code))]
 
-pub use self::imp::{cleanup, init};
+pub use self::imp::init;
 use self::imp::{drop_handler, make_handler};
 
 pub struct Handler {
@@ -70,7 +70,7 @@ mod imp {
     use super::thread_info::{delete_current_info, set_current_info, with_current_info};
     use crate::ops::Range;
     use crate::sync::atomic::{Atomic, AtomicBool, AtomicPtr, AtomicUsize, Ordering};
-    use crate::sys::pal::unix::os;
+    use crate::sys::pal::unix::conf;
     use crate::{io, mem, ptr};
 
     // Signal handler for the SIGSEGV and SIGBUS handlers. We've got guard pages
@@ -143,6 +143,12 @@ mod imp {
     }
 
     static PAGE_SIZE: Atomic<usize> = AtomicUsize::new(0);
+    // Store a pointer to the allocation for the main thread's altstack so that
+    // tools like valgrind don't complain about a leaked unreachable allocation.
+    //
+    // If the main thread exits, the process will terminate so there's no use in
+    // freeing resources. It also means that the altstack is still installed
+    // while TLS destructors are run on the main thread (c.f. #111272).
     static MAIN_ALTSTACK: Atomic<*mut libc::c_void> = AtomicPtr::new(ptr::null_mut());
     static NEED_ALTSTACK: Atomic<bool> = AtomicBool::new(false);
 
@@ -150,7 +156,7 @@ mod imp {
     /// Must be called only once
     #[forbid(unsafe_op_in_unsafe_fn)]
     pub unsafe fn init() {
-        PAGE_SIZE.store(os::page_size(), Ordering::Relaxed);
+        PAGE_SIZE.store(conf::page_size(), Ordering::Relaxed);
 
         let mut guard_page_range = unsafe { install_main_guard() };
 
@@ -188,18 +194,6 @@ mod imp {
                 unsafe { sigaction(signal, &action, ptr::null_mut()) };
             }
         }
-    }
-
-    /// # Safety
-    /// Must be called only once
-    #[forbid(unsafe_op_in_unsafe_fn)]
-    pub unsafe fn cleanup() {
-        if cfg!(panic = "immediate-abort") {
-            return;
-        }
-        // FIXME: I probably cause more bugs than I'm worth!
-        // see https://github.com/rust-lang/rust/issues/111272
-        unsafe { drop_handler(MAIN_ALTSTACK.load(Ordering::Relaxed)) };
     }
 
     unsafe fn get_stack() -> libc::stack_t {
@@ -305,7 +299,7 @@ mod imp {
     }
 
     /// Modern kernels on modern hardware can have dynamic signal stack sizes.
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(all(any(target_os = "linux", target_os = "android"), not(target_env = "uclibc")))]
     fn sigstack_size() -> usize {
         let dynamic_sigstksz = unsafe { libc::getauxval(libc::AT_MINSIGSTKSZ) };
         // If getauxval couldn't find the entry, it returns 0,
@@ -315,7 +309,7 @@ mod imp {
     }
 
     /// Not all OS support hardware where this is needed.
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    #[cfg(not(all(any(target_os = "linux", target_os = "android"), not(target_env = "uclibc"))))]
     fn sigstack_size() -> usize {
         libc::SIGSTKSZ
     }
@@ -429,6 +423,11 @@ mod imp {
 
     #[forbid(unsafe_op_in_unsafe_fn)]
     unsafe fn install_main_guard_linux(page_size: usize) -> Option<Range<usize>> {
+        // See the corresponding conditional in init().
+        // Avoid stack_start_aligned, which makes slow syscalls to read /proc/self/maps
+        if cfg!(panic = "immediate-abort") {
+            return None;
+        }
         // Linux doesn't allocate the whole stack right away, and
         // the kernel has its own stack-guard mechanism to fault
         // when growing too close to an existing mapping. If we map
@@ -456,6 +455,10 @@ mod imp {
     #[forbid(unsafe_op_in_unsafe_fn)]
     #[cfg(target_os = "freebsd")]
     unsafe fn install_main_guard_freebsd(page_size: usize) -> Option<Range<usize>> {
+        // See the corresponding conditional in install_main_guard_linux().
+        if cfg!(panic = "immediate-abort") {
+            return None;
+        }
         // FreeBSD's stack autogrows, and optionally includes a guard page
         // at the bottom. If we try to remap the bottom of the stack
         // ourselves, FreeBSD's guard page moves upwards. So we'll just use
@@ -489,6 +492,10 @@ mod imp {
 
     #[forbid(unsafe_op_in_unsafe_fn)]
     unsafe fn install_main_guard_bsds(page_size: usize) -> Option<Range<usize>> {
+        // See the corresponding conditional in install_main_guard_linux().
+        if cfg!(panic = "immediate-abort") {
+            return None;
+        }
         // OpenBSD stack already includes a guard page, and stack is
         // immutable.
         // NetBSD stack includes the guard page.
@@ -638,8 +645,6 @@ mod imp {
 mod imp {
     pub unsafe fn init() {}
 
-    pub unsafe fn cleanup() {}
-
     pub unsafe fn make_handler(_main_thread: bool) -> super::Handler {
         super::Handler::null()
     }
@@ -721,8 +726,6 @@ mod imp {
         // Set the thread stack guarantee for the main thread.
         reserve_stack();
     }
-
-    pub unsafe fn cleanup() {}
 
     pub unsafe fn make_handler(main_thread: bool) -> super::Handler {
         if !main_thread {

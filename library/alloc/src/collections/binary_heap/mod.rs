@@ -549,8 +549,8 @@ impl<T, A: Allocator> BinaryHeap<T, A> {
     ///
     /// use std::alloc::System;
     /// use std::collections::BinaryHeap;
-    /// let mut heap = BinaryHeap::new_in(System);
-    /// heap.push(4);
+    ///
+    /// let heap : BinaryHeap<i32, System> = BinaryHeap::new_in(System);
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[must_use]
@@ -573,13 +573,47 @@ impl<T, A: Allocator> BinaryHeap<T, A> {
     ///
     /// use std::alloc::System;
     /// use std::collections::BinaryHeap;
-    /// let mut heap = BinaryHeap::with_capacity_in(10, System);
-    /// heap.push(4);
+    ///
+    /// let heap: BinaryHeap<i32, System> = BinaryHeap::with_capacity_in(10, System);
     /// ```
     #[unstable(feature = "allocator_api", issue = "32838")]
     #[must_use]
     pub fn with_capacity_in(capacity: usize, alloc: A) -> BinaryHeap<T, A> {
         BinaryHeap { data: Vec::with_capacity_in(capacity, alloc) }
+    }
+
+    /// Creates a `BinaryHeap` using the supplied `vec`. This does not rebuild the heap,
+    /// so `vec` must already be a max-heap.
+    ///
+    /// # Safety
+    ///
+    /// The supplied `vec` must be a max-heap, i.e. for all indices `0 < i < vec.len()`,
+    /// `vec[(i - 1) / 2] >= vec[i]`.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// #![feature(binary_heap_from_raw_vec)]
+    ///
+    /// use std::collections::BinaryHeap;
+    /// let heap = BinaryHeap::from([1, 2, 3]);
+    /// let vec = heap.into_vec();
+    ///
+    /// // Safety: vec is the output of heap.from_vec(), so is a max-heap.
+    /// let mut new_heap = unsafe {
+    ///     BinaryHeap::from_raw_vec(vec)
+    /// };
+    /// assert_eq!(new_heap.pop(), Some(3));
+    /// assert_eq!(new_heap.pop(), Some(2));
+    /// assert_eq!(new_heap.pop(), Some(1));
+    /// assert_eq!(new_heap.pop(), None);
+    /// ```
+    #[unstable(feature = "binary_heap_from_raw_vec", issue = "152500")]
+    #[must_use]
+    pub unsafe fn from_raw_vec(vec: Vec<T, A>) -> BinaryHeap<T, A> {
+        BinaryHeap { data: vec }
     }
 }
 
@@ -1224,7 +1258,7 @@ impl<T, A: Allocator> BinaryHeap<T, A> {
     ///
     ///     Ok(heap.pop())
     /// }
-    /// # find_max_slow(&[1, 2, 3]).expect("why is the test harness OOMing on 12 bytes?");
+    /// # find_max_slow(&[1, 2, 3]).expect("reserving capacity for 12 bytes should never fail");
     /// ```
     #[stable(feature = "try_reserve_2", since = "1.63.0")]
     pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
@@ -1260,7 +1294,7 @@ impl<T, A: Allocator> BinaryHeap<T, A> {
     ///
     ///     Ok(heap.pop())
     /// }
-    /// # find_max_slow(&[1, 2, 3]).expect("why is the test harness OOMing on 12 bytes?");
+    /// # find_max_slow(&[1, 2, 3]).expect("reserving capacity for 12 bytes should never fail");
     /// ```
     #[stable(feature = "try_reserve_2", since = "1.63.0")]
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
@@ -1328,6 +1362,37 @@ impl<T, A: Allocator> BinaryHeap<T, A> {
     #[stable(feature = "binary_heap_as_slice", since = "1.80.0")]
     pub fn as_slice(&self) -> &[T] {
         self.data.as_slice()
+    }
+
+    /// Returns a mutable slice of all values in the underlying vector.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the slice remains a max-heap, i.e. for all indices
+    /// `0 < i < slice.len()`, `slice[(i - 1) / 2] >= slice[i]`, before the borrow ends
+    /// and the binary heap is used.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// #![feature(binary_heap_as_mut_slice)]
+    ///
+    /// use std::collections::BinaryHeap;
+    ///
+    /// let mut heap = BinaryHeap::<u32>::from([1, 2, 3, 4, 5, 6, 7]);
+    ///
+    /// unsafe {
+    ///     for value in heap.as_mut_slice() {
+    ///         *value = (*value).saturating_mul(2);
+    ///     }
+    /// }
+    /// ```
+    #[must_use]
+    #[unstable(feature = "binary_heap_as_mut_slice", issue = "154009")]
+    pub unsafe fn as_mut_slice(&mut self) -> &mut [T] {
+        self.data.as_mut_slice()
     }
 
     /// Consumes the `BinaryHeap` and returns the underlying vector

@@ -8,7 +8,7 @@ on:
     branches: [main]
 
 env:
-  FLUX_VERSION: "9c1b5e278791f57eed1fd109816bbe180423fa9d"
+  FLUX_VERSION: "c460561937c10c1b4af389f0514102bdcc491462"
   FIXPOINT_VERSION: "nightly-2026-07-20"
 
 jobs:

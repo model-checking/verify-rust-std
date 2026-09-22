@@ -15,7 +15,8 @@ mod validations;
 
 use self::pattern::{DoubleEndedSearcher, Pattern, ReverseSearcher, Searcher};
 use crate::char::{self, EscapeDebugExtArgs};
-use crate::ops::Range;
+use crate::hint::assert_unchecked;
+use crate::range::Range;
 use crate::slice::{self, SliceIndex};
 use crate::ub_checks::assert_unsafe_precondition;
 use crate::{ascii, mem};
@@ -81,38 +82,50 @@ const fn slice_error_fail_ct(_: &str, _: usize, _: usize) -> ! {
 
 #[track_caller]
 fn slice_error_fail_rt(s: &str, begin: usize, end: usize) -> ! {
-    const MAX_DISPLAY_LENGTH: usize = 256;
-    let trunc_len = s.floor_char_boundary(MAX_DISPLAY_LENGTH);
-    let s_trunc = &s[..trunc_len];
-    let ellipsis = if trunc_len < s.len() { "[...]" } else { "" };
+    let len = s.len();
 
-    // 1. out of bounds
-    if begin > s.len() || end > s.len() {
-        let oob_index = if begin > s.len() { begin } else { end };
-        panic!("byte index {oob_index} is out of bounds of `{s_trunc}`{ellipsis}");
+    // 1. begin is OOB.
+    if begin > len {
+        panic!("start byte index {begin} is out of bounds for string of length {len}");
     }
 
-    // 2. begin <= end
-    assert!(
-        begin <= end,
-        "begin <= end ({} <= {}) when slicing `{}`{}",
-        begin,
-        end,
-        s_trunc,
-        ellipsis
-    );
+    // 2. end is OOB.
+    if end > len {
+        panic!("end byte index {end} is out of bounds for string of length {len}");
+    }
 
-    // 3. character boundary
-    let index = if !s.is_char_boundary(begin) { begin } else { end };
-    // find the character
-    let char_start = s.floor_char_boundary(index);
-    // `char_start` must be less than len and a char boundary
-    let ch = s[char_start..].chars().next().unwrap();
-    let char_range = char_start..char_start + ch.len_utf8();
-    panic!(
-        "byte index {} is not a char boundary; it is inside {:?} (bytes {:?}) of `{}`{}",
-        index, ch, char_range, s_trunc, ellipsis
-    );
+    // 3. range is backwards.
+    if begin > end {
+        panic!("byte range starts at {begin} but ends at {end}");
+    }
+
+    // 4. begin is inside a character.
+    if !s.is_char_boundary(begin) {
+        let floor = s.floor_char_boundary(begin);
+        let ceil = s.ceil_char_boundary(begin);
+        let range = floor..ceil;
+        let ch = s[floor..ceil].chars().next().unwrap();
+        panic!(
+            "start byte index {begin} is not a char boundary; it is inside {ch:?} (bytes {range:?} of string)"
+        )
+    }
+
+    // 5. end is inside a character.
+    if !s.is_char_boundary(end) {
+        let floor = s.floor_char_boundary(end);
+        let ceil = s.ceil_char_boundary(end);
+        let range = floor..ceil;
+        let ch = s[floor..ceil].chars().next().unwrap();
+        panic!(
+            "end byte index {end} is not a char boundary; it is inside {ch:?} (bytes {range:?} of string)"
+        )
+    }
+
+    // 6. end is OOB and range is inclusive (end == len).
+    // This test cannot be combined with 2. above because for cases like
+    // `"abcαβγ"[4..9]` the error is that 4 is inside 'α', not that 9 is OOB.
+    debug_assert_eq!(end, len);
+    panic!("end byte index {end} is out of bounds for string of length {len}");
 }
 
 impl str {
@@ -138,6 +151,7 @@ impl str {
     #[rustc_no_implicit_autorefs]
     #[must_use]
     #[inline]
+    #[allow(clippy::needless_as_bytes)]
     pub const fn len(&self) -> usize {
         self.as_bytes().len()
     }
@@ -409,21 +423,35 @@ impl str {
     #[inline]
     pub const fn floor_char_boundary(&self, index: usize) -> usize {
         if index >= self.len() {
-            self.len()
-        } else {
-            let mut i = index;
-            while i > 0 {
-                if self.as_bytes()[i].is_utf8_char_boundary() {
-                    break;
-                }
-                i -= 1;
-            }
-
-            //  The character boundary will be within four bytes of the index
-            debug_assert!(i >= index.saturating_sub(3));
-
-            i
+            return self.len();
         }
+        if self.as_bytes()[index].is_utf8_char_boundary() {
+            return index;
+        }
+        // Unlike `ceil_char_boundary`, the loop is unrolled manually to prevent the compiler from
+        // generating excessive unrolled loop bodies when `index` is statically known.
+
+        // The first byte of `&str` must always be a char boundary, so we can assume `i > 0` below
+        // for any `i` where `self.as_bytes()[i]` is not a char boundary.
+        debug_assert!(self.as_bytes()[0].is_utf8_char_boundary());
+
+        // SAFETY: `self.as_bytes()[0]` is always a char boundary with valid `&str`
+        unsafe { assert_unchecked(index >= 1) };
+        if self.as_bytes()[index - 1].is_utf8_char_boundary() {
+            return index - 1;
+        }
+
+        // SAFETY: `self.as_bytes()[0]` is always a char boundary with valid `&str`
+        unsafe { assert_unchecked(index >= 2) };
+        if self.as_bytes()[index - 2].is_utf8_char_boundary() {
+            return index - 2;
+        }
+
+        // `self.as_bytes()[0]` is always a char boundary with valid `&str`
+        debug_assert!(index >= 3);
+        // The character boundary will be within four bytes of the index
+        debug_assert!(self.as_bytes()[index - 3].is_utf8_char_boundary());
+        index - 3
     }
 
     /// Finds the closest `x` not below `index` where [`is_char_boundary(x)`] is `true`.
@@ -455,14 +483,14 @@ impl str {
             self.len()
         } else {
             let mut i = index;
-            while i < self.len() {
-                if self.as_bytes()[i].is_utf8_char_boundary() {
+            while !self.as_bytes()[i].is_utf8_char_boundary() {
+                i += 1;
+                if i >= self.len() {
                     break;
                 }
-                i += 1;
             }
 
-            //  The character boundary will be within four bytes of the index
+            // The character boundary will be within four bytes of the index
             debug_assert!(i <= index + 3);
 
             i
@@ -577,6 +605,7 @@ impl str {
     #[rustc_as_ptr]
     #[must_use]
     #[inline(always)]
+    #[rustc_no_writable]
     pub const fn as_mut_ptr(&mut self) -> *mut u8 {
         self as *mut str as *mut u8
     }
@@ -1190,6 +1219,9 @@ impl str {
     ///
     /// This uses the same definition as [`char::is_ascii_whitespace`].
     /// To split by Unicode `Whitespace` instead, use [`split_whitespace`].
+    /// Note that because of this difference in definition, even if `s.is_ascii()`
+    /// is `true`, `s.split_ascii_whitespace()` behavior will differ from `s.split_whitespace()`
+    /// if `s` contains U+000B VERTICAL TAB.
     ///
     /// [`split_whitespace`]: str::split_whitespace
     ///
@@ -2461,12 +2493,14 @@ impl str {
 
     /// Returns a string slice with the prefix and suffix removed.
     ///
-    /// If the string starts with the pattern `prefix` and ends with the pattern `suffix`, returns
+    /// If the string starts with the pattern `prefix` and ends with
+    /// the pattern `suffix`, and the prefix and suffix don't overlap, returns
     /// the substring after the prefix and before the suffix, wrapped in `Some`.
     /// Unlike [`trim_start_matches`] and [`trim_end_matches`], this method removes both the prefix
     /// and suffix exactly once.
     ///
-    /// If the string does not start with `prefix` or does not end with `suffix`, returns `None`.
+    /// If the string does not start with `prefix`, does not end with `suffix`,
+    /// or the prefix and suffix overlap in the string, returns `None`.
     ///
     /// Each [pattern] can be a `&str`, [`char`], a slice of [`char`]s, or a
     /// function or closure that determines if a character matches.
@@ -2479,15 +2513,14 @@ impl str {
     /// # Examples
     ///
     /// ```
-    /// #![feature(strip_circumfix)]
-    ///
     /// assert_eq!("bar:hello:foo".strip_circumfix("bar:", ":foo"), Some("hello"));
     /// assert_eq!("bar:foo".strip_circumfix("foo", "foo"), None);
     /// assert_eq!("foo:bar;".strip_circumfix("foo:", ';'), Some("bar"));
+    /// assert_eq!("foo:bar:baz".strip_circumfix("foo:bar:", ":bar:baz"), None);
     /// ```
     #[must_use = "this returns the remaining substring as a new slice, \
                   without modifying the original"]
-    #[unstable(feature = "strip_circumfix", issue = "147946")]
+    #[stable(feature = "strip_circumfix", since = "1.98.0")]
     pub fn strip_circumfix<P: Pattern, S: Pattern>(&self, prefix: P, suffix: S) -> Option<&str>
     where
         for<'a> S::Searcher<'a>: ReverseSearcher<'a>,
@@ -2810,6 +2843,9 @@ impl str {
     /// Same as `to_ascii_lowercase(a) == to_ascii_lowercase(b)`,
     /// but without allocating and copying temporaries.
     ///
+    /// For Unicode-aware case-insensitive matching, consider
+    /// [`str::eq_ignore_case_unnormalized`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -2823,6 +2859,59 @@ impl str {
     #[inline]
     pub const fn eq_ignore_ascii_case(&self, other: &str) -> bool {
         self.as_bytes().eq_ignore_ascii_case(other.as_bytes())
+    }
+
+    /// Checks that two strings are a caseless match, according to
+    /// [Definition 144] in Chapter 3 of the Unicode Standard.
+    ///
+    /// [Definition 144]: https://www.unicode.org/versions/latest/core-spec/chapter-3/#G53513
+    ///
+    /// Same as `a.to_casefold_unnormalized() == b.to_casefold_unnormalized()`,
+    /// but without allocating. See that method's documentation,
+    /// as well as [`char::to_casefold_unnormalized()`],
+    /// for more information about case folding.
+    ///
+    /// No [normalization] (e.g. NFC) is performed, so visually and semantically identical strings
+    /// might still compare unequal. For example, `"Å"` (U+00C5 LATIN CAPITAL LETTER A WITH RING ABOVE)
+    /// is considered distinct from `"Å"` (A followed by U+030A COMBINING RING ABOVE),
+    /// even though Unicode considers them canonically equivalent.
+    ///
+    /// In addition, this method is independent of language/locale,
+    /// so the special behavior of I/ı/İ/i in Turkish and Azeri is not handled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(casefold)]
+    /// assert!("Ferris".eq_ignore_case_unnormalized("FERRIS"));
+    /// assert!("Ferrös".eq_ignore_case_unnormalized("FERRÖS"));
+    /// assert!("ẞ".eq_ignore_case_unnormalized("ss"));
+    /// ```
+    ///
+    /// No NFC [normalization] is performed:
+    ///
+    /// ```rust
+    /// #![feature(casefold)]
+    /// // These two strings are visually and semantically identical...
+    /// let comp = "Å";
+    /// let decomp = "Å";
+    ///
+    /// // ... but not codepoint-for-codepoint equal.
+    /// assert_eq!(comp, "\u{C5}");
+    /// assert_eq!(decomp, "A\u{030A}");
+    ///
+    /// // Their case-foldings are likewise unequal:
+    /// assert!(!comp.eq_ignore_case_unnormalized(decomp));
+    /// ```
+    ///
+    /// [normalization]: https://www.unicode.org/faq/normalization.html
+    #[unstable(feature = "casefold", issue = "157000")]
+    #[must_use]
+    #[inline]
+    pub fn eq_ignore_case_unnormalized(&self, other: &str) -> bool {
+        self.chars()
+            .flat_map(char::to_casefold_unnormalized)
+            .eq(other.chars().flat_map(char::to_casefold_unnormalized))
     }
 
     /// Converts this string to its ASCII upper case equivalent in-place.
@@ -2881,12 +2970,78 @@ impl str {
         me.make_ascii_lowercase()
     }
 
+    /// Copies the string from `src` into `self`, using a memcpy.
+    ///
+    /// The length of `src` must be the same as `self`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the two strings have different lengths.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(str_copy_from_str)]
+    /// let src = "Saludos";
+    /// let mut dst = String::from("Grüße, Jürgen");
+    ///
+    /// // Because the strings have to be the same length,
+    /// // we slice the destination slice from sixteen bytes
+    /// // to seven. It will panic if we don't do this.
+    /// dst[..7].copy_from_str(src);
+    ///
+    /// assert_eq!(src, "Saludos");
+    /// assert_eq!(dst, "Saludos, Jürgen");
+    /// ```
+    ///
+    /// Rust enforces that there can only be one mutable reference with no
+    /// immutable references to a particular piece of data in a particular
+    /// scope. Because of this, attempting to use `copy_from_str` on a
+    /// single string will result in a compile failure:
+    ///
+    /// ```compile_fail
+    /// #![feature(str_copy_from_str)]
+    /// let mut string = String::from("Abcde");
+    ///
+    /// string[..2].copy_from_str(&string[3..]); // compile fail!
+    /// ```
+    ///
+    /// To work around this, we can use [`split_at_mut`] to create two distinct
+    /// sub-slices from a string:
+    ///
+    /// ```
+    /// #![feature(str_copy_from_str)]
+    /// let mut string = String::from("Abcde");
+    ///
+    /// {
+    ///     let (left, right) = string.split_at_mut(2);
+    ///     left.copy_from_str(&right[1..]);
+    /// }
+    ///
+    /// assert_eq!(string, "decde");
+    /// ```
+    ///
+    /// [`split_at_mut`]: str::split_at_mut
+    #[doc(alias = "memcpy")]
+    #[inline]
+    #[unstable(feature = "str_copy_from_str", issue = "159841")]
+    #[track_caller]
+    pub fn copy_from_str(&mut self, src: &str) {
+        // SAFETY: `copy_from_slice` panics unless the lengths are equal, and copying same-length
+        // UTF-8 into a `str` keeps it valid UTF-8.
+        let me = unsafe { self.as_bytes_mut() };
+        me.copy_from_slice(src.as_bytes());
+    }
+
     /// Returns a string slice with leading ASCII whitespace removed.
     ///
     /// 'Whitespace' refers to the definition used by
-    /// [`u8::is_ascii_whitespace`].
+    /// [`u8::is_ascii_whitespace`]. Importantly, this definition excludes
+    /// the U+000B code point even though it has the Unicode [`White_Space`] property
+    /// and is removed by [`str::trim_start`].
     ///
     /// [`u8::is_ascii_whitespace`]: u8::is_ascii_whitespace
+    /// [`White_Space`]: https://www.unicode.org/reports/tr44/#White_Space
     ///
     /// # Examples
     ///
@@ -2909,9 +3064,12 @@ impl str {
     /// Returns a string slice with trailing ASCII whitespace removed.
     ///
     /// 'Whitespace' refers to the definition used by
-    /// [`u8::is_ascii_whitespace`].
+    /// [`u8::is_ascii_whitespace`]. Importantly, this definition excludes
+    /// the U+000B code point even though it has the Unicode [`White_Space`] property
+    /// and is removed by [`str::trim_end`].
     ///
     /// [`u8::is_ascii_whitespace`]: u8::is_ascii_whitespace
+    /// [`White_Space`]: https://www.unicode.org/reports/tr44/#White_Space
     ///
     /// # Examples
     ///
@@ -2935,9 +3093,12 @@ impl str {
     /// removed.
     ///
     /// 'Whitespace' refers to the definition used by
-    /// [`u8::is_ascii_whitespace`].
+    /// [`u8::is_ascii_whitespace`]. Importantly, this definition excludes
+    /// the U+000B code point even though it has the Unicode [`White_Space`] property
+    /// and is removed by [`str::trim`].
     ///
     /// [`u8::is_ascii_whitespace`]: u8::is_ascii_whitespace
+    /// [`White_Space`]: https://www.unicode.org/reports/tr44/#White_Space
     ///
     /// # Examples
     ///
@@ -3099,18 +3260,18 @@ impl str {
     ///
     /// # Examples
     /// ```
-    /// #![feature(substr_range)]
+    /// use core::range::Range;
     ///
     /// let data = "a, b, b, a";
     /// let mut iter = data.split(", ").map(|s| data.substr_range(s).unwrap());
     ///
-    /// assert_eq!(iter.next(), Some(0..1));
-    /// assert_eq!(iter.next(), Some(3..4));
-    /// assert_eq!(iter.next(), Some(6..7));
-    /// assert_eq!(iter.next(), Some(9..10));
+    /// assert_eq!(iter.next(), Some(Range { start: 0, end: 1 }));
+    /// assert_eq!(iter.next(), Some(Range { start: 3, end: 4 }));
+    /// assert_eq!(iter.next(), Some(Range { start: 6, end: 7 }));
+    /// assert_eq!(iter.next(), Some(Range { start: 9, end: 10 }));
     /// ```
     #[must_use]
-    #[unstable(feature = "substr_range", issue = "126769")]
+    #[stable(feature = "substr_range", since = "1.98.0")]
     pub fn substr_range(&self, substr: &str) -> Option<Range<usize>> {
         self.as_bytes().subslice_range(substr.as_bytes())
     }
@@ -3129,7 +3290,7 @@ impl str {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl const AsRef<[u8]> for str {
+const impl AsRef<[u8]> for str {
     #[inline]
     fn as_ref(&self) -> &[u8] {
         self.as_bytes()
@@ -3138,7 +3299,7 @@ impl const AsRef<[u8]> for str {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_const_unstable(feature = "const_default", issue = "143894")]
-impl const Default for &str {
+const impl Default for &str {
     /// Creates an empty str
     #[inline]
     fn default() -> Self {
@@ -3148,7 +3309,7 @@ impl const Default for &str {
 
 #[stable(feature = "default_mut_str", since = "1.28.0")]
 #[rustc_const_unstable(feature = "const_default", issue = "143894")]
-impl const Default for &mut str {
+const impl Default for &mut str {
     /// Creates an empty mutable str
     #[inline]
     fn default() -> Self {
@@ -3169,7 +3330,7 @@ impl_fn_for_zst! {
     #[derive(Clone)]
     struct CharEscapeDebugContinue impl Fn = |c: char| -> char::EscapeDebug {
         c.escape_debug_ext(EscapeDebugExtArgs {
-            escape_grapheme_extended: false,
+            escape_grapheme_extender: false,
             escape_single_quote: true,
             escape_double_quote: true
         })

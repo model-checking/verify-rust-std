@@ -6,7 +6,7 @@ use crate::cell::{Cell, Ref, RefCell, RefMut, SyncUnsafeCell, UnsafeCell};
 use crate::char::EscapeDebugExtArgs;
 use crate::hint::assert_unchecked;
 use crate::marker::{PhantomData, PointeeSized};
-use crate::num::fmt as numfmt;
+use crate::num::imp::fmt as numfmt;
 use crate::ops::Deref;
 use crate::ptr::NonNull;
 use crate::{iter, mem, result, str};
@@ -36,8 +36,10 @@ pub enum Alignment {
     Center,
 }
 
-#[unstable(feature = "int_format_into", issue = "138215")]
-pub use num_buffer::{NumBuffer, NumBufferTrait};
+#[stable(feature = "int_format_into", since = "1.98.0")]
+pub use num_buffer::NumBuffer;
+#[unstable(feature = "fmt_internals", issue = "none")]
+pub use num_buffer::NumBufferTrait;
 
 #[stable(feature = "debug_builders", since = "1.2.0")]
 pub use self::builders::{DebugList, DebugMap, DebugSet, DebugStruct, DebugTuple};
@@ -330,9 +332,7 @@ mod flags {
 }
 
 impl FormattingOptions {
-    /// Construct a new `FormatterBuilder` with the supplied `Write` trait
-    /// object for output that is equivalent to the `{}` formatting
-    /// specifier:
+    /// Construct a new `FormattingOptions` representing the plain `{}` formatting specifier:
     ///
     /// - no flags,
     /// - filled with spaces,
@@ -516,7 +516,7 @@ impl FormattingOptions {
     pub const fn get_precision(&self) -> Option<u16> {
         if self.flags & flags::PRECISION_FLAG != 0 { Some(self.precision) } else { None }
     }
-    /// Returns the current precision.
+    /// Returns the current `x?` or `X?` flag.
     #[unstable(feature = "formatting_options", issue = "118117")]
     pub const fn get_debug_as_hex(&self) -> Option<DebugAsHex> {
         if self.flags & flags::DEBUG_LOWER_HEX_FLAG != 0 {
@@ -1037,9 +1037,10 @@ impl Display for Arguments<'_> {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_on_unimplemented(
     on(
-        crate_local,
+        all(crate_local, not(Self = "{union}")),
         note = "add `#[derive(Debug)]` to `{Self}` or manually `impl {This} for {Self}`"
     ),
+    on(all(crate_local, Self = "{union}"), note = "manually `impl {This} for {Self}`"),
     on(
         from_desugaring = "FormatLiteral",
         label = "`{Self}` cannot be formatted using `{{:?}}` because it doesn't implement `{This}`"
@@ -1175,7 +1176,7 @@ pub use macros::Debug;
     ),
     on(
         from_desugaring = "FormatLiteral",
-        note = "in format strings you may be able to use `{{:?}}` (or {{:#?}} for pretty-print) instead",
+        note = "in format strings you may be able to use `{{:?}}` (or `{{:#?}}` for pretty-print) instead",
         label = "`{Self}` cannot be formatted with the default formatter",
     ),
     message = "`{Self}` doesn't implement `{This}`"
@@ -1610,7 +1611,7 @@ pub trait UpperExp: PointeeSized {
 ///
 /// let mut output = String::new();
 /// fmt::write(&mut output, format_args!("Hello {}!", "world"))
-///     .expect("Error occurred while trying to write in String");
+///     .expect("Writing to a `String` should not fail");
 /// assert_eq!(output, "Hello world!");
 /// ```
 ///
@@ -1621,7 +1622,7 @@ pub trait UpperExp: PointeeSized {
 ///
 /// let mut output = String::new();
 /// write!(&mut output, "Hello {}!", "world")
-///     .expect("Error occurred while trying to write in String");
+///     .expect("Writing to a `String` should not fail");
 /// assert_eq!(output, "Hello world!");
 /// ```
 ///
@@ -2006,7 +2007,13 @@ impl<'a> Formatter<'a> {
                 // SAFETY: Per the precondition.
                 unsafe { self.write_formatted_parts(&formatted) }
             } else {
-                let post_padding = self.padding(width - len as u16, Alignment::Right)?;
+                // Padding widths are capped at `u16`, so reaching this branch means
+                // the formatted output is also shorter than `u16::MAX`.
+                let len = match u16::try_from(len) {
+                    Ok(len) => len,
+                    Err(_) => unreachable!(),
+                };
+                let post_padding = self.padding(width - len, Alignment::Right)?;
                 // SAFETY: Per the precondition.
                 unsafe {
                     self.write_formatted_parts(&formatted)?;
@@ -2570,6 +2577,21 @@ impl<'a> Formatter<'a> {
         builder.finish()
     }
 
+    /// Shrinks `derive(Debug)` code, for faster compilation and smaller binaries.
+    /// For C-like enums with concatenated variant name strings.
+    #[doc(hidden)]
+    #[unstable(feature = "fmt_helpers_for_derive", issue = "none")]
+    pub fn debug_c_like_enum_write_str<'b>(
+        &'b mut self,
+        names: &str,
+        offset: &[usize],
+        discr: usize,
+    ) -> Result {
+        let start = offset[discr];
+        let end = offset[discr + 1];
+        self.write_str(&names[start..end])
+    }
+
     /// Creates a `DebugTuple` builder designed to assist with creation of
     /// `fmt::Debug` implementations for tuple structs.
     ///
@@ -2920,7 +2942,7 @@ impl Debug for str {
         // the loop here first skips over runs of printable ASCII as a fast path.
         // other chars (unicode, or ASCII that needs escaping) are then handled per-`char`.
         let mut rest = self;
-        while rest.len() > 0 {
+        while !rest.is_empty() {
             let Some(non_printable_start) = rest.as_bytes().iter().position(|&b| needs_escape(b))
             else {
                 printable_range.end += rest.len();
@@ -2934,7 +2956,7 @@ impl Debug for str {
             let mut chars = rest.chars();
             if let Some(c) = chars.next() {
                 let esc = c.escape_debug_ext(EscapeDebugExtArgs {
-                    escape_grapheme_extended: true,
+                    escape_grapheme_extender: true,
                     escape_single_quote: false,
                     escape_double_quote: true,
                 });
@@ -2966,7 +2988,7 @@ impl Debug for char {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.write_char('\'')?;
         let esc = self.escape_debug_ext(EscapeDebugExtArgs {
-            escape_grapheme_extended: true,
+            escape_grapheme_extender: true,
             escape_single_quote: true,
             escape_double_quote: false,
         });
@@ -2989,20 +3011,19 @@ impl Display for char {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: PointeeSized> Pointer for *const T {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        if <<T as core::ptr::Pointee>::Metadata as core::unit::IsUnit>::is_unit() {
-            pointer_fmt_inner(self.expose_provenance(), f)
+        // Since the formatting will be identical for all pointer types, erase the pointee type and
+        // metadata type to reduce the amount of codegen work needed for each distinct type.
+        let ptr: *const T = *self;
+        let ptr_addr = ptr.expose_provenance();
+        if <<T as core::ptr::Pointee>::Metadata as core::unit::IsUnit>::IS_UNIT {
+            pointer_fmt_inner(ptr_addr, f)
         } else {
-            f.debug_struct("Pointer")
-                .field_with("addr", |f| pointer_fmt_inner(self.expose_provenance(), f))
-                .field("metadata", &core::ptr::metadata(*self))
-                .finish()
+            wide_pointer_fmt_inner(ptr_addr, &core::ptr::metadata(ptr), f)
         }
     }
 }
 
-/// Since the formatting will be identical for all pointer types, uses a
-/// non-monomorphized implementation for the actual formatting to reduce the
-/// amount of codegen work needed.
+/// Formats an address in `fmt::Pointer` style.
 ///
 /// This uses `ptr_addr: usize` and not `ptr: *const ()` to be able to use this for
 /// `fn(...) -> ...` without using [problematic] "Oxford Casts".
@@ -3029,6 +3050,14 @@ pub(crate) fn pointer_fmt_inner(ptr_addr: usize, f: &mut Formatter<'_>) -> Resul
     f.options = old_options;
 
     ret
+}
+
+/// Formats a wide pointer (address and type-erased metadata) in `fmt::Pointer` style.
+fn wide_pointer_fmt_inner(ptr_addr: usize, metadata: &dyn Debug, f: &mut Formatter<'_>) -> Result {
+    f.debug_struct("Pointer")
+        .field_with("addr", move |f| pointer_fmt_inner(ptr_addr, f))
+        .field("metadata", metadata)
+        .finish()
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -3160,7 +3189,7 @@ impl<T: ?Sized + Debug> Debug for Ref<'_, T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: ?Sized + Debug> Debug for RefMut<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        Debug::fmt(&*(self.deref()), f)
+        Debug::fmt(self.deref(), f)
     }
 }
 

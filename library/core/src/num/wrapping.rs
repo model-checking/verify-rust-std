@@ -99,7 +99,7 @@ macro_rules! sh_impl_signed {
     ($t:ident, $f:ident) => {
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Shl<$f> for Wrapping<$t> {
+        const impl Shl<$f> for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -117,7 +117,7 @@ macro_rules! sh_impl_signed {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const ShlAssign<$f> for Wrapping<$t> {
+        const impl ShlAssign<$f> for Wrapping<$t> {
             #[inline]
             fn shl_assign(&mut self, other: $f) {
                 *self = *self << other;
@@ -129,7 +129,7 @@ macro_rules! sh_impl_signed {
 
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Shr<$f> for Wrapping<$t> {
+        const impl Shr<$f> for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -147,7 +147,7 @@ macro_rules! sh_impl_signed {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const ShrAssign<$f> for Wrapping<$t> {
+        const impl ShrAssign<$f> for Wrapping<$t> {
             #[inline]
             fn shr_assign(&mut self, other: $f) {
                 *self = *self >> other;
@@ -163,7 +163,7 @@ macro_rules! sh_impl_unsigned {
     ($t:ident, $f:ident) => {
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Shl<$f> for Wrapping<$t> {
+        const impl Shl<$f> for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -177,7 +177,7 @@ macro_rules! sh_impl_unsigned {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const ShlAssign<$f> for Wrapping<$t> {
+        const impl ShlAssign<$f> for Wrapping<$t> {
             #[inline]
             fn shl_assign(&mut self, other: $f) {
                 *self = *self << other;
@@ -189,7 +189,7 @@ macro_rules! sh_impl_unsigned {
 
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Shr<$f> for Wrapping<$t> {
+        const impl Shr<$f> for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -203,7 +203,7 @@ macro_rules! sh_impl_unsigned {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const ShrAssign<$f> for Wrapping<$t> {
+        const impl ShrAssign<$f> for Wrapping<$t> {
             #[inline]
             fn shr_assign(&mut self, other: $f) {
                 *self = *self >> other;
@@ -241,7 +241,7 @@ macro_rules! wrapping_impl {
     ($($t:ty)*) => ($(
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Add for Wrapping<$t> {
+        const impl Add for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -255,7 +255,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const AddAssign for Wrapping<$t> {
+        const impl AddAssign for Wrapping<$t> {
             #[inline]
             fn add_assign(&mut self, other: Wrapping<$t>) {
                 *self = *self + other;
@@ -267,7 +267,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_int_assign_impl", since = "1.60.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const AddAssign<$t> for Wrapping<$t> {
+        const impl AddAssign<$t> for Wrapping<$t> {
             #[inline]
             fn add_assign(&mut self, other: $t) {
                 *self = *self + Wrapping(other);
@@ -279,7 +279,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Sub for Wrapping<$t> {
+        const impl Sub for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -293,7 +293,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const SubAssign for Wrapping<$t> {
+        const impl SubAssign for Wrapping<$t> {
             #[inline]
             fn sub_assign(&mut self, other: Wrapping<$t>) {
                 *self = *self - other;
@@ -305,7 +305,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_int_assign_impl", since = "1.60.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const SubAssign<$t> for Wrapping<$t> {
+        const impl SubAssign<$t> for Wrapping<$t> {
             #[inline]
             fn sub_assign(&mut self, other: $t) {
                 *self = *self - Wrapping(other);
@@ -317,7 +317,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Mul for Wrapping<$t> {
+        const impl Mul for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -331,7 +331,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const MulAssign for Wrapping<$t> {
+        const impl MulAssign for Wrapping<$t> {
             #[inline]
             fn mul_assign(&mut self, other: Wrapping<$t>) {
                 *self = *self * other;
@@ -343,7 +343,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_int_assign_impl", since = "1.60.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const MulAssign<$t> for Wrapping<$t> {
+        const impl MulAssign<$t> for Wrapping<$t> {
             #[inline]
             fn mul_assign(&mut self, other: $t) {
                 *self = *self * Wrapping(other);
@@ -355,7 +355,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_div", since = "1.3.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Div for Wrapping<$t> {
+        const impl Div for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -369,7 +369,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const DivAssign for Wrapping<$t> {
+        const impl DivAssign for Wrapping<$t> {
             #[inline]
             fn div_assign(&mut self, other: Wrapping<$t>) {
                 *self = *self / other;
@@ -381,7 +381,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_int_assign_impl", since = "1.60.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const DivAssign<$t> for Wrapping<$t> {
+        const impl DivAssign<$t> for Wrapping<$t> {
             #[inline]
             fn div_assign(&mut self, other: $t) {
                 *self = *self / Wrapping(other);
@@ -393,7 +393,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_impls", since = "1.7.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Rem for Wrapping<$t> {
+        const impl Rem for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -407,7 +407,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const RemAssign for Wrapping<$t> {
+        const impl RemAssign for Wrapping<$t> {
             #[inline]
             fn rem_assign(&mut self, other: Wrapping<$t>) {
                 *self = *self % other;
@@ -419,7 +419,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_int_assign_impl", since = "1.60.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const RemAssign<$t> for Wrapping<$t> {
+        const impl RemAssign<$t> for Wrapping<$t> {
             #[inline]
             fn rem_assign(&mut self, other: $t) {
                 *self = *self % Wrapping(other);
@@ -431,7 +431,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Not for Wrapping<$t> {
+        const impl Not for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -445,7 +445,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitXor for Wrapping<$t> {
+        const impl BitXor for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -459,7 +459,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitXorAssign for Wrapping<$t> {
+        const impl BitXorAssign for Wrapping<$t> {
             #[inline]
             fn bitxor_assign(&mut self, other: Wrapping<$t>) {
                 *self = *self ^ other;
@@ -471,7 +471,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_int_assign_impl", since = "1.60.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitXorAssign<$t> for Wrapping<$t> {
+        const impl BitXorAssign<$t> for Wrapping<$t> {
             #[inline]
             fn bitxor_assign(&mut self, other: $t) {
                 *self = *self ^ Wrapping(other);
@@ -483,7 +483,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitOr for Wrapping<$t> {
+        const impl BitOr for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -497,7 +497,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitOrAssign for Wrapping<$t> {
+        const impl BitOrAssign for Wrapping<$t> {
             #[inline]
             fn bitor_assign(&mut self, other: Wrapping<$t>) {
                 *self = *self | other;
@@ -509,7 +509,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_int_assign_impl", since = "1.60.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitOrAssign<$t> for Wrapping<$t> {
+        const impl BitOrAssign<$t> for Wrapping<$t> {
             #[inline]
             fn bitor_assign(&mut self, other: $t) {
                 *self = *self | Wrapping(other);
@@ -521,7 +521,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "rust1", since = "1.0.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitAnd for Wrapping<$t> {
+        const impl BitAnd for Wrapping<$t> {
             type Output = Wrapping<$t>;
 
             #[inline]
@@ -535,7 +535,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "op_assign_traits", since = "1.8.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitAndAssign for Wrapping<$t> {
+        const impl BitAndAssign for Wrapping<$t> {
             #[inline]
             fn bitand_assign(&mut self, other: Wrapping<$t>) {
                 *self = *self & other;
@@ -547,7 +547,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_int_assign_impl", since = "1.60.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const BitAndAssign<$t> for Wrapping<$t> {
+        const impl BitAndAssign<$t> for Wrapping<$t> {
             #[inline]
             fn bitand_assign(&mut self, other: $t) {
                 *self = *self & Wrapping(other);
@@ -559,7 +559,7 @@ macro_rules! wrapping_impl {
 
         #[stable(feature = "wrapping_neg", since = "1.10.0")]
         #[rustc_const_unstable(feature = "const_ops", issue = "143802")]
-        impl const Neg for Wrapping<$t> {
+        const impl Neg for Wrapping<$t> {
             type Output = Self;
             #[inline]
             fn neg(self) -> Self {

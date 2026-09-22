@@ -38,7 +38,7 @@ impl Condvar {
         // possible for `counter` to decrease due to a condvar timing out, in which
         // case the corresponding `timed_out` will increase accordingly.
         let Ok(waiter_count) =
-            self.counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |counter| {
+            self.counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |counter| {
                 if counter == 0 {
                     return None;
                 } else {
@@ -124,11 +124,9 @@ impl Condvar {
     }
 
     pub unsafe fn wait_timeout(&self, mutex: &Mutex, dur: Duration) -> bool {
-        let mut millis = dur.as_millis() as usize;
-        // Ensure we don't wait for 0 ms, which would cause us to wait forever
-        if millis == 0 {
-            millis = 1;
-        }
+        // A value of zero indicates an indefinite wait, so clamp the number of
+        // milliseconds to the representable range and avoid waiting forever.
+        let millis = usize::max(dur.as_millis().try_into().unwrap_or(usize::MAX), 1);
         self.wait_ms(mutex, millis)
     }
 }

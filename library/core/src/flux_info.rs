@@ -2,6 +2,7 @@
 
 
 use crate::hash;
+use crate::num;
 use crate::time;
 
 
@@ -84,6 +85,18 @@ use crate::time;
         impl clone::Clone for BuildHasherDefault {
             #[trusted(reason="https://github.com/flux-rs/flux/issues/1185")]
             fn clone(self: &Self) -> Self;
+        }
+    }
+
+    mod num {
+        mod niche_types {
+            // The `define_valid_range_type!` macro can no longer build this
+            // bound itself (upstream replaced its `$low`/`$high` literals with
+            // a single pattern), so the range precondition for the only niche
+            // type Flux actually reasons about is declared here instead.
+            impl Nanoseconds {
+                fn new_unchecked(val: u32{0 <= val && val <= 999999999}) -> Self[{val: val}];
+            }
         }
     }
 

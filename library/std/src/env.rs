@@ -15,7 +15,7 @@ use crate::ffi::{OsStr, OsString};
 use crate::num::NonZero;
 use crate::ops::Try;
 use crate::path::{Path, PathBuf};
-use crate::sys::{env as env_imp, os as os_imp};
+use crate::sys::{env as env_imp, paths as paths_imp};
 use crate::{array, fmt, io, sys};
 
 /// Returns the current working directory as a [`PathBuf`].
@@ -51,7 +51,7 @@ use crate::{array, fmt, io, sys};
 #[doc(alias = "GetCurrentDirectory")]
 #[stable(feature = "env", since = "1.0.0")]
 pub fn current_dir() -> io::Result<PathBuf> {
-    os_imp::getcwd()
+    paths_imp::getcwd()
 }
 
 /// Changes the current working directory to the specified path.
@@ -78,7 +78,7 @@ pub fn current_dir() -> io::Result<PathBuf> {
 #[doc(alias = "chdir", alias = "SetCurrentDirectory", alias = "SetCurrentDirectoryW")]
 #[stable(feature = "env", since = "1.0.0")]
 pub fn set_current_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
-    os_imp::chdir(path.as_ref())
+    paths_imp::chdir(path.as_ref())
 }
 
 /// An iterator over a snapshot of the environment variables of this process.
@@ -100,6 +100,12 @@ pub struct Vars {
 pub struct VarsOs {
     inner: env_imp::Env,
 }
+
+#[stable(feature = "env_vars_unimpl_send_sync", since = "1.98.0")]
+impl !Send for VarsOs {}
+
+#[stable(feature = "env_vars_unimpl_send_sync", since = "1.98.0")]
+impl !Sync for VarsOs {}
 
 /// Returns an iterator of (variable, value) pairs of strings, for all the
 /// environment variables of the current process.
@@ -220,14 +226,13 @@ impl fmt::Debug for VarsOs {
 /// ```
 #[stable(feature = "env", since = "1.0.0")]
 pub fn var<K: AsRef<OsStr>>(key: K) -> Result<String, VarError> {
-    _var(key.as_ref())
-}
-
-fn _var(key: &OsStr) -> Result<String, VarError> {
-    match var_os(key) {
-        Some(s) => s.into_string().map_err(VarError::NotUnicode),
-        None => Err(VarError::NotPresent),
+    fn inner(key: &OsStr) -> Result<String, VarError> {
+        env_imp::getenv(key)
+            .ok_or(VarError::NotPresent)?
+            .into_string()
+            .map_err(VarError::NotUnicode)
     }
+    inner(key.as_ref())
 }
 
 /// Fetches the environment variable `key` from the current process, returning
@@ -257,11 +262,7 @@ fn _var(key: &OsStr) -> Result<String, VarError> {
 #[must_use]
 #[stable(feature = "env", since = "1.0.0")]
 pub fn var_os<K: AsRef<OsStr>>(key: K) -> Option<OsString> {
-    _var_os(key.as_ref())
-}
-
-fn _var_os(key: &OsStr) -> Option<OsString> {
-    env_imp::getenv(key)
+    env_imp::getenv(key.as_ref())
 }
 
 /// The error type for operations interacting with environment variables.
@@ -303,12 +304,12 @@ impl Error for VarError {}
 ///
 /// # Safety
 ///
-/// This function is safe to call in a single-threaded program.
+/// This function is sound to call in a single-threaded program.
 ///
-/// This function is also always safe to call on Windows, in single-threaded
+/// This function is also always sound to call on Windows, in single-threaded
 /// and multi-threaded programs.
 ///
-/// In multi-threaded programs on other operating systems, the only safe option is
+/// In multi-threaded programs on other operating systems, the only sound option is
 /// to not use `set_var` or `remove_var` at all.
 ///
 /// The exact requirement is: you
@@ -322,7 +323,7 @@ impl Error for VarError {}
 /// lookups from [`std::net::ToSocketAddrs`]. No stable guarantee is made about
 /// which functions may read from the environment in future versions of a
 /// library. All this makes it not practically possible for you to guarantee
-/// that no other thread will read the environment, so the only safe option is
+/// that no other thread will read the environment, so the only sound option is
 /// to not use `set_var` or `remove_var` in multi-threaded programs at all.
 ///
 /// Discussion of this unsafety on Unix may be found in:
@@ -366,12 +367,12 @@ pub unsafe fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
 ///
 /// # Safety
 ///
-/// This function is safe to call in a single-threaded program.
+/// This function is sound to call in a single-threaded program.
 ///
-/// This function is also always safe to call on Windows, in single-threaded
+/// This function is also always sound to call on Windows, in single-threaded
 /// and multi-threaded programs.
 ///
-/// In multi-threaded programs on other operating systems, the only safe option is
+/// In multi-threaded programs on other operating systems, the only sound option is
 /// to not use `set_var` or `remove_var` at all.
 ///
 /// The exact requirement is: you
@@ -385,7 +386,7 @@ pub unsafe fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
 /// lookups from [`std::net::ToSocketAddrs`]. No stable guarantee is made about
 /// which functions may read from the environment in future versions of a
 /// library. All this makes it not practically possible for you to guarantee
-/// that no other thread will read the environment, so the only safe option is
+/// that no other thread will read the environment, so the only sound option is
 /// to not use `set_var` or `remove_var` in multi-threaded programs at all.
 ///
 /// Discussion of this unsafety on Unix may be found in:
@@ -444,7 +445,7 @@ pub unsafe fn remove_var<K: AsRef<OsStr>>(key: K) {
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 #[stable(feature = "env", since = "1.0.0")]
 pub struct SplitPaths<'a> {
-    inner: os_imp::SplitPaths<'a>,
+    inner: paths_imp::SplitPaths<'a>,
 }
 
 /// Parses input according to platform conventions for the `PATH`
@@ -480,7 +481,7 @@ pub struct SplitPaths<'a> {
 /// ```
 #[stable(feature = "env", since = "1.0.0")]
 pub fn split_paths<T: AsRef<OsStr> + ?Sized>(unparsed: &T) -> SplitPaths<'_> {
-    SplitPaths { inner: os_imp::split_paths(unparsed.as_ref()) }
+    SplitPaths { inner: paths_imp::split_paths(unparsed.as_ref()) }
 }
 
 #[stable(feature = "env", since = "1.0.0")]
@@ -508,7 +509,7 @@ impl fmt::Debug for SplitPaths<'_> {
 #[derive(Debug)]
 #[stable(feature = "env", since = "1.0.0")]
 pub struct JoinPathsError {
-    inner: os_imp::JoinPathsError,
+    inner: paths_imp::JoinPathsError,
 }
 
 /// Joins a collection of [`Path`]s appropriately for the `PATH`
@@ -579,7 +580,7 @@ where
     I: IntoIterator<Item = T>,
     T: AsRef<OsStr>,
 {
-    os_imp::join_paths(paths.into_iter()).map_err(|e| JoinPathsError { inner: e })
+    paths_imp::join_paths(paths.into_iter()).map_err(|e| JoinPathsError { inner: e })
 }
 
 #[stable(feature = "env", since = "1.0.0")]
@@ -605,6 +606,7 @@ impl Error for JoinPathsError {
 /// For example, [XDG Base Directories] on Unix or the `LOCALAPPDATA` and `APPDATA` environment variables on Windows.
 ///
 /// [XDG Base Directories]: https://specifications.freedesktop.org/basedir-spec/latest/
+//  feature(xdg_basedir): This should link to std::os::unix::xdg once it's stabilized
 ///
 /// # Unix
 ///
@@ -640,8 +642,9 @@ impl Error for JoinPathsError {
 /// ```
 #[must_use]
 #[stable(feature = "env", since = "1.0.0")]
+#[doc(alias = "home")]
 pub fn home_dir() -> Option<PathBuf> {
-    os_imp::home_dir()
+    paths_imp::home_dir()
 }
 
 /// Returns the path of a temporary directory.
@@ -670,6 +673,17 @@ pub fn home_dir() -> Option<PathBuf> {
 ///
 /// On Windows, the behavior is equivalent to that of [`GetTempPath2`][GetTempPath2] /
 /// [`GetTempPath`][GetTempPath], which this function uses internally.
+/// Specifically, for non-SYSTEM processes, the function checks for the
+/// following environment variables in order and returns the first path found:
+///
+/// 1. The path specified by the `TMP` environment variable.
+/// 2. The path specified by the `TEMP` environment variable.
+/// 3. The path specified by the `USERPROFILE` environment variable.
+/// 4. The Windows directory.
+///
+/// When called from a process running as SYSTEM,
+/// [`GetTempPath2`][GetTempPath2] returns `C:\Windows\SystemTemp`
+/// regardless of environment variables.
 ///
 /// Note that, this [may change in the future][changes].
 ///
@@ -678,7 +692,7 @@ pub fn home_dir() -> Option<PathBuf> {
 /// [GetTempPath]: https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppatha
 /// [appledoc]: https://developer.apple.com/library/archive/documentation/Security/Conceptual/SecureCodingGuide/Articles/RaceConditions.html#//apple_ref/doc/uid/TP40002585-SW10
 ///
-/// ```no_run
+/// ```
 /// use std::env;
 ///
 /// fn main() {
@@ -690,7 +704,7 @@ pub fn home_dir() -> Option<PathBuf> {
 #[doc(alias = "GetTempPath", alias = "GetTempPath2")]
 #[stable(feature = "env", since = "1.0.0")]
 pub fn temp_dir() -> PathBuf {
-    os_imp::temp_dir()
+    paths_imp::temp_dir()
 }
 
 /// Returns the full filesystem path of the current running executable.
@@ -712,28 +726,21 @@ pub fn temp_dir() -> PathBuf {
 ///
 /// # Security
 ///
-/// The output of this function should not be trusted for anything
-/// that might have security implications. Basically, if users can run
-/// the executable, they can change the output arbitrarily.
+/// The output of this function must be treated with care to avoid security
+/// vulnerabilities, particularly in processes that run with privileges higher
+/// than the user, such as setuid or setgid programs.
 ///
-/// As an example, you can easily introduce a race condition. It goes
-/// like this:
+/// For example, on some Unix platforms, the result is calculated by
+/// searching `$PATH` for an executable matching `argv[0]`, but both the
+/// environment and arguments can be be set arbitrarily by the user who
+/// invokes the program.
 ///
-/// 1. You get the path to the current executable using `current_exe()`, and
-///    store it in a variable.
-/// 2. Time passes. A malicious actor removes the current executable, and
-///    replaces it with a malicious one.
-/// 3. You then use the stored path to re-execute the current
-///    executable.
+/// On Linux, if `fs.secure_hardlinks` is not set, an attacker who can
+/// create hardlinks to the executable may be able to cause this function
+/// to return an attacker-controlled path, which they later replace with
+/// a different program.
 ///
-/// You expected to safely execute the current executable, but you're
-/// instead executing something completely different. The code you
-/// just executed runs with your privileges.
-///
-/// This sort of behavior has been known to [lead to privilege escalation] when
-/// used incorrectly.
-///
-/// [lead to privilege escalation]: https://securityvulns.com/Wdocument183.html
+/// This list of illustrative example attacks is not exhaustive.
 ///
 /// # Examples
 ///
@@ -748,7 +755,7 @@ pub fn temp_dir() -> PathBuf {
 /// ```
 #[stable(feature = "env", since = "1.0.0")]
 pub fn current_exe() -> io::Result<PathBuf> {
-    os_imp::current_exe()
+    paths_imp::current_exe()
 }
 
 /// An iterator over the arguments of a process, yielding a [`String`] value for
@@ -1067,41 +1074,43 @@ pub mod consts {
     ///
     /// <details><summary>Full list of possible values</summary>
     ///
-    /// * `"linux"`
-    /// * `"windows"`
-    /// * `"macos"`
-    /// * `"android"`
-    /// * `"ios"`
-    /// * `"openbsd"`
-    /// * `"freebsd"`
-    /// * `"netbsd"`
-    /// * `"wasi"`
-    /// * `"hermit"`
+    // tidy-alphabetical-start
     /// * `"aix"`
+    /// * `"android"`
     /// * `"apple"`
     /// * `"dragonfly"`
     /// * `"emscripten"`
     /// * `"espidf"`
     /// * `"fortanix"`
-    /// * `"uefi"`
+    /// * `"freebsd"`
     /// * `"fuchsia"`
     /// * `"haiku"`
     /// * `"hermit"`
-    /// * `"watchos"`
-    /// * `"visionos"`
-    /// * `"tvos"`
     /// * `"horizon"`
     /// * `"hurd"`
     /// * `"illumos"`
+    /// * `"ios"`
     /// * `"l4re"`
+    /// * `"linux"`
+    /// * `"macos"`
+    /// * `"netbsd"`
     /// * `"nto"`
+    /// * `"openbsd"`
+    /// * `"qnx"`
     /// * `"redox"`
     /// * `"solaris"`
     /// * `"solid_asp3"`
+    /// * `"tvos"`
+    /// * `"uefi"`
     /// * `"vexos"`
+    /// * `"visionos"`
     /// * `"vita"`
     /// * `"vxworks"`
+    /// * `"wasi"`
+    /// * `"watchos"`
+    /// * `"windows"`
     /// * `"xous"`
+    // tidy-alphabetical-end
     ///
     /// </details>
     #[stable(feature = "env", since = "1.0.0")]
