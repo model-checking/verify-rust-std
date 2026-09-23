@@ -1210,13 +1210,12 @@ impl<'a, 'b: 'a> DebugMap<'a, 'b> {
     }
 }
 
-/// Creates a type whose [`fmt::Debug`] and [`fmt::Display`] impls are provided with the function
-/// `f`.
+/// Creates a type whose [`fmt::Debug`] and [`fmt::Display`] impls are
+/// forwarded to the provided closure.
 ///
 /// # Examples
 ///
 /// ```
-/// #![feature(debug_closure_helpers)]
 /// use std::fmt;
 ///
 /// let value = 'a';
@@ -1227,21 +1226,20 @@ impl<'a, 'b: 'a> DebugMap<'a, 'b> {
 /// assert_eq!(format!("{}", wrapped), "'a'");
 /// assert_eq!(format!("{:?}", wrapped), "'a'");
 /// ```
-#[unstable(feature = "debug_closure_helpers", issue = "117729")]
+#[stable(feature = "fmt_from_fn", since = "1.93.0")]
+#[rustc_const_stable(feature = "const_fmt_from_fn", since = "CURRENT_RUSTC_VERSION")]
 #[must_use = "returns a type implementing Debug and Display, which do not have any effects unless they are used"]
-pub fn from_fn<F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result>(f: F) -> FromFn<F> {
+pub const fn from_fn<F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result>(f: F) -> FromFn<F> {
     FromFn(f)
 }
 
-/// Implements [`fmt::Debug`] and [`fmt::Display`] using a function.
+/// Implements [`fmt::Debug`] and [`fmt::Display`] via the provided closure.
 ///
 /// Created with [`from_fn`].
-#[unstable(feature = "debug_closure_helpers", issue = "117729")]
-pub struct FromFn<F>(F)
-where
-    F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result;
+#[stable(feature = "fmt_from_fn", since = "1.93.0")]
+pub struct FromFn<F>(F);
 
-#[unstable(feature = "debug_closure_helpers", issue = "117729")]
+#[stable(feature = "fmt_from_fn", since = "1.93.0")]
 impl<F> fmt::Debug for FromFn<F>
 where
     F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result,
@@ -1251,7 +1249,7 @@ where
     }
 }
 
-#[unstable(feature = "debug_closure_helpers", issue = "117729")]
+#[stable(feature = "fmt_from_fn", since = "1.93.0")]
 impl<F> fmt::Display for FromFn<F>
 where
     F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result,

@@ -87,7 +87,6 @@
 #[allow(deprecated)]
 pub use self::sip::SipHasher;
 #[unstable(feature = "hashmap_internals", issue = "none")]
-#[allow(deprecated)]
 #[doc(hidden)]
 pub use self::sip::SipHasher13;
 use crate::{fmt, marker};
@@ -633,6 +632,7 @@ impl<H: Hasher + ?Sized> Hasher for &mut H {
 ///
 /// [`build_hasher`]: BuildHasher::build_hasher
 /// [`HashMap`]: ../../std/collections/struct.HashMap.html
+#[cfg_attr(not(test), rustc_diagnostic_item = "BuildHasher")]
 #[stable(since = "1.7.0", feature = "build_hasher")]
 pub trait BuildHasher {
     /// Type of the hasher that will be created.
@@ -783,7 +783,8 @@ impl<H> Clone for BuildHasherDefault<H> {
 }
 
 #[stable(since = "1.7.0", feature = "build_hasher")]
-impl<H> Default for BuildHasherDefault<H> {
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
+impl<H> const Default for BuildHasherDefault<H> {
     fn default() -> BuildHasherDefault<H> {
         Self::new()
     }

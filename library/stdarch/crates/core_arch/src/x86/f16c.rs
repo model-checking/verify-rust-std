@@ -3,16 +3,13 @@
 //! [F16C intrinsics]: https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=fp16&expand=1769
 
 use crate::core_arch::{simd::*, x86::*};
+use crate::intrinsics::simd::*;
 
 #[cfg(test)]
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
 unsafe extern "unadjusted" {
-    #[link_name = "llvm.x86.vcvtph2ps.128"]
-    fn llvm_vcvtph2ps_128(a: i16x8) -> f32x4;
-    #[link_name = "llvm.x86.vcvtph2ps.256"]
-    fn llvm_vcvtph2ps_256(a: i16x8) -> f32x8;
     #[link_name = "llvm.x86.vcvtps2ph.128"]
     fn llvm_vcvtps2ph_128(a: f32x4, rounding: i32) -> i16x8;
     #[link_name = "llvm.x86.vcvtps2ph.256"]
@@ -28,8 +25,13 @@ unsafe extern "unadjusted" {
 #[target_feature(enable = "f16c")]
 #[cfg_attr(test, assert_instr("vcvtph2ps"))]
 #[stable(feature = "x86_f16c_intrinsics", since = "1.68.0")]
-pub fn _mm_cvtph_ps(a: __m128i) -> __m128 {
-    unsafe { transmute(llvm_vcvtph2ps_128(transmute(a))) }
+#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
+pub const fn _mm_cvtph_ps(a: __m128i) -> __m128 {
+    unsafe {
+        let a: f16x8 = transmute(a);
+        let a: f16x4 = simd_shuffle!(a, a, [0, 1, 2, 3]);
+        simd_cast(a)
+    }
 }
 
 /// Converts the 8 x 16-bit half-precision float values in the 128-bit vector
@@ -40,8 +42,12 @@ pub fn _mm_cvtph_ps(a: __m128i) -> __m128 {
 #[target_feature(enable = "f16c")]
 #[cfg_attr(test, assert_instr("vcvtph2ps"))]
 #[stable(feature = "x86_f16c_intrinsics", since = "1.68.0")]
-pub fn _mm256_cvtph_ps(a: __m128i) -> __m256 {
-    unsafe { transmute(llvm_vcvtph2ps_256(transmute(a))) }
+#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
+pub const fn _mm256_cvtph_ps(a: __m128i) -> __m256 {
+    unsafe {
+        let a: f16x8 = transmute(a);
+        simd_cast(a)
+    }
 }
 
 /// Converts the 4 x 32-bit float values in the 128-bit vector `a` into 4 x
@@ -99,7 +105,8 @@ pub fn _mm256_cvtps_ph<const IMM_ROUNDING: i32>(a: __m256) -> __m128i {
 
 #[cfg(test)]
 mod tests {
-    use crate::{core_arch::x86::*, mem::transmute};
+    use crate::core_arch::assert_eq_const as assert_eq;
+    use crate::core_arch::x86::*;
     use stdarch_test::simd_test;
 
     const F16_ONE: i16 = 0x3c00;
@@ -112,7 +119,7 @@ mod tests {
     const F16_EIGHT: i16 = 0x4800;
 
     #[simd_test(enable = "f16c")]
-    unsafe fn test_mm_cvtph_ps() {
+    const fn test_mm_cvtph_ps() {
         let a = _mm_set_epi16(0, 0, 0, 0, F16_ONE, F16_TWO, F16_THREE, F16_FOUR);
         let r = _mm_cvtph_ps(a);
         let e = _mm_set_ps(1.0, 2.0, 3.0, 4.0);
@@ -120,7 +127,7 @@ mod tests {
     }
 
     #[simd_test(enable = "f16c")]
-    unsafe fn test_mm256_cvtph_ps() {
+    const fn test_mm256_cvtph_ps() {
         let a = _mm_set_epi16(
             F16_ONE, F16_TWO, F16_THREE, F16_FOUR, F16_FIVE, F16_SIX, F16_SEVEN, F16_EIGHT,
         );
@@ -130,7 +137,7 @@ mod tests {
     }
 
     #[simd_test(enable = "f16c")]
-    unsafe fn test_mm_cvtps_ph() {
+    fn test_mm_cvtps_ph() {
         let a = _mm_set_ps(1.0, 2.0, 3.0, 4.0);
         let r = _mm_cvtps_ph::<_MM_FROUND_CUR_DIRECTION>(a);
         let e = _mm_set_epi16(0, 0, 0, 0, F16_ONE, F16_TWO, F16_THREE, F16_FOUR);
@@ -138,7 +145,7 @@ mod tests {
     }
 
     #[simd_test(enable = "f16c")]
-    unsafe fn test_mm256_cvtps_ph() {
+    fn test_mm256_cvtps_ph() {
         let a = _mm256_set_ps(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm256_cvtps_ph::<_MM_FROUND_CUR_DIRECTION>(a);
         let e = _mm_set_epi16(

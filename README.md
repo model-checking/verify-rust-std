@@ -8,7 +8,7 @@ This repository is a fork of the official Rust programming
 language repository, created solely to verify the Rust standard
 library. It should not be used as an alternative to the official
 Rust releases. The repository is tool agnostic and welcomes the addition of
-new tools. The currently accepted tools are [Flux](https://model-checking.github.io/verify-rust-std/tools/flux.html), [GOTO Transcoder (ESBMC)](https://model-checking.github.io/verify-rust-std/tools/goto-transcoder.html), [Kani](https://model-checking.github.io/verify-rust-std/tools/kani.html), and [VeriFast](https://model-checking.github.io/verify-rust-std/tools/verifast.html).
+new tools. The currently accepted tools are [Flux](https://model-checking.github.io/verify-rust-std/tools/flux.html), [GOTO Transcoder (ESBMC)](https://model-checking.github.io/verify-rust-std/tools/goto-transcoder.html), [Kani](https://model-checking.github.io/verify-rust-std/tools/kani.html), [KMIR](https://model-checking.github.io/verify-rust-std/tools/kmir.html), and [VeriFast](https://model-checking.github.io/verify-rust-std/tools/verifast.html).
 
 The goal is to have a verified [Rust standard library](https://doc.rust-lang.org/std/) and prove that it is safe.
 1. Contributing to the core mechanism of verifying the rust standard library
@@ -36,10 +36,10 @@ These are the challenges:
 | [9: Safe abstractions for `core::time::Duration`](https://model-checking.github.io/verify-rust-std/challenges/0009-duration.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/136) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/time.rs) |
 | [10: Memory safety of String](https://model-checking.github.io/verify-rust-std/challenges/0010-string.html) | 10,000 USD | Open | |
 | [11: Safety of Methods for Numeric Primitive Types](https://model-checking.github.io/verify-rust-std/challenges/0011-floats-ints.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/issues/59) | [Kani](https://github.com/model-checking/verify-rust-std/tree/main/library/core/src/num) |
-| [12: Safety of `NonZero`](https://model-checking.github.io/verify-rust-std/challenges/0012-nonzero.html) | 10,000 USD | Open | |
+| [12: Safety of `NonZero`](https://model-checking.github.io/verify-rust-std/challenges/0012-nonzero.html) | 10,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/637) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/num/nonzero.rs) |
 | [13: Safety of `CStr`](https://model-checking.github.io/verify-rust-std/challenges/0013-cstr.html) | 10,000 USD | Open | |
-| [14: Safety of Primitive Conversions](https://model-checking.github.io/verify-rust-std/challenges/0014-convert-num.html) | TBD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/247) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/convert/num.rs) |
-| [15: Contracts and Tests for SIMD Intrinsics](https://model-checking.github.io/verify-rust-std/challenges/0015-intrinsics-simd.html) | 20,000 USD | Open | |
+| [14: Safety of Primitive Conversions](https://model-checking.github.io/verify-rust-std/challenges/0014-convert-num.html) | N/A | [Resolved](https://github.com/model-checking/verify-rust-std/pull/247) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/core/src/convert/num.rs) |
+| [15: Contracts and Tests for SIMD Intrinsics](https://model-checking.github.io/verify-rust-std/challenges/0015-intrinsics-simd.html) | 20,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/423) | [Testable Models](https://github.com/model-checking/verify-rust-std/tree/main/testable-simd-models) |
 | [16: Verify the safety of Iterator functions](https://model-checking.github.io/verify-rust-std/challenges/0016-iter.html) | 10,000 USD | Open | |
 | [17: Verify the safety of slice functions](https://model-checking.github.io/verify-rust-std/challenges/0017-slice.html) | 10,000 USD | Open | |
 | [18: Verify the safety of slice iter functions](https://model-checking.github.io/verify-rust-std/challenges/0018-slice-iter.html) | 10,000 USD | Open | |
@@ -52,10 +52,45 @@ These are the challenges:
 | [25: Verify the safety of `VecDeque` functions](https://model-checking.github.io/verify-rust-std/challenges/0025-vecdeque.html) | 10,000 USD | Open | |
 | [26: Verify reference-counted Cell implementation](https://model-checking.github.io/verify-rust-std/challenges/0026-rc.html) | 10,000 USD | Open | |
 | [27: Verify atomically reference-counted Cell implementation](https://model-checking.github.io/verify-rust-std/challenges/0027-arc.html) | 10,000 USD | Open | |
+| [28: Verify float to decimal conversion module](https://model-checking.github.io/verify-rust-std/challenges/0028-flt2dec.html) | 5,000 USD | Open | |
+| [29: Safety of `boxed`](https://model-checking.github.io/verify-rust-std/challenges/0029-boxed.html) | 15,000 USD | Open | |
 
 See [our book](https://model-checking.github.io/verify-rust-std/intro.html) for more details on the challenge rules.
 
 We welcome everyone to participate!
+
+## Citing this project
+
+If you use this project in your research, please cite our NFM 2026 paper.
+
+ACM Reference Format:
+
+> Byron Cook, Remi Delmas, Zyad Hassan, Bart Jacobs, Ranjit Jhala, Rahul Kumar, Felipe R. Monteiro, Thanh Nguyen, Rebecca Rumbul, Michael Tautschnig, Celina Val, and Carolyn Zech. 2026. Verifying the Rust Standard Library. In *NASA Formal Methods: 18th International Symposium, NFM 2026, Los Angeles, CA, USA, May 5–7, 2026, Proceedings*. Springer-Verlag, Berlin, Heidelberg, 415–435. <https://doi.org/10.1007/978-3-032-28079-4_19>
+
+BibTeX:
+
+```bibtex
+@inproceedings{10.1007/978-3-032-28079-4_19,
+  author    = {Cook, Byron and Delmas, Remi and Hassan, Zyad and Jacobs, Bart and
+               Jhala, Ranjit and Kumar, Rahul and Monteiro, Felipe R. and
+               Nguyen, Thanh and Rumbul, Rebecca and Tautschnig, Michael and
+               Val, Celina and Zech, Carolyn},
+  title     = {Verifying the Rust Standard Library},
+  year      = {2026},
+  isbn      = {978-3-032-28078-7},
+  publisher = {Springer-Verlag},
+  address   = {Berlin, Heidelberg},
+  url       = {https://doi.org/10.1007/978-3-032-28079-4_19},
+  doi       = {10.1007/978-3-032-28079-4_19},
+  booktitle = {NASA Formal Methods: 18th International Symposium, NFM 2026, Los Angeles, CA, USA, May 5–7, 2026, Proceedings},
+  pages     = {415–435},
+  numpages  = {21},
+  location  = {Los Angeles, CA, USA}
+}
+```
+
+The same citation is available in machine-readable form in [CITATION.cff](CITATION.cff),
+which powers GitHub's *Cite this repository* button.
 
 ## Contact
 
@@ -70,6 +105,25 @@ See [SECURITY](https://github.com/model-checking/kani/security/policy) for more 
 ### Kani
 Kani is distributed under the terms of both the MIT license and the Apache License (Version 2.0).
 See [LICENSE-APACHE](https://github.com/model-checking/kani/blob/main/LICENSE-APACHE) and [LICENSE-MIT](https://github.com/model-checking/kani/blob/main/LICENSE-MIT) for details.
+
+### GOTO Transcoder (ESBMC)
+The [goto-transcoder](https://github.com/rafaelsamenezes/goto-transcoder) is distributed under the terms of the MIT license.
+See [LICENSE](https://github.com/rafaelsamenezes/goto-transcoder/blob/main/LICENSE) for details.
+
+[ESBMC](https://github.com/esbmc/esbmc) is distributed under the terms of the Apache License (Version 2.0).
+See [COPYING](https://github.com/esbmc/esbmc/blob/master/COPYING) for details.
+
+### Flux
+[Flux](https://github.com/flux-rs/flux) is distributed under the terms of the MIT license.
+See [LICENSE](https://github.com/flux-rs/flux/blob/main/LICENSE) for details.
+
+### VeriFast
+[VeriFast](https://github.com/verifast/verifast) is distributed under the terms of the MIT license.
+See [LICENSE.md](https://github.com/verifast/verifast/blob/master/LICENSE.md) for details.
+
+### KMIR
+[KMIR](https://github.com/runtimeverification/mir-semantics) is distributed under the terms of the BSD-3-Clause license.
+See [LICENSE](https://github.com/runtimeverification/mir-semantics/blob/master/LICENSE) for details.
 
 ### Rust
 Rust is primarily distributed under the terms of both the MIT license and the Apache License (Version 2.0), with portions covered by various BSD-like licenses.

@@ -35,6 +35,10 @@ jobs:
       WORKER_INDEX: ${{ matrix.partition }}
       # Total number of workers running this step
       WORKER_TOTAL: 4
+      # Cap parallel harness verification on ubuntu-latest: its 4-core/16 GB
+      # runners get OOM-killed when 4 memory-hungry harnesses (up to ~10 GB
+      # each, e.g. the ffi::c_str ones) run concurrently.
+      KANI_JOBS: ${{ matrix.os == 'ubuntu-latest' && 2 || '' }}
     
     steps:
       - name: Remove unnecessary software to free up disk space
@@ -107,6 +111,7 @@ jobs:
             --include-pattern alloc::__default_lib_allocator:: \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
+            --include-pattern "<char[[:space:]]as[[:space:]]ascii::AsciiExt>::is_ascii" \
             --include-pattern char::convert::from_u32_unchecked \
             --include-pattern core_arch::x86::__m128d::as_f64x2 \
             --include-pattern "convert::num::<impl.convert::From<num::nonzero::NonZero<" \

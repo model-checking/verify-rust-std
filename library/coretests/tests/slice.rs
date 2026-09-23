@@ -433,6 +433,13 @@ fn test_chunks_exact_mut_zip_aliasing() {
 }
 
 #[test]
+fn test_chunks_zst() {
+    const SIZE: usize = 16;
+    let mut it = [(); usize::MAX].chunks(SIZE);
+    assert_eq!(it.nth_back(0), Some(&[(); SIZE - 1][..]));
+}
+
+#[test]
 fn test_rchunks_mut_zip_aliasing() {
     let v1: &mut [i32] = &mut [0, 1, 2, 3, 4];
     let v2: &[i32] = &[6, 7, 8, 9, 10];
@@ -2499,4 +2506,42 @@ fn test_slice_from_raw_parts_in_const() {
         unsafe { std::slice::from_raw_parts(std::ptr::without_provenance(123456), 0) };
     assert_eq!(EMPTY_SLICE.as_ptr().addr(), 123456);
     assert_eq!(EMPTY_SLICE.len(), 0);
+}
+
+#[test]
+fn test_shift_left() {
+    #[track_caller]
+    fn case<const M: usize, const N: usize>(
+        mut a: [i32; M],
+        i: [i32; N],
+        j: [i32; N],
+        b: [i32; M],
+    ) {
+        assert_eq!((a.shift_left(i), a), (j, b));
+    }
+    case([], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5], []);
+    case([1], [2, 3, 4, 5], [1, 2, 3, 4], [5]);
+    case([1, 2], [3, 4, 5], [1, 2, 3], [4, 5]);
+    case([1, 2, 3], [4, 5], [1, 2], [3, 4, 5]);
+    case([1, 2, 3, 4], [5], [1], [2, 3, 4, 5]);
+    case([1, 2, 3, 4, 5], [], [], [1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn test_shift_right() {
+    #[track_caller]
+    fn case<const M: usize, const N: usize>(
+        i: [i32; N],
+        mut a: [i32; M],
+        b: [i32; M],
+        j: [i32; N],
+    ) {
+        assert_eq!((a.shift_right(i), a), (j, b));
+    }
+    case([], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5], []);
+    case([1], [2, 3, 4, 5], [1, 2, 3, 4], [5]);
+    case([1, 2], [3, 4, 5], [1, 2, 3], [4, 5]);
+    case([1, 2, 3], [4, 5], [1, 2], [3, 4, 5]);
+    case([1, 2, 3, 4], [5], [1], [2, 3, 4, 5]);
+    case([1, 2, 3, 4, 5], [], [], [1, 2, 3, 4, 5]);
 }

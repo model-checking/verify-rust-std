@@ -1,9 +1,10 @@
 use safety::{ensures, requires};
 
+use crate::clone::TrivialClone;
 use crate::cmp::Ordering;
 #[cfg(kani)]
 use crate::kani;
-use crate::marker::{PointeeSized, Unsize};
+use crate::marker::{Destruct, PointeeSized, Unsize};
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::num::NonZero;
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
@@ -173,7 +174,7 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure the pointer is valid to create a reference.
-    #[ensures(|result: &&MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))] // Ensure returned reference points to the correct memory location.
+    #[ensures(|result: &&MaybeUninit<T>| core::ptr::addr_eq(*result, self.cast::<MaybeUninit<T>>().as_ptr()))] // Ensure returned reference points to the correct memory location.
     pub const unsafe fn as_uninit_ref<'a>(self) -> &'a MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -198,7 +199,7 @@ impl<T: Sized> NonNull<T> {
     #[must_use]
     #[unstable(feature = "ptr_as_uninit", issue = "75402")]
     #[requires(ub_checks::can_dereference(self.as_ptr()))] // Ensure pointer is valid to create a mutable reference.
-    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::eq(*result, self.cast().as_ptr()))] // Ensure the returned reference points to the correct memory.
+    #[ensures(|result: &&mut MaybeUninit<T>| core::ptr::addr_eq(*result, self.cast::<MaybeUninit<T>>().as_ptr()))] // Ensure the returned reference points to the correct memory.
     pub const unsafe fn as_uninit_mut<'a>(self) -> &'a mut MaybeUninit<T> {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -242,7 +243,8 @@ impl<T: PointeeSized> NonNull<T> {
     #[inline]
     #[track_caller]
     #[requires(!ptr.is_null())]
-    #[ensures(|result| result.as_ptr() == ptr)]
+    // See as_ptr regarding the use of addr_eq for wide-pointer support.
+    #[ensures(|result| core::ptr::addr_eq(result.as_ptr(), ptr))]
     pub const unsafe fn new_unchecked(ptr: *mut T) -> Self {
         // SAFETY: the caller must guarantee that `ptr` is non-null.
         unsafe {
@@ -280,7 +282,8 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_new", since = "1.85.0")]
     #[inline]
     #[ensures(|result| result.is_some() == !ptr.is_null())]
-    #[ensures(|result| result.is_none() || result.expect("ptr is null!").as_ptr() == ptr)]
+    // See as_ptr regarding the use of addr_eq for wide-pointer support.
+    #[ensures(|result| result.is_none() || core::ptr::addr_eq(result.expect("ptr is null!").as_ptr(), ptr))]
     pub const fn new(ptr: *mut T) -> Option<Self> {
         if !ptr.is_null() {
             // SAFETY: The pointer is already checked and is not null
@@ -419,8 +422,13 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_never_returns_null_ptr]
     #[must_use]
     #[inline(always)]
-    //Ensures address of resulting pointer is same as original
-    #[ensures(|result: &*mut T| *result == self.pointer as *mut T)]
+    // Ensures the address of the resulting pointer is the same as the
+    // original. `addr_eq` (rather than `==`) makes this well-defined for
+    // wide pointers too: comparing `*mut dyn Trait` with `==` also compares
+    // vtable pointers, whose identity is unspecified (and which Kani rejects
+    // with "unstable vtable comparison"). `as_ptr` is a representation-level
+    // conversion that trivially preserves metadata.
+    #[ensures(|result: &*mut T| core::ptr::addr_eq(*result, self.pointer))]
     pub const fn as_ptr(self) -> *mut T {
         // This is a transmute for the same reasons as `NonZero::get`.
 
@@ -460,8 +468,14 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "const_nonnull_as_ref", since = "1.73.0")]
     #[must_use]
     #[inline(always)]
-    #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure input is convertible to a reference
-    #[ensures(|result: &&T| core::ptr::eq(*result, self.as_ptr()))] // Ensure returned reference matches pointer
+    #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))]
+    // Ensure input is convertible to a reference
+    // addr_eq (rather than ptr::eq) so the clause is well-defined for
+    // wide pointers too: comparing *const dyn with == also compares vtable
+    // pointers, whose identity is unspecified (Kani: "unstable vtable
+    // comparison"). The reference is created from `self`, so metadata is
+    // preserved by construction.
+    #[ensures(|result: &&T| core::ptr::addr_eq(*result, self.as_ptr()))] // Ensure returned reference matches pointer
     pub const unsafe fn as_ref<'a>(&self) -> &'a T {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a reference.
@@ -502,7 +516,8 @@ impl<T: PointeeSized> NonNull<T> {
     #[inline(always)]
     #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))]
     // verify result (a mutable reference) is still associated with the same memory address as the raw pointer stored in self
-    #[ensures(|result: &&mut T| core::ptr::eq(*result, self.as_ptr()))]
+    // See as_ref regarding the use of addr_eq.
+    #[ensures(|result: &&mut T| core::ptr::addr_eq(*result, self.as_ptr()))]
     pub const unsafe fn as_mut<'a>(&mut self) -> &'a mut T {
         // SAFETY: the caller must guarantee that `self` meets all the
         // requirements for a mutable reference.
@@ -692,7 +707,10 @@ impl<T: PointeeSized> NonNull<T> {
     #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some()
         && count * core::mem::size_of::<T>() <= isize::MAX as usize
         && (self.pointer as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some() // check wrapping add
-        && core::ub_checks::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize)))]
+        // Zero-sized offsets (`count * size_of::<T>() == 0`) are always
+        // permitted, including on dangling pointers, per the documentation.
+        && (count == 0 || core::mem::size_of::<T>() == 0
+            || core::ub_checks::same_allocation(self.pointer, self.pointer.wrapping_offset(count as isize))))]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(count as isize))]
     pub const unsafe fn add(self, count: usize) -> Self
     where
@@ -783,7 +801,10 @@ impl<T: PointeeSized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>()).is_some() &&
         count * core::mem::size_of::<T>() <= isize::MAX as usize &&
-        core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count))
+        // Zero-sized offsets (`count * size_of::<T>() == 0`) are always
+        // permitted, including on dangling pointers, per the documentation.
+        (count == 0 || core::mem::size_of::<T>() == 0 ||
+            core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_sub(count)))
     )]
     #[ensures(|result: &NonNull<T>| result.as_ptr() == self.as_ptr().offset(-(count as isize)))]
     pub const unsafe fn sub(self, count: usize) -> Self
@@ -1031,7 +1052,11 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "const_ptr_sub_ptr", since = "1.87.0")]
     #[requires(
         self.as_ptr().addr().checked_sub(subtracted.as_ptr().addr()).is_some() &&
-        core::ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr()) &&
+        // Pointers with equal addresses trivially satisfy the
+        // same-allocation requirement (a zero-sized span), including
+        // dangling pointers such as those of empty slices.
+        (self.as_ptr().addr() == subtracted.as_ptr().addr() ||
+            core::ub_checks::same_allocation(self.as_ptr(), subtracted.as_ptr())) &&
         (self.as_ptr().addr()) >= (subtracted.as_ptr().addr()) &&
         (self.as_ptr().addr() - subtracted.as_ptr().addr()) % core::mem::size_of::<T>() == 0
     )]
@@ -1238,9 +1263,13 @@ impl<T: PointeeSized> NonNull<T> {
     /// [`ptr::drop_in_place`]: crate::ptr::drop_in_place()
     #[inline(always)]
     #[stable(feature = "non_null_convenience", since = "1.80.0")]
+    #[rustc_const_unstable(feature = "const_drop_in_place", issue = "109342")]
     #[requires(ub_checks::can_dereference(self.as_ptr() as *const()))] // Ensure self is aligned, initialized, and valid for read
     #[requires(ub_checks::can_write(self.as_ptr() as *mut()))] // Ensure self is valid for write
-    pub unsafe fn drop_in_place(self) {
+    pub const unsafe fn drop_in_place(self)
+    where
+        T: [const] Destruct,
+    {
         // SAFETY: the caller must uphold the safety contract for `drop_in_place`.
         unsafe { ptr::drop_in_place(self.as_ptr()) }
     }
@@ -1545,6 +1574,35 @@ impl<T> NonNull<T> {
     pub const fn cast_uninit(self) -> NonNull<MaybeUninit<T>> {
         self.cast()
     }
+
+    /// Creates a non-null raw slice from a thin pointer and a length.
+    ///
+    /// The `len` argument is the number of **elements**, not the number of bytes.
+    ///
+    /// This function is safe, but dereferencing the return value is unsafe.
+    /// See the documentation of [`slice::from_raw_parts`] for slice safety requirements.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// #![feature(ptr_cast_slice)]
+    /// use std::ptr::NonNull;
+    ///
+    /// // create a slice pointer when starting out with a pointer to the first element
+    /// let mut x = [5, 6, 7];
+    /// let nonnull_pointer = NonNull::new(x.as_mut_ptr()).unwrap();
+    /// let slice = nonnull_pointer.cast_slice(3);
+    /// assert_eq!(unsafe { slice.as_ref()[2] }, 7);
+    /// ```
+    ///
+    /// (Note that this example artificially demonstrates a use of this method,
+    /// but `let slice = NonNull::from(&x[..]);` would be a better way to write code like this.)
+    #[inline]
+    #[must_use]
+    #[unstable(feature = "ptr_cast_slice", issue = "149103")]
+    pub const fn cast_slice(self, len: usize) -> NonNull<[T]> {
+        NonNull::slice_from_raw_parts(self, len)
+    }
 }
 impl<T> NonNull<MaybeUninit<T>> {
     /// Casts from a maybe-uninitialized type to its initialized version.
@@ -1585,9 +1643,14 @@ impl<T> NonNull<[T]> {
     #[rustc_const_stable(feature = "const_slice_from_raw_parts_mut", since = "1.83.0")]
     #[must_use]
     #[inline]
+    // `result.len()` reads the length from the wide-pointer metadata without
+    // creating a reference: `slice_from_raw_parts` is a safe function with no
+    // validity requirements on `data`, so the postcondition must not
+    // dereference the resulting pointer (`unsafe { result.as_ref() }.len()`,
+    // as used previously, is UB for dangling or misaligned `data`).
     #[ensures(|result| !result.pointer.is_null()
         && result.pointer as *const T == data.pointer
-        && unsafe { result.as_ref() }.len() == len)]
+        && result.len() == len)]
     pub const fn slice_from_raw_parts(data: NonNull<T>, len: usize) -> Self {
         // SAFETY: `data` is a `NonNull` pointer which is necessarily non-null
         unsafe { Self::new_unchecked(super::slice_from_raw_parts_mut(data.as_ptr(), len)) }
@@ -1669,8 +1732,8 @@ impl<T> NonNull<[T]> {
     #[must_use]
     #[unstable(feature = "slice_ptr_get", issue = "74265")]
     #[rustc_never_returns_null_ptr]
-    // Address preservation
-    #[ensures(|result: &*mut T| *result == self.pointer as *mut T)]
+    // Address preservation; see as_ptr regarding the use of addr_eq.
+    #[ensures(|result: &*mut T| core::ptr::addr_eq(*result, self.pointer))]
     pub const fn as_mut_ptr(self) -> *mut T {
         self.as_non_null_ptr().as_ptr()
     }
@@ -1847,6 +1910,10 @@ impl<T: PointeeSized> Clone for NonNull<T> {
 
 #[stable(feature = "nonnull", since = "1.25.0")]
 impl<T: PointeeSized> Copy for NonNull<T> {}
+
+#[doc(hidden)]
+#[unstable(feature = "trivial_clone", issue = "none")]
+unsafe impl<T: PointeeSized> TrivialClone for NonNull<T> {}
 
 #[unstable(feature = "coerce_unsized", issue = "18598")]
 impl<T: PointeeSized, U: PointeeSized> CoerceUnsized<NonNull<U>> for NonNull<T> where T: Unsize<U> {}

@@ -16,26 +16,26 @@ pub struct TcpStream {
 }
 
 impl TcpStream {
+    fn new(inner: tcp::Tcp) -> Self {
+        Self {
+            inner,
+            read_timeout: Arc::new(Mutex::new(None)),
+            write_timeout: Arc::new(Mutex::new(None)),
+        }
+    }
+
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
         return each_addr(addr, inner);
 
         fn inner(addr: &SocketAddr) -> io::Result<TcpStream> {
             let inner = tcp::Tcp::connect(addr, None)?;
-            Ok(TcpStream {
-                inner,
-                read_timeout: Arc::new(Mutex::new(None)),
-                write_timeout: Arc::new(Mutex::new(None)),
-            })
+            Ok(TcpStream::new(inner))
         }
     }
 
     pub fn connect_timeout(addr: &SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
         let inner = tcp::Tcp::connect(addr, Some(timeout))?;
-        Ok(Self {
-            inner,
-            read_timeout: Arc::new(Mutex::new(None)),
-            write_timeout: Arc::new(Mutex::new(None)),
-        })
+        Ok(Self::new(inner))
     }
 
     pub fn set_read_timeout(&self, t: Option<Duration>) -> io::Result<()> {
@@ -69,12 +69,11 @@ impl TcpStream {
     }
 
     pub fn read_vectored(&self, buf: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-        // FIXME: UEFI does support vectored read, so implement that.
-        crate::io::default_read_vectored(|b| self.read(b), buf)
+        self.inner.read_vectored(buf, self.read_timeout()?)
     }
 
     pub fn is_read_vectored(&self) -> bool {
-        false
+        true
     }
 
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
@@ -82,12 +81,11 @@ impl TcpStream {
     }
 
     pub fn write_vectored(&self, buf: &[IoSlice<'_>]) -> io::Result<usize> {
-        // FIXME: UEFI does support vectored write, so implement that.
-        crate::io::default_write_vectored(|b| self.write(b), buf)
+        self.inner.write_vectored(buf, self.write_timeout()?)
     }
 
     pub fn is_write_vectored(&self) -> bool {
-        false
+        true
     }
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
@@ -150,16 +148,23 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
-    pub fn bind<A: ToSocketAddrs>(_: A) -> io::Result<TcpListener> {
-        unsupported()
+    pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
+        return each_addr(addr, inner);
+
+        fn inner(addr: &SocketAddr) -> io::Result<TcpListener> {
+            let inner = tcp::Tcp::bind(addr)?;
+            Ok(TcpListener { inner })
+        }
     }
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
-        unsupported()
+        self.inner.socket_addr()
     }
 
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
-        unsupported()
+        let tcp = self.inner.accept()?;
+        let addr = tcp.peer_addr()?;
+        Ok((TcpStream::new(tcp), addr))
     }
 
     pub fn duplicate(&self) -> io::Result<TcpListener> {

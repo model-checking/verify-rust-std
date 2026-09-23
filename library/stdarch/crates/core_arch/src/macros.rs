@@ -90,17 +90,10 @@ macro_rules! types {
         pub struct $name($v [$elem_type; $len]);
 
         impl $name {
-            /// Using `my_simd([x; N])` seemingly fails tests,
-            /// so use this internal helper for it instead.
+            /// Put the same value in every lane.
             #[inline(always)]
             $v fn splat(value: $elem_type) -> $name {
-                #[derive(Copy, Clone)]
-                #[repr(simd)]
-                struct JustOne([$elem_type; 1]);
-                let one = JustOne([value]);
-                // SAFETY: 0 is always in-bounds because we're shuffling
-                // a simd type with exactly one element.
-                unsafe { simd_shuffle!(one, one, [0; $len]) }
+                unsafe { $crate::intrinsics::simd::simd_splat(value) }
             }
 
             /// Returns an array reference containing the entire SIMD vector.
@@ -135,6 +128,22 @@ macro_rules! types {
                 crate::core_arch::simd::debug_simd_finish(f, stringify!($name), self.as_array())
             }
         }
+
+        $(#[$stability])+
+        impl crate::convert::From<crate::core_arch::simd::Simd<$elem_type, $len>> for $name {
+            #[inline(always)]
+            fn from(simd: crate::core_arch::simd::Simd<$elem_type, $len>) -> Self {
+                unsafe { crate::mem::transmute(simd) }
+            }
+        }
+
+        $(#[$stability])+
+        impl crate::convert::From<$name> for crate::core_arch::simd::Simd<$elem_type, $len> {
+            #[inline(always)]
+            fn from(simd: $name) -> Self {
+                unsafe { crate::mem::transmute(simd) }
+            }
+        }
     )*);
 }
 
@@ -162,4 +171,18 @@ macro_rules! simd_insert {
 macro_rules! simd_extract {
     ($x:expr, $idx:expr $(,)?) => {{ $crate::intrinsics::simd::simd_extract($x, const { $idx }) }};
     ($x:expr, $idx:expr, $ty:ty $(,)?) => {{ $crate::intrinsics::simd::simd_extract::<_, $ty>($x, const { $idx }) }};
+}
+
+#[allow(unused)]
+macro_rules! simd_masked_load {
+    ($align:expr, $mask:expr, $ptr:expr, $default:expr) => {
+        $crate::intrinsics::simd::simd_masked_load::<_, _, _, { $align }>($mask, $ptr, $default)
+    };
+}
+
+#[allow(unused)]
+macro_rules! simd_masked_store {
+    ($align:expr, $mask:expr, $ptr:expr, $default:expr) => {
+        $crate::intrinsics::simd::simd_masked_store::<_, _, _, { $align }>($mask, $ptr, $default)
+    };
 }

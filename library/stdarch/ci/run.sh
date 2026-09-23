@@ -12,7 +12,7 @@ set -ex
 
 export RUSTFLAGS="${RUSTFLAGS} -D warnings -Z merge-functions=disabled -Z verify-llvm-ir"
 export HOST_RUSTFLAGS="${RUSTFLAGS}"
-export PROFILE="${PROFILE:="--profile=release"}"
+export PROFILE="${PROFILE:="release"}"
 
 case ${TARGET} in
     # On Windows the linker performs identical COMDAT folding (ICF) by default
@@ -40,7 +40,10 @@ case ${TARGET} in
 	export RUSTFLAGS="${RUSTFLAGS} -C llvm-args=-fast-isel=false"
 	;;
     armv7-*eabihf | thumbv7-*eabihf)
-        export RUSTFLAGS="${RUSTFLAGS} -Ctarget-feature=+neon"
+        export RUSTFLAGS="${RUSTFLAGS} -Ctarget-feature=+neon,+fp16"
+        ;;
+    amdgcn-*)
+        export RUSTFLAGS="${RUSTFLAGS} -Ctarget-cpu=gfx1200"
         ;;
     # Some of our test dependencies use the deprecated `gcc` crates which
     # doesn't detect RISC-V compilers automatically, so do it manually here.
@@ -63,7 +66,7 @@ cargo_test() {
     if [ "$NORUN" = "1" ]; then
         export subcmd="build"
     fi
-    cmd="$cmd ${subcmd} --target=$TARGET $1"
+    cmd="$cmd ${subcmd} --target=$TARGET --profile=$PROFILE $1"
     cmd="$cmd -- $2"
 
     case ${TARGET} in
@@ -71,6 +74,12 @@ cargo_test() {
         # harness isn't trying to capture output, otherwise we won't get any useful
         # output.
         wasm32*)
+            if [ "$PROFILE" = "release" ]; then
+              dir="release"
+            else
+              dir="debug"
+            fi
+            export CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime -Wexceptions --dir /checkout/target/wasm32-wasip1/$dir/deps::."
             cmd="$cmd --nocapture"
             ;;
     esac
@@ -79,117 +88,57 @@ cargo_test() {
 
 CORE_ARCH="--manifest-path=crates/core_arch/Cargo.toml"
 STDARCH_EXAMPLES="--manifest-path=examples/Cargo.toml"
-INTRINSIC_TEST="--manifest-path=crates/intrinsic-test/Cargo.toml"
 
-cargo_test "${CORE_ARCH} ${PROFILE}"
+cargo_test "${CORE_ARCH}"
 
 if [ "$NOSTD" != "1" ]; then
-    cargo_test "${STDARCH_EXAMPLES} ${PROFILE}"
+    cargo_test "${STDARCH_EXAMPLES}"
 fi
 
 
 # Test targets compiled with extra features.
 case ${TARGET} in
-    x86_64-unknown-linux-gnu)
-        export STDARCH_DISABLE_ASSERT_INSTR=1
-
-        export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+avx"
-        cargo_test "${PROFILE}"
-
-        export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+avx512f"
-        cargo_test "${PROFILE}"
-        ;;
     x86_64* | i686*)
         export STDARCH_DISABLE_ASSERT_INSTR=1
 
         export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+avx"
-        cargo_test "${PROFILE}"
+        cargo_test 
         ;;
     # FIXME: don't build anymore
     #mips-*gnu* | mipsel-*gnu*)
     #    export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+msa,+fp64,+mips32r5"
-    #    cargo_test "${PROFILE}"
+    #    cargo_test 
 	  #    ;;
     mips64*)
         export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+msa"
-        cargo_test "${PROFILE}"
+        cargo_test 
 	      ;;
     s390x*)
         export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+vector-enhancements-1"
-        cargo_test "${PROFILE}"
+        cargo_test 
 	      ;;
     powerpc64*)
         export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+altivec"
-        cargo_test "${PROFILE}"
+        cargo_test 
 
         export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+vsx"
-        cargo_test "${PROFILE}"
+        cargo_test 
         ;;
     powerpc*)
         # qemu has a bug in PPC32 which leads to a crash when compiled with `vsx`
         export RUSTFLAGS="${RUSTFLAGS} -C target-feature=+altivec"
-        cargo_test "${PROFILE}"
-        ;;
-
-    # Setup aarch64 & armv7 specific variables, the runner, along with some
-    # tests to skip
-    aarch64-unknown-linux-gnu*)
-        TEST_CPPFLAGS="-fuse-ld=lld -I/usr/aarch64-linux-gnu/include/ -I/usr/aarch64-linux-gnu/include/c++/9/aarch64-linux-gnu/"
-        TEST_SKIP_INTRINSICS=crates/intrinsic-test/missing_aarch64.txt
-        TEST_CXX_COMPILER="clang++"
-        TEST_RUNNER="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER}"
-        ;;
-
-    aarch64_be-unknown-linux-gnu*)
-        TEST_CPPFLAGS="-fuse-ld=lld"
-        TEST_SKIP_INTRINSICS=crates/intrinsic-test/missing_aarch64.txt
-        TEST_CXX_COMPILER="clang++"
-        TEST_RUNNER="${CARGO_TARGET_AARCH64_BE_UNKNOWN_LINUX_GNU_RUNNER}"
-        ;;
-
-    armv7-unknown-linux-gnueabihf*)
-        TEST_CPPFLAGS="-fuse-ld=lld -I/usr/arm-linux-gnueabihf/include/ -I/usr/arm-linux-gnueabihf/include/c++/9/arm-linux-gnueabihf/"
-        TEST_SKIP_INTRINSICS=crates/intrinsic-test/missing_arm.txt
-        TEST_CXX_COMPILER="clang++"
-        TEST_RUNNER="${CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER}"
+        cargo_test 
         ;;
     *)
         ;;
 
 esac
 
-# Arm specific
-case "${TARGET}" in
-    aarch64-unknown-linux-gnu*|armv7-unknown-linux-gnueabihf*)
-        CPPFLAGS="${TEST_CPPFLAGS}" RUSTFLAGS="${HOST_RUSTFLAGS}" RUST_LOG=warn \
-            cargo run "${INTRINSIC_TEST}" "${PROFILE}" \
-            --bin intrinsic-test -- intrinsics_data/arm_intrinsics.json \
-            --runner "${TEST_RUNNER}" \
-            --cppcompiler "${TEST_CXX_COMPILER}" \
-            --skip "${TEST_SKIP_INTRINSICS}" \
-            --target "${TARGET}"
-        ;;
-
-    aarch64_be-unknown-linux-gnu*)
-        CPPFLAGS="${TEST_CPPFLAGS}" RUSTFLAGS="${HOST_RUSTFLAGS}" RUST_LOG=warn \
-            cargo run "${INTRINSIC_TEST}" "${PROFILE}"  \
-            --bin intrinsic-test -- intrinsics_data/arm_intrinsics.json \
-            --runner "${TEST_RUNNER}" \
-            --cppcompiler "${TEST_CXX_COMPILER}" \
-            --skip "${TEST_SKIP_INTRINSICS}" \
-            --target "${TARGET}" \
-            --linker "${CARGO_TARGET_AARCH64_BE_UNKNOWN_LINUX_GNU_LINKER}" \
-            --cxx-toolchain-dir "${AARCH64_BE_TOOLCHAIN}"
-        ;;
-     *)
-        ;;
-esac
-
 if [ "$NORUN" != "1" ] && [ "$NOSTD" != 1 ]; then
     # Test examples
     (
         cd examples
-        cargo test --target "$TARGET" "${PROFILE}"
-        echo test | cargo run --target "$TARGET" "${PROFILE}" hex
+        cargo test --target "${TARGET}" --profile "${PROFILE}"
+        echo test | cargo run --target "${TARGET}" --profile "${PROFILE}" hex
     )
 fi
