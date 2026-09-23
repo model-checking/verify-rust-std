@@ -2917,6 +2917,27 @@ pub macro addr_of_mut($place:expr) {
 #[repr(Rust, packed)]
 struct Unaligned<T>(T);
 
+/// Whether offsetting `ptr` by `byte_offset` yields an address consistent with full-width
+/// integer arithmetic on `ptr`'s address.
+///
+/// Used only by the `offset`/`add`/`sub` contracts. The model checker represents a pointer as
+/// an (allocation, offset) pair whose offset field is narrower than the address space, so
+/// pointer arithmetic truncates byte offsets that are multiples of the field's range and
+/// aliases the result back into the original allocation. A `same_allocation` check on such a
+/// result holds spuriously, which let genuinely out-of-bounds offsets verify; requiring this
+/// equation first rejects those offsets, so `same_allocation` is asked about a pointer that
+/// has not been truncated.
+///
+/// See <https://github.com/model-checking/kani/pull/4671> and
+/// <https://github.com/model-checking/kani/issues/1150>.
+#[cfg(kani)]
+pub(crate) fn byte_offset_does_not_wrap<T: PointeeSized>(
+    ptr: *const T,
+    byte_offset: isize,
+) -> bool {
+    ptr.wrapping_byte_offset(byte_offset).addr() == ptr.addr().wrapping_add_signed(byte_offset)
+}
+
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
 mod verify {

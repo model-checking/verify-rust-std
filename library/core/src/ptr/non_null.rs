@@ -611,6 +611,9 @@ impl<T: PointeeSized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>() as isize).is_some() &&
        (self.as_ptr() as isize).checked_add(count.wrapping_mul(core::mem::size_of::<T>() as isize)).is_some() &&
+        // The byte offset must not wrap the model checker's pointer encoding, which would make
+        // the `same_allocation` check below hold spuriously. See `byte_offset_does_not_wrap`.
+        crate::ptr::byte_offset_does_not_wrap(self.as_ptr(), count.wrapping_mul(core::mem::size_of::<T>() as isize)) &&
         (count == 0 || core::ub_checks::same_allocation(self.as_ptr() as *const (), self.as_ptr().wrapping_offset(count) as *const ()))
     )]
     #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_offset(count))]
@@ -642,6 +645,9 @@ impl<T: PointeeSized> NonNull<T> {
     #[rustc_const_stable(feature = "non_null_convenience", since = "1.80.0")]
     #[requires(
         (self.as_ptr().addr() as isize).checked_add(count).is_some() &&
+        // The byte offset must not wrap the model checker's pointer encoding, which would make
+        // the `same_allocation` check below hold spuriously. See `byte_offset_does_not_wrap`.
+        crate::ptr::byte_offset_does_not_wrap(self.as_ptr(), count) &&
         core::ub_checks::same_allocation(self.as_ptr(), self.as_ptr().wrapping_byte_offset(count))
     )]
     #[ensures(|result: &Self| result.as_ptr() == self.as_ptr().wrapping_byte_offset(count))]
@@ -677,6 +683,9 @@ impl<T: PointeeSized> NonNull<T> {
     #[requires(count.checked_mul(core::mem::size_of::<T>()).is_some()
         && count * core::mem::size_of::<T>() <= isize::MAX as usize
         && (self.as_ptr() as isize).checked_add(count as isize * core::mem::size_of::<T>() as isize).is_some() // check wrapping add
+        // The byte offset must not wrap the model checker's pointer encoding, which would make
+        // the `same_allocation` check below hold spuriously. See `byte_offset_does_not_wrap`.
+        && crate::ptr::byte_offset_does_not_wrap(self.as_ptr(), count as isize * core::mem::size_of::<T>() as isize)
         // Zero-sized offsets (`count * size_of::<T>() == 0`) are always
         // permitted, including on dangling pointers, per the documentation.
         && (count == 0 || core::mem::size_of::<T>() == 0
@@ -749,6 +758,9 @@ impl<T: PointeeSized> NonNull<T> {
     #[requires(
         count.checked_mul(core::mem::size_of::<T>()).is_some() &&
         count * core::mem::size_of::<T>() <= isize::MAX as usize &&
+        // The byte offset must not wrap the model checker's pointer encoding, which would make
+        // the `same_allocation` check below hold spuriously. See `byte_offset_does_not_wrap`.
+        crate::ptr::byte_offset_does_not_wrap(self.as_ptr(), -((count * core::mem::size_of::<T>()) as isize)) &&
         // Zero-sized offsets (`count * size_of::<T>() == 0`) are always
         // permitted, including on dangling pointers, per the documentation.
         (count == 0 || core::mem::size_of::<T>() == 0 ||

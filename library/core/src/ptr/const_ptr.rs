@@ -359,8 +359,11 @@ impl<T: PointeeSized> *const T {
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: adding the computed offset to `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
-        count.checked_mul(core::mem::size_of::<T>() as isize).is_some_and(|computed_offset| (self as isize).checked_add(computed_offset).is_some()) &&
-        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        // Precondition 3: the byte offset does not wrap the model checker's pointer encoding,
+        // which would make precondition 4 hold spuriously. See `byte_offset_does_not_wrap`.
+        count.checked_mul(core::mem::size_of::<T>() as isize).is_some_and(|computed_offset| (self as isize).checked_add(computed_offset).is_some()
+            && crate::ptr::byte_offset_does_not_wrap(self, computed_offset)) &&
+        // Precondition 4: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_offset(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
         (count == 0 || core::mem::size_of::<T>() == 0 || core::ub_checks::same_allocation(self, self.wrapping_offset(count)))
@@ -885,11 +888,14 @@ impl<T: PointeeSized> *const T {
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: adding the computed offset to `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani. 
+        // Precondition 3: the byte offset does not wrap the model checker's pointer encoding,
+        // which would make precondition 4 hold spuriously. See `byte_offset_does_not_wrap`.
         count.checked_mul(core::mem::size_of::<T>())
         .is_some_and(|computed_offset| {
             computed_offset <= isize::MAX as usize && (self as isize).checked_add(computed_offset as isize).is_some()
+                && crate::ptr::byte_offset_does_not_wrap(self, computed_offset as isize)
         }) &&
-        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        // Precondition 4: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_add(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
         (count == 0 || (core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_add(count))))
@@ -996,11 +1002,14 @@ impl<T: PointeeSized> *const T {
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: substracting the computed offset from `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
+        // Precondition 3: the byte offset does not wrap the model checker's pointer encoding,
+        // which would make precondition 4 hold spuriously. See `byte_offset_does_not_wrap`.
         count.checked_mul(core::mem::size_of::<T>())
         .is_some_and(|computed_offset| {
             computed_offset <= isize::MAX as usize && (self as isize).checked_sub(computed_offset as isize).is_some()
+                && crate::ptr::byte_offset_does_not_wrap(self, -(computed_offset as isize))
         }) &&
-        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        // Precondition 4: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_sub(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
         (count == 0 || (core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_sub(count))))
