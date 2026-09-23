@@ -5829,8 +5829,6 @@ mod verify {
     safe_update_harness!(harness_safe_fetch_update_bool, AtomicBool, bool, fetch_update, |_| None);
     #[cfg(target_has_atomic = "8")]
     safe_update_harness!(harness_safe_try_update_bool, AtomicBool, bool, try_update, |_| None);
-    #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_update_bool, AtomicBool, bool, update, |x| x);
     #[cfg(target_has_atomic = "ptr")]
     #[kani::proof_for_contract(AtomicPtr::<u8>::fetch_update)]
     pub fn harness_safe_fetch_update_ptr() {
@@ -5845,74 +5843,46 @@ mod verify {
         let _ = storage.try_update(Relaxed, any_failure_order(), |_| None);
         kani::cover(true, "safe atomic pointer try-update: reached after call");
     }
-    #[cfg(all(target_has_atomic_load_store = "ptr", target_has_atomic = "8"))]
-    #[kani::proof_for_contract(AtomicPtr::<u8>::update)]
-    pub fn harness_safe_update_ptr() {
-        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
-        let value = kani::any::<usize>() as *mut u8;
-        let _ = storage.update(Relaxed, any_failure_order(), |_| value);
-        kani::cover(true, "safe atomic pointer update: reached after call");
-    }
     #[cfg(target_has_atomic = "8")]
     safe_update_harness!(harness_safe_fetch_update_i8, AtomicI8, i8, fetch_update, |_| None);
     #[cfg(target_has_atomic = "8")]
     safe_update_harness!(harness_safe_try_update_i8, AtomicI8, i8, try_update, |_| None);
     #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_update_i8, AtomicI8, i8, update, |x| x);
-    #[cfg(target_has_atomic = "8")]
     safe_update_harness!(harness_safe_fetch_update_u8, AtomicU8, u8, fetch_update, |_| None);
     #[cfg(target_has_atomic = "8")]
     safe_update_harness!(harness_safe_try_update_u8, AtomicU8, u8, try_update, |_| None);
-    #[cfg(target_has_atomic = "8")]
-    safe_update_harness!(harness_safe_update_u8, AtomicU8, u8, update, |x| x);
     #[cfg(target_has_atomic = "16")]
     safe_update_harness!(harness_safe_fetch_update_i16, AtomicI16, i16, fetch_update, |_| None);
     #[cfg(target_has_atomic = "16")]
     safe_update_harness!(harness_safe_try_update_i16, AtomicI16, i16, try_update, |_| None);
     #[cfg(target_has_atomic = "16")]
-    safe_update_harness!(harness_safe_update_i16, AtomicI16, i16, update, |x| x);
-    #[cfg(target_has_atomic = "16")]
     safe_update_harness!(harness_safe_fetch_update_u16, AtomicU16, u16, fetch_update, |_| None);
     #[cfg(target_has_atomic = "16")]
     safe_update_harness!(harness_safe_try_update_u16, AtomicU16, u16, try_update, |_| None);
-    #[cfg(target_has_atomic = "16")]
-    safe_update_harness!(harness_safe_update_u16, AtomicU16, u16, update, |x| x);
     #[cfg(target_has_atomic = "32")]
     safe_update_harness!(harness_safe_fetch_update_i32, AtomicI32, i32, fetch_update, |_| None);
     #[cfg(target_has_atomic = "32")]
     safe_update_harness!(harness_safe_try_update_i32, AtomicI32, i32, try_update, |_| None);
     #[cfg(target_has_atomic = "32")]
-    safe_update_harness!(harness_safe_update_i32, AtomicI32, i32, update, |x| x);
-    #[cfg(target_has_atomic = "32")]
     safe_update_harness!(harness_safe_fetch_update_u32, AtomicU32, u32, fetch_update, |_| None);
     #[cfg(target_has_atomic = "32")]
     safe_update_harness!(harness_safe_try_update_u32, AtomicU32, u32, try_update, |_| None);
-    #[cfg(target_has_atomic = "32")]
-    safe_update_harness!(harness_safe_update_u32, AtomicU32, u32, update, |x| x);
     #[cfg(target_has_atomic = "64")]
     safe_update_harness!(harness_safe_fetch_update_i64, AtomicI64, i64, fetch_update, |_| None);
     #[cfg(target_has_atomic = "64")]
     safe_update_harness!(harness_safe_try_update_i64, AtomicI64, i64, try_update, |_| None);
     #[cfg(target_has_atomic = "64")]
-    safe_update_harness!(harness_safe_update_i64, AtomicI64, i64, update, |x| x);
-    #[cfg(target_has_atomic = "64")]
     safe_update_harness!(harness_safe_fetch_update_u64, AtomicU64, u64, fetch_update, |_| None);
     #[cfg(target_has_atomic = "64")]
     safe_update_harness!(harness_safe_try_update_u64, AtomicU64, u64, try_update, |_| None);
-    #[cfg(target_has_atomic = "64")]
-    safe_update_harness!(harness_safe_update_u64, AtomicU64, u64, update, |x| x);
     #[cfg(target_has_atomic = "128")]
     safe_update_harness!(harness_safe_fetch_update_i128, AtomicI128, i128, fetch_update, |_| None);
     #[cfg(target_has_atomic = "128")]
     safe_update_harness!(harness_safe_try_update_i128, AtomicI128, i128, try_update, |_| None);
     #[cfg(target_has_atomic = "128")]
-    safe_update_harness!(harness_safe_update_i128, AtomicI128, i128, update, |x| x);
-    #[cfg(target_has_atomic = "128")]
     safe_update_harness!(harness_safe_fetch_update_u128, AtomicU128, u128, fetch_update, |_| None);
     #[cfg(target_has_atomic = "128")]
     safe_update_harness!(harness_safe_try_update_u128, AtomicU128, u128, try_update, |_| None);
-    #[cfg(target_has_atomic = "128")]
-    safe_update_harness!(harness_safe_update_u128, AtomicU128, u128, update, |x| x);
     #[cfg(target_has_atomic = "ptr")]
     safe_update_harness!(harness_safe_fetch_update_isize, AtomicIsize, isize, fetch_update, |_| {
         None
@@ -5920,15 +5890,63 @@ mod verify {
     #[cfg(target_has_atomic = "ptr")]
     safe_update_harness!(harness_safe_try_update_isize, AtomicIsize, isize, try_update, |_| None);
     #[cfg(target_has_atomic = "ptr")]
-    safe_update_harness!(harness_safe_update_isize, AtomicIsize, isize, update, |x| x);
-    #[cfg(target_has_atomic = "ptr")]
     safe_update_harness!(harness_safe_fetch_update_usize, AtomicUsize, usize, fetch_update, |_| {
         None
     });
     #[cfg(target_has_atomic = "ptr")]
     safe_update_harness!(harness_safe_try_update_usize, AtomicUsize, usize, try_update, |_| None);
+
+    // Kani does not infer a finite bound for this CAS retry loop automatically.
+    // An unwind bound of 2 is sufficient for this single-threaded harness under
+    // Kani's current atomic intrinsic model.
+    macro_rules! safe_update_loop_harness {
+        ($name:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract(<$atomic>::update)]
+            #[kani::unwind(2)]
+            pub fn $name() {
+                let storage = <$atomic>::new(kani::any::<$value>());
+                let _ = storage.update(Relaxed, any_failure_order(), |x| x);
+                kani::cover(true, "safe atomic update: reached after call");
+            }
+        };
+    }
+    #[cfg(target_has_atomic = "8")]
+    safe_update_loop_harness!(harness_safe_update_bool, AtomicBool, bool);
+    #[cfg(target_has_atomic = "8")]
+    safe_update_loop_harness!(harness_safe_update_i8, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    safe_update_loop_harness!(harness_safe_update_u8, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    safe_update_loop_harness!(harness_safe_update_i16, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    safe_update_loop_harness!(harness_safe_update_u16, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    safe_update_loop_harness!(harness_safe_update_i32, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    safe_update_loop_harness!(harness_safe_update_u32, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    safe_update_loop_harness!(harness_safe_update_i64, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    safe_update_loop_harness!(harness_safe_update_u64, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    safe_update_loop_harness!(harness_safe_update_i128, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    safe_update_loop_harness!(harness_safe_update_u128, AtomicU128, u128);
     #[cfg(target_has_atomic = "ptr")]
-    safe_update_harness!(harness_safe_update_usize, AtomicUsize, usize, update, |x| x);
+    safe_update_loop_harness!(harness_safe_update_isize, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    safe_update_loop_harness!(harness_safe_update_usize, AtomicUsize, usize);
+
+    #[cfg(all(target_has_atomic_load_store = "ptr", target_has_atomic = "8"))]
+    #[kani::proof_for_contract(AtomicPtr::<u8>::update)]
+    #[kani::unwind(2)]
+    pub fn harness_safe_update_ptr() {
+        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
+        let value = kani::any::<usize>() as *mut u8;
+        let _ = storage.update(Relaxed, any_failure_order(), |_| value);
+        kani::cover(true, "safe atomic pointer update: reached after call");
+    }
+
     #[cfg(target_has_atomic_load_store = "8")]
     #[kani::proof]
     #[kani::should_panic]
