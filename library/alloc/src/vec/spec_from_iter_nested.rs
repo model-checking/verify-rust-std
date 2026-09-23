@@ -1,4 +1,6 @@
 use core::iter::TrustedLen;
+#[cfg(kani)]
+use core::kani;
 use core::{cmp, ptr};
 
 use super::{SpecExtend, Vec};
@@ -60,4 +62,43 @@ where
         vector.spec_extend(iterator);
         vector
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::super::Vec;
+    use super::*;
+
+    // Harness for `SpecFromIterNested::from_iter`
+    macro_rules! gen_from_iter_default_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Choose a bounded non-deterministic iterator length
+                let len = kani::any_where(|len: &usize| *len <= 8);
+                // Build an iterator that yields non-deterministic elements and prevents specialization shortcuts
+                let iter = (0..len).map(|_| kani::any::<$ty>()).inspect(|_| ());
+                // Collect the iterator through the nested FromIterator specialization
+                let vector = <Vec<$ty> as SpecFromIterNested<$ty, _>>::from_iter(iter);
+                // Keep the harness focused on construction rather than drop behavior
+                core::mem::forget(vector);
+            }
+        };
+    }
+
+    gen_from_iter_default_harness!(harness_from_iter_default_u8, u8);
+    gen_from_iter_default_harness!(harness_from_iter_default_u16, u16);
+    gen_from_iter_default_harness!(harness_from_iter_default_u32, u32);
+    gen_from_iter_default_harness!(harness_from_iter_default_u64, u64);
+    gen_from_iter_default_harness!(harness_from_iter_default_u128, u128);
+    gen_from_iter_default_harness!(harness_from_iter_default_usize, usize);
+    gen_from_iter_default_harness!(harness_from_iter_default_i8, i8);
+    gen_from_iter_default_harness!(harness_from_iter_default_i16, i16);
+    gen_from_iter_default_harness!(harness_from_iter_default_i32, i32);
+    gen_from_iter_default_harness!(harness_from_iter_default_i64, i64);
+    gen_from_iter_default_harness!(harness_from_iter_default_i128, i128);
+    gen_from_iter_default_harness!(harness_from_iter_default_isize, isize);
+    gen_from_iter_default_harness!(harness_from_iter_default_unit, ());
+    gen_from_iter_default_harness!(harness_from_iter_default_array, [u8; 4]);
 }

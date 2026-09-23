@@ -1,3 +1,5 @@
+#[cfg(kani)]
+use core::kani;
 use core::mem::ManuallyDrop;
 use core::ptr::{self};
 
@@ -61,4 +63,46 @@ impl<T> SpecFromIter<T, IntoIter<T>> for Vec<T> {
         vec.spec_extend(iterator);
         vec
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::super::kani_vec_harness_helpers::*;
+    use super::*;
+
+    // Harness for `SpecFromIter::from_iter`
+    macro_rules! gen_from_iter_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let mut iter = vec.into_iter();
+                // Optionally consume one element before collecting the remaining iterator
+                // to cover both the advanced and unadvanced IntoIter cases
+                if kani::any::<bool>() {
+                    let _ = iter.next();
+                }
+                // Collect the remaining IntoIter through the FromIterator specialization
+                let _ = <Vec<$ty> as SpecFromIter<$ty, IntoIter<$ty>>>::from_iter(iter);
+            }
+        };
+    }
+
+    gen_from_iter_harness!(harness_from_iter_u8, u8);
+    gen_from_iter_harness!(harness_from_iter_u16, u16);
+    gen_from_iter_harness!(harness_from_iter_u32, u32);
+    gen_from_iter_harness!(harness_from_iter_u64, u64);
+    gen_from_iter_harness!(harness_from_iter_u128, u128);
+    gen_from_iter_harness!(harness_from_iter_usize, usize);
+    gen_from_iter_harness!(harness_from_iter_i8, i8);
+    gen_from_iter_harness!(harness_from_iter_i16, i16);
+    gen_from_iter_harness!(harness_from_iter_i32, i32);
+    gen_from_iter_harness!(harness_from_iter_i64, i64);
+    gen_from_iter_harness!(harness_from_iter_i128, i128);
+    gen_from_iter_harness!(harness_from_iter_isize, isize);
+    gen_from_iter_harness!(harness_from_iter_unit, ());
+    gen_from_iter_harness!(harness_from_iter_array, [u8; 4]);
 }
