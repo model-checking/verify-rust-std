@@ -25,15 +25,8 @@ impl<'a> SetLenOnDrop<'a> {
     }
 
     #[cfg(kani)]
-    #[inline]
     pub(super) fn local_len_ptr(&mut self) -> *mut usize {
         core::ptr::addr_of_mut!(self.local_len)
-    }
-
-    #[cfg(kani)]
-    #[inline]
-    pub(super) fn target_len_ptr(&mut self) -> *mut usize {
-        core::ptr::addr_of_mut!(*self.len)
     }
 }
 
