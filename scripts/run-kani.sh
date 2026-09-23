@@ -162,6 +162,12 @@ build_kani() {
         if [[ "$os_name" == "Linux" ]]; then
             ./scripts/setup/ubuntu/install_deps.sh
         elif [[ "$os_name" == "Darwin" ]]; then
+            # Homebrew 6.0+ refuses to load formulae from third-party taps
+            # unless they are explicitly trusted, which breaks the
+            # `brew tap diffblue/cbmc` in the pinned Kani's install_cbmc.sh.
+            # Trust the tap first (no-op on older Homebrew). Mirrors
+            # model-checking/kani#4785.
+            brew trust diffblue/cbmc 2>/dev/null || true
             ./scripts/setup/macos/install_deps.sh
         else
             echo "Unknown operating system"
@@ -322,7 +328,8 @@ main() {
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown \
+                "${command_args[@]}"
         else
             "$kani_path" list $unstable_args ./library --std --format markdown
         fi
@@ -330,7 +337,8 @@ main() {
         local current_dir=$(pwd)
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json \
+                "${command_args[@]}"
         else
             "$kani_path" list $unstable_args ./library --std --format json
         fi

@@ -111,6 +111,7 @@ jobs:
             --include-pattern alloc::__default_lib_allocator:: \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
+            --include-pattern "<char[[:space:]]as[[:space:]]ascii::AsciiExt>::is_ascii" \
             --include-pattern char::convert::from_u32_unchecked \
             --include-pattern core_arch::x86::__m128d::as_f64x2 \
             --include-pattern "convert::num::<impl.convert::From<num::nonzero::NonZero<" \
