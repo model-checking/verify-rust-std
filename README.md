@@ -50,7 +50,7 @@ These are the challenges:
 | [23: Verify the safety of Vec functions part 1](https://model-checking.github.io/verify-rust-std/challenges/0023-vec-pt1.html) | 15,000 USD | Open | |
 | [24: Verify the safety of Vec functions part 2](https://model-checking.github.io/verify-rust-std/challenges/0024-vec-pt2.html) | 15,000 USD | Open | |
 | [25: Verify the safety of `VecDeque` functions](https://model-checking.github.io/verify-rust-std/challenges/0025-vecdeque.html) | 10,000 USD | Open | |
-| [26: Verify reference-counted Cell implementation](https://model-checking.github.io/verify-rust-std/challenges/0026-rc.html) | 10,000 USD | Open | |
+| [26: Verify reference-counted Cell implementation](https://model-checking.github.io/verify-rust-std/challenges/0026-rc.html) | 10,000 USD | [Resolved](https://github.com/model-checking/verify-rust-std/pull/582) | [Kani](https://github.com/model-checking/verify-rust-std/blob/main/library/alloc/src/rc.rs) |
 | [27: Verify atomically reference-counted Cell implementation](https://model-checking.github.io/verify-rust-std/challenges/0027-arc.html) | 10,000 USD | Open | |
 | [28: Verify float to decimal conversion module](https://model-checking.github.io/verify-rust-std/challenges/0028-flt2dec.html) | 5,000 USD | Open | |
 | [29: Safety of `boxed`](https://model-checking.github.io/verify-rust-std/challenges/0029-boxed.html) | 15,000 USD | Open | |
