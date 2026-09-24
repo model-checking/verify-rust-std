@@ -4785,6 +4785,43 @@ mod kani_vec_harness_helpers {
         }
     }
 
+    /// Cloneable but non-`Copy` element used to force the default
+    /// `ExtendFromWithinSpec` implementation instead of the `TrivialClone`
+    /// specialization.
+    #[derive(Clone, kani::Arbitrary)]
+    #[repr(transparent)]
+    pub(super) struct CloneOnly(u8);
+
+    impl Shape for CloneOnly {}
+
+    /// `needs_drop` and non-`Copy` representative element.
+    /// Its destructor is intentionally side-effect free: the main purpose of this
+    /// shape is to exercise ownership-sensitive and drop-bearing code generation,
+    /// not to count destructor invocations. Exact slice-drop behavior is checked
+    /// separately by bounded supplementary harnesses.
+    #[derive(Clone, kani::Arbitrary)]
+    #[repr(transparent)]
+    pub(super) struct WithDrop(u8);
+
+    impl Drop for WithDrop {
+        fn drop(&mut self) {}
+    }
+
+    impl Shape for WithDrop {}
+
+    /// Finish a primary harness without introducing an unrelated symbolic-length
+    /// slice-drop loop.
+    /// For ordinary shapes the Vec is dropped normally. For `needs_drop` shapes,
+    /// the primary proof is concerned with the target operation itself; Vec's
+    /// compiler-generated slice drop glue is covered separately in `bounded_evidence`.
+    pub(super) fn finish<T>(vec: Vec<T>) {
+        if mem::needs_drop::<T>() {
+            mem::forget(vec);
+        } else {
+            drop(vec);
+        }
+    }
+
     // A symbolic exact-size iterator used by both general and TrustedLen
     // extension proofs.  Its remaining count is unconstrained except by the
     // allocation/layout assumptions of the caller.
@@ -4949,13 +4986,16 @@ mod verify {
     //! capacities, logical lengths, indices, ranges, and operation-specific counts
     //! are symbolic rather than chosen from a small fixed array.
     //!
-    //! Except for `extend_desugared` and `extend_trusted`, the Challenge 23 target
-    //! harnesses do not impose a program-level element-count bound and do not use
-    //! `#[kani::unwind]`. Loops in those targets are either verified directly or
-    //! discharged with loop contracts. In this sense the main advantage of this
-    //! verification is that almost all listed `Vec` operations are checked over
-    //! symbolic, effectively unbounded logical lengths rather than over a small
-    //! test-sized container.
+    //! Except for the primary `extend_desugared` and `extend_trusted` proofs, the
+    //! main Challenge 23 target harnesses do not impose a program-level
+    //! element-count bound and do not use `#[kani::unwind]`. Loops in those primary
+    //! proofs are either verified directly or discharged with loop contracts.
+    //!
+    //! A small set of separate supplementary harnesses uses bounded unwinding for
+    //! behaviors that cannot currently carry a Kani loop contract: compiler-generated
+    //! slice drop glue for `needs_drop` elements and the iterator loop hidden inside
+    //! the default `spec_extend_from_within` implementation. These bounded harnesses
+    //! supplement rather than replace the corresponding unbounded primary proofs.
     //!
     //! Non-ZST allocations are still restricted by `MAX_ALLOCATION_BYTES`. This is
     //! a CBMC object-model restriction required to represent one symbolic heap
@@ -4992,6 +5032,28 @@ mod verify {
     //! These two harness families are therefore explicit tool limitations of the
     //! current submission; all other target families retain symbolic lengths and
     //! unbounded loop reasoning.
+    //!
+    //! # Supplementary bounded evidence
+    //!
+    //! Representative `WithDrop` and `CloneOnly` shapes cover behaviors that are
+    //! absent from the primitive `TrivialClone` instantiations.
+    //!
+    //! `WithDrop` is `Clone`, non-`Copy`, and `needs_drop`. Primary harnesses use it
+    //! for ownership-sensitive operations while avoiding an unrelated final
+    //! symbolic-length `Vec::drop` through `finish`. Actual slice-drop paths in
+    //! `Vec::drop`, `truncate`, `clear`, and `Drain::drop` are checked separately
+    //! with bounded unwinding because that compiler-generated drop loop has no
+    //! source-level loop contract site.
+    //!
+    //! `CloneOnly` is `Clone` but not `TrivialClone`, forcing
+    //! `spec_extend_from_within` and `extend_from_within` through the default
+    //! per-element cloning implementation. That implementation iterates through
+    //! `zip` / `map` / `for_each`, so its supplementary evidence is bounded for
+    //! the same reason that a loop contract cannot be attached directly to the
+    //! hidden iterator loop.
+    //!
+    //! These supplementary bounds are not used to describe the main Challenge 23
+    //! proofs as unbounded evidence.
     //!
     //! # Kani-only source reshaping
     //!
@@ -5156,6 +5218,14 @@ mod verify {
     gen_into_boxed_slice_harness!(harness_vec_into_boxed_slice_bool, bool);
     gen_into_boxed_slice_harness!(harness_vec_into_boxed_slice_array, [u8; 4]);
 
+    #[cfg(not(no_global_oom_handling))]
+    #[kani::proof]
+    fn harness_vec_into_boxed_slice_with_drop() {
+        let vec = verifier_nondet_vec::<WithDrop>();
+        let boxed = vec.into_boxed_slice();
+        core::mem::forget(boxed);
+    }
+
     // Harnesses for `Vec::truncate`
     macro_rules! gen_truncate_harness {
         ($name:ident, $ty:ty) => {
@@ -5216,7 +5286,9 @@ mod verify {
                 // Choose a non-deterministic index within the initialized length
                 let index = kani::any_where(|index: &usize| *index < vec.len());
                 // Remove the selected element by swapping in the last element
-                let _ = vec.swap_remove(index);
+                let value = vec.swap_remove(index);
+                drop(value);
+                finish(vec);
             }
         };
     }
@@ -5226,6 +5298,7 @@ mod verify {
     gen_swap_remove_harness!(harness_vec_swap_remove_unit, ());
     gen_swap_remove_harness!(harness_vec_swap_remove_bool, bool);
     gen_swap_remove_harness!(harness_vec_swap_remove_array, [u8; 4]);
+    gen_swap_remove_harness!(harness_vec_swap_remove_with_drop, WithDrop);
 
     // `swap_remove` must panic when `index >= len`.
     #[kani::proof]
@@ -5266,6 +5339,7 @@ mod verify {
                 let element: $ty = kani::any();
                 // Call the function under verification.
                 vec.insert(index, element);
+                finish(vec);
             }
         };
     }
@@ -5275,6 +5349,7 @@ mod verify {
     gen_insert_harness!(harness_vec_insert_unit, ());
     gen_insert_harness!(harness_vec_insert_bool, bool);
     gen_insert_harness!(harness_vec_insert_array, [u8; 4]);
+    gen_insert_harness!(harness_vec_insert_with_drop, WithDrop);
 
     // `insert` must panic when `index > len`.
     #[cfg(not(no_global_oom_handling))]
@@ -5300,7 +5375,9 @@ mod verify {
                 // Generate a nondeterministic index which is guaranteed to be within bounds
                 let index = kani::any_where(|index: &usize| *index < vec.len());
                 // Remove and return the selected element
-                let _ = vec.remove(index);
+                let value = vec.remove(index);
+                drop(value);
+                finish(vec);
             }
         };
     }
@@ -5310,6 +5387,7 @@ mod verify {
     gen_remove_harness!(harness_vec_remove_unit, ());
     gen_remove_harness!(harness_vec_remove_bool, bool);
     gen_remove_harness!(harness_vec_remove_array, [u8; 4]);
+    gen_remove_harness!(harness_vec_remove_with_drop, WithDrop);
 
     // `remove` must panic when `index >= len`.
     #[kani::proof]
@@ -5332,6 +5410,7 @@ mod verify {
                 let mut vec = verifier_nondet_vec::<$ty>();
                 // Retain each element according to a non-deterministic predicate
                 vec.retain_mut(|_| kani::any::<bool>());
+                finish(vec);
             }
         };
     }
@@ -5341,6 +5420,7 @@ mod verify {
     gen_retain_mut_harness!(harness_vec_retain_mut_unit, ());
     gen_retain_mut_harness!(harness_vec_retain_mut_array, [u8; 4]);
     gen_retain_mut_harness!(harness_vec_retain_mut_bool, bool);
+    gen_retain_mut_harness!(harness_vec_retain_mut_with_drop, WithDrop);
 
     // Harnesses for `Vec::dedup_by`
     // The proof harness instantiates `same_bucket` with a capture-free ZST
@@ -5354,6 +5434,7 @@ mod verify {
                 // Create a symbolic non-deterministic Vec for the target element type
                 let mut vec = verifier_nondet_vec::<$ty>();
                 vec.dedup_by(|_, _| kani::any());
+                finish(vec);
             }
         };
     }
@@ -5363,6 +5444,7 @@ mod verify {
     gen_dedup_by_harness!(harness_vec_dedup_by_unit, ());
     gen_dedup_by_harness!(harness_vec_dedup_by_array, [u8; 4]);
     gen_dedup_by_harness!(harness_vec_dedup_by_bool, bool);
+    gen_dedup_by_harness!(harness_vec_dedup_by_with_drop, WithDrop);
 
     // Harnesses for `Vec::push`
     macro_rules! gen_push_harness {
@@ -5384,6 +5466,7 @@ mod verify {
                 kani::cover(core::mem::size_of::<$ty>() == 0 || spare > 0, "push: spare capacity");
                 // Push the selected value onto the Vec
                 vec.push(value);
+                finish(vec);
             }
         };
     }
@@ -5393,6 +5476,7 @@ mod verify {
     gen_push_harness!(harness_vec_push_unit, ());
     gen_push_harness!(harness_vec_push_bool, bool);
     gen_push_harness!(harness_vec_push_array, [u8; 4]);
+    gen_push_harness!(harness_vec_push_with_drop, WithDrop);
 
     // Harnesses for `Vec::push_within_capacity`
     macro_rules! gen_push_within_capacity_harness {
@@ -5404,7 +5488,9 @@ mod verify {
                 // Create a non-deterministic element to append if capacity permits
                 let value = kani::any();
                 // Attempt to push the value without growing the allocation
-                let _ = vec.push_within_capacity(value);
+                let result = vec.push_within_capacity(value);
+                drop(result);
+                finish(vec);
             }
         };
     }
@@ -5414,6 +5500,7 @@ mod verify {
     gen_push_within_capacity_harness!(harness_vec_push_within_capacity_unit, ());
     gen_push_within_capacity_harness!(harness_vec_push_within_capacity_bool, bool);
     gen_push_within_capacity_harness!(harness_vec_push_within_capacity_array, [u8; 4]);
+    gen_push_within_capacity_harness!(harness_vec_push_within_capacity_with_drop, WithDrop);
 
     // Harnesses for `Vec::pop`
     macro_rules! gen_pop_harness {
@@ -5423,7 +5510,9 @@ mod verify {
                 // Create a non-deterministic Vec for the target element type
                 let mut vec = verifier_nondet_vec::<$ty>();
                 // Pop the last initialized element if one exists
-                let _ = vec.pop();
+                let value = vec.pop();
+                drop(value);
+                finish(vec);
             }
         };
     }
@@ -5433,6 +5522,7 @@ mod verify {
     gen_pop_harness!(harness_vec_pop_unit, ());
     gen_pop_harness!(harness_vec_pop_bool, bool);
     gen_pop_harness!(harness_vec_pop_array, [u8; 4]);
+    gen_pop_harness!(harness_vec_pop_with_drop, WithDrop);
 
     // Harnesses for `Vec::append`
     macro_rules! gen_append_harness {
@@ -5444,10 +5534,18 @@ mod verify {
                 let mut vec = verifier_nondet_vec::<$ty>();
                 // Create the source Vec whose elements will be moved
                 let mut other = verifier_nondet_vec::<$ty>();
+                let other_len = other.len();
                 // Require enough capacity for all elements from the source Vec
-                assume_reserve_no_capacity_overflow::<$ty>(vec.len(), vec.capacity(), other.len());
+                assume_reserve_no_capacity_overflow::<$ty>(vec.len(), vec.capacity(), other_len);
                 // Move all elements from `other` into `vec`
                 vec.append(&mut other);
+
+                assert_eq!(other.len(), 0);
+                kani::cover(other_len == 0, "append: empty source");
+                kani::cover(other_len > 0, "append: non-empty source");
+
+                finish(vec);
+                finish(other);
             }
         };
     }
@@ -5457,6 +5555,7 @@ mod verify {
     gen_append_harness!(harness_vec_append_unit, ());
     gen_append_harness!(harness_vec_append_array, [u8; 4]);
     gen_append_harness!(harness_vec_append_bool, bool);
+    gen_append_harness!(harness_vec_append_with_drop, WithDrop);
 
     // Harnesses for `Vec::append_elements`
     // * `append_elements` is verified directly rather than with
@@ -5533,6 +5632,21 @@ mod verify {
     gen_drain_harness!(harness_vec_drain_bool, bool);
     gen_drain_harness!(harness_vec_drain_array, [u8; 4]);
 
+    // `drain` construction is checked unboundedly for a `needs_drop` element type.
+    // The iterator is deliberately forgotten here so this proof remains about the
+    // Challenge target itself; execution of `Drain::drop` over a symbolic element
+    // range is covered separately in `bounded_evidence`.
+    #[kani::proof]
+    fn harness_vec_drain_with_drop() {
+        let mut vec = verifier_nondet_vec::<WithDrop>();
+        let len = vec.len();
+        let end = kani::any_where(|end: &usize| *end <= len);
+        let start = kani::any_where(|start: &usize| *start <= end);
+        let drain = vec.drain(start..end);
+        core::mem::forget(drain);
+        finish(vec);
+    }
+
     // Harnesses for `Vec::clear`
     macro_rules! gen_clear_harness {
         ($name:ident, $ty:ty) => {
@@ -5560,13 +5674,19 @@ mod verify {
             pub fn $name() {
                 // Create a non-deterministic Vec for the target element type
                 let mut vec = verifier_nondet_vec::<$ty>();
+                let old_len = vec.len();
                 // Choose a non-deterministic split point within the initialized length
-                let at = kani::any_where(|at: &usize| *at <= vec.len());
+                let at = kani::any_where(|at: &usize| *at <= old_len);
                 kani::cover(at == 0, "split_off: zero");
                 kani::cover(at == vec.len(), "split_off: len");
                 kani::cover(at > 0 && at < vec.len(), "split_off: middle");
                 // Split off the suffix starting at the selected point
-                let _ = vec.split_off(at);
+                let tail = vec.split_off(at);
+                assert_eq!(vec.len(), at);
+                assert_eq!(tail.len(), old_len - at);
+
+                finish(vec);
+                finish(tail);
             }
         };
     }
@@ -5576,6 +5696,7 @@ mod verify {
     gen_split_off_harness!(harness_vec_split_off_unit, ());
     gen_split_off_harness!(harness_vec_split_off_bool, bool);
     gen_split_off_harness!(harness_vec_split_off_array, [u8; 4]);
+    gen_split_off_harness!(harness_vec_split_off_with_drop, WithDrop);
 
     #[cfg(not(no_global_oom_handling))]
     #[kani::proof]
@@ -5776,6 +5897,13 @@ mod verify {
         zst_overflow([(); 4])
     );
 
+    #[kani::proof]
+    fn harness_vec_into_flattened_with_drop() {
+        let vec = verifier_nondet_vec::<[WithDrop; 4]>();
+        let flat: Vec<WithDrop> = vec.into_flattened();
+        finish(flat);
+    }
+
     // The main proof is unbounded and verifies the Kani loop-contract transcription above.
     // Harnesses for `Vec::extend_with`
     macro_rules! gen_extend_with_harness {
@@ -5798,6 +5926,7 @@ mod verify {
                 kani::cover(n != 0, "extend_with: nonempty");
                 // Extend the Vec with `n` clones of `value`
                 vec.extend_with(n, value);
+                finish(vec);
             }
         };
     }
@@ -5807,6 +5936,7 @@ mod verify {
     gen_extend_with_harness!(harness_vec_extend_with_unit, ());
     gen_extend_with_harness!(harness_vec_extend_with_array, [u8; 4]);
     gen_extend_with_harness!(harness_vec_extend_with_bool, bool);
+    gen_extend_with_harness!(harness_vec_extend_with_with_drop, WithDrop);
 
     // Harnesses for `Vec::spec_extend_from_within`
     macro_rules! gen_vec_spec_extend_from_within_harness {
@@ -5920,6 +6050,15 @@ mod verify {
     gen_vec_into_iter_harness!(harness_vec_into_iter_bool, bool);
     gen_vec_into_iter_harness!(harness_vec_into_iter_array, [u8; 4]);
 
+    #[kani::proof]
+    fn harness_vec_into_iter_with_drop() {
+        let vec = verifier_nondet_vec::<WithDrop>();
+        // Verify transfer of ownership from Vec to IntoIter without entering the
+        // compiler-generated symbolic-length drop glue for the iterator.
+        let iter = vec.into_iter();
+        core::mem::forget(iter);
+    }
+
     // `extend_desugared` is verified with bounded loop unwinding instead of a
     // loop contract.
     // We initially attempted an unbounded proof by attaching a loop contract to
@@ -5962,6 +6101,7 @@ mod verify {
 
                 // Directly verify the real Vec::extend_desugared implementation.
                 vec.extend_desugared(iter);
+                finish(vec);
             }
         };
     }
@@ -5971,6 +6111,7 @@ mod verify {
     gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_unit, ());
     gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_array, [u8; 4]);
     gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_bool, bool);
+    gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_with_drop, WithDrop);
 
     // `extend_trusted` is verified with bounded loop unwinding rather than an
     // unbounded loop contract.
@@ -6016,6 +6157,7 @@ mod verify {
                 // Execute the real shipped implementation, including its
                 // Iterator::for_each / fold iteration.
                 vec.extend_trusted(iter);
+                finish(vec);
             }
         };
     }
@@ -6025,6 +6167,7 @@ mod verify {
     gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_unit, ());
     gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_array, [u8; 4]);
     gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_bool, bool);
+    gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_with_drop, WithDrop);
 
     // Harnesses for `Vec::extract_if`
     macro_rules! gen_vec_extract_if_harness {
@@ -6037,7 +6180,10 @@ mod verify {
                 let start = kani::any_where(|start: &usize| *start <= vec.len());
                 let end = kani::any_where(|end: &usize| *end >= start && *end <= vec.len());
                 // Extract elements from the selected range according to a non-deterministic predicate
-                let _ = vec.extract_if(start..end, |_x| kani::any::<bool>());
+                let iter = vec.extract_if(start..end, |_x| kani::any::<bool>());
+                // Dropping an unconsumed ExtractIf restores the Vec's logical length.
+                drop(iter);
+                finish(vec);
             }
         };
     }
@@ -6047,6 +6193,7 @@ mod verify {
     gen_vec_extract_if_harness!(harness_vec_extract_if_unit, ());
     gen_vec_extract_if_harness!(harness_vec_extract_if_bool, bool);
     gen_vec_extract_if_harness!(harness_vec_extract_if_array, [u8; 4]);
+    gen_vec_extract_if_harness!(harness_vec_extract_if_with_drop, WithDrop);
 
     // Harnesses for `Vec::drop`
     macro_rules! gen_vec_drop_harness {
@@ -6086,4 +6233,164 @@ mod verify {
     gen_vec_try_from_harness!(harness_vec_try_from_unit, ());
     gen_vec_try_from_harness!(harness_vec_try_from_bool, bool);
     gen_vec_try_from_harness!(harness_vec_try_from_array, [u8; 4]);
+
+    mod bounded_evidence {
+        //! Supplementary bounded evidence for paths that cannot currently be
+        //! discharged with Kani loop contracts.
+        //! The primary Challenge 23 harnesses remain unbounded except for
+        //! `extend_desugared` and `extend_trusted`. The proofs in this module are
+        //! additional evidence for `needs_drop` behavior and the default
+        //! `Clone` specialization.
+        //! `Vec` destruction, `truncate`, `clear`, and `Drain::drop` eventually
+        //! execute compiler-generated slice drop glue. That loop has no source-level
+        //! loop on which this module can attach a Kani loop contract, so these paths
+        //! use bounded unwinding.
+        //! The default `spec_extend_from_within` implementation similarly hides its
+        //! iteration inside `zip` / `map` / `for_each`; `CloneOnly` is used here to
+        //! force that implementation instead of the `TrivialClone` specialization.
+        use super::*;
+
+        fn bounded_with_drop_vec() -> Vec<WithDrop> {
+            let mut vec = verifier_nondet_vec::<WithDrop>();
+            // Pick a symbolic logical length for the compiler-generated
+            // drop loop to be completely unwound. The original initialized prefix is
+            // at least this long, so shortening the logical length preserves Vec's
+            // memory-safety invariants.
+            let len = kani::any_where(|len: &usize| *len <= 4 && *len <= vec.len());
+            vec.len = len;
+            vec
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_drop_with_drop() {
+            let vec = bounded_with_drop_vec();
+            kani::cover(vec.len() == 0, "Vec::drop WithDrop: empty");
+            kani::cover(vec.len() > 0, "Vec::drop WithDrop: non-empty");
+            kani::cover(vec.len() == 4, "Vec::drop WithDrop: maximum bounded length");
+            drop(vec);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_truncate_with_drop() {
+            let mut vec = bounded_with_drop_vec();
+            let old_len = vec.len();
+            let new_len: usize = kani::any();
+            kani::cover(new_len < old_len, "truncate WithDrop: drops elements");
+            kani::cover(new_len >= old_len, "truncate WithDrop: no-op");
+            kani::cover(
+                old_len == 4 && new_len == 0,
+                "truncate WithDrop: maximum bounded dropped suffix",
+            );
+            vec.truncate(new_len);
+            drop(vec);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_clear_with_drop() {
+            let mut vec = bounded_with_drop_vec();
+            let old_len = vec.len();
+            kani::cover(old_len == 0, "clear WithDrop: empty Vec");
+            kani::cover(old_len > 0, "clear WithDrop: non-empty Vec");
+            kani::cover(old_len == 4, "clear WithDrop: maximum bounded length");
+            vec.clear();
+            assert_eq!(vec.len(), 0);
+            drop(vec);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_try_from_with_drop_success() {
+            let vec = verifier_nondet_vec::<WithDrop>();
+            if vec.len() != 4 {
+                core::mem::forget(vec);
+                return;
+            }
+            kani::cover(vec.len() == 4, "try_from WithDrop: exact array length");
+            let result: Result<[WithDrop; 4], Vec<WithDrop>> =
+                <[WithDrop; 4] as core::convert::TryFrom<Vec<WithDrop>>>::try_from(vec);
+            assert!(result.is_ok());
+            if let Ok(array) = result {
+                drop(array);
+            }
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_drain_drop_with_drop() {
+            let mut vec = bounded_with_drop_vec();
+            let old_len = vec.len();
+            let end = kani::any_where(|end: &usize| *end <= old_len);
+            let start = kani::any_where(|start: &usize| *start <= end);
+            kani::cover(start == end, "drain WithDrop: empty range");
+            kani::cover(start < end, "drain WithDrop: non-empty range");
+            kani::cover(
+                old_len == 4 && start == 0 && end == old_len,
+                "drain WithDrop: maximum bounded full drain",
+            );
+            let drain = vec.drain(start..end);
+            drop(drain);
+            drop(vec);
+        }
+
+        #[cfg(not(no_global_oom_handling))]
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_spec_extend_from_within_clone_only() {
+            let mut vec = verifier_nondet_vec::<CloneOnly>();
+            let len = vec.len();
+            let cap = vec.capacity();
+
+            // `CloneOnly` does not implement `TrivialClone`, so this reaches the
+            // default per-element `Clone` implementation. Bound only the number of
+            // clone iterations hidden inside `zip` / `map` / `for_each`.
+            let count = kani::any_where(|count: &usize| {
+                *count <= 4 && *count <= len && *count <= cap - len
+            });
+            let start = kani::any_where(|start: &usize| *start <= len - count);
+            let end = start + count;
+            kani::cover(count == 0, "spec_extend_from_within CloneOnly: empty range");
+            kani::cover(count > 0, "spec_extend_from_within CloneOnly: non-empty range");
+            kani::cover(
+                count == 4,
+                "spec_extend_from_within CloneOnly: maximum bounded clone count",
+            );
+            unsafe {
+                vec.spec_extend_from_within(start..end);
+            }
+            finish(vec);
+        }
+
+        #[cfg(not(no_global_oom_handling))]
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_extend_from_within_clone_only() {
+            let mut vec = verifier_nondet_vec::<CloneOnly>();
+            let len = vec.len();
+            let cap = vec.capacity();
+            // Bound only the default Clone implementation's hidden iteration.
+            // The surrounding Vec state, including its capacity, remains symbolic.
+            let additional =
+                kani::any_where(|additional: &usize| *additional <= 4 && *additional <= len);
+            let start = kani::any_where(|start: &usize| *start <= len - additional);
+            let end = start + additional;
+            assume_reserve_no_capacity_overflow::<CloneOnly>(len, cap, additional);
+            let old_spare = cap - len;
+            kani::cover(additional == 0, "extend_from_within CloneOnly: empty range");
+            kani::cover(additional > 0, "extend_from_within CloneOnly: non-empty range");
+            kani::cover(
+                additional == 4,
+                "extend_from_within CloneOnly: maximum bounded clone count",
+            );
+            kani::cover(
+                additional <= old_spare,
+                "extend_from_within CloneOnly: existing spare capacity",
+            );
+            kani::cover(additional > old_spare, "extend_from_within CloneOnly: growth");
+            vec.extend_from_within(start..end);
+            finish(vec);
+        }
+    }
 }
