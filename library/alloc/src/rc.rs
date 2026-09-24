@@ -3982,8 +3982,9 @@ unsafe fn rc_raw_parts<T: ?Sized>(
 #[cfg(kani)]
 #[inline]
 unsafe fn rc_raw_layout_valid<T: ?Sized>(ptr: *const T) -> bool {
-    let (_, value, _) = unsafe { rc_raw_parts(ptr) };
-    ptr::addr_eq(ptr, value)
+    let (inner, value, _) = unsafe { rc_raw_parts(ptr) };
+    kani::mem::same_allocation(ptr.cast::<u8>(), inner.cast::<u8>())
+        && ptr::addr_eq(ptr, value)
         && kani::mem::checked_size_of_raw(ptr) == Some(unsafe { mem::size_of_val_raw(value) })
         && kani::mem::checked_align_of_raw(ptr) == Some(unsafe { mem::align_of_val_raw(value) })
 }
@@ -3995,6 +3996,8 @@ unsafe fn rc_raw_valid<T: ?Sized>(ptr: *const T) -> bool {
     (unsafe { rc_raw_layout_valid(ptr) })
         && kani::mem::can_dereference(strong)
         && (unsafe { (*strong).get() >= 1 })
+        // Live strong references collectively own one implicit weak reference.
+        && (unsafe { weak_raw_count_valid(ptr) })
 }
 
 #[cfg(kani)]
@@ -8286,9 +8289,10 @@ mod verify {
                         assert!(Rc::weak_count(&rc) == 0);
                         kani::cover(true, "try_new_in success starts without explicit weak owners");
                     }
-                    // With `Global` and these fixed-size layouts, allocation failure is not
-                    // reachable in this harness, so this cover is expected to be unreachable.
-                    Err(_) => kani::cover(true, "try_new_in allocation failure is reachable"),
+                    Err(_) => {
+                        // Kani does not currently model allocation failure, so the `Err`
+                        // path is unreachable in this harness and is intentionally not covered.
+                    }
                 }
             }
         };
@@ -8317,9 +8321,10 @@ mod verify {
                             "try_new_in Vec success starts without explicit weak owners",
                         );
                     }
-                    // The `Rc<Vec<_>>` allocation has a fixed layout here, so `Global` failure is
-                    // not reachable, so this cover is expected to be unreachable.
-                    Err(_) => kani::cover(true, "try_new_in Vec allocation failure is reachable"),
+                    Err(_) => {
+                        // Kani does not currently model allocation failure, so the `Err`
+                        // path is unreachable in this harness and is intentionally not covered.
+                    }
                 }
             }
         };
@@ -8368,10 +8373,9 @@ mod verify {
                             "try_new_uninit_in success starts without explicit weak owners",
                         );
                     }
-                    // With `Global` and these fixed-size layouts, allocation failure is not
-                    // reachable in this harness, so this cover is expected to be unreachable.
                     Err(_) => {
-                        kani::cover(true, "try_new_uninit_in allocation failure is reachable")
+                        // Kani does not currently model allocation failure, so the `Err`
+                        // path is unreachable in this harness and is intentionally not covered.
                     }
                 }
             }
@@ -8415,10 +8419,9 @@ mod verify {
                             "try_new_zeroed_in success starts without explicit weak owners",
                         );
                     }
-                    // With `Global` and these fixed-size layouts, allocation failure is not
-                    // reachable in this harness, so this cover is expected to be unreachable.
                     Err(_) => {
-                        kani::cover(true, "try_new_zeroed_in allocation failure is reachable")
+                        // Kani does not currently model allocation failure, so the `Err`
+                        // path is unreachable in this harness and is intentionally not covered.
                     }
                 }
             }
@@ -8743,9 +8746,10 @@ mod verify {
                         assert!(Rc::weak_count(&rc) == 0);
                         kani::cover(true, "try_new success starts without explicit weak owners");
                     }
-                    // With `Global` and these fixed-size layouts, allocation failure is not
-                    // reachable in this harness, so this cover is expected to be unreachable.
-                    Err(_) => kani::cover(true, "try_new allocation failure is reachable"),
+                    Err(_) => {
+                        // Kani does not currently model allocation failure, so the `Err`
+                        // path is unreachable in this harness and is intentionally not covered.
+                    }
                 }
             }
         };
@@ -8777,9 +8781,10 @@ mod verify {
                             "try_new Vec success starts without explicit weak owners",
                         );
                     }
-                    // `Rc<Vec<_>>` has a fixed outer layout, so `Global` allocation failure
-                    // is not reachable in this harness and this cover is expected to be unreachable.
-                    Err(_) => kani::cover(true, "try_new Vec allocation failure is reachable"),
+                    Err(_) => {
+                        // Kani does not currently model allocation failure, so the `Err`
+                        // path is unreachable in this harness and is intentionally not covered.
+                    }
                 }
             }
         };
@@ -8826,9 +8831,10 @@ mod verify {
                             "try_new_uninit success starts without explicit weak owners",
                         );
                     }
-                    // With `Global` and these fixed-size layouts, allocation failure is not
-                    // reachable in this harness, so this cover is expected to be unreachable.
-                    Err(_) => kani::cover(true, "try_new_uninit allocation failure is reachable"),
+                    Err(_) => {
+                        // Kani does not currently model allocation failure, so the `Err`
+                        // path is unreachable in this harness and is intentionally not covered.
+                    }
                 }
             }
         };
@@ -8869,9 +8875,10 @@ mod verify {
                             "try_new_zeroed success starts without explicit weak owners",
                         );
                     }
-                    // With `Global` and these fixed-size layouts, allocation failure is not
-                    // reachable in this harness, so this cover is expected to be unreachable.
-                    Err(_) => kani::cover(true, "try_new_zeroed allocation failure is reachable"),
+                    Err(_) => {
+                        // Kani does not currently model allocation failure, so the `Err`
+                        // path is unreachable in this harness and is intentionally not covered.
+                    }
                 }
             }
         };
