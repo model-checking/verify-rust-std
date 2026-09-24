@@ -81,6 +81,8 @@ use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 #[cfg(not(no_global_oom_handling))]
 use core::iter;
+#[cfg(kani)]
+use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::marker::Destruct;
 use core::marker::{Freeze, PhantomData};
@@ -89,6 +91,8 @@ use core::ops::{self, Index, IndexMut, Range, RangeBounds};
 use core::ptr::{self, NonNull};
 use core::slice::{self, SliceIndex};
 use core::{fmt, hint, intrinsics, ub_checks};
+
+use safety::{ensures, requires};
 
 #[stable(feature = "extract_if", since = "1.87.0")]
 pub use self::extract_if::ExtractIf;
@@ -642,6 +646,45 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[requires(length <= capacity)]
+    #[requires({
+        mem::size_of::<T>()
+            .checked_mul(capacity)
+            .is_some_and(|size| size <= isize::MAX as usize)
+    })]
+    #[requires(!ptr.is_null() && ptr.is_aligned())]
+    #[requires({
+        mem::size_of::<T>() == 0
+            || capacity == 0
+            || ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(ptr, capacity))
+    })]
+    #[requires({
+        mem::size_of::<T>() == 0
+            || capacity == 0
+            || {
+                let end = ptr.wrapping_add(capacity);
+                ub_checks::same_allocation(ptr as *const T, end as *const T)
+                    && !ub_checks::same_allocation(
+                        ptr as *const T,
+                        ptr.wrapping_sub(1) as *const T,
+                    )
+            }
+    })]
+    // Kani-specific clause: the tool-independent safety predicate API has no
+    // equivalent of `kani::mem::is_inbounds`. This distinguishes the exact
+    // one-past allocation endpoint from an interior pointer.
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            mem::size_of::<T>() == 0
+                || capacity == 0
+                || !kani::mem::is_inbounds(ptr.wrapping_add(capacity) as *const T)
+        })
+    )]
+    #[requires({
+        length == 0
+            || ub_checks::can_dereference(core::ptr::slice_from_raw_parts(ptr as *const T, length))
+    })]
     pub unsafe fn from_raw_parts(ptr: *mut T, length: usize, capacity: usize) -> Self {
         unsafe { Self::from_raw_parts_in(ptr, length, capacity, Global) }
     }
@@ -744,6 +787,46 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     #[unstable(feature = "box_vec_non_null", issue = "130364")]
+    #[requires(length <= capacity)]
+    #[requires({
+        mem::size_of::<T>()
+            .checked_mul(capacity)
+            .is_some_and(|size| size <= isize::MAX as usize)
+    })]
+    #[requires(ptr.as_ptr().is_aligned())]
+    #[requires({
+        mem::size_of::<T>() == 0
+            || capacity == 0
+            || ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(ptr.as_ptr(), capacity))
+    })]
+    #[requires({
+        mem::size_of::<T>() == 0
+            || capacity == 0
+            || {
+                let raw_ptr = ptr.as_ptr();
+                let end = raw_ptr.wrapping_add(capacity);
+                ub_checks::same_allocation(raw_ptr, end)
+                    && !ub_checks::same_allocation(raw_ptr, raw_ptr.wrapping_sub(1))
+            }
+    })]
+    // Kani-specific clause: the tool-independent safety predicate API has no
+    // equivalent of `kani::mem::is_inbounds`. This distinguishes the exact
+    // one-past allocation endpoint from an interior pointer.
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            mem::size_of::<T>() == 0
+                || capacity == 0
+                || {
+                    let raw_ptr = ptr.as_ptr();
+                    !kani::mem::is_inbounds(raw_ptr.wrapping_add(capacity))
+                }
+        })
+    )]
+    #[requires({
+        length == 0
+            || ub_checks::can_dereference(core::ptr::slice_from_raw_parts(ptr.as_ptr(), length))
+    })]
     pub unsafe fn from_parts(ptr: NonNull<T>, length: usize, capacity: usize) -> Self {
         unsafe { Self::from_parts_in(ptr, length, capacity, Global) }
     }
@@ -1290,6 +1373,46 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", issue = "130364")]
+    #[requires(length <= capacity)]
+    #[requires({
+        mem::size_of::<T>()
+            .checked_mul(capacity)
+            .is_some_and(|size| size <= isize::MAX as usize)
+    })]
+    #[requires(ptr.as_ptr().is_aligned())]
+    #[requires({
+        mem::size_of::<T>() == 0
+            || capacity == 0
+            || ub_checks::can_write(core::ptr::slice_from_raw_parts_mut(ptr.as_ptr(), capacity))
+    })]
+    #[requires({
+        mem::size_of::<T>() == 0
+            || capacity == 0
+            || {
+                let raw_ptr = ptr.as_ptr();
+                let end = raw_ptr.wrapping_add(capacity);
+                ub_checks::same_allocation(raw_ptr, end)
+                    && !ub_checks::same_allocation(raw_ptr, raw_ptr.wrapping_sub(1))
+            }
+    })]
+    // Kani-specific clause: the tool-independent safety predicate API has no
+    // equivalent of `kani::mem::is_inbounds`. This distinguishes the exact
+    // one-past allocation endpoint from an interior pointer.
+    #[cfg_attr(
+        kani,
+        kani::requires({
+            mem::size_of::<T>() == 0
+                || capacity == 0
+                || {
+                    let raw_ptr = ptr.as_ptr();
+                    !kani::mem::is_inbounds(raw_ptr.wrapping_add(capacity))
+                }
+        })
+    )]
+    #[requires({
+        length == 0
+            || ub_checks::can_dereference(core::ptr::slice_from_raw_parts(ptr.as_ptr(), length))
+    })]
     pub unsafe fn from_parts_in(ptr: NonNull<T>, length: usize, capacity: usize, alloc: A) -> Self {
         ub_checks::assert_unsafe_precondition!(
             check_library_ub,
@@ -2093,6 +2216,15 @@ impl<T, A: Allocator> Vec<T, A> {
     /// [`spare_capacity_mut()`]: Vec::spare_capacity_mut
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[requires(new_len <= self.capacity())]
+    #[requires(
+        new_len <= self.len
+            || ub_checks::can_dereference(core::ptr::slice_from_raw_parts(
+                self.as_ptr().wrapping_add(self.len),
+                new_len - self.len,
+            ))
+    )]
+    #[cfg_attr(kani, kani::modifies(&mut self.len))]
     pub unsafe fn set_len(&mut self, new_len: usize) {
         ub_checks::assert_unsafe_precondition!(
             check_library_ub,
@@ -2389,6 +2521,13 @@ impl<T, A: Allocator> Vec<T, A> {
     {
         let original_len = self.len();
 
+        #[cfg(kani)]
+        let modified_items = if mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), original_len)
+        };
+
         if original_len == 0 {
             // Empty case: explicit return allows better optimization, vs letting compiler infer it
             return;
@@ -2431,6 +2570,8 @@ impl<T, A: Allocator> Vec<T, A> {
         }
 
         let mut read = 0;
+        #[safety::loop_invariant(read < original_len && self.len == original_len)]
+        #[cfg_attr(kani, kani::loop_modifies(&read, modified_items))]
         loop {
             // SAFETY: read < original_len
             let cur = unsafe { self.get_unchecked_mut(read) };
@@ -2450,6 +2591,8 @@ impl<T, A: Allocator> Vec<T, A> {
         // SAFETY: previous `read` is always less than original_len.
         unsafe { ptr::drop_in_place(&mut *g.v.as_mut_ptr().add(read)) };
 
+        #[safety::loop_invariant(g.write < g.read && g.read <= g.original_len && g.v.len == g.original_len)]
+        #[cfg_attr(kani, kani::loop_modifies(&g.read, &g.write, modified_items))]
         while g.read < g.original_len {
             // SAFETY: `read` is always less than original_len.
             let cur = unsafe { &mut *g.v.as_mut_ptr().add(g.read) };
@@ -2534,6 +2677,16 @@ impl<T, A: Allocator> Vec<T, A> {
         // And avoids any memory writes if we don't need to remove anything.
         let mut first_duplicate_idx: usize = 1;
         let start = self.as_mut_ptr();
+        #[cfg(kani)]
+        let capacity = self.capacity();
+        #[cfg(kani)]
+        let modified_items = if mem::size_of::<T>() == 0 {
+            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+        } else {
+            core::ptr::slice_from_raw_parts_mut(start, len)
+        };
+
+        #[safety::loop_invariant(len <= capacity && first_duplicate_idx >= 1 && first_duplicate_idx <= len)]
         while first_duplicate_idx != len {
             let found_duplicate = unsafe {
                 // SAFETY: first_duplicate always in range [1..len)
@@ -2612,22 +2765,98 @@ impl<T, A: Allocator> Vec<T, A> {
             ptr::drop_in_place(start.add(first_duplicate_idx));
         }
 
+        // Kani-only reshaping of loop-local bindings.
+        // The shipped second pass declares `read_ptr`, `prev_ptr`,
+        // `found_duplicate`, and `write_ptr` inside the loop body. The pinned
+        // Kani/CBMC loop-frame instrumentation requires mutable locals written by
+        // the loop to be nameable from `loop_modifies`; body-local `let` bindings
+        // cannot be named there and lead to assignability/frame failures.
+        // Under `cfg(kani)` we therefore only extend the storage lifetime of those
+        // temporaries (plus the indices used to derive their pointers). Every
+        // temporary is overwritten with exactly the value computed by the shipped
+        // statement before its first use. These helper values are integers, bools,
+        // and raw pointers and have no drop behavior. Predicate calls, drops,
+        // copies, length updates, branch conditions, and their ordering are
+        // otherwise identical to the shipped implementation.
+        // This is a loop-frame reshaping for the unbounded proof, not a different
+        // deduplication algorithm.
+        #[cfg(kani)]
+        let mut found_duplicate = false;
+        #[cfg(kani)]
+        let mut read_idx = 0usize;
+        #[cfg(kani)]
+        let mut gap_prev_idx = 0usize;
+        #[cfg(kani)]
+        let mut write_idx = 0usize;
+        #[cfg(kani)]
+        let mut read_ptr = start;
+        #[cfg(kani)]
+        let mut prev_ptr = start;
+        #[cfg(kani)]
+        let mut write_ptr = start;
+
         /* SAFETY: Because of the invariant, read_ptr, prev_ptr and write_ptr
          * are always in-bounds and read_ptr never aliases prev_ptr */
         unsafe {
+            #[safety::loop_invariant(
+                len <= capacity
+                    && first_duplicate_idx < len
+                    && gap.vec.len == len
+                    && gap.write > 0
+                    && gap.write < gap.read
+                    && gap.read <= len
+            )]
+            #[cfg_attr(
+                kani,
+                kani::loop_modifies(
+                    &gap.read,
+                    &gap.write,
+                    &found_duplicate,
+                    &read_idx,
+                    &gap_prev_idx,
+                    &write_idx,
+                    &read_ptr,
+                    &prev_ptr,
+                    &write_ptr,
+                    modified_items
+                )
+            )]
             while gap.read < len {
+                #[cfg(not(kani))]
                 let read_ptr = start.add(gap.read);
+                #[cfg(kani)]
+                {
+                    read_idx = gap.read;
+                    read_ptr = start.add(read_idx);
+                }
+                #[cfg(not(kani))]
                 let prev_ptr = start.add(gap.write.wrapping_sub(1));
+                #[cfg(kani)]
+                {
+                    gap_prev_idx = gap.write.wrapping_sub(1);
+                    prev_ptr = start.add(gap_prev_idx);
+                }
 
                 // We explicitly say in docs that references are reversed.
+                #[cfg(not(kani))]
                 let found_duplicate = same_bucket(&mut *read_ptr, &mut *prev_ptr);
+                #[cfg(kani)]
+                {
+                    found_duplicate = same_bucket(&mut *read_ptr, &mut *prev_ptr);
+                }
                 if found_duplicate {
                     // Increase `gap.read` now since the drop may panic.
                     gap.read += 1;
                     /* We have found duplicate, drop it in-place */
                     ptr::drop_in_place(read_ptr);
                 } else {
+                    #[cfg(not(kani))]
                     let write_ptr = start.add(gap.write);
+                    #[cfg(kani)]
+                    {
+                        write_idx = gap.write;
+                        write_ptr = start.add(write_idx);
+                    }
 
                     /* read_ptr cannot be equal to write_ptr because at this point
                      * we guaranteed to skip at least one element (before loop starts).
@@ -2809,6 +3038,13 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Appends elements to `self` from other buffer.
     #[cfg(not(no_global_oom_handling))]
     #[inline]
+    #[requires({
+        let count = other.len();
+        count == 0
+            || (ub_checks::can_dereference(other)
+                && (mem::size_of::<T>() == 0
+                    || !ub_checks::same_allocation(other as *const T, self.as_ptr())))
+    })]
     unsafe fn append_elements(&mut self, other: *const [T]) {
         let count = other.len();
         self.reserve(count);
@@ -3202,6 +3438,19 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Safety: changing returned .2 (&mut usize) is considered the same as calling `.set_len(_)`.
     ///
     /// This method provides unique access to all vec parts at once in `extend_from_within`.
+    #[ensures(|result| *result.2 == old(self.len()))]
+    #[ensures(|result| {
+        result.0.len() == old(self.len())
+            && result.1.len() == old(self.capacity()) - old(self.len())
+    })]
+    #[ensures(|result| {
+            core::ptr::from_ref(&*result.2) == old(core::ptr::addr_of!(self.len))
+        })] // RQ-1
+    #[ensures(|result| {
+        result.0.as_ptr() == old(self.as_ptr())
+            && result.1.as_ptr()
+                == old(self.as_ptr()).wrapping_add(result.0.len()).cast::<MaybeUninit<T>>()
+    })]
     unsafe fn split_at_spare_mut_with_len(
         &mut self,
     ) -> (&mut [T], &mut [MaybeUninit<T>], &mut usize) {
@@ -3528,17 +3777,102 @@ impl<T: Clone, A: Allocator> Vec<T, A> {
 
         unsafe {
             let mut ptr = self.as_mut_ptr().add(self.len());
+            #[cfg(kani)]
+            let old_len = self.len();
+
+            #[cfg(kani)]
+            let cap = self.capacity();
+
+            #[cfg(kani)]
+            let spare_start = ptr;
+
+            #[cfg(kani)]
+            let clone_count = if n == 0 { 0 } else { n - 1 };
+
             // Use SetLenOnDrop to work around bug where compiler
             // might not realize the store through `ptr` through self.set_len()
             // don't alias.
             let mut local_len = SetLenOnDrop::new(&mut self.len);
 
+            #[cfg(kani)]
+            let local_len_ptr = local_len.local_len_ptr();
+
+            #[cfg(kani)]
+            let spare_write_set = if mem::size_of::<T>() == 0 || clone_count == 0 {
+                core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
+            } else {
+                core::ptr::slice_from_raw_parts_mut(spare_start, clone_count)
+            };
+
+            #[cfg(kani)]
+            if mem::size_of::<T>() != 0 && clone_count != 0 {
+                assert!(ub_checks::can_write(spare_write_set));
+            }
+
+            // Shipped implementation.
+            #[cfg(not(kani))]
             // Write all elements except the last one
             for _ in 1..n {
                 ptr::write(ptr, value.clone());
                 ptr = ptr.add(1);
+
                 // Increment the length in every step in case clone() panics
                 local_len.increment_len(1);
+            }
+
+            // Kani-only loop transcription for the unbounded loop-contract proof.
+            // The shipped loop is:
+            //     for _ in 1..n {
+            //         write(value.clone());
+            //         advance pointer;
+            //         increment SetLenOnDrop;
+            //     }
+            //
+            // For `n > 0` it therefore performs exactly `n - 1` clone/write/length
+            // updates; for `n == 0` it performs none. At the pinned Kani version,
+            // attaching a contract to this exact `1..n` range is unsuitable: Kani
+            // rewrites contracted `for` loops through its verifier iterator/index model,
+            // whose representation of the `n == 0` `1..n` case and hidden mutable state
+            // make the required frame problematic.
+            // The Kani branch instead counts `written` from zero to
+            // `clone_count = if n == 0 { 0 } else { n - 1 }` and writes
+            // `spare_start.add(written)`. This performs the same clone/write/
+            // SetLenOnDrop update sequence. After the contracted loop `ptr` is set to
+            // the position that the shipped pointer-increment loop would have reached;
+            // the final write of the original `value` is shared by both builds.
+            // No memory-safety property is assumed by the transcription: the writable
+            // spare range is checked with `assert!`.
+            #[cfg(kani)]
+            {
+                let mut written = 0usize;
+
+                #[safety::loop_invariant(
+                    old_len <= cap
+                        && n <= cap - old_len
+                        && clone_count <= n
+                        && written <= clone_count
+                        && written <= cap - old_len
+                        && unsafe {
+                            *local_len_ptr == old_len + written
+                        }
+                )]
+                #[kani::loop_modifies(
+                    &written,
+                    local_len_ptr,
+                    spare_write_set
+                )]
+                while written < clone_count {
+                    ptr::write(spare_start.add(written), value.clone());
+
+                    // Increment the length in every step in case clone() panics
+                    local_len.increment_len(1);
+                    written += 1;
+                }
+
+                // Match the pointer position produced by the shipped `for` loop.
+                // Keep this outside the contracted loop so `ptr` does not need to
+                // be part of the induction state.
+                ptr = spare_start.add(clone_count);
             }
 
             if n > 0 {
@@ -4418,48 +4752,1645 @@ impl<T, A: Allocator, const N: usize> TryFrom<Vec<T, A>> for [T; N] {
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
+mod kani_vec_harness_helpers {
+    use core::alloc::Layout;
+    use core::iter::{self, FusedIterator};
+    use core::{mem, ptr};
+
+    use super::*;
+
+    // This is a bound of CBMC's object model, not a logical Vec length bound.
+    pub(super) const MAX_ALLOCATION_BYTES: usize = 1 << 48;
+
+    pub(super) trait Shape: kani::Arbitrary {
+        // The fill byte is used only for pre-existing opaque values.  It must
+        // be a valid repeated representation for each shape below.
+        fn fill_byte() -> u8 {
+            kani::any()
+        }
+    }
+
+    impl Shape for () {}
+    impl Shape for u8 {}
+    impl Shape for u64 {}
+    impl<T: Shape, const N: usize> Shape for [T; N] {
+        fn fill_byte() -> u8 {
+            T::fill_byte()
+        }
+    }
+
+    impl Shape for bool {
+        fn fill_byte() -> u8 {
+            kani::any_where(|value: &u8| *value <= 1)
+        }
+    }
+
+    /// Cloneable but non-`Copy` element used to force the default
+    /// `ExtendFromWithinSpec` implementation instead of the `TrivialClone`
+    /// specialization.
+    #[derive(Clone, kani::Arbitrary)]
+    #[repr(transparent)]
+    pub(super) struct CloneOnly(u8);
+
+    impl Shape for CloneOnly {}
+
+    /// `needs_drop` and non-`Copy` representative element.
+    /// Its destructor is intentionally side-effect free: the main purpose of this
+    /// shape is to exercise ownership-sensitive and drop-bearing code generation,
+    /// not to count destructor invocations. Exact slice-drop behavior is checked
+    /// separately by bounded supplementary harnesses.
+    #[derive(Clone, kani::Arbitrary)]
+    #[repr(transparent)]
+    pub(super) struct WithDrop(u8);
+
+    impl Drop for WithDrop {
+        fn drop(&mut self) {}
+    }
+
+    impl Shape for WithDrop {}
+
+    /// Finish a primary harness without introducing an unrelated symbolic-length
+    /// slice-drop loop.
+    /// For ordinary shapes the Vec is dropped normally. For `needs_drop` shapes,
+    /// the primary proof is concerned with the target operation itself; Vec's
+    /// compiler-generated slice drop glue is covered separately in `bounded_evidence`.
+    pub(super) fn finish<T>(vec: Vec<T>) {
+        if mem::needs_drop::<T>() {
+            mem::forget(vec);
+        } else {
+            drop(vec);
+        }
+    }
+
+    // A symbolic exact-size iterator used by both general and TrustedLen
+    // extension proofs.  Its remaining count is unconstrained except by the
+    // allocation/layout assumptions of the caller.
+    pub(super) struct AnyIter<T> {
+        remaining: usize,
+        marker: PhantomData<T>,
+    }
+
+    impl<T> AnyIter<T> {
+        pub(super) fn new(remaining: usize) -> Self {
+            Self { remaining, marker: PhantomData }
+        }
+    }
+
+    impl<T: kani::Arbitrary> Iterator for AnyIter<T> {
+        type Item = T;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.remaining == 0 {
+                None
+            } else {
+                self.remaining -= 1;
+                Some(kani::any())
+            }
+        }
+
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (self.remaining, Some(self.remaining))
+        }
+    }
+
+    impl<T: kani::Arbitrary> ExactSizeIterator for AnyIter<T> {}
+    impl<T: kani::Arbitrary> FusedIterator for AnyIter<T> {}
+    unsafe impl<T: kani::Arbitrary> iter::TrustedLen for AnyIter<T> {}
+
+    pub(super) fn verifier_nondet_vec<T: Shape>() -> Vec<T> {
+        // ZSTs have no backing allocation, but their logical length remains
+        // symbolic.  Assigning the private field avoids recursively invoking
+        // the set_len contract being verified.
+        if mem::size_of::<T>() == 0 {
+            let mut v = Vec::<T>::new();
+            v.len = kani::any();
+            kani::cover(v.len == 0, "generator: empty ZST");
+            kani::cover(v.len != 0, "generator: nonempty ZST");
+            return v;
+        }
+
+        let requested: usize = kani::any();
+        kani::assume(Layout::array::<T>(requested).is_ok());
+        kani::assume(
+            requested
+                .checked_mul(mem::size_of::<T>())
+                .is_some_and(|bytes| bytes <= MAX_ALLOCATION_BYTES),
+        );
+
+        let mut v = Vec::<T>::with_capacity(requested);
+        let cap = v.capacity();
+        let len = kani::any_where(|len: &usize| *len <= cap);
+
+        // Initialize the logical prefix before exposing it through Vec::len.
+        // The fill byte is shape-specific, so this does not manufacture
+        // invalid values for the validity-constrained shapes in this model.
+        unsafe {
+            if len != 0 {
+                ptr::write_bytes(
+                    v.as_mut_ptr().cast::<u8>(),
+                    T::fill_byte(),
+                    mem::size_of::<T>() * len,
+                );
+            }
+        }
+        v.len = len;
+        kani::cover(len == 0, "generator: empty");
+        kani::cover(len > 0 && len < cap, "generator: partially full");
+        kani::cover(len == cap && cap > 0, "generator: full");
+        v
+    }
+
+    pub(super) fn assume_reserve_no_capacity_overflow<T>(
+        len: usize,
+        cap: usize,
+        additional: usize,
+    ) {
+        // Restrict the harness to executions in which `Vec::reserve`
+        // returns normally and every newly-created allocation is representable
+        // in CBMC's object model.
+        //
+        // These are proof-domain/modeling assumptions, not safety assumptions
+        // about the operation being verified. Both the no-growth and growth
+        // paths remain possible for non-ZST vectors.
+        assert!(len <= cap);
+
+        let elem_size = mem::size_of::<T>();
+
+        if elem_size == 0 {
+            assert_eq!(cap, usize::MAX);
+
+            // For a ZST, reserve succeeds exactly while the logical length
+            // addition remains representable.
+            let zst_len_ok = additional <= usize::MAX - len;
+            kani::assume(zst_len_ok);
+            kani::cover(
+                zst_len_ok,
+                "reserve assumption: ZST logical length addition is representable",
+            );
+
+            return;
+        }
+
+        let spare = cap - len;
+        if additional <= spare {
+            return;
+        }
+
+        // We are now on the real RawVec growth path.
+        kani::cover(additional > spare, "reserve model: non-ZST growth path is reachable");
+
+        let required_cap_ok = len.checked_add(additional).is_some();
+        kani::assume(required_cap_ok);
+        kani::cover(required_cap_ok, "reserve assumption: required capacity is representable");
+
+        let required_cap = len + additional;
+
+        // RawVec stores non-ZST capacity below the high usize bit, so its
+        // amortized doubling cannot overflow.
+        assert!(cap.checked_mul(2).is_some());
+        let doubled_cap = cap * 2;
+
+        let new_cap = core::cmp::max(
+            core::cmp::max(doubled_cap, required_cap),
+            RawVec::<T>::MIN_NON_ZERO_CAP,
+        );
+
+        // `RawVec::finish_grow` must be able to construct the target layout.
+        let growth_layout_ok = Layout::array::<T>(new_cap).is_ok();
+        kani::assume(growth_layout_ok);
+        kani::cover(
+            growth_layout_ok,
+            "reserve assumption: grown allocation layout is representable",
+        );
+
+        // This is a verifier representation bound only.
+        let growth_object_model_ok =
+            new_cap.checked_mul(elem_size).is_some_and(|bytes| bytes <= MAX_ALLOCATION_BYTES);
+
+        kani::assume(growth_object_model_ok);
+        kani::cover(
+            growth_object_model_ok,
+            "reserve assumption: grown allocation fits the CBMC object model",
+        );
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
 mod verify {
-    use core::kani;
+    //! Kani verification for Challenge 23 (`Vec`, part 1).
+    //!
+    //! # Verification strategy
+    //!
+    //! The proofs use symbolic `Vec` states produced by `verifier_nondet_vec`:
+    //! capacities, logical lengths, indices, ranges, and operation-specific counts
+    //! are symbolic rather than chosen from a small fixed array.
+    //!
+    //! Except for the primary `extend_desugared` and `extend_trusted` proofs, the
+    //! main Challenge 23 target harnesses do not impose a program-level
+    //! element-count bound and do not use `#[kani::unwind]`. Loops in those primary
+    //! proofs are either verified directly or discharged with loop contracts.
+    //!
+    //! A small set of separate supplementary harnesses uses bounded unwinding for
+    //! behaviors that cannot currently carry a Kani loop contract: compiler-generated
+    //! slice drop glue for `needs_drop` elements and the iterator loop hidden inside
+    //! the default `spec_extend_from_within` implementation. These bounded harnesses
+    //! supplement rather than replace the corresponding unbounded primary proofs.
+    //!
+    //! Non-ZST allocations are still restricted by `MAX_ALLOCATION_BYTES`. This is
+    //! a CBMC object-model restriction required to represent one symbolic heap
+    //! object; it is not an API precondition and it is intentionally kept separate
+    //! from semantic element-count bounds. ZST lengths remain symbolic over the
+    //! full `usize` domain.
+    //!
+    //! # The two bounded target proofs
+    //!
+    //! `extend_desugared` and `extend_trusted` are the only target families that
+    //! currently use bounded unwinding. Both bounded harnesses execute the exact
+    //! shipped implementation; they do not replace the target with a verification
+    //! model.
+    //!
+    //! For `extend_desugared`, an unbounded loop-contract proof was attempted first.
+    //! Its loop may call `reserve`, so the induction step must model reallocation,
+    //! replacement of the backing allocation, and freeing of the old allocation.
+    //! At the pinned Kani version the resulting loop frame does not preserve enough
+    //! allocation/provenance state to soundly reason about the following iteration.
+    //! In addition, the natural invariant would require accessor calls such as
+    //! `capacity()`, while model-checking/kani#4796 shows that method calls in loop
+    //! invariants can be lowered with missing arguments and replaced by
+    //! nondeterministic values.
+    //!
+    //! For `extend_trusted`, the shipped iteration is hidden inside
+    //! `Iterator::for_each` / `fold`, so there is no source-level loop on which a
+    //! loop contract can be attached. An explicit repeated-`next` transcription was
+    //! also tried, but proving the required `TrustedLen` relation requires querying
+    //! iterator state inside the invariant, again running into the pinned loop-
+    //! contract limitations including #4796. Rather than claim an unbounded proof
+    //! of a replacement body, the current harness executes the shipped `for_each`
+    //! implementation directly with bounded unwinding.
+    //!
+    //! These two harness families are therefore explicit tool limitations of the
+    //! current submission; all other target families retain symbolic lengths and
+    //! unbounded loop reasoning.
+    //!
+    //! # Supplementary bounded evidence
+    //!
+    //! Representative `WithDrop` and `CloneOnly` shapes cover behaviors that are
+    //! absent from the primitive `TrivialClone` instantiations.
+    //!
+    //! `WithDrop` is `Clone`, non-`Copy`, and `needs_drop`. Primary harnesses use it
+    //! for ownership-sensitive operations while avoiding an unrelated final
+    //! symbolic-length `Vec::drop` through `finish`. Actual slice-drop paths in
+    //! `Vec::drop`, `truncate`, `clear`, and `Drain::drop` are checked separately
+    //! with bounded unwinding because that compiler-generated drop loop has no
+    //! source-level loop contract site.
+    //!
+    //! `CloneOnly` is `Clone` but not `TrivialClone`, forcing
+    //! `spec_extend_from_within` and `extend_from_within` through the default
+    //! per-element cloning implementation. That implementation iterates through
+    //! `zip` / `map` / `for_each`, so its supplementary evidence is bounded for
+    //! the same reason that a loop contract cannot be attached directly to the
+    //! hidden iterator loop.
+    //!
+    //! These supplementary bounds are not used to describe the main Challenge 23
+    //! proofs as unbounded evidence.
+    //!
+    //! # Kani-only source reshaping
+    //!
+    //! Normal Rust builds retain the shipped implementation. Where the pinned Kani
+    //! loop-contract machinery cannot express the shipped loop frame directly,
+    //! `cfg(kani)` is used only for a semantics-preserving reshaping needed by the
+    //! proof:
+    //!
+    //! * `dedup_by` predeclares a small set of scalar/raw-pointer loop temporaries
+    //!   so that variables written by the loop can be named by `loop_modifies`.
+    //!   Every temporary is assigned the same value as in the shipped body before
+    //!   its first use; predicate calls, drops, copies, length updates, and their
+    //!   ordering are unchanged.
+    //! * `extend_with` transcribes the shipped `for _ in 1..n` clone loop into an
+    //!   explicit counter loop. Both forms perform exactly `n - 1` clone/write/
+    //!   length-increment steps when `n > 0`, no such step when `n == 0`, and then
+    //!   execute the same final write of the original value. The transcription is
+    //!   used because the pinned Kani lowering of contracted `for` ranges introduces
+    //!   verifier iterator/index state that makes this particular frame unsuitable,
+    //!   especially for the valid `n == 0` case.
+    //!
+    //! # Remaining verification limitations
+    //!
+    //! `set_len`'s contract uses Kani's dereferenceability predicate for the
+    //! documented initialized-prefix requirement. The actual `split_off` path has a
+    //! separate initialization-order concern: enabling Kani's full uninitialized-
+    //! memory instrumentation on the alloc path is currently blocked by the pinned
+    //! toolchain's function-pointer/vtable limitation (the Kani #3300 class of
+    //! failures). Results obtained without that instrumentation must therefore not
+    //! be presented as establishing that separate initialization property.
+    //!
+    //! `append_elements` is verified with a direct proof rather than
+    //! `proof_for_contract`: its `reserve` may replace and free the old allocation,
+    //! while the pinned Kani public function-contract API can express writable
+    //! `modifies` regions but not the corresponding `frees` frame.
+    use core::mem::ManuallyDrop;
+    use core::ops::{Deref, DerefMut};
 
+    use super::kani_vec_harness_helpers::*;
+    use super::*;
     use crate::vec::Vec;
-
-    // Size chosen for testing the empty vector (0), middle element removal (1)
-    // and last element removal (2) cases while keeping verification tractable
-    const ARRAY_LEN: usize = 3;
 
     #[kani::proof]
     pub fn verify_swap_remove() {
-        // Creating a vector directly from a fixed length arbitrary array
-        let mut arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
-        let mut vect = Vec::from(&arr);
+        // Start from a symbolic vector state rather than a fixed-size array.
+        let mut vect = verifier_nondet_vec::<u8>();
 
-        // Recording the original length and a copy of the vector for validation
-        let original_len = vect.len();
-        let original_vec = vect.clone();
+        let index = kani::any_where(|index: &usize| *index < vect.len());
+        let _ = vect.swap_remove(index);
+    }
 
-        // Generating a nondeterministic index which is guaranteed to be within bounds
-        let index: usize = kani::any_where(|x| *x < original_len);
+    // Harnesses for `Vec::from_raw_parts`
+    macro_rules! gen_from_raw_parts_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Vec::<$ty>::from_raw_parts)]
+            pub fn $name() {
+                // Create a non-deterministic Vec and prevent it from being dropped
+                // before ownership is transferred through the raw parts
+                let mut original = ManuallyDrop::new(verifier_nondet_vec::<$ty>());
+                // Get the raw pointer, initialized length, and allocation capacity
+                let ptr = original.as_mut_ptr();
+                let len = original.len();
+                let capacity = original.capacity();
+                // Rebuild the Vec from the same allocation metadata
+                let _: Vec<$ty> = unsafe { Vec::from_raw_parts(ptr, len, capacity) };
+            }
+        };
+    }
 
-        let removed = vect.swap_remove(index);
+    gen_from_raw_parts_harness!(harness_vec_from_raw_parts_u8, u8);
+    gen_from_raw_parts_harness!(harness_vec_from_raw_parts_u64, u64);
+    gen_from_raw_parts_harness!(harness_vec_from_raw_parts_unit, ());
+    gen_from_raw_parts_harness!(harness_vec_from_raw_parts_array, [u8; 4]);
+    gen_from_raw_parts_harness!(harness_vec_from_raw_parts_bool, bool);
 
-        // Verifying that the length of the vector decreases by one after the operation is performed
-        assert!(vect.len() == original_len - 1, "Length should decrease by 1");
+    // Harnesses for `Vec::from_parts` (Vec::from_nonnull not found as Vec functions)
+    macro_rules! gen_from_parts_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Vec::<$ty>::from_parts)]
+            pub fn $name() {
+                // Create a non-deterministic Vec and prevent it from being dropped
+                // before ownership is transferred through the raw parts
+                let mut original = ManuallyDrop::new(verifier_nondet_vec::<$ty>());
+                // Get a non-null pointer to the Vec allocation
+                let ptr = unsafe { NonNull::new_unchecked(original.as_mut_ptr()) };
+                // Get the initialized length and allocation capacity
+                let len = original.len();
+                let capacity = original.capacity();
+                // Rebuild the Vec from the same allocation metadata
+                let _: Vec<$ty> = unsafe { Vec::from_parts(ptr, len, capacity) };
+            }
+        };
+    }
 
-        // Verifying that the removed element matches the original element at the index
-        assert!(removed == original_vec[index], "Removed element should match original");
+    gen_from_parts_harness!(harness_vec_from_parts_u8, u8);
+    gen_from_parts_harness!(harness_vec_from_parts_u64, u64);
+    gen_from_parts_harness!(harness_vec_from_parts_unit, ());
+    gen_from_parts_harness!(harness_vec_from_parts_array, [u8; 4]);
+    gen_from_parts_harness!(harness_vec_from_parts_bool, bool);
 
-        // Verifying that the removed index now contains the element originally at the vector's last index if applicable
-        if index < original_len - 1 {
-            assert!(
-                vect[index] == original_vec[original_len - 1],
-                "Index should contain last element"
-            );
+    // Harnesses for `Vec::from_parts_in` (Vec::from_nonnull_in not found as Vec functions)
+    macro_rules! gen_from_parts_in_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Vec::<$ty>::from_parts_in)]
+            pub fn $name() {
+                // Create a non-deterministic Vec and prevent it from being dropped
+                // before ownership is transferred through the allocator-aware raw parts
+                let mut original = ManuallyDrop::new(verifier_nondet_vec::<$ty>());
+                // Get a non-null pointer to the Vec allocation
+                let ptr = unsafe { NonNull::new_unchecked(original.as_mut_ptr()) };
+                // Get the initialized length and allocation capacity
+                let len = original.len();
+                let capacity = original.capacity();
+                // Rebuild the Vec from the same allocation metadata and allocator
+                let _: Vec<$ty> = unsafe { Vec::from_parts_in(ptr, len, capacity, Global) };
+            }
+        };
+    }
+
+    gen_from_parts_in_harness!(harness_vec_from_parts_in_u8, u8);
+    gen_from_parts_in_harness!(harness_vec_from_parts_in_u64, u64);
+    gen_from_parts_in_harness!(harness_vec_from_parts_in_unit, ());
+    gen_from_parts_in_harness!(harness_vec_from_parts_in_array, [u8; 4]);
+    gen_from_parts_in_harness!(harness_vec_from_parts_in_bool, bool);
+
+    // Harnesses for `Vec::into_raw_parts_with_alloc`
+    macro_rules! gen_into_raw_parts_with_alloc_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Decompose the Vec into raw parts together with its allocator
+                let _ = vec.into_raw_parts_with_alloc();
+            }
+        };
+    }
+
+    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_u8, u8);
+    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_u64, u64);
+    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_unit, ());
+    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_bool, bool);
+    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_array, [u8; 4]);
+
+    // Harnesses for `Vec::into_boxed_slice`
+    macro_rules! gen_into_boxed_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into a boxed slice containing its initialized elements
+                let _: Box<[$ty]> = vec.into_boxed_slice();
+            }
+        };
+    }
+
+    gen_into_boxed_slice_harness!(harness_vec_into_boxed_slice_u8, u8);
+    gen_into_boxed_slice_harness!(harness_vec_into_boxed_slice_u64, u64);
+    gen_into_boxed_slice_harness!(harness_vec_into_boxed_slice_unit, ());
+    gen_into_boxed_slice_harness!(harness_vec_into_boxed_slice_bool, bool);
+    gen_into_boxed_slice_harness!(harness_vec_into_boxed_slice_array, [u8; 4]);
+
+    #[cfg(not(no_global_oom_handling))]
+    #[kani::proof]
+    fn harness_vec_into_boxed_slice_with_drop() {
+        let vec = verifier_nondet_vec::<WithDrop>();
+        let boxed = vec.into_boxed_slice();
+        core::mem::forget(boxed);
+    }
+
+    // Harnesses for `Vec::truncate`
+    macro_rules! gen_truncate_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Choose a non-deterministic target length
+                let new_len: usize = kani::any();
+                // Truncate the Vec to the selected length
+                vec.truncate(new_len);
+            }
+        };
+    }
+
+    gen_truncate_harness!(harness_vec_truncate_u8, u8);
+    gen_truncate_harness!(harness_vec_truncate_u64, u64);
+    gen_truncate_harness!(harness_vec_truncate_unit, ());
+    gen_truncate_harness!(harness_vec_truncate_bool, bool);
+    gen_truncate_harness!(harness_vec_truncate_array, [u8; 4]);
+
+    // Harnesses for `Vec::set_len`
+    macro_rules! gen_set_len_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Vec::<$ty>::set_len)]
+            pub fn $name() {
+                // The generator initializes a symbolic prefix before exposing
+                // it through Vec::len, so it can model both shrink and grow.
+                let mut vec = verifier_nondet_vec::<$ty>();
+                let initialized_len = vec.len();
+                let old_len = kani::any_where(|len: &usize| *len <= initialized_len);
+                vec.len = old_len;
+                let new_len = kani::any_where(|len: &usize| *len <= initialized_len);
+                kani::cover(new_len > old_len, "set_len: grow");
+                kani::cover(new_len < old_len, "set_len: shrink");
+                kani::cover(new_len == old_len, "set_len: unchanged");
+                unsafe {
+                    vec.set_len(new_len);
+                }
+            }
+        };
+    }
+
+    gen_set_len_harness!(harness_vec_set_len_u8, u8);
+    gen_set_len_harness!(harness_vec_set_len_u64, u64);
+    gen_set_len_harness!(harness_vec_set_len_unit, ());
+    gen_set_len_harness!(harness_vec_set_len_array, [u8; 4]);
+    gen_set_len_harness!(harness_vec_set_len_bool, bool);
+
+    // Harnesses for `Vec::swap_remove`
+    // `swap_remove` must return without panic when `index < len`.
+    macro_rules! gen_swap_remove_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Choose a non-deterministic index within the initialized length
+                let index = kani::any_where(|index: &usize| *index < vec.len());
+                // Remove the selected element by swapping in the last element
+                let value = vec.swap_remove(index);
+                drop(value);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_swap_remove_harness!(harness_vec_swap_remove_u8, u8);
+    gen_swap_remove_harness!(harness_vec_swap_remove_u64, u64);
+    gen_swap_remove_harness!(harness_vec_swap_remove_unit, ());
+    gen_swap_remove_harness!(harness_vec_swap_remove_bool, bool);
+    gen_swap_remove_harness!(harness_vec_swap_remove_array, [u8; 4]);
+    gen_swap_remove_harness!(harness_vec_swap_remove_with_drop, WithDrop);
+
+    // `swap_remove` must panic when `index >= len`.
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_vec_swap_remove_out_of_bounds() {
+        // Create a non-deterministic Vec for the panic case
+        let mut vec = verifier_nondet_vec::<u8>();
+        // Choose a non-deterministic index outside the initialized length
+        let index = kani::any_where(|index: &usize| *index >= vec.len());
+        // Calling `swap_remove` with an out-of-bounds index must panic
+        let _ = vec.swap_remove(index);
+    }
+
+    // Harnesses for `Vec::insert`
+    // `insert` must return without panic when `index <= len`.
+    macro_rules! gen_insert_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic vector with unconstrained length, capacity, and contents.
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Require one spare slot so inserting does not overflow capacity.
+                let len = vec.len();
+                let cap = vec.capacity();
+                assume_reserve_no_capacity_overflow::<$ty>(len, cap, 1);
+                kani::cover(core::mem::size_of::<$ty>() == 0 || cap == len, "insert: growth");
+                kani::cover(
+                    core::mem::size_of::<$ty>() == 0 || cap > len,
+                    "insert: spare capacity",
+                );
+                // Pick a symbolic index that satisfies the non-panicking precondition.
+                let index = kani::any_where(|index: &usize| *index <= vec.len());
+                kani::cover(index == 0, "insert: front");
+                kani::cover(index == vec.len(), "insert: end");
+                kani::cover(index > 0 && index < vec.len(), "insert: middle");
+                // Create a symbolic element to insert.
+                let element: $ty = kani::any();
+                // Call the function under verification.
+                vec.insert(index, element);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_insert_harness!(harness_vec_insert_u8, u8);
+    gen_insert_harness!(harness_vec_insert_u64, u64);
+    gen_insert_harness!(harness_vec_insert_unit, ());
+    gen_insert_harness!(harness_vec_insert_bool, bool);
+    gen_insert_harness!(harness_vec_insert_array, [u8; 4]);
+    gen_insert_harness!(harness_vec_insert_with_drop, WithDrop);
+
+    // `insert` must panic when `index > len`.
+    #[cfg(not(no_global_oom_handling))]
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_vec_insert_out_of_bounds() {
+        // Create a non-deterministic Vec for the panic case
+        let mut vec = verifier_nondet_vec::<u8>();
+        // Choose a non-deterministic index beyond the insertion boundary
+        let index = kani::any_where(|index: &usize| *index > vec.len());
+        // Calling `insert` past the end must panic
+        vec.insert(index, kani::any());
+    }
+
+    // Harnesses for `Vec::remove`
+    // `remove` must return without panic when `index < len`.
+    macro_rules! gen_remove_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Build a symbolic vector of the target type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Generate a nondeterministic index which is guaranteed to be within bounds
+                let index = kani::any_where(|index: &usize| *index < vec.len());
+                // Remove and return the selected element
+                let value = vec.remove(index);
+                drop(value);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_remove_harness!(harness_vec_remove_u8, u8);
+    gen_remove_harness!(harness_vec_remove_u64, u64);
+    gen_remove_harness!(harness_vec_remove_unit, ());
+    gen_remove_harness!(harness_vec_remove_bool, bool);
+    gen_remove_harness!(harness_vec_remove_array, [u8; 4]);
+    gen_remove_harness!(harness_vec_remove_with_drop, WithDrop);
+
+    // `remove` must panic when `index >= len`.
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_vec_remove_out_of_bounds() {
+        // Create a non-deterministic Vec for the panic case
+        let mut vec = verifier_nondet_vec::<u8>();
+        // Choose a non-deterministic index beyond the removal boundary
+        let index = kani::any_where(|index: &usize| *index >= vec.len());
+        // Calling `remove` with an out-of-bounds index must panic
+        let _ = vec.remove(index);
+    }
+
+    // Harnesses for `Vec::retain_mut`
+    macro_rules! gen_retain_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Retain each element according to a non-deterministic predicate
+                vec.retain_mut(|_| kani::any::<bool>());
+                finish(vec);
+            }
+        };
+    }
+
+    gen_retain_mut_harness!(harness_vec_retain_mut_u8, u8);
+    gen_retain_mut_harness!(harness_vec_retain_mut_u64, u64);
+    gen_retain_mut_harness!(harness_vec_retain_mut_unit, ());
+    gen_retain_mut_harness!(harness_vec_retain_mut_array, [u8; 4]);
+    gen_retain_mut_harness!(harness_vec_retain_mut_bool, bool);
+    gen_retain_mut_harness!(harness_vec_retain_mut_with_drop, WithDrop);
+
+    // Harnesses for `Vec::dedup_by`
+    // The proof harness instantiates `same_bucket` with a capture-free ZST
+    // closure. The pinned Kani/CBMC crashes when a ZST closure is listed in
+    // `loop_modifies` (kani#4786), so the predicate itself is omitted.
+    // Mutations through its `&mut T` arguments are covered by `modified_items`.
+    macro_rules! gen_dedup_by_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a symbolic non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                vec.dedup_by(|_, _| kani::any());
+                finish(vec);
+            }
+        };
+    }
+
+    gen_dedup_by_harness!(harness_vec_dedup_by_u8, u8);
+    gen_dedup_by_harness!(harness_vec_dedup_by_u64, u64);
+    gen_dedup_by_harness!(harness_vec_dedup_by_unit, ());
+    gen_dedup_by_harness!(harness_vec_dedup_by_array, [u8; 4]);
+    gen_dedup_by_harness!(harness_vec_dedup_by_bool, bool);
+    gen_dedup_by_harness!(harness_vec_dedup_by_with_drop, WithDrop);
+
+    // Harnesses for `Vec::push`
+    macro_rules! gen_push_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Snapshot the initial length and capacity for the reserve precondition
+                let len = vec.len();
+                let cap = vec.capacity();
+                // Create a non-deterministic element to append
+                let value = kani::any();
+                // Require enough capacity for one additional element
+                assume_reserve_no_capacity_overflow::<$ty>(len, cap, 1);
+                let spare = cap.saturating_sub(len);
+                kani::cover(core::mem::size_of::<$ty>() == 0 || spare == 0, "push: growth");
+                kani::cover(core::mem::size_of::<$ty>() == 0 || spare > 0, "push: spare capacity");
+                // Push the selected value onto the Vec
+                vec.push(value);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_push_harness!(harness_vec_push_u8, u8);
+    gen_push_harness!(harness_vec_push_u64, u64);
+    gen_push_harness!(harness_vec_push_unit, ());
+    gen_push_harness!(harness_vec_push_bool, bool);
+    gen_push_harness!(harness_vec_push_array, [u8; 4]);
+    gen_push_harness!(harness_vec_push_with_drop, WithDrop);
+
+    // Harnesses for `Vec::push_within_capacity`
+    macro_rules! gen_push_within_capacity_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Create a non-deterministic element to append if capacity permits
+                let value = kani::any();
+                // Attempt to push the value without growing the allocation
+                let result = vec.push_within_capacity(value);
+                drop(result);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_push_within_capacity_harness!(harness_vec_push_within_capacity_u8, u8);
+    gen_push_within_capacity_harness!(harness_vec_push_within_capacity_u64, u64);
+    gen_push_within_capacity_harness!(harness_vec_push_within_capacity_unit, ());
+    gen_push_within_capacity_harness!(harness_vec_push_within_capacity_bool, bool);
+    gen_push_within_capacity_harness!(harness_vec_push_within_capacity_array, [u8; 4]);
+    gen_push_within_capacity_harness!(harness_vec_push_within_capacity_with_drop, WithDrop);
+
+    // Harnesses for `Vec::pop`
+    macro_rules! gen_pop_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Pop the last initialized element if one exists
+                let value = vec.pop();
+                drop(value);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_pop_harness!(harness_vec_pop_u8, u8);
+    gen_pop_harness!(harness_vec_pop_u64, u64);
+    gen_pop_harness!(harness_vec_pop_unit, ());
+    gen_pop_harness!(harness_vec_pop_bool, bool);
+    gen_pop_harness!(harness_vec_pop_array, [u8; 4]);
+    gen_pop_harness!(harness_vec_pop_with_drop, WithDrop);
+
+    // Harnesses for `Vec::append`
+    macro_rules! gen_append_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create the destination Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Create the source Vec whose elements will be moved
+                let mut other = verifier_nondet_vec::<$ty>();
+                let other_len = other.len();
+                // Require enough capacity for all elements from the source Vec
+                assume_reserve_no_capacity_overflow::<$ty>(vec.len(), vec.capacity(), other_len);
+                // Move all elements from `other` into `vec`
+                vec.append(&mut other);
+
+                assert_eq!(other.len(), 0);
+                kani::cover(other_len == 0, "append: empty source");
+                kani::cover(other_len > 0, "append: non-empty source");
+
+                finish(vec);
+                finish(other);
+            }
+        };
+    }
+
+    gen_append_harness!(harness_vec_append_u8, u8);
+    gen_append_harness!(harness_vec_append_u64, u64);
+    gen_append_harness!(harness_vec_append_unit, ());
+    gen_append_harness!(harness_vec_append_array, [u8; 4]);
+    gen_append_harness!(harness_vec_append_bool, bool);
+    gen_append_harness!(harness_vec_append_with_drop, WithDrop);
+
+    // Harnesses for `Vec::append_elements`
+    // * `append_elements` is verified directly rather than with
+    //   `proof_for_contract`. Its `reserve` call may reallocate and therefore
+    //   deallocate the old buffer. The pinned Kani function-contract API can
+    //   express writable regions with `modifies`, but cannot express the
+    //   corresponding `frees` frame required for reallocation.
+    macro_rules! gen_vec_append_elements_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create the destination Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Create the source Vec whose slice will be appended
+                let other = verifier_nondet_vec::<$ty>();
+                let count = other.len();
+                let old_spare = vec.capacity().saturating_sub(vec.len());
+                assume_reserve_no_capacity_overflow::<$ty>(vec.len(), vec.capacity(), count);
+                // `other.as_slice()` establishes the readable-source part of
+                // `append_elements`'s unsafe precondition. The remaining condition is that
+                // a non-empty, non-ZST source must not overlap the destination allocation.
+                kani::assume(
+                    count == 0
+                        || core::mem::size_of::<$ty>() == 0
+                        || !kani::mem::same_allocation(other.as_ptr(), vec.as_ptr()),
+                );
+                kani::cover(
+                    core::mem::size_of::<$ty>() == 0 || count <= old_spare,
+                    "append_elements: no growth",
+                );
+                kani::cover(
+                    core::mem::size_of::<$ty>() != 0 && count > old_spare,
+                    "append_elements: growth",
+                );
+                unsafe {
+                    // Append all elements from the source slice into the destination Vec
+                    vec.append_elements(other.as_slice() as _);
+                }
+            }
+        };
+    }
+
+    gen_vec_append_elements_harness!(harness_vec_append_elements_u8, u8);
+    gen_vec_append_elements_harness!(harness_vec_append_elements_u64, u64);
+    gen_vec_append_elements_harness!(harness_vec_append_elements_unit, ());
+    gen_vec_append_elements_harness!(harness_vec_append_elements_array, [u8; 4]);
+    gen_vec_append_elements_harness!(harness_vec_append_elements_bool, bool);
+
+    // Harnesses for `Vec::drain`
+    macro_rules! gen_drain_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut v = verifier_nondet_vec::<$ty>();
+                // Snapshot the initialized length to constrain the drain range
+                let len = v.len();
+                // Choose a non-deterministic in-bounds exclusive range end
+                let end = kani::any_where(|end: &usize| *end <= len);
+                // Choose a non-deterministic in-bounds range start
+                let start = kani::any_where(|start: &usize| *start <= end);
+                // Create a drain iterator over the selected range
+                let d = v.drain(start..end);
+                // Prevent the drain iterator from running its drop logic in this harness
+                core::mem::forget(d);
+            }
+        };
+    }
+
+    gen_drain_harness!(harness_vec_drain_u8, u8);
+    gen_drain_harness!(harness_vec_drain_u64, u64);
+    gen_drain_harness!(harness_vec_drain_unit, ());
+    gen_drain_harness!(harness_vec_drain_bool, bool);
+    gen_drain_harness!(harness_vec_drain_array, [u8; 4]);
+
+    // `drain` construction is checked unboundedly for a `needs_drop` element type.
+    // The iterator is deliberately forgotten here so this proof remains about the
+    // Challenge target itself; execution of `Drain::drop` over a symbolic element
+    // range is covered separately in `bounded_evidence`.
+    #[kani::proof]
+    fn harness_vec_drain_with_drop() {
+        let mut vec = verifier_nondet_vec::<WithDrop>();
+        let len = vec.len();
+        let end = kani::any_where(|end: &usize| *end <= len);
+        let start = kani::any_where(|start: &usize| *start <= end);
+        let drain = vec.drain(start..end);
+        core::mem::forget(drain);
+        finish(vec);
+    }
+
+    // Harnesses for `Vec::clear`
+    macro_rules! gen_clear_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut v = verifier_nondet_vec::<$ty>();
+                // Remove all initialized elements from the Vec
+                v.clear();
+            }
+        };
+    }
+
+    gen_clear_harness!(harness_vec_clear_u8, u8);
+    gen_clear_harness!(harness_vec_clear_u64, u64);
+    gen_clear_harness!(harness_vec_clear_unit, ());
+    gen_clear_harness!(harness_vec_clear_bool, bool);
+    gen_clear_harness!(harness_vec_clear_array, [u8; 4]);
+
+    // Harnesses for `Vec::split_off`
+    macro_rules! gen_split_off_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                let old_len = vec.len();
+                // Choose a non-deterministic split point within the initialized length
+                let at = kani::any_where(|at: &usize| *at <= old_len);
+                kani::cover(at == 0, "split_off: zero");
+                kani::cover(at == vec.len(), "split_off: len");
+                kani::cover(at > 0 && at < vec.len(), "split_off: middle");
+                // Split off the suffix starting at the selected point
+                let tail = vec.split_off(at);
+                assert_eq!(vec.len(), at);
+                assert_eq!(tail.len(), old_len - at);
+
+                finish(vec);
+                finish(tail);
+            }
+        };
+    }
+
+    gen_split_off_harness!(harness_vec_split_off_u8, u8);
+    gen_split_off_harness!(harness_vec_split_off_u64, u64);
+    gen_split_off_harness!(harness_vec_split_off_unit, ());
+    gen_split_off_harness!(harness_vec_split_off_bool, bool);
+    gen_split_off_harness!(harness_vec_split_off_array, [u8; 4]);
+    gen_split_off_harness!(harness_vec_split_off_with_drop, WithDrop);
+
+    #[cfg(not(no_global_oom_handling))]
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_vec_split_off_out_of_bounds() {
+        // Create a non-deterministic Vec for the panic case
+        let mut vec = verifier_nondet_vec::<u8>();
+        assert!(vec.len() < usize::MAX);
+        let at = kani::any_where(|at: &usize| *at > vec.len());
+        // Calling `split_off` with an out-of-bounds split point must panic
+        let _ = vec.split_off(at);
+    }
+
+    // Harnesses for `Vec::leak`
+    macro_rules! gen_leak_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Leak the Vec and return a mutable slice to its initialized elements
+                let _ = vec.leak();
+            }
+        };
+    }
+
+    gen_leak_harness!(harness_vec_leak_u8, u8);
+    gen_leak_harness!(harness_vec_leak_u64, u64);
+    gen_leak_harness!(harness_vec_leak_unit, ());
+    gen_leak_harness!(harness_vec_leak_bool, bool);
+    gen_leak_harness!(harness_vec_leak_array, [u8; 4]);
+
+    // Harnesses for `Vec::spare_capacity_mut`
+    macro_rules! gen_spare_capacity_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Borrow the spare capacity as maybe-uninitialized elements
+                let _ = vec.spare_capacity_mut();
+            }
+        };
+    }
+
+    gen_spare_capacity_mut_harness!(harness_vec_spare_capacity_mut_u8, u8);
+    gen_spare_capacity_mut_harness!(harness_vec_spare_capacity_mut_u64, u64);
+    gen_spare_capacity_mut_harness!(harness_vec_spare_capacity_mut_unit, ());
+    gen_spare_capacity_mut_harness!(harness_vec_spare_capacity_mut_bool, bool);
+    gen_spare_capacity_mut_harness!(harness_vec_spare_capacity_mut_array, [u8; 4]);
+
+    // Harnesses for `Vec::split_at_spare_mut`
+    macro_rules! gen_split_at_spare_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Split the Vec into initialized elements and spare capacity
+                let _ = vec.split_at_spare_mut();
+            }
+        };
+    }
+
+    gen_split_at_spare_mut_harness!(harness_vec_split_at_spare_mut_u8, u8);
+    gen_split_at_spare_mut_harness!(harness_vec_split_at_spare_mut_u64, u64);
+    gen_split_at_spare_mut_harness!(harness_vec_split_at_spare_mut_unit, ());
+    gen_split_at_spare_mut_harness!(harness_vec_split_at_spare_mut_bool, bool);
+    gen_split_at_spare_mut_harness!(harness_vec_split_at_spare_mut_array, [u8; 4]);
+
+    // Harnesses for `Vec::split_at_spare_mut_with_len`
+    macro_rules! gen_split_at_spare_mut_with_len_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(Vec::<$ty>::split_at_spare_mut_with_len)]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Split the Vec and expose the mutable length field under the contract
+                let _ = unsafe { vec.split_at_spare_mut_with_len() };
+            }
+        };
+    }
+
+    gen_split_at_spare_mut_with_len_harness!(harness_vec_split_at_spare_mut_with_len_u8, u8);
+    gen_split_at_spare_mut_with_len_harness!(harness_vec_split_at_spare_mut_with_len_u64, u64);
+    gen_split_at_spare_mut_with_len_harness!(harness_vec_split_at_spare_mut_with_len_unit, ());
+    gen_split_at_spare_mut_with_len_harness!(harness_vec_split_at_spare_mut_with_len_bool, bool);
+    gen_split_at_spare_mut_with_len_harness!(
+        harness_vec_split_at_spare_mut_with_len_array,
+        [u8; 4]
+    );
+
+    // Harnesses for `Vec::extend_from_within`
+    macro_rules! gen_extend_from_within_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof()]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Snapshot the initial length and capacity before choosing the source range
+                let len = vec.len();
+                let cap = vec.capacity();
+                // Choose a non-deterministic in-bounds exclusive range end
+                let end: usize = kani::any_where(|end: &usize| *end <= len);
+                // Choose a non-deterministic in-bounds range start
+                let start: usize = kani::any_where(|start: &usize| *start <= end);
+                // Compute how many elements will be cloned from the selected range
+                let additional = end - start;
+                // Require enough capacity for the cloned elements
+                assume_reserve_no_capacity_overflow::<$ty>(len, cap, additional);
+                // Perform any possible growth before constraining the raw copy pointers.
+                // `extend_from_within` will call `reserve` again, but this makes that call a no-op
+                // and lets the non-overlap assumption refer to the buffer used by the copy.
+                vec.reserve(additional);
+
+                // Compute the byte length used by `copy_nonoverlapping` and reject overflow states.
+                let elem_size = core::mem::size_of::<$ty>();
+                assert!(elem_size == 0 || additional <= usize::MAX / elem_size);
+                let copy_bytes = elem_size * additional;
+
+                // For non-empty raw copies, the initialized source range `[start, end)`
+                // and the spare destination range starting at `len` should not overlap.
+                if copy_bytes != 0 {
+                    let src_ptr = unsafe { vec.as_ptr().add(start) }.cast::<u8>();
+                    let dst_ptr = unsafe { vec.as_mut_ptr().add(len) }.cast::<u8>();
+                    assert!(src_ptr.addr().abs_diff(dst_ptr.addr()) >= copy_bytes);
+                }
+                // Extend the Vec by cloning the selected initialized range
+                vec.extend_from_within(start..end);
+            }
+        };
+    }
+
+    gen_extend_from_within_harness!(harness_vec_extend_from_within_u8, u8);
+    gen_extend_from_within_harness!(harness_vec_extend_from_within_u64, u64);
+    gen_extend_from_within_harness!(harness_vec_extend_from_within_unit, ());
+    gen_extend_from_within_harness!(harness_vec_extend_from_within_bool, bool);
+    gen_extend_from_within_harness!(harness_vec_extend_from_within_array, [u8; 4]);
+
+    // Harnesses for `Vec::into_flattened`
+    macro_rules! gen_into_flattened_harness {
+        ($name:ident, [$ty:ty; $n:expr]) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec of fixed-size arrays
+                let vec = verifier_nondet_vec::<[$ty; $n]>();
+                // Flatten the Vec into a Vec of the array element type
+                let _ = vec.into_flattened();
+            }
+        };
+        ($name:ident, zst_no_overflow([$ty:ty; $n:expr])) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec of fixed-size zero-sized arrays
+                let vec = verifier_nondet_vec::<[$ty; $n]>();
+                // Keep the flattened zero-sized length within usize bounds
+                let flattened_len_fits = vec.len() <= usize::MAX / $n;
+                kani::assume(flattened_len_fits);
+                kani::cover(
+                    flattened_len_fits,
+                    "into_flattened assumption: ZST flattened length is representable",
+                );
+                kani::cover(
+                    vec.len() == usize::MAX / $n,
+                    "into_flattened: largest non-overflowing ZST length",
+                );
+                // Flatten the Vec under the non-overflow precondition
+                let _ = vec.into_flattened();
+            }
+        };
+        ($name:ident, zst_overflow([$ty:ty; $n:expr])) => {
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $name() {
+                // Create a non-deterministic Vec of fixed-size zero-sized arrays
+                let vec = verifier_nondet_vec::<[$ty; $n]>();
+                // Force the flattened zero-sized length to overflow
+                let flattened_len_overflows = vec.len() > usize::MAX / $n;
+                kani::assume(flattened_len_overflows);
+                kani::cover(
+                    flattened_len_overflows,
+                    "into_flattened panic assumption: ZST flattened length overflows usize",
+                );
+                // Flattening this Vec must panic on length overflow
+                let _ = vec.into_flattened();
+            }
+        };
+    }
+
+    gen_into_flattened_harness!(harness_vec_into_flattened_u8_array, [u8; 4]);
+    gen_into_flattened_harness!(harness_vec_into_flattened_u64_array, [u64; 4]);
+    gen_into_flattened_harness!(harness_vec_into_flattened_bool_array, [bool; 4]);
+    gen_into_flattened_harness!(harness_vec_into_flattened_u8_array_array_4, [[u8; 4]; 4]);
+    gen_into_flattened_harness!(harness_vec_into_flattened_unit_array, zst_no_overflow([(); 4]));
+    gen_into_flattened_harness!(
+        harness_vec_into_flattened_unit_array_overflow,
+        zst_overflow([(); 4])
+    );
+
+    #[kani::proof]
+    fn harness_vec_into_flattened_with_drop() {
+        let vec = verifier_nondet_vec::<[WithDrop; 4]>();
+        let flat: Vec<WithDrop> = vec.into_flattened();
+        finish(flat);
+    }
+
+    // The main proof is unbounded and verifies the Kani loop-contract transcription above.
+    // Harnesses for `Vec::extend_with`
+    macro_rules! gen_extend_with_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Snapshot the initial length and capacity for the reserve precondition
+                let len = vec.len();
+                let cap = vec.capacity();
+                // Choose a non-deterministic number of cloned elements to append
+                let n: usize = kani::any();
+                // Create the value that will be cloned into the spare slots
+                let value: $ty = kani::any();
+                // Require enough capacity for the appended clones
+                assume_reserve_no_capacity_overflow::<$ty>(len, cap, n);
+                kani::cover(n == 0, "extend_with: empty");
+                kani::cover(n != 0, "extend_with: nonempty");
+                // Extend the Vec with `n` clones of `value`
+                vec.extend_with(n, value);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_extend_with_harness!(harness_vec_extend_with_u8, u8);
+    gen_extend_with_harness!(harness_vec_extend_with_u64, u64);
+    gen_extend_with_harness!(harness_vec_extend_with_unit, ());
+    gen_extend_with_harness!(harness_vec_extend_with_array, [u8; 4]);
+    gen_extend_with_harness!(harness_vec_extend_with_bool, bool);
+    gen_extend_with_harness!(harness_vec_extend_with_with_drop, WithDrop);
+
+    // Harnesses for `Vec::spec_extend_from_within`
+    macro_rules! gen_vec_spec_extend_from_within_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Build a nondeterministic vector for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Snapshot the initial vector length and capacity
+                let len = vec.len();
+                let cap = vec.capacity();
+                // Choose an in-bounds exclusive range start and end
+                let end: usize = kani::any_where(|end: &usize| *end <= len);
+                let start: usize = kani::any_where(|start: &usize| *start <= end);
+                // Compute how many elements will be copied from the initialized prefix
+                let count = end - start;
+                // Precondition of `spec_extend_from_within`: the complete source
+                // range must fit in the current spare capacity.
+                let enough_spare = count <= cap - len;
+                kani::assume(enough_spare);
+                kani::cover(
+                    enough_spare,
+                    "spec_extend_from_within precondition: source range fits spare capacity",
+                );
+                kani::cover(count == 0, "spec_extend_from_within: empty source range");
+                kani::cover(count > 0, "spec_extend_from_within: non-empty source range");
+                // Get the size of each element in bytes for the raw memory overlap check
+                let elem_size = core::mem::size_of::<$ty>();
+                // Compute the total byte length of the copied region, rejecting overflow states
+                // kani::assume(elem_size == 0 || count <= usize::MAX / elem_size);
+                assert!(elem_size == 0 || count <= usize::MAX / elem_size);
+                let copy_bytes = elem_size * count;
+                // Skip raw pointer reasoning when the copied byte range is empty
+                if copy_bytes != 0 {
+                    // Compute the source byte pointer and destination byte pointer
+                    let src_ptr = unsafe { vec.as_ptr().add(start) }.cast::<u8>();
+                    let dst_ptr = unsafe { vec.as_mut_ptr().add(len) }.cast::<u8>();
+
+                    // Tell Kani that the source and destination byte ranges do not overlap
+                    // kani::assume(src_ptr.addr().abs_diff(dst_ptr.addr()) >= copy_bytes);
+                    assert!(src_ptr.addr().abs_diff(dst_ptr.addr()) >= copy_bytes);
+                }
+                // Call the unsafe internal function under its preconditions
+                unsafe {
+                    vec.spec_extend_from_within(start..end);
+                }
+            }
+        };
+    }
+
+    gen_vec_spec_extend_from_within_harness!(harness_vec_spec_extend_from_within_u8, u8);
+    gen_vec_spec_extend_from_within_harness!(harness_vec_spec_extend_from_within_u64, u64);
+    gen_vec_spec_extend_from_within_harness!(harness_vec_spec_extend_from_within_unit, ());
+    gen_vec_spec_extend_from_within_harness!(harness_vec_spec_extend_from_within_bool, bool);
+    gen_vec_spec_extend_from_within_harness!(harness_vec_spec_extend_from_within_array, [u8; 4]);
+
+    // Harnesses for `Vec::deref`
+    macro_rules! gen_vec_deref_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Borrow the Vec as an immutable slice
+                let _: &[$ty] = vec.deref();
+            }
+        };
+    }
+
+    gen_vec_deref_harness!(harness_vec_deref_u8, u8);
+    gen_vec_deref_harness!(harness_vec_deref_u64, u64);
+    gen_vec_deref_harness!(harness_vec_deref_unit, ());
+    gen_vec_deref_harness!(harness_vec_deref_bool, bool);
+    gen_vec_deref_harness!(harness_vec_deref_array, [u8; 4]);
+
+    // Harnesses for `Vec::deref_mut`
+    macro_rules! gen_vec_deref_mut_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Borrow the Vec as a mutable slice
+                let _: &mut [$ty] = vec.deref_mut();
+            }
+        };
+    }
+
+    gen_vec_deref_mut_harness!(harness_vec_deref_mut_u8, u8);
+    gen_vec_deref_mut_harness!(harness_vec_deref_mut_u64, u64);
+    gen_vec_deref_mut_harness!(harness_vec_deref_mut_unit, ());
+    gen_vec_deref_mut_harness!(harness_vec_deref_mut_bool, bool);
+    gen_vec_deref_mut_harness!(harness_vec_deref_mut_array, [u8; 4]);
+
+    // Harnesses for `Vec::into_iter`
+    macro_rules! gen_vec_into_iter_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Convert the Vec into its owning iterator
+                let _ = vec.into_iter();
+            }
+        };
+    }
+
+    gen_vec_into_iter_harness!(harness_vec_into_iter_u8, u8);
+    gen_vec_into_iter_harness!(harness_vec_into_iter_u64, u64);
+    gen_vec_into_iter_harness!(harness_vec_into_iter_unit, ());
+    gen_vec_into_iter_harness!(harness_vec_into_iter_bool, bool);
+    gen_vec_into_iter_harness!(harness_vec_into_iter_array, [u8; 4]);
+
+    #[kani::proof]
+    fn harness_vec_into_iter_with_drop() {
+        let vec = verifier_nondet_vec::<WithDrop>();
+        // Verify transfer of ownership from Vec to IntoIter without entering the
+        // compiler-generated symbolic-length drop glue for the iterator.
+        let iter = vec.into_iter();
+        core::mem::forget(iter);
+    }
+
+    // `extend_desugared` is verified with bounded loop unwinding instead of a
+    // loop contract.
+    // We initially attempted an unbounded proof by attaching a loop contract to
+    // the shipped `while let` loop. That approach is not currently viable with
+    // the pinned Kani version:
+    // - The loop body may call `reserve`, which can reallocate the Vec. During
+    //   loop-contract induction, Kani/CBMC must therefore model changes to the
+    //   Vec's pointer, capacity, allocation lifetime, and deallocation of the old
+    //   buffer. The resulting loop frame does not preserve enough allocation
+    //   state to reason soundly about subsequent iterations, leading to spurious
+    //   allocation/provenance failures such as invalid realloc/free operations.
+    // - Strengthening the invariant with accessors such as `capacity()` is also
+    //   not usable with the pinned Kani version because method calls in loop
+    //   invariants are affected by Kani issue #4796: they may be lowered with
+    //   missing arguments and replaced by non-deterministic values.
+    // This is therefore a bounded end-to-end verification of the real
+    // implementation, not an unbounded loop-contract proof.
+    macro_rules! gen_vec_extend_desugared_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            #[kani::unwind(11)]
+            pub fn $name() {
+                // Create an arbitrary valid Vec state.
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Verify the exact shipped implementation for iterators containing
+                // up to 10 elements.
+                let n: usize = kani::any_where(|&x| x <= 10);
+                // Constrain only allocation/layout representability. This does not
+                // force the no-growth path: both existing-spare-capacity and
+                // reserve/reallocation executions remain possible.
+                assume_reserve_no_capacity_overflow::<$ty>(vec.len(), vec.capacity(), n);
+
+                kani::cover(n == 0, "extend_desugared bounded: empty iterator");
+                kani::cover(n == 1, "extend_desugared bounded: one element");
+                kani::cover(n > 1, "extend_desugared bounded: multiple elements");
+                kani::cover(n == 10, "extend_desugared bounded: maximum length");
+
+                let iter = AnyIter::<$ty>::new(n);
+
+                // Directly verify the real Vec::extend_desugared implementation.
+                vec.extend_desugared(iter);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_u8, u8);
+    gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_u64, u64);
+    gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_unit, ());
+    gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_array, [u8; 4]);
+    gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_bool, bool);
+    gen_vec_extend_desugared_harness!(harness_vec_extend_desugared_with_drop, WithDrop);
+
+    // `extend_trusted` is verified with bounded loop unwinding rather than an
+    // unbounded loop contract.
+    // We initially attempted to verify the iteration unboundedly by replacing the
+    // hidden `Iterator::for_each` loop with an explicit verification loop carrying
+    // a loop contract. This is not currently reliable with the pinned Kani version:
+    // - Kani cannot attach a loop contract directly to the loop hidden inside
+    //   `Iterator::for_each` / `fold`, requiring a verification-only transcription.
+    // - The explicit loop must preserve the `TrustedLen` relation between the
+    //   iterator's remaining elements and the number of elements already written.
+    //   Expressing that relation naturally requires querying the iterator (for
+    //   example through `size_hint()`), but method calls in loop invariants are
+    //   affected by Kani issue #4796 and may be lowered to non-deterministic values.
+    // - Attempts to work around the hidden-loop structure also exposed limitations
+    //   in the pinned loop-contract MIR transformation for some control-flow shapes.
+    //
+    // Rather than rely on a Kani-only transcription that does not directly verify
+    // the shipped implementation, these harnesses use bounded unwinding and execute
+    // the real `Iterator::for_each` implementation below.
+    // This is therefore a bounded end-to-end verification of the shipped
+    // `extend_trusted` implementation, not an unbounded loop-contract proof.
+    macro_rules! gen_vec_extend_trusted_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            #[kani::unwind(11)]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type.
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Directly verify the shipped `extend_trusted` implementation for
+                // TrustedLen iterators containing up to 10 elements.
+                let n: usize = kani::any_where(|&x| x <= 10);
+                // Constrain allocation/layout representability for the initial
+                // `reserve(n)`. This does not force a particular allocation path.
+                assume_reserve_no_capacity_overflow::<$ty>(vec.len(), vec.capacity(), n);
+                kani::cover(n == 0, "extend_trusted bounded: empty iterator");
+                kani::cover(n == 1, "extend_trusted bounded: one element");
+                kani::cover(n > 1, "extend_trusted bounded: multiple elements");
+                kani::cover(n == 10, "extend_trusted bounded: maximum iterator length");
+                // `AnyIter` provides an exact finite size hint and satisfies the
+                // TrustedLen contract for exactly `n` symbolic elements.
+                let iter = AnyIter::<$ty>::new(n);
+                // Execute the real shipped implementation, including its
+                // Iterator::for_each / fold iteration.
+                vec.extend_trusted(iter);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_u8, u8);
+    gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_u64, u64);
+    gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_unit, ());
+    gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_array, [u8; 4]);
+    gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_bool, bool);
+    gen_vec_extend_trusted_harness!(harness_vec_extend_trusted_with_drop, WithDrop);
+
+    // Harnesses for `Vec::extract_if`
+    macro_rules! gen_vec_extract_if_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let mut vec = verifier_nondet_vec::<$ty>();
+                // Choose a non-deterministic in-bounds extraction range
+                let start = kani::any_where(|start: &usize| *start <= vec.len());
+                let end = kani::any_where(|end: &usize| *end >= start && *end <= vec.len());
+                // Extract elements from the selected range according to a non-deterministic predicate
+                let iter = vec.extract_if(start..end, |_x| kani::any::<bool>());
+                // Dropping an unconsumed ExtractIf restores the Vec's logical length.
+                drop(iter);
+                finish(vec);
+            }
+        };
+    }
+
+    gen_vec_extract_if_harness!(harness_vec_extract_if_u8, u8);
+    gen_vec_extract_if_harness!(harness_vec_extract_if_u64, u64);
+    gen_vec_extract_if_harness!(harness_vec_extract_if_unit, ());
+    gen_vec_extract_if_harness!(harness_vec_extract_if_bool, bool);
+    gen_vec_extract_if_harness!(harness_vec_extract_if_array, [u8; 4]);
+    gen_vec_extract_if_harness!(harness_vec_extract_if_with_drop, WithDrop);
+
+    // Harnesses for `Vec::drop`
+    macro_rules! gen_vec_drop_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Drop the Vec and its initialized elements
+                drop(vec);
+            }
+        };
+    }
+
+    gen_vec_drop_harness!(harness_vec_drop_u8, u8);
+    gen_vec_drop_harness!(harness_vec_drop_u64, u64);
+    gen_vec_drop_harness!(harness_vec_drop_unit, ());
+    gen_vec_drop_harness!(harness_vec_drop_array, [u8; 4]);
+    gen_vec_drop_harness!(harness_vec_drop_bool, bool);
+
+    // Harnesses for `Vec::try_from`
+    macro_rules! gen_vec_try_from_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Create a non-deterministic Vec for the target element type
+                let vec = verifier_nondet_vec::<$ty>();
+                // Try to convert the Vec into a fixed-size array
+                let _: Result<[$ty; 4], Vec<$ty>> =
+                    <[$ty; 4] as core::convert::TryFrom<Vec<$ty>>>::try_from(vec);
+            }
+        };
+    }
+
+    gen_vec_try_from_harness!(harness_vec_try_from_u8, u8);
+    gen_vec_try_from_harness!(harness_vec_try_from_u64, u64);
+    gen_vec_try_from_harness!(harness_vec_try_from_unit, ());
+    gen_vec_try_from_harness!(harness_vec_try_from_bool, bool);
+    gen_vec_try_from_harness!(harness_vec_try_from_array, [u8; 4]);
+
+    mod bounded_evidence {
+        //! Supplementary bounded evidence for paths that cannot currently be
+        //! discharged with Kani loop contracts.
+        //! The primary Challenge 23 harnesses remain unbounded except for
+        //! `extend_desugared` and `extend_trusted`. The proofs in this module are
+        //! additional evidence for `needs_drop` behavior and the default
+        //! `Clone` specialization.
+        //! `Vec` destruction, `truncate`, `clear`, and `Drain::drop` eventually
+        //! execute compiler-generated slice drop glue. That loop has no source-level
+        //! loop on which this module can attach a Kani loop contract, so these paths
+        //! use bounded unwinding.
+        //! The default `spec_extend_from_within` implementation similarly hides its
+        //! iteration inside `zip` / `map` / `for_each`; `CloneOnly` is used here to
+        //! force that implementation instead of the `TrivialClone` specialization.
+        use super::*;
+
+        fn bounded_with_drop_vec() -> Vec<WithDrop> {
+            let mut vec = verifier_nondet_vec::<WithDrop>();
+            // Pick a symbolic logical length for the compiler-generated
+            // drop loop to be completely unwound. The original initialized prefix is
+            // at least this long, so shortening the logical length preserves Vec's
+            // memory-safety invariants.
+            let len = kani::any_where(|len: &usize| *len <= 4 && *len <= vec.len());
+            vec.len = len;
+            vec
         }
 
-        // Check that all other unaffected elements remain unchanged
-        let k = kani::any_where(|&x: &usize| x < original_len - 1);
-        if k != index {
-            assert!(vect[k] == arr[k]);
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_drop_with_drop() {
+            let vec = bounded_with_drop_vec();
+            kani::cover(vec.len() == 0, "Vec::drop WithDrop: empty");
+            kani::cover(vec.len() > 0, "Vec::drop WithDrop: non-empty");
+            kani::cover(vec.len() == 4, "Vec::drop WithDrop: maximum bounded length");
+            drop(vec);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_truncate_with_drop() {
+            let mut vec = bounded_with_drop_vec();
+            let old_len = vec.len();
+            let new_len: usize = kani::any();
+            kani::cover(new_len < old_len, "truncate WithDrop: drops elements");
+            kani::cover(new_len >= old_len, "truncate WithDrop: no-op");
+            kani::cover(
+                old_len == 4 && new_len == 0,
+                "truncate WithDrop: maximum bounded dropped suffix",
+            );
+            vec.truncate(new_len);
+            drop(vec);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_clear_with_drop() {
+            let mut vec = bounded_with_drop_vec();
+            let old_len = vec.len();
+            kani::cover(old_len == 0, "clear WithDrop: empty Vec");
+            kani::cover(old_len > 0, "clear WithDrop: non-empty Vec");
+            kani::cover(old_len == 4, "clear WithDrop: maximum bounded length");
+            vec.clear();
+            assert_eq!(vec.len(), 0);
+            drop(vec);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_try_from_with_drop_success() {
+            let vec = verifier_nondet_vec::<WithDrop>();
+            if vec.len() != 4 {
+                core::mem::forget(vec);
+                return;
+            }
+            kani::cover(vec.len() == 4, "try_from WithDrop: exact array length");
+            let result: Result<[WithDrop; 4], Vec<WithDrop>> =
+                <[WithDrop; 4] as core::convert::TryFrom<Vec<WithDrop>>>::try_from(vec);
+            assert!(result.is_ok());
+            if let Ok(array) = result {
+                drop(array);
+            }
+        }
+
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_drain_drop_with_drop() {
+            let mut vec = bounded_with_drop_vec();
+            let old_len = vec.len();
+            let end = kani::any_where(|end: &usize| *end <= old_len);
+            let start = kani::any_where(|start: &usize| *start <= end);
+            kani::cover(start == end, "drain WithDrop: empty range");
+            kani::cover(start < end, "drain WithDrop: non-empty range");
+            kani::cover(
+                old_len == 4 && start == 0 && end == old_len,
+                "drain WithDrop: maximum bounded full drain",
+            );
+            let drain = vec.drain(start..end);
+            drop(drain);
+            drop(vec);
+        }
+
+        #[cfg(not(no_global_oom_handling))]
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_spec_extend_from_within_clone_only() {
+            let mut vec = verifier_nondet_vec::<CloneOnly>();
+            let len = vec.len();
+            let cap = vec.capacity();
+
+            // `CloneOnly` does not implement `TrivialClone`, so this reaches the
+            // default per-element `Clone` implementation. Bound only the number of
+            // clone iterations hidden inside `zip` / `map` / `for_each`.
+            let count = kani::any_where(|count: &usize| {
+                *count <= 4 && *count <= len && *count <= cap - len
+            });
+            let start = kani::any_where(|start: &usize| *start <= len - count);
+            let end = start + count;
+            kani::cover(count == 0, "spec_extend_from_within CloneOnly: empty range");
+            kani::cover(count > 0, "spec_extend_from_within CloneOnly: non-empty range");
+            kani::cover(
+                count == 4,
+                "spec_extend_from_within CloneOnly: maximum bounded clone count",
+            );
+            unsafe {
+                vec.spec_extend_from_within(start..end);
+            }
+            finish(vec);
+        }
+
+        #[cfg(not(no_global_oom_handling))]
+        #[kani::proof]
+        #[kani::unwind(6)]
+        fn bounded_vec_extend_from_within_clone_only() {
+            let mut vec = verifier_nondet_vec::<CloneOnly>();
+            let len = vec.len();
+            let cap = vec.capacity();
+            // Bound only the default Clone implementation's hidden iteration.
+            // The surrounding Vec state, including its capacity, remains symbolic.
+            let additional =
+                kani::any_where(|additional: &usize| *additional <= 4 && *additional <= len);
+            let start = kani::any_where(|start: &usize| *start <= len - additional);
+            let end = start + additional;
+            assume_reserve_no_capacity_overflow::<CloneOnly>(len, cap, additional);
+            let old_spare = cap - len;
+            kani::cover(additional == 0, "extend_from_within CloneOnly: empty range");
+            kani::cover(additional > 0, "extend_from_within CloneOnly: non-empty range");
+            kani::cover(
+                additional == 4,
+                "extend_from_within CloneOnly: maximum bounded clone count",
+            );
+            kani::cover(
+                additional <= old_spare,
+                "extend_from_within CloneOnly: existing spare capacity",
+            );
+            kani::cover(additional > old_spare, "extend_from_within CloneOnly: growth");
+            vec.extend_from_within(start..end);
+            finish(vec);
         }
     }
 }
