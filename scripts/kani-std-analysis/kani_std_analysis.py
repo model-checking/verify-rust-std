@@ -38,6 +38,31 @@ def str_to_bool(string: str):
             sys.exit(1)
 
 
+# Scanner names are crate-prefixed (`core::ptr::align_offset`) since rust-lang/rust#149401;
+# `kani list` names are not (`ptr::align_offset`). Strip the prefix so they match again, but
+# only where `<crate>::` is a path qualifier, never a continuation segment (like Kani does).
+def strip_crate_prefix(name: str, crate: str) -> str:
+    needle = f"{crate}::"
+    if needle not in name:
+        return name
+    out = []
+    rest = name
+    prev = None
+    while True:
+        at_qualifier = prev is None or (not prev.isalnum() and prev not in "_:")
+        if at_qualifier and rest.startswith(needle):
+            rest = rest[len(needle):]
+            prev = ":"
+            continue
+        if not rest:
+            break
+        ch = rest[0]
+        out.append(ch)
+        prev = ch
+        rest = rest[1:]
+    return "".join(out)
+
+
 # Process the results from Kani's std-analysis.sh script for each crate.
 class GenericSTDMetrics():
     def __init__(self, results_dir, crate):
@@ -89,6 +114,7 @@ class GenericSTDMetrics():
                 if len(row) >= 5:
                     name, is_unsafe, has_unsafe_ops = row[0], row[1], row[2]
                     has_unsupported_input, has_loop = row[3], row[4]
+                    name = strip_crate_prefix(name, self.crate)
                     # An unsafe function is a function for which is_unsafe=true
                     if str_to_bool(is_unsafe):
                         self.unsafe_fns.append(name)
