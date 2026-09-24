@@ -350,6 +350,9 @@ main() {
         ./kani_std_analysis.py --crate core \
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-core.json
+        ./kani_std_analysis.py --crate alloc \
+          --kani-list-file $current_dir/kani-list.json \
+          --metrics-file metrics-data-alloc.json
         ./kani_std_analysis.py --crate std \
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-std.json
