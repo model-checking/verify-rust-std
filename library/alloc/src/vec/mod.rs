@@ -1310,6 +1310,15 @@ impl<T, A: Allocator> Vec<T, A> {
     #[inline]
     #[unstable(feature = "allocator_api", issue = "32838")]
     // #[unstable(feature = "box_vec_non_null", issue = "130364")]
+    // Contract note: the allocation-provenance obligation (ptr from an
+    // allocation of exactly `capacity`, in `alloc`) is not expressible as a
+    // predicate; the proof harness constructs genuinely valid parts and the
+    // remaining obligation is documented here rather than assumed. For ZSTs the
+    // capacity argument is ignored (RawVec reports usize::MAX), so both clauses
+    // apply only to sized element types.
+    #[safety::requires(core::mem::size_of::<T>() == 0 || length <= capacity)]
+    #[safety::ensures(|result: &Self| result.len() == length
+        && (core::mem::size_of::<T>() == 0 || result.capacity() == capacity))]
     pub unsafe fn from_parts_in(ptr: NonNull<T>, length: usize, capacity: usize, alloc: A) -> Self {
         ub_checks::assert_unsafe_precondition!(
             check_library_ub,
@@ -4610,15 +4619,18 @@ mod verify {
         let _v2 = unsafe { Vec::from_parts(p, l, c) };
     }
 
-    #[kani::proof]
+    #[kani::proof_for_contract(Vec::from_parts_in)]
     fn verify_from_parts_in() {
         let v = any_vec_symcap();
         let mut v = core::mem::ManuallyDrop::new(v);
         let (l, c) = (v.len(), v.capacity());
         let p = unsafe { core::ptr::NonNull::new_unchecked(v.as_mut_ptr()) };
+        // any_vec_symcap yields len 1 over a symbolic capacity, so witness the
+        // two reachable capacity regimes rather than an unreachable empty state.
+        kani::cover(c == l, "exact-capacity round-trip reachable");
+        kani::cover(c > l, "spare-capacity round-trip reachable");
         // SAFETY: parts from a live Vec; Global is its allocator.
-        let v2 = unsafe { Vec::from_parts_in(p, l, c, crate::alloc::Global) };
-        assert!(v2.len() == l && v2.capacity() == c);
+        let _v2 = unsafe { Vec::from_parts_in(p, l, c, crate::alloc::Global) };
     }
 
     #[kani::proof]
