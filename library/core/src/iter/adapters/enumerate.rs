@@ -321,3 +321,71 @@ impl<I: Default> Default for Enumerate<I> {
         Enumerate::new(Default::default())
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for enumerate
+    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
+    macro_rules! generate_enumerate_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Generate a symbolic enumeration offset.
+                let count: usize = kani::any();
+                // Generate a symbolic relative access index.
+                let idx: usize = kani::any();
+                // Generate an arbitrary inner item.
+                let value: $ty = kani::any();
+                // Record the absolute position reached by the inner iterator.
+                let observed_position = crate::cell::Cell::new(usize::MAX);
+
+                // Model the remaining range after `count` items without allocating elements.
+                let source = (count..usize::MAX).map(|position| {
+                    // Record which inner element the target actually requested.
+                    observed_position.set(position);
+                    value
+                });
+                // Build a valid `Enumerate` state with a symbolic offset.
+                let mut iter = Enumerate { iter: source, count };
+
+                // Express the target's `idx < self.size()` precondition.
+                kani::assume(idx < iter.size_hint().0);
+                // Save observable iterator state before random access.
+                let count_before = iter.next_index();
+                let size_before = iter.size_hint();
+
+                // Call the target `Enumerate<I>` implementation through the trait path.
+                let result =
+                    unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+
+                // Check that the relative `idx` reached the correct absolute position.
+                assert_eq!(observed_position.get(), count_before + idx);
+                // Check the enumeration index added by the target.
+                assert_eq!(result.0, count_before + idx);
+                // Check that the inner item was forwarded unchanged.
+                assert_eq!(result.1, value);
+                // Check that random access did not advance the enumeration count.
+                assert_eq!(iter.next_index(), count_before);
+                // Check that random access did not consume the iterator.
+                assert_eq!(iter.size_hint(), size_before);
+            }
+        };
+    }
+
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i8, i8);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i16, i16);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i32, i32);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i64, i64);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_i128, i128);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u8, u8);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u16, u16);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u32, u32);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u64, u64);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_u128, u128);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_array, [u8; 4]);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_bool, bool);
+    generate_enumerate_get_unchecked_harness!(harness_enumerate_get_unchecked_unit, ());
+}

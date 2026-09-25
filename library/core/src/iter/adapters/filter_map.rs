@@ -1,5 +1,7 @@
 use crate::iter::adapters::SourceIter;
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused};
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{ManuallyDrop, MaybeUninit};
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, Try};
@@ -210,4 +212,48 @@ where
 unsafe impl<I: InPlaceIterable, F> InPlaceIterable for FilterMap<I, F> {
     const EXPAND_BY: Option<NonZero<usize>> = I::EXPAND_BY;
     const MERGE_BY: Option<NonZero<usize>> = I::MERGE_BY;
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `next_chunk` for FilterMap
+    macro_rules! generate_next_chunk_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                // Use a fixed-size source so the underlying iterator loop is bounded.
+                let values: [$ty; 4] = kani::any();
+                let source: crate::array::IntoIter<$ty, 4> = values.into_iter();
+
+                // Choose whether each input is mapped to Some or filtered out as None.
+                let mut filter_map =
+                    FilterMap::new(
+                        source,
+                        |element: $ty| {
+                            if kani::any::<bool>() { Some(element) } else { None }
+                        },
+                    );
+
+                // Exercise both the full-chunk and partial-chunk result paths.
+                let _ = filter_map.next_chunk::<4>();
+            }
+        };
+    }
+
+    generate_next_chunk_harness!(harness_next_chunk_i8, i8);
+    generate_next_chunk_harness!(harness_next_chunk_i16, i16);
+    generate_next_chunk_harness!(harness_next_chunk_i32, i32);
+    generate_next_chunk_harness!(harness_next_chunk_i64, i64);
+    generate_next_chunk_harness!(harness_next_chunk_i128, i128);
+    generate_next_chunk_harness!(harness_next_chunk_u8, u8);
+    generate_next_chunk_harness!(harness_next_chunk_u16, u16);
+    generate_next_chunk_harness!(harness_next_chunk_u32, u32);
+    generate_next_chunk_harness!(harness_next_chunk_u64, u64);
+    generate_next_chunk_harness!(harness_next_chunk_u128, u128);
+    generate_next_chunk_harness!(harness_next_chunk_array, [u8; 4]);
+    generate_next_chunk_harness!(harness_next_chunk_bool, bool);
+    generate_next_chunk_harness!(harness_next_chunk_unit, ());
 }

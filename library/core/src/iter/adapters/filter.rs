@@ -5,6 +5,8 @@ use core::ops::ControlFlow;
 use crate::fmt;
 use crate::iter::adapters::SourceIter;
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::Try;
 
@@ -251,3 +253,42 @@ impl<I: TrustedLen> SpecAssumeCount for I {
         unsafe { crate::hint::assert_unchecked(count <= upper) }
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `next_chunk_dropless` for Filter
+    macro_rules! generate_next_chunk_dropless_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            fn $name() {
+                // Use a fixed-size source so the underlying iterator loop is bounded.
+                let values: [$ty; 4] = kani::any();
+                let source: crate::array::IntoIter<$ty, 4> = values.into_iter();
+
+                // Choose each filtering decision nondeterministically.
+                let mut filter = Filter::new(source, |_: &$ty| kani::any());
+
+                // Exercise both the full-chunk and partial-chunk result paths.
+                let _ = filter.next_chunk_dropless::<4>();
+            }
+        };
+    }
+
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_i8, i8);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_i16, i16);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_i32, i32);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_i64, i64);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_i128, i128);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_u8, u8);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_u16, u16);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_u32, u32);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_u64, u64);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_u128, u128);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_array, [u8; 4]);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_bool, bool);
+    generate_next_chunk_dropless_harness!(harness_next_chunk_dropless_unit, ());
+}
+  
