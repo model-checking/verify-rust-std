@@ -62,3 +62,56 @@ impl<T> SpecFromIter<T, IntoIter<T>> for Vec<T> {
         vec
     }
 }
+
+#[cfg(kani)]
+mod verify {
+    use core::kani;
+
+    use super::SpecFromIter;
+    use crate::vec::{IntoIter, Vec};
+
+    // from_iter (IntoIter specialization): reuse-allocation path (from_parts /
+    // ptr::copy-to-front) — object-light, no reallocation. Real body,
+    // symbolic-length source; postcondition checks length and element value
+    // at a symbolic index.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_from_iter_intoiter_u8() {
+        let arr: [u8; 64] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let n = s.len();
+        let src: IntoIter<u8> = s.to_vec().into_iter();
+        let v: Vec<u8> = <Vec<u8> as SpecFromIter<u8, IntoIter<u8>>>::from_iter(src);
+        assert!(v.len() == n);
+        if n > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < n);
+            assert!(v[j] == s[j]);
+        }
+    }
+
+    use crate::vec::kani_shapes::DropToken;
+
+    // from_iter (IntoIter) over a Drop-carrying T: the ManuallyDrop + from_parts
+    // ownership transfer is the no-double-drop obligation. Mirrors
+    // check_from_iter_intoiter_u8.
+    fn check_from_iter_intoiter_shape<T: kani::Arbitrary + Clone + PartialEq, const N: usize>() {
+        let arr: [T; N] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let n = s.len();
+        let src: IntoIter<T> = s.to_vec().into_iter();
+        let v: Vec<T> = <Vec<T> as SpecFromIter<T, IntoIter<T>>>::from_iter(src);
+        assert!(v.len() == n);
+        if n > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < n);
+            assert!(v[j] == s[j]);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_from_iter_intoiter_droptoken() {
+        check_from_iter_intoiter_shape::<DropToken, 8>();
+    }
+}
