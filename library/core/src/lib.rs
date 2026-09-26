@@ -43,6 +43,7 @@
 //!   which do not trigger a panic can be assured that this function is never
 //!   called. The `lang` attribute is called `eh_personality`.
 
+#![cfg_attr(kani, recursion_limit = "256")]
 #![stable(feature = "core", since = "1.6.0")]
 #![doc(
     html_playground_url = "https://play.rust-lang.org/",
