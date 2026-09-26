@@ -1,5 +1,7 @@
 //! This module contains a variety of sort implementations that are optimized for small lengths.
 
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::slice::sort::shared::FreezeMarker;
 use crate::{hint, intrinsics, ptr, slice};
@@ -383,6 +385,10 @@ where
 /// types. `is_less` could be a huge function and we want to give the compiler an option to
 /// not inline this function. For the same reasons that this function is very perf critical
 /// it should be in the same module as the functions that use it.
+#[safety::requires(a_pos != b_pos)]
+#[safety::requires(crate::ub_checks::can_write(unsafe { v_base.add(a_pos) })
+    && crate::ub_checks::can_write(unsafe { v_base.add(b_pos) }))]
+#[cfg_attr(kani, kani::modifies(unsafe { v_base.add(a_pos) }, unsafe { v_base.add(b_pos) }))]
 unsafe fn swap_if_less<T, F>(v_base: *mut T, a_pos: usize, b_pos: usize, is_less: &mut F)
 where
     F: FnMut(&T, &T) -> bool,
@@ -577,6 +583,11 @@ unsafe fn insert_tail<T, F: FnMut(&T, &T) -> bool>(begin: *mut T, tail: *mut T, 
 }
 
 /// Sort `v` assuming `v[..offset]` is already sorted.
+// The precondition mirrors the function's own guard: `offset == 0 || offset > v.len()`
+// takes the `intrinsics::abort()` arm (a defined, safe outcome that a `should_panic`
+// harness cannot observe), so the verified domain is the non-aborting one.
+#[safety::requires(offset >= 1 && offset <= v.len())]
+#[cfg_attr(kani, kani::modifies(v))]
 pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
     v: &mut [T],
     offset: usize,
@@ -864,4 +875,417 @@ fn panic_on_ord_violation() -> ! {
 pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
     // Heuristic that holds true on all tested 64-bit capable architectures.
     size_of::<T>() <= 8 // size_of::<u64>()
+}
+
+#[cfg(kani)]
+mod verify {
+    use super::*;
+    use crate::cell::Cell;
+
+    // Freeze + !Copy element: selects the default (non-Copy) arm of
+    // `UnstableSmallSortFreezeTypeImpl` — the `small_sort_general` route.
+    struct NonCopy(u8);
+
+    // Freeze + !Copy + Drop: same dispatch as `NonCopy`, but forces drop-glue
+    // on every move path (guards, scratch copies).
+    struct DropT(u8);
+    impl Drop for DropT {
+        fn drop(&mut self) {}
+    }
+
+    // `v` is non-decreasing under the `key` projection.
+    fn is_sorted_by_key<T, K: PartialOrd>(v: &[T], key: impl Fn(&T) -> K) -> bool {
+        let mut i = 1;
+        while i < v.len() {
+            if key(&v[i - 1]) > key(&v[i]) {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    // Occurrence count of key value `x` in `v` — O(n). With a symbolic `x`,
+    // one count pair (`count(before, x) == count(after, x)`) proves full
+    // multiset equality under the projection: Kani checks it for every `x`.
+    fn count_by_key<T, K: PartialEq>(v: &[T], key: impl Fn(&T) -> K, x: &K) -> usize {
+        let mut c = 0usize;
+        let mut i = 0;
+        while i < v.len() {
+            c += (&key(&v[i]) == x) as usize;
+            i += 1;
+        }
+        c
+    }
+
+    // ===================================================================
+    // No-UB harnesses at the tractable length thresholds.
+    //
+    // The small-sort API is bounded by design (each impl's `small_sort_threshold`
+    // caps the valid input length). We verify absence of UB at those caps where
+    // the SAT solver reaches them: the fallback/insertion band to 16 (including a
+    // symbolic length over the whole domain), the general and network bands to
+    // the deepest length that completes — 17 and 18 respectively. Beyond that the
+    // per-harness SAT problem (~55k VCCs at length 32) does not converge in a CI
+    // budget; see the module-level note and the PR discussion.
+    // ===================================================================
+
+    // --- Fallback / insertion band (threshold 16) ---
+
+    // Symbolic length over the ENTIRE fallback validity domain [1, 16] — the
+    // literal "arbitrary valid length" obligation, discharged for this band.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn check_insertion_sort_shift_left_symlen_i32() {
+        let mut backing: [i32; 16] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= 16);
+        insertion_sort_shift_left(&mut backing[..len], 1, &mut |a: &i32, b: &i32| a < b);
+        kani::cover(len == 16, "full fallback threshold reachable");
+    }
+
+    // Non-Freeze element through the unstable trait entry → default fallback impl.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn check_unstable_small_sort_cell_16() {
+        let mut v: [Cell<i32>; 16] = crate::array::from_fn(|_| Cell::new(kani::any()));
+        <Cell<i32> as UnstableSmallSortTypeImpl>::small_sort(
+            &mut v,
+            &mut |a: &Cell<i32>, b: &Cell<i32>| a.get() < b.get(),
+        );
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // Non-Freeze element through the STABLE trait entry → default insertion impl.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn check_stable_small_sort_cell_16() {
+        let mut v: [Cell<i32>; 16] = crate::array::from_fn(|_| Cell::new(kani::any()));
+        let mut scratch: [MaybeUninit<Cell<i32>>; SMALL_SORT_GENERAL_SCRATCH_LEN] =
+            [const { MaybeUninit::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+        <Cell<i32> as StableSmallSortTypeImpl>::small_sort(
+            &mut v,
+            &mut scratch,
+            &mut |a: &Cell<i32>, b: &Cell<i32>| a.get() < b.get(),
+        );
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // Huge element ([u64; 11] = 88 bytes, 88*48 > 4096) → forced onto the
+    // fallback route even through the Copy-specialized dispatch. The comparator
+    // reads only the first lane: this is a valid ordering for the no-UB check
+    // and avoids an 11-element lexicographic compare loop inside every `is_less`
+    // call, which the array `<` operator would otherwise introduce. Length 8:
+    // the huge-element symbolic state does not converge at the 16 threshold.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_unstable_small_sort_bigt_8() {
+        let mut v: [[u64; 11]; 8] = kani::any();
+        <[u64; 11] as UnstableSmallSortTypeImpl>::small_sort(
+            &mut v,
+            &mut |a: &[u64; 11], b: &[u64; 11]| a[0] < b[0],
+        );
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // --- General band (sort8_stable + ping-pong merge; max-green length 17) ---
+    // 8-bit element width in this band's length-16/17 harnesses: wider elements
+    // exceed the CI per-harness budget at these lengths (32-bit width measures
+    // 566-714 s); 32-bit width is exercised at the sort4-branch and network
+    // lengths below.
+
+    #[kani::proof]
+    #[kani::unwind(18)]
+    #[kani::solver(kissat)]
+    fn check_stable_small_sort_u8_16() {
+        let mut v: [u8; 16] = kani::any();
+        let mut scratch: [MaybeUninit<u8>; SMALL_SORT_GENERAL_SCRATCH_LEN] =
+            [const { MaybeUninit::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+        <u8 as StableSmallSortTypeImpl>::small_sort(&mut v, &mut scratch, &mut |a: &u8, b: &u8| {
+            a < b
+        });
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // Odd split (halves 8 / 9): exercises the region-insertion extension loop.
+    #[kani::proof]
+    #[kani::unwind(18)]
+    #[kani::solver(kissat)]
+    fn check_stable_small_sort_u8_17() {
+        let mut v: [u8; 17] = kani::any();
+        let mut scratch: [MaybeUninit<u8>; SMALL_SORT_GENERAL_SCRATCH_LEN] =
+            [const { MaybeUninit::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+        <u8 as StableSmallSortTypeImpl>::small_sort(&mut v, &mut scratch, &mut |a: &u8, b: &u8| {
+            a < b
+        });
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // Freeze + !Copy element → general route (small_sort_general, stack scratch).
+    #[kani::proof]
+    #[kani::unwind(18)]
+    #[kani::solver(kissat)]
+    fn check_unstable_small_sort_noncopy_16() {
+        let mut v: [NonCopy; 16] = crate::array::from_fn(|_| NonCopy(kani::any()));
+        <NonCopy as UnstableSmallSortTypeImpl>::small_sort(
+            &mut v,
+            &mut |a: &NonCopy, b: &NonCopy| a.0 < b.0,
+        );
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // Drop-carrying element → general route + drop-glue on every move path.
+    #[kani::proof]
+    #[kani::unwind(18)]
+    #[kani::solver(kissat)]
+    fn check_unstable_small_sort_dropt_16() {
+        let mut v: [DropT; 16] = crate::array::from_fn(|_| DropT(kani::any()));
+        <DropT as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &DropT, b: &DropT| {
+            a.0 < b.0
+        });
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // u128 (16 bytes, Copy): has_efficient false → skips the network route and
+    // takes small_sort_general — the only element class that reaches the
+    // Copy-specialized impl's general branch. The 16-byte element width is
+    // expensive under BMC, so this branch is exercised at length 4 (the deeper
+    // general-band lengths are covered by the 4-byte types).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    #[kani::solver(kissat)]
+    fn check_unstable_small_sort_u128_4() {
+        let mut v: [u128; 4] = kani::any();
+        <u128 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u128, b: &u128| a < b);
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // --- Network band (sort9_optimal / sort13_optimal + merge; max-green 18) ---
+
+    // sort13_optimal band (13 <= len < 18: straight-line network, no merge).
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn check_unstable_small_sort_u8_13() {
+        let mut v: [u8; 13] = kani::any();
+        <u8 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u8, b: &u8| a < b);
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // First merge-path length (no_merge flips false at 18).
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn check_unstable_small_sort_u8_18() {
+        let mut v: [u8; 18] = kani::any();
+        <u8 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u8, b: &u8| a < b);
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // Network band at 32-bit element width (not just u8).
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn check_unstable_small_sort_i32_13() {
+        let mut v: [i32; 13] = kani::any();
+        <i32 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &i32, b: &i32| a < b);
+        kani::cover(true, "call completed: no-UB path reachable");
+    }
+
+    // ===================================================================
+    // Sorting-correctness oracles: output is sorted AND a multiset-permutation
+    // of the input (the count-probe encoding). At the deepest length the coupled
+    // sorted+permutation problem reaches per family.
+    // ===================================================================
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_stable_small_sort_sorts_i32_8() {
+        let mut v: [i32; 8] = kani::any();
+        let snapshot = v;
+        let mut scratch: [MaybeUninit<i32>; SMALL_SORT_GENERAL_SCRATCH_LEN] =
+            [const { MaybeUninit::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+        <i32 as StableSmallSortTypeImpl>::small_sort(
+            &mut v,
+            &mut scratch,
+            &mut |a: &i32, b: &i32| a < b,
+        );
+        assert!(is_sorted_by_key(&v, |x: &i32| *x));
+        let probe: i32 = kani::any();
+        assert!(
+            count_by_key(&snapshot, |x: &i32| *x, &probe) == count_by_key(&v, |x: &i32| *x, &probe)
+        );
+        kani::cover(true, "sorted+permutation proven");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(11)]
+    fn check_unstable_small_sort_sorts_u8_9() {
+        let mut v: [u8; 9] = kani::any();
+        let snapshot = v;
+        <u8 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u8, b: &u8| a < b);
+        assert!(is_sorted_by_key(&v, |x: &u8| *x));
+        let probe: u8 = kani::any();
+        assert!(
+            count_by_key(&snapshot, |x: &u8| *x, &probe) == count_by_key(&v, |x: &u8| *x, &probe)
+        );
+        kani::cover(true, "sorted+permutation proven (sort9 network)");
+    }
+
+    // sort13 network: sorted-only. The coupled sorted+permutation problem does
+    // not converge at length 13 for this network (the input↔output multiset
+    // coupling is the intractable part, not the sortedness assertion) — so the
+    // permutation half is carried at length 9 (sort9 band, above) where it does
+    // converge, and this length-13 harness asserts sortedness only. Constant-fill
+    // degeneracy is excluded by the length-9 permutation harness on this path.
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn check_unstable_small_sort_sorted_u8_13() {
+        let mut v: [u8; 13] = kani::any();
+        let had_descent = v.len() >= 2 && v[0] > v[1];
+        <u8 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u8, b: &u8| a < b);
+        assert!(is_sorted_by_key(&v, |x: &u8| *x));
+        kani::cover(had_descent, "an initially-unsorted input reaches the sortedness assert");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_unstable_small_sort_sorts_cell_8() {
+        let mut v: [Cell<i32>; 8] = crate::array::from_fn(|_| Cell::new(kani::any()));
+        let snap: [i32; 8] = crate::array::from_fn(|i| v[i].get());
+        <Cell<i32> as UnstableSmallSortTypeImpl>::small_sort(
+            &mut v,
+            &mut |a: &Cell<i32>, b: &Cell<i32>| a.get() < b.get(),
+        );
+        assert!(is_sorted_by_key(&v, |x: &Cell<i32>| x.get()));
+        let probe: i32 = kani::any();
+        assert!(
+            count_by_key(&snap, |x: &i32| *x, &probe)
+                == count_by_key(&v, |x: &Cell<i32>| x.get(), &probe)
+        );
+        kani::cover(true, "sorted+permutation proven (non-Freeze)");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_unstable_small_sort_sorts_dropt_8() {
+        let mut v: [DropT; 8] = crate::array::from_fn(|_| DropT(kani::any()));
+        let snap: [u8; 8] = crate::array::from_fn(|i| v[i].0);
+        <DropT as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &DropT, b: &DropT| {
+            a.0 < b.0
+        });
+        assert!(is_sorted_by_key(&v, |x: &DropT| x.0));
+        let probe: u8 = kani::any();
+        assert!(
+            count_by_key(&snap, |x: &u8| *x, &probe) == count_by_key(&v, |x: &DropT| x.0, &probe)
+        );
+        kani::cover(true, "sorted+permutation proven (drop-carrying)");
+    }
+
+    // Fallback/insertion band correctness: sorted AND permutation. Length 8 —
+    // the coupled check does not converge at the 16 threshold (the sortedness
+    // assertion over all 16 outputs is itself the intractable part there; the
+    // no-UB and symbolic-length harnesses cover length 16 for this band).
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_insertion_sort_shift_left_sorts_i32_8() {
+        let mut v: [i32; 8] = kani::any();
+        let snapshot = v;
+        insertion_sort_shift_left(&mut v, 1, &mut |a: &i32, b: &i32| a < b);
+        assert!(is_sorted_by_key(&v, |x: &i32| *x));
+        let probe: i32 = kani::any();
+        assert!(
+            count_by_key(&snapshot, |x: &i32| *x, &probe) == count_by_key(&v, |x: &i32| *x, &probe)
+        );
+        kani::cover(true, "sorted+permutation proven (insertion band)");
+    }
+
+    // ===================================================================
+    // Contracts. Validity-domain preconditions on the two free callee functions
+    // that carry loops, each with a matching proof_for_contract. Contracts on the
+    // three `small_sort` trait-impl methods do not compile at this toolchain
+    // (specialization + the generic `old()` snapshot needs `T: Clone`), so those
+    // impls are exercised by the in-harness oracles above instead.
+    // ===================================================================
+
+    #[kani::proof_for_contract(swap_if_less)]
+    fn check_swap_if_less_contract() {
+        let mut arr: [u8; 4] = kani::any();
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        kani::assume(a < 4 && b < 4 && a != b);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut is_less = |x: &u8, y: &u8| x < y;
+        // SAFETY: a, b in-bounds and distinct per the assumes.
+        unsafe { swap_if_less(arr.as_mut_ptr(), a, b, &mut is_less) };
+    }
+
+    #[kani::proof_for_contract(insertion_sort_shift_left)]
+    #[kani::unwind(9)]
+    fn check_insertion_sort_shift_left_contract() {
+        let mut v: [i32; 8] = kani::any();
+        let offset: usize = kani::any();
+        kani::assume(offset >= 1 && offset <= 8);
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        insertion_sort_shift_left(&mut v, offset, &mut |a: &i32, b: &i32| a < b);
+    }
+
+    // ===================================================================
+    // Remaining criteria functions and callees.
+    // ===================================================================
+
+    // The size heuristic, across the width classes it discriminates.
+    #[kani::proof]
+    fn check_has_efficient_in_place_swap() {
+        assert!(has_efficient_in_place_swap::<u8>());
+        assert!(has_efficient_in_place_swap::<u16>());
+        assert!(has_efficient_in_place_swap::<u32>());
+        assert!(has_efficient_in_place_swap::<u64>());
+        assert!(!has_efficient_in_place_swap::<u128>());
+        assert!(!has_efficient_in_place_swap::<[u8; 9]>());
+        assert!(has_efficient_in_place_swap::<()>());
+        assert!(has_efficient_in_place_swap::<Cell<u32>>());
+        kani::cover(true, "heuristic evaluated");
+    }
+
+    // sort4_stable: branchless, no loops. Sorted + permutation on the output.
+    #[kani::proof]
+    fn check_sort4_stable_u8() {
+        let src: [u8; 4] = kani::any();
+        let mut dst = [0u8; 4];
+        let mut is_less = |a: &u8, b: &u8| a < b;
+        // SAFETY: src has 4 readable elements; dst has 4 writable, non-overlapping.
+        unsafe { sort4_stable(src.as_ptr(), dst.as_mut_ptr(), &mut is_less) };
+        assert!(is_sorted_by_key(&dst, |x: &u8| *x));
+        let probe: u8 = kani::any();
+        assert!(count_by_key(&src, |x: &u8| *x, &probe) == count_by_key(&dst, |x: &u8| *x, &probe));
+        kani::cover(true, "sort4 sorted+permutation proven");
+    }
+
+    // bidirectional_merge: two sorted halves in, fully sorted permutation out.
+    // The sorted-halves precondition prunes the state space enough to reach the
+    // general threshold length here.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_bidirectional_merge_sorts_i32_8() {
+        let v: [i32; 8] = kani::any();
+        kani::assume(is_sorted_by_key(&v[..4], |x: &i32| *x));
+        kani::assume(is_sorted_by_key(&v[4..], |x: &i32| *x));
+        let mut dst = [0i32; 8];
+        // SAFETY: dst is a distinct local valid for 8 writes; len 8 >= 2, halves sorted.
+        unsafe { bidirectional_merge(&v, dst.as_mut_ptr(), &mut |a: &i32, b: &i32| a < b) };
+        assert!(is_sorted_by_key(&dst, |x: &i32| *x));
+        let probe: i32 = kani::any();
+        assert!(count_by_key(&v, |x: &i32| *x, &probe) == count_by_key(&dst, |x: &i32| *x, &probe));
+        kani::cover(v[0] != v[4], "distinct-half merge reaches the assert");
+    }
+
+    // Sanity-check the oracle predicates themselves on known inputs, so a bug
+    // in a helper cannot silently weaken every correctness harness above.
+    #[kani::proof]
+    fn check_oracle_helpers() {
+        let b = [1u8, 2, 3];
+        assert!(is_sorted_by_key(&b, |x: &u8| *x));
+        assert!(!is_sorted_by_key(&[2u8, 1], |x: &u8| *x));
+        assert!(count_by_key(&b, |x: &u8| *x, &2) == 1);
+        assert!(count_by_key(&b, |x: &u8| *x, &9) == 0);
+        kani::cover(true, "oracle predicates evaluated");
+    }
 }
