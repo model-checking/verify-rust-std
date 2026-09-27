@@ -1,6 +1,8 @@
 use crate::cmp;
 use crate::iter::adapters::SourceIter;
 use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedLen, TrustedRandomAccess};
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, Try};
 
@@ -299,6 +301,13 @@ impl<I: Iterator + TrustedRandomAccess> SpecTake for Take<I> {
     {
         let mut acc = init;
         let end = self.n.min(self.iter.size());
+        // Loop-contract invariant: the iteration index never exceeds `end`,
+        // which is the bound the SAFETY comment below relies on
+        // (`end <= self.iter.size()`, and `__iterator_get_unchecked` is
+        // read-only for TrustedRandomAccess iterators, so `size()` is
+        // preserved across iterations). `kani::index` is Kani's handle for
+        // the current iteration count of the `for` loop that follows.
+        #[cfg_attr(kani, kani::loop_invariant(kani::index <= end))]
         for i in 0..end {
             // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end
             let val = unsafe { self.iter.__iterator_get_unchecked(i) };
@@ -310,6 +319,13 @@ impl<I: Iterator + TrustedRandomAccess> SpecTake for Take<I> {
     #[inline]
     fn spec_for_each<F: FnMut(Self::Item)>(mut self, mut f: F) {
         let end = self.n.min(self.iter.size());
+        // Loop-contract invariant: the iteration index never exceeds `end`,
+        // which is the bound the SAFETY comment below relies on
+        // (`end <= self.iter.size()`, and `__iterator_get_unchecked` is
+        // read-only for TrustedRandomAccess iterators, so `size()` is
+        // preserved across iterations). `kani::index` is Kani's handle for
+        // the current iteration count of the `for` loop that follows.
+        #[cfg_attr(kani, kani::loop_invariant(kani::index <= end))]
         for i in 0..end {
             // SAFETY: i < end <= self.iter.size() and we discard the iterator at the end
             let val = unsafe { self.iter.__iterator_get_unchecked(i) };
@@ -372,5 +388,77 @@ impl<T: Clone> ExactSizeIterator for Take<crate::iter::Repeat<T>> {
 impl<F: FnMut() -> A, A> ExactSizeIterator for Take<crate::iter::RepeatWith<F>> {
     fn len(&self) -> usize {
         self.n
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // spec_fold (TRA specialized — uses __iterator_get_unchecked in a loop)
+    // The source-level loop invariant abstracts the get_unchecked loop via loop
+    // contracts instead of finite unrolling; this harness covers slices up to MAX_LEN.
+    #[kani::proof]
+    fn check_take_spec_fold_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        let take = Take::new(slice.iter(), n);
+        // Exercises TRA spec_fold path — proves absence of UB in
+        // __iterator_get_unchecked loop over slices up to MAX_LEN with arbitrary take count.
+        take.fold((), |(), _| ());
+    }
+
+    #[kani::proof]
+    fn check_take_spec_fold_unit() {
+        const MAX_LEN: usize = isize::MAX as usize;
+        let array: [(); MAX_LEN] = [(); MAX_LEN];
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        let take = Take::new(slice.iter(), n);
+        take.fold((), |(), _| ());
+    }
+
+    // spec_for_each (TRA specialized — uses __iterator_get_unchecked in a loop)
+    #[kani::proof]
+    fn check_take_spec_for_each_u8() {
+        const MAX_LEN: usize = 5000;
+        let array: [u8; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        let take = Take::new(slice.iter(), n);
+        take.for_each(|_| {});
+    }
+
+    #[kani::proof]
+    fn check_take_spec_fold_char() {
+        const MAX_LEN: usize = 50;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        let take = Take::new(slice.iter(), n);
+        take.fold((), |(), _| ());
+    }
+
+    #[kani::proof]
+    fn check_take_spec_fold_tup() {
+        const MAX_LEN: usize = 50;
+        let array: [(char, u8); MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        let take = Take::new(slice.iter(), n);
+        take.fold((), |(), _| ());
+    }
+
+    #[kani::proof]
+    fn check_take_spec_for_each_char() {
+        const MAX_LEN: usize = 50;
+        let array: [char; MAX_LEN] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&array);
+        let n: usize = kani::any();
+        let take = Take::new(slice.iter(), n);
+        take.for_each(|_| {});
     }
 }
