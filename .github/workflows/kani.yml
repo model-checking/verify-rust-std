@@ -256,6 +256,11 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Test the metrics script
+        run: |
+          pip install -r scripts/kani-std-analysis/requirements.txt
+          python3 -m unittest discover -s scripts/kani-std-analysis
+
       # Step 2: Run list on the std library
       - name: Run Kani Metrics
         run: |
