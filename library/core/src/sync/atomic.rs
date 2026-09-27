@@ -244,10 +244,16 @@
 // are just normal values that get loaded/stored, but not dereferenced.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+use safety::{ensures, requires};
+
 use self::Ordering::*;
 use crate::cell::UnsafeCell;
 use crate::hint::spin_loop;
 use crate::intrinsics::AtomicOrdering as AO;
+#[cfg(kani)]
+use crate::kani;
+#[cfg(kani)]
+use crate::ub_checks;
 use crate::{fmt, intrinsics};
 
 trait Sealed {}
@@ -573,6 +579,12 @@ impl AtomicBool {
     #[inline]
     #[stable(feature = "atomic_from_ptr", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_atomic_from_ptr", since = "1.84.0")]
+    #[requires(ptr.cast::<AtomicBool>().is_aligned())]
+    #[requires(ub_checks::can_dereference(ptr))]
+    #[requires(ub_checks::can_write(ptr))]
+    #[ensures(|result: &&AtomicBool| {
+        core::ptr::eq(*result, ptr.cast::<AtomicBool>())
+    })]
     pub const unsafe fn from_ptr<'a>(ptr: *mut bool) -> &'a AtomicBool {
         // SAFETY: guaranteed by the caller
         unsafe { &*ptr.cast() }
@@ -723,6 +735,7 @@ impl AtomicBool {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(order == Relaxed || order == Acquire || order == SeqCst)]
     pub fn load(&self, order: Ordering) -> bool {
         // SAFETY: any data races are prevented by atomic intrinsics and the raw
         // pointer passed in is valid because we got it from a reference.
@@ -752,6 +765,8 @@ impl AtomicBool {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(order == Relaxed || order == Release || order == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn store(&self, val: bool, order: Ordering) {
         // SAFETY: any data races are prevented by atomic intrinsics and the raw
         // pointer passed in is valid because we got it from a reference.
@@ -785,6 +800,7 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn swap(&self, val: bool, order: Ordering) -> bool {
         if EMULATE_ATOMIC_BOOL {
             if val { self.fetch_or(true, order) } else { self.fetch_and(false, order) }
@@ -853,6 +869,7 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn compare_and_swap(&self, current: bool, new: bool, order: Ordering) -> bool {
         match self.compare_exchange(current, new, order, strongest_failure_ordering(order)) {
             Ok(x) => x,
@@ -915,6 +932,8 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(failure == Relaxed || failure == Acquire || failure == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn compare_exchange(
         &self,
         current: bool,
@@ -1011,6 +1030,8 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(failure == Relaxed || failure == Acquire || failure == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn compare_exchange_weak(
         &self,
         current: bool,
@@ -1068,6 +1089,7 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_and(&self, val: bool, order: Ordering) -> bool {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe { atomic_and(self.v.get(), val as u8, order) != 0 }
@@ -1111,6 +1133,7 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_nand(&self, val: bool, order: Ordering) -> bool {
         // We can't use atomic_nand here because it can result in a bool with
         // an invalid value. This happens because the atomic operation is done
@@ -1164,6 +1187,7 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_or(&self, val: bool, order: Ordering) -> bool {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe { atomic_or(self.v.get(), val as u8, order) != 0 }
@@ -1206,6 +1230,7 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_xor(&self, val: bool, order: Ordering) -> bool {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe { atomic_xor(self.v.get(), val as u8, order) != 0 }
@@ -1244,6 +1269,7 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_not(&self, order: Ordering) -> bool {
         self.fetch_xor(true, order)
     }
@@ -1337,6 +1363,8 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_update<F>(
         &self,
         set_order: Ordering,
@@ -1409,6 +1437,8 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn try_update(
         &self,
         set_order: Ordering,
@@ -1468,6 +1498,8 @@ impl AtomicBool {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn update(
         &self,
         set_order: Ordering,
@@ -1545,6 +1577,12 @@ impl<T> AtomicPtr<T> {
     #[inline]
     #[stable(feature = "atomic_from_ptr", since = "1.75.0")]
     #[rustc_const_stable(feature = "const_atomic_from_ptr", since = "1.84.0")]
+    #[requires(ptr.cast::<AtomicPtr<T>>().is_aligned())]
+    #[requires(ub_checks::can_dereference(ptr))]
+    #[requires(ub_checks::can_write(ptr))]
+    #[ensures(|result: &&AtomicPtr<T>| {
+        core::ptr::eq(*result, ptr.cast::<AtomicPtr<T>>())
+    })]
     pub const unsafe fn from_ptr<'a>(ptr: *mut *mut T) -> &'a AtomicPtr<T> {
         // SAFETY: guaranteed by the caller
         unsafe { &*ptr.cast() }
@@ -1740,6 +1778,7 @@ impl<T> AtomicPtr<T> {
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+    #[requires(order == Relaxed || order == Acquire || order == SeqCst)]
     pub fn load(&self, order: Ordering) -> *mut T {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe { atomic_load(self.p.get(), order) }
@@ -1770,6 +1809,8 @@ impl<T> AtomicPtr<T> {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(order == Relaxed || order == Release || order == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn store(&self, ptr: *mut T, order: Ordering) {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe {
@@ -1804,6 +1845,7 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "ptr")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn swap(&self, ptr: *mut T, order: Ordering) -> *mut T {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe { atomic_swap(self.p.get(), ptr, order) }
@@ -1867,6 +1909,7 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "ptr")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn compare_and_swap(&self, current: *mut T, new: *mut T, order: Ordering) -> *mut T {
         match self.compare_exchange(current, new, order, strongest_failure_ordering(order)) {
             Ok(x) => x,
@@ -1922,6 +1965,8 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "ptr")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(failure == Relaxed || failure == Acquire || failure == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn compare_exchange(
         &self,
         current: *mut T,
@@ -1986,6 +2031,8 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "ptr")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(failure == Relaxed || failure == Acquire || failure == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn compare_exchange_weak(
         &self,
         current: *mut T,
@@ -2060,6 +2107,8 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "ptr")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_update<F>(
         &self,
         set_order: Ordering,
@@ -2141,6 +2190,8 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "ptr")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn try_update(
         &self,
         set_order: Ordering,
@@ -2205,6 +2256,8 @@ impl<T> AtomicPtr<T> {
     #[cfg(target_has_atomic = "8")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn update(
         &self,
         set_order: Ordering,
@@ -2424,6 +2477,7 @@ impl<T> AtomicPtr<T> {
     #[stable(feature = "strict_provenance_atomic_ptr", since = "1.91.0")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_or(&self, val: usize, order: Ordering) -> *mut T {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe { atomic_or(self.p.get(), val, order).cast() }
@@ -2474,6 +2528,7 @@ impl<T> AtomicPtr<T> {
     #[stable(feature = "strict_provenance_atomic_ptr", since = "1.91.0")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_and(&self, val: usize, order: Ordering) -> *mut T {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe { atomic_and(self.p.get(), val, order).cast() }
@@ -2522,6 +2577,7 @@ impl<T> AtomicPtr<T> {
     #[stable(feature = "strict_provenance_atomic_ptr", since = "1.91.0")]
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     #[rustc_should_not_be_called_on_const_items]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub fn fetch_xor(&self, val: usize, order: Ordering) -> *mut T {
         // SAFETY: data races are prevented by atomic intrinsics.
         unsafe { atomic_xor(self.p.get(), val, order).cast() }
@@ -2758,6 +2814,19 @@ macro_rules! atomic_int {
             #[inline]
             #[stable(feature = "atomic_from_ptr", since = "1.75.0")]
             #[rustc_const_stable(feature = "const_atomic_from_ptr", since = "1.84.0")]
+            #[requires(ptr.cast::<$atomic_type>().is_aligned())]
+            #[requires(!ptr.is_null())]
+            #[requires(ub_checks::can_dereference(ptr))]
+            #[requires(ub_checks::can_write(ptr))]
+            #[ensures(|result: &&$atomic_type| {
+                core::ptr::eq(*result, ptr.cast::<$atomic_type>())
+            })]
+            #[ensures(|result: &&$atomic_type| {
+                ub_checks::can_dereference(*result as *const $atomic_type)
+            })]
+            #[ensures(|result: &&$atomic_type| {
+                ub_checks::can_write((*result).as_ptr())
+            })]
             pub const unsafe fn from_ptr<'a>(ptr: *mut $int_type) -> &'a $atomic_type {
                 // SAFETY: guaranteed by the caller
                 unsafe { &*ptr.cast() }
@@ -2935,6 +3004,7 @@ macro_rules! atomic_int {
             #[inline]
             #[$stable]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+            #[requires(order == Relaxed || order == Acquire || order == SeqCst)]
             pub fn load(&self, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_load(self.v.get(), order) }
@@ -2963,6 +3033,8 @@ macro_rules! atomic_int {
             #[$stable]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[requires(order == Relaxed || order == Release || order == SeqCst)]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn store(&self, val: $int_type, order: Ordering) {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_store(self.v.get(), val, order); }
@@ -2992,6 +3064,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn swap(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_swap(self.v.get(), val, order) }
@@ -3057,6 +3130,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn compare_and_swap(&self,
                                     current: $int_type,
                                     new: $int_type,
@@ -3126,6 +3200,8 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[requires(failure == Relaxed || failure == Acquire || failure == SeqCst)]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn compare_exchange(&self,
                                     current: $int_type,
                                     new: $int_type,
@@ -3190,6 +3266,8 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[requires(failure == Relaxed || failure == Acquire || failure == SeqCst)]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn compare_exchange_weak(&self,
                                          current: $int_type,
                                          new: $int_type,
@@ -3227,6 +3305,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_add(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_add(self.v.get(), val, order) }
@@ -3258,6 +3337,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_sub(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_sub(self.v.get(), val, order) }
@@ -3292,6 +3372,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_and(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_and(self.v.get(), val, order) }
@@ -3326,6 +3407,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_nand(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_nand(self.v.get(), val, order) }
@@ -3360,6 +3442,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_or(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_or(self.v.get(), val, order) }
@@ -3394,6 +3477,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_xor(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { atomic_xor(self.v.get(), val, order) }
@@ -3449,6 +3533,8 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_update<F>(&self,
                                    set_order: Ordering,
                                    fetch_order: Ordering,
@@ -3517,6 +3603,8 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn try_update(
                 &self,
                 set_order: Ordering,
@@ -3579,6 +3667,8 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[requires(fetch_order == Relaxed || fetch_order == Acquire || fetch_order == SeqCst)]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn update(
                 &self,
                 set_order: Ordering,
@@ -3634,6 +3724,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_max(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { $max_fn(self.v.get(), val, order) }
@@ -3681,6 +3772,7 @@ macro_rules! atomic_int {
             #[$cfg_cas]
             #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
             #[rustc_should_not_be_called_on_const_items]
+            #[cfg_attr(kani, kani::modifies(self))]
             pub fn fetch_min(&self, val: $int_type, order: Ordering) -> $int_type {
                 // SAFETY: data races are prevented by atomic intrinsics.
                 unsafe { $min_fn(self.v.get(), val, order) }
@@ -4005,6 +4097,11 @@ fn strongest_failure_ordering(order: Ordering) -> Ordering {
 
 #[inline]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_write(dst))]
+#[requires(order == Relaxed || order == Release || order == SeqCst)]
+#[ensures(|_| ub_checks::can_dereference(dst as *const T))]
+#[ensures(|_| ub_checks::can_write(dst))]
 unsafe fn atomic_store<T: Copy>(dst: *mut T, val: T, order: Ordering) {
     // SAFETY: the caller must uphold the safety contract for `atomic_store`.
     unsafe {
@@ -4020,6 +4117,9 @@ unsafe fn atomic_store<T: Copy>(dst: *mut T, val: T, order: Ordering) {
 
 #[inline]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[requires(ub_checks::can_dereference(dst))]
+#[requires(order == Relaxed || order == Acquire || order == SeqCst)]
+#[ensures(|_| ub_checks::can_dereference(dst))]
 unsafe fn atomic_load<T: Copy>(dst: *const T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_load`.
     unsafe {
@@ -4036,6 +4136,12 @@ unsafe fn atomic_load<T: Copy>(dst: *const T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_swap<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_swap`.
     unsafe {
@@ -4053,6 +4159,12 @@ unsafe fn atomic_swap<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_add<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_add`.
     unsafe {
@@ -4070,6 +4182,12 @@ unsafe fn atomic_add<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> 
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_sub<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_sub`.
     unsafe {
@@ -4089,6 +4207,13 @@ unsafe fn atomic_sub<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> 
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[doc(hidden)]
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[requires(failure != Release && failure != AcqRel)]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 pub unsafe fn atomic_compare_exchange<T: Copy>(
     dst: *mut T,
     old: T,
@@ -4154,6 +4279,13 @@ pub unsafe fn atomic_compare_exchange<T: Copy>(
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[requires(failure != Release && failure != AcqRel)]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_compare_exchange_weak<T: Copy>(
     dst: *mut T,
     old: T,
@@ -4219,6 +4351,12 @@ unsafe fn atomic_compare_exchange_weak<T: Copy>(
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_and<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_and`
     unsafe {
@@ -4235,6 +4373,12 @@ unsafe fn atomic_and<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> 
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_nand<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_nand`
     unsafe {
@@ -4251,6 +4395,12 @@ unsafe fn atomic_nand<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) ->
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_or<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_or`
     unsafe {
@@ -4267,6 +4417,12 @@ unsafe fn atomic_or<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_xor<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_xor`
     unsafe {
@@ -4284,6 +4440,12 @@ unsafe fn atomic_xor<T: Copy, U: Copy>(dst: *mut T, val: U, order: Ordering) -> 
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_max<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_max`
     unsafe {
@@ -4318,6 +4480,12 @@ unsafe fn atomic_min<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_umax<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_umax`
     unsafe {
@@ -4335,6 +4503,12 @@ unsafe fn atomic_umax<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
 #[inline]
 #[cfg(target_has_atomic)]
 #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[cfg_attr(kani, kani::modifies(dst))]
+#[requires(ub_checks::can_dereference(dst as *const T))]
+#[requires(ub_checks::can_write(dst))]
+#[ensures(|_| {
+    ub_checks::can_dereference(dst as *const T) && ub_checks::can_write(dst)
+})]
 unsafe fn atomic_umin<T: Copy>(dst: *mut T, val: T, order: Ordering) -> T {
     // SAFETY: the caller must uphold the safety contract for `atomic_umin`
     unsafe {
@@ -4628,4 +4802,1252 @@ impl<T> fmt::Pointer for AtomicPtr<T> {
 #[deprecated(since = "1.51.0", note = "use hint::spin_loop instead")]
 pub fn spin_loop_hint() {
     spin_loop()
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Generate candidates across the allocation. Contract proofs assume the callee's
+    // preconditions, retaining only initialized, aligned, readable, and writable offsets.
+    fn ptr_at_offset<T>(buf: &mut [u8; 100]) -> *mut T {
+        let offset = kani::any_where(|offset: &usize| *offset < 100);
+        buf.as_mut_ptr().wrapping_add(offset).cast::<T>()
+    }
+
+    fn any_ordering() -> Ordering {
+        match kani::any::<u8>() {
+            0 => Relaxed,
+            1 => Release,
+            2 => Acquire,
+            3 => AcqRel,
+            _ => SeqCst,
+        }
+    }
+
+    // Part 1: from_ptr.
+    #[cfg(target_has_atomic_load_store = "8")]
+    #[kani::proof_for_contract(AtomicBool::from_ptr)]
+    pub fn harness_atomic_bool_from_ptr() {
+        let mut buf: [bool; 100] = kani::any();
+        let offset = kani::any_where(|offset: &usize| *offset < 100);
+        let ptr = buf.as_mut_ptr().wrapping_add(offset);
+
+        let _ = unsafe { AtomicBool::from_ptr(ptr) };
+        kani::cover(true, "AtomicBool::from_ptr: reached after call");
+    }
+
+    // Harnesses for integer Atomic*::from_ptr functions.
+    macro_rules! from_ptr_harness {
+        ($name:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract(<$atomic>::from_ptr)]
+            pub fn $name() {
+                let mut buf: [u8; 100] = kani::any();
+                let ptr = ptr_at_offset::<$value>(&mut buf);
+
+                let _ = unsafe { <$atomic>::from_ptr(ptr) };
+                kani::cover(true, "integer from_ptr: reached after call");
+            }
+        };
+    }
+
+    #[cfg(target_has_atomic_load_store = "8")]
+    from_ptr_harness!(harness_atomic_i8_from_ptr, AtomicI8, i8);
+    #[cfg(target_has_atomic_load_store = "8")]
+    from_ptr_harness!(harness_atomic_u8_from_ptr, AtomicU8, u8);
+    #[cfg(target_has_atomic_load_store = "16")]
+    from_ptr_harness!(harness_atomic_i16_from_ptr, AtomicI16, i16);
+    #[cfg(target_has_atomic_load_store = "16")]
+    from_ptr_harness!(harness_atomic_u16_from_ptr, AtomicU16, u16);
+    #[cfg(target_has_atomic_load_store = "32")]
+    from_ptr_harness!(harness_atomic_i32_from_ptr, AtomicI32, i32);
+    #[cfg(target_has_atomic_load_store = "32")]
+    from_ptr_harness!(harness_atomic_u32_from_ptr, AtomicU32, u32);
+    #[cfg(target_has_atomic_load_store = "64")]
+    from_ptr_harness!(harness_atomic_i64_from_ptr, AtomicI64, i64);
+    #[cfg(target_has_atomic_load_store = "64")]
+    from_ptr_harness!(harness_atomic_u64_from_ptr, AtomicU64, u64);
+    #[cfg(target_has_atomic_load_store = "128")]
+    from_ptr_harness!(harness_atomic_i128_from_ptr, AtomicI128, i128);
+    #[cfg(target_has_atomic_load_store = "128")]
+    from_ptr_harness!(harness_atomic_u128_from_ptr, AtomicU128, u128);
+
+    // Harnesses for AtomicPtr::from_ptr.
+    macro_rules! atomic_ptr_from_ptr_harness {
+        ($name:ident, $pointee:ty) => {
+            #[cfg(target_has_atomic_load_store = "ptr")]
+            #[kani::proof_for_contract(AtomicPtr::<$pointee>::from_ptr)]
+            pub fn $name() {
+                // The stored pointer is arbitrary; the outer pointer targets valid local storage.
+                let mut value = kani::any::<usize>() as *mut $pointee;
+                let ptr = &mut value as *mut *mut $pointee;
+
+                let _ = unsafe { AtomicPtr::<$pointee>::from_ptr(ptr) };
+                kani::cover(true, "AtomicPtr::from_ptr: reached after call");
+            }
+        };
+    }
+
+    // Cover pointee sizes 0, 1, 2, 4, and the non-power-of-two size 3.
+    atomic_ptr_from_ptr_harness!(harness_atomic_ptr_from_ptr_unit, ());
+    atomic_ptr_from_ptr_harness!(harness_atomic_ptr_from_ptr_u8, u8);
+    atomic_ptr_from_ptr_harness!(harness_atomic_ptr_from_ptr_u16, u16);
+    atomic_ptr_from_ptr_harness!(harness_atomic_ptr_from_ptr_u32, u32);
+    atomic_ptr_from_ptr_harness!(harness_atomic_ptr_from_ptr_u8_3, [u8; 3]);
+
+    // Part 2: unsafe atomic helpers.
+    // Harnesses for atomic_store.
+    macro_rules! store_harness {
+        ($name:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract(atomic_store::<$value>)]
+            pub fn $name() {
+                let initial: $value = kani::any();
+                let storage = <$atomic>::new(initial);
+                let val: $value = kani::any();
+
+                unsafe { atomic_store(storage.as_ptr(), val, any_ordering()) };
+                kani::cover(true, "atomic_store: reached after call");
+            }
+        };
+    }
+
+    #[cfg(target_has_atomic_load_store = "8")]
+    store_harness!(harness_atomic_store_i8, AtomicI8, i8);
+    #[cfg(target_has_atomic_load_store = "8")]
+    store_harness!(harness_atomic_store_u8, AtomicU8, u8);
+    #[cfg(target_has_atomic_load_store = "16")]
+    store_harness!(harness_atomic_store_i16, AtomicI16, i16);
+    #[cfg(target_has_atomic_load_store = "16")]
+    store_harness!(harness_atomic_store_u16, AtomicU16, u16);
+    #[cfg(target_has_atomic_load_store = "32")]
+    store_harness!(harness_atomic_store_i32, AtomicI32, i32);
+    #[cfg(target_has_atomic_load_store = "32")]
+    store_harness!(harness_atomic_store_u32, AtomicU32, u32);
+    #[cfg(target_has_atomic_load_store = "64")]
+    store_harness!(harness_atomic_store_i64, AtomicI64, i64);
+    #[cfg(target_has_atomic_load_store = "64")]
+    store_harness!(harness_atomic_store_u64, AtomicU64, u64);
+    #[cfg(target_has_atomic_load_store = "128")]
+    store_harness!(harness_atomic_store_i128, AtomicI128, i128);
+    #[cfg(target_has_atomic_load_store = "128")]
+    store_harness!(harness_atomic_store_u128, AtomicU128, u128);
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    store_harness!(harness_atomic_store_isize, AtomicIsize, isize);
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    store_harness!(harness_atomic_store_usize, AtomicUsize, usize);
+
+    // Pointer harnesses for atomic_store.
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    #[kani::proof_for_contract(atomic_store::<*mut u8>)]
+    pub fn harness_atomic_store_ptr() {
+        let initial = kani::any::<usize>() as *mut u8;
+        let storage = AtomicPtr::<u8>::new(initial);
+        let val = kani::any::<usize>() as *mut u8;
+
+        unsafe { atomic_store(storage.as_ptr(), val, any_ordering()) };
+        kani::cover(true, "atomic_store: reached after call");
+    }
+
+    // Harnesses for atomic_load.
+    macro_rules! load_harness {
+        ($name:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract(atomic_load::<$value>)]
+            pub fn $name() {
+                let initial: $value = kani::any();
+                let storage = <$atomic>::new(initial);
+
+                let _ = unsafe { atomic_load(storage.as_ptr().cast_const(), any_ordering()) };
+                kani::cover(true, "atomic_load: reached after call");
+            }
+        };
+    }
+
+    // Load helpers.
+    #[cfg(target_has_atomic_load_store = "8")]
+    load_harness!(harness_atomic_load_i8, AtomicI8, i8);
+    #[cfg(target_has_atomic_load_store = "8")]
+    load_harness!(harness_atomic_load_u8, AtomicU8, u8);
+    #[cfg(target_has_atomic_load_store = "16")]
+    load_harness!(harness_atomic_load_i16, AtomicI16, i16);
+    #[cfg(target_has_atomic_load_store = "16")]
+    load_harness!(harness_atomic_load_u16, AtomicU16, u16);
+    #[cfg(target_has_atomic_load_store = "32")]
+    load_harness!(harness_atomic_load_i32, AtomicI32, i32);
+    #[cfg(target_has_atomic_load_store = "32")]
+    load_harness!(harness_atomic_load_u32, AtomicU32, u32);
+    #[cfg(target_has_atomic_load_store = "64")]
+    load_harness!(harness_atomic_load_i64, AtomicI64, i64);
+    #[cfg(target_has_atomic_load_store = "64")]
+    load_harness!(harness_atomic_load_u64, AtomicU64, u64);
+    #[cfg(target_has_atomic_load_store = "128")]
+    load_harness!(harness_atomic_load_i128, AtomicI128, i128);
+    #[cfg(target_has_atomic_load_store = "128")]
+    load_harness!(harness_atomic_load_u128, AtomicU128, u128);
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    load_harness!(harness_atomic_load_isize, AtomicIsize, isize);
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    load_harness!(harness_atomic_load_usize, AtomicUsize, usize);
+
+    // Pointer harness for atomic_load.
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    #[kani::proof_for_contract(atomic_load::<*mut u8>)]
+    pub fn harness_atomic_load_ptr_u8() {
+        let initial = kani::any::<usize>() as *mut u8;
+        let storage = AtomicPtr::<u8>::new(initial);
+
+        let _ = unsafe { atomic_load(storage.as_ptr().cast_const(), any_ordering()) };
+        kani::cover(true, "atomic_load: reached after call");
+    }
+
+    // Harnesses for atomic_swap, atomic_max, atomic_umax, and atomic_umin.
+    macro_rules! rmw_harness {
+        ($name:ident, $operation:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract($operation::<$value>)]
+            pub fn $name() {
+                let initial: $value = kani::any();
+                let storage = <$atomic>::new(initial);
+                let val: $value = kani::any();
+
+                let _ = unsafe { $operation(storage.as_ptr(), val, any_ordering()) };
+                kani::cover(true, "atomic_swap/max/umax/umin: reached after call");
+            }
+        };
+    }
+
+    // Exchange helpers.
+    #[cfg(target_has_atomic = "8")]
+    rmw_harness!(harness_atomic_swap_i8, atomic_swap, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    rmw_harness!(harness_atomic_swap_u8, atomic_swap, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    rmw_harness!(harness_atomic_swap_i16, atomic_swap, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    rmw_harness!(harness_atomic_swap_u16, atomic_swap, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    rmw_harness!(harness_atomic_swap_i32, atomic_swap, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    rmw_harness!(harness_atomic_swap_u32, atomic_swap, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    rmw_harness!(harness_atomic_swap_i64, atomic_swap, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    rmw_harness!(harness_atomic_swap_u64, atomic_swap, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    rmw_harness!(harness_atomic_swap_i128, atomic_swap, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    rmw_harness!(harness_atomic_swap_u128, atomic_swap, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    rmw_harness!(harness_atomic_swap_isize, atomic_swap, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    rmw_harness!(harness_atomic_swap_usize, atomic_swap, AtomicUsize, usize);
+
+    // Signed maximum helpers.
+    #[cfg(target_has_atomic = "8")]
+    rmw_harness!(harness_atomic_max_i8, atomic_max, AtomicI8, i8);
+    #[cfg(target_has_atomic = "16")]
+    rmw_harness!(harness_atomic_max_i16, atomic_max, AtomicI16, i16);
+    #[cfg(target_has_atomic = "32")]
+    rmw_harness!(harness_atomic_max_i32, atomic_max, AtomicI32, i32);
+    #[cfg(target_has_atomic = "64")]
+    rmw_harness!(harness_atomic_max_i64, atomic_max, AtomicI64, i64);
+    #[cfg(target_has_atomic = "128")]
+    rmw_harness!(harness_atomic_max_i128, atomic_max, AtomicI128, i128);
+    #[cfg(target_has_atomic = "ptr")]
+    rmw_harness!(harness_atomic_max_isize, atomic_max, AtomicIsize, isize);
+
+    // Unsigned maximum helpers.
+    #[cfg(target_has_atomic = "8")]
+    rmw_harness!(harness_atomic_umax_u8, atomic_umax, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    rmw_harness!(harness_atomic_umax_u16, atomic_umax, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    rmw_harness!(harness_atomic_umax_u32, atomic_umax, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    rmw_harness!(harness_atomic_umax_u64, atomic_umax, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    rmw_harness!(harness_atomic_umax_u128, atomic_umax, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    rmw_harness!(harness_atomic_umax_usize, atomic_umax, AtomicUsize, usize);
+
+    // Unsigned minimum helpers.
+    #[cfg(target_has_atomic = "8")]
+    rmw_harness!(harness_atomic_umin_u8, atomic_umin, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    rmw_harness!(harness_atomic_umin_u16, atomic_umin, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    rmw_harness!(harness_atomic_umin_u32, atomic_umin, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    rmw_harness!(harness_atomic_umin_u64, atomic_umin, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    rmw_harness!(harness_atomic_umin_u128, atomic_umin, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    rmw_harness!(harness_atomic_umin_usize, atomic_umin, AtomicUsize, usize);
+
+    // Pointer harnesses for atomic_swap.
+    #[cfg(target_has_atomic = "ptr")]
+    #[kani::proof_for_contract(atomic_swap::<*mut u8>)]
+    pub fn harness_atomic_swap_ptr() {
+        let initial = kani::any::<usize>() as *mut u8;
+        let storage = AtomicPtr::<u8>::new(initial);
+        let val = kani::any::<usize>() as *mut u8;
+
+        let _ = unsafe { atomic_swap(storage.as_ptr(), val, any_ordering()) };
+        kani::cover(true, "atomic_swap: reached after call");
+    }
+
+    // Harnesses for atomic_add, atomic_sub, atomic_and, atomic_nand, atomic_or, and atomic_xor.
+    macro_rules! binary_rmw_harness {
+        ($name:ident, $operation:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract($operation::<$value, $value>)]
+            pub fn $name() {
+                let initial: $value = kani::any();
+                let storage = <$atomic>::new(initial);
+                let val: $value = kani::any();
+
+                let _ = unsafe { $operation(storage.as_ptr(), val, any_ordering()) };
+                kani::cover(true, "atomic_add/sub/and/nand/or/xor: reached after call");
+            }
+        };
+    }
+
+    // Pointer versions use a usize operand; raw pointers do not implement kani::Arbitrary.
+    macro_rules! binary_rmw_ptr_harness {
+        ($name:ident, $operation:ident, $pointee:ty) => {
+            #[kani::proof_for_contract($operation::<*mut $pointee, usize>)]
+            pub fn $name() {
+                let initial = kani::any::<usize>() as *mut $pointee;
+                let storage = AtomicPtr::<$pointee>::new(initial);
+                let val: usize = kani::any();
+
+                let _ = unsafe { $operation(storage.as_ptr(), val, any_ordering()) };
+                kani::cover(true, "atomic pointer binary RMW: reached after call");
+            }
+        };
+    }
+
+    // Add helpers.
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_add_i8, atomic_add, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_add_u8, atomic_add, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_add_i16, atomic_add, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_add_u16, atomic_add, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_add_i32, atomic_add, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_add_u32, atomic_add, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_add_i64, atomic_add, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_add_u64, atomic_add, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_add_i128, atomic_add, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_add_u128, atomic_add, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_add_isize, atomic_add, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_add_usize, atomic_add, AtomicUsize, usize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_ptr_harness!(harness_atomic_add_ptr, atomic_add, u8);
+
+    // Subtract helpers.
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_sub_i8, atomic_sub, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_sub_u8, atomic_sub, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_sub_i16, atomic_sub, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_sub_u16, atomic_sub, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_sub_i32, atomic_sub, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_sub_u32, atomic_sub, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_sub_i64, atomic_sub, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_sub_u64, atomic_sub, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_sub_i128, atomic_sub, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_sub_u128, atomic_sub, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_sub_isize, atomic_sub, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_sub_usize, atomic_sub, AtomicUsize, usize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_ptr_harness!(harness_atomic_sub_ptr, atomic_sub, u8);
+
+    // Bitwise AND helpers.
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_and_i8, atomic_and, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_and_u8, atomic_and, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_and_i16, atomic_and, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_and_u16, atomic_and, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_and_i32, atomic_and, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_and_u32, atomic_and, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_and_i64, atomic_and, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_and_u64, atomic_and, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_and_i128, atomic_and, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_and_u128, atomic_and, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_and_isize, atomic_and, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_and_usize, atomic_and, AtomicUsize, usize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_ptr_harness!(harness_atomic_and_ptr, atomic_and, u8);
+
+    // Bitwise NAND helpers.
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_nand_i8, atomic_nand, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_nand_u8, atomic_nand, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_nand_i16, atomic_nand, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_nand_u16, atomic_nand, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_nand_i32, atomic_nand, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_nand_u32, atomic_nand, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_nand_i64, atomic_nand, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_nand_u64, atomic_nand, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_nand_i128, atomic_nand, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_nand_u128, atomic_nand, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_nand_isize, atomic_nand, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_nand_usize, atomic_nand, AtomicUsize, usize);
+
+    // Bitwise OR helpers.
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_or_i8, atomic_or, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_or_u8, atomic_or, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_or_i16, atomic_or, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_or_u16, atomic_or, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_or_i32, atomic_or, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_or_u32, atomic_or, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_or_i64, atomic_or, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_or_u64, atomic_or, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_or_i128, atomic_or, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_or_u128, atomic_or, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_or_isize, atomic_or, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_or_usize, atomic_or, AtomicUsize, usize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_ptr_harness!(harness_atomic_or_ptr, atomic_or, u8);
+
+    // Bitwise XOR helpers.
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_xor_i8, atomic_xor, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    binary_rmw_harness!(harness_atomic_xor_u8, atomic_xor, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_xor_i16, atomic_xor, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    binary_rmw_harness!(harness_atomic_xor_u16, atomic_xor, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_xor_i32, atomic_xor, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    binary_rmw_harness!(harness_atomic_xor_u32, atomic_xor, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_xor_i64, atomic_xor, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    binary_rmw_harness!(harness_atomic_xor_u64, atomic_xor, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_xor_i128, atomic_xor, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    binary_rmw_harness!(harness_atomic_xor_u128, atomic_xor, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_xor_isize, atomic_xor, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_harness!(harness_atomic_xor_usize, atomic_xor, AtomicUsize, usize);
+    #[cfg(target_has_atomic = "ptr")]
+    binary_rmw_ptr_harness!(harness_atomic_xor_ptr, atomic_xor, u8);
+
+    // Harnesses for atomic_compare_exchange and atomic_compare_exchange_weak.
+    macro_rules! compare_exchange_harness {
+        ($name:ident, $operation:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract($operation::<$value>)]
+            pub fn $name() {
+                let initial: $value = kani::any();
+                let storage = <$atomic>::new(initial);
+                let old: $value = kani::any();
+                let new: $value = kani::any();
+
+                let _ = unsafe {
+                    $operation(storage.as_ptr(), old, new, any_ordering(), any_ordering())
+                };
+                kani::cover(true, "atomic_compare_exchange/weak: reached after call");
+            }
+        };
+    }
+
+    // Strong compare-exchange helpers.
+    #[cfg(target_has_atomic = "8")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_i8,
+        atomic_compare_exchange,
+        AtomicI8,
+        i8
+    );
+    #[cfg(target_has_atomic = "8")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_u8,
+        atomic_compare_exchange,
+        AtomicU8,
+        u8
+    );
+    #[cfg(target_has_atomic = "16")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_i16,
+        atomic_compare_exchange,
+        AtomicI16,
+        i16
+    );
+    #[cfg(target_has_atomic = "16")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_u16,
+        atomic_compare_exchange,
+        AtomicU16,
+        u16
+    );
+    #[cfg(target_has_atomic = "32")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_i32,
+        atomic_compare_exchange,
+        AtomicI32,
+        i32
+    );
+    #[cfg(target_has_atomic = "32")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_u32,
+        atomic_compare_exchange,
+        AtomicU32,
+        u32
+    );
+    #[cfg(target_has_atomic = "64")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_i64,
+        atomic_compare_exchange,
+        AtomicI64,
+        i64
+    );
+    #[cfg(target_has_atomic = "64")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_u64,
+        atomic_compare_exchange,
+        AtomicU64,
+        u64
+    );
+    #[cfg(target_has_atomic = "128")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_i128,
+        atomic_compare_exchange,
+        AtomicI128,
+        i128
+    );
+    #[cfg(target_has_atomic = "128")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_u128,
+        atomic_compare_exchange,
+        AtomicU128,
+        u128
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_isize,
+        atomic_compare_exchange,
+        AtomicIsize,
+        isize
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_usize,
+        atomic_compare_exchange,
+        AtomicUsize,
+        usize
+    );
+
+    // Weak compare-exchange helpers.
+    #[cfg(target_has_atomic = "8")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_i8,
+        atomic_compare_exchange_weak,
+        AtomicI8,
+        i8
+    );
+    #[cfg(target_has_atomic = "8")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_u8,
+        atomic_compare_exchange_weak,
+        AtomicU8,
+        u8
+    );
+    #[cfg(target_has_atomic = "16")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_i16,
+        atomic_compare_exchange_weak,
+        AtomicI16,
+        i16
+    );
+    #[cfg(target_has_atomic = "16")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_u16,
+        atomic_compare_exchange_weak,
+        AtomicU16,
+        u16
+    );
+    #[cfg(target_has_atomic = "32")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_i32,
+        atomic_compare_exchange_weak,
+        AtomicI32,
+        i32
+    );
+    #[cfg(target_has_atomic = "32")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_u32,
+        atomic_compare_exchange_weak,
+        AtomicU32,
+        u32
+    );
+    #[cfg(target_has_atomic = "64")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_i64,
+        atomic_compare_exchange_weak,
+        AtomicI64,
+        i64
+    );
+    #[cfg(target_has_atomic = "64")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_u64,
+        atomic_compare_exchange_weak,
+        AtomicU64,
+        u64
+    );
+    #[cfg(target_has_atomic = "128")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_i128,
+        atomic_compare_exchange_weak,
+        AtomicI128,
+        i128
+    );
+    #[cfg(target_has_atomic = "128")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_u128,
+        atomic_compare_exchange_weak,
+        AtomicU128,
+        u128
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_isize,
+        atomic_compare_exchange_weak,
+        AtomicIsize,
+        isize
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    compare_exchange_harness!(
+        harness_atomic_compare_exchange_weak_usize,
+        atomic_compare_exchange_weak,
+        AtomicUsize,
+        usize
+    );
+
+    // Pointer harnesses for atomic_compare_exchange and atomic_compare_exchange_weak.
+    macro_rules! compare_exchange_ptr_harness {
+        ($name:ident, $operation:ident, $pointee:ty) => {
+            #[kani::proof_for_contract($operation::<*mut $pointee>)]
+            pub fn $name() {
+                let initial = kani::any::<usize>() as *mut $pointee;
+                let storage = AtomicPtr::<$pointee>::new(initial);
+                let old = kani::any::<usize>() as *mut $pointee;
+                let new = kani::any::<usize>() as *mut $pointee;
+
+                let _ = unsafe {
+                    $operation(storage.as_ptr(), old, new, any_ordering(), any_ordering())
+                };
+                kani::cover(true, "atomic_compare_exchange/weak: reached after call");
+            }
+        };
+    }
+
+    #[cfg(target_has_atomic = "ptr")]
+    compare_exchange_ptr_harness!(harness_atomic_compare_exchange_ptr, atomic_compare_exchange, u8);
+    #[cfg(target_has_atomic = "ptr")]
+    compare_exchange_ptr_harness!(
+        harness_atomic_compare_exchange_weak_ptr,
+        atomic_compare_exchange_weak,
+        u8
+    );
+
+    // Part 2 (optional): safe atomic abstractions and ordering contracts.
+    fn any_load_order() -> Ordering {
+        match kani::any::<u8>() % 3 {
+            0 => Relaxed,
+            1 => Acquire,
+            _ => SeqCst,
+        }
+    }
+
+    fn any_store_order() -> Ordering {
+        match kani::any::<u8>() % 3 {
+            0 => Relaxed,
+            1 => Release,
+            _ => SeqCst,
+        }
+    }
+
+    fn any_failure_order() -> Ordering {
+        any_load_order()
+    }
+
+    // Harnesses for load and store methods of atomic types, with safe abstractions.
+    macro_rules! safe_load_store_harness {
+        ($load_name:ident, $store_name:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract(<$atomic>::load)]
+            pub fn $load_name() {
+                let storage = <$atomic>::new(kani::any::<$value>());
+                let _ = storage.load(any_load_order());
+                kani::cover(true, "safe atomic load: reached after call");
+            }
+
+            #[kani::proof_for_contract(<$atomic>::store)]
+            pub fn $store_name() {
+                let storage = <$atomic>::new(kani::any::<$value>());
+                storage.store(kani::any::<$value>(), any_store_order());
+                kani::cover(true, "safe atomic store: reached after call");
+            }
+        };
+    }
+
+    #[cfg(target_has_atomic_load_store = "8")]
+    safe_load_store_harness!(harness_safe_load_bool, harness_safe_store_bool, AtomicBool, bool);
+    #[cfg(target_has_atomic_load_store = "8")]
+    safe_load_store_harness!(harness_safe_load_i8, harness_safe_store_i8, AtomicI8, i8);
+    #[cfg(target_has_atomic_load_store = "8")]
+    safe_load_store_harness!(harness_safe_load_u8, harness_safe_store_u8, AtomicU8, u8);
+    #[cfg(target_has_atomic_load_store = "16")]
+    safe_load_store_harness!(harness_safe_load_i16, harness_safe_store_i16, AtomicI16, i16);
+    #[cfg(target_has_atomic_load_store = "16")]
+    safe_load_store_harness!(harness_safe_load_u16, harness_safe_store_u16, AtomicU16, u16);
+    #[cfg(target_has_atomic_load_store = "32")]
+    safe_load_store_harness!(harness_safe_load_i32, harness_safe_store_i32, AtomicI32, i32);
+    #[cfg(target_has_atomic_load_store = "32")]
+    safe_load_store_harness!(harness_safe_load_u32, harness_safe_store_u32, AtomicU32, u32);
+    #[cfg(target_has_atomic_load_store = "64")]
+    safe_load_store_harness!(harness_safe_load_i64, harness_safe_store_i64, AtomicI64, i64);
+    #[cfg(target_has_atomic_load_store = "64")]
+    safe_load_store_harness!(harness_safe_load_u64, harness_safe_store_u64, AtomicU64, u64);
+    #[cfg(target_has_atomic_load_store = "128")]
+    safe_load_store_harness!(harness_safe_load_i128, harness_safe_store_i128, AtomicI128, i128);
+    #[cfg(target_has_atomic_load_store = "128")]
+    safe_load_store_harness!(harness_safe_load_u128, harness_safe_store_u128, AtomicU128, u128);
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    safe_load_store_harness!(harness_safe_load_isize, harness_safe_store_isize, AtomicIsize, isize);
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    safe_load_store_harness!(harness_safe_load_usize, harness_safe_store_usize, AtomicUsize, usize);
+
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    #[kani::proof_for_contract(AtomicPtr::<u8>::load)]
+    pub fn harness_safe_load_ptr() {
+        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
+        let _ = storage.load(any_load_order());
+        kani::cover(true, "safe atomic pointer load: reached after call");
+    }
+
+    #[cfg(target_has_atomic_load_store = "ptr")]
+    #[kani::proof_for_contract(AtomicPtr::<u8>::store)]
+    pub fn harness_safe_store_ptr() {
+        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
+        storage.store(kani::any::<usize>() as *mut u8, any_store_order());
+        kani::cover(true, "safe atomic pointer store: reached after call");
+    }
+
+    macro_rules! safe_compare_exchange_harness {
+        ($name:ident, $atomic:ty, $value:ty, $method:ident) => {
+            #[kani::proof_for_contract(<$atomic>::$method)]
+            pub fn $name() {
+                let storage = <$atomic>::new(kani::any::<$value>());
+                let _ = storage.$method(
+                    kani::any::<$value>(),
+                    kani::any::<$value>(),
+                    any_ordering(),
+                    any_failure_order(),
+                );
+                kani::cover(true, "safe atomic compare-exchange: reached after call");
+            }
+        };
+    }
+
+    #[cfg(target_has_atomic = "8")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_bool,
+        AtomicBool,
+        bool,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "8")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_bool,
+        AtomicBool,
+        bool,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    #[kani::proof_for_contract(AtomicPtr::<u8>::compare_exchange)]
+    pub fn harness_safe_compare_exchange_ptr() {
+        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
+        let _ = storage.compare_exchange(
+            kani::any::<usize>() as *mut u8,
+            kani::any::<usize>() as *mut u8,
+            any_ordering(),
+            any_failure_order(),
+        );
+        kani::cover(true, "safe atomic pointer compare-exchange: reached after call");
+    }
+    #[cfg(target_has_atomic = "ptr")]
+    #[kani::proof_for_contract(AtomicPtr::<u8>::compare_exchange_weak)]
+    pub fn harness_safe_compare_exchange_weak_ptr() {
+        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
+        let _ = storage.compare_exchange_weak(
+            kani::any::<usize>() as *mut u8,
+            kani::any::<usize>() as *mut u8,
+            any_ordering(),
+            any_failure_order(),
+        );
+        kani::cover(true, "safe atomic pointer weak compare-exchange: reached after call");
+    }
+    #[cfg(target_has_atomic = "8")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_u8,
+        AtomicU8,
+        u8,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "8")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_u8,
+        AtomicU8,
+        u8,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "8")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_i8,
+        AtomicI8,
+        i8,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "8")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_i8,
+        AtomicI8,
+        i8,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "16")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_i16,
+        AtomicI16,
+        i16,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "16")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_i16,
+        AtomicI16,
+        i16,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "16")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_u16,
+        AtomicU16,
+        u16,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "16")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_u16,
+        AtomicU16,
+        u16,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "32")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_i32,
+        AtomicI32,
+        i32,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "32")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_i32,
+        AtomicI32,
+        i32,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "32")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_u32,
+        AtomicU32,
+        u32,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "32")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_u32,
+        AtomicU32,
+        u32,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "64")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_i64,
+        AtomicI64,
+        i64,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "64")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_i64,
+        AtomicI64,
+        i64,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "64")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_u64,
+        AtomicU64,
+        u64,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "64")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_u64,
+        AtomicU64,
+        u64,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "128")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_i128,
+        AtomicI128,
+        i128,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "128")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_i128,
+        AtomicI128,
+        i128,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "128")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_u128,
+        AtomicU128,
+        u128,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "128")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_u128,
+        AtomicU128,
+        u128,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_isize,
+        AtomicIsize,
+        isize,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_isize,
+        AtomicIsize,
+        isize,
+        compare_exchange_weak
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_usize,
+        AtomicUsize,
+        usize,
+        compare_exchange
+    );
+    #[cfg(target_has_atomic = "ptr")]
+    safe_compare_exchange_harness!(
+        harness_safe_compare_exchange_weak_usize,
+        AtomicUsize,
+        usize,
+        compare_exchange_weak
+    );
+
+    macro_rules! safe_update_harness {
+        ($name:ident, $atomic:ty, $value:ty, $method:ident, $closure:expr) => {
+            #[kani::proof_for_contract(<$atomic>::$method)]
+            pub fn $name() {
+                let storage = <$atomic>::new(kani::any::<$value>());
+                let _ = storage.$method(Relaxed, any_failure_order(), $closure);
+                kani::cover(true, "safe atomic update: reached after call");
+            }
+        };
+    }
+
+    #[cfg(target_has_atomic = "8")]
+    safe_update_harness!(harness_safe_fetch_update_bool, AtomicBool, bool, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "8")]
+    safe_update_harness!(harness_safe_try_update_bool, AtomicBool, bool, try_update, |_| None);
+    #[cfg(target_has_atomic = "ptr")]
+    #[kani::proof_for_contract(AtomicPtr::<u8>::fetch_update)]
+    pub fn harness_safe_fetch_update_ptr() {
+        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
+        let _ = storage.fetch_update(Relaxed, any_failure_order(), |_| None);
+        kani::cover(true, "safe atomic pointer fetch-update: reached after call");
+    }
+    #[cfg(target_has_atomic = "ptr")]
+    #[kani::proof_for_contract(AtomicPtr::<u8>::try_update)]
+    pub fn harness_safe_try_update_ptr() {
+        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
+        let _ = storage.try_update(Relaxed, any_failure_order(), |_| None);
+        kani::cover(true, "safe atomic pointer try-update: reached after call");
+    }
+    #[cfg(target_has_atomic = "8")]
+    safe_update_harness!(harness_safe_fetch_update_i8, AtomicI8, i8, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "8")]
+    safe_update_harness!(harness_safe_try_update_i8, AtomicI8, i8, try_update, |_| None);
+    #[cfg(target_has_atomic = "8")]
+    safe_update_harness!(harness_safe_fetch_update_u8, AtomicU8, u8, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "8")]
+    safe_update_harness!(harness_safe_try_update_u8, AtomicU8, u8, try_update, |_| None);
+    #[cfg(target_has_atomic = "16")]
+    safe_update_harness!(harness_safe_fetch_update_i16, AtomicI16, i16, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "16")]
+    safe_update_harness!(harness_safe_try_update_i16, AtomicI16, i16, try_update, |_| None);
+    #[cfg(target_has_atomic = "16")]
+    safe_update_harness!(harness_safe_fetch_update_u16, AtomicU16, u16, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "16")]
+    safe_update_harness!(harness_safe_try_update_u16, AtomicU16, u16, try_update, |_| None);
+    #[cfg(target_has_atomic = "32")]
+    safe_update_harness!(harness_safe_fetch_update_i32, AtomicI32, i32, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "32")]
+    safe_update_harness!(harness_safe_try_update_i32, AtomicI32, i32, try_update, |_| None);
+    #[cfg(target_has_atomic = "32")]
+    safe_update_harness!(harness_safe_fetch_update_u32, AtomicU32, u32, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "32")]
+    safe_update_harness!(harness_safe_try_update_u32, AtomicU32, u32, try_update, |_| None);
+    #[cfg(target_has_atomic = "64")]
+    safe_update_harness!(harness_safe_fetch_update_i64, AtomicI64, i64, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "64")]
+    safe_update_harness!(harness_safe_try_update_i64, AtomicI64, i64, try_update, |_| None);
+    #[cfg(target_has_atomic = "64")]
+    safe_update_harness!(harness_safe_fetch_update_u64, AtomicU64, u64, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "64")]
+    safe_update_harness!(harness_safe_try_update_u64, AtomicU64, u64, try_update, |_| None);
+    #[cfg(target_has_atomic = "128")]
+    safe_update_harness!(harness_safe_fetch_update_i128, AtomicI128, i128, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "128")]
+    safe_update_harness!(harness_safe_try_update_i128, AtomicI128, i128, try_update, |_| None);
+    #[cfg(target_has_atomic = "128")]
+    safe_update_harness!(harness_safe_fetch_update_u128, AtomicU128, u128, fetch_update, |_| None);
+    #[cfg(target_has_atomic = "128")]
+    safe_update_harness!(harness_safe_try_update_u128, AtomicU128, u128, try_update, |_| None);
+    #[cfg(target_has_atomic = "ptr")]
+    safe_update_harness!(harness_safe_fetch_update_isize, AtomicIsize, isize, fetch_update, |_| {
+        None
+    });
+    #[cfg(target_has_atomic = "ptr")]
+    safe_update_harness!(harness_safe_try_update_isize, AtomicIsize, isize, try_update, |_| None);
+    #[cfg(target_has_atomic = "ptr")]
+    safe_update_harness!(harness_safe_fetch_update_usize, AtomicUsize, usize, fetch_update, |_| {
+        None
+    });
+    #[cfg(target_has_atomic = "ptr")]
+    safe_update_harness!(harness_safe_try_update_usize, AtomicUsize, usize, try_update, |_| None);
+
+    // Kani does not infer a finite bound for this CAS retry loop automatically.
+    // An unwind bound of 2 is sufficient for this single-threaded harness under
+    // Kani's current atomic intrinsic model.
+    macro_rules! safe_update_loop_harness {
+        ($name:ident, $atomic:ty, $value:ty) => {
+            #[kani::proof_for_contract(<$atomic>::update)]
+            #[kani::unwind(2)]
+            pub fn $name() {
+                let storage = <$atomic>::new(kani::any::<$value>());
+                let _ = storage.update(Relaxed, any_failure_order(), |x| x);
+                kani::cover(true, "safe atomic update: reached after call");
+            }
+        };
+    }
+    #[cfg(target_has_atomic = "8")]
+    safe_update_loop_harness!(harness_safe_update_bool, AtomicBool, bool);
+    #[cfg(target_has_atomic = "8")]
+    safe_update_loop_harness!(harness_safe_update_i8, AtomicI8, i8);
+    #[cfg(target_has_atomic = "8")]
+    safe_update_loop_harness!(harness_safe_update_u8, AtomicU8, u8);
+    #[cfg(target_has_atomic = "16")]
+    safe_update_loop_harness!(harness_safe_update_i16, AtomicI16, i16);
+    #[cfg(target_has_atomic = "16")]
+    safe_update_loop_harness!(harness_safe_update_u16, AtomicU16, u16);
+    #[cfg(target_has_atomic = "32")]
+    safe_update_loop_harness!(harness_safe_update_i32, AtomicI32, i32);
+    #[cfg(target_has_atomic = "32")]
+    safe_update_loop_harness!(harness_safe_update_u32, AtomicU32, u32);
+    #[cfg(target_has_atomic = "64")]
+    safe_update_loop_harness!(harness_safe_update_i64, AtomicI64, i64);
+    #[cfg(target_has_atomic = "64")]
+    safe_update_loop_harness!(harness_safe_update_u64, AtomicU64, u64);
+    #[cfg(target_has_atomic = "128")]
+    safe_update_loop_harness!(harness_safe_update_i128, AtomicI128, i128);
+    #[cfg(target_has_atomic = "128")]
+    safe_update_loop_harness!(harness_safe_update_u128, AtomicU128, u128);
+    #[cfg(target_has_atomic = "ptr")]
+    safe_update_loop_harness!(harness_safe_update_isize, AtomicIsize, isize);
+    #[cfg(target_has_atomic = "ptr")]
+    safe_update_loop_harness!(harness_safe_update_usize, AtomicUsize, usize);
+
+    #[cfg(all(target_has_atomic_load_store = "ptr", target_has_atomic = "8"))]
+    #[kani::proof_for_contract(AtomicPtr::<u8>::update)]
+    #[kani::unwind(2)]
+    pub fn harness_safe_update_ptr() {
+        let storage = AtomicPtr::<u8>::new(kani::any::<usize>() as *mut u8);
+        let value = kani::any::<usize>() as *mut u8;
+        let _ = storage.update(Relaxed, any_failure_order(), |_| value);
+        kani::cover(true, "safe atomic pointer update: reached after call");
+    }
+
+    #[cfg(target_has_atomic_load_store = "8")]
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_safe_load_panics_on_release() {
+        let storage = AtomicBool::new(false);
+        let _ = storage.load(Release);
+    }
+
+    #[cfg(target_has_atomic_load_store = "8")]
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_safe_load_panics_on_acqrel() {
+        let storage = AtomicBool::new(false);
+        let _ = storage.load(AcqRel);
+    }
+
+    #[cfg(target_has_atomic_load_store = "8")]
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_safe_store_panics_on_acquire() {
+        let storage = AtomicBool::new(false);
+        storage.store(true, Acquire);
+    }
+
+    #[cfg(target_has_atomic_load_store = "8")]
+    #[kani::proof]
+    #[kani::should_panic]
+    pub fn harness_safe_store_panics_on_acqrel() {
+        let storage = AtomicBool::new(false);
+        storage.store(true, AcqRel);
+    }
+
+    macro_rules! safe_compare_exchange_panics_harness {
+        ($name:ident, $method:ident, $failure:expr) => {
+            #[cfg(target_has_atomic = "8")]
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $name() {
+                let storage = AtomicBool::new(false);
+                let _ = storage.$method(false, true, Relaxed, $failure);
+            }
+        };
+    }
+
+    safe_compare_exchange_panics_harness!(
+        harness_safe_compare_exchange_panics_on_release,
+        compare_exchange,
+        Release
+    );
+    safe_compare_exchange_panics_harness!(
+        harness_safe_compare_exchange_panics_on_acqrel,
+        compare_exchange,
+        AcqRel
+    );
+    safe_compare_exchange_panics_harness!(
+        harness_safe_compare_exchange_weak_panics_on_release,
+        compare_exchange_weak,
+        Release
+    );
+    safe_compare_exchange_panics_harness!(
+        harness_safe_compare_exchange_weak_panics_on_acqrel,
+        compare_exchange_weak,
+        AcqRel
+    );
+
+    macro_rules! safe_update_panics_harness {
+        ($name:ident, $method:ident, $failure:expr, $closure:expr) => {
+            #[cfg(target_has_atomic = "8")]
+            #[kani::proof]
+            #[kani::should_panic]
+            pub fn $name() {
+                let storage = AtomicBool::new(false);
+                let _ = storage.$method(Relaxed, $failure, $closure);
+            }
+        };
+    }
+
+    safe_update_panics_harness!(
+        harness_safe_fetch_update_panics_on_release,
+        fetch_update,
+        Release,
+        |_| None
+    );
+    safe_update_panics_harness!(
+        harness_safe_fetch_update_panics_on_acqrel,
+        fetch_update,
+        AcqRel,
+        |_| None
+    );
+    safe_update_panics_harness!(
+        harness_safe_try_update_panics_on_release,
+        try_update,
+        Release,
+        |_| None
+    );
+    safe_update_panics_harness!(
+        harness_safe_try_update_panics_on_acqrel,
+        try_update,
+        AcqRel,
+        |_| None
+    );
+    safe_update_panics_harness!(harness_safe_update_panics_on_release, update, Release, |x| x);
+    safe_update_panics_harness!(harness_safe_update_panics_on_acqrel, update, AcqRel, |x| x);
 }
