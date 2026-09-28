@@ -776,6 +776,23 @@ mod verify {
         }
     }
 
+    // fold from an arbitrary reachable state: the real `while self.ptr != end`
+    // loop must visit exactly the remaining elements from any interior `ptr`.
+    // Held separate from the harnesses above because it is the one with real
+    // solver-tractability risk: the reachable-state construction stacks two
+    // symbolic advance loops on top of fold's own loop. If CI times out at 64,
+    // lower this harness to <32> — the fresh-state fold harness below already
+    // covers length 64.
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_fold_reachable_u8() {
+        let (it, _front, _back) = any_reachable_u8_intoiter::<64>();
+        let n = it.len();
+        kani::cover(n > 1, "non-vacuity: a multi-element fold from an interior state is reachable");
+        let count = it.fold(0usize, |acc, _| acc + 1);
+        assert!(count == n);
+    }
+
     // fold: verifies the REAL non-ZST body (the `while self.ptr != end`
     // concrete-pointer loop) — no cfg(kani) body substitution. The counting
     // accumulator asserts fold visits exactly `len` elements.
