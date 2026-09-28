@@ -793,6 +793,81 @@ mod verify {
         assert!(count == n);
     }
 
+    // try_fold from an arbitrary reachable state: the symbolic early exit
+    // exercises the `?` short-circuit and the drop of the remaining tail from
+    // an interior `ptr`. Same solver class as fold_reachable above; the same
+    // lower-to-32 note applies if CI times out at 64. Deliberately mirrors the
+    // fresh harness's Result/len form without an accumulator-content spec (that
+    // would need a second loop over the snapshot in the harness itself); the
+    // new information here is the interior pre-state and its early-exit drop.
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_try_fold_reachable_u8() {
+        let (mut it, _front, _back) = any_reachable_u8_intoiter::<64>();
+        let n = it.len();
+        kani::cover(
+            n > 1,
+            "non-vacuity: a multi-element try_fold from an interior state is reachable",
+        );
+        let r: Result<u32, ()> =
+            it.try_fold(
+                0u32,
+                |acc, x| {
+                    if kani::any() { Err(()) } else { Ok(acc.wrapping_add(x as u32)) }
+                },
+            );
+        if r.is_ok() {
+            assert!(it.len() == 0);
+        } else {
+            assert!(it.len() < n);
+        }
+    }
+
+    // next_chunk from an arbitrary reachable state: the chunk copy must start
+    // at the advanced front offset (Ok), and the partial-chunk Err must carry
+    // exactly the remaining elements. Chunk size 2 matches the fresh harness.
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_next_chunk_reachable_u8() {
+        let (mut it, snapshot, front, _back) = any_reachable_u8_intoiter_snap::<64>();
+        let n = it.len();
+        kani::cover(n >= 2, "full-chunk Ok branch reachable from an interior state");
+        kani::cover(n == 1, "partial-chunk Err branch reachable from an interior state");
+        match it.next_chunk::<2>() {
+            Ok(arr) => {
+                assert!(n >= 2);
+                assert!(arr[0] == snapshot[front] && arr[1] == snapshot[front + 1]);
+                assert!(it.len() == n - 2);
+            }
+            Err(mut rest) => {
+                assert!(n < 2);
+                assert!(it.len() == 0);
+                if n == 1 {
+                    assert!(rest.next() == Some(snapshot[front]));
+                } else {
+                    assert!(rest.next().is_none());
+                }
+            }
+        }
+    }
+
+    // into_vecdeque from an arbitrary reachable state: directly exercises the
+    // `ptr.offset_from_unsigned(buf)..end.offset_from_unsigned(buf)` range
+    // math with an interior `ptr` — the resulting VecDeque must hold exactly
+    // the remaining middle range.
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_into_vecdeque_reachable_u8() {
+        let (it, snapshot, front, back) = any_reachable_u8_intoiter_snap::<64>();
+        let n = it.len();
+        let dq = it.into_vecdeque();
+        assert!(dq.len() == n);
+        if n > 0 {
+            assert!(dq[0] == snapshot[front]);
+            assert!(dq[n - 1] == snapshot[snapshot.len() - 1 - back]);
+        }
+    }
+
     // fold: verifies the REAL non-ZST body (the `while self.ptr != end`
     // concrete-pointer loop) — no cfg(kani) body substitution. The counting
     // accumulator asserts fold visits exactly `len` elements.
