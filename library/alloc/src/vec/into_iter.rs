@@ -578,6 +578,204 @@ mod verify {
         }
     }
 
+    // ---- Arbitrary reachable iterator states ----
+    // The harnesses above build a fresh iterator (`ptr == buf`) and call the
+    // target immediately. Safety must also hold after any valid front/back
+    // advancement, when `ptr` sits at an interior position. The helpers below
+    // construct such reachable states so each target is checked from them too.
+
+    // Advances an IntoIter<u8> to an arbitrary reachable state: a symbolic number
+    // of elements consumed from the front and back. Complete over the states
+    // reachable by iteration — any next/next_back/advance consumption lands on
+    // some (front, back). Reached via advance_by/advance_back_by, which are
+    // themselves verified by their own harnesses (asserted Ok here).
+    fn reach_u8(mut it: IntoIter<u8>) -> (IntoIter<u8>, usize, usize) {
+        let front: usize = kani::any();
+        kani::assume(front <= it.len());
+        assert!(it.advance_by(front).is_ok());
+        let back: usize = kani::any();
+        kani::assume(back <= it.len());
+        assert!(it.advance_back_by(back).is_ok());
+        kani::cover(front > 0 && it.len() > 0, "front-consumed non-empty state reachable");
+        kani::cover(back > 0 && it.len() > 0, "back-consumed non-empty state reachable");
+        kani::cover(
+            front > 0 && back > 0 && it.len() > 0,
+            "both-ends-consumed interior state reachable",
+        );
+        kani::cover(it.len() == 0, "exhausted state reachable");
+        (it, front, back)
+    }
+
+    // Content-less reachable iterator (no snapshot clone) — for harnesses that
+    // check only lengths/results (size_hint, advance_by, advance_back_by).
+    fn any_reachable_u8_intoiter<const N: usize>() -> (IntoIter<u8>, usize, usize) {
+        reach_u8(any_u8_vec::<N>().into_iter())
+    }
+
+    // Snapshot variant — keeps the original contents so harnesses can assert
+    // content identity at the advanced offsets (next, next_back, as_slice,
+    // as_mut_slice).
+    fn any_reachable_u8_intoiter_snap<const N: usize>() -> (IntoIter<u8>, Vec<u8>, usize, usize) {
+        let v = any_u8_vec::<N>();
+        let snapshot = v.clone();
+        let (it, front, back) = reach_u8(v.into_iter());
+        (it, snapshot, front, back)
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_next_reachable_u8() {
+        let (mut it, snapshot, front, _back) = any_reachable_u8_intoiter_snap::<64>();
+        let n = it.len();
+        let r = it.next();
+        assert!(it.len() == n - (r.is_some() as usize));
+        if n > 0 {
+            assert!(r == Some(snapshot[front]));
+        } else {
+            assert!(r.is_none());
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_next_back_reachable_u8() {
+        let (mut it, snapshot, _front, back) = any_reachable_u8_intoiter_snap::<64>();
+        let n = it.len();
+        let r = it.next_back();
+        assert!(it.len() == n - (r.is_some() as usize));
+        if n > 0 {
+            assert!(r == Some(snapshot[snapshot.len() - 1 - back]));
+        } else {
+            assert!(r.is_none());
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_size_hint_reachable_u8() {
+        let (it, _front, _back) = any_reachable_u8_intoiter::<64>();
+        let n = it.len();
+        let (lo, hi) = it.size_hint();
+        assert!(lo == n && hi == Some(n));
+    }
+
+    // The slice views from an interior ptr must start at the advanced front
+    // offset and end before the consumed back range.
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_as_slice_reachable_u8() {
+        let (it, snapshot, front, back) = any_reachable_u8_intoiter_snap::<64>();
+        let n = it.len();
+        let s = it.as_slice();
+        assert!(s.len() == n);
+        if n > 0 {
+            assert!(s[0] == snapshot[front]);
+            assert!(s[n - 1] == snapshot[snapshot.len() - 1 - back]);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_as_mut_slice_reachable_u8() {
+        let (mut it, snapshot, front, back) = any_reachable_u8_intoiter_snap::<64>();
+        let n = it.len();
+        let s = it.as_mut_slice();
+        assert!(s.len() == n);
+        if n > 0 {
+            assert!(s[0] == snapshot[front]);
+            assert!(s[n - 1] == snapshot[snapshot.len() - 1 - back]);
+            // Write-through: a store via the mut view is observed by iteration.
+            s[0] = s[0].wrapping_add(1);
+            let expected = s[0];
+            assert!(it.next() == Some(expected));
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_advance_by_reachable_u8() {
+        let (mut it, _front, _back) = any_reachable_u8_intoiter::<64>();
+        let n = it.len();
+        let k: usize = kani::any();
+        let r = it.advance_by(k);
+        if k <= n {
+            assert!(r.is_ok());
+            assert!(it.len() == n - k);
+        } else {
+            assert!(r.is_err());
+            assert!(it.len() == 0);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_advance_back_by_reachable_u8() {
+        let (mut it, _front, _back) = any_reachable_u8_intoiter::<64>();
+        let n = it.len();
+        let k: usize = kani::any();
+        let r = it.advance_back_by(k);
+        if k <= n {
+            assert!(r.is_ok());
+            assert!(it.len() == n - k);
+        } else {
+            assert!(r.is_err());
+            assert!(it.len() == 0);
+        }
+    }
+
+    // Drop from an interior state: after consuming a symbolic number of elements
+    // from each end, IntoIter's Drop must run drop glue for exactly the remaining
+    // middle range and free the allocation.
+    #[kani::proof]
+    #[kani::unwind(16)]
+    fn check_into_iter_drop_reachable_droptoken() {
+        let mut it = vec![
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+            DropToken(kani::any()),
+        ]
+        .into_iter();
+        let front: usize = kani::any();
+        kani::assume(front <= it.len());
+        assert!(it.advance_by(front).is_ok());
+        let back: usize = kani::any();
+        kani::assume(back <= it.len());
+        assert!(it.advance_back_by(back).is_ok());
+        kani::cover(
+            front > 0 && back > 0 && it.len() > 0,
+            "a strict middle range remains for Drop after both ends were consumed",
+        );
+        drop(it);
+    }
+
+    // ZST interior state: the ZST encoding tracks length in `end`, so advancement
+    // arithmetic differs from the non-ZST pointer walk.
+    #[kani::proof]
+    #[kani::unwind(72)]
+    fn check_into_iter_next_reachable_zst() {
+        let n: usize = kani::any();
+        kani::assume(n <= 64);
+        kani::cover(n == 64, "upper length bound reachable");
+        let mut it = vec![(); n].into_iter();
+        let front: usize = kani::any();
+        kani::assume(front <= it.len());
+        assert!(it.advance_by(front).is_ok());
+        let back: usize = kani::any();
+        kani::assume(back <= it.len());
+        assert!(it.advance_back_by(back).is_ok());
+        kani::cover(front > 0 && it.len() > 0, "front-consumed non-empty ZST state reachable");
+        kani::cover(back > 0 && it.len() > 0, "back-consumed non-empty ZST state reachable");
+        let rem = it.len();
+        let r = it.next();
+        assert!(it.len() == rem - (r.is_some() as usize));
+        if rem == 0 {
+            assert!(r.is_none());
+        } else {
+            assert!(r == Some(()));
+        }
+    }
+
     // fold: verifies the REAL non-ZST body (the `while self.ptr != end`
     // concrete-pointer loop) — no cfg(kani) body substitution. The counting
     // accumulator asserts fold visits exactly `len` elements.
