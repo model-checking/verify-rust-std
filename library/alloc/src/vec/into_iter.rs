@@ -315,98 +315,22 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         F: FnMut(B, Self::Item) -> B,
     {
         if T::IS_ZST {
-            #[cfg(kani)]
-            let fold_ptr = self.ptr.as_ptr();
-            #[cfg(kani)]
-            let fold_ptr_is_aligned = fold_ptr.is_aligned();
-            #[cfg(kani)]
-            let mut remaining = self.end.addr().wrapping_sub(fold_ptr.addr());
-            #[cfg(kani)]
-            let initial_remaining = remaining;
-
-            #[cfg_attr(kani, kani::loop_invariant(
-                remaining <= initial_remaining
-                    && (remaining == 0) == (fold_ptr == self.end.cast_mut())
-                    && fold_ptr_is_aligned
-            ))]
-            #[cfg_attr(kani, kani::loop_modifies(&self.end, &remaining))]
-            while {
-                #[cfg(kani)]
-                {
-                    fold_ptr != self.end.cast_mut()
-                }
-                #[cfg(not(kani))]
-                {
-                    self.ptr.as_ptr() != self.end.cast_mut()
-                }
-            } {
-                #[cfg(kani)]
-                kani::assume(remaining > 0);
+            while self.ptr.as_ptr() != self.end.cast_mut() {
                 // SAFETY: we just checked that `self.ptr` is in bounds.
-                #[cfg(kani)]
-                let tmp = unsafe { fold_ptr.read() };
-                #[cfg(not(kani))]
                 let tmp = unsafe { self.ptr.read() };
                 // See `next` for why we subtract from `end` here.
                 self.end = self.end.wrapping_byte_sub(1);
-                #[cfg(kani)]
-                {
-                    remaining -= 1;
-                    kani::assume((remaining == 0) == (fold_ptr == self.end.cast_mut()));
-                }
                 accum = f(accum, tmp);
             }
         } else {
-            #[cfg(kani)]
-            let base_ptr = self.ptr.as_ptr();
-            #[cfg(kani)]
-            let mut remaining = self.size_hint().0;
-            #[cfg(kani)]
-            let initial_remaining = remaining;
-            #[cfg(kani)]
-            let initial_items = ptr::slice_from_raw_parts(base_ptr as *const T, initial_remaining);
-            #[cfg(kani)]
-            kani::assume(kani::mem::can_dereference(initial_items));
-
-            #[cfg_attr(kani, kani::loop_invariant(remaining <= initial_remaining))]
-            #[cfg_attr(kani, kani::loop_modifies(&accum, &remaining))]
             // SAFETY: `self.end` can only be null if `T` is a ZST.
-            while {
-                #[cfg(kani)]
-                {
-                    remaining > 0
-                }
-                #[cfg(not(kani))]
-                {
-                    self.ptr != non_null!(self.end, T)
-                }
-            } {
-                #[cfg(kani)]
-                let cur = unsafe { base_ptr.add(initial_remaining - remaining) };
-                #[cfg(kani)]
-                kani::assume(kani::mem::can_dereference(cur as *const T));
+            while self.ptr != non_null!(self.end, T) {
                 // SAFETY: we just checked that `self.ptr` is in bounds.
-                #[cfg(kani)]
-                let tmp = unsafe { cur.read() };
-                #[cfg(not(kani))]
                 let tmp = unsafe { self.ptr.read() };
                 // SAFETY: the maximum this can be is `self.end`.
                 // Increment `self.ptr` first to avoid double dropping in the event of a panic.
-                #[cfg(not(kani))]
-                {
-                    self.ptr = unsafe { self.ptr.add(1) };
-                }
-                #[cfg(kani)]
-                {
-                    remaining -= 1;
-                }
+                self.ptr = unsafe { self.ptr.add(1) };
                 accum = f(accum, tmp);
-            }
-            #[cfg(kani)]
-            {
-                let fold_end = self.end.cast_mut();
-                kani::assume(!fold_end.is_null());
-                self.ptr = unsafe { NonNull::new_unchecked(fold_end) };
             }
         }
         accum
@@ -419,107 +343,22 @@ impl<T, A: Allocator> Iterator for IntoIter<T, A> {
         R: core::ops::Try<Output = B>,
     {
         if T::IS_ZST {
-            #[cfg(kani)]
-            let try_fold_ptr = self.ptr.as_ptr();
-            #[cfg(kani)]
-            let try_fold_ptr_addr = try_fold_ptr.addr();
-            #[cfg(kani)]
-            let try_fold_ptr_is_aligned = try_fold_ptr.is_aligned();
-            #[cfg(kani)]
-            let mut remaining = self.end.addr().wrapping_sub(try_fold_ptr_addr);
-            #[cfg(kani)]
-            let initial_remaining = remaining;
-
-            #[cfg_attr(kani, kani::loop_invariant(
-                remaining <= initial_remaining
-                    && (remaining == 0) == (try_fold_ptr_addr == self.end.addr())
-                    && try_fold_ptr_is_aligned
-            ))]
-            #[cfg_attr(kani, kani::loop_modifies(&self.end, &remaining))]
-            while {
-                #[cfg(kani)]
-                {
-                    try_fold_ptr_addr != self.end.addr()
-                }
-                #[cfg(not(kani))]
-                {
-                    self.ptr.as_ptr() != self.end.cast_mut()
-                }
-            } {
-                #[cfg(kani)]
-                kani::assume(remaining > 0);
+            while self.ptr.as_ptr() != self.end.cast_mut() {
                 // SAFETY: we just checked that `self.ptr` is in bounds.
-                #[cfg(kani)]
-                let tmp = unsafe { try_fold_ptr.read() };
-                #[cfg(not(kani))]
                 let tmp = unsafe { self.ptr.read() };
                 // See `next` for why we subtract from `end` here.
                 self.end = self.end.wrapping_byte_sub(1);
-                #[cfg(kani)]
-                {
-                    remaining -= 1;
-                    kani::assume((remaining == 0) == (try_fold_ptr_addr == self.end.addr()));
-                }
                 accum = f(accum, tmp)?;
             }
         } else {
-            #[cfg(kani)]
-            let base_ptr = self.ptr.as_ptr();
-            #[cfg(kani)]
-            let initial_remaining = self.size_hint().0;
-            #[cfg(kani)]
-            let mut processed = 0usize;
-            #[cfg(kani)]
-            let initial_items = ptr::slice_from_raw_parts(base_ptr as *const T, initial_remaining);
-            #[cfg(kani)]
-            kani::assume(kani::mem::can_dereference(initial_items));
-            #[cfg(kani)]
-            let self_ptr_slot = (&raw mut self.ptr).cast::<*mut T>();
-            #[cfg(kani)]
-            kani::assume(kani::mem::can_write(self_ptr_slot));
-
-            #[cfg_attr(kani, kani::loop_invariant(processed <= initial_remaining))]
-            #[cfg_attr(kani, kani::loop_modifies(self_ptr_slot, &accum, &processed))]
             // SAFETY: `self.end` can only be null if `T` is a ZST.
-            while {
-                #[cfg(kani)]
-                {
-                    processed < initial_remaining
-                }
-                #[cfg(not(kani))]
-                {
-                    self.ptr != non_null!(self.end, T)
-                }
-            } {
-                #[cfg(kani)]
-                let cur = unsafe { base_ptr.add(processed) };
-                #[cfg(kani)]
-                kani::assume(kani::mem::can_dereference(cur as *const T));
+            while self.ptr != non_null!(self.end, T) {
                 // SAFETY: we just checked that `self.ptr` is in bounds.
-                #[cfg(kani)]
-                let tmp = unsafe { cur.read() };
-                #[cfg(not(kani))]
                 let tmp = unsafe { self.ptr.read() };
                 // SAFETY: the maximum this can be is `self.end`.
                 // Increment `self.ptr` first to avoid double dropping in the event of a panic.
-                #[cfg(not(kani))]
-                {
-                    self.ptr = unsafe { self.ptr.add(1) };
-                }
-                #[cfg(kani)]
-                {
-                    let next = unsafe { cur.add(1) };
-                    kani::assume(!next.is_null());
-                    unsafe { *self_ptr_slot = next };
-                    processed += 1;
-                }
+                self.ptr = unsafe { self.ptr.add(1) };
                 accum = f(accum, tmp)?;
-            }
-            #[cfg(kani)]
-            {
-                let try_fold_end = self.end.cast_mut();
-                kani::assume(!try_fold_end.is_null());
-                unsafe { *self_ptr_slot = try_fold_end };
             }
         }
         R::from_output(accum)
@@ -726,60 +565,62 @@ mod verify {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let iter = vec.into_iter();
-                // Borrow the remaining iterator elements as an immutable slice
-                let _: &[$ty] = iter.as_slice();
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let expected_ptr = iter.ptr.as_ptr();
+                let slice = iter.as_slice();
+                assert!(
+                    slice.len() == expected_len,
+                    "as_slice: returned length differs from IntoIter remaining length"
+                );
+                assert!(
+                    slice.as_ptr() == expected_ptr,
+                    "as_slice: returned slice starts at the wrong pointer"
+                );
+                kani::cover(expected_len == 0, "as_slice: empty remaining range");
+                kani::cover(expected_len > 0, "as_slice: non-empty remaining range");
             }
         };
     }
 
     gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u8, u8);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u16, u16);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u32, u32);
     gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u64, u64);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u128, u128);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_usize, usize);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i8, i8);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i16, i16);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i32, i32);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i64, i64);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_i128, i128);
-    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_isize, isize);
     gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_unit, ());
     gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_array, [u8; 4]);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_bool, bool);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_al16, Al16);
 
     // Harnesses for IntoIter::as_mut_slice()
     macro_rules! gen_into_iter_as_mut_slice_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Borrow the remaining iterator elements as a mutable slice
-                let _: &mut [$ty] = iter.as_mut_slice();
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let expected_ptr = iter.ptr.as_ptr();
+                let slice = iter.as_mut_slice();
+                assert!(
+                    slice.len() == expected_len,
+                    "as_mut_slice: returned length differs from IntoIter remaining length"
+                );
+                assert!(
+                    slice.as_mut_ptr() == expected_ptr,
+                    "as_mut_slice: returned slice starts at the wrong pointer"
+                );
+                kani::cover(expected_len == 0, "as_mut_slice: empty remaining range");
+                kani::cover(expected_len > 0, "as_mut_slice: non-empty remaining range");
             }
         };
     }
 
     gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u8, u8);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u16, u16);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u32, u32);
     gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u64, u64);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u128, u128);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_usize, usize);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i8, i8);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i16, i16);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i32, i32);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i64, i64);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_i128, i128);
-    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_isize, isize);
     gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_unit, ());
     gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_array, [u8; 4]);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_bool, bool);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_al16, Al16);
 
     // Harnesses for IntoIter::forget_allocation_drop_remaining()
     macro_rules! gen_into_iter_forget_allocation_drop_remaining_harness {
@@ -787,12 +628,28 @@ mod verify {
             #[cfg(not(no_global_oom_handling))]
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Drop the remaining elements and forget the backing allocation
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
                 iter.forget_allocation_drop_remaining();
+                assert!(
+                    iter.len() == 0,
+                    "forget_allocation_drop_remaining: iterator is not empty afterwards"
+                );
+                assert!(
+                    iter.cap == 0,
+                    "forget_allocation_drop_remaining: capacity was not cleared"
+                );
+                assert!(
+                    iter.ptr == iter.buf,
+                    "forget_allocation_drop_remaining: ptr does not equal reset buffer"
+                );
+                assert!(
+                    iter.end == iter.ptr.as_ptr(),
+                    "forget_allocation_drop_remaining: end does not equal reset ptr"
+                );
+                kani::cover(before_len == 0, "forget_allocation_drop_remaining: empty input");
+                kani::cover(before_len > 0, "forget_allocation_drop_remaining: non-empty input");
             }
         };
     }
@@ -802,48 +659,8 @@ mod verify {
         u8
     );
     gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_u16,
-        u16
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_u32,
-        u32
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
         harness_into_iter_forget_allocation_drop_remaining_u64,
         u64
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_u128,
-        u128
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_usize,
-        usize
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_i8,
-        i8
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_i16,
-        i16
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_i32,
-        i32
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_i64,
-        i64
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_i128,
-        i128
-    );
-    gen_into_iter_forget_allocation_drop_remaining_harness!(
-        harness_into_iter_forget_allocation_drop_remaining_isize,
-        isize
     );
     gen_into_iter_forget_allocation_drop_remaining_harness!(
         harness_into_iter_forget_allocation_drop_remaining_unit,
@@ -853,6 +670,10 @@ mod verify {
         harness_into_iter_forget_allocation_drop_remaining_array,
         [u8; 4]
     );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_bool,
+        bool
+    );
 
     // Harnesses for IntoIter::into_vecdeque()
     macro_rules! gen_into_iter_into_vecdeque_harness {
@@ -860,291 +681,391 @@ mod verify {
             #[cfg(not(no_global_oom_handling))]
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Repackage the remaining iterator range as a VecDeque
-                let _ = iter.into_vecdeque();
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let deque = iter.into_vecdeque();
+                assert!(
+                    deque.len() == expected_len,
+                    "into_vecdeque: resulting VecDeque has the wrong length"
+                );
+                kani::cover(expected_len == 0, "into_vecdeque: empty remaining range");
+                kani::cover(expected_len > 0, "into_vecdeque: non-empty remaining range");
             }
         };
     }
 
     gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u8, u8);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u16, u16);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u32, u32);
     gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u64, u64);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u128, u128);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_usize, usize);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i8, i8);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i16, i16);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i32, i32);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i64, i64);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_i128, i128);
-    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_isize, isize);
     gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_unit, ());
     gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_array, [u8; 4]);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_bool, bool);
 
     // Harnesses for IntoIter::next()
     macro_rules! gen_into_iter_next_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Advance the iterator from the front by one element if possible
-                let _ = iter.next();
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let result = iter.next();
+                assert!(
+                    result.is_some() == (before_len > 0),
+                    "next: Option result does not match whether the iterator was empty"
+                );
+                assert!(
+                    iter.len() == before_len.saturating_sub(1),
+                    "next: remaining length is incorrect"
+                );
+                kani::cover(before_len == 0, "next: empty iterator returns None");
+                kani::cover(before_len == 1, "next: consumes the final element");
+                kani::cover(before_len > 1, "next: elements remain afterwards");
             }
         };
     }
 
     gen_into_iter_next_harness!(harness_into_iter_next_u8, u8);
-    gen_into_iter_next_harness!(harness_into_iter_next_u16, u16);
-    gen_into_iter_next_harness!(harness_into_iter_next_u32, u32);
     gen_into_iter_next_harness!(harness_into_iter_next_u64, u64);
-    gen_into_iter_next_harness!(harness_into_iter_next_u128, u128);
-    gen_into_iter_next_harness!(harness_into_iter_next_usize, usize);
-    gen_into_iter_next_harness!(harness_into_iter_next_i8, i8);
-    gen_into_iter_next_harness!(harness_into_iter_next_i16, i16);
-    gen_into_iter_next_harness!(harness_into_iter_next_i32, i32);
-    gen_into_iter_next_harness!(harness_into_iter_next_i64, i64);
-    gen_into_iter_next_harness!(harness_into_iter_next_i128, i128);
-    gen_into_iter_next_harness!(harness_into_iter_next_isize, isize);
     gen_into_iter_next_harness!(harness_into_iter_next_unit, ());
     gen_into_iter_next_harness!(harness_into_iter_next_array, [u8; 4]);
+    gen_into_iter_next_harness!(harness_into_iter_next_bool, bool);
+    gen_into_iter_next_harness!(harness_into_iter_next_al16, Al16);
 
     // Harnesses for IntoIter::size_hint()
     macro_rules! gen_into_iter_size_hint_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let iter = vec.into_iter();
-                // Query the exact remaining iterator length
-                let _ = iter.size_hint();
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let (lower, upper) = iter.size_hint();
+                assert!(
+                    lower == expected_len,
+                    "size_hint: lower bound is not the exact remaining length"
+                );
+                assert!(
+                    upper == Some(expected_len),
+                    "size_hint: upper bound is not the exact remaining length"
+                );
+                assert!(
+                    iter.len() == expected_len,
+                    "size_hint: querying size_hint modified the iterator"
+                );
+                kani::cover(expected_len == 0, "size_hint: empty iterator");
+                kani::cover(expected_len > 0, "size_hint: non-empty iterator");
             }
         };
     }
 
     gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u8, u8);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u16, u16);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u32, u32);
     gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u64, u64);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u128, u128);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_usize, usize);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i8, i8);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i16, i16);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i32, i32);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i64, i64);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_i128, i128);
-    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_isize, isize);
     gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_unit, ());
     gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_array, [u8; 4]);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_bool, bool);
 
     // Harnesses for IntoIter::advance_by()
     macro_rules! gen_into_iter_advance_by_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Choose a non-deterministic number of front elements to skip
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
                 let n: usize = kani::any();
-                // Advance the iterator from the front by the selected count
-                let _ = iter.advance_by(n);
+                let expected_step = before_len.min(n);
+                let expected_len = before_len - expected_step;
+                let result = iter.advance_by(n);
+                assert!(iter.len() == expected_len, "advance_by: remaining length is incorrect");
+                match result {
+                    Ok(()) => {
+                        assert!(
+                            n <= before_len,
+                            "advance_by: returned Ok even though n exceeded the remaining length"
+                        );
+                    }
+                    Err(remaining) => {
+                        assert!(
+                            n > before_len,
+                            "advance_by: returned Err even though n fit in the remaining length"
+                        );
+                        assert!(
+                            remaining.get() == n - before_len,
+                            "advance_by: Err contains the wrong unadvanced count"
+                        );
+                    }
+                }
+                kani::cover(n == 0, "advance_by: zero requested");
+                kani::cover(before_len > 0 && n < before_len, "advance_by: partial advance");
+                kani::cover(before_len > 0 && n == before_len, "advance_by: exact exhaustion");
+                kani::cover(n > before_len, "advance_by: request exceeds remaining length");
             }
         };
     }
 
     gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u8, u8);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u16, u16);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u32, u32);
     gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u64, u64);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u128, u128);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_usize, usize);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i8, i8);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i16, i16);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i32, i32);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i64, i64);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_i128, i128);
-    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_isize, isize);
     gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_unit, ());
     gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_array, [u8; 4]);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_bool, bool);
 
     // Harnesses for IntoIter::next_chunk()
     macro_rules! gen_into_iter_next_chunk_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Try to collect the next fixed-size chunk from the iterator
-                let _ = iter.next_chunk::<4>();
+                const N: usize = 4;
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let result = iter.next_chunk::<N>();
+                match result {
+                    Ok(chunk) => {
+                        assert!(
+                            before_len >= N,
+                            "next_chunk: returned Ok with fewer than N elements"
+                        );
+                        assert!(
+                            chunk.len() == N,
+                            "next_chunk: successful chunk has incorrect length"
+                        );
+                        assert!(
+                            iter.len() == before_len - N,
+                            "next_chunk: remaining length is incorrect after Ok"
+                        );
+                    }
+                    Err(remainder) => {
+                        assert!(
+                            before_len < N,
+                            "next_chunk: returned Err with at least N elements available"
+                        );
+                        assert!(
+                            remainder.len() == before_len,
+                            "next_chunk: Err iterator has incorrect length"
+                        );
+                        assert!(
+                            iter.len() == 0,
+                            "next_chunk: source iterator was not exhausted after Err"
+                        );
+                    }
+                }
+                kani::cover(before_len == 0, "next_chunk: empty iterator");
+                kani::cover(before_len > 0 && before_len < N, "next_chunk: short iterator");
+                kani::cover(before_len == N, "next_chunk: exact chunk");
+                kani::cover(before_len > N, "next_chunk: elements remain");
             }
         };
     }
 
     gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u8, u8);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u16, u16);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u32, u32);
     gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u64, u64);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u128, u128);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_usize, usize);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i8, i8);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i16, i16);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i32, i32);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i64, i64);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_i128, i128);
-    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_isize, isize);
     gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_unit, ());
     gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_array, [u8; 4]);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_bool, bool);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_al16, Al16);
 
-    // Harnesses for IntoIter::fold()
-    macro_rules! gen_into_iter_fold_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let iter = vec.into_iter();
-                // Create a non-deterministic initial accumulator
-                let accum: $ty = kani::any();
-                // Fold all remaining elements while preserving the accumulator
-                let _ = iter.fold(accum, |accum, _item| accum);
-            }
-        };
+    // Harnesses for IntoIter::fold() non-ZST case
+    #[kani::proof]
+    #[kani::unwind(72)]
+    pub fn harness_into_iter_fold_u8() {
+        let backing: [u8; 64] = kani::any();
+        // Symbolic prefix length: 0..=64.
+        let vec = kani::slice::any_slice_of_array(&backing).to_vec();
+        let mut iter = vec.into_iter();
+        // Also cover arbitrary reachable front/back iterator states.
+        position_into_iter(&mut iter);
+        let before_len = iter.len();
+        // Count exactly how many elements fold feeds to the closure.
+        let count = iter.fold(0usize, |count, _item| count + 1);
+        assert!(
+            count == before_len,
+            "fold: closure was not called exactly once per remaining element"
+        );
+        kani::cover(before_len == 0, "fold: empty iterator");
+        kani::cover(before_len == 1, "fold: one remaining element");
+        kani::cover(before_len > 1, "fold: multiple remaining elements");
+        kani::cover(before_len == 64, "fold: maximum bounded length");
     }
 
-    gen_into_iter_fold_harness!(harness_into_iter_fold_u8, u8);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_u16, u16);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_u32, u32);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_u64, u64);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_u128, u128);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_usize, usize);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_i8, i8);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_i16, i16);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_i32, i32);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_i64, i64);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_i128, i128);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_isize, isize);
-    gen_into_iter_fold_harness!(harness_into_iter_fold_unit, ());
-    gen_into_iter_fold_harness!(harness_into_iter_fold_array, [u8; 4]);
+    // Harnesses for IntoIter::fold() ZST case
+    #[kani::proof]
+    #[kani::unwind(72)]
+    pub fn harness_into_iter_fold_unit() {
+        let backing = [(); 64];
+        let vec = kani::slice::any_slice_of_array(&backing).to_vec();
+        let mut iter = vec.into_iter();
+        position_into_iter(&mut iter);
 
-    // Harnesses for IntoIter::try_fold()
-    macro_rules! gen_into_iter_try_fold_harness {
-        ($name:ident, $ty:ty) => {
-            #[kani::proof]
-            pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Create a non-deterministic initial accumulator
-                let accum: $ty = kani::any();
-                // Try to fold all remaining elements, allowing early termination
-                let _: Result<$ty, ()> =
-                    iter.try_fold(
-                        accum,
-                        |accum, _item| {
-                            if kani::any::<bool>() { Ok(accum) } else { Err(()) }
-                        },
-                    );
-            }
-        };
+        let before_len = iter.len();
+        let count = iter.fold(0usize, |count, _item| count + 1);
+
+        assert!(
+            count == before_len,
+            "fold ZST: closure was not called exactly once per remaining element"
+        );
+
+        kani::cover(before_len == 0, "fold ZST: empty iterator");
+        kani::cover(before_len == 1, "fold ZST: one remaining element");
+        kani::cover(before_len > 1, "fold ZST: multiple remaining elements");
+        kani::cover(before_len == 64, "fold ZST: maximum bounded length");
     }
 
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u8, u8);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u16, u16);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u32, u32);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u64, u64);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_u128, u128);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_usize, usize);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i8, i8);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i16, i16);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i32, i32);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i64, i64);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_i128, i128);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_isize, isize);
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_unit, ());
-    gen_into_iter_try_fold_harness!(harness_into_iter_try_fold_array, [u8; 4]);
+    // Harnesses for IntoIter::try_fold() non-ZST case
+    #[kani::proof]
+    #[kani::unwind(72)]
+    pub fn harness_into_iter_try_fold_u8() {
+        let backing: [u8; 64] = kani::any();
+        let vec = kani::slice::any_slice_of_array(&backing).to_vec();
+        let mut iter = vec.into_iter();
+        position_into_iter(&mut iter);
+        let before_len = iter.len();
+        let result: Result<usize, usize> = iter.try_fold(0usize, |processed, _item| {
+            let processed = processed + 1;
+            if kani::any::<bool>() { Err(processed) } else { Ok(processed) }
+        });
+        let after_len = iter.len();
+        assert!(after_len <= before_len, "try_fold: remaining length increased");
+        match result {
+            Ok(processed) => {
+                assert!(
+                    processed == before_len,
+                    "try_fold: Ok did not process every remaining element"
+                );
+                assert!(after_len == 0, "try_fold: Ok did not exhaust the iterator");
+            }
+            Err(processed) => {
+                assert!(processed > 0, "try_fold: Err occurred without processing an element");
+                assert!(
+                    processed <= before_len,
+                    "try_fold: processed more elements than were available"
+                );
+                assert!(
+                    after_len == before_len - processed,
+                    "try_fold: iterator state does not match consumed elements"
+                );
+            }
+        }
+        kani::cover(before_len == 0, "try_fold: empty iterator");
+        kani::cover(before_len > 0 && result.is_ok(), "try_fold: successful traversal");
+        kani::cover(before_len > 0 && result.is_err(), "try_fold: early termination");
+        kani::cover(
+            matches!(result, Err(processed) if processed == 1),
+            "try_fold: failure on first element",
+        );
+        kani::cover(
+            matches!(result, Err(processed) if processed > 1),
+            "try_fold: failure after multiple elements",
+        );
+    }
+
+    // Harnesses for IntoIter::try_fold() ZST case
+    #[kani::proof]
+    #[kani::unwind(72)]
+    pub fn harness_into_iter_try_fold_unit() {
+        let backing = [(); 64];
+        let vec = kani::slice::any_slice_of_array(&backing).to_vec();
+        let mut iter = vec.into_iter();
+        position_into_iter(&mut iter);
+        let before_len = iter.len();
+        let result: Result<usize, usize> = iter.try_fold(0usize, |processed, _item| {
+            let processed = processed + 1;
+            if kani::any::<bool>() { Err(processed) } else { Ok(processed) }
+        });
+        let after_len = iter.len();
+        assert!(after_len <= before_len, "try_fold ZST: remaining length increased");
+        match result {
+            Ok(processed) => {
+                assert!(
+                    processed == before_len,
+                    "try_fold ZST: Ok did not process every remaining element"
+                );
+                assert!(after_len == 0, "try_fold ZST: Ok did not exhaust the iterator");
+            }
+            Err(processed) => {
+                assert!(processed > 0, "try_fold ZST: Err occurred without processing an element");
+                assert!(
+                    processed <= before_len,
+                    "try_fold ZST: processed more elements than were available"
+                );
+                assert!(
+                    after_len == before_len - processed,
+                    "try_fold ZST: iterator state does not match consumed elements"
+                );
+            }
+        }
+        kani::cover(before_len == 0, "try_fold ZST: empty iterator");
+        kani::cover(before_len > 0 && result.is_ok(), "try_fold ZST: successful traversal");
+        kani::cover(before_len > 0 && result.is_err(), "try_fold ZST: early termination");
+        kani::cover(
+            matches!(result, Err(processed) if processed == 1),
+            "try_fold ZST: failure on first element",
+        );
+        kani::cover(
+            matches!(result, Err(processed) if processed > 1),
+            "try_fold ZST: failure after multiple elements",
+        );
+    }
 
     // Harnesses for IntoIter::__iterator_get_unchecked()
     macro_rules! gen_into_iter_iterator_get_unchecked_harness {
         ($name:ident, $ty:ty) => {
-            // `__iterator_get_unchecked` is an `Iterator` method implemented by
-            // the generic impl `impl<T, A: Allocator> Iterator for IntoIter<T, A>`.
-            // Kani currently cannot resolve a `proof_for_contract` target such as
-            // `<IntoIter<$ty> as core::iter::Iterator>::__iterator_get_unchecked`
-            // back to that generic trait impl's concrete monomorphization. Use a
-            // plain proof and enforce the contract precondition in this harness.
-            // #[kani::proof_for_contract(
-            //     <IntoIter<$ty> as core::iter::Iterator>::__iterator_get_unchecked
-            // )]
+            // `__iterator_get_unchecked` is defined on the generic
+            // `Iterator for IntoIter<T, A>` implementation.
+            //
+            // Kani cannot currently resolve this concrete generic-self
+            // instantiation as a `proof_for_contract` target, so this harness
+            // verifies the real implementation directly and mirrors its
+            // `#[requires(i < self.len())]` precondition with `kani::assume`.
+            //
+            // TODO: switch to `proof_for_contract` once Kani's generic-self
+            // trait-method contract resolution supports this target.
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // This is the safety precondition for `__iterator_get_unchecked`:
-                // the unchecked index must be within the iterator's remaining range.
-                let i = kani::any_where(|i: &usize| *i < iter.len());
-                // Execute the unsafe implementation of `__iterator_get_unchecked` with the selected index
-                let _ = unsafe { iter.__iterator_get_unchecked(i) };
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let before_ptr = iter.ptr;
+                let before_end = iter.end;
+                let i: usize = kani::any();
+                // Demonstrate that the contract precondition is satisfiable before
+                // restricting verification to calls permitted by the contract.
+                kani::cover(
+                    before_len > 0 && i < before_len,
+                    "__iterator_get_unchecked: contract precondition is reachable",
+                );
+                // Mirrors the method contract:
+                // `#[requires(i < self.len())]`.
+                kani::assume(i < before_len);
+                let expected = iter.as_slice()[i];
+                let result = unsafe { iter.__iterator_get_unchecked(i) };
+                assert!(result == expected, "__iterator_get_unchecked: returned the wrong element");
+                assert!(
+                    iter.len() == before_len,
+                    "__iterator_get_unchecked: changed the remaining length"
+                );
+                assert!(
+                    iter.ptr == before_ptr,
+                    "__iterator_get_unchecked: changed the front pointer"
+                );
+                assert!(
+                    iter.end == before_end,
+                    "__iterator_get_unchecked: changed the end pointer"
+                );
+                kani::cover(i == 0, "__iterator_get_unchecked: first element");
+                kani::cover(i == before_len - 1, "__iterator_get_unchecked: last valid element");
+                kani::cover(
+                    before_len > 2 && i > 0 && i < before_len - 1,
+                    "__iterator_get_unchecked: interior element",
+                );
             }
         };
     }
 
     gen_into_iter_iterator_get_unchecked_harness!(harness_into_iter_iterator_get_unchecked_u8, u8);
     gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_u16,
-        u16
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_u32,
-        u32
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(
         harness_into_iter_iterator_get_unchecked_u64,
         u64
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_u128,
-        u128
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_usize,
-        usize
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(harness_into_iter_iterator_get_unchecked_i8, i8);
-    gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_i16,
-        i16
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_i32,
-        i32
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_i64,
-        i64
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_i128,
-        i128
-    );
-    gen_into_iter_iterator_get_unchecked_harness!(
-        harness_into_iter_iterator_get_unchecked_isize,
-        isize
     );
     gen_into_iter_iterator_get_unchecked_harness!(
         harness_into_iter_iterator_get_unchecked_unit,
@@ -1154,96 +1075,147 @@ mod verify {
         harness_into_iter_iterator_get_unchecked_array,
         [u8; 4]
     );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_bool,
+        bool
+    );
 
     // Harnesses for IntoIter::next_back()
     macro_rules! gen_into_iter_next_back_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Advance the iterator from the back by one element if possible
-                let _ = iter.next_back();
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let before_ptr = iter.ptr;
+                let result = iter.next_back();
+                assert!(
+                    result.is_some() == (before_len > 0),
+                    "next_back: Option result does not match whether the iterator was empty"
+                );
+                assert!(
+                    iter.len() == before_len.saturating_sub(1),
+                    "next_back: remaining length is incorrect"
+                );
+                assert!(iter.ptr == before_ptr, "next_back: changed the front pointer");
+                kani::cover(before_len == 0, "next_back: empty iterator returns None");
+                kani::cover(before_len == 1, "next_back: consumes the final element");
+                kani::cover(before_len > 1, "next_back: elements remain afterwards");
             }
         };
     }
 
     gen_into_iter_next_back_harness!(harness_into_iter_next_back_u8, u8);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u16, u16);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u32, u32);
     gen_into_iter_next_back_harness!(harness_into_iter_next_back_u64, u64);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u128, u128);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_usize, usize);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i8, i8);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i16, i16);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i32, i32);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i64, i64);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_i128, i128);
-    gen_into_iter_next_back_harness!(harness_into_iter_next_back_isize, isize);
     gen_into_iter_next_back_harness!(harness_into_iter_next_back_unit, ());
     gen_into_iter_next_back_harness!(harness_into_iter_next_back_array, [u8; 4]);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_bool, bool);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_al16, Al16);
 
     // Harnesses for IntoIter::advance_back_by()
     macro_rules! gen_into_iter_advance_back_by_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Choose a non-deterministic number of back elements to skip
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let before_ptr = iter.ptr;
                 let n: usize = kani::any();
-                // Advance the iterator from the back by the selected count
-                let _ = iter.advance_back_by(n);
+                let expected_step = before_len.min(n);
+                let expected_len = before_len - expected_step;
+                let result = iter.advance_back_by(n);
+                assert!(
+                    iter.len() == expected_len,
+                    "advance_back_by: remaining length is incorrect"
+                );
+                assert!(
+                    iter.ptr == before_ptr,
+                    "advance_back_by: changed the front pointer"
+                );
+                match result {
+                    Ok(()) => {
+                        assert!(
+                            n <= before_len,
+                            "advance_back_by: returned Ok even though n exceeded the remaining length"
+                        );
+                    }
+                    Err(remaining) => {
+                        assert!(
+                            n > before_len,
+                            "advance_back_by: returned Err even though n fit in the remaining length"
+                        );
+                        assert!(
+                            remaining.get() == n - before_len,
+                            "advance_back_by: Err contains the wrong unadvanced count"
+                        );
+                    }
+                }
+                kani::cover(n == 0, "advance_back_by: zero requested");
+                kani::cover(before_len > 0 && n < before_len, "advance_back_by: partial advance");
+                kani::cover(before_len > 0 && n == before_len, "advance_back_by: exact exhaustion");
+                kani::cover(n > before_len, "advance_back_by: request exceeds remaining length");
             }
         };
     }
 
     gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u8, u8);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u16, u16);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u32, u32);
     gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u64, u64);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u128, u128);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_usize, usize);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i8, i8);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i16, i16);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i32, i32);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i64, i64);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_i128, i128);
-    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_isize, isize);
     gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_unit, ());
     gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_array, [u8; 4]);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_bool, bool);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_al16, Al16);
 
     // Harnesses for IntoIter::drop()
     macro_rules! gen_into_iter_drop_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let iter = vec.into_iter();
-                // Drop the iterator and any remaining elements
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                kani::cover(before_len == 0, "drop: empty iterator");
+                kani::cover(before_len > 0, "drop: non-empty iterator");
                 drop(iter);
             }
         };
     }
 
     gen_into_iter_drop_harness!(harness_into_iter_drop_u8, u8);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_u16, u16);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_u32, u32);
     gen_into_iter_drop_harness!(harness_into_iter_drop_u64, u64);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_u128, u128);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_usize, usize);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_i8, i8);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_i16, i16);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_i32, i32);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_i64, i64);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_i128, i128);
-    gen_into_iter_drop_harness!(harness_into_iter_drop_isize, isize);
     gen_into_iter_drop_harness!(harness_into_iter_drop_unit, ());
     gen_into_iter_drop_harness!(harness_into_iter_drop_array, [u8; 4]);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_bool, bool);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_al16, Al16);
+
+    mod bounded_evidence {
+        //! Supplementary bounded evidence for `needs_drop` behavior.
+        //!
+        //! The primary `IntoIter::drop` harnesses remain unbounded. Dropping an
+        //! `IntoIter<WithDrop>` eventually executes compiler-generated slice drop
+        //! glue, which has no source-level loop where a Kani loop contract can be
+        //! attached. This module therefore uses bounded unwinding only for that
+        //! drop-glue path.
+        use super::*;
+
+        fn bounded_with_drop_into_iter() -> IntoIter<WithDrop> {
+            let mut vec = verifier_nondet_vec::<WithDrop>();
+            // Bound only the compiler-generated slice drop loop.
+            let len = kani::any_where(|len: &usize| *len <= 8 && *len <= vec.len());
+            vec.len = len;
+            vec.into_iter()
+        }
+
+        #[kani::proof]
+        #[kani::unwind(12)]
+        fn bounded_into_iter_drop_with_drop() {
+            let iter = bounded_with_drop_into_iter();
+            let len = iter.len();
+            kani::cover(len == 0, "IntoIter::drop WithDrop: empty iterator");
+            kani::cover(len > 0, "IntoIter::drop WithDrop: non-empty iterator");
+            kani::cover(len == 8, "IntoIter::drop WithDrop: maximum bounded length");
+            drop(iter);
+        }
+    }
 }

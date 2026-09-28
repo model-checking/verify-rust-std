@@ -71,38 +71,66 @@ mod verify {
     use super::super::kani_vec_harness_helpers::*;
     use super::*;
 
-    // Harness for `SpecFromIter::from_iter`
+    // Harnesses for `SpecFromIter::from_iter` with `IntoIter`
     macro_rules! gen_from_iter_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
-                // Create a non-deterministic Vec for the target element type
-                let vec = verifier_nondet_vec::<$ty>();
-                // Convert the Vec into its owning iterator
-                let mut iter = vec.into_iter();
-                // Optionally consume one element before collecting the remaining iterator
-                // to cover both the advanced and unadvanced IntoIter cases
-                if kani::any::<bool>() {
-                    let _ = iter.next();
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let original_cap = iter.cap;
+                let original_buf = iter.buf;
+                let has_advanced = iter.buf != iter.ptr;
+                // Mirrors the specialization's allocation-reuse condition.
+                let should_reuse = !has_advanced || expected_len >= original_cap / 2;
+                let vec = <Vec<$ty> as SpecFromIter<$ty, IntoIter<$ty>>>::from_iter(iter);
+                assert!(
+                    vec.len() == expected_len,
+                    "SpecFromIter<IntoIter>: resulting Vec has the wrong length"
+                );
+                assert!(
+                    vec.capacity() >= vec.len(),
+                    "SpecFromIter<IntoIter>: resulting Vec has insufficient capacity"
+                );
+                if should_reuse {
+                    assert!(
+                        vec.as_ptr() == original_buf.as_ptr(),
+                        "SpecFromIter<IntoIter>: reusable allocation was not preserved"
+                    );
+                    assert!(
+                        vec.capacity() == original_cap,
+                        "SpecFromIter<IntoIter>: reused allocation has the wrong capacity"
+                    );
                 }
-                // Collect the remaining IntoIter through the FromIterator specialization
-                let _ = <Vec<$ty> as SpecFromIter<$ty, IntoIter<$ty>>>::from_iter(iter);
+                kani::cover(!has_advanced, "SpecFromIter<IntoIter>: direct allocation reuse");
+                if core::mem::size_of::<$ty>() != 0 {
+                    kani::cover(
+                        has_advanced && expected_len >= original_cap / 2,
+                        "SpecFromIter<IntoIter>: compact and reuse allocation",
+                    );
+                    kani::cover(
+                        has_advanced && expected_len > 0 && expected_len >= original_cap / 2,
+                        "SpecFromIter<IntoIter>: non-empty overlapping copy",
+                    );
+                    kani::cover(
+                        has_advanced && expected_len < original_cap / 2,
+                        "SpecFromIter<IntoIter>: fallback to SpecExtend",
+                    );
+                }
+                kani::cover(expected_len == 0, "SpecFromIter<IntoIter>: empty remaining iterator");
+                kani::cover(
+                    expected_len > 0,
+                    "SpecFromIter<IntoIter>: non-empty remaining iterator",
+                );
             }
         };
     }
 
     gen_from_iter_harness!(harness_from_iter_u8, u8);
-    gen_from_iter_harness!(harness_from_iter_u16, u16);
-    gen_from_iter_harness!(harness_from_iter_u32, u32);
     gen_from_iter_harness!(harness_from_iter_u64, u64);
-    gen_from_iter_harness!(harness_from_iter_u128, u128);
-    gen_from_iter_harness!(harness_from_iter_usize, usize);
-    gen_from_iter_harness!(harness_from_iter_i8, i8);
-    gen_from_iter_harness!(harness_from_iter_i16, i16);
-    gen_from_iter_harness!(harness_from_iter_i32, i32);
-    gen_from_iter_harness!(harness_from_iter_i64, i64);
-    gen_from_iter_harness!(harness_from_iter_i128, i128);
-    gen_from_iter_harness!(harness_from_iter_isize, isize);
     gen_from_iter_harness!(harness_from_iter_unit, ());
     gen_from_iter_harness!(harness_from_iter_array, [u8; 4]);
+    gen_from_iter_harness!(harness_from_iter_bool, bool);
+    gen_from_iter_harness!(harness_from_iter_al16, Al16);
 }
