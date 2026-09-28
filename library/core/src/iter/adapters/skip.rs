@@ -180,6 +180,18 @@ where
         //   before something is written into the storage used by the prefix
         unsafe {
             if Self::MAY_HAVE_SIDE_EFFECT && idx == 0 {
+                #[cfg(kani)]
+                let inner_size_hint = self.iter.size_hint();
+                // The outer precondition and `idx == 0` imply `self.n < inner_size_hint.0`.
+                // Random access may mutate the inner iterator, but it must preserve its size.
+                #[cfg_attr(
+                    kani,
+                    kani::loop_invariant(
+                        kani::index <= self.n
+                            && self.n < inner_size_hint.0
+                            && self.iter.size_hint() == inner_size_hint
+                    )
+                )]
                 for skipped_idx in 0..self.n {
                     drop(try_get_unchecked(&mut self.iter, skipped_idx));
                 }
@@ -293,3 +305,136 @@ where
 // I: TrustedLen would not.
 #[unstable(feature = "trusted_len", issue = "37572")]
 unsafe impl<I> TrustedLen for Skip<I> where I: Iterator + TrustedRandomAccess {}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+
+    // Harnesses for `__iterator_get_unchecked` for Skip
+    // Use a regular proof because `proof_for_contract` cannot resolve this trait method path.
+    macro_rules! generate_skip_get_unchecked_unbounded_harness {
+        ($name:ident) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Generate a symbolic pending skip count.
+                let n: usize = kani::any();
+                // Generate a symbolic index in the shortened iterator.
+                let idx: usize = kani::any();
+
+                // Use a maximal lazy range with no random-access side effects.
+                let source = 0..usize::MAX;
+                // Construct the target with a symbolic skip offset.
+                let mut iter = Skip::new(source, n);
+
+                // Express the target's `idx < self.size()` precondition.
+                kani::assume(idx < iter.size_hint().0);
+                // Save observable iterator state before random access.
+                let n_before = iter.n;
+                let size_before = iter.size_hint();
+
+                // Call the target `Skip<I>` implementation through the trait path.
+                let result =
+                    unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+
+                // Check that `Skip` translated the outer index to `n + idx`.
+                assert_eq!(result, n + idx);
+                // Check that random access did not consume the pending skip count.
+                assert_eq!(iter.n, n_before);
+                // Check that random access did not consume the iterator.
+                assert_eq!(iter.size_hint(), size_before);
+            }
+        };
+    }
+
+    // Cover Copy item types with core's non-side-effecting array iterator
+    macro_rules! generate_skip_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Generate a symbolic pending skip count and outer index.
+                let n: usize = kani::any();
+                let idx: usize = kani::any();
+                // Generate four independent symbolic values of the selected item type.
+                let values: [$ty; 4] = kani::any();
+                // Keep a Copy snapshot for checking the translated index.
+                let expected_values = values;
+
+                // Use core's generic trusted-random-access iterator with no side effects.
+                let source: crate::array::IntoIter<$ty, 4> = values.into_iter();
+                // Construct the target with a symbolic skip offset.
+                let mut iter = Skip::new(source, n);
+
+                // Express the target's `idx < self.size()` precondition.
+                kani::assume(idx < iter.size_hint().0);
+                // The precondition guarantees that `n + idx` indexes the original array.
+                let expected = expected_values[n + idx];
+                // Save observable iterator state before random access.
+                let n_before = iter.n;
+                let size_before = iter.size_hint();
+
+                // Call the target `Skip<I>` implementation through the trait path.
+                let result =
+                    unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+
+                // Check that `Skip` selected the original element at `n + idx`.
+                assert_eq!(result, expected);
+                // Check that random access did not consume the adapter state.
+                assert_eq!(iter.n, n_before);
+                assert_eq!(iter.size_hint(), size_before);
+            }
+        };
+    }
+
+    // Cover side-effecting path
+    macro_rules! generate_skip_get_unchecked_side_effect_harness {
+        ($name:ident) => {
+            #[kani::proof]
+            pub fn $name() {
+                // Generate a symbolic pending skip count.
+                let n: usize = kani::any();
+                // Generate a symbolic index in the shortened iterator.
+                let idx: usize = kani::any();
+
+                // `Map` sets `MAY_HAVE_SIDE_EFFECT = true` for every mapping closure,
+                // so this selects `Skip`'s side-effecting random-access branch.
+                // Keep the closure stateless because this harness does not track exact effects.
+                let source = (0..usize::MAX).map(|position| position);
+                // Construct the target with a symbolic skip offset.
+                let mut iter = Skip::new(source, n);
+
+                // Express the target's `idx < self.size()` precondition.
+                kani::assume(idx < iter.size_hint().0);
+                // Save observable iterator state before random access.
+                let n_before = iter.n;
+                let size_before = iter.size_hint();
+
+                // Call the target `Skip<I>` implementation through the trait path.
+                let result =
+                    unsafe { crate::iter::Iterator::__iterator_get_unchecked(&mut iter, idx) };
+
+                // Check that `Skip` translated the outer index to `n + idx`.
+                assert_eq!(result, n + idx);
+                // Check that random access did not consume the adapter state.
+                assert_eq!(iter.n, n_before);
+                assert_eq!(iter.size_hint(), size_before);
+            }
+        };
+    }
+
+    generate_skip_get_unchecked_unbounded_harness!(harness_skip_get_unchecked_unbounded);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i8, i8);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i16, i16);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i32, i32);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i64, i64);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_i128, i128);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u8, u8);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u16, u16);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u32, u32);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u64, u64);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_u128, u128);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_array, [u8; 4]);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_bool, bool);
+    generate_skip_get_unchecked_harness!(harness_skip_get_unchecked_unit, ());
+    generate_skip_get_unchecked_side_effect_harness!(harness_skip_get_unchecked_side_effect);
+}
