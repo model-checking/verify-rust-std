@@ -6,6 +6,8 @@ use core::error::Error;
 use core::fmt::{self, Debug, Display, Formatter};
 #[cfg(not(no_global_oom_handling))]
 use core::intrinsics::{const_allocate, const_make_global};
+#[cfg(kani)]
+use core::kani;
 use core::marker::PhantomData;
 #[cfg(not(no_global_oom_handling))]
 use core::marker::Unsize;
@@ -13,6 +15,8 @@ use core::marker::Unsize;
 use core::mem::{self, SizedTypeProperties};
 use core::ops::{Deref, DerefMut};
 use core::ptr::{self, NonNull, Pointee};
+
+use safety::requires;
 
 use crate::alloc::{self, Layout, LayoutError};
 
@@ -358,6 +362,10 @@ impl<H> WithHeader<H> {
     // Safety:
     // - Assumes that either `value` can be dereferenced, or is the
     //   `NonNull::dangling()` we use when both `T` and `H` are ZSTs.
+    #[requires(
+        value.cast::<u8>() == self.0.as_ptr()
+            && core::ub_checks::can_dereference(value)
+    )]
     unsafe fn drop<T: ?Sized>(&self, value: *mut T) {
         struct DropGuard<H> {
             ptr: NonNull<u8>,
@@ -428,5 +436,182 @@ impl<H> WithHeader<H> {
 impl<T: ?Sized + Error> Error for ThinBox<T> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.deref().source()
+    }
+}
+
+// Challenge 29
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::any::Any;
+
+    use super::*;
+
+    // Each expansion has a separate named target, with sized, ZST, slice
+    // and vtable metadata. The u128 trait-object payload exercises padding when
+    // value alignment exceeds metadata alignment on the verification target.
+    macro_rules! thinbox_harnesses {
+        ($module:ident, $target:literal, |$thin:ident| $body:block) => {
+            mod $module {
+                use super::*;
+
+                #[doc = $target]
+                fn check<T: ?Sized>($thin: ThinBox<T>) {
+                    $body
+                    kani::cover(true, $target);
+                }
+
+                #[kani::proof]
+                fn sized() { check(ThinBox::new(kani::any::<i32>())); }
+
+                #[kani::proof]
+                fn zst() { check(ThinBox::new(())); }
+
+                #[kani::proof]
+                fn slice() {
+                    check(ThinBox::<[u8]>::new_unsize(kani::any::<[u8; 4]>()));
+                }
+
+                #[kani::proof]
+                fn dyn_any() {
+                    check(ThinBox::<dyn Any>::new_unsize(kani::any::<u128>()));
+                }
+            }
+        };
+    }
+
+    thinbox_harnesses!(harness_thinbox_deref, "Checks ThinBox::deref.", |thin| {
+        let expected_data = thin.ptr.0.as_ptr();
+        let expected_metadata = unsafe { *thin.with_header().header() };
+        let value = Deref::deref(&thin);
+        assert_eq!(ptr::from_ref(value).cast::<u8>(), expected_data.cast_const());
+        assert_eq!(ptr::metadata(value), expected_metadata);
+    });
+    thinbox_harnesses!(harness_thinbox_deref_mut, "Checks ThinBox::deref_mut.", |thin| {
+        let mut thin = thin;
+        let expected_data = thin.ptr.0.as_ptr();
+        let expected_metadata = unsafe { *thin.with_header().header() };
+        let value = DerefMut::deref_mut(&mut thin);
+        assert_eq!(ptr::from_mut(value).cast::<u8>(), expected_data);
+        assert_eq!(ptr::metadata(value), expected_metadata);
+    });
+    thinbox_harnesses!(harness_thinbox_drop, "Checks <ThinBox<T> as Drop>::drop.", |thin| {
+        drop(thin);
+    });
+    thinbox_harnesses!(harness_thinbox_meta, "Checks ThinBox::meta.", |thin| {
+        let expected = unsafe { *thin.with_header().header() };
+        assert_eq!(thin.meta(), expected);
+    });
+    thinbox_harnesses!(harness_thinbox_with_header, "Checks ThinBox::with_header.", |thin| {
+        assert_eq!(thin.with_header().value(), thin.ptr.0.as_ptr());
+    });
+    thinbox_harnesses!(harness_with_header_header, "Checks WithHeader::header.", |thin| {
+        let header = thin.with_header().header();
+        assert!(header.is_aligned());
+        assert!(core::ub_checks::can_dereference(header));
+        assert_eq!(unsafe { header.add(1) }.cast::<u8>(), thin.ptr.0.as_ptr());
+    });
+
+    // Constructor harnesses have distinct targets. Rewrapping transfers the
+    // allocation to ThinBox so cleanup also checks the stored metadata/layout.
+    fn into_thin<T: ?Sized>(header: WithHeader<<T as Pointee>::Metadata>) -> ThinBox<T> {
+        ThinBox { ptr: WithOpaqueHeader(header.0), _marker: PhantomData }
+    }
+
+    macro_rules! header_constructors {
+        ($module:ident, $dst:ty, $value:expr) => {
+            mod $module {
+                use super::*;
+
+                /// Checks WithHeader::new.
+                #[kani::proof]
+                fn new() {
+                    let value = $value;
+                    let metadata = ptr::metadata(&value as &$dst);
+                    let layout = Layout::for_value(&value);
+                    let thin = into_thin::<$dst>(WithHeader::new(metadata, value));
+                    assert_eq!(ptr::metadata(&*thin), metadata);
+                    assert_eq!(Layout::for_value(&*thin), layout);
+                    kani::cover(true, "WithHeader::new preserves metadata and value layout");
+                }
+
+                /// Checks WithHeader::try_new, retaining its fallible result.
+                #[kani::proof]
+                fn try_new() {
+                    let value = $value;
+                    let metadata = ptr::metadata(&value as &$dst);
+                    let layout = Layout::for_value(&value);
+                    if let Ok(header) = WithHeader::try_new(metadata, value) {
+                        let thin = into_thin::<$dst>(header);
+                        assert_eq!(ptr::metadata(&*thin), metadata);
+                        assert_eq!(Layout::for_value(&*thin), layout);
+                        kani::cover(
+                            true,
+                            "WithHeader::try_new preserves metadata and value layout",
+                        );
+                    }
+                    kani::cover(true, "WithHeader::try_new returns");
+                }
+            }
+        };
+    }
+
+    header_constructors!(harness_with_header_sized, i32, kani::any::<i32>());
+    header_constructors!(harness_with_header_zst, (), ());
+    header_constructors!(harness_with_header_slice, [u8], kani::any::<[u8; 4]>());
+    header_constructors!(harness_with_header_dyn_any, dyn Any, kani::any::<u128>());
+
+    /// Checks WithHeader::new_unsize_zst with slice metadata.
+    #[kani::proof]
+    fn harness_with_header_new_unsize_zst_slice() {
+        let header = WithHeader::<usize>::new_unsize_zst::<[u8], [u8; 0]>([]);
+        let thin = into_thin::<[u8]>(header);
+        assert!(thin.is_empty());
+        kani::cover(true, "WithHeader::new_unsize_zst preserves empty slice metadata");
+    }
+
+    /// Checks WithHeader::new_unsize_zst with vtable metadata.
+    #[kani::proof]
+    fn harness_with_header_new_unsize_zst_dyn_any() {
+        let header =
+            WithHeader::<<dyn Any as Pointee>::Metadata>::new_unsize_zst::<dyn Any, ()>(());
+        let metadata = unsafe { *header.header() };
+        assert_eq!(metadata.size_of(), size_of::<()>());
+        assert_eq!(metadata.align_of(), mem::align_of::<()>());
+        kani::cover(true, "WithHeader::new_unsize_zst preserves unit size and alignment");
+    }
+
+    // Non-ZST drop uses ordinary proofs because Kani contracts cannot express
+    // permission to free the allocation created by the harness. Explicitly
+    // check the requires clause before executing the real body; these are body
+    // checks, not proof_for_contract evidence. Keep them in sync with requires.
+    // WithHeader has no Drop impl, so cleanup does not call the target again.
+    #[kani::proof]
+    fn harness_with_header_drop_sized() {
+        let header = WithHeader::new((), kani::any::<i32>());
+        let value = header.value().cast::<i32>();
+        assert_eq!(value.cast::<u8>(), header.0.as_ptr());
+        assert!(core::ub_checks::can_dereference(value));
+        unsafe { header.drop(value) };
+        kani::cover(true, "WithHeader::drop completes for a sized value");
+    }
+
+    // ZST drop does not deallocate, so it retains direct contract checking.
+    #[kani::proof_for_contract(WithHeader::drop)]
+    fn harness_with_header_drop_zst() {
+        let header = WithHeader::new((), ());
+        unsafe { header.drop(header.value().cast::<()>()) };
+        kani::cover(true, "WithHeader::drop completes for a ZST");
+    }
+
+    #[kani::proof]
+    fn harness_with_header_drop_slice() {
+        let header = WithHeader::new(2usize, kani::any::<[u128; 2]>());
+        let value = ptr::slice_from_raw_parts_mut(header.value().cast::<u128>(), 2);
+        assert_eq!(value.cast::<u8>(), header.0.as_ptr());
+        assert!(core::ub_checks::can_dereference(value));
+        unsafe { header.drop(value) };
+        kani::cover(true, "WithHeader::drop completes for a slice");
     }
 }
