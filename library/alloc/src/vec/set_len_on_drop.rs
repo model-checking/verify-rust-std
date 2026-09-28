@@ -23,6 +23,11 @@ impl<'a> SetLenOnDrop<'a> {
     pub(super) fn current_len(&self) -> usize {
         self.local_len
     }
+
+    #[cfg(kani)]
+    pub(super) fn local_len_ptr(&mut self) -> *mut usize {
+        core::ptr::addr_of_mut!(self.local_len)
+    }
 }
 
 impl Drop for SetLenOnDrop<'_> {
