@@ -1,4 +1,6 @@
 use core::iter::TrustedLen;
+#[cfg(kani)]
+use core::kani;
 use core::{cmp, ptr};
 
 use super::{SpecExtend, Vec};
@@ -60,4 +62,47 @@ where
         vector.spec_extend(iterator);
         vector
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::super::Vec;
+    use super::super::kani_vec_harness_helpers::*;
+    use super::*;
+
+    // Harness for `SpecFromIterNested::from_iter`
+    macro_rules! gen_from_iter_default_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            #[kani::unwind(72)]
+            pub fn $name() {
+                let len = kani::any_where(|len: &usize| *len <= 64);
+                let iter = UnderreportingIter::<$ty>::new(len);
+                let vector = <Vec<$ty> as SpecFromIterNested<$ty, _>>::from_iter(iter);
+                assert!(
+                    vector.len() == len,
+                    "SpecFromIterNested: resulting Vec has the wrong length"
+                );
+                assert!(
+                    vector.capacity() >= vector.len(),
+                    "SpecFromIterNested: resulting Vec has insufficient capacity"
+                );
+                if core::mem::size_of::<$ty>() != 0 {
+                    let initial_capacity = core::cmp::max(RawVec::<$ty>::MIN_NON_ZERO_CAP, 1);
+                    kani::cover(
+                        len > initial_capacity,
+                        "SpecFromIterNested: extend_desugared growth path",
+                    );
+                }
+            }
+        };
+    }
+
+    gen_from_iter_default_harness!(harness_from_iter_default_u8, u8);
+    gen_from_iter_default_harness!(harness_from_iter_default_u64, u64);
+    gen_from_iter_default_harness!(harness_from_iter_default_unit, ());
+    gen_from_iter_default_harness!(harness_from_iter_default_array, [u8; 4]);
+    gen_from_iter_default_harness!(harness_from_iter_default_bool, bool);
+    gen_from_iter_default_harness!(harness_from_iter_default_al16, Al16);
 }

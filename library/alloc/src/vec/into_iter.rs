@@ -552,3 +552,760 @@ unsafe impl<T> AsVecIntoIter for IntoIter<T> {
         self
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::super::Vec;
+    use super::super::kani_vec_harness_helpers::*;
+    use super::*;
+
+    // Harnesses for IntoIter::as_slice()
+    macro_rules! gen_into_iter_as_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let expected_ptr = iter.ptr.as_ptr();
+                let slice = iter.as_slice();
+                assert!(
+                    slice.len() == expected_len,
+                    "as_slice: returned length differs from IntoIter remaining length"
+                );
+                assert!(
+                    slice.as_ptr() == expected_ptr,
+                    "as_slice: returned slice starts at the wrong pointer"
+                );
+                kani::cover(expected_len == 0, "as_slice: empty remaining range");
+                kani::cover(expected_len > 0, "as_slice: non-empty remaining range");
+            }
+        };
+    }
+
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u8, u8);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_u64, u64);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_unit, ());
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_array, [u8; 4]);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_bool, bool);
+    gen_into_iter_as_slice_harness!(harness_into_iter_as_slice_al16, Al16);
+
+    // Harnesses for IntoIter::as_mut_slice()
+    macro_rules! gen_into_iter_as_mut_slice_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let expected_ptr = iter.ptr.as_ptr();
+                let slice = iter.as_mut_slice();
+                assert!(
+                    slice.len() == expected_len,
+                    "as_mut_slice: returned length differs from IntoIter remaining length"
+                );
+                assert!(
+                    slice.as_mut_ptr() == expected_ptr,
+                    "as_mut_slice: returned slice starts at the wrong pointer"
+                );
+                kani::cover(expected_len == 0, "as_mut_slice: empty remaining range");
+                kani::cover(expected_len > 0, "as_mut_slice: non-empty remaining range");
+            }
+        };
+    }
+
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u8, u8);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_u64, u64);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_unit, ());
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_array, [u8; 4]);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_bool, bool);
+    gen_into_iter_as_mut_slice_harness!(harness_into_iter_as_mut_slice_al16, Al16);
+
+    // Harnesses for IntoIter::forget_allocation_drop_remaining()
+    macro_rules! gen_into_iter_forget_allocation_drop_remaining_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                iter.forget_allocation_drop_remaining();
+                assert!(
+                    iter.len() == 0,
+                    "forget_allocation_drop_remaining: iterator is not empty afterwards"
+                );
+                assert!(
+                    iter.cap == 0,
+                    "forget_allocation_drop_remaining: capacity was not cleared"
+                );
+                assert!(
+                    iter.ptr == iter.buf,
+                    "forget_allocation_drop_remaining: ptr does not equal reset buffer"
+                );
+                assert!(
+                    iter.end == iter.ptr.as_ptr(),
+                    "forget_allocation_drop_remaining: end does not equal reset ptr"
+                );
+                kani::cover(before_len == 0, "forget_allocation_drop_remaining: empty input");
+                kani::cover(before_len > 0, "forget_allocation_drop_remaining: non-empty input");
+            }
+        };
+    }
+
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_u8,
+        u8
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_u64,
+        u64
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_unit,
+        ()
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_array,
+        [u8; 4]
+    );
+    gen_into_iter_forget_allocation_drop_remaining_harness!(
+        harness_into_iter_forget_allocation_drop_remaining_bool,
+        bool
+    );
+
+    // Harnesses for IntoIter::into_vecdeque()
+    macro_rules! gen_into_iter_into_vecdeque_harness {
+        ($name:ident, $ty:ty) => {
+            #[cfg(not(no_global_oom_handling))]
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let deque = iter.into_vecdeque();
+                assert!(
+                    deque.len() == expected_len,
+                    "into_vecdeque: resulting VecDeque has the wrong length"
+                );
+                kani::cover(expected_len == 0, "into_vecdeque: empty remaining range");
+                kani::cover(expected_len > 0, "into_vecdeque: non-empty remaining range");
+            }
+        };
+    }
+
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u8, u8);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_u64, u64);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_unit, ());
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_array, [u8; 4]);
+    gen_into_iter_into_vecdeque_harness!(harness_into_iter_into_vecdeque_bool, bool);
+
+    // Harnesses for IntoIter::next()
+    macro_rules! gen_into_iter_next_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let result = iter.next();
+                assert!(
+                    result.is_some() == (before_len > 0),
+                    "next: Option result does not match whether the iterator was empty"
+                );
+                assert!(
+                    iter.len() == before_len.saturating_sub(1),
+                    "next: remaining length is incorrect"
+                );
+                kani::cover(before_len == 0, "next: empty iterator returns None");
+                kani::cover(before_len == 1, "next: consumes the final element");
+                kani::cover(before_len > 1, "next: elements remain afterwards");
+            }
+        };
+    }
+
+    gen_into_iter_next_harness!(harness_into_iter_next_u8, u8);
+    gen_into_iter_next_harness!(harness_into_iter_next_u64, u64);
+    gen_into_iter_next_harness!(harness_into_iter_next_unit, ());
+    gen_into_iter_next_harness!(harness_into_iter_next_array, [u8; 4]);
+    gen_into_iter_next_harness!(harness_into_iter_next_bool, bool);
+    gen_into_iter_next_harness!(harness_into_iter_next_al16, Al16);
+
+    // Harnesses for IntoIter::size_hint()
+    macro_rules! gen_into_iter_size_hint_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let expected_len = iter.len();
+                let (lower, upper) = iter.size_hint();
+                assert!(
+                    lower == expected_len,
+                    "size_hint: lower bound is not the exact remaining length"
+                );
+                assert!(
+                    upper == Some(expected_len),
+                    "size_hint: upper bound is not the exact remaining length"
+                );
+                assert!(
+                    iter.len() == expected_len,
+                    "size_hint: querying size_hint modified the iterator"
+                );
+                kani::cover(expected_len == 0, "size_hint: empty iterator");
+                kani::cover(expected_len > 0, "size_hint: non-empty iterator");
+            }
+        };
+    }
+
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u8, u8);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_u64, u64);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_unit, ());
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_array, [u8; 4]);
+    gen_into_iter_size_hint_harness!(harness_into_iter_size_hint_bool, bool);
+
+    // Harnesses for IntoIter::advance_by()
+    macro_rules! gen_into_iter_advance_by_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let n: usize = kani::any();
+                let expected_step = before_len.min(n);
+                let expected_len = before_len - expected_step;
+                let result = iter.advance_by(n);
+                assert!(iter.len() == expected_len, "advance_by: remaining length is incorrect");
+                match result {
+                    Ok(()) => {
+                        assert!(
+                            n <= before_len,
+                            "advance_by: returned Ok even though n exceeded the remaining length"
+                        );
+                    }
+                    Err(remaining) => {
+                        assert!(
+                            n > before_len,
+                            "advance_by: returned Err even though n fit in the remaining length"
+                        );
+                        assert!(
+                            remaining.get() == n - before_len,
+                            "advance_by: Err contains the wrong unadvanced count"
+                        );
+                    }
+                }
+                kani::cover(n == 0, "advance_by: zero requested");
+                kani::cover(before_len > 0 && n < before_len, "advance_by: partial advance");
+                kani::cover(before_len > 0 && n == before_len, "advance_by: exact exhaustion");
+                kani::cover(n > before_len, "advance_by: request exceeds remaining length");
+            }
+        };
+    }
+
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u8, u8);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_u64, u64);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_unit, ());
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_array, [u8; 4]);
+    gen_into_iter_advance_by_harness!(harness_into_iter_advance_by_bool, bool);
+
+    // Harnesses for IntoIter::next_chunk()
+    macro_rules! gen_into_iter_next_chunk_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                const N: usize = 4;
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let result = iter.next_chunk::<N>();
+                match result {
+                    Ok(chunk) => {
+                        assert!(
+                            before_len >= N,
+                            "next_chunk: returned Ok with fewer than N elements"
+                        );
+                        assert!(
+                            chunk.len() == N,
+                            "next_chunk: successful chunk has incorrect length"
+                        );
+                        assert!(
+                            iter.len() == before_len - N,
+                            "next_chunk: remaining length is incorrect after Ok"
+                        );
+                    }
+                    Err(remainder) => {
+                        assert!(
+                            before_len < N,
+                            "next_chunk: returned Err with at least N elements available"
+                        );
+                        assert!(
+                            remainder.len() == before_len,
+                            "next_chunk: Err iterator has incorrect length"
+                        );
+                        assert!(
+                            iter.len() == 0,
+                            "next_chunk: source iterator was not exhausted after Err"
+                        );
+                    }
+                }
+                kani::cover(before_len == 0, "next_chunk: empty iterator");
+                kani::cover(before_len > 0 && before_len < N, "next_chunk: short iterator");
+                kani::cover(before_len == N, "next_chunk: exact chunk");
+                kani::cover(before_len > N, "next_chunk: elements remain");
+            }
+        };
+    }
+
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u8, u8);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_u64, u64);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_unit, ());
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_array, [u8; 4]);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_bool, bool);
+    gen_into_iter_next_chunk_harness!(harness_into_iter_next_chunk_al16, Al16);
+
+    // Harnesses for IntoIter::fold() non-ZST case
+    #[kani::proof]
+    #[kani::unwind(72)]
+    pub fn harness_into_iter_fold_u8() {
+        let backing: [u8; 64] = kani::any();
+        // Symbolic prefix length: 0..=64.
+        let vec = kani::slice::any_slice_of_array(&backing).to_vec();
+        let mut iter = vec.into_iter();
+        // Also cover arbitrary reachable front/back iterator states.
+        position_into_iter(&mut iter);
+        let before_len = iter.len();
+        // Count exactly how many elements fold feeds to the closure.
+        let count = iter.fold(0usize, |count, _item| count + 1);
+        assert!(
+            count == before_len,
+            "fold: closure was not called exactly once per remaining element"
+        );
+        kani::cover(before_len == 0, "fold: empty iterator");
+        kani::cover(before_len == 1, "fold: one remaining element");
+        kani::cover(before_len > 1, "fold: multiple remaining elements");
+        kani::cover(before_len == 64, "fold: maximum bounded length");
+    }
+
+    // Harnesses for IntoIter::fold() ZST case
+    #[kani::proof]
+    #[kani::unwind(72)]
+    pub fn harness_into_iter_fold_unit() {
+        let backing = [(); 64];
+        let vec = kani::slice::any_slice_of_array(&backing).to_vec();
+        let mut iter = vec.into_iter();
+        position_into_iter(&mut iter);
+
+        let before_len = iter.len();
+        let count = iter.fold(0usize, |count, _item| count + 1);
+
+        assert!(
+            count == before_len,
+            "fold ZST: closure was not called exactly once per remaining element"
+        );
+
+        kani::cover(before_len == 0, "fold ZST: empty iterator");
+        kani::cover(before_len == 1, "fold ZST: one remaining element");
+        kani::cover(before_len > 1, "fold ZST: multiple remaining elements");
+        kani::cover(before_len == 64, "fold ZST: maximum bounded length");
+    }
+
+    // Harnesses for IntoIter::try_fold() non-ZST case
+    #[kani::proof]
+    #[kani::unwind(72)]
+    pub fn harness_into_iter_try_fold_u8() {
+        let backing: [u8; 64] = kani::any();
+        let vec = kani::slice::any_slice_of_array(&backing).to_vec();
+        let mut iter = vec.into_iter();
+        position_into_iter(&mut iter);
+        let before_len = iter.len();
+        let result: Result<usize, usize> = iter.try_fold(0usize, |processed, _item| {
+            let processed = processed + 1;
+            if kani::any::<bool>() { Err(processed) } else { Ok(processed) }
+        });
+        let after_len = iter.len();
+        assert!(after_len <= before_len, "try_fold: remaining length increased");
+        match result {
+            Ok(processed) => {
+                assert!(
+                    processed == before_len,
+                    "try_fold: Ok did not process every remaining element"
+                );
+                assert!(after_len == 0, "try_fold: Ok did not exhaust the iterator");
+            }
+            Err(processed) => {
+                assert!(processed > 0, "try_fold: Err occurred without processing an element");
+                assert!(
+                    processed <= before_len,
+                    "try_fold: processed more elements than were available"
+                );
+                assert!(
+                    after_len == before_len - processed,
+                    "try_fold: iterator state does not match consumed elements"
+                );
+            }
+        }
+        kani::cover(before_len == 0, "try_fold: empty iterator");
+        kani::cover(before_len > 0 && result.is_ok(), "try_fold: successful traversal");
+        kani::cover(before_len > 0 && result.is_err(), "try_fold: early termination");
+        kani::cover(
+            matches!(result, Err(processed) if processed == 1),
+            "try_fold: failure on first element",
+        );
+        kani::cover(
+            matches!(result, Err(processed) if processed > 1),
+            "try_fold: failure after multiple elements",
+        );
+    }
+
+    // Harnesses for IntoIter::try_fold() ZST case
+    #[kani::proof]
+    #[kani::unwind(72)]
+    pub fn harness_into_iter_try_fold_unit() {
+        let backing = [(); 64];
+        let vec = kani::slice::any_slice_of_array(&backing).to_vec();
+        let mut iter = vec.into_iter();
+        position_into_iter(&mut iter);
+        let before_len = iter.len();
+        let result: Result<usize, usize> = iter.try_fold(0usize, |processed, _item| {
+            let processed = processed + 1;
+            if kani::any::<bool>() { Err(processed) } else { Ok(processed) }
+        });
+        let after_len = iter.len();
+        assert!(after_len <= before_len, "try_fold ZST: remaining length increased");
+        match result {
+            Ok(processed) => {
+                assert!(
+                    processed == before_len,
+                    "try_fold ZST: Ok did not process every remaining element"
+                );
+                assert!(after_len == 0, "try_fold ZST: Ok did not exhaust the iterator");
+            }
+            Err(processed) => {
+                assert!(processed > 0, "try_fold ZST: Err occurred without processing an element");
+                assert!(
+                    processed <= before_len,
+                    "try_fold ZST: processed more elements than were available"
+                );
+                assert!(
+                    after_len == before_len - processed,
+                    "try_fold ZST: iterator state does not match consumed elements"
+                );
+            }
+        }
+        kani::cover(before_len == 0, "try_fold ZST: empty iterator");
+        kani::cover(before_len > 0 && result.is_ok(), "try_fold ZST: successful traversal");
+        kani::cover(before_len > 0 && result.is_err(), "try_fold ZST: early termination");
+        kani::cover(
+            matches!(result, Err(processed) if processed == 1),
+            "try_fold ZST: failure on first element",
+        );
+        kani::cover(
+            matches!(result, Err(processed) if processed > 1),
+            "try_fold ZST: failure after multiple elements",
+        );
+    }
+
+    // Harnesses for IntoIter::__iterator_get_unchecked()
+    macro_rules! gen_into_iter_iterator_get_unchecked_harness {
+        ($name:ident, $ty:ty) => {
+            // `__iterator_get_unchecked` is defined on the generic
+            // `Iterator for IntoIter<T, A>` implementation.
+            //
+            // Kani cannot currently resolve this concrete generic-self
+            // instantiation as a `proof_for_contract` target, so this harness
+            // verifies the real implementation directly and mirrors its
+            // `#[requires(i < self.len())]` precondition with `kani::assume`.
+            //
+            // TODO: switch to `proof_for_contract` once Kani's generic-self
+            // trait-method contract resolution supports this target.
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let before_ptr = iter.ptr;
+                let before_end = iter.end;
+                let i: usize = kani::any();
+                // Demonstrate that the contract precondition is satisfiable before
+                // restricting verification to calls permitted by the contract.
+                kani::cover(
+                    before_len > 0 && i < before_len,
+                    "__iterator_get_unchecked: contract precondition is reachable",
+                );
+                // Mirrors the method contract:
+                // `#[requires(i < self.len())]`.
+                kani::assume(i < before_len);
+                let expected = iter.as_slice()[i];
+                let result = unsafe { iter.__iterator_get_unchecked(i) };
+                assert!(result == expected, "__iterator_get_unchecked: returned the wrong element");
+                assert!(
+                    iter.len() == before_len,
+                    "__iterator_get_unchecked: changed the remaining length"
+                );
+                assert!(
+                    iter.ptr == before_ptr,
+                    "__iterator_get_unchecked: changed the front pointer"
+                );
+                assert!(
+                    iter.end == before_end,
+                    "__iterator_get_unchecked: changed the end pointer"
+                );
+                kani::cover(i == 0, "__iterator_get_unchecked: first element");
+                kani::cover(i == before_len - 1, "__iterator_get_unchecked: last valid element");
+                kani::cover(
+                    before_len > 2 && i > 0 && i < before_len - 1,
+                    "__iterator_get_unchecked: interior element",
+                );
+            }
+        };
+    }
+
+    gen_into_iter_iterator_get_unchecked_harness!(harness_into_iter_iterator_get_unchecked_u8, u8);
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_u64,
+        u64
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_unit,
+        ()
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_array,
+        [u8; 4]
+    );
+    gen_into_iter_iterator_get_unchecked_harness!(
+        harness_into_iter_iterator_get_unchecked_bool,
+        bool
+    );
+
+    // Harnesses for IntoIter::next_back()
+    macro_rules! gen_into_iter_next_back_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let before_ptr = iter.ptr;
+                let result = iter.next_back();
+                assert!(
+                    result.is_some() == (before_len > 0),
+                    "next_back: Option result does not match whether the iterator was empty"
+                );
+                assert!(
+                    iter.len() == before_len.saturating_sub(1),
+                    "next_back: remaining length is incorrect"
+                );
+                assert!(iter.ptr == before_ptr, "next_back: changed the front pointer");
+                kani::cover(before_len == 0, "next_back: empty iterator returns None");
+                kani::cover(before_len == 1, "next_back: consumes the final element");
+                kani::cover(before_len > 1, "next_back: elements remain afterwards");
+            }
+        };
+    }
+
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u8, u8);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_u64, u64);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_unit, ());
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_array, [u8; 4]);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_bool, bool);
+    gen_into_iter_next_back_harness!(harness_into_iter_next_back_al16, Al16);
+
+    // Harnesses for IntoIter::advance_back_by()
+    macro_rules! gen_into_iter_advance_back_by_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                let before_ptr = iter.ptr;
+                let n: usize = kani::any();
+                let expected_step = before_len.min(n);
+                let expected_len = before_len - expected_step;
+                let result = iter.advance_back_by(n);
+                assert!(
+                    iter.len() == expected_len,
+                    "advance_back_by: remaining length is incorrect"
+                );
+                assert!(
+                    iter.ptr == before_ptr,
+                    "advance_back_by: changed the front pointer"
+                );
+                match result {
+                    Ok(()) => {
+                        assert!(
+                            n <= before_len,
+                            "advance_back_by: returned Ok even though n exceeded the remaining length"
+                        );
+                    }
+                    Err(remaining) => {
+                        assert!(
+                            n > before_len,
+                            "advance_back_by: returned Err even though n fit in the remaining length"
+                        );
+                        assert!(
+                            remaining.get() == n - before_len,
+                            "advance_back_by: Err contains the wrong unadvanced count"
+                        );
+                    }
+                }
+                kani::cover(n == 0, "advance_back_by: zero requested");
+                kani::cover(before_len > 0 && n < before_len, "advance_back_by: partial advance");
+                kani::cover(before_len > 0 && n == before_len, "advance_back_by: exact exhaustion");
+                kani::cover(n > before_len, "advance_back_by: request exceeds remaining length");
+            }
+        };
+    }
+
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u8, u8);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_u64, u64);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_unit, ());
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_array, [u8; 4]);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_bool, bool);
+    gen_into_iter_advance_back_by_harness!(harness_into_iter_advance_back_by_al16, Al16);
+
+    // Harnesses for IntoIter::drop()
+    macro_rules! gen_into_iter_drop_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof]
+            pub fn $name() {
+                let mut iter = verifier_nondet_into_iter::<$ty>();
+                position_into_iter(&mut iter);
+                let before_len = iter.len();
+                kani::cover(before_len == 0, "drop: empty iterator");
+                kani::cover(before_len > 0, "drop: non-empty iterator");
+                drop(iter);
+            }
+        };
+    }
+
+    gen_into_iter_drop_harness!(harness_into_iter_drop_u8, u8);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_u64, u64);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_unit, ());
+    gen_into_iter_drop_harness!(harness_into_iter_drop_array, [u8; 4]);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_bool, bool);
+    gen_into_iter_drop_harness!(harness_into_iter_drop_al16, Al16);
+
+    mod bounded_evidence {
+        //! Supplementary bounded evidence for `needs_drop` behavior.
+        //!
+        //! The primary IntoIter harnesses remain unbounded. These harnesses only
+        //! bound compiler-generated slice drop glue, which has no source-level
+        //! loop where a Kani loop contract can be attached.
+
+        use super::*;
+
+        fn bounded_with_drop_into_iter() -> IntoIter<WithDrop> {
+            let vec = verifier_nondet_vec::<WithDrop>();
+            kani::assume(vec.len() <= 8);
+            vec.into_iter()
+        }
+
+        #[kani::proof]
+        #[kani::unwind(12)]
+        fn bounded_into_iter_drop_with_drop() {
+            let iter = bounded_with_drop_into_iter();
+            kani::cover(iter.len() > 0, "IntoIter::drop WithDrop: drop glue is exercised");
+            drop(iter);
+        }
+
+        #[cfg(not(no_global_oom_handling))]
+        #[kani::proof]
+        #[kani::unwind(12)]
+        fn bounded_forget_allocation_drop_remaining_with_drop() {
+            let mut iter = bounded_with_drop_into_iter();
+            let before_len = iter.len();
+            kani::cover(
+                before_len > 0,
+                "forget_allocation_drop_remaining WithDrop: drop glue is exercised",
+            );
+            iter.forget_allocation_drop_remaining();
+            assert!(
+                iter.len() == 0,
+                "forget_allocation_drop_remaining WithDrop: iterator is not empty"
+            );
+            assert!(
+                iter.cap == 0,
+                "forget_allocation_drop_remaining WithDrop: capacity was not cleared"
+            );
+            assert!(
+                iter.ptr == iter.buf,
+                "forget_allocation_drop_remaining WithDrop: ptr was not reset"
+            );
+            assert!(
+                iter.end == iter.ptr.as_ptr(),
+                "forget_allocation_drop_remaining WithDrop: end was not reset"
+            );
+            drop(iter);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(12)]
+        fn bounded_advance_by_with_drop() {
+            let mut iter = bounded_with_drop_into_iter();
+            let before_len = iter.len();
+            let n: usize = kani::any();
+            let step = before_len.min(n);
+            let result = iter.advance_by(n);
+            assert!(
+                iter.len() == before_len - step,
+                "advance_by WithDrop: remaining length is incorrect"
+            );
+            match result {
+                Ok(()) => assert!(
+                    n <= before_len,
+                    "advance_by WithDrop: returned Ok when n exceeded the remaining length"
+                ),
+                Err(remaining) => {
+                    assert!(
+                        n > before_len,
+                        "advance_by WithDrop: returned Err when n fit in the remaining length"
+                    );
+                    assert!(
+                        remaining.get() == n - before_len,
+                        "advance_by WithDrop: incorrect unadvanced count"
+                    );
+                }
+            }
+            kani::cover(step > 0, "advance_by WithDrop: dropped elements are exercised");
+            drop(iter);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(12)]
+        fn bounded_advance_back_by_with_drop() {
+            let mut iter = bounded_with_drop_into_iter();
+            let before_len = iter.len();
+            let before_ptr = iter.ptr;
+            let n: usize = kani::any();
+            let step = before_len.min(n);
+            let result = iter.advance_back_by(n);
+            assert!(
+                iter.len() == before_len - step,
+                "advance_back_by WithDrop: remaining length is incorrect"
+            );
+            assert!(iter.ptr == before_ptr, "advance_back_by WithDrop: changed the front pointer");
+            match result {
+                Ok(()) => assert!(
+                    n <= before_len,
+                    "advance_back_by WithDrop: returned Ok when n exceeded the remaining length"
+                ),
+                Err(remaining) => {
+                    assert!(
+                        n > before_len,
+                        "advance_back_by WithDrop: returned Err when n fit in the remaining length"
+                    );
+                    assert!(
+                        remaining.get() == n - before_len,
+                        "advance_back_by WithDrop: incorrect unadvanced count"
+                    );
+                }
+            }
+            kani::cover(step > 0, "advance_back_by WithDrop: dropped elements are exercised");
+            drop(iter);
+        }
+    }
+}

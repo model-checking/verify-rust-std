@@ -1,3 +1,5 @@
+#[cfg(kani)]
+use core::kani;
 use core::ops::{Range, RangeBounds};
 use core::{fmt, ptr, slice};
 
@@ -146,4 +148,100 @@ where
         };
         f.debug_struct("ExtractIf").field("peek", &peek).finish_non_exhaustive()
     }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::super::kani_vec_harness_helpers::*;
+    use super::*;
+
+    // Harnesses for ExtractIf::next()
+    macro_rules! gen_extract_if_next_harness {
+        ($name:ident, $ty:ty) => {
+            // Bounded for now due to a Kani loop-contract limitation with reborrowed
+            // loop-local `&mut T` values. An unbounded proof is being investigated.
+            #[kani::proof]
+            #[kani::unwind(12)]
+            pub fn $name() {
+                let backing: [$ty; 8] = kani::any();
+                let mut vec = kani::slice::any_slice_of_array(&backing).to_vec();
+                let old_len = vec.len();
+                let start = kani::any_where(|start: &usize| *start <= old_len);
+                let end = kani::any_where(|end: &usize| start <= *end && *end <= old_len);
+                let mut iter = vec.extract_if(start..end, |_x| kani::any::<bool>());
+                assert!(
+                    iter.idx == start,
+                    "ExtractIf::next: initial index does not match range start"
+                );
+                assert!(iter.end == end, "ExtractIf::next: stored range end is incorrect");
+                assert!(iter.del == 0, "ExtractIf::next: deletion count is not initially zero");
+                assert!(iter.old_len == old_len, "ExtractIf::next: original length is incorrect");
+                let first_some = iter.next().is_some();
+                let idx_after_first = iter.idx;
+                assert!(
+                    iter.idx >= start && iter.idx <= end,
+                    "ExtractIf::next: first call left idx outside the extraction range"
+                );
+                assert!(
+                    iter.del == first_some as usize,
+                    "ExtractIf::next: deletion count after first call is incorrect"
+                );
+                if !first_some {
+                    assert!(
+                        iter.idx == end,
+                        "ExtractIf::next: None did not exhaust the extraction range"
+                    );
+                }
+                let second_some = iter.next().is_some();
+                let idx_after_second = iter.idx;
+                let removed = first_some as usize + second_some as usize;
+                assert!(
+                    iter.idx >= idx_after_first && iter.idx <= end,
+                    "ExtractIf::next: second call moved idx incorrectly"
+                );
+                assert!(
+                    iter.del == removed,
+                    "ExtractIf::next: deletion count does not match returned elements"
+                );
+                if !second_some {
+                    assert!(
+                        iter.idx == end,
+                        "ExtractIf::next: second None did not exhaust the extraction range"
+                    );
+                }
+                if !first_some {
+                    assert!(
+                        !second_some,
+                        "ExtractIf::next: produced an element after already returning None"
+                    );
+                }
+                kani::cover(start == end && !first_some, "ExtractIf::next: empty extraction range");
+                kani::cover(
+                    start < end && first_some,
+                    "ExtractIf::next: first call removes an element",
+                );
+                kani::cover(
+                    start < end && !first_some,
+                    "ExtractIf::next: first call scans to the end",
+                );
+                kani::cover(first_some && second_some, "ExtractIf::next: two successive removals");
+                kani::cover(
+                    first_some && idx_after_second > idx_after_first + second_some as usize,
+                    "ExtractIf::next: hole-shift path is reachable",
+                );
+                drop(iter);
+                assert!(
+                    vec.len() == old_len - removed,
+                    "ExtractIf::next: dropping ExtractIf restored the wrong Vec length"
+                );
+            }
+        };
+    }
+
+    gen_extract_if_next_harness!(harness_extract_if_next_u8, u8);
+    gen_extract_if_next_harness!(harness_extract_if_next_u64, u64);
+    gen_extract_if_next_harness!(harness_extract_if_next_unit, ());
+    gen_extract_if_next_harness!(harness_extract_if_next_array, [u8; 4]);
+    gen_extract_if_next_harness!(harness_extract_if_next_bool, bool);
 }
