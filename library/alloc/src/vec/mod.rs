@@ -4470,7 +4470,6 @@ mod verify {
 #[unstable(feature = "kani", issue = "none")]
 mod kani_vec_harness_helpers {
     use core::alloc::Layout;
-    use core::iter::{self, FusedIterator};
     use core::marker::PhantomData;
     use core::{mem, ptr};
 
@@ -4540,38 +4539,6 @@ mod kani_vec_harness_helpers {
 
     impl Shape for WithDrop {}
 
-    pub(super) struct AnyIter<T> {
-        remaining: usize,
-        marker: PhantomData<T>,
-    }
-
-    impl<T> AnyIter<T> {
-        pub(super) fn new(remaining: usize) -> Self {
-            Self { remaining, marker: PhantomData }
-        }
-    }
-
-    impl<T: kani::Arbitrary> Iterator for AnyIter<T> {
-        type Item = T;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            if self.remaining == 0 {
-                None
-            } else {
-                self.remaining -= 1;
-                Some(kani::any())
-            }
-        }
-
-        fn size_hint(&self) -> (usize, Option<usize>) {
-            (self.remaining, Some(self.remaining))
-        }
-    }
-
-    impl<T: kani::Arbitrary> ExactSizeIterator for AnyIter<T> {}
-    impl<T: kani::Arbitrary> FusedIterator for AnyIter<T> {}
-    unsafe impl<T: kani::Arbitrary> iter::TrustedLen for AnyIter<T> {}
-
     /// A general iterator whose lower bound intentionally does not predict the remaining count.
     /// This keeps the default `from_iter` path on its real reserve/growth branch.
     pub(super) struct UnderreportingIter<T> {
@@ -4600,14 +4567,6 @@ mod kani_vec_harness_helpers {
         fn size_hint(&self) -> (usize, Option<usize>) {
             (0, Some(self.remaining))
         }
-    }
-
-    /// Move an owning iterator to an arbitrary reachable front/back state before a target call.
-    pub(super) fn advance_into_iter<T: Shape>(iter: &mut super::IntoIter<T>) {
-        let front = kani::any_where(|front: &usize| *front <= iter.len());
-        let _ = iter.advance_by(front);
-        let back = kani::any_where(|back: &usize| *back <= iter.len());
-        let _ = iter.advance_back_by(back);
     }
 
     /// Position a non-ZST IntoIter at an arbitrary reachable front/back state.

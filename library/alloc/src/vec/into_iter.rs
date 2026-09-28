@@ -1192,18 +1192,15 @@ mod verify {
     mod bounded_evidence {
         //! Supplementary bounded evidence for `needs_drop` behavior.
         //!
-        //! The primary `IntoIter::drop` harnesses remain unbounded. Dropping an
-        //! `IntoIter<WithDrop>` eventually executes compiler-generated slice drop
-        //! glue, which has no source-level loop where a Kani loop contract can be
-        //! attached. This module therefore uses bounded unwinding only for that
-        //! drop-glue path.
+        //! The primary IntoIter harnesses remain unbounded. These harnesses only
+        //! bound compiler-generated slice drop glue, which has no source-level
+        //! loop where a Kani loop contract can be attached.
+
         use super::*;
 
         fn bounded_with_drop_into_iter() -> IntoIter<WithDrop> {
-            let mut vec = verifier_nondet_vec::<WithDrop>();
-            // Bound only the compiler-generated slice drop loop.
-            let len = kani::any_where(|len: &usize| *len <= 8 && *len <= vec.len());
-            vec.len = len;
+            let vec = verifier_nondet_vec::<WithDrop>();
+            kani::assume(vec.len() <= 8);
             vec.into_iter()
         }
 
@@ -1211,10 +1208,103 @@ mod verify {
         #[kani::unwind(12)]
         fn bounded_into_iter_drop_with_drop() {
             let iter = bounded_with_drop_into_iter();
-            let len = iter.len();
-            kani::cover(len == 0, "IntoIter::drop WithDrop: empty iterator");
-            kani::cover(len > 0, "IntoIter::drop WithDrop: non-empty iterator");
-            kani::cover(len == 8, "IntoIter::drop WithDrop: maximum bounded length");
+            kani::cover(iter.len() > 0, "IntoIter::drop WithDrop: drop glue is exercised");
+            drop(iter);
+        }
+
+        #[cfg(not(no_global_oom_handling))]
+        #[kani::proof]
+        #[kani::unwind(12)]
+        fn bounded_forget_allocation_drop_remaining_with_drop() {
+            let mut iter = bounded_with_drop_into_iter();
+            let before_len = iter.len();
+            kani::cover(
+                before_len > 0,
+                "forget_allocation_drop_remaining WithDrop: drop glue is exercised",
+            );
+            iter.forget_allocation_drop_remaining();
+            assert!(
+                iter.len() == 0,
+                "forget_allocation_drop_remaining WithDrop: iterator is not empty"
+            );
+            assert!(
+                iter.cap == 0,
+                "forget_allocation_drop_remaining WithDrop: capacity was not cleared"
+            );
+            assert!(
+                iter.ptr == iter.buf,
+                "forget_allocation_drop_remaining WithDrop: ptr was not reset"
+            );
+            assert!(
+                iter.end == iter.ptr.as_ptr(),
+                "forget_allocation_drop_remaining WithDrop: end was not reset"
+            );
+            drop(iter);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(12)]
+        fn bounded_advance_by_with_drop() {
+            let mut iter = bounded_with_drop_into_iter();
+            let before_len = iter.len();
+            let n: usize = kani::any();
+            let step = before_len.min(n);
+            let result = iter.advance_by(n);
+            assert!(
+                iter.len() == before_len - step,
+                "advance_by WithDrop: remaining length is incorrect"
+            );
+            match result {
+                Ok(()) => assert!(
+                    n <= before_len,
+                    "advance_by WithDrop: returned Ok when n exceeded the remaining length"
+                ),
+                Err(remaining) => {
+                    assert!(
+                        n > before_len,
+                        "advance_by WithDrop: returned Err when n fit in the remaining length"
+                    );
+                    assert!(
+                        remaining.get() == n - before_len,
+                        "advance_by WithDrop: incorrect unadvanced count"
+                    );
+                }
+            }
+            kani::cover(step > 0, "advance_by WithDrop: dropped elements are exercised");
+            drop(iter);
+        }
+
+        #[kani::proof]
+        #[kani::unwind(12)]
+        fn bounded_advance_back_by_with_drop() {
+            let mut iter = bounded_with_drop_into_iter();
+            let before_len = iter.len();
+            let before_ptr = iter.ptr;
+            let n: usize = kani::any();
+            let step = before_len.min(n);
+            let result = iter.advance_back_by(n);
+            assert!(
+                iter.len() == before_len - step,
+                "advance_back_by WithDrop: remaining length is incorrect"
+            );
+            assert!(iter.ptr == before_ptr, "advance_back_by WithDrop: changed the front pointer");
+            match result {
+                Ok(()) => assert!(
+                    n <= before_len,
+                    "advance_back_by WithDrop: returned Ok when n exceeded the remaining length"
+                ),
+                Err(remaining) => {
+                    assert!(
+                        n > before_len,
+                        "advance_back_by WithDrop: returned Err when n fit in the remaining length"
+                    );
+                    assert!(
+                        remaining.get() == n - before_len,
+                        "advance_back_by WithDrop: incorrect unadvanced count"
+                    );
+                }
+            }
+            kani::cover(step > 0, "advance_back_by WithDrop: dropped elements are exercised");
             drop(iter);
         }
     }
