@@ -430,3 +430,142 @@ impl<T: ?Sized + Error> Error for ThinBox<T> {
         self.deref().source()
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::any::Any;
+    use core::kani;
+
+    use super::*;
+
+    #[kani::proof]
+    fn check_deref_u32() {
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let t = ThinBox::new(v);
+        assert_eq!(*t, v);
+    }
+
+    #[kani::proof]
+    fn check_deref_mut_u32() {
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut t = ThinBox::new(v);
+        *t = v.wrapping_add(1);
+        assert_eq!(*t, v.wrapping_add(1));
+    }
+
+    #[kani::proof]
+    fn check_drop_u32() {
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let t = ThinBox::new(v);
+        assert_eq!(*t, v);
+        drop(t);
+    }
+
+    // Three widths (u8/u32/u64): WithHeader's layout arithmetic depends on
+    // align_of::<T>(), so width variation exercises different header padding.
+    #[kani::proof]
+    fn check_thinbox_new_deref_u8() {
+        let v: u8 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut t = ThinBox::new(v);
+        assert_eq!(*t, v);
+        *t = v.wrapping_add(1);
+        assert_eq!(*t, v.wrapping_add(1));
+        drop(t);
+    }
+
+    #[kani::proof]
+    fn check_thinbox_new_deref_u64() {
+        let v: u64 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let mut t = ThinBox::new(v);
+        assert_eq!(*t, v);
+        *t = v.wrapping_add(1);
+        assert_eq!(*t, v.wrapping_add(1));
+        drop(t);
+    }
+
+    // Non-ZST slice-Dyn: exercises Drop's real deallocating branch
+    // (`value_layout.size() != 0` in `WithHeader::drop`'s `DropGuard`), the
+    // sibling arm to check_new_unsize_zst_slice_u32's ZST early-return.
+    #[kani::proof]
+    fn check_drop_slice_u32() {
+        // Array length is a compile-time `Unsize` coercion parameter, not a
+        // runtime constructor input — this file's symbolic-length pattern for
+        // slice constructors doesn't apply here; only the element values are
+        // made symbolic.
+        let arr: [u32; 4] = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let t: ThinBox<[u32]> = ThinBox::new_unsize(arr);
+        assert_eq!(t.len(), 4);
+        drop(t);
+    }
+
+    // `ThinBox::meta`/`ThinBox::with_header` (thin.rs:175/185, private) and
+    // `WithHeader::header` (thin.rs:401) have no dedicated harness: every
+    // deref/drop harness above and below calls `deref()` (`deref_mut()` for
+    // drop) -> `meta()` -> `with_header()` -> `WithHeader::header()` and
+    // asserts on the result, so all three are exercised and checked by every
+    // harness in this module.
+    #[kani::proof]
+    fn check_meta_dyn_any() {
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let t: ThinBox<dyn Any> = ThinBox::new_unsize(v);
+        assert!((&*t).is::<u32>());
+        drop(t);
+    }
+
+    #[kani::proof]
+    fn check_with_header_new_u32() {
+        let h: u32 = kani::any();
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let wh = WithHeader::new(h, v);
+        unsafe {
+            assert_eq!(*wh.header(), h);
+            assert_eq!(*wh.value().cast::<u32>(), v);
+            wh.drop::<u32>(wh.value().cast::<u32>());
+        }
+    }
+
+    #[kani::proof]
+    fn check_with_header_try_new_u32() {
+        let h: u32 = kani::any();
+        let v: u32 = kani::any();
+        kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
+        let r = WithHeader::try_new(h, v);
+        kani::cover(r.is_ok(), "alloc-success arm reached");
+        // Allocation is modeled as always succeeding at this kani pin; the Err arm
+        // is model-unreachable — no cover placed.
+        if let Ok(wh) = r {
+            unsafe {
+                assert_eq!(*wh.header(), h);
+                assert_eq!(*wh.value().cast::<u32>(), v);
+                wh.drop::<u32>(wh.value().cast::<u32>());
+            }
+        }
+    }
+
+    // Slice-metadata ZST route (no vtable): PROVEN clean. `[u32; 0]` unsizes
+    // to `[u32]` with `Metadata = usize`, so this never touches trait-object
+    // drop glue. The dyn-Any ZST route (`ThinBox<dyn Any>::new_unsize(())`,
+    // same fn with `Metadata = DynMetadata<dyn Any>`) was probed separately
+    // and is excluded from this module: it fails at this Kani version inside
+    // the const-allocated metadata block, with
+    // `core::ptr::drop_in_place::<dyn Any>.missing_definition` plus 3
+    // pointer-liveness failures (NULL/invalid/deallocated) on the
+    // const-allocated pointer — a Kani modeling gap in CTFE-constructed dyn
+    // metadata, not a code defect. Fully deterministic — the only
+    // `[u32; 0]` value is `[]` — so no cover.
+    #[kani::proof]
+    fn check_new_unsize_zst_slice_u32() {
+        let t: ThinBox<[u32]> = ThinBox::new_unsize([0u32; 0]);
+        assert_eq!(t.len(), 0);
+        drop(t);
+    }
+}
