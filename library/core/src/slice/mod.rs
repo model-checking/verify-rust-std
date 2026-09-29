@@ -649,7 +649,7 @@ impl<T> [T] {
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     #[cfg_attr(rapx, rapx::verify)]
-    #[cfg_attr(rapx, rapx::requires(InBound(index_access(self, index))))]
+    #[cfg_attr(rapx, rapx::requires(InBound(self, index)))]
     #[requires(index.kani_in_bounds(self.len()))]
     pub const unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
     where
@@ -697,7 +697,7 @@ impl<T> [T] {
     #[track_caller]
     #[rustc_const_unstable(feature = "const_index", issue = "143775")]
     #[cfg_attr(rapx, rapx::verify)]
-    #[cfg_attr(rapx, rapx::requires(InBound(index_access(self, index))))]
+    #[cfg_attr(rapx, rapx::requires(InBound(self, index)))]
     #[requires(index.kani_in_bounds(self.len()))]
     pub const unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
     where
@@ -5346,7 +5346,7 @@ impl<T> [T] {
     #[inline]
     #[track_caller]
     #[cfg_attr(rapx, rapx::verify)]
-    #[cfg_attr(rapx, rapx::requires(InBound(index_access(self, indices))))]
+    #[cfg_attr(rapx, rapx::requires(InBound(self, indices)))]
     #[cfg_attr(rapx, rapx::requires(NonOverlap(indices)))]
     #[requires(crate::slice::get_disjoint_check_valid(&indices, self.len()).is_ok())]
     pub unsafe fn get_disjoint_unchecked_mut<I, const N: usize>(
