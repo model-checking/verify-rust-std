@@ -964,6 +964,8 @@ impl<T> [T] {
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(a, "[0,self.len())")))]
     #[cfg_attr(rapx, rapx::requires(ValidNum(b, "[0,self.len())")))]
+    #[requires(a < self.len() && b < self.len())]
+    #[cfg_attr(kani, kani::modifies(self))]
     pub const unsafe fn swap_unchecked(&mut self, a: usize, b: usize) {
         assert_unsafe_precondition!(
             check_library_ub,
@@ -1365,6 +1367,7 @@ impl<T> [T] {
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(N, "[1,)")))]
     #[cfg_attr(rapx, rapx::requires(ValidNum(len(self) % N == 0)))]
+    #[requires(N != 0 && self.len() % N == 0)]
     pub const unsafe fn as_chunks_unchecked<const N: usize>(&self) -> &[[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -1530,6 +1533,7 @@ impl<T> [T] {
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(N, "[1,)")))]
     #[cfg_attr(rapx, rapx::requires(ValidNum(len(self) % N == 0)))]
+    #[requires(N != 0 && self.len() % N == 0)]
     pub const unsafe fn as_chunks_unchecked_mut<const N: usize>(&mut self) -> &mut [[T; N]] {
         assert_unsafe_precondition!(
             check_language_ub,
@@ -2073,6 +2077,7 @@ impl<T> [T] {
     #[track_caller]
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(mid, [0,self.len()])))]
+    #[requires(mid <= self.len())]
     pub const unsafe fn split_at_unchecked(&self, mid: usize) -> (&[T], &[T]) {
         // FIXME(const-hack): the const function `from_raw_parts` is used to make this
         // function const; previously the implementation used
@@ -2129,6 +2134,7 @@ impl<T> [T] {
     #[track_caller]
     #[cfg_attr(rapx, rapx::verify)]
     #[cfg_attr(rapx, rapx::requires(ValidNum(mid, [0,self.len()])))]
+    #[requires(mid <= self.len())]
     pub const unsafe fn split_at_mut_unchecked(&mut self, mid: usize) -> (&mut [T], &mut [T]) {
         let len = self.len();
         let ptr = self.as_mut_ptr();
@@ -6064,5 +6070,373 @@ mod verify {
     fn check_reverse() {
         let mut a: [u8; 100] = kani::any();
         a.reverse();
+    }
+
+    // ===== Ch17 Phase 1 · Task 1: safe loop-free chunk/split/flatten family (no-UB, symbolic length) =====
+    #[kani::proof]
+    fn check_first_chunk_3() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.first_chunk::<3>();
+    }
+    #[kani::proof]
+    fn check_split_first_chunk_3() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.split_first_chunk::<3>();
+    }
+    #[kani::proof]
+    fn check_split_last_chunk_3() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.split_last_chunk::<3>();
+    }
+    #[kani::proof]
+    fn check_last_chunk_3() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.last_chunk::<3>();
+    }
+    #[kani::proof]
+    fn check_as_chunks_3() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.as_chunks::<3>();
+    }
+    #[kani::proof]
+    fn check_as_chunks_4() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.as_chunks::<4>();
+    }
+    #[kani::proof]
+    fn check_as_rchunks_3() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.as_rchunks::<3>();
+    }
+    #[kani::proof]
+    fn check_as_rchunks_4() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.as_rchunks::<4>();
+    }
+    #[kani::proof]
+    fn check_split_at_checked() {
+        let a: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&a);
+        let mid: usize = kani::any();
+        kani::cover(mid > 0 && mid < s.len(), "non-trivial split reached");
+        let _ = s.split_at_checked(mid);
+    }
+    #[kani::proof]
+    fn check_first_chunk_mut_3() {
+        let mut a: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.first_chunk_mut::<3>();
+    }
+    #[kani::proof]
+    fn check_split_first_chunk_mut_3() {
+        let mut a: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.split_first_chunk_mut::<3>();
+    }
+    #[kani::proof]
+    fn check_split_last_chunk_mut_3() {
+        let mut a: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.split_last_chunk_mut::<3>();
+    }
+    #[kani::proof]
+    fn check_last_chunk_mut_3() {
+        let mut a: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.last_chunk_mut::<3>();
+    }
+    #[kani::proof]
+    fn check_as_chunks_mut_3() {
+        let mut a: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut a);
+        kani::cover(s.len() >= 4, "non-trivial slice reached");
+        let _ = s.as_chunks_mut::<3>();
+    }
+    #[kani::proof]
+    fn check_split_at_mut_checked() {
+        let mut a: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut a);
+        let mid: usize = kani::any();
+        kani::cover(mid > 0 && mid < s.len(), "non-trivial split reached");
+        let _ = s.split_at_mut_checked(mid);
+    }
+    #[kani::proof]
+    fn check_as_flattened() {
+        let a2: [[u8; 3]; 33] = kani::any();
+        let s2: &[[u8; 3]] = kani::slice::any_slice_of_array(&a2);
+        kani::cover(s2.len() >= 2, "non-trivial flatten reached");
+        let _ = s2.as_flattened();
+    }
+    #[kani::proof]
+    fn check_as_flattened_mut() {
+        let mut a2: [[u8; 3]; 33] = kani::any();
+        let s2: &mut [[u8; 3]] = kani::slice::any_slice_of_array_mut(&mut a2);
+        kani::cover(s2.len() >= 2, "non-trivial flatten reached");
+        let _ = s2.as_flattened_mut();
+    }
+
+    // ===== Ch17 Phase 1 · Tasks 2-4: memory-ops, SIMD, get_disjoint (loop-free) =====
+    #[kani::proof]
+    fn check_copy_from_slice() {
+        let src_a: [u8; 100] = kani::any();
+        let src: &[u8] = kani::slice::any_slice_of_array(&src_a);
+        let mut dst_a: [u8; 100] = kani::any();
+        let dst: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut dst_a);
+        kani::assume(src.len() == dst.len()); // copy_from_slice panics unless equal len
+        kani::cover(src.len() >= 1, "non-empty copy reached");
+        dst.copy_from_slice(src);
+    }
+    #[kani::proof]
+    fn check_copy_within() {
+        let mut arr: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut arr);
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        let d: usize = kani::any();
+        // doc precondition: src range a..b in-bounds AND dest+len <= slice len
+        kani::assume(a <= b && b <= s.len() && d <= s.len() - (b - a));
+        kani::cover(b > a, "non-empty range copied");
+        s.copy_within(a..b, d);
+    }
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn check_swap_with_slice() {
+        // bounded: swap_nonoverlapping's internal chunk loop needs an unwind bound (no loop contract).
+        let mut a1: [u8; 8] = kani::any();
+        let s1: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut a1);
+        let mut a2: [u8; 8] = kani::any();
+        let s2: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut a2);
+        kani::assume(s1.len() == s2.len()); // swap_with_slice asserts equal len
+        kani::cover(s1.len() >= 1, "non-empty swap reached");
+        s1.swap_with_slice(s2);
+    }
+    #[kani::proof]
+    fn check_as_simd_i32() {
+        let arr: [i32; 32] = kani::any(); // integer SimdElement — far cheaper than float SIMD for CBMC
+        let s: &[i32] = kani::slice::any_slice_of_array(&arr);
+        kani::cover(s.len() >= 8, "prefix+middle+suffix reachable");
+        let _ = s.as_simd::<4>();
+    }
+    #[kani::proof]
+    fn check_as_simd_mut_i32() {
+        let mut arr: [i32; 32] = kani::any();
+        let s: &mut [i32] = kani::slice::any_slice_of_array_mut(&mut arr);
+        kani::cover(s.len() >= 8, "prefix+middle+suffix reachable");
+        let _ = s.as_simd_mut::<4>();
+    }
+    #[kani::proof]
+    fn check_get_disjoint_mut_usize_2() {
+        let mut arr: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut arr);
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::cover(i != j && i < s.len() && j < s.len(), "valid disjoint pair reachable");
+        let _ = s.get_disjoint_mut([i, j]);
+    }
+    #[kani::proof]
+    fn check_get_disjoint_check_valid_usize_2() {
+        let len: usize = kani::any();
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::cover(i < len && j < len && i != j, "valid disjoint pair reachable");
+        let _ = get_disjoint_check_valid::<usize, 2>(&[i, j], len);
+    }
+
+    // ===== Ch17 · binary_search_by — bounded (unwind). A genuine-unbounded (loop-invariant) proof
+    // is blocked: get_unchecked's precondition is not discharged when the comparator closure
+    // receives the element by reference. A computed index alone verifies; the escaping slice
+    // reference into the closure is the trigger. Tracked at model-checking/kani#4911. =====
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn check_binary_search_by() {
+        let arr: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&arr);
+        kani::cover(s.len() >= 4, "binary search performs multiple halvings");
+        let _ = s.binary_search_by(|_| {
+            if kani::any() { core::cmp::Ordering::Less } else { core::cmp::Ordering::Greater }
+        });
+    }
+
+    // ===== Ch17 · partition_dedup_by — bounded (fixed length + unwind).
+    // The nondeterministic comparator branches 2x/iteration, so cost is 2^len paths; a small fixed
+    // length keeps it within CBMC's object budget (--object-bits 12) — at len 16 it overflows.
+    // The 6.10 canary is authoritative: local 6.11 spuriously fails here on an unbounded
+    // memcmp-builtin loop (a 6.11-only artifact). A genuine-unbounded loop-invariant form is not
+    // available — an explicit loop_modifies can't name the loop body's compiler temporaries. =====
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_partition_dedup_by_spike() {
+        let mut arr: [u8; 4] = kani::any();
+        let s: &mut [u8] = &mut arr; // fixed length → concrete loop bound
+        kani::cover(s.len() >= 2, "dedup loop entered");
+        let _ = s.partition_dedup_by(|_, _| kani::any::<bool>());
+    }
+
+    // ===== Ch17 · rotate_left/right → ptr_rotate (bounded). ptr_rotate dispatches by size:
+    // memmove (min(l,r) <= 256/size_of::<T>), gcd (size_of::<T> > 32B), swap (small T + min > 256).
+    // BufType = [usize;32] = 256B. memmove + gcd verified here; the swap path needs 500+ u8 elements
+    // (min > 256) → intractable bounded → disclosed residual (dispatch-identified, not attempted). =====
+    #[kani::proof]
+    fn check_rotate_memmove_u8() {
+        // left=2, right=6, min=2 <= 256 → memmove (copy_nonoverlapping, no loop).
+        let mut arr: [u8; 8] = kani::any();
+        kani::cover(arr[0] != arr[7], "non-uniform contents rotated");
+        arr.rotate_left(2);
+    }
+    #[kani::proof]
+    #[kani::unwind(20)]
+    fn check_rotate_gcd_big_t() {
+        // [usize;5] = 40B > 32B forces the gcd branch (dispatch-forced type, not "representative").
+        // len=14, mid=7 → left=right=7, min=7 > 256/40=6 → not memmove → gcd (linear cycle loop).
+        let mut arr: [[usize; 5]; 14] = kani::any();
+        // compare a scalar element, not the whole [usize;5] (array != lowers to memcmp,
+        // which is a 6.11 unbounded-builtin-loop artifact).
+        kani::cover(arr[0][0] != arr[13][0], "non-uniform contents rotated");
+        arr.rotate_left(7);
+    }
+    #[kani::proof]
+    fn check_rotate_zst() {
+        // ZST → ptr_rotate early-returns (branch 1); no-UB on the ZST path.
+        let mut arr: [(); 8] = kani::any();
+        arr.rotate_left(2);
+    }
+    #[kani::proof]
+    fn check_rotate_noop_zero() {
+        // mid=0 → left=0 → ptr_rotate early-returns (branch 2); no-UB on the no-op path.
+        let mut arr: [u8; 4] = kani::any();
+        arr.rotate_left(0);
+    }
+    #[kani::proof]
+    fn check_rotate_right_memmove_u8() {
+        // right=2, left=6, min=2 <= 256 → memmove (copy_nonoverlapping, no loop).
+        let mut arr: [u8; 8] = kani::any();
+        kani::cover(arr[0] != arr[7], "non-uniform contents rotated");
+        arr.rotate_right(2);
+    }
+
+    // ===== Ch17 · panic-path pairs (should_panic): safe fns that panic on a precondition
+    // violation, verified to panic as documented (R3 split success/failure; the success harnesses
+    // above assume the precondition). They panic on the leading assert, before any loop. =====
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_swap_with_slice_len_mismatch() {
+        let mut a1: [u8; 8] = kani::any();
+        let mut a2: [u8; 4] = kani::any();
+        let s1: &mut [u8] = &mut a1;
+        let s2: &mut [u8] = &mut a2;
+        s1.swap_with_slice(s2); // len 8 != 4 → "slices have different lengths"
+    }
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_copy_from_slice_len_mismatch() {
+        let src: [u8; 4] = kani::any();
+        let mut dst: [u8; 8] = kani::any();
+        let d: &mut [u8] = &mut dst;
+        d.copy_from_slice(&src); // len 8 != 4 → "source slice length ... destination slice length"
+    }
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_copy_within_oob() {
+        let mut arr: [u8; 4] = kani::any();
+        arr.copy_within(0..5, 0); // src range end 5 > len 4 → out-of-range panic
+    }
+    #[kani::proof]
+    #[kani::should_panic]
+    fn check_rotate_left_oob() {
+        let mut arr: [u8; 4] = kani::any();
+        arr.rotate_left(5); // mid 5 > len 4 → assert!(mid <= self.len()) panics
+    }
+
+    // ===== Ch17 Phase 1 · Task 7: contracts on 5 clean inherent unsafe fns (proof_for_contract) =====
+    #[kani::proof_for_contract(<[u8]>::swap_unchecked)]
+    fn check_swap_unchecked_u8() {
+        // pointer-swap verify is CBMC-6.11-heavy → canary; contract compiles + attaches here
+        let mut arr: [u8; 16] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut arr);
+        let a: usize = kani::any();
+        let b: usize = kani::any();
+        unsafe {
+            s.swap_unchecked(a, b);
+        }
+    }
+    #[kani::proof_for_contract(<[u8]>::split_at_unchecked)]
+    fn check_split_at_unchecked_u8() {
+        let arr: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&arr);
+        let mid: usize = kani::any();
+        let _ = unsafe { s.split_at_unchecked(mid) };
+    }
+    #[kani::proof_for_contract(<[u8]>::split_at_mut_unchecked)]
+    fn check_split_at_mut_unchecked_u8() {
+        let mut arr: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut arr);
+        let mid: usize = kani::any();
+        let _ = unsafe { s.split_at_mut_unchecked(mid) };
+    }
+    #[kani::proof_for_contract(<[u8]>::as_chunks_unchecked::<4>)]
+    fn check_as_chunks_unchecked_u8_4() {
+        let arr: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&arr);
+        let _ = unsafe { s.as_chunks_unchecked::<4>() };
+    }
+    #[kani::proof_for_contract(<[u8]>::as_chunks_unchecked_mut::<4>)]
+    fn check_as_chunks_unchecked_mut_u8_4() {
+        let mut arr: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut arr);
+        let _ = unsafe { s.as_chunks_unchecked_mut::<4>() };
+    }
+
+    // ===== Ch17 Phase 1 · Task 8: get_unchecked trio — assume-mirror no-UB proofs.
+    // Real proof_for_contract is kani#1997-walled (generic SliceIndex trait method); the pfc conversion
+    // rides the kani#4865 pin-bump (our fix), matching the #549/#689 family pattern. =====
+    #[kani::proof]
+    fn check_get_unchecked_usize() {
+        let arr: [u8; 100] = kani::any();
+        let s: &[u8] = kani::slice::any_slice_of_array(&arr);
+        let i: usize = kani::any();
+        kani::assume(i < s.len()); // documented caller safety precondition (assume-mirror)
+        kani::cover(s.len() >= 1, "in-bounds index reachable");
+        let _ = unsafe { s.get_unchecked(i) };
+    }
+    #[kani::proof]
+    fn check_get_unchecked_mut_usize() {
+        let mut arr: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = s.len();
+        let i: usize = kani::any();
+        kani::assume(i < len);
+        kani::cover(len >= 1, "in-bounds index reachable");
+        let _ = unsafe { s.get_unchecked_mut(i) };
+    }
+    #[kani::proof]
+    fn check_get_disjoint_unchecked_mut_usize_2() {
+        let mut arr: [u8; 100] = kani::any();
+        let s: &mut [u8] = kani::slice::any_slice_of_array_mut(&mut arr);
+        let len = s.len();
+        let i: usize = kani::any();
+        let j: usize = kani::any();
+        kani::assume(i < len && j < len && i != j); // in-bounds + non-overlapping
+        kani::cover(len >= 2, "disjoint pair reachable");
+        let _ = unsafe { s.get_disjoint_unchecked_mut([i, j]) };
     }
 }
