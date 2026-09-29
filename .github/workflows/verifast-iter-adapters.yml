@@ -1,0 +1,93 @@
+name: VeriFast iterator adapters
+
+on:
+  workflow_dispatch:
+  merge_group:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verifast-iter-adapters.yml'
+      - 'verifast-proofs/core/iter/adapters/**'
+      - 'verifast-proofs/setup-verifast-home'
+      - 'verifast-proofs/verifast'
+      - 'verifast-proofs/refinement-checker'
+      - 'library/core/src/iter/adapters/map_windows.rs'
+      - 'library/core/src/iter/adapters/step_by.rs'
+  push:
+    branches: [main, 16-iter-adapters]
+    paths:
+      - '.github/workflows/verifast-iter-adapters.yml'
+      - 'verifast-proofs/core/iter/adapters/**'
+      - 'verifast-proofs/setup-verifast-home'
+      - 'verifast-proofs/verifast'
+      - 'verifast-proofs/refinement-checker'
+      - 'library/core/src/iter/adapters/map_windows.rs'
+      - 'library/core/src/iter/adapters/step_by.rs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verifast-iter-adapters-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify-iter-adapters:
+    name: Verify generic iterator adapter contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out proof inputs
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check sources and contract selection
+        run: |
+          bash verifast-proofs/core/iter/adapters/verify.sh --static
+          python3 -I verifast-proofs/core/iter/adapters/test_sources.py
+
+      - name: Install frontend schema compiler
+        run: |
+          sudo --non-interactive apt-get update -qq
+          sudo --non-interactive apt-get install -y --no-install-recommends capnproto
+
+      - name: Restore compiled frontend
+        id: backend-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/verifast-iter-adapters
+          key: ${{ runner.os }}-verifast-iter-v1-${{ hashFiles('verifast-proofs/core/iter/adapters/backend/prepare.sh', 'verifast-proofs/core/iter/adapters/backend/*.patch') }}
+
+      - name: Verify contracts and source refinement
+        run: |
+          # A service cgroup limits the entire compiler/verifier process tree.
+          # --wait propagates failure, including timeout or memory exhaustion.
+          sudo --non-interactive systemd-run \
+            --unit="verifast-iter-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --service-type=exec --wait --pipe --collect \
+            --uid="$(id -u)" --gid="$(id -g)" \
+            --working-directory="$PWD" \
+            --setenv="PATH=$PATH" \
+            --setenv="CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" \
+            --setenv="RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
+            --property=MemoryMax=4G \
+            --property=MemorySwapMax=0 \
+            --property=TasksMax=256 \
+            --property=CPUQuota=200% \
+            --property=OOMPolicy=kill \
+            --property=KillMode=control-group \
+            --property=RuntimeMaxSec=1500 \
+            --property=TimeoutStopSec=15 \
+            /usr/bin/bash verifast-proofs/core/iter/adapters/verify.sh --remote
+
+      - name: Save compiled frontend
+        if: ${{ always() && !cancelled() && steps.backend-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/verifast-iter-adapters
+          key: ${{ steps.backend-cache.outputs.cache-primary-key }}

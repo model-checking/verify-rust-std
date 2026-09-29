@@ -3,6 +3,8 @@ use crate::iter::adapters::SourceIter;
 use crate::iter::{
     ByRefSized, FusedIterator, InPlaceIterable, TrustedFused, TrustedRandomAccessNoCoerce,
 };
+#[cfg(kani)]
+use crate::kani;
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, NeverShortCircuit, Try};
 
@@ -230,6 +232,14 @@ where
         let inner_len = self.iter.size();
         let mut i = 0;
         // Use a while loop because (0..len).step_by(N) doesn't optimize well.
+        // Kani: the loop writes only `accum` and `i`, so `inner_len` keeps
+        // its entry value `self.iter.size()`; the invariant bounds `i`, which
+        // also guards the `inner_len - i` subtraction in the loop condition
+        // against underflow. The frame is stated explicitly because the
+        // `from_fn` closure borrows `self` mutably, and the inferred frame
+        // would otherwise havoc the whole adapter, `remainder` included.
+        #[safety::loop_invariant(i <= inner_len)]
+        #[cfg_attr(kani, kani::loop_modifies(&accum, &i))]
         while inner_len - i >= N {
             let chunk = crate::array::from_fn(|local| {
                 // SAFETY: The method consumes the iterator and the loop condition ensures that
@@ -273,4 +283,69 @@ unsafe impl<I: InPlaceIterable + Iterator, const N: usize> InPlaceIterable for A
             _ => None,
         }
     };
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::kani;
+
+    fn any_slice<T>(orig: &[T]) -> &[T] {
+        if kani::any() {
+            let last = kani::any_where(|i: &usize| *i <= orig.len());
+            let first = kani::any_where(|i: &usize| *i <= last);
+            &orig[first..last]
+        } else {
+            let ptr = kani::any_where::<usize, _>(|v| *v != 0) as *const T;
+            kani::assume(ptr.is_aligned());
+            unsafe { crate::slice::from_raw_parts(ptr, 0) }
+        }
+    }
+
+    // `next_back_remainder` pulls the final `len % N` elements off the back via
+    // `rev().take(rem).next_chunk()`, then reverses them in place, relying on
+    // `unwrap_err_unchecked` (sound because `rem < N`).
+    macro_rules! check_next_back_remainder {
+        ($harness:ident, $elem_ty:ty, $n:expr, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const N: usize = $n;
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let mut it: ArrayChunks<_, N> = ArrayChunks::new(any_slice(&array).iter());
+                it.next_back_remainder();
+                let _ = &it.remainder;
+            }
+        };
+    }
+    check_next_back_remainder!(check_array_chunks_next_back_remainder_unit, (), 2, 8);
+    check_next_back_remainder!(check_array_chunks_next_back_remainder_u8, u8, 2, 8);
+    check_next_back_remainder!(check_array_chunks_next_back_remainder_char, char, 3, 9);
+    check_next_back_remainder!(check_array_chunks_next_back_remainder_tup, (char, u8), 2, 8);
+
+    // `fold` on a `TrustedRandomAccessNoCoerce` source builds each chunk with
+    // `array::from_fn` calling `__iterator_get_unchecked(i + local)` under an
+    // `inner_len - i >= N` guard; this proves those indexes stay in bounds.
+    // The chunking loop carries a Kani loop invariant, so no unwind bound is
+    // necessary and `MAX_LEN` mirrors the accessor harness menu: `u32::MAX`
+    // for `u8`, `isize::MAX` for the ZST, moderate bounds for the wider
+    // element types.
+    macro_rules! check_fold {
+        ($harness:ident, $elem_ty:ty, $n:expr, $max_len:expr) => {
+            #[kani::proof]
+            fn $harness() {
+                const N: usize = $n;
+                const MAX_LEN: usize = $max_len;
+                let array: [$elem_ty; MAX_LEN] = kani::any();
+                let it: ArrayChunks<_, N> = ArrayChunks::new(any_slice(&array).iter());
+                // Disambiguate from the in-scope internal `SpecFold::fold`.
+                let _ = crate::iter::Iterator::fold(it, 0usize, |acc, _chunk| acc.wrapping_add(1));
+            }
+        };
+    }
+    check_fold!(check_array_chunks_fold_unit, (), 2, isize::MAX as usize);
+    check_fold!(check_array_chunks_fold_u8, u8, 2, u32::MAX as usize);
+    check_fold!(check_array_chunks_fold_char, char, 3, 10);
+    check_fold!(check_array_chunks_fold_tup, (char, u8), 2, 10);
 }

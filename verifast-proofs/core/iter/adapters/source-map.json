@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "upstream": "library/core/src/iter/adapters/map_windows.rs",
+      "snapshot": "source/map_windows.rs",
+      "sha256": "f82419679445fa307ffc7d869f5e8e75578925a82ea51005ef7dddf46a8e1d61",
+      "projection": "original/map_windows.rs",
+      "ranges": [[2, 2], [4, 4], [41, 47], [108, 108], [116, 201], [224, 236]],
+      "contracts": ["buffer_ptr", "buffer_mut_ptr", "as_array_ref", "as_uninit_array_mut", "push", "drop"]
+    },
+    {
+      "upstream": "library/core/src/iter/adapters/step_by.rs",
+      "snapshot": "source/step_by.rs",
+      "sha256": "5de19bd52fe39caf378b1d64e72d14220c67dab3f79ff485ade9b559be337e49",
+      "projection": "original/step_by.rs",
+      "ranges": [[1, 1], [5, 5], [16, 33], [42, 42], [50, 58]],
+      "contracts": ["original_step"]
+    }
+  ]
+}
