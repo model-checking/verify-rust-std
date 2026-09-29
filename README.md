@@ -59,6 +59,9 @@ See [our book](https://model-checking.github.io/verify-rust-std/intro.html) for 
 
 We welcome everyone to participate!
 
+The [autoharness generation dashboard](https://model-checking.github.io/verify-rust-std/dashboard/)
+reports official CI generation snapshots. Generated harnesses do not imply successful verification.
+
 ## Citing this project
 
 If you use this project in your research, please cite our NFM 2026 paper.
