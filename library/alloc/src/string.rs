@@ -3621,7 +3621,7 @@ mod verify {
     //!   no unwind bound limits the input. `check_remove` has `#[kani::unwind(2)]` only to cut an
     //!   infeasible panic-formatting path (see the comment on it).
     //! * Receiver of any length, bounded edit: `check_replace_range` (removed and inserted
-    //!   ranges of at most 4 bytes each) and `check_remove_matches` (at most 4 matches). Their
+    //!   ranges of at most 4 bytes each) and `check_remove_matches` (at most 5 matches). Their
     //!   loops run once per edited byte or per match, never once per receiver byte.
     //! * Bounded because of tool limits: `check_retain_bounded` (strings of up to 12 chars) and
     //!   the `from_utf16*` harnesses (inputs of up to 12 bytes, 8 for `from_utf16le_lossy`). See
@@ -3642,8 +3642,9 @@ mod verify {
     //! quantities that any valid `String` can produce. Nothing is assumed about the result of the
     //! function under test.
     //!
-    //! Panics are not UB. Documented panic conditions (index not on a char boundary, removing
-    //! at the end) are excluded with `kani::assume`.
+    //! Panics are not UB. Documented panic conditions are excluded: an index that is not on a char
+    //! boundary with `kani::assume`, and `remove` at the end of the string by construction
+    //! (`with_char_at` always puts a char at the index that is removed).
     use core::cell::Cell;
     use core::kani;
     use core::str::pattern::{Pattern, SearchStep, Searcher};
@@ -3672,13 +3673,14 @@ mod verify {
     /// and `suffix` of arbitrary lengths. Returns the string, the start of `c`, and `c`.
     fn with_char_at() -> (String, usize, char) {
         let c: char = kani::any();
+        let c_len = c.len_utf8();
         let prefix: usize = kani::any_where(|p: &usize| *p <= MAX_ALLOC);
         let suffix: usize = kani::any();
-        let total = prefix.checked_add(4).and_then(|n| n.checked_add(suffix));
+        let total = prefix.checked_add(c_len).and_then(|n| n.checked_add(suffix));
         kani::assume(total.is_some_and(|n| n <= MAX_ALLOC));
+        // `cap >= total`, so `cap == len` is possible for chars of every width.
         let cap: usize = kani::any_where(|c: &usize| *c >= total.unwrap() && *c <= MAX_ALLOC);
         let mut v: Vec<u8> = vec![0u8; cap];
-        let c_len = c.len_utf8();
         // SAFETY (harness): `prefix + c_len <= cap = v.len()`, so the char's bytes are written
         // inside the zeroed, initialized buffer.
         unsafe {
@@ -3691,10 +3693,12 @@ mod verify {
 
     #[kani::proof]
     fn check_pop() {
-        // Either empty, or `c` is the last char (everything before it arbitrary).
+        // Either empty, or `c` is the last char, after a NUL prefix of arbitrary length.
         let (mut s, start, c) = with_char_at();
         let has_last_char: bool = kani::any();
-        // SAFETY (harness): shrinking the length keeps a prefix of the initialized bytes.
+        // SAFETY (harness): shrinking the length keeps a prefix of the initialized bytes. The new
+        // length is 0 or `start + c.len_utf8()`, the end of `c`, so the kept bytes are NULs
+        // followed by the whole encoding of `c`: valid UTF-8.
         unsafe { s.as_mut_vec().set_len(if has_last_char { start + c.len_utf8() } else { 0 }) };
         kani::cover(has_last_char && start > 64, "pop from a long string");
         let res = s.pop();
@@ -3809,8 +3813,7 @@ mod verify {
     }
 
     // ---------------------------------------------------------------------------------------
-    // replace_range / remove_matches (from the ch10-hard6 branch): arbitrary receiver length,
-    // bounded edit size.
+    // replace_range / remove_matches: arbitrary receiver length, bounded edit size.
     //
     // Every loop reachable from these two functions iterates once per *edited* byte or per
     // *match* (Splice::drop's drain/fill/extend/collect loops; remove_matches' rejection-collect
@@ -3870,18 +3873,22 @@ mod verify {
 
     /// A `Pattern` whose searcher returns an arbitrary sequence of matches allowed by the
     /// `unsafe trait Searcher` contract that `remove_matches` relies on (its SAFETY comment).
-    /// `Searcher::next` must produce `Match`/`Reject` ranges that are adjacent, non-overlapping,
-    /// cover the whole haystack and lie on UTF-8 char boundaries, and `next_match` returns the
-    /// `Match` ranges of that stream. So successive `next_match` results `(a, b)` satisfy
-    /// `front <= a <= b <= haystack.len()`, where `front` is the end of the previous match (0 at
-    /// first), with `a` and `b` on char boundaries; the gap `front..a` is the implied `Reject`.
-    /// Empty matches are allowed, but never twice at the same position: that would make no
-    /// progress, and no std searcher does it. Every searcher that meets this contract and never
-    /// repeats an empty match yields one of these sequences, so this covers all of them at once;
-    /// the std searchers' own conformance is the subject of Challenges 20/21. At most
-    /// `max_matches` matches (the only bound).
+    /// The docs of `Searcher::next` say: "The stream of Match and Reject values up to a Done
+    /// will contain index ranges that are adjacent, non-overlapping, covering the whole
+    /// haystack, and laying on utf8 boundaries." and "Both ranges may have zero length."
+    /// `next_match` returns the `Match` ranges of that stream. So the successive `next_match`
+    /// results `(a, b)` are exactly the sequences with `front <= a <= b <= haystack.len()`,
+    /// where `front` is the end of the previous match (0 at first), and `a`, `b` on char
+    /// boundaries; the gap `front..a` is the implied `Reject`. This searcher generates all of
+    /// them: matches in increasing order, non-overlapping, possibly empty, possibly an empty
+    /// match repeated at one position (adjacent zero-length ranges, which the contract allows;
+    /// `remove_matches` then copies 0 bytes), within the haystack, on char boundaries. So it
+    /// covers every searcher that meets the contract at once; the std searchers' own
+    /// conformance is the subject of Challenges 20/21. At most `max_matches` matches (the only
+    /// bound).
     struct AnyPattern<'c> {
         removed: &'c Cell<usize>,
+        matches: &'c Cell<usize>,
         max_matches: usize,
     }
 
@@ -3889,15 +3896,16 @@ mod verify {
         haystack: &'a str,
         front: usize,
         left: usize,
-        /// Position of the previous match if it was empty.
-        last_empty: Option<usize>,
         removed: &'c Cell<usize>,
+        matches: &'c Cell<usize>,
     }
 
-    // SAFETY: `next_match` returns `Match` ranges of a stream that meets the contract of
-    // `Searcher::next` (see `AnyPattern`): in increasing order, non-overlapping, within the
-    // haystack, on char boundaries, and no empty match repeated at one position. `next` reports
-    // the rest of the haystack (from the end of the last match) as one `Reject`, then `Done`.
+    // SAFETY: `next_match` returns the `Match` ranges of a stream that meets the contract of
+    // `Searcher::next` (see `AnyPattern`): in increasing order, non-overlapping (possibly empty,
+    // and possibly an empty match repeated at one position, as the contract allows), within the
+    // haystack, on char boundaries; the gaps between them are the implied `Reject`s. `next`
+    // reports the rest of the haystack (from the end of the last match) as one `Reject`, then
+    // `Done`.
     unsafe impl<'a, 'c> Searcher<'a> for AnySearcher<'a, 'c> {
         fn haystack(&self) -> &'a str {
             self.haystack
@@ -3922,11 +3930,10 @@ mod verify {
             let a: usize = kani::any_where(|a: &usize| *a >= front && *a <= len);
             let b: usize = kani::any_where(|b: &usize| *b >= a && *b <= len);
             kani::assume(self.haystack.is_char_boundary(a) && self.haystack.is_char_boundary(b));
-            kani::assume(!(a == b && self.last_empty == Some(a)));
-            self.last_empty = if a == b { Some(a) } else { None };
             self.front = b;
             self.left -= 1;
             self.removed.set(self.removed.get() + (b - a));
+            self.matches.set(self.matches.get() + 1);
             Some((a, b))
         }
     }
@@ -3939,21 +3946,26 @@ mod verify {
                 haystack,
                 front: 0,
                 left: self.max_matches,
-                last_empty: None,
                 removed: self.removed,
+                matches: self.matches,
             }
         }
     }
 
+    /// At most 5 matches. `remove_matches` collects the gaps between matches into a
+    /// `Vec<(usize, usize)>` that starts with capacity 4, so the 5th match exercises its
+    /// reallocation. The loops run at most 6 times (5 gaps plus the tail), hence `unwind(7)`.
     #[kani::proof]
-    #[kani::unwind(6)]
+    #[kani::unwind(7)]
     fn check_remove_matches() {
         let mut s = any_string();
         let len = s.len();
         let removed = Cell::new(0usize);
-        kani::cover(len > 64, "long receiver");
-        s.remove_matches(AnyPattern { removed: &removed, max_matches: 4 });
+        let matches = Cell::new(0usize);
+        s.remove_matches(AnyPattern { removed: &removed, matches: &matches, max_matches: 5 });
         let r = removed.get();
+        kani::cover(r > 0 && s.len() > 64, "real removal, long string left");
+        kani::cover(matches.get() == 5, "5 matches: the rejections Vec reallocates");
         assert!(s.len() == len - r);
     }
 
@@ -3967,24 +3979,22 @@ mod verify {
     // stated sizes (the unwinding assertions make an insufficient bound fail).
     // ---------------------------------------------------------------------------------------
 
-    /// Up to `N` arbitrary chars encoded back to back into one allocation (valid UTF-8 by
-    /// construction; no reallocation, which keeps the harness CI-sized).
+    /// Up to `N` arbitrary chars encoded back to back into a zeroed (initialized) buffer of
+    /// `4 * N` bytes, which is then truncated to the encoded length (valid UTF-8 by construction;
+    /// no reallocation, which keeps the harness CI-sized).
     fn any_valid_string<const N: usize>() -> String {
         let chars: [char; N] = kani::any();
         let n: usize = kani::any_where(|n: &usize| *n <= N);
-        let mut v: Vec<u8> = Vec::with_capacity(4 * N);
+        let mut v: Vec<u8> = vec![0u8; 4 * N];
         let mut off = 0;
         for i in 0..n {
             let l = chars[i].len_utf8();
-            // SAFETY (harness): `off + l <= 4 * N = capacity`.
-            unsafe {
-                chars[i].encode_utf8(core::slice::from_raw_parts_mut(v.as_mut_ptr().add(off), l));
-            }
+            chars[i].encode_utf8(&mut v[off..off + l]);
             off += l;
         }
-        // SAFETY (harness): the first `off` bytes were written above.
-        unsafe { v.set_len(off) };
-        // SAFETY (harness): concatenation of UTF-8 encodings of chars.
+        v.truncate(off);
+        // SAFETY (harness): `v` is exactly the concatenation of the UTF-8 encodings of
+        // `chars[..n]` (`truncate` drops only the unused zero bytes after them): valid UTF-8.
         unsafe { String::from_utf8_unchecked(v) }
     }
 
@@ -3994,8 +4004,22 @@ mod verify {
     fn check_retain_bounded() {
         let mut s = any_valid_string::<12>();
         let len = s.len();
-        kani::cover(len > 6, "multi-byte input");
-        s.retain(|_c| kani::any());
+        // Observers for the cover below; they do not influence the predicate's result.
+        let deleted = Cell::new(false);
+        let kept_multibyte_after_deletion = Cell::new(false);
+        s.retain(|c| {
+            let keep: bool = kani::any();
+            if !keep {
+                deleted.set(true);
+            } else if c.len_utf8() > 1 && deleted.get() {
+                kept_multibyte_after_deletion.set(true);
+            }
+            keep
+        });
+        kani::cover(
+            kept_multibyte_after_deletion.get(),
+            "multi-byte char kept after a deletion (moved by the unsafe re-encode)",
+        );
         assert!(s.len() <= len);
     }
 
