@@ -237,6 +237,7 @@ impl Duration {
     #[rustc_const_stable(feature = "duration_consts", since = "1.32.0")]
     #[ensures(|duration| duration.is_safe())]
     #[ensures(|duration| duration.secs == secs)]
+    #[ensures(|duration| duration.nanos.as_inner() == 0)]
     pub const fn from_secs(secs: u64) -> Duration {
         Duration { secs, nanos: Nanoseconds::ZERO }
     }
