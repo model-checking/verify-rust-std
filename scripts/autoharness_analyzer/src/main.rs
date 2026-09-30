@@ -52,9 +52,11 @@ pub struct AutoHarnessMetadata {
 /// Reasons that Kani does not generate an automatic harness for a function.
 #[derive(Debug, Clone, Serialize, Deserialize, Display, EnumString)]
 pub enum AutoHarnessSkipReason {
-    /// The function is generic.
+    /// The function is generic and autoharness could not find a monomorphic instantiation to
+    /// verify. The payload gives the specific reason (e.g. const generic parameters, or trait
+    /// bounds that no candidate type satisfies).
     #[strum(serialize = "Generic Function")]
-    GenericFn,
+    GenericFn(String),
     /// A Kani-internal function: already a harness, implementation of a Kani associated item or Kani contract instrumentation functions).
     #[strum(serialize = "Kani implementation")]
     KaniImpl,
@@ -65,6 +67,11 @@ pub enum AutoHarnessSkipReason {
     /// The function does not have a body.
     #[strum(serialize = "The function does not have a body")]
     NoBody,
+    /// The function's arguments are only supported with bounded nondeterministic values, and
+    /// the user did not pass --bounded-arguments.
+    /// (The Vec<(String, String)> contains the list of (name, type) tuples for each such argument.)
+    #[strum(serialize = "Requires --bounded-arguments for argument(s)")]
+    RequiresBoundedArguments(Vec<(String, String)>),
     /// The function doesn't match the user's provided filters.
     #[strum(serialize = "Did not match provided filters")]
     UserFilter,
@@ -88,6 +95,23 @@ impl AutoHarnessMetadata {
         self.chosen.extend(other.chosen);
         self.skipped.extend(other.skipped);
     }
+}
+
+/// Kani at the commit in `tool_config/kani-version.toml` predates model-checking/kani#4679 and
+/// writes `GenericFn` as a bare string, while current Kani writes `{"GenericFn": "<reason>"}`.
+/// Rewrite the old form so both deserialize into `GenericFn(String)`.
+fn normalize_skip_reasons(mut autoharness_md: Value) -> Value {
+    if let Some(skipped) = autoharness_md
+        .get_mut("skipped")
+        .and_then(Value::as_object_mut)
+    {
+        for reason in skipped.values_mut() {
+            if reason.as_str() == Some("GenericFn") {
+                *reason = serde_json::json!({ "GenericFn": "" });
+            }
+        }
+    }
+    autoharness_md
 }
 
 fn main() -> Result<()> {
@@ -127,7 +151,7 @@ fn main() -> Result<()> {
         let fn_to_row_data = process_scan_fns(scanner_fn_csv_path)?;
 
         let autoharness_md: AutoHarnessMetadata =
-            serde_json::from_value(v["autoharness_md"].clone())?;
+            serde_json::from_value(normalize_skip_reasons(v["autoharness_md"].clone()))?;
 
         if args.per_crate {
             // Process each crate separately
@@ -164,4 +188,41 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(skipped: &str) -> AutoHarnessMetadata {
+        let v: Value = serde_json::from_str(&format!(
+            r#"{{"chosen": [], "skipped": {{"f": {skipped}}}}}"#
+        ))
+        .unwrap();
+        serde_json::from_value(normalize_skip_reasons(v)).unwrap()
+    }
+
+    #[test]
+    fn generic_fn_old_form() {
+        let md = parse(r#""GenericFn""#);
+        assert!(matches!(md.skipped["f"], AutoHarnessSkipReason::GenericFn(ref s) if s.is_empty()));
+    }
+
+    #[test]
+    fn generic_fn_new_form() {
+        let md = parse(r#"{"GenericFn": "no candidate instantiation"}"#);
+        assert!(matches!(
+            md.skipped["f"],
+            AutoHarnessSkipReason::GenericFn(ref s) if s == "no candidate instantiation"
+        ));
+    }
+
+    #[test]
+    fn requires_bounded_arguments() {
+        let md = parse(r#"{"RequiresBoundedArguments": [["s", "&[u8]"]]}"#);
+        let AutoHarnessSkipReason::RequiresBoundedArguments(args) = &md.skipped["f"] else {
+            panic!("wrong variant");
+        };
+        assert_eq!(args, &[("s".to_string(), "&[u8]".to_string())]);
+    }
 }
