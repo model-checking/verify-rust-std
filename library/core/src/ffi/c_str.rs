@@ -780,11 +780,12 @@ impl ops::Index<ops::RangeFrom<usize>> for CStr {
     type Output = CStr;
 
     #[inline]
-    // The tail of a valid `CStr` is itself a valid `CStr`; the postcondition
-    // binds on normal return only — the out-of-bounds panic path is proven
-    // separately by the `check_index_range_from_out_of_bounds` harness.
-    #[ensures(|result: &&CStr| result.is_safe())]
-    #[ensures(|result: &&CStr| result.to_bytes_with_nul() == &self.to_bytes_with_nul()[index.start..])]
+    // No `#[ensures]` contract on this trait method: at the pinned Kani,
+    // `proof_for_contract` on a generic trait method fails to resolve
+    // (model-checking/kani#1997), so the tail-is-a-valid-`CStr` and byte-suffix
+    // properties are proven in the `check_index_range_from_contract` harness
+    // instead of as a contract. Restore the contract form when the pin includes
+    // the resolver fix.
     fn index(&self, index: ops::RangeFrom<usize>) -> &CStr {
         let bytes = self.to_bytes_with_nul();
         // we need to manually check the starting index to account for the null
@@ -1165,9 +1166,10 @@ mod verify {
     // Verified as a plain proof rather than proof_for_contract: at the pinned
     // Kani, a pfc target on a generic trait's method (Index<RangeFrom<usize>>)
     // fails to resolve (model-checking/kani#1997) — "unable to find
-    // implementation of associated function Index::index for CStr". The two
-    // #[ensures] postconditions on `index` are asserted directly on the result
-    // below. (Non-generic trait pfc, e.g. CloneToUninit, still resolves and is
+    // implementation of associated function Index::index for CStr". The
+    // tail-is-a-valid-`CStr` and byte-suffix postconditions are asserted
+    // directly on the result below rather than as method contracts.
+    // (Non-generic trait pfc, e.g. CloneToUninit, still resolves and is
     // kept in contract form.)
     #[kani::proof]
     #[kani::unwind(17)] // bounded at 16: at 32 this harness took 263s.
