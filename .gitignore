@@ -57,3 +57,8 @@ goto-transcoder
 
 #/target
 testable-simd-models/target
+
+# The standalone dashboard uses reproducible npm installs.
+!/dashboard/package-lock.json
+
+.codex/

@@ -1,0 +1,27 @@
+{
+  "name": "autoharness-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "postinstall": "nuxt prepare",
+    "test": "node --test tests/*.test.mjs",
+    "validate:data": "node scripts/validate-autoharness-dashboard.mjs --data-dir public/data",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "nuxt": "4.5.2",
+    "vue": "3.5.22",
+    "vue-router": "4.6.3",
+    "primevue": "4.3.7",
+    "primeicons": "7.0.0",
+    "@primeuix/themes": "1.2.3"
+  },
+  "devDependencies": {
+    "@primevue/nuxt-module": "4.3.7",
+    "typescript": "5.9.3",
+    "vue-tsc": "3.1.1"
+  }
+}

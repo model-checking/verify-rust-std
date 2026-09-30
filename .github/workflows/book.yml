@@ -10,6 +10,15 @@ on:
     paths:
       - 'doc/**'
       - '.github/workflows/book.yml'
+      - 'dashboard/**'
+      - 'scripts/kani-std-analysis/metrics-data-*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -31,15 +40,93 @@ jobs:
         run: mdbook build doc
 
       - name: Upload book
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
+          name: book-html
           path: book/html
+          if-no-files-found: error
           retention-days: "2"
 
-  deploy:
-    needs: build
+  dashboard:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && startsWith('refs/heads/main', github.ref) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test collector packaging and failure handling
+        run: python3 dashboard/tests/collector.test.py
+      - name: Validate and build dashboard
+        working-directory: dashboard
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+          npm run validate:data
+          if [ "$SOURCE_REPOSITORY" = 'model-checking/verify-rust-std' ]; then
+            npm run validate:data -- --require-official
+          fi
+          npm run typecheck
+          npm run generate
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          NUXT_APP_BASE_URL: /verify-rust-std/dashboard/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-html
+          path: dashboard/.output/public
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 2
+
+  package:
+    permissions:
+      contents: read
+      pages: read
+    needs: [build, dashboard]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: book-html
+          path: site
+      - name: Ensure the book does not already own dashboard paths
+        run: test ! -e site/dashboard
+      - uses: actions/download-artifact@v4
+        with:
+          name: dashboard-html
+          path: site/dashboard
+      - name: Check combined site
+        run: |
+          set -euo pipefail
+          test -f site/index.html
+          test -f site/dashboard/index.html
+          test -f site/dashboard/autoharness/index.html
+          test -f site/dashboard/functions/index.html
+          test -f site/dashboard/data/autoharness-dashboard.json
+          test -f site/dashboard/data/autoharness-functions.json
+          test -z "$(find site -type l -print -quit)"
+      - uses: actions/configure-pages@v5
+        if: github.repository == 'model-checking/verify-rust-std' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+          retention-days: 2
+
+  deploy:
+    needs: package
+    runs-on: ubuntu-latest
+    if: github.repository == 'model-checking/verify-rust-std' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    concurrency:
+      group: github-pages-deploy
+      cancel-in-progress: false
 
     # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
     permissions:

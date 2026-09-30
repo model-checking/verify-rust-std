@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "dataStatus": "pending",
+  "runId": null,
+  "generatedAt": null,
+  "meta": null,
+  "summary": null,
+  "crates": [],
+  "skipReasons": [],
+  "verification": {
+    "status": "not-collected"
+  },
+  "notes": [
+    "Awaiting the first official analysis."
+  ]
+}
