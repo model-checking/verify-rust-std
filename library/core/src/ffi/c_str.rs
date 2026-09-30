@@ -538,6 +538,7 @@ impl CStr {
     // contents, `self.inner.len()` bytes ending in the terminator; `inner`
     // is nonempty by the type's safety invariant, so the index below
     // cannot underflow.
+    #[requires(self.is_safe())]
     #[ensures(|&result| can_dereference(crate::ptr::slice_from_raw_parts(result, self.inner.len())))]
     #[ensures(|&result| unsafe { *result.add(self.inner.len() - 1) } == 0)]
     pub const fn as_ptr(&self) -> *const c_char {
@@ -574,6 +575,7 @@ impl CStr {
     // Cross-accessor consistency: the count excludes the terminating NUL that
     // `to_bytes_with_nul` includes; `result + 1` cannot overflow since
     // `result == self.inner.len() - 1`.
+    #[requires(self.is_safe())]
     #[ensures(|&result| result + 1 == self.to_bytes_with_nul().len())]
     pub const fn count_bytes(&self) -> usize {
         self.inner.len() - 1
@@ -591,6 +593,7 @@ impl CStr {
     #[stable(feature = "cstr_is_empty", since = "1.71.0")]
     #[rustc_const_stable(feature = "cstr_is_empty", since = "1.71.0")]
     // Empty means exactly zero content bytes before the NUL.
+    #[requires(self.is_safe())]
     #[ensures(|&result| result == (self.count_bytes() == 0))]
     pub const fn is_empty(&self) -> bool {
         // SAFETY: We know there is at least one byte; for empty strings it
@@ -620,6 +623,7 @@ impl CStr {
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
     // The content bytes contain no NUL and exclude the terminator;
     // `result.len() + 1` cannot overflow since the full view includes the NUL.
+    #[requires(self.is_safe())]
     #[ensures(|result| !result.contains(&0))]
     #[ensures(|result| result.len() + 1 == self.to_bytes_with_nul().len())]
     pub const fn to_bytes(&self) -> &[u8] {
@@ -649,6 +653,7 @@ impl CStr {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_stable(feature = "const_cstr_methods", since = "1.72.0")]
     // The full byte view is the invariant shape: NUL-terminated, no interior NUL.
+    #[requires(self.is_safe())]
     #[ensures(|result| result.len() > 0 && result[result.len() - 1] == 0
         && !result[..result.len() - 1].contains(&0))]
     pub const fn to_bytes_with_nul(&self) -> &[u8] {
