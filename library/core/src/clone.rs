@@ -36,6 +36,10 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use safety::{ensures, requires};
+
+#[cfg(kani)]
+use crate::kani;
 use crate::marker::{Destruct, PointeeSized};
 
 mod uninit;
@@ -576,6 +580,24 @@ unsafe impl CloneToUninit for str {
 #[unstable(feature = "clone_to_uninit", issue = "126799")]
 unsafe impl CloneToUninit for crate::ffi::CStr {
     #[cfg_attr(debug_assertions, track_caller)]
+    // Safety precondition per the trait docs: `dest` must be valid for
+    // writes of `size_of_val(self)` bytes (alignment is 1 for [c_char]).
+    // The docs state no non-overlap condition; the contract mirrors the
+    // documented obligations.
+    #[requires(crate::ub_checks::can_write(crate::ptr::slice_from_raw_parts_mut(
+        dest,
+        crate::mem::size_of_val(self)
+    )))]
+    // The clone reproduces the full NUL-terminated contents at `dest`.
+    #[ensures(|_| unsafe {
+        crate::slice::from_raw_parts(dest, self.to_bytes_with_nul().len())
+    } == self.to_bytes_with_nul())]
+    // The safety crate has no `modifies` wrapper; kani's form is applied
+    // directly under cfg_attr so the non-kani build is untouched.
+    #[cfg_attr(
+        kani,
+        kani::modifies(crate::ptr::slice_from_raw_parts_mut(dest, crate::mem::size_of_val(self)))
+    )]
     unsafe fn clone_to_uninit(&self, dest: *mut u8) {
         // SAFETY: For now, CStr is just a #[repr(trasnsparent)] [c_char] with some invariants.
         // And we can cast [c_char] to [u8] on all supported platforms (see: to_bytes_with_nul).
@@ -692,4 +714,34 @@ mod impls {
     /// Shared references can be cloned, but mutable references *cannot*!
     #[stable(feature = "rust1", since = "1.0.0")]
     impl<T: PointeeSized> !Clone for &mut T {}
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::CloneToUninit;
+    use crate::ffi::CStr;
+    use crate::kani;
+    use crate::ub_checks::Invariant;
+
+    // <CStr as CloneToUninit>::clone_to_uninit — byte-copy of the full
+    // NUL-terminated contents into caller-provided storage.
+    #[kani::proof_for_contract(<CStr as CloneToUninit>::clone_to_uninit)]
+    #[kani::unwind(33)]
+    fn check_clone_to_uninit_contract() {
+        const MAX_SIZE: usize = 32;
+        let string: [u8; MAX_SIZE] = kani::any();
+        let slice = kani::slice::any_slice_of_array(&string);
+        kani::assume(slice.len() > 0 && slice[slice.len() - 1] == 0);
+        kani::cover(true, "nul-terminated source slice admitted");
+        let c_str = CStr::from_bytes_until_nul(slice).unwrap();
+        assert!(c_str.is_safe());
+        let len = c_str.to_bytes_with_nul().len();
+
+        let mut dest = [0u8; MAX_SIZE];
+        unsafe { c_str.clone_to_uninit(dest.as_mut_ptr()) };
+        // Semantic: the clone reproduces the source bytes including the NUL.
+        assert_eq!(&dest[..len], c_str.to_bytes_with_nul());
+        kani::cover(true, "clone completed with byte-equal contents");
+    }
 }
