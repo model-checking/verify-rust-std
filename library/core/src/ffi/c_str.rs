@@ -780,12 +780,12 @@ impl ops::Index<ops::RangeFrom<usize>> for CStr {
     type Output = CStr;
 
     #[inline]
-    // No `#[ensures]` contract on this trait method: at the pinned Kani,
-    // `proof_for_contract` on a generic trait method fails to resolve
-    // (model-checking/kani#1997), so the tail-is-a-valid-`CStr` and byte-suffix
-    // properties are proven in the `check_index_range_from_contract` harness
-    // instead of as a contract. Restore the contract form when the pin includes
-    // the resolver fix.
+    // No `#[ensures]` contract on this trait method: `proof_for_contract` on a
+    // generic trait method isn't resolvable at this Kani pin, which predates the
+    // resolver fix (model-checking/kani#4865), so the tail-is-a-valid-`CStr` and
+    // byte-suffix properties are proven in the `check_index_range_from_contract`
+    // harness instead of as a contract. Restore the contract form once the pin
+    // includes kani#4865.
     fn index(&self, index: ops::RangeFrom<usize>) -> &CStr {
         let bytes = self.to_bytes_with_nul();
         // we need to manually check the starting index to account for the null
@@ -1163,10 +1163,11 @@ mod verify {
     }
 
     // impl ops::Index<ops::RangeFrom<usize>> for CStr — in-bounds tail slicing.
-    // Verified as a plain proof rather than proof_for_contract: at the pinned
-    // Kani, a pfc target on a generic trait's method (Index<RangeFrom<usize>>)
-    // fails to resolve (model-checking/kani#1997) — "unable to find
-    // implementation of associated function Index::index for CStr". The
+    // Verified as a plain proof rather than proof_for_contract: a pfc target on
+    // a generic trait's method (Index<RangeFrom<usize>>) isn't resolvable at
+    // this Kani pin, which predates the resolver fix (model-checking/kani#4865)
+    // — "unable to find implementation of associated function Index::index for
+    // CStr". The
     // tail-is-a-valid-`CStr` and byte-suffix postconditions are asserted
     // directly on the result below rather than as method contracts.
     // (Non-generic trait pfc, e.g. CloneToUninit, still resolves and is
