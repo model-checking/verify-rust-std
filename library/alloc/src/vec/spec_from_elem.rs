@@ -73,3 +73,57 @@ impl SpecFromElem for () {
         v
     }
 }
+
+#[cfg(kani)]
+mod verify {
+    use core::kani;
+
+    use super::SpecFromElem;
+    use crate::alloc::Global;
+
+    // from_elem (i8/u8/()): with_capacity + write_bytes/zeroed (memset intrinsic,
+    // no element loop) — object-light, real body, symbolic length and element.
+    // The symbolic `elem` exercises both the zeroed and the write_bytes branches;
+    // the postcondition checks length and element value at a symbolic index.
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_from_elem_i8() {
+        let n: usize = kani::any();
+        kani::assume(n <= 64);
+        kani::cover(n == 64, "non-vacuity: the full-length case is reachable");
+        let elem: i8 = kani::any();
+        let v = <i8 as SpecFromElem>::from_elem(elem, n, Global);
+        assert!(v.len() == n);
+        if n > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < n);
+            assert!(v[j] == elem);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_from_elem_u8() {
+        let n: usize = kani::any();
+        kani::assume(n <= 64);
+        kani::cover(n == 64, "non-vacuity: the full-length case is reachable");
+        let elem: u8 = kani::any();
+        let v = <u8 as SpecFromElem>::from_elem(elem, n, Global);
+        assert!(v.len() == n);
+        if n > 0 {
+            let j: usize = kani::any();
+            kani::assume(j < n);
+            assert!(v[j] == elem);
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn check_from_elem_unit() {
+        let n: usize = kani::any();
+        kani::assume(n <= 64);
+        kani::cover(n == 64, "non-vacuity: the full-length case is reachable");
+        let v = <() as SpecFromElem>::from_elem((), n, Global);
+        assert!(v.len() == n);
+    }
+}
