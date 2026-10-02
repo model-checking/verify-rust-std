@@ -5300,10 +5300,10 @@ mod verify {
         shape_retain::<Al16>();
     }
 
-    #[kani::proof]
-    #[kani::unwind(8)]
-    fn verify_drain_droptoken() {
-        let mut v = any_bounded_vec::<DropToken, 4>();
+    // Length 0..=4 over any element type: drain a symbolic sub-range in place;
+    // the cover confirms a non-empty drain is reachable.
+    fn shape_drain<T: kani::Arbitrary>() {
+        let mut v = any_bounded_vec::<T, 4>();
         let n = v.len();
         let a: usize = kani::any();
         let b: usize = kani::any();
@@ -5311,6 +5311,16 @@ mod verify {
         kani::cover(b > a, "a draining drop is reachable");
         drop(v.drain(a..b));
         assert!(v.len() == n - (b - a));
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_drain_droptoken() {
+        shape_drain::<DropToken>();
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_drain_al16() {
+        shape_drain::<Al16>();
     }
 
     // ZST arm: Vec<()> capacity semantics + len bookkeeping.
