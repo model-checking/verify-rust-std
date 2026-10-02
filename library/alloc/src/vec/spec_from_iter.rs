@@ -80,6 +80,7 @@ mod verify {
         let arr: [u8; 64] = kani::any();
         let s = kani::slice::any_slice_of_array(&arr);
         let n = s.len();
+        kani::cover(n == 64, "non-vacuity: the full-length source is reachable");
         let src: IntoIter<u8> = s.to_vec().into_iter();
         let v: Vec<u8> = <Vec<u8> as SpecFromIter<u8, IntoIter<u8>>>::from_iter(src);
         assert!(v.len() == n);

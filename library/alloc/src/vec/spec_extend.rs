@@ -75,6 +75,7 @@ mod verify {
         let arr: [u8; 64] = kani::any();
         let s = kani::slice::any_slice_of_array(&arr);
         let m = s.len();
+        kani::cover(m == 64, "non-vacuity: the full-length source is reachable");
         let src: IntoIter<u8> = s.to_vec().into_iter();
         v.spec_extend(src);
         assert!(v.len() == m);
@@ -93,6 +94,7 @@ mod verify {
         let arr: [u8; 64] = kani::any();
         let s = kani::slice::any_slice_of_array(&arr);
         let m = s.len();
+        kani::cover(m == 64, "non-vacuity: the full-length source is reachable");
         v.spec_extend(s.iter());
         assert!(v.len() == m);
         if m > 0 {
