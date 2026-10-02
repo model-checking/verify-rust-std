@@ -5277,18 +5277,27 @@ mod verify {
         shape_swap_remove::<Al16>();
     }
 
-    #[kani::proof]
-    #[kani::unwind(8)]
-    fn verify_retain_droptoken() {
-        let mut v = any_bounded_vec::<DropToken, 4>();
+    // Length 0..=4 over any element type: retain with a symbolic predicate
+    // drops a symbolic subset in place; the cover confirms a drop is reachable.
+    fn shape_retain<T: kani::Arbitrary>() {
+        let mut v = any_bounded_vec::<T, 4>();
         let n = v.len();
-        v.retain(|t| {
+        v.retain(|_t| {
             let keep: bool = kani::any();
-            let _ = t.0;
             keep
         });
         assert!(v.len() <= n);
         kani::cover(v.len() < n, "a drop-in-retain is reachable");
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_retain_droptoken() {
+        shape_retain::<DropToken>();
+    }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_retain_al16() {
+        shape_retain::<Al16>();
     }
 
     #[kani::proof]
