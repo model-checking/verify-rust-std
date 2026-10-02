@@ -1602,6 +1602,17 @@ impl<T: ?Sized> Rc<T> {
         let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
         unsafe { &raw const *strong_ptr }
     }))]
+    #[ensures(|result: &()| {
+        let old_strong = old({
+            let offset = unsafe { data_offset(ptr) };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            unsafe { (*strong_ptr).get() }
+        });
+        let offset = unsafe { data_offset(ptr) };
+        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+        let new_strong = unsafe { (*strong_ptr).get() };
+        new_strong == old_strong + 1
+    })]
     pub unsafe fn increment_strong_count(ptr: *const T) {
         unsafe { Self::increment_strong_count_in(ptr, Global) }
     }
@@ -1657,6 +1668,21 @@ impl<T: ?Sized> Rc<T> {
         let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
         unsafe { &raw const *strong_ptr }
     }))]
+    #[ensures(|result: &()| {
+        let old_strong = old({
+            let offset = unsafe { data_offset(ptr) };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            unsafe { (*strong_ptr).get() }
+        });
+        // At old_strong == 1 this drops the last strong ref: the value is dropped and
+        // the strong slot may no longer be safely readable, so skip the post-state read.
+        old_strong == 1 || {
+            let offset = unsafe { data_offset(ptr) };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            let new_strong = unsafe { (*strong_ptr).get() };
+            new_strong == old_strong - 1
+        }
+    })]
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         unsafe { Self::decrement_strong_count_in(ptr, Global) }
     }
@@ -1939,6 +1965,17 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
         let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
         unsafe { &raw const *strong_ptr }
     }))]
+    #[ensures(|result: &()| {
+        let old_strong = old({
+            let offset = unsafe { data_offset(ptr) };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            unsafe { (*strong_ptr).get() }
+        });
+        let offset = unsafe { data_offset(ptr) };
+        let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+        let new_strong = unsafe { (*strong_ptr).get() };
+        new_strong == old_strong + 1
+    })]
     pub unsafe fn increment_strong_count_in(ptr: *const T, alloc: A)
     where
         A: Clone,
@@ -2003,6 +2040,21 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
         let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
         unsafe { &raw const *strong_ptr }
     }))]
+    #[ensures(|result: &()| {
+        let old_strong = old({
+            let offset = unsafe { data_offset(ptr) };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            unsafe { (*strong_ptr).get() }
+        });
+        // At old_strong == 1 this drops the last strong ref: the value is dropped and
+        // the strong slot may no longer be safely readable, so skip the post-state read.
+        old_strong == 1 || {
+            let offset = unsafe { data_offset(ptr) };
+            let strong_ptr = unsafe { ptr.byte_sub(offset) as *const Cell<usize> };
+            let new_strong = unsafe { (*strong_ptr).get() };
+            new_strong == old_strong - 1
+        }
+    })]
     pub unsafe fn decrement_strong_count_in(ptr: *const T, alloc: A) {
         unsafe { drop(Rc::from_raw_in(ptr, alloc)) };
     }
