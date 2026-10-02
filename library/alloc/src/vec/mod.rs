@@ -5271,6 +5271,11 @@ mod verify {
     fn verify_swap_remove_droptoken() {
         shape_swap_remove::<DropToken>();
     }
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn verify_swap_remove_al16() {
+        shape_swap_remove::<Al16>();
+    }
 
     #[kani::proof]
     #[kani::unwind(8)]
