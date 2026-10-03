@@ -49,7 +49,7 @@ while IFS= read -r line; do
         continue
     fi
     echo "Processing: $contract"
-    $esbmc --binary $contract_folder/$line --function $contract
+    $esbmc --binary $contract_folder/$line --function $contract < /dev/null
     checked=$((checked + 1))
 done < "_contracts.txt"
 
