@@ -37,6 +37,7 @@ if [ ! -x "$esbmc" ]; then
     chmod +x $esbmc
 fi
 
+checked=0
 ls $contract_folder | grep "$supported_regex" | grep -v .symtab.out > _contracts.txt
 
 while IFS= read -r line; do
@@ -49,6 +50,12 @@ while IFS= read -r line; do
     fi
     echo "Processing: $contract"
     $esbmc --binary $contract_folder/$line --function $contract
+    checked=$((checked + 1))
 done < "_contracts.txt"
 
 rm "_contracts.txt"
+
+if [ "$checked" -eq 0 ]; then
+    echo "No contract matching '$supported_regex' was checked"
+    exit 1
+fi
