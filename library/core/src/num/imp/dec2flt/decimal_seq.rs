@@ -18,6 +18,18 @@ use crate::forall;
 use crate::kani;
 use crate::num::imp::dec2flt;
 
+// `10^i` for every power of ten that fits in a `u64`, used in place of `u64::pow` by the Kani
+// annotations below: `pow` goes through `checked_pow`, whose loop invariant keeps only `acc > 0`
+// when Kani runs with loop contracts, so it does not yield the exact power there.
+#[cfg(kani)]
+#[rustfmt::skip]
+const POW10: [u64; 20] = [
+    1, 10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000,
+    10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000,
+    100_000_000_000_000, 1_000_000_000_000_000, 10_000_000_000_000_000,
+    100_000_000_000_000_000, 1_000_000_000_000_000_000, 10_000_000_000_000_000_000,
+];
+
 /// A decimal floating-point number, represented as a sequence of decimal digits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecimalSeq {
@@ -106,7 +118,7 @@ impl DecimalSeq {
         let dp = self.decimal_point as usize;
         let mut n = 0_u64;
 
-        #[cfg_attr(kani, kani::loop_invariant(n < 10u64.pow(kani::index as u32)))]
+        #[cfg_attr(kani, kani::loop_invariant(n < POW10[kani::index]))]
         for i in 0..dp {
             n *= 10;
             if i < self.num_digits {
@@ -455,7 +467,7 @@ pub mod decimal_seq_verify {
         // 19 is the greatest number x such that 10u64^x does not overflow
         // It is also TABLE.max << 11
         assert!(n <= 19);
-        assert!(n == 19 || 1u64 << shift < 10u64.pow(n as u32 + 1))
+        assert!(n == 19 || 1u64 << shift < POW10[n + 1])
     }
 
     #[kani::proof]
