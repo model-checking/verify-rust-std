@@ -886,8 +886,13 @@ pub mod verify {
     #[kani::unwind(8)]
     // FIXME: the loop invariant in the x_64 & sse2 version of is_ascii
     // fails because Kani does not yet support modifies clauses for loop invariants.
-    // Once it does, remove this cfg.
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    // The aarch64 & neon version uses `vmaxvq_u8`, i.e. `simd_reduce_max`, which Kani
+    // does not support yet (https://github.com/model-checking/kani/issues/4954).
+    // Once both are supported, remove this cfg.
+    #[cfg(not(any(
+        all(target_arch = "x86_64", target_feature = "sse2"),
+        all(target_arch = "aarch64", target_feature = "neon")
+    )))]
     pub fn check_is_ascii() {
         if kani::any() {
             // TODO: ARR_SIZE can be much larger with cbmc argument
