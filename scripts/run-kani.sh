@@ -328,7 +328,8 @@ main() {
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown \
+                "${command_args[@]}"
         else
             "$kani_path" list $unstable_args ./library --std --format markdown
         fi
@@ -336,7 +337,8 @@ main() {
         local current_dir=$(pwd)
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json \
+                "${command_args[@]}"
         else
             "$kani_path" list $unstable_args ./library --std --format json
         fi
@@ -348,6 +350,9 @@ main() {
         ./kani_std_analysis.py --crate core \
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-core.json
+        ./kani_std_analysis.py --crate alloc \
+          --kani-list-file $current_dir/kani-list.json \
+          --metrics-file metrics-data-alloc.json
         ./kani_std_analysis.py --crate std \
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-std.json
