@@ -194,6 +194,7 @@
 #![feature(slice_internals)]
 #![feature(staged_api)]
 #![feature(stmt_expr_attributes)]
+#![feature(proc_macro_hygiene)]
 #![feature(strict_provenance_lints)]
 #![feature(unboxed_closures)]
 #![feature(unsized_fn_params)]
