@@ -5,8 +5,17 @@ set -e
 ##############
 # PARAMETERS #
 ##############
-contract_folder=$1/kani_verify_std/target/x86_64-unknown-linux-gnu/debug/deps
 supported_regex=$2
+target=$1/kani_verify_std/target/x86_64-unknown-linux-gnu/debug
+contract_folder=$target/deps
+# Cargo 1.99+ gives each package its own debug/build/PKG/HASH/out/ and no longer creates debug/deps.
+if [ ! -d "$contract_folder" ]; then
+    contract_folder=$(find "$target/build" -path '*/out/*.out' | grep "$supported_regex" | head -n 1 | xargs -r dirname)
+fi
+if [ -z "$contract_folder" ]; then
+    echo "No contract programs matching '$supported_regex' under $target"
+    exit 1
+fi
 unsupported_regex=neg
 
 goto_transcoder_git=https://github.com/esbmc/goto-transcoder
