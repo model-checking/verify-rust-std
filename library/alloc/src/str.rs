@@ -737,48 +737,29 @@ mod verify {
     //   (K, wall-clock) tuning trail sits at the assume site). Str length stays symbolic.
     //   Local wall exceeds the 120s line at every measured K — runtime budget is
     //   CANARY-ARBITRATED (settled by the CI canary run, not the local measurement).
-    // - Content family: the decode harnesses use the all-zero valid-UTF-8 family at
-    //   symbolic length; bounded full-content companions reach the remaining decode arms.
+    // - Content family: every symbolic-length harness uses the all-zero valid-UTF-8
+    //   family (assumption 4); bounded full-content companions reach the remaining
+    //   decode arms.
     // - Encoding cap: symbolic lengths cap at 2^40, the pointer-encoding budget under
     //   `--object-bits 12`; the cap moves with that flag and is not a property bound.
     // - P = char: searcher stubs instantiate the pattern at `char`; the stub envelope
     //   encodes only assumption 2's correctness grant, which is pattern-generic.
 
-    /// Symbolic length in [1, 2^40], valid backing, NONDET content. Use only for
-    /// content-INDEPENDENT properties. The nondeterministic content over-approximates the
-    /// challenge's valid-UTF-8 family (assumption 4): the resulting `&str` may violate the
-    /// UTF-8 library invariant, but that invariant is a library, not a language, validity
-    /// property (unlike `char`/`bool`), so constructing it is not UB, and proving the
-    /// memory safety of a content-independent method over this superset is strictly
-    /// stronger than proving it over the valid subset.
+    /// Symbolic length in [1, 2^40], zeroed valid backing: all-zero bytes are valid
+    /// (ASCII) UTF-8, so this is a legitimate `&str` of arbitrary length (assumption 4
+    /// family). Used by both the content-independent harnesses (searcher stubbed;
+    /// content never read) and the content-dependent decode paths (e.g. `advance_by`'s
+    /// chunk loop).
     fn symbolic_str() -> &'static str {
         let n: usize = kani::any();
         // Nonempty family; 2^40 = offset-bits budget under --object-bits 12 (measured cap).
         kani::assume(n > 0 && n <= 1usize << 40);
         // SAFETY: align 1 nonzero power of two; n <= 2^40 < isize::MAX.
         let layout = unsafe { Layout::from_size_align_unchecked(n, 1) };
-        let ptr = unsafe { alloc(layout) };
-        // Harness infrastructure: model a successful allocation (OOM out of scope).
-        kani::assume(!ptr.is_null());
-        kani::cover(true, "ch22 symbolic str live");
-        // SAFETY: fresh n-byte allocation. Content is nondeterministic — callers must not
-        // rely on UTF-8 validity of the contents.
-        unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr, n)) }
-    }
-
-    /// Symbolic length, VALID content: all-zero bytes are valid (ASCII) UTF-8, so this is
-    /// a legitimate `&str` of arbitrary length with concrete content — for exercising
-    /// content-DEPENDENT paths (e.g. `advance_by`'s decode loops) without harness-side UB.
-    fn symbolic_str_zeroed() -> &'static str {
-        let n: usize = kani::any();
-        // Assumption 4 family (all-zero content = valid UTF-8); same measured offset-bits cap.
-        kani::assume(n > 0 && n <= 1usize << 40);
-        // SAFETY: align 1 nonzero power of two; n <= 2^40 < isize::MAX.
-        let layout = unsafe { Layout::from_size_align_unchecked(n, 1) };
         let ptr = unsafe { alloc_zeroed(layout) };
         // Harness infrastructure: model a successful allocation (OOM out of scope).
         kani::assume(!ptr.is_null());
-        kani::cover(true, "ch22 zeroed str live");
+        kani::cover(true, "ch22 symbolic str live");
         // SAFETY: fresh zeroed n-byte allocation; all-zero bytes are valid UTF-8.
         unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr, n)) }
     }
@@ -813,6 +794,10 @@ mod verify {
             kani::assume(a <= b && b <= hay.len()); // assumption 2: match range is in-bounds
             // assumption 2: successive matches never regress (forward progress)
             kani::assume(a >= FWD_LAST_END.load(Ordering::Relaxed));
+            // assumption 2: front/back sequences are consistent (DoubleEndedSearcher) —
+            // a forward match never enters the region already yielded from the back.
+            // No-op (MAX) unless a harness also drives next_match_back.
+            kani::assume(b <= BACK_LAST_START.load(Ordering::Relaxed));
             // assumption 2: match endpoints lie on char boundaries
             kani::assume(hay.is_char_boundary(a) && hay.is_char_boundary(b));
             FWD_LAST_END.store(b, Ordering::Relaxed);
@@ -837,6 +822,10 @@ mod verify {
             kani::assume(a <= b && b <= hay.len()); // assumption 2: match range is in-bounds
             // assumption 2: successive reverse matches never advance (reverse progress)
             kani::assume(b <= BACK_LAST_START.load(Ordering::Relaxed));
+            // assumption 2: front/back sequences are consistent (DoubleEndedSearcher) —
+            // a reverse match never enters the region already yielded from the front.
+            // No-op (0) unless a harness also drives next_match.
+            kani::assume(a >= FWD_LAST_END.load(Ordering::Relaxed));
             // assumption 2: match endpoints lie on char boundaries
             kani::assume(hay.is_char_boundary(a) && hay.is_char_boundary(b));
             BACK_LAST_START.store(a, Ordering::Relaxed);
@@ -849,7 +838,7 @@ mod verify {
     // family of symbolic length (assumption 4 scope note in the body's content-family row).
     #[kani::proof]
     fn check_next_chars() {
-        let s = symbolic_str_zeroed();
+        let s = symbolic_str();
         let mut it = s.chars();
         let c = it.next();
         kani::cover(c.is_some(), "next yields a char");
@@ -857,7 +846,7 @@ mod verify {
 
     #[kani::proof]
     fn check_next_back_chars() {
-        let s = symbolic_str_zeroed();
+        let s = symbolic_str();
         let mut it = s.chars();
         let c = it.next_back();
         kani::cover(c.is_some(), "next_back yields a char");
@@ -880,7 +869,7 @@ mod verify {
     #[kani::proof]
     #[kani::unwind(34)]
     fn check_advance_by_chars() {
-        let s = symbolic_str_zeroed();
+        let s = symbolic_str();
         let mut chars = s.chars();
         let n: usize = kani::any();
         // Count window K = 256 (measured bound, not a property bound). Local wall trail
@@ -981,7 +970,7 @@ mod verify {
 
     // ---- Split family: SplitInternal driven through the public split iterators ----
     // Content-independent (the unsafe slicing depends only on index arithmetic and the
-    // searcher envelope), so nondet-content `symbolic_str` applies. Searcher calls are
+    // searcher envelope), so the zeroed `symbolic_str` family loses nothing. Searcher calls are
     // stubbed per assumption 2; every stubbing harness resets the ghosts first.
     // `#[kani::unwind(4)]` on these harnesses bounds the driver's internal empty-match
     // skip loop; a single stubbed search resolves per call, so the bound is not reached —
@@ -1301,6 +1290,64 @@ mod verify {
         }
         let a = it.next();
         kani::cover(a.is_some(), "advanced match_indices next yields an element");
+    }
+
+    // ---- S1: mixed-direction (front/back) advanced-state harnesses ----
+    // The advanced harnesses above drive one direction. These reach the MIXED state —
+    // both cursors moved — where `start`, `end`, and both searcher frontiers interact.
+    // Both stubs are active; their no-cross clauses (assumption 2's DoubleEndedSearcher
+    // consistency) keep the two frontiers inside the searcher contract, and are no-ops
+    // for the single-direction harnesses (ghosts stay at their reset values there).
+    // One representative per family arm, as above.
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    #[kani::stub(<CharSearcher<'_> as Searcher<'_>>::next_match, stub_char_next_match)]
+    #[kani::stub(<CharSearcher<'_> as core::str::pattern::ReverseSearcher<'_>>::next_match_back, stub_char_next_match_back)]
+    fn check_next_split_mixed() {
+        reset_search_ghosts();
+        let s = symbolic_str();
+        let mut it = s.split('x');
+        let front = it.next(); // front cursor moves (a split's first next always yields)
+        kani::cover(front.is_some(), "mixed split: front call consumed a field");
+        let back = it.next_back(); // back cursor moves: the mixed state
+        kani::cover(back.is_some(), "mixed split: back call consumed a field");
+        let a = it.next(); // checked call from the both-cursors-moved state
+        kani::cover(a.is_some(), "mixed split next yields an element");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    #[kani::stub(<CharSearcher<'_> as Searcher<'_>>::next_match, stub_char_next_match)]
+    #[kani::stub(<CharSearcher<'_> as core::str::pattern::ReverseSearcher<'_>>::next_match_back, stub_char_next_match_back)]
+    fn check_next_matches_mixed() {
+        reset_search_ghosts();
+        let s = symbolic_str();
+        let mut it = s.matches('x');
+        let front = it.next();
+        kani::cover(front.is_some(), "mixed matches: front call consumed a match");
+        kani::cover(front.is_none(), "mixed matches: front call finished the iterator");
+        let back = it.next_back();
+        kani::cover(back.is_some(), "mixed matches: back call consumed a match");
+        let a = it.next();
+        kani::cover(a.is_some(), "mixed matches next yields an element");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    #[kani::stub(<CharSearcher<'_> as Searcher<'_>>::next_match, stub_char_next_match)]
+    #[kani::stub(<CharSearcher<'_> as core::str::pattern::ReverseSearcher<'_>>::next_match_back, stub_char_next_match_back)]
+    fn check_next_match_indices_mixed() {
+        reset_search_ghosts();
+        let s = symbolic_str();
+        let mut it = s.match_indices('x');
+        let front = it.next();
+        kani::cover(front.is_some(), "mixed match_indices: front call consumed a match");
+        kani::cover(front.is_none(), "mixed match_indices: front call finished the iterator");
+        let back = it.next_back();
+        kani::cover(back.is_some(), "mixed match_indices: back call consumed a match");
+        let a = it.next();
+        kani::cover(a.is_some(), "mixed match_indices next yields an element");
     }
 
     // ---- S3: hybrid joint length×content decode harnesses (decode fns only) ----
