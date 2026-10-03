@@ -25,7 +25,6 @@
     loongarch_target_feature,
     hexagon_target_feature,
     wasm_target_feature,
-    abi_unadjusted,
     rtm_target_feature,
     allow_internal_unstable,
     decl_macro,
@@ -43,7 +42,15 @@
     clflushopt_target_feature,
     min_adt_const_params
 )]
-#![cfg_attr(test, feature(test, abi_vectorcall, stdarch_internal))]
+#![cfg_attr(
+    test,
+    feature(
+        test,
+        abi_vectorcall,
+        stdarch_internal,
+        cfg_target_has_reliable_f16_f128
+    )
+)]
 #![deny(clippy::missing_inline_in_public_items)]
 #![allow(
     clippy::identity_op,

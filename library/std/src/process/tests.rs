@@ -16,14 +16,12 @@ fn known_command() -> Command {
     }
 }
 
-#[cfg(target_os = "android")]
 fn shell_cmd() -> Command {
-    Command::new("/system/bin/sh")
-}
-
-#[cfg(not(target_os = "android"))]
-fn shell_cmd() -> Command {
-    Command::new("/bin/sh")
+    if cfg!(target_os = "android") || cfg!(target_os = "motor") {
+        Command::new("/system/bin/sh")
+    } else {
+        Command::new("/bin/sh")
+    }
 }
 
 #[test]
@@ -97,7 +95,7 @@ fn signal_reported_right() {
     }
 }
 
-pub fn run_output(mut cmd: Command) -> String {
+pub(crate) fn run_output(mut cmd: Command) -> String {
     let p = cmd.spawn();
     assert!(p.is_ok());
     let mut p = p.unwrap();
@@ -363,18 +361,18 @@ fn test_wait_with_output_once() {
 }
 
 #[cfg(all(unix, not(target_os = "android")))]
-pub fn env_cmd() -> Command {
+pub(crate) fn env_cmd() -> Command {
     Command::new("env")
 }
 #[cfg(target_os = "android")]
-pub fn env_cmd() -> Command {
+pub(crate) fn env_cmd() -> Command {
     let mut cmd = Command::new("/system/bin/sh");
     cmd.arg("-c").arg("set");
     cmd
 }
 
 #[cfg(windows)]
-pub fn env_cmd() -> Command {
+pub(crate) fn env_cmd() -> Command {
     let mut cmd = Command::new("cmd");
     cmd.arg("/c").arg("set");
     cmd

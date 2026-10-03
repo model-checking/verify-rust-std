@@ -10,6 +10,8 @@
 use crate::ffi::CStr;
 use crate::mem::{self, DropGuard, ManuallyDrop};
 use crate::num::NonZero;
+use crate::pin::pin;
+use crate::sys::helpers::COpaque;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 use crate::sys::weak::dlsym;
 #[cfg(any(
@@ -50,11 +52,13 @@ impl Thread {
     #[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
     pub unsafe fn new(stack: usize, init: Box<ThreadInit>) -> io::Result<Thread> {
         let data = init;
-        let mut attr: mem::MaybeUninit<libc::pthread_attr_t> = mem::MaybeUninit::uninit();
-        assert_eq!(libc::pthread_attr_init(attr.as_mut_ptr()), 0);
-        let mut attr = DropGuard::new(&mut attr, |attr| {
-            assert_eq!(libc::pthread_attr_destroy(attr.as_mut_ptr()), 0)
-        });
+        let attr = pin!(COpaque::<libc::pthread_attr_t>::uninit());
+        // FIXME(pin-ergonomics): remove the next line.
+        let attr = attr.into_ref();
+
+        assert_eq!(libc::pthread_attr_init(attr.get()), 0);
+        let attr =
+            DropGuard::new(attr, |attr| assert_eq!(libc::pthread_attr_destroy(attr.get()), 0));
 
         #[cfg(any(target_os = "espidf", target_os = "nuttx"))]
         if stack > 0 {
@@ -62,8 +66,8 @@ impl Thread {
             // 0 is used as an indication that the default stack size configured in the ESP-IDF/NuttX menuconfig system should be used
             assert_eq!(
                 libc::pthread_attr_setstacksize(
-                    attr.as_mut_ptr(),
-                    cmp::max(stack, min_stack_size(attr.as_ptr()))
+                    attr.get(),
+                    cmp::max(stack, min_stack_size(attr.get()))
                 ),
                 0
             );
@@ -71,9 +75,9 @@ impl Thread {
 
         #[cfg(not(any(target_os = "espidf", target_os = "nuttx")))]
         {
-            let stack_size = cmp::max(stack, min_stack_size(attr.as_ptr()));
+            let stack_size = cmp::max(stack, min_stack_size(attr.get()));
 
-            match libc::pthread_attr_setstacksize(attr.as_mut_ptr(), stack_size) {
+            match libc::pthread_attr_setstacksize(attr.get(), stack_size) {
                 0 => {}
                 n => {
                     assert_eq!(n, libc::EINVAL);
@@ -88,7 +92,7 @@ impl Thread {
                     // Some libc implementations, e.g. musl, place an upper bound
                     // on the stack size, in which case we can only gracefully return
                     // an error here.
-                    if libc::pthread_attr_setstacksize(attr.as_mut_ptr(), stack_size) != 0 {
+                    if libc::pthread_attr_setstacksize(attr.get(), stack_size) != 0 {
                         return Err(io::const_error!(
                             io::ErrorKind::InvalidInput,
                             "invalid stack size"
@@ -100,7 +104,7 @@ impl Thread {
 
         let data = Box::into_raw(data);
         let mut native: libc::pthread_t = mem::zeroed();
-        let ret = libc::pthread_create(&mut native, attr.as_ptr(), thread_start, data as *mut _);
+        let ret = libc::pthread_create(&mut native, attr.get(), thread_start, data as *mut _);
         return if ret == 0 {
             Ok(Thread { id: native })
         } else {
@@ -158,6 +162,7 @@ pub fn available_parallelism() -> io::Result<NonZero<usize>> {
             target_os = "hurd",
             target_os = "linux",
             target_os = "aix",
+            target_os = "freebsd",
             target_vendor = "apple",
             target_os = "cygwin",
             target_os = "redox",
@@ -170,9 +175,17 @@ pub fn available_parallelism() -> io::Result<NonZero<usize>> {
             #[cfg(any(target_os = "android", target_os = "linux"))]
             {
                 quota = cgroups::quota().max(1);
-                let mut set: libc::cpu_set_t = unsafe { mem::zeroed() };
+            }
+
+            #[cfg(any(target_os = "android", target_os = "linux", target_os = "freebsd"))]
+            {
+                #[cfg(not(target_os = "freebsd"))]
+                type Cpuset = libc::cpu_set_t;
+                #[cfg(target_os = "freebsd")]
+                type Cpuset = libc::cpuset_t;
+                let mut set: Cpuset = unsafe { mem::zeroed() };
                 unsafe {
-                    if libc::sched_getaffinity(0, size_of::<libc::cpu_set_t>(), &mut set) == 0 {
+                    if libc::sched_getaffinity(0, size_of::<Cpuset>(), &mut set) == 0 {
                         let count = libc::CPU_COUNT(&set) as usize;
                         let count = count.min(quota);
 
@@ -197,33 +210,8 @@ pub fn available_parallelism() -> io::Result<NonZero<usize>> {
                 }
             }
         }
-        any(
-            target_os = "freebsd",
-            target_os = "dragonfly",
-            target_os = "openbsd",
-            target_os = "netbsd",
-        ) => {
+        any(target_os = "dragonfly", target_os = "openbsd", target_os = "netbsd") => {
             use crate::ptr;
-
-            #[cfg(target_os = "freebsd")]
-            {
-                let mut set: libc::cpuset_t = unsafe { mem::zeroed() };
-                unsafe {
-                    if libc::cpuset_getaffinity(
-                        libc::CPU_LEVEL_WHICH,
-                        libc::CPU_WHICH_PID,
-                        -1,
-                        size_of::<libc::cpuset_t>(),
-                        &mut set,
-                    ) == 0
-                    {
-                        let count = libc::CPU_COUNT(&set) as usize;
-                        if count > 0 {
-                            return Ok(NonZero::new_unchecked(count));
-                        }
-                    }
-                }
-            }
 
             #[cfg(target_os = "netbsd")]
             {
@@ -668,6 +656,26 @@ pub fn sleep(dur: Duration) {
 pub fn sleep_until(deadline: crate::time::Instant) {
     use crate::time::Instant;
 
+    let timespec = deadline.into_inner().into_timespec();
+    if timespec.tv_sec < 0 {
+        // `clock_nanosleep` fails with EINVAL if
+        // > The tp argument to clock_settime() is outside the range for the
+        // > given clock ID.
+        //
+        // This specification allows *any* clock range, which means we'd
+        // theoretically have to detect whether the time point is in the
+        // future (and block indefinitely) or the past (and return immediately)
+        // when encountering `EINVAL`. But since all existing implementations
+        // interpret this as saying that negative `tv_sec` values are unsupported,
+        // we can just test that and return – given that POSIX specifies that
+        // `CLOCK_MONOTONIC` measures the time "since an unspecified amount
+        // in the past" negative values are definitely in the past. If you
+        // observe any platform returning `EINVAL` for more cases, please
+        // file a bug; we'd need to  add logic handling `EINVAL` when it
+        // occurs.
+        return;
+    }
+
     #[cfg(all(
         target_os = "linux",
         target_env = "gnu",
@@ -690,7 +698,7 @@ pub fn sleep_until(deadline: crate::time::Instant) {
         }
 
         if let Some(clock_nanosleep) = __clock_nanosleep_time64.get() {
-            let ts = deadline.into_inner().into_timespec().to_timespec64();
+            let ts = timespec.to_timespec64();
             loop {
                 let r = unsafe {
                     clock_nanosleep(
@@ -718,7 +726,7 @@ pub fn sleep_until(deadline: crate::time::Instant) {
         }
     }
 
-    let Some(ts) = deadline.into_inner().into_timespec().to_timespec() else {
+    let Some(ts) = timespec.to_timespec() else {
         // The deadline is further in the future then can be passed to
         // clock_nanosleep. We have to use Self::sleep instead. This might
         // happen on 32 bit platforms, especially closer to 2038.
@@ -793,6 +801,16 @@ pub fn sleep_until(deadline: crate::time::Instant) {
                 panic!("mach_wait_until failed: {} (code {error})", description.display())
             }
         }
+    }
+}
+
+#[cfg(target_os = "fuchsia")]
+pub fn sleep_until(deadline: crate::time::Instant) {
+    use crate::sys::pal::fuchsia::{zx_cvt, zx_nanosleep};
+
+    let deadline = deadline.into_inner().into_deadline();
+    if let Err(error) = zx_cvt(zx_nanosleep(deadline)) {
+        panic!("zx_nanosleep failed: {error}");
     }
 }
 

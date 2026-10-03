@@ -126,14 +126,11 @@ where
         // Implemented as explicit indexing rather
         // than zipped iterators for performance reasons.
         // See PR https://github.com/rust-lang/rust/pull/116846
-        // FIXME(const_hack): make this a `for idx in 0..len` loop.
-        let mut idx = 0;
-        while idx < len {
+        for idx in 0..len {
             // SAFETY: idx < len, so both are in-bounds and readable
             if unsafe { *lhs.add(idx) != *rhs.add(idx) } {
                 return false;
             }
-            idx += 1;
         }
 
         true
@@ -176,7 +173,7 @@ const trait SliceChain: Sized {
     fn chaining_ge(left: &[Self], right: &[Self]) -> ControlFlow<bool>;
 }
 
-type AlwaysBreak<B> = ControlFlow<B, crate::convert::Infallible>;
+type AlwaysBreak<B> = ControlFlow<B, !>;
 
 #[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
 const impl<A: [const] PartialOrd> SlicePartialOrd for A {
@@ -224,11 +221,8 @@ const fn chaining_impl<'l, 'r, A: PartialOrd, B, C>(
     let lhs = &left[..l];
     let rhs = &right[..l];
 
-    // FIXME(const-hack): revert this to `for i in 0..l` once `impl const Iterator for Range<T>`
-    let mut i: usize = 0;
-    while i < l {
+    for i in 0..l {
         elem_chain(&lhs[i], &rhs[i])?;
-        i += 1;
     }
 
     len_chain(&left.len(), &right.len())
@@ -386,6 +380,7 @@ impl<T> SliceContains for T
 where
     T: PartialEq,
 {
+    #[expect(clippy::manual_contains, reason = "implements slice_contains")]
     default fn slice_contains(&self, x: &[Self]) -> bool {
         x.iter().any(|y| *y == *self)
     }
@@ -393,6 +388,7 @@ where
 
 impl<T: BytewiseEq> SliceContains for T {
     #[inline]
+    #[expect(clippy::manual_contains, reason = "implements slice_contains")]
     default fn slice_contains(&self, x: &[Self]) -> bool {
         if size_of::<T>() == 1 {
             // SAFETY: `BytewiseEq` guarantees that values have no padding or provenance and

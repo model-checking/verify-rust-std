@@ -510,7 +510,6 @@ impl str {
     #[rustc_const_stable(feature = "str_as_bytes", since = "1.39.0")]
     #[must_use]
     #[inline(always)]
-    #[allow(unused_attributes)]
     pub const fn as_bytes(&self) -> &[u8] {
         // SAFETY: const sound because we transmute two types with the same layout
         unsafe { mem::transmute(self) }
@@ -824,13 +823,13 @@ impl str {
         unsafe { &mut *(begin..end).get_unchecked_mut(self) }
     }
 
-    /// Divides one string slice into two at an index.
+    /// Divides one string slice into two at a byte offset.
     ///
     /// The argument, `mid`, should be a byte offset from the start of the
     /// string. It must also be on the boundary of a UTF-8 code point.
     ///
-    /// The two slices returned go from the start of the string slice to `mid`,
-    /// and from `mid` to the end of the string slice.
+    /// The first returned slice contains exactly the first `mid` bytes, and the
+    /// second contains all remaining bytes.
     ///
     /// To get mutable string slices instead, see the [`split_at_mut`]
     /// method.
@@ -864,13 +863,13 @@ impl str {
         }
     }
 
-    /// Divides one mutable string slice into two at an index.
+    /// Divides one mutable string slice into two at a byte offset.
     ///
     /// The argument, `mid`, should be a byte offset from the start of the
     /// string. It must also be on the boundary of a UTF-8 code point.
     ///
-    /// The two slices returned go from the start of the string slice to `mid`,
-    /// and from `mid` to the end of the string slice.
+    /// The first returned slice contains exactly the first `mid` bytes, and the
+    /// second contains all remaining bytes.
     ///
     /// To get immutable string slices instead, see the [`split_at`] method.
     ///
@@ -908,14 +907,14 @@ impl str {
         }
     }
 
-    /// Divides one string slice into two at an index.
+    /// Divides one string slice into two at a byte offset.
     ///
     /// The argument, `mid`, should be a valid byte offset from the start of the
     /// string. It must also be on the boundary of a UTF-8 code point. The
     /// method returns `None` if that’s not the case.
     ///
-    /// The two slices returned go from the start of the string slice to `mid`,
-    /// and from `mid` to the end of the string slice.
+    /// The first returned slice contains exactly the first `mid` bytes, and the
+    /// second contains all remaining bytes.
     ///
     /// To get mutable string slices instead, see the [`split_at_mut_checked`]
     /// method.
@@ -948,14 +947,14 @@ impl str {
         }
     }
 
-    /// Divides one mutable string slice into two at an index.
+    /// Divides one mutable string slice into two at a byte offset.
     ///
     /// The argument, `mid`, should be a valid byte offset from the start of the
     /// string. It must also be on the boundary of a UTF-8 code point. The
     /// method returns `None` if that’s not the case.
     ///
-    /// The two slices returned go from the start of the string slice to `mid`,
-    /// and from `mid` to the end of the string slice.
+    /// The first returned slice contains exactly the first `mid` bytes, and the
+    /// second contains all remaining bytes.
     ///
     /// To get immutable string slices instead, see the [`split_at_checked`] method.
     ///
@@ -989,7 +988,7 @@ impl str {
         }
     }
 
-    /// Divides one string slice into two at an index.
+    /// Divides one string slice into two at a byte offset.
     ///
     /// # Safety
     ///
@@ -1008,7 +1007,7 @@ impl str {
         }
     }
 
-    /// Divides one string slice into two at an index.
+    /// Divides one mutable string slice into two at a byte offset.
     ///
     /// # Safety
     ///
@@ -1263,8 +1262,7 @@ impl str {
     #[stable(feature = "split_ascii_whitespace", since = "1.34.0")]
     #[inline]
     pub fn split_ascii_whitespace(&self) -> SplitAsciiWhitespace<'_> {
-        let inner =
-            self.as_bytes().split(IsAsciiWhitespace).filter(BytesIsNotEmpty).map(UnsafeBytesToStr);
+        let inner = self.as_bytes().split_ascii_whitespace().inner.map(UnsafeBytesToStr);
         SplitAsciiWhitespace { inner }
     }
 
@@ -2546,8 +2544,6 @@ impl str {
     /// # Examples
     ///
     /// ```
-    /// #![feature(trim_prefix_suffix)]
-    ///
     /// // Prefix present - removes it
     /// assert_eq!("foo:bar".trim_prefix("foo:"), "bar");
     /// assert_eq!("foofoo".trim_prefix("foo"), "foo");
@@ -2560,7 +2556,7 @@ impl str {
     /// ```
     #[must_use = "this returns the remaining substring as a new slice, \
                   without modifying the original"]
-    #[unstable(feature = "trim_prefix_suffix", issue = "142312")]
+    #[stable(feature = "trim_prefix_suffix", since = "CURRENT_RUSTC_VERSION")]
     pub fn trim_prefix<P: Pattern>(&self, prefix: P) -> &str {
         prefix.strip_prefix_of(self).unwrap_or(self)
     }
@@ -2583,8 +2579,6 @@ impl str {
     /// # Examples
     ///
     /// ```
-    /// #![feature(trim_prefix_suffix)]
-    ///
     /// // Suffix present - removes it
     /// assert_eq!("bar:foo".trim_suffix(":foo"), "bar");
     /// assert_eq!("foofoo".trim_suffix("foo"), "foo");
@@ -2597,7 +2591,7 @@ impl str {
     /// ```
     #[must_use = "this returns the remaining substring as a new slice, \
                   without modifying the original"]
-    #[unstable(feature = "trim_prefix_suffix", issue = "142312")]
+    #[stable(feature = "trim_prefix_suffix", since = "CURRENT_RUSTC_VERSION")]
     pub fn trim_suffix<P: Pattern>(&self, suffix: P) -> &str
     where
         for<'a> P::Searcher<'a>: ReverseSearcher<'a>,
@@ -2917,7 +2911,7 @@ impl str {
     /// Converts this string to its ASCII upper case equivalent in-place.
     ///
     /// ASCII letters 'a' to 'z' are mapped to 'A' to 'Z',
-    /// but non-ASCII letters are unchanged.
+    /// but all other characters are unchanged.
     ///
     /// To return a new uppercased value without modifying the existing one, use
     /// [`to_ascii_uppercase()`].
@@ -2945,7 +2939,7 @@ impl str {
     /// Converts this string to its ASCII lower case equivalent in-place.
     ///
     /// ASCII letters 'A' to 'Z' are mapped to 'a' to 'z',
-    /// but non-ASCII letters are unchanged.
+    /// but all other characters are unchanged.
     ///
     /// To return a new lowercased value without modifying the existing one, use
     /// [`to_ascii_lowercase()`].
@@ -3120,9 +3114,6 @@ impl str {
 
     /// Returns an iterator that escapes each char in `self` with [`char::escape_debug`].
     ///
-    /// Note: only extended grapheme codepoints that begin the string will be
-    /// escaped.
-    ///
     /// # Examples
     ///
     /// As an iterator:
@@ -3156,15 +3147,7 @@ impl str {
                   without modifying the original"]
     #[stable(feature = "str_escape", since = "1.34.0")]
     pub fn escape_debug(&self) -> EscapeDebug<'_> {
-        let mut chars = self.chars();
-        EscapeDebug {
-            inner: chars
-                .next()
-                .map(|first| first.escape_debug_ext(EscapeDebugExtArgs::ESCAPE_ALL))
-                .into_iter()
-                .flatten()
-                .chain(chars.flat_map(CharEscapeDebugContinue)),
-        }
+        EscapeDebug { inner: self.chars().flat_map(CharEscapeDebug) }
     }
 
     /// Returns an iterator that escapes each char in `self` with [`char::escape_default`].
@@ -3328,12 +3311,8 @@ impl_fn_for_zst! {
     };
 
     #[derive(Clone)]
-    struct CharEscapeDebugContinue impl Fn = |c: char| -> char::EscapeDebug {
-        c.escape_debug_ext(EscapeDebugExtArgs {
-            escape_grapheme_extender: false,
-            escape_single_quote: true,
-            escape_double_quote: true
-        })
+    struct CharEscapeDebug impl Fn = |c: char| -> char::EscapeDebug {
+        c.escape_debug_ext(EscapeDebugExtArgs::ESCAPE_ALL)
     };
 
     #[derive(Clone)]
@@ -3351,7 +3330,7 @@ impl_fn_for_zst! {
     };
 
     #[derive(Clone)]
-    struct IsAsciiWhitespace impl Fn = |byte: &u8| -> bool {
+    pub(crate) struct IsAsciiWhitespace impl Fn = |byte: &u8| -> bool {
         byte.is_ascii_whitespace()
     };
 
@@ -3361,7 +3340,7 @@ impl_fn_for_zst! {
     };
 
     #[derive(Clone)]
-    struct BytesIsNotEmpty impl<'a, 'b> Fn = |s: &'a &'b [u8]| -> bool {
+    pub(crate) struct BytesIsNotEmpty impl<'a, 'b> Fn = |s: &'a &'b [u8]| -> bool {
         !s.is_empty()
     };
 

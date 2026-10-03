@@ -2219,7 +2219,6 @@ const _: () = ();
 /// It is also possible to have `unsafe fn` in a regular safe `trait`:
 ///
 /// ```rust
-/// # #![feature(never_type)]
 /// #![deny(unsafe_op_in_unsafe_fn)]
 ///
 /// trait Indexable {
@@ -2507,7 +2506,7 @@ const _: () = ();
 /// }
 /// ```
 ///
-/// [RFC]: https://github.com/rust-lang/rfcs/blob/master/text/0135-where.md
+/// [RFC]: https://rust-lang.github.io/rfcs/0135-where.html
 const _: () = ();
 
 #[doc(keyword = "while")]

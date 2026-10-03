@@ -21,7 +21,7 @@ use core::mem::{ManuallyDrop, SizedTypeProperties};
 use core::ops::{Index, IndexMut, Range, RangeBounds};
 use core::{fmt, ptr, slice};
 
-use crate::alloc::{Allocator, Global};
+use crate::alloc::{Allocator, AllocatorNightly, Global};
 use crate::collections::{TryReserveError, TryReserveErrorKind};
 use crate::raw_vec::RawVec;
 use crate::vec::Vec;
@@ -106,7 +106,7 @@ use core::kani;
 #[rustc_insignificant_dtor]
 pub struct VecDeque<
     T,
-    #[unstable(feature = "allocator_api", issue = "32838")] A: Allocator = Global,
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")] A: Allocator = Global,
 > {
     // `self[0]`, if it exists, is `buf[head]`.
     // `head < buf.capacity()`, unless `buf.capacity() == 0` when `head == 0`.
@@ -142,6 +142,7 @@ struct Dropper<'a, T>(&'a mut [T]);
 
 impl<T> Drop for Dropper<'_, T> {
     fn drop(&mut self) {
+        // ignore-tidy-undocumented-unsafe
         unsafe {
             ptr::drop_in_place(self.0);
         }
@@ -152,6 +153,7 @@ impl<T> Drop for Dropper<'_, T> {
 unsafe impl<#[may_dangle] T, A: Allocator> Drop for VecDeque<T, A> {
     fn drop(&mut self) {
         let (front, back) = self.as_mut_slices();
+        // ignore-tidy-undocumented-unsafe
         unsafe {
             let _back_dropper = Dropper(back);
             // use drop for [T]
@@ -209,6 +211,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// Moves an element out of the buffer
     #[inline]
     unsafe fn buffer_read(&mut self, off: WrappedIndex) -> T {
+        // SAFETY: Upheld by caller.
         unsafe { ptr::read(self.ptr().add(off.as_index())) }
     }
 
@@ -218,6 +221,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// May only be called if `off < self.capacity()`.
     #[inline]
     unsafe fn buffer_write(&mut self, off: WrappedIndex, value: T) -> &mut T {
+        // SAFETY: Upheld by caller.
         unsafe {
             let ptr = self.ptr().add(off.as_index());
             ptr::write(ptr, value);
@@ -229,6 +233,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// `range` must lie inside `0..self.capacity()`.
     #[inline]
     unsafe fn buffer_range(&self, range: Range<usize>) -> *mut [T] {
+        // SAFETY: Upheld by caller.
         unsafe { self.ptr().add(range.start).cast_slice(range.end - range.start) }
     }
 
@@ -307,6 +312,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             self.capacity(),
         );
 
+        // ignore-tidy-undocumented-unsafe
         unsafe {
             let ptr = self.ptr();
             let src_ptr = ptr.add(wrapped_src.as_index());
@@ -351,6 +357,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             len,
             self.capacity()
         );
+        // SAFETY: Upheld by caller.
         unsafe {
             ptr::copy(self.ptr().add(src.as_index()), self.ptr().add(dst.as_index()), len);
         }
@@ -375,6 +382,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             len,
             self.capacity()
         );
+        // SAFETY: Upheld by caller.
         unsafe {
             ptr::copy_nonoverlapping(
                 self.ptr().add(src.as_index()),
@@ -419,6 +427,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 // 2 [_ _ A A A A B B _]
                 //            D . . .
                 //
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     self.copy(src, dst, len);
                 }
@@ -432,6 +441,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 // 3 [B B B B _ _ _ A A]
                 //    . .           D .
                 //
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     self.copy(src, dst, dst_pre_wrap_len);
                     self.copy(
@@ -450,6 +460,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 // 3 [B B _ _ _ A A A A]
                 //    . .           D .
                 //
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     self.copy(
                         src.add(dst_pre_wrap_len),
@@ -468,6 +479,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 // 3 [C C _ _ _ B B C C]
                 //              D . . .
                 //
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     self.copy(src, dst, src_pre_wrap_len);
                     self.copy(
@@ -486,6 +498,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 // 3 [C C A A _ _ _ C C]
                 //    D . . .
                 //
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     self.copy(
                         WrappedIndex::zero(),
@@ -507,6 +520,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 //
                 debug_assert!(dst_pre_wrap_len > src_pre_wrap_len);
                 let delta = dst_pre_wrap_len - src_pre_wrap_len;
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     self.copy(src, dst, src_pre_wrap_len);
                     self.copy(WrappedIndex::zero(), dst.add(src_pre_wrap_len), delta);
@@ -529,6 +543,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 //
                 debug_assert!(src_pre_wrap_len > dst_pre_wrap_len);
                 let delta = src_pre_wrap_len - dst_pre_wrap_len;
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     self.copy(
                         WrappedIndex::zero(),
@@ -553,11 +568,13 @@ impl<T, A: Allocator> VecDeque<T, A> {
         debug_assert!(src.len() <= self.capacity());
         let head_room = self.capacity() - dst.as_index();
         if src.len() <= head_room {
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 ptr::copy_nonoverlapping(src.as_ptr(), self.ptr().add(dst.as_index()), src.len());
             }
         } else {
             let (left, right) = src.split_at(head_room);
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 ptr::copy_nonoverlapping(left.as_ptr(), self.ptr().add(dst.as_index()), left.len());
                 ptr::copy_nonoverlapping(right.as_ptr(), self.ptr(), right.len());
@@ -575,6 +592,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         /// See [`ptr::copy_nonoverlapping`].
         unsafe fn copy_nonoverlapping_reversed<T>(src: *const T, dst: *mut T, count: usize) {
             for i in 0..count {
+                // SAFETY: Upheld by caller.
                 unsafe { ptr::copy_nonoverlapping(src.add(count - 1 - i), dst.add(i), 1) };
             }
         }
@@ -582,6 +600,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         debug_assert!(src.len() <= self.capacity());
         let head_room = self.capacity() - dst.as_index();
         if src.len() <= head_room {
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 copy_nonoverlapping_reversed(
                     src.as_ptr(),
@@ -591,6 +610,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             }
         } else {
             let (left, right) = src.split_at(src.len() - head_room);
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 copy_nonoverlapping_reversed(
                     right.as_ptr(),
@@ -615,6 +635,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         iter: impl Iterator<Item = T>,
         written: &mut usize,
     ) {
+        // ignore-tidy-undocumented-unsafe
         iter.enumerate().for_each(|(i, element)| unsafe {
             self.buffer_write(dst.add(i), element);
             *written += 1;
@@ -651,8 +672,10 @@ impl<T, A: Allocator> VecDeque<T, A> {
         let mut guard = Guard { deque: self, written: 0 };
 
         if head_room >= len {
+            // ignore-tidy-undocumented-unsafe
             unsafe { guard.deque.write_iter(dst, iter, &mut guard.written) };
         } else {
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 guard.deque.write_iter(
                     dst,
@@ -700,6 +723,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             let tail_len = self.len - head_len;
             if head_len > tail_len && new_capacity - old_capacity >= tail_len {
                 // B
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     self.copy_nonoverlapping(
                         WrappedIndex::zero(),
@@ -710,6 +734,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             } else {
                 // C
                 let new_head = WrappedIndex::from_arbitrary_number(new_capacity - head_len);
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     // can't use copy_nonoverlapping here, because if e.g. head_len = 2
                     // and new_capacity = old_capacity + 1, then the heads overlap.
@@ -882,7 +907,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(allocator_api)]
+    /// # #![feature(allocator_ext)]
     ///
     /// use std::collections::VecDeque;
     /// use std::alloc::Global;
@@ -890,7 +915,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// let deque: VecDeque<i32> = VecDeque::new_in(Global);
     /// ```
     #[inline]
-    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
     pub const fn new_in(alloc: A) -> VecDeque<T, A> {
         VecDeque { head: WrappedIndex::zero(), len: 0, buf: RawVec::new_in(alloc) }
     }
@@ -900,14 +925,14 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// # Examples
     ///
     /// ```
-    /// # #![feature(allocator_api)]
+    /// # #![feature(allocator_ext)]
     ///
     /// use std::collections::VecDeque;
     /// use std::alloc::Global;
     ///
     /// let deque: VecDeque<i32> = VecDeque::with_capacity_in(10, Global);
     /// ```
-    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
     pub fn with_capacity_in(capacity: usize, alloc: A) -> VecDeque<T, A> {
         VecDeque {
             head: WrappedIndex::zero(),
@@ -927,6 +952,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// `Vec::from_raw_parts_in`, but takes a *range* of elements that are
     /// initialized rather than only supporting `0..len`.  Requires that
     /// `initialized.start` ≤ `initialized.end` ≤ `capacity`.
+    /// Also, `initialized.start` < `capacity`, unless both are 0.
     #[inline]
     #[cfg(not(test))]
     pub(crate) unsafe fn from_contiguous_raw_parts_in(
@@ -937,9 +963,13 @@ impl<T, A: Allocator> VecDeque<T, A> {
     ) -> Self {
         debug_assert!(initialized.start <= initialized.end);
         debug_assert!(initialized.end <= capacity);
+        debug_assert!(initialized.start == 0 && capacity == 0 || initialized.start < capacity);
 
         // SAFETY: Our safety precondition guarantees the range length won't wrap,
-        // and that the allocation is valid for use in `RawVec`.
+        // that the allocation is valid for use in `RawVec` with `alloc`,
+        // and that the range contains valid elements.
+        // We have `head`, `len` ≤ `cap`, since `start`, `end` ≤ `cap`.
+        // Also, `head` < `cap` unless `head` = `cap` = `0`.
         unsafe {
             VecDeque {
                 head: WrappedIndex::from_arbitrary_number(initialized.start),
@@ -969,6 +999,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     pub fn get(&self, index: usize) -> Option<&T> {
         if index < self.len {
             let idx = self.to_wrapped_index(index);
+            // ignore-tidy-undocumented-unsafe
             unsafe { Some(&*self.ptr().add(idx.as_index())) }
         } else {
             None
@@ -999,6 +1030,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         if index < self.len {
             let idx = self.to_wrapped_index(index);
+            // ignore-tidy-undocumented-unsafe
             unsafe { Some(&mut *self.ptr().add(idx.as_index())) }
         } else {
             None
@@ -1034,6 +1066,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         assert!(j < self.len());
         let ri = self.to_wrapped_index(i);
         let rj = self.to_wrapped_index(j);
+        // ignore-tidy-undocumented-unsafe
         unsafe { ptr::swap(self.ptr().add(ri.as_index()), self.ptr().add(rj.as_index())) }
     }
 
@@ -1083,6 +1116,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
         if new_cap > old_cap {
             self.buf.reserve_exact(self.len, additional);
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 self.handle_capacity_increase(old_cap);
             }
@@ -1115,6 +1149,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             // we don't need to reserve_exact(), as the size doesn't have
             // to be a power of 2.
             self.buf.reserve(self.len, additional);
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 self.handle_capacity_increase(old_cap);
             }
@@ -1166,6 +1201,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
         if new_cap > old_cap {
             self.buf.try_reserve_exact(self.len, additional)?;
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 self.handle_capacity_increase(old_cap);
             }
@@ -1214,6 +1250,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
         if new_cap > old_cap {
             self.buf.try_reserve(self.len, additional)?;
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 self.handle_capacity_increase(old_cap);
             }
@@ -1295,8 +1332,10 @@ impl<T, A: Allocator> VecDeque<T, A> {
             //   [. . . . . . . . o o o o o o o . ]
             //    H           L
             //   [o o o o o o o . ]
+            //
+            // SAFETY: `self.head >= target_cap >= self.len`, therefore these accesses
+            // do not overlap.
             unsafe {
-                // nonoverlapping because `self.head >= target_cap >= self.len`.
                 self.copy_nonoverlapping(self.head, WrappedIndex::zero(), self.len);
             }
             self.head = WrappedIndex::zero();
@@ -1312,7 +1351,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             //      L   H
             //   [o o . o o o o o ]
             let len = self.head + self.len - target_cap;
-            // Safety: head is < target_cap, so the index is wrapped
+            // SAFETY: head is < target_cap, so the index is wrapped
             unsafe {
                 self.copy_nonoverlapping(
                     WrappedIndex::from_arbitrary_number(target_cap),
@@ -1335,6 +1374,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
             // head_len is at least one, so new_head will be < target_cap
             let new_head = WrappedIndex::from_arbitrary_number(target_cap - head_len);
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 // can't use `copy_nonoverlapping()` here because the new and old
                 // regions for the head might overlap.
@@ -1352,11 +1392,9 @@ impl<T, A: Allocator> VecDeque<T, A> {
         impl<T, A: Allocator> Drop for Guard<'_, T, A> {
             #[cold]
             fn drop(&mut self) {
-                unsafe {
-                    // SAFETY: This is only called if `buf.shrink_to_fit` unwinds,
-                    // which is the only time it's safe to call `abort_shrink`.
-                    self.deque.abort_shrink(self.old_head, self.target_cap)
-                }
+                // SAFETY: This is only called if `buf.shrink_to_fit` unwinds,
+                // which is the only time it's safe to call `abort_shrink`.
+                unsafe { self.deque.abort_shrink(self.old_head, self.target_cap) }
             }
         }
 
@@ -1394,9 +1432,9 @@ impl<T, A: Allocator> VecDeque<T, A> {
             // There's enough spare capacity to copy the tail to the back (because `tail_len < self.capacity() - target_cap`),
             // and copying the tail should be cheaper than copying the head (because `tail_len <= head_len`).
 
+            // SAFETY: The old tail and the new tail can't overlap because the head slice lies
+            // between them. The head slice ends at `target_cap`, so that's where we copy to.
             unsafe {
-                // The old tail and the new tail can't overlap because the head slice lies between them. The
-                // head slice ends at `target_cap`, so that's where we copy to.
                 self.copy_nonoverlapping(
                     WrappedIndex::zero(),
                     WrappedIndex::from_arbitrary_number(target_cap),
@@ -1406,6 +1444,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         } else {
             // Either there's not enough spare capacity to make the deque contiguous, or the head is shorter than the tail
             // (and therefore hopefully cheaper to copy).
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 // The old and the new head slice can overlap, so we can't use `copy_nonoverlapping` here.
                 self.copy(self.head, old_head, head_len);
@@ -1436,19 +1475,19 @@ impl<T, A: Allocator> VecDeque<T, A> {
     #[doc(alias = "retain_front")]
     #[stable(feature = "deque_extras", since = "1.16.0")]
     pub fn truncate(&mut self, len: usize) {
-        // Safe because:
-        //
+        if len >= self.len {
+            return;
+        }
+
+        let (front, back) = self.as_mut_slices();
+
+        // SAFETY:
         // * Any slice passed to `drop_in_place` is valid; the second case has
         //   `len <= front.len()` and returning on `len > self.len()` ensures
         //   `begin <= back.len()` in the first case
         // * The head of the VecDeque is moved before calling `drop_in_place`,
         //   so no value is dropped twice if `drop_in_place` panics
         unsafe {
-            if len >= self.len {
-                return;
-            }
-
-            let (front, back) = self.as_mut_slices();
             if len > front.len() {
                 let begin = len - front.len();
                 let drop_back = back.get_unchecked_mut(begin..) as *mut _;
@@ -1490,13 +1529,15 @@ impl<T, A: Allocator> VecDeque<T, A> {
     #[doc(alias = "truncate_front")]
     #[stable(feature = "vec_deque_truncate_front", since = "1.99.0")]
     pub fn retain_back(&mut self, len: usize) {
-        unsafe {
-            if len >= self.len {
-                // No action is taken
-                return;
-            }
+        if len >= self.len {
+            // No action is taken
+            return;
+        }
 
-            let (front, back) = self.as_mut_slices();
+        let (front, back) = self.as_mut_slices();
+
+        // ignore-tidy-undocumented-unsafe
+        unsafe {
             if len > back.len() {
                 // The 'back' slice remains unchanged.
                 // front.len() + back.len() == self.len, so 'end' is non-negative
@@ -1568,6 +1609,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         let fptr = front.as_mut_ptr();
         let bptr = back.as_mut_ptr();
 
+        // ignore-tidy-undocumented-unsafe
         unsafe {
             let (drop_a, drop_b, drop_c) = if end <= flen {
                 // Kept range lies in `front`.  The dropped suffix is the rest of `front`
@@ -1609,7 +1651,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     }
 
     /// Returns a reference to the underlying allocator.
-    #[unstable(feature = "allocator_api", issue = "32838")]
+    #[unstable(feature = "allocator_ext", issue = "163177", implied_by = "allocator_api")]
     #[inline]
     pub fn allocator(&self) -> &A {
         self.buf.allocator()
@@ -1861,8 +1903,8 @@ impl<T, A: Allocator> VecDeque<T, A> {
         // are valid ranges into the physical buffer, so
         // it's ok to pass them to `buffer_range` and
         // dereference the result.
-        let a = unsafe { &*self.buffer_range(a_range) };
-        let b = unsafe { &*self.buffer_range(b_range) };
+        let (a, b) = unsafe { (&*self.buffer_range(a_range), &*self.buffer_range(b_range)) };
+
         Iter::new(a.iter(), b.iter())
     }
 
@@ -1897,12 +1939,13 @@ impl<T, A: Allocator> VecDeque<T, A> {
         R: RangeBounds<usize>,
     {
         let (a_range, b_range) = self.slice_ranges(range, self.len);
-        // SAFETY: The ranges returned by `slice_ranges`
-        // are valid ranges into the physical buffer, so
-        // it's ok to pass them to `buffer_range` and
-        // dereference the result.
-        let a = unsafe { &mut *self.buffer_range(a_range) };
-        let b = unsafe { &mut *self.buffer_range(b_range) };
+        let (a, b) =
+            // SAFETY: The ranges returned by `slice_ranges`
+            // are valid ranges into the physical buffer, so
+            // it's ok to pass them to `buffer_range` and
+            // dereference the result.
+            unsafe { (&mut *self.buffer_range(a_range), &mut *self.buffer_range(b_range)) };
+
         IterMut::new(a.iter_mut(), b.iter_mut())
     }
 
@@ -1978,6 +2021,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         // "forget" about the values after the start of the drain until after
         // the drain is complete and the Drain destructor is run.
 
+        // ignore-tidy-undocumented-unsafe
         unsafe { Drain::new(self, drain_start, drain_len) }
     }
 
@@ -2052,6 +2096,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     /// assert!(deque.is_empty());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[expect(clippy::manual_clear, reason = "implements clear")]
     #[inline]
     pub fn clear(&mut self) {
         self.truncate(0);
@@ -2204,6 +2249,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             let old_head = self.head;
             self.head = self.to_wrapped_index(1);
             self.len -= 1;
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 core::hint::assert_unchecked(self.len < self.capacity());
                 Some(self.buffer_read(old_head))
@@ -2231,6 +2277,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             None
         } else {
             self.len -= 1;
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 core::hint::assert_unchecked(self.len < self.capacity());
                 Some(self.buffer_read(self.to_wrapped_index(self.len)))
@@ -2363,6 +2410,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
         let len = self.len;
         self.len += 1;
+        // ignore-tidy-undocumented-unsafe
         unsafe { self.buffer_write(self.to_wrapped_index(len), value) }
     }
 
@@ -2575,6 +2623,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             // `index + 1` can't overflow, because if index was usize::MAX, then either the
             // assert would've failed, or the deque would've tried to grow past usize::MAX
             // and panicked.
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 // see `remove()` for explanation why this wrap_copy() call is safe.
                 self.wrap_copy(self.to_wrapped_index(index), self.to_wrapped_index(index + 1), k);
@@ -2584,6 +2633,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         } else {
             let old_head = self.head;
             self.head = self.wrap_sub(self.head, 1);
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 self.wrap_copy(old_head, self.head, index);
                 self.len += 1;
@@ -2622,18 +2672,20 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
         let wrapped_idx = self.to_wrapped_index(index);
 
+        // ignore-tidy-undocumented-unsafe
         let elem = unsafe { Some(self.buffer_read(wrapped_idx)) };
 
         let k = self.len - index - 1;
-        // safety: due to the nature of the if-condition, whichever wrap_copy gets called,
-        // its length argument will be at most `self.len / 2`, so there can't be more than
-        // one overlapping area.
         if k < index {
+            // SAFETY: due to the nature of the if-condition, whichever wrap_copy gets called,
+            // its length argument will be at most `self.len / 2`, so there can't be more than
+            // one overlapping area.
             unsafe { self.wrap_copy(self.wrap_add(wrapped_idx, 1), wrapped_idx, k) };
             self.len -= 1;
         } else {
             let old_head = self.head;
             self.head = self.to_wrapped_index(1);
+            // ignore-tidy-undocumented-unsafe
             unsafe { self.wrap_copy(old_head, self.head, index) };
             self.len -= 1;
         }
@@ -2681,6 +2733,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         let first_len = first_half.len();
         let second_len = second_half.len();
 
+        // ignore-tidy-undocumented-unsafe
         unsafe {
             if at < first_len {
                 // `at` lies in the first half.
@@ -2742,8 +2795,9 @@ impl<T, A: Allocator> VecDeque<T, A> {
         }
 
         self.reserve(other.len);
+        let (left, right) = other.as_slices();
+        // ignore-tidy-undocumented-unsafe
         unsafe {
-            let (left, right) = other.as_slices();
             self.copy_slice(self.to_wrapped_index(self.len), left);
             // no overflow, because self.capacity() >= old_cap + left.len() >= self.len + left.len()
             self.copy_slice(self.to_wrapped_index(self.len + left.len()), right);
@@ -2861,6 +2915,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         debug_assert!(self.is_full());
         let old_cap = self.capacity();
         self.buf.grow_one();
+        // ignore-tidy-undocumented-unsafe
         unsafe {
             self.handle_capacity_increase(old_cap);
         }
@@ -2965,6 +3020,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         }
 
         if self.is_contiguous() {
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 return slice::from_raw_parts_mut(self.ptr().add(self.head.as_index()), self.len);
             }
@@ -2990,6 +3046,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             //
             // from: DEFGH....ABC
             // to:   ABCDEFGH....
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 self.copy(
                     WrappedIndex::zero(),
@@ -3009,6 +3066,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             //
             // from: FGH....ABCDE
             // to:   ...ABCDEFGH.
+            // ignore-tidy-undocumented-unsafe
             unsafe {
                 self.copy(head, tail, head_len);
                 // FGHABCDE....
@@ -3041,6 +3099,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 //  2. rotate used part of the buffer
                 //  3. update head to point to the new beginning (which is just `free`)
 
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     // if there is no free space in the buffer, then the slices are already
                     // right next to each other and we don't need to move any memory.
@@ -3073,6 +3132,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
                 //  2. rotate used part of the buffer
                 //  3. update head to point to the new beginning (which is the beginning of the buffer)
 
+                // ignore-tidy-undocumented-unsafe
                 unsafe {
                     // if there is no free space in the buffer, then the slices are already
                     // right next to each other and we don't need to move any memory.
@@ -3100,6 +3160,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
             }
         }
 
+        // ignore-tidy-undocumented-unsafe
         unsafe { slice::from_raw_parts_mut(ptr.add(self.head.as_index()), self.len) }
     }
 
@@ -3140,8 +3201,10 @@ impl<T, A: Allocator> VecDeque<T, A> {
         assert!(n <= self.len());
         let k = self.len - n;
         if n <= k {
+            // SAFETY: Ensured by check.
             unsafe { self.rotate_left_inner(n) }
         } else {
+            // SAFETY: Ensured by check.
             unsafe { self.rotate_right_inner(k) }
         }
     }
@@ -3183,8 +3246,10 @@ impl<T, A: Allocator> VecDeque<T, A> {
         assert!(n <= self.len());
         let k = self.len - n;
         if n <= k {
+            // SAFETY: Ensured by check.
             unsafe { self.rotate_right_inner(n) }
         } else {
+            // SAFETY: Ensured by check.
             unsafe { self.rotate_left_inner(k) }
         }
     }
@@ -3199,6 +3264,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
 
     unsafe fn rotate_left_inner(&mut self, mid: usize) {
         debug_assert!(mid * 2 <= self.len());
+        // SAFETY: Upheld by caller.
         unsafe {
             self.wrap_copy(self.head, self.to_wrapped_index(self.len), mid);
         }
@@ -3208,6 +3274,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     unsafe fn rotate_right_inner(&mut self, k: usize) {
         debug_assert!(k * 2 <= self.len());
         self.head = self.wrap_sub(self.head, k);
+        // SAFETY: Upheld by caller.
         unsafe {
             self.wrap_copy(self.to_wrapped_index(self.len), self.head, k);
         }
@@ -3315,7 +3382,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
         F: FnMut(&'a T) -> Ordering,
     {
         let (front, back) = self.as_slices();
-        let cmp_back = back.first().map(|elem| f(elem));
+        let cmp_back = back.first().map(&mut f);
 
         if let Some(Ordering::Equal) = cmp_back {
             Ok(front.len())
@@ -3426,7 +3493,7 @@ impl<T, A: Allocator> VecDeque<T, A> {
     {
         let (front, back) = self.as_slices();
 
-        if let Some(true) = back.first().map(|v| pred(v)) {
+        if let Some(true) = back.first().map(&mut pred) {
             back.partition_point(pred) + front.len()
         } else {
             front.partition_point(pred)
@@ -3569,20 +3636,21 @@ impl<T: Clone, A: Allocator> SpecExtendFromWithin for VecDeque<T, A> {
         let count = src.end - src.start;
         let src = src.start;
 
-        unsafe {
-            // SAFETY:
-            // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
-            // - Ranges are in bounds: guaranteed by the caller.
-            let ranges = self.nonoverlapping_ranges(src, dst, count, self.head);
+        // SAFETY:
+        // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
+        // - Ranges are in bounds: guaranteed by the caller.
+        let ranges = unsafe { self.nonoverlapping_ranges(src, dst, count, self.head) };
 
-            // `len` is updated after every clone to prevent leaking and
-            // leave the deque in the right state when a clone implementation panics
+        // `len` is updated after every clone to prevent leaking and
+        // leave the deque in the right state when a clone implementation panics
 
-            for (src, dst, count) in ranges {
-                for offset in 0..count {
-                    dst.add(offset).write((*src.add(offset)).clone());
-                    self.len += 1;
-                }
+        for (src, dst, count) in ranges {
+            for offset in 0..count {
+                // SAFETY: The allocations of `dst` and `src` go up to `count` elems,
+                // and `nonoverlapping_ranges` ensures `dst` and `src` are valid
+                // for writes and reads respectively.
+                unsafe { dst.add(offset).write((*src.add(offset)).clone()) };
+                self.len += 1;
             }
         }
     }
@@ -3595,45 +3663,50 @@ impl<T: Clone, A: Allocator> SpecExtendFromWithin for VecDeque<T, A> {
         let new_head = self.wrap_sub(self.head, count);
         let cap = self.capacity();
 
-        unsafe {
-            // SAFETY:
-            // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
-            // - Ranges are in bounds: guaranteed by the caller.
-            let ranges = self.nonoverlapping_ranges(src, dst, count, new_head);
+        // SAFETY:
+        // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
+        // - Ranges are in bounds: guaranteed by the caller.
+        let ranges = unsafe { self.nonoverlapping_ranges(src, dst, count, new_head) };
 
-            // Cloning is done in reverse because we prepend to the front of the deque,
-            // we can't get holes in the *logical* buffer.
-            // `head` and `len` are updated after every clone to prevent leaking and
-            // leave the deque in the right state when a clone implementation panics
+        // Cloning is done in reverse because we prepend to the front of the deque,
+        // we can't get holes in the *logical* buffer.
+        // `head` and `len` are updated after every clone to prevent leaking and
+        // leave the deque in the right state when a clone implementation panics
 
-            // Clone the first range
-            let (src, dst, count) = ranges[1];
-            for offset in (0..count).rev() {
-                dst.add(offset).write((*src.add(offset)).clone());
-                self.head = self.head.sub(1);
-                self.len += 1;
+        // Clone the first range
+        let (src, dst, count) = ranges[1];
+        for offset in (0..count).rev() {
+            // ignore-tidy-undocumented-unsafe
+            unsafe { dst.add(offset).write((*src.add(offset)).clone()) };
+            // ignore-tidy-undocumented-unsafe
+            self.head = unsafe { self.head.sub(1) };
+            self.len += 1;
+        }
+
+        // Clone the second range
+        let (src, dst, count) = ranges[0];
+        let mut iter = (0..count).rev();
+        if let Some(offset) = iter.next() {
+            // ignore-tidy-undocumented-unsafe
+            unsafe { dst.add(offset).write((*src.add(offset)).clone()) };
+            // After the first clone of the second range, wrap `head` around
+            if self.head.is_zero() {
+                // SAFETY: the wrapped index may be temporarily equal to the capacity even if it
+                // is not zero, because we subtract it one line below.
+                // FIXME: should `from_arbitrary_number` be unsafe? its docs imply so...
+                self.head = WrappedIndex::from_arbitrary_number(cap);
             }
+            // ignore-tidy-undocumented-unsafe
+            self.head = unsafe { self.head.sub(1) };
+            self.len += 1;
 
-            // Clone the second range
-            let (src, dst, count) = ranges[0];
-            let mut iter = (0..count).rev();
-            if let Some(offset) = iter.next() {
-                dst.add(offset).write((*src.add(offset)).clone());
-                // After the first clone of the second range, wrap `head` around
-                if self.head.is_zero() {
-                    // SAFETY: the wrapped index may be temporarily equal to the capacity even if it
-                    // is not zero, because we subtract it one line below.
-                    self.head = WrappedIndex::from_arbitrary_number(cap);
-                }
-                self.head = self.head.sub(1);
+            // Continue like normal
+            for offset in iter {
+                // ignore-tidy-undocumented-unsafe
+                unsafe { dst.add(offset).write((*src.add(offset)).clone()) };
+                // ignore-tidy-undocumented-unsafe
+                self.head = unsafe { self.head.sub(1) };
                 self.len += 1;
-
-                // Continue like normal
-                for offset in iter {
-                    dst.add(offset).write((*src.add(offset)).clone());
-                    self.head = self.head.sub(1);
-                    self.len += 1;
-                }
             }
         }
     }
@@ -3646,14 +3719,13 @@ impl<T: TrivialClone, A: Allocator> SpecExtendFromWithin for VecDeque<T, A> {
         let count = src.end - src.start;
         let src = src.start;
 
-        unsafe {
-            // SAFETY:
-            // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
-            // - Ranges are in bounds: guaranteed by the caller.
-            let ranges = self.nonoverlapping_ranges(src, dst, count, self.head);
-            for (src, dst, count) in ranges {
-                ptr::copy_nonoverlapping(src, dst, count);
-            }
+        // SAFETY:
+        // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
+        // - Ranges are in bounds: guaranteed by the caller.
+        let ranges = unsafe { self.nonoverlapping_ranges(src, dst, count, self.head) };
+        for (src, dst, count) in ranges {
+            // SAFETY: Ditto.
+            unsafe { ptr::copy_nonoverlapping(src, dst, count) };
         }
 
         // SAFETY:
@@ -3668,14 +3740,13 @@ impl<T: TrivialClone, A: Allocator> SpecExtendFromWithin for VecDeque<T, A> {
 
         let new_head = self.wrap_sub(self.head, count);
 
-        unsafe {
-            // SAFETY:
-            // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
-            // - Ranges are in bounds: guaranteed by the caller.
-            let ranges = self.nonoverlapping_ranges(src, dst, count, new_head);
-            for (src, dst, count) in ranges {
-                ptr::copy_nonoverlapping(src, dst, count);
-            }
+        // SAFETY:
+        // - Ranges do not overlap: src entirely spans initialized values, dst entirely spans uninitialized values.
+        // - Ranges are in bounds: guaranteed by the caller.
+        let ranges = unsafe { self.nonoverlapping_ranges(src, dst, count, new_head) };
+        for (src, dst, count) in ranges {
+            // SAFETY: Ditto.
+            unsafe { ptr::copy_nonoverlapping(src, dst, count) };
         }
 
         // SAFETY:
@@ -3983,7 +4054,7 @@ impl<T: fmt::Debug, A: Allocator> fmt::Debug for VecDeque<T, A> {
 }
 
 #[stable(feature = "vecdeque_vec_conversions", since = "1.10.0")]
-impl<T, A: Allocator> From<Vec<T, A>> for VecDeque<T, A> {
+impl<T, A: AllocatorNightly> From<Vec<T, A>> for VecDeque<T, A> {
     /// Turn a [`Vec<T>`] into a [`VecDeque<T>`].
     ///
     /// [`Vec<T>`]: crate::vec::Vec
@@ -3998,6 +4069,7 @@ impl<T, A: Allocator> From<Vec<T, A>> for VecDeque<T, A> {
         Self {
             head: WrappedIndex::zero(),
             len,
+            // ignore-tidy-undocumented-unsafe
             buf: unsafe { RawVec::from_raw_parts_in(ptr, cap, alloc) },
         }
     }
@@ -4037,6 +4109,7 @@ impl<T, A: Allocator> From<VecDeque<T, A>> for Vec<T, A> {
     fn from(mut other: VecDeque<T, A>) -> Self {
         other.make_contiguous();
 
+        // ignore-tidy-undocumented-unsafe
         unsafe {
             let other = ManuallyDrop::new(other);
             let buf = other.buf.ptr();

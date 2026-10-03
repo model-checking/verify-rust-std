@@ -1,6 +1,7 @@
 //! Numeric traits and functions for the built-in numeric types.
 
 #![stable(feature = "rust1", since = "1.0.0")]
+#![expect(clippy::manual_is_ascii_check, reason = "this module implements various is_ascii checks")]
 
 use safety::{ensures, requires};
 
@@ -53,6 +54,7 @@ mod int_macros; // import int_impl!
 #[macro_use]
 mod uint_macros; // import uint_impl!
 
+mod bfloat;
 mod complex;
 mod error;
 #[cfg(not(no_fp_fmt_parse))]
@@ -66,6 +68,8 @@ mod wrapping;
 #[doc(hidden)]
 pub mod niche_types;
 
+#[unstable(feature = "f16b", issue = "160630")]
+pub use bfloat::f16b;
 #[unstable(feature = "complex_numbers", issue = "154023")]
 pub use complex::Complex;
 #[stable(feature = "int_error_matching", since = "1.55.0")]
@@ -745,6 +749,7 @@ impl u8 {
     /// ```
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[rustc_const_stable(feature = "const_ascii_methods_on_intrinsics", since = "1.52.0")]
+    #[expect(clippy::manual_ignore_case_cmp, reason = "implements eq_ignore_ascii_case")]
     #[inline]
     pub const fn eq_ignore_ascii_case(&self, other: &u8) -> bool {
         self.to_ascii_lowercase() == other.to_ascii_lowercase()
@@ -1587,6 +1592,16 @@ pub enum FpCategory {
 #[inline(always)]
 #[unstable(issue = "none", feature = "std_internals")]
 pub const fn can_not_overflow<T>(radix: u32, is_signed_ty: bool, digits: &[u8]) -> bool {
+    // Assume that `digits` represents a whole number N in base `radix`.
+    // Then in infinite precision arithmetic (on whole numbers), we have:
+    //
+    // |N| <= pow(radix, digits.len()) - 1
+    //     <= pow(16, 2 * size_of::<T>() - is_signed) - 1
+    //     == pow(2, 8 * size_of::<T>() - 4 * is_signed) - 1
+    //     <= pow(2, 8 * size_of::<T>() - is_signed) - 1
+    //     == T::MAX
+    //
+    // Therefore this condition is sufficient for having no overflow.
     radix <= 16 && digits.len() <= size_of::<T>() * 2 - is_signed_ty as usize
 }
 
@@ -1831,20 +1846,23 @@ macro_rules! from_str_int_impl {
                     // Consider radix 16 as it has the highest information density per digit and will thus overflow the earliest:
                     // `u8::MAX` is `ff` - any str of len 2 is guaranteed to not overflow.
                     // `i8::MAX` is `7f` - only a str of len 1 is guaranteed to not overflow.
-                    macro_rules! run_unchecked_loop {
-                        ($unchecked_additive_op:tt) => {{
+                    //
+                    // NOTE: We could use unchecked arithmetic here, but we don't, based on the observation
+                    // that it produces the same assembly as wrapping ones. See #163099.
+                    macro_rules! run_no_check_loop {
+                        ($additive_op:ident) => {{
                             while let [c, rest @ ..] = digits {
-                                result = result * (radix as $int_ty);
+                                result = <$int_ty>::wrapping_mul(result, radix as _);
                                 let x = unwrap_or_PIE!((*c as char).to_digit(radix), InvalidDigit);
-                                result = result $unchecked_additive_op (x as $int_ty);
+                                result = result.$additive_op(x as $int_ty);
                                 digits = rest;
                             }
                         }};
                     }
                     if is_positive {
-                        run_unchecked_loop!(+)
+                        run_no_check_loop!(wrapping_add)
                     } else {
-                        run_unchecked_loop!(-)
+                        run_no_check_loop!(wrapping_sub)
                     };
                 } else {
                     macro_rules! run_checked_loop {
