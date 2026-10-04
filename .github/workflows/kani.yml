@@ -263,6 +263,11 @@ jobs:
 
       # Step 2: Run list on the std library
       - name: Run Kani Metrics
+        # Under Kani each library crate takes 1-12 GB to compile; compiling them in parallel
+        # exceeds the 16 GB of an ubuntu-latest runner, which then dies with "The runner has
+        # received a shutdown signal". One crate at a time peaks at the largest one (std).
+        env:
+          CARGO_BUILD_JOBS: 1
         run: |
           scripts/run-kani.sh --run metrics --with-autoharness
           pushd /tmp/std_lib_analysis
@@ -359,6 +364,11 @@ jobs:
 
       # Step 2: Run list on the std library
       - name: Run Kani List
+        # Under Kani each library crate takes 1-12 GB to compile; compiling them in parallel
+        # exceeds the 16 GB of an ubuntu-latest runner, which then dies with "The runner has
+        # received a shutdown signal". One crate at a time peaks at the largest one (std).
+        env:
+          CARGO_BUILD_JOBS: 1
         run: |
           head/scripts/run-kani.sh --run list --with-autoharness --path ${{github.workspace}}/head
           # remove duplicate white space to reduce file size (GitHub permits at
