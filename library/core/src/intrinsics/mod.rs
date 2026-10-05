@@ -4269,4 +4269,598 @@ mod verify {
     fn supported_status(status: AllocationStatus) -> bool {
         status != AllocationStatus::Dangling && status != AllocationStatus::DeadObject
     }
+
+    // Challenge 7, Part 3: atomic intrinsic contracts.
+    //
+    // Kani cannot currently attach contracts directly to bodyless
+    // `rustc_intrinsic` declarations (model-checking/kani#3345). These wrappers
+    // are the Kani-facing specifications for the const-generic intrinsics above.
+    // The harness instantiations follow the integer and pointer restrictions in
+    // the intrinsic documentation, while the contracts encode only the local
+    // memory obligations required by the intrinsic calls.
+    //
+    // `can_dereference` and `can_write` cover allocation bounds, initialization,
+    // and alignment for `T`. Kani function contracts do not currently expose a predicate for cross-thread
+    // access histories, so the atomic model remains responsible for detecting
+    // data races and mixed-size overlapping atomic accesses in concurrent proofs.
+
+    #[allow(dead_code)]
+    #[kani::modifies(dst)]
+    #[requires(crate::ub_checks::can_write(dst))]
+    unsafe fn atomic_store_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, val: T) {
+        unsafe { atomic_store::<T, ORD>(dst, val) }
+    }
+
+    #[allow(dead_code)]
+    #[requires(crate::ub_checks::can_dereference(src))]
+    unsafe fn atomic_load_wrapper<T: Copy, const ORD: AtomicOrdering>(src: *const T) -> T {
+        unsafe { atomic_load::<T, ORD>(src) }
+    }
+
+    #[allow(dead_code)]
+    #[kani::modifies(dst)]
+    #[requires(crate::ub_checks::can_dereference(dst as *const T))]
+    #[requires(crate::ub_checks::can_write(dst))]
+    unsafe fn atomic_xchg_wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, val: T) -> T {
+        unsafe { atomic_xchg::<T, ORD>(dst, val) }
+    }
+
+    macro_rules! define_atomic_binary_rmw_wrapper {
+        ($wrapper:ident, $intrinsic:ident) => {
+            #[allow(dead_code)]
+            #[kani::modifies(dst)]
+            #[requires(crate::ub_checks::can_dereference(dst as *const T))]
+            #[requires(crate::ub_checks::can_write(dst))]
+            unsafe fn $wrapper<T: Copy, U: Copy, const ORD: AtomicOrdering>(
+                dst: *mut T,
+                val: U,
+            ) -> T {
+                unsafe { $intrinsic::<T, U, ORD>(dst, val) }
+            }
+        };
+    }
+
+    define_atomic_binary_rmw_wrapper!(atomic_xadd_wrapper, atomic_xadd);
+    define_atomic_binary_rmw_wrapper!(atomic_xsub_wrapper, atomic_xsub);
+    define_atomic_binary_rmw_wrapper!(atomic_and_wrapper, atomic_and);
+    define_atomic_binary_rmw_wrapper!(atomic_nand_wrapper, atomic_nand);
+    define_atomic_binary_rmw_wrapper!(atomic_or_wrapper, atomic_or);
+    define_atomic_binary_rmw_wrapper!(atomic_xor_wrapper, atomic_xor);
+
+    macro_rules! define_atomic_extremum_wrapper {
+        ($wrapper:ident, $intrinsic:ident) => {
+            #[allow(dead_code)]
+            #[kani::modifies(dst)]
+            #[requires(crate::ub_checks::can_dereference(dst as *const T))]
+            #[requires(crate::ub_checks::can_write(dst))]
+            unsafe fn $wrapper<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, val: T) -> T {
+                unsafe { $intrinsic::<T, ORD>(dst, val) }
+            }
+        };
+    }
+
+    define_atomic_extremum_wrapper!(atomic_max_wrapper, atomic_max);
+    define_atomic_extremum_wrapper!(atomic_min_wrapper, atomic_min);
+    define_atomic_extremum_wrapper!(atomic_umax_wrapper, atomic_umax);
+    define_atomic_extremum_wrapper!(atomic_umin_wrapper, atomic_umin);
+
+    macro_rules! define_atomic_compare_exchange_wrapper {
+        ($wrapper:ident, $intrinsic:ident) => {
+            #[allow(dead_code)]
+            #[kani::modifies(dst)]
+            #[requires(crate::ub_checks::can_dereference(dst as *const T))]
+            #[requires(crate::ub_checks::can_write(dst))]
+            unsafe fn $wrapper<
+                T: Copy,
+                const ORD_SUCC: AtomicOrdering,
+                const ORD_FAIL: AtomicOrdering,
+            >(
+                dst: *mut T,
+                old: T,
+                new: T,
+            ) -> (T, bool) {
+                unsafe { $intrinsic::<T, ORD_SUCC, ORD_FAIL>(dst, old, new) }
+            }
+        };
+    }
+
+    define_atomic_compare_exchange_wrapper!(atomic_cxchg_wrapper, atomic_cxchg);
+    define_atomic_compare_exchange_wrapper!(atomic_cxchgweak_wrapper, atomic_cxchgweak);
+
+    // Every ordering-specific harness below expands to every legal integer
+    // width and to the pointer form.  Storage is a local object, so the raw
+    // pointer passed to the intrinsic has concrete provenance without a
+    // separate wrapper type. Pointer *values* remain arbitrary addresses.
+    macro_rules! atomic_integer_load_store_types {
+        ($call:ident, $($args:tt)*) => {
+            #[cfg(target_has_atomic_load_store = "8")] { $call!(i8, $($args)*); $call!(u8, $($args)*); }
+            #[cfg(target_has_atomic_load_store = "16")] { $call!(i16, $($args)*); $call!(u16, $($args)*); }
+            #[cfg(target_has_atomic_load_store = "32")] { $call!(i32, $($args)*); $call!(u32, $($args)*); }
+            #[cfg(target_has_atomic_load_store = "64")] { $call!(i64, $($args)*); $call!(u64, $($args)*); }
+            #[cfg(target_has_atomic_load_store = "128")] { $call!(i128, $($args)*); $call!(u128, $($args)*); }
+            #[cfg(target_has_atomic_load_store = "ptr")] { $call!(isize, $($args)*); $call!(usize, $($args)*); }
+        };
+    }
+
+    macro_rules! atomic_integer_types {
+        ($call:ident, $($args:tt)*) => {
+            #[cfg(target_has_atomic = "8")] { $call!(i8, $($args)*); $call!(u8, $($args)*); }
+            #[cfg(target_has_atomic = "16")] { $call!(i16, $($args)*); $call!(u16, $($args)*); }
+            #[cfg(target_has_atomic = "32")] { $call!(i32, $($args)*); $call!(u32, $($args)*); }
+            #[cfg(target_has_atomic = "64")] { $call!(i64, $($args)*); $call!(u64, $($args)*); }
+            #[cfg(target_has_atomic = "128")] { $call!(i128, $($args)*); $call!(u128, $($args)*); }
+            #[cfg(target_has_atomic = "ptr")] { $call!(isize, $($args)*); $call!(usize, $($args)*); }
+        };
+    }
+
+    macro_rules! atomic_signed_types {
+        ($call:ident, $($args:tt)*) => {
+            #[cfg(target_has_atomic = "8")] { $call!(i8, $($args)*); }
+            #[cfg(target_has_atomic = "16")] { $call!(i16, $($args)*); }
+            #[cfg(target_has_atomic = "32")] { $call!(i32, $($args)*); }
+            #[cfg(target_has_atomic = "64")] { $call!(i64, $($args)*); }
+            #[cfg(target_has_atomic = "128")] { $call!(i128, $($args)*); }
+            #[cfg(target_has_atomic = "ptr")] { $call!(isize, $($args)*); }
+        };
+    }
+
+    macro_rules! atomic_unsigned_types {
+        ($call:ident, $($args:tt)*) => {
+            #[cfg(target_has_atomic = "8")] { $call!(u8, $($args)*); }
+            #[cfg(target_has_atomic = "16")] { $call!(u16, $($args)*); }
+            #[cfg(target_has_atomic = "32")] { $call!(u32, $($args)*); }
+            #[cfg(target_has_atomic = "64")] { $call!(u64, $($args)*); }
+            #[cfg(target_has_atomic = "128")] { $call!(u128, $($args)*); }
+            #[cfg(target_has_atomic = "ptr")] { $call!(usize, $($args)*); }
+        };
+    }
+
+    // Store: integer and pointer T, with the three orderings accepted by the
+    // intrinsic's stabilized atomic counterpart.
+    macro_rules! atomic_store_call {
+        ($ty:ty, $ord:path) => {{
+            let mut dst: $ty = kani::any();
+            let val: $ty = kani::any();
+            unsafe { atomic_store_wrapper::<$ty, { $ord }>(&mut dst, val) };
+        }};
+    }
+    macro_rules! atomic_store_harness {
+        ($name:ident, $ord:path) => {
+            #[kani::proof_for_contract(atomic_store_wrapper)]
+            fn $name() {
+                atomic_integer_load_store_types!(atomic_store_call, $ord);
+                #[cfg(target_has_atomic_load_store = "ptr")]
+                {
+                    let mut dst: *mut u8 = kani::any::<usize>() as *mut u8;
+                    let val: *mut u8 = kani::any::<usize>() as *mut u8;
+                    unsafe { atomic_store_wrapper::<*mut u8, { $ord }>(&mut dst, val) };
+                }
+                kani::cover(true, "atomic intrinsic store: reached after call");
+            }
+        };
+    }
+    atomic_store_harness!(harness_intrinsic_atomic_store_relaxed, AtomicOrdering::Relaxed);
+    atomic_store_harness!(harness_intrinsic_atomic_store_release, AtomicOrdering::Release);
+    atomic_store_harness!(harness_intrinsic_atomic_store_seqcst, AtomicOrdering::SeqCst);
+
+    // Load: the same complete T matrix as store.
+    macro_rules! atomic_load_call {
+        ($ty:ty, $ord:path) => {{
+            let src: $ty = kani::any();
+            let _ = unsafe { atomic_load_wrapper::<$ty, { $ord }>(&src) };
+        }};
+    }
+    macro_rules! atomic_load_harness {
+        ($name:ident, $ord:path) => {
+            #[kani::proof_for_contract(atomic_load_wrapper)]
+            fn $name() {
+                atomic_integer_load_store_types!(atomic_load_call, $ord);
+                #[cfg(target_has_atomic_load_store = "ptr")]
+                {
+                    let src: *mut u8 = kani::any::<usize>() as *mut u8;
+                    let _ = unsafe { atomic_load_wrapper::<*mut u8, { $ord }>(&src) };
+                }
+                kani::cover(true, "atomic intrinsic load: reached after call");
+            }
+        };
+    }
+    atomic_load_harness!(harness_intrinsic_atomic_load_relaxed, AtomicOrdering::Relaxed);
+    atomic_load_harness!(harness_intrinsic_atomic_load_acquire, AtomicOrdering::Acquire);
+    atomic_load_harness!(harness_intrinsic_atomic_load_seqcst, AtomicOrdering::SeqCst);
+
+    // Unary RMW operations (swap, xchg): integer and pointer T.
+    macro_rules! atomic_rmw_call {
+        ($ty:ty, $wrapper:ident, $ord:path) => {{
+            let mut dst: $ty = kani::any();
+            let val: $ty = kani::any();
+            let _ = unsafe { $wrapper::<$ty, { $ord }>(&mut dst, val) };
+        }};
+    }
+    macro_rules! atomic_rmw_harness {
+        ($name:ident, $wrapper:ident, $ord:path) => {
+            #[kani::proof_for_contract($wrapper)]
+            fn $name() {
+                atomic_integer_types!(atomic_rmw_call, $wrapper, $ord);
+                #[cfg(target_has_atomic = "ptr")]
+                {
+                    let mut dst: *mut u8 = kani::any::<usize>() as *mut u8;
+                    let val: *mut u8 = kani::any::<usize>() as *mut u8;
+                    let _ = unsafe { $wrapper::<*mut u8, { $ord }>(&mut dst, val) };
+                }
+                kani::cover(true, "atomic intrinsic exchange: reached after call");
+            }
+        };
+    }
+    macro_rules! atomic_rmw_orders {
+        ($wrapper:ident, $relaxed:ident, $acquire:ident, $release:ident, $acqrel:ident, $seqcst:ident) => {
+            atomic_rmw_harness!($relaxed, $wrapper, AtomicOrdering::Relaxed);
+            atomic_rmw_harness!($acquire, $wrapper, AtomicOrdering::Acquire);
+            atomic_rmw_harness!($release, $wrapper, AtomicOrdering::Release);
+            atomic_rmw_harness!($acqrel, $wrapper, AtomicOrdering::AcqRel);
+            atomic_rmw_harness!($seqcst, $wrapper, AtomicOrdering::SeqCst);
+        };
+    }
+    atomic_rmw_orders!(
+        atomic_xchg_wrapper,
+        harness_intrinsic_atomic_xchg_relaxed,
+        harness_intrinsic_atomic_xchg_acquire,
+        harness_intrinsic_atomic_xchg_release,
+        harness_intrinsic_atomic_xchg_acqrel,
+        harness_intrinsic_atomic_xchg_seqcst
+    );
+
+    // Binary RMW operations: U == T for integer T, and U == usize for pointer T.
+    macro_rules! atomic_binary_call {
+        ($ty:ty, $wrapper:ident, $ord:path) => {{
+            let mut dst: $ty = kani::any();
+            let val: $ty = kani::any();
+            let _ = unsafe { $wrapper::<$ty, $ty, { $ord }>(&mut dst, val) };
+        }};
+    }
+    macro_rules! atomic_binary_harness {
+        ($name:ident, $wrapper:ident, $ord:path) => {
+            #[kani::proof_for_contract($wrapper)]
+            fn $name() {
+                atomic_integer_types!(atomic_binary_call, $wrapper, $ord);
+                #[cfg(target_has_atomic = "ptr")]
+                {
+                    let mut dst: *mut u8 = kani::any::<usize>() as *mut u8;
+                    let val: usize = kani::any();
+                    let _ = unsafe { $wrapper::<*mut u8, usize, { $ord }>(&mut dst, val) };
+                }
+                kani::cover(true, "atomic intrinsic binary RMW: reached after call");
+            }
+        };
+    }
+    macro_rules! atomic_binary_orders {
+        ($wrapper:ident, $relaxed:ident, $acquire:ident, $release:ident, $acqrel:ident, $seqcst:ident) => {
+            atomic_binary_harness!($relaxed, $wrapper, AtomicOrdering::Relaxed);
+            atomic_binary_harness!($acquire, $wrapper, AtomicOrdering::Acquire);
+            atomic_binary_harness!($release, $wrapper, AtomicOrdering::Release);
+            atomic_binary_harness!($acqrel, $wrapper, AtomicOrdering::AcqRel);
+            atomic_binary_harness!($seqcst, $wrapper, AtomicOrdering::SeqCst);
+        };
+    }
+    atomic_binary_orders!(
+        atomic_xadd_wrapper,
+        harness_intrinsic_atomic_xadd_relaxed,
+        harness_intrinsic_atomic_xadd_acquire,
+        harness_intrinsic_atomic_xadd_release,
+        harness_intrinsic_atomic_xadd_acqrel,
+        harness_intrinsic_atomic_xadd_seqcst
+    );
+    atomic_binary_orders!(
+        atomic_xsub_wrapper,
+        harness_intrinsic_atomic_xsub_relaxed,
+        harness_intrinsic_atomic_xsub_acquire,
+        harness_intrinsic_atomic_xsub_release,
+        harness_intrinsic_atomic_xsub_acqrel,
+        harness_intrinsic_atomic_xsub_seqcst
+    );
+    atomic_binary_orders!(
+        atomic_and_wrapper,
+        harness_intrinsic_atomic_and_relaxed,
+        harness_intrinsic_atomic_and_acquire,
+        harness_intrinsic_atomic_and_release,
+        harness_intrinsic_atomic_and_acqrel,
+        harness_intrinsic_atomic_and_seqcst
+    );
+    atomic_binary_orders!(
+        atomic_nand_wrapper,
+        harness_intrinsic_atomic_nand_relaxed,
+        harness_intrinsic_atomic_nand_acquire,
+        harness_intrinsic_atomic_nand_release,
+        harness_intrinsic_atomic_nand_acqrel,
+        harness_intrinsic_atomic_nand_seqcst
+    );
+    atomic_binary_orders!(
+        atomic_or_wrapper,
+        harness_intrinsic_atomic_or_relaxed,
+        harness_intrinsic_atomic_or_acquire,
+        harness_intrinsic_atomic_or_release,
+        harness_intrinsic_atomic_or_acqrel,
+        harness_intrinsic_atomic_or_seqcst
+    );
+    atomic_binary_orders!(
+        atomic_xor_wrapper,
+        harness_intrinsic_atomic_xor_relaxed,
+        harness_intrinsic_atomic_xor_acquire,
+        harness_intrinsic_atomic_xor_release,
+        harness_intrinsic_atomic_xor_acqrel,
+        harness_intrinsic_atomic_xor_seqcst
+    );
+
+    // Signed and unsigned extrema have the restricted T matrices documented by
+    // atomic_max/min and atomic_umax/umin respectively.
+    macro_rules! atomic_extremum_call {
+        ($ty:ty, $wrapper:ident, $ord:path) => {{
+            let mut dst: $ty = kani::any();
+            let val: $ty = kani::any();
+            let _ = unsafe { $wrapper::<$ty, { $ord }>(&mut dst, val) };
+        }};
+    }
+    macro_rules! atomic_extremum_harness {
+        ($name:ident, $wrapper:ident, $types:ident, $ord:path) => {
+            #[kani::proof_for_contract($wrapper)]
+            fn $name() {
+                $types!(atomic_extremum_call, $wrapper, $ord);
+                kani::cover(true, "atomic intrinsic extremum: reached after call");
+            }
+        };
+    }
+    macro_rules! atomic_extremum_orders {
+        ($wrapper:ident, $types:ident, $relaxed:ident, $acquire:ident, $release:ident, $acqrel:ident, $seqcst:ident) => {
+            atomic_extremum_harness!($relaxed, $wrapper, $types, AtomicOrdering::Relaxed);
+            atomic_extremum_harness!($acquire, $wrapper, $types, AtomicOrdering::Acquire);
+            atomic_extremum_harness!($release, $wrapper, $types, AtomicOrdering::Release);
+            atomic_extremum_harness!($acqrel, $wrapper, $types, AtomicOrdering::AcqRel);
+            atomic_extremum_harness!($seqcst, $wrapper, $types, AtomicOrdering::SeqCst);
+        };
+    }
+    atomic_extremum_orders!(
+        atomic_max_wrapper,
+        atomic_signed_types,
+        harness_intrinsic_atomic_max_relaxed,
+        harness_intrinsic_atomic_max_acquire,
+        harness_intrinsic_atomic_max_release,
+        harness_intrinsic_atomic_max_acqrel,
+        harness_intrinsic_atomic_max_seqcst
+    );
+    atomic_extremum_orders!(
+        atomic_min_wrapper,
+        atomic_signed_types,
+        harness_intrinsic_atomic_min_relaxed,
+        harness_intrinsic_atomic_min_acquire,
+        harness_intrinsic_atomic_min_release,
+        harness_intrinsic_atomic_min_acqrel,
+        harness_intrinsic_atomic_min_seqcst
+    );
+    atomic_extremum_orders!(
+        atomic_umax_wrapper,
+        atomic_unsigned_types,
+        harness_intrinsic_atomic_umax_relaxed,
+        harness_intrinsic_atomic_umax_acquire,
+        harness_intrinsic_atomic_umax_release,
+        harness_intrinsic_atomic_umax_acqrel,
+        harness_intrinsic_atomic_umax_seqcst
+    );
+    atomic_extremum_orders!(
+        atomic_umin_wrapper,
+        atomic_unsigned_types,
+        harness_intrinsic_atomic_umin_relaxed,
+        harness_intrinsic_atomic_umin_acquire,
+        harness_intrinsic_atomic_umin_release,
+        harness_intrinsic_atomic_umin_acqrel,
+        harness_intrinsic_atomic_umin_seqcst
+    );
+
+    // Compare exchange uses all integer/pointer T types for every legal
+    // success/failure ordering pair. Failure orderings are exactly the three
+    // values listed in the intrinsic documentation.
+    macro_rules! atomic_cxchg_call {
+        ($ty:ty, $wrapper:ident, $succ:path, $fail:path) => {{
+            let mut dst: $ty = kani::any();
+            let old: $ty = kani::any();
+            let new: $ty = kani::any();
+            let _ = unsafe { $wrapper::<$ty, { $succ }, { $fail }>(&mut dst, old, new) };
+        }};
+    }
+    macro_rules! atomic_cxchg_harness {
+        ($name:ident, $wrapper:ident, $succ:path, $fail:path) => {
+            #[kani::proof_for_contract($wrapper)]
+            fn $name() {
+                atomic_integer_types!(atomic_cxchg_call, $wrapper, $succ, $fail);
+                #[cfg(target_has_atomic = "ptr")]
+                {
+                    let mut dst: *mut u8 = kani::any::<usize>() as *mut u8;
+                    let old: *mut u8 = kani::any::<usize>() as *mut u8;
+                    let new: *mut u8 = kani::any::<usize>() as *mut u8;
+                    let _ =
+                        unsafe { $wrapper::<*mut u8, { $succ }, { $fail }>(&mut dst, old, new) };
+                }
+                kani::cover(true, "atomic intrinsic compare-exchange: reached after call");
+            }
+        };
+    }
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_relaxed_relaxed,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Relaxed,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_relaxed_acquire,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Relaxed,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_relaxed_seqcst,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Relaxed,
+        AtomicOrdering::SeqCst
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_acquire_relaxed,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Acquire,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_acquire_acquire,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Acquire,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_acquire_seqcst,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Acquire,
+        AtomicOrdering::SeqCst
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_release_relaxed,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Release,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_release_acquire,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Release,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_release_seqcst,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::Release,
+        AtomicOrdering::SeqCst
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_acqrel_relaxed,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::AcqRel,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_acqrel_acquire,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::AcqRel,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_acqrel_seqcst,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::AcqRel,
+        AtomicOrdering::SeqCst
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_seqcst_relaxed,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::SeqCst,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_seqcst_acquire,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::SeqCst,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchg_seqcst_seqcst,
+        atomic_cxchg_wrapper,
+        AtomicOrdering::SeqCst,
+        AtomicOrdering::SeqCst
+    );
+
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_relaxed_relaxed,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Relaxed,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_relaxed_acquire,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Relaxed,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_relaxed_seqcst,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Relaxed,
+        AtomicOrdering::SeqCst
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_acquire_relaxed,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Acquire,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_acquire_acquire,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Acquire,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_acquire_seqcst,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Acquire,
+        AtomicOrdering::SeqCst
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_release_relaxed,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Release,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_release_acquire,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Release,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_release_seqcst,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::Release,
+        AtomicOrdering::SeqCst
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_acqrel_relaxed,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::AcqRel,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_acqrel_acquire,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::AcqRel,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_acqrel_seqcst,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::AcqRel,
+        AtomicOrdering::SeqCst
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_seqcst_relaxed,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::SeqCst,
+        AtomicOrdering::Relaxed
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_seqcst_acquire,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::SeqCst,
+        AtomicOrdering::Acquire
+    );
+    atomic_cxchg_harness!(
+        harness_intrinsic_atomic_cxchgweak_seqcst_seqcst,
+        atomic_cxchgweak_wrapper,
+        AtomicOrdering::SeqCst,
+        AtomicOrdering::SeqCst
+    );
 }
