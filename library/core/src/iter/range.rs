@@ -571,12 +571,14 @@ step_integer_impls! {
 // These are still macro-generated because the integer literals resolve to different types.
 macro_rules! step_nonzero_identical_methods {
     ($int:ident) => {
+        #[requires(start.get().checked_add(n as $int).is_some())]
         #[inline]
         unsafe fn forward_unchecked(start: Self, n: usize) -> Self {
             // SAFETY: the caller has to guarantee that `start + n` doesn't overflow.
             unsafe { Self::new_unchecked(start.get().unchecked_add(n as $int)) }
         }
 
+        #[requires(start.get().checked_sub(n as $int).is_some_and(|r| r != 0))]
         #[inline]
         unsafe fn backward_unchecked(start: Self, n: usize) -> Self {
             // SAFETY: the caller has to guarantee that `start - n` doesn't overflow or hit zero.
@@ -794,11 +796,14 @@ const impl Step for char {
         }
     }
 
+    // The result, after skipping the surrogate range, must still be a valid `char`.
     #[requires({
         (start as u32).checked_add(count as u32).is_some_and(|dist|
-            (start as u32) >= 0xD800 ||
-            dist < 0xD800 ||
-            dist.checked_add(0x800).is_some()
+            if (start as u32) < 0xD800 && dist >= 0xD800 {
+                dist.checked_add(0x800).is_some_and(|res| res <= char::MAX as u32)
+            } else {
+                dist <= char::MAX as u32
+            }
          )
     })]
     #[inline]
@@ -863,7 +868,6 @@ const impl Step for AsciiChar {
         Some(unsafe { AsciiChar::from_u8_unchecked(end) })
     }
 
-    #[requires(count < 256 && start.to_u8().checked_add(count as u8).is_some())]
     #[inline]
     fn forward_overflowing(start: Self, count: usize) -> (Self, bool) {
         let (s, o) = (start as usize).overflowing_add(count);
@@ -882,6 +886,8 @@ const impl Step for AsciiChar {
         (unsafe { AsciiChar::from_u8_unchecked(ret as u8) }, o || ret < s)
     }
 
+    // The result must be a valid ASCII character, not just fit in a `u8`.
+    #[requires((start.to_u8() as usize).checked_add(count).is_some_and(|end| end <= 127))]
     #[inline]
     unsafe fn forward_unchecked(start: AsciiChar, count: usize) -> AsciiChar {
         // SAFETY: Caller asserts that result is a valid ASCII character,
@@ -922,7 +928,6 @@ const impl Step for Ipv4Addr {
         u32::backward_checked(start.to_bits(), count).map(Ipv4Addr::from_bits)
     }
 
-    #[requires(start.to_bits().checked_add(count as u32).is_some())]
     #[inline]
     fn forward_overflowing(start: Self, count: usize) -> (Self, bool) {
         let (s, o) = u32::forward_overflowing(start.to_bits(), count);
@@ -935,6 +940,7 @@ const impl Step for Ipv4Addr {
         (Ipv4Addr::from_bits(s), o)
     }
 
+    #[requires(start.to_bits().checked_add(count as u32).is_some())]
     #[inline]
     unsafe fn forward_unchecked(start: Ipv4Addr, count: usize) -> Ipv4Addr {
         // SAFETY: Since u32 and Ipv4Addr are losslessly convertible,
@@ -969,7 +975,6 @@ const impl Step for Ipv6Addr {
         u128::backward_checked(start.to_bits(), count).map(Ipv6Addr::from_bits)
     }
 
-    #[requires(start.to_bits().checked_add(count as u128).is_some())]
     #[inline]
     fn forward_overflowing(start: Self, count: usize) -> (Self, bool) {
         let (s, o) = u128::forward_overflowing(start.to_bits(), count);
@@ -982,6 +987,7 @@ const impl Step for Ipv6Addr {
         (Ipv6Addr::from_bits(s), o)
     }
 
+    #[requires(start.to_bits().checked_add(count as u128).is_some())]
     #[inline]
     unsafe fn forward_unchecked(start: Ipv6Addr, count: usize) -> Ipv6Addr {
         // SAFETY: Since u128 and Ipv6Addr are losslessly convertible,
