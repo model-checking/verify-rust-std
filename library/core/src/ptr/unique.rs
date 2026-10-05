@@ -6,7 +6,6 @@ use crate::fmt;
 use crate::kani;
 use crate::marker::{PhantomData, PointeeSized, Unsize};
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
-use crate::pin::PinCoerceUnsized;
 use crate::ptr::NonNull;
 
 /// A wrapper around a raw non-null `*mut T` that indicates that the possessor
@@ -43,7 +42,7 @@ pub struct Unique<T: PointeeSized> {
     // for dropck to understand that we logically own a `T`.
     //
     // For details, see:
-    // https://github.com/rust-lang/rfcs/blob/master/text/0769-sound-generic-drop.md#phantom-data
+    // https://rust-lang.github.io/rfcs/0769-sound-generic-drop.html#phantom-data
     _marker: PhantomData<T>,
 }
 
@@ -186,9 +185,6 @@ impl<T: PointeeSized, U: PointeeSized> CoerceUnsized<Unique<U>> for Unique<T> wh
 #[unstable(feature = "ptr_internals", issue = "none")]
 impl<T: PointeeSized, U: PointeeSized> DispatchFromDyn<Unique<U>> for Unique<T> where T: Unsize<U> {}
 
-#[unstable(feature = "pin_coerce_unsized_trait", issue = "150112")]
-unsafe impl<T: PointeeSized> PinCoerceUnsized for Unique<T> {}
-
 #[unstable(feature = "ptr_internals", issue = "none")]
 impl<T: PointeeSized> fmt::Debug for Unique<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -205,7 +201,7 @@ impl<T: PointeeSized> fmt::Pointer for Unique<T> {
 
 #[unstable(feature = "ptr_internals", issue = "none")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl<T: PointeeSized> const From<&mut T> for Unique<T> {
+const impl<T: PointeeSized> From<&mut T> for Unique<T> {
     /// Converts a `&mut T` to a `Unique<T>`.
     ///
     /// This conversion is infallible since references cannot be null.
@@ -217,7 +213,7 @@ impl<T: PointeeSized> const From<&mut T> for Unique<T> {
 
 #[unstable(feature = "ptr_internals", issue = "none")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl<T: PointeeSized> const From<NonNull<T>> for Unique<T> {
+const impl<T: PointeeSized> From<NonNull<T>> for Unique<T> {
     /// Converts a `NonNull<T>` to a `Unique<T>`.
     ///
     /// This conversion is infallible since `NonNull` cannot be null.

@@ -101,6 +101,11 @@ jobs:
       # Notes:
       # - core_arch::x86::__m128d::as_f64x2 is just one example of hundreds of
       #   core_arch::x86:: functions that are known to verify successfully.
+      # - __rdl_dealloc/__rdl_realloc are excluded until their contracts require ptr
+      #   to come from the allocator (#712).
+      # - unicode::unicode_data::conversions::to_* are not listed for now: since the
+      #   Unicode tables were regenerated (nightly-2026-09-25) they exceed the 10m
+      #   timeout on macOS and the ubuntu runner died while verifying them.
       - name: Run Kani Verification
         run: |
           scripts/run-kani.sh --run autoharness --kani-args \
@@ -109,6 +114,7 @@ jobs:
             --include-pattern "<(.+)[[:space:]]as[[:space:]]iter::range::Step>::backward_unchecked" \
             --include-pattern "<(.+)[[:space:]]as[[:space:]]iter::range::Step>::forward_unchecked" \
             --include-pattern alloc::__default_lib_allocator:: \
+            --exclude-pattern "alloc::__default_lib_allocator::__rdl_(dealloc|realloc)" \
             --include-pattern alloc::layout::Layout::from_size_align \
             --include-pattern ascii::ascii_char::AsciiChar::from_u8 \
             --include-pattern "<char[[:space:]]as[[:space:]]ascii::AsciiExt>::is_ascii" \
@@ -206,7 +212,6 @@ jobs:
             --exclude-pattern time::Duration::from_nanos_u128 \
             --include-pattern time::Duration::from_secs \
             --exclude-pattern time::Duration::from_secs_f \
-            --include-pattern unicode::unicode_data::conversions::to_ \
             --exclude-pattern ::precondition_check \
             --harness-timeout 10m \
             --default-unwind 1000 \
@@ -263,6 +268,11 @@ jobs:
 
       # Step 2: Run list on the std library
       - name: Run Kani Metrics
+        # Under Kani each library crate takes 1-12 GB to compile; compiling them in parallel
+        # exceeds the 16 GB of an ubuntu-latest runner, which then dies with "The runner has
+        # received a shutdown signal". One crate at a time peaks at the largest one (std).
+        env:
+          CARGO_BUILD_JOBS: 1
         run: |
           scripts/run-kani.sh --run metrics --with-autoharness
           pushd /tmp/std_lib_analysis
@@ -359,6 +369,11 @@ jobs:
 
       # Step 2: Run list on the std library
       - name: Run Kani List
+        # Under Kani each library crate takes 1-12 GB to compile; compiling them in parallel
+        # exceeds the 16 GB of an ubuntu-latest runner, which then dies with "The runner has
+        # received a shutdown signal". One crate at a time peaks at the largest one (std).
+        env:
+          CARGO_BUILD_JOBS: 1
         run: |
           head/scripts/run-kani.sh --run list --with-autoharness --path ${{github.workspace}}/head
           # remove duplicate white space to reduce file size (GitHub permits at
