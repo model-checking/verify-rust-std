@@ -1,3 +1,5 @@
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{MaybeUninit, SizedTypeProperties};
 use crate::ptr;
 
@@ -124,10 +126,13 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
     // the way until about `left + right == 32`, but the worst case performance breaks even
     // around 16. 24 was chosen as middle ground. If the size of `T` is larger than 4
     // `usize`s, this algorithm also outperforms other algorithms.
+    #[cfg(kani)]
+    let len = left + right;
     // SAFETY: callers must ensure `mid - left` is valid for reading and writing.
     let x = unsafe { mid.sub(left) };
     // beginning of first round
     // SAFETY: see previous comment.
+    #[cfg(not(kani))]
     let mut tmp: T = unsafe { x.read() };
     let mut i = right;
     // `gcd` can be found before hand by calculating `gcd(left + right, right)`,
@@ -138,6 +143,7 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
     // of reading one temporary once, copying backwards, and then writing that temporary at
     // the very end. This is possibly due to the fact that swapping or replacing temporaries
     // uses only one memory address in the loop instead of needing to manage two.
+    #[cfg(not(kani))]
     loop {
         // [long-safety-expl]
         // SAFETY: callers must ensure `[left, left+mid+right)` are all valid for reading and
@@ -175,9 +181,46 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
             i += right;
         }
     }
+    #[cfg(kani)]
+    {
+        // SAFETY: see previous comment.
+        let mut tmp: T = unsafe { x.read() };
+
+        #[kani::loop_invariant(
+            !T::IS_ZST
+                && len > 0
+                && left > 0
+                && right > 0
+                && left < len
+                && right < len
+                && i < len
+                && gcd > 0
+                && gcd <= right
+                && (gcd <= left || i > left)
+        )]
+        #[kani::loop_modifies(&i, &gcd, &tmp, ptr::slice_from_raw_parts(x as *const T, len))]
+        while i != 0 {
+            // SAFETY: see [long-safety-expl].
+            tmp = unsafe { x.add(i).replace(tmp) };
+            if i >= left {
+                i -= left;
+                if i != 0 && i < gcd {
+                    gcd = i;
+                }
+            } else {
+                i += right;
+            }
+        }
+        // end of first round
+        // SAFETY: tmp has been read from a valid source and x is valid for writing
+        // according to the caller.
+        unsafe { x.write(tmp) };
+    }
     // finish the chunk with more rounds
     // FIXME(const-hack): Use `for start in 1..gcd` when available in const
     let mut start = 1;
+
+    #[cfg(not(kani))]
     while start < gcd {
         // SAFETY: `gcd` is at most equal to `right` so all values in `1..gcd` are valid for
         // reading and writing as per the function's safety contract, see [long-safety-expl]
@@ -207,6 +250,67 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
 
         start += 1;
     }
+
+    #[cfg(kani)]
+    {
+        #[kani::loop_invariant(
+            !T::IS_ZST
+                && len > 0
+                && left > 0
+                && right > 0
+                && left < len
+                && right < len
+                && start >= 1
+                && start <= gcd
+                && gcd > 0
+                && gcd <= left
+                && gcd <= right
+                && start < len
+        )]
+        #[kani::loop_modifies(&start, &i, ptr::slice_from_raw_parts(x as *const T, len))]
+        while start < gcd {
+            // SAFETY: `gcd` is at most equal to `right` so all values in `1..gcd` are valid for
+            // reading and writing as per the function's safety contract, see [long-safety-expl]
+            // above
+            let mut tmp = unsafe { x.add(start).read() };
+            // [safety-expl-addition]
+            //
+            // Here `start < gcd` so `start < right` so `i < right+right`: `right` being the
+            // greatest common divisor of `(left+right, right)` means that `left = right` so
+            // `i < left+right` so `x+i = mid-left+i` is always valid for reading and writing
+            // according to the function's safety contract.
+            i = start + right;
+            #[kani::loop_invariant(
+                !T::IS_ZST
+                    && len > 0
+                    && left > 0
+                    && right > 0
+                    && left < len
+                    && right < len
+                    && start < gcd
+                    && start < left
+                    && start < right
+                    && i < len
+                    && gcd > 0
+                    && gcd <= left
+                    && gcd <= right
+            )]
+            #[kani::loop_modifies(&i, &tmp, ptr::slice_from_raw_parts(x as *const T, len))]
+            while i != start {
+                // SAFETY: see [long-safety-expl] and [safety-expl-addition]
+                tmp = unsafe { x.add(i).replace(tmp) };
+                if i >= left {
+                    i -= left;
+                } else {
+                    i += right;
+                }
+            }
+            // SAFETY: see [long-safety-expl] and [safety-expl-addition]
+            unsafe { x.add(start).write(tmp) };
+
+            start += 1;
+        }
+    }
 }
 
 /// Algorithm 3 utilizes repeated swapping of `min(left, right)` elements.
@@ -228,45 +332,89 @@ const unsafe fn ptr_rotate_gcd<T>(left: usize, mid: *mut T, right: usize) {
 /// The specified range must be valid for reading and writing.
 #[inline]
 const unsafe fn ptr_rotate_swap<T>(mut left: usize, mut mid: *mut T, mut right: usize) {
-    loop {
-        if left >= right {
-            // Algorithm 3
-            // There is an alternate way of swapping that involves finding where the last swap
-            // of this algorithm would be, and swapping using that last chunk instead of swapping
-            // adjacent chunks like this algorithm is doing, but this way is still faster.
-            loop {
-                // SAFETY:
-                // `left >= right` so `[mid-right, mid+right)` is valid for reading and writing
-                // Subtracting `right` from `mid` each turn is counterbalanced by the addition and
-                // check after it.
-                unsafe {
-                    ptr::swap_nonoverlapping(mid.sub(right), mid, right);
-                    mid = mid.sub(right);
+    #[cfg(not(kani))]
+    {
+        loop {
+            if left >= right {
+                // Algorithm 3
+                // There is an alternate way of swapping that involves finding where the last swap
+                // of this algorithm would be, and swapping using that last chunk instead of swapping
+                // adjacent chunks like this algorithm is doing, but this way is still faster.
+                loop {
+                    // SAFETY:
+                    // `left >= right` so `[mid-right, mid+right)` is valid for reading and writing
+                    // Subtracting `right` from `mid` each turn is counterbalanced by the addition and
+                    // check after it.
+                    unsafe {
+                        ptr::swap_nonoverlapping(mid.sub(right), mid, right);
+                        mid = mid.sub(right);
+                    }
+                    left -= right;
+                    if left < right {
+                        break;
+                    }
                 }
-                left -= right;
-                if left < right {
-                    break;
+            } else {
+                // Algorithm 3, `left < right`
+                loop {
+                    // SAFETY: `[mid-left, mid+left)` is valid for reading and writing because
+                    // `left < right` so `mid+left < mid+right`.
+                    // Adding `left` to `mid` each turn is counterbalanced by the subtraction and check
+                    // after it.
+                    unsafe {
+                        ptr::swap_nonoverlapping(mid.sub(left), mid, left);
+                        mid = mid.add(left);
+                    }
+                    right -= left;
+                    if right < left {
+                        break;
+                    }
                 }
             }
-        } else {
-            // Algorithm 3, `left < right`
-            loop {
-                // SAFETY: `[mid-left, mid+left)` is valid for reading and writing because
-                // `left < right` so `mid+left < mid+right`.
-                // Adding `left` to `mid` each turn is counterbalanced by the subtraction and check
-                // after it.
-                unsafe {
-                    ptr::swap_nonoverlapping(mid.sub(left), mid, left);
-                    mid = mid.add(left);
-                }
-                right -= left;
-                if right < left {
-                    break;
-                }
+            if (right == 0) || (left == 0) {
+                return;
             }
         }
-        if (right == 0) || (left == 0) {
-            return;
+    }
+
+    #[cfg(kani)]
+    {
+        let len = left + right;
+        let base = unsafe { mid.sub(left) };
+        let mut mid_index = left;
+
+        #[kani::loop_invariant(
+            !T::IS_ZST
+                && len > 0
+                && mid_index <= len
+                && left <= mid_index
+                && right <= len - mid_index
+        )]
+        #[kani::loop_modifies(&left, &right, &mid_index, ptr::slice_from_raw_parts(base as *const T, len))]
+        while left != 0 && right != 0 {
+            let mid = unsafe { base.add(mid_index) };
+            if left >= right {
+                // Algorithm 3
+                // There is an alternate way of swapping that involves finding where the last swap
+                // of this algorithm would be, and swapping using that last chunk instead of swapping
+                // adjacent chunks like this algorithm is doing, but this way is still faster.
+                // SAFETY:
+                // `left >= right` so `[mid-right, mid+right)` is valid for reading and writing.
+                unsafe {
+                    ptr::swap_nonoverlapping(mid.sub(right), mid, right);
+                }
+                mid_index -= right;
+                left -= right;
+            } else {
+                // Algorithm 3, `left < right`
+                // SAFETY: `[mid-left, mid+left)` is valid for reading and writing because
+                // `left < right` so `mid+left < mid+right`.
+                unsafe {
+                    ptr::swap_nonoverlapping(mid.sub(left), mid, left);
+                }
+                mid_index += left;
+                right -= left;
+            }
         }
     }
 }
