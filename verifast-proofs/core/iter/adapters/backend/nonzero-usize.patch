@@ -1,0 +1,37 @@
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2386,6 +2386,18 @@
+                       (`TrFnCallRExpr
+                         (Printf.sprintf "Invalid (generic) arg(s) for %s"
+                            fn_name)))
++            | "std::num::NonZero::<T>::new_unchecked"
++              when List.length substs = 1 &&
++                   List.for_all
++                     (function
++                       | Mir.GenArgType info ->
++                           info.vf_ty = Ast.ManifestTypeExpr
++                             (Ast.type_expr_loc info.vf_ty, Ast.Int (Ast.Unsigned, Ast.PtrRank))
++                       | Mir.GenArgLifetime _ | Mir.GenArgConst _ -> false)
++                     substs ->
++                Ok (tmp_rvalue_binders, FnCallOutcome
++                  (Ast.CallExpr (fn_loc, "std::num::new_nonzero_usize", [], [],
++                    List.map (fun arg -> Ast.LitPat arg) args, Ast.Static)))
+             | "std::ptr::null_mut" ->
+                 Ok
+                   ( [],
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -265,6 +265,13 @@
+     struct NonZero<T>;
+     
+     //@ fix NonZero::get<T>(nz: NonZero<T>) -> T;
++
++    // Trusted library boundary for NonZero::<usize>::new_unchecked.
++    // The frontend routes only the usize instantiation to this specification.
++    unsafe fn new_nonzero_usize(value: usize) -> NonZero<usize>;
++    //@ req 0 < value;
++    //@ ens result.get() == value;
++    //@ on_unwind_ens false;
+     
+     /*@
+     

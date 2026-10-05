@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+proof_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$proof_dir"
+
+case "${1:-}" in
+  --static)
+    exec python3 -I check_sources.py
+    ;;
+  --remote)
+    ;;
+  *)
+    echo 'Usage: bash verify.sh --static | --remote' >&2
+    echo '--remote runs compilers and solvers on a prepared Linux machine.' >&2
+    exit 2
+    ;;
+esac
+
+# Do not invoke the repository wrappers on the memory-constrained Mac.
+# The wrappers may install VeriFast and its pinned Rust toolchain.
+if [[ "$(uname -s)" != Linux ]]; then
+  echo 'Proof execution requires a separate Linux machine. Use --static here.' >&2
+  exit 2
+fi
+
+python3 -I check_sources.py
+
+# This is a per-process address-space limit, not an aggregate process-tree cap.
+# Require headroom for the verifier, Rust frontend, solver, and operating system.
+python3 -I - <<'PY'
+from pathlib import Path
+import sys
+
+fields = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
+available_kib = int(fields["MemAvailable"].split()[0])
+if available_kib < 8 * 1024 * 1024:
+    sys.exit("Proof execution requires at least 8 GiB currently available RAM.")
+print(f"Remote preflight: {available_kib // 1024} MiB available RAM")
+PY
+
+command -v timeout >/dev/null
+ulimit -c 0
+ulimit -t 600
+export VFVERSION=26.09
+export CARGO_BUILD_JOBS=1
+export RAYON_NUM_THREADS=1
+export PATH="$proof_dir/../../..:$PATH"
+
+# Install the pinned release and build its patched Rust frontend remotely.
+# The workflow's cgroup also covers this build. Proof processes get the tighter
+# per-process address-space limit after the compiler has finished.
+export VFPLATFORM=linux
+# shellcheck source=/dev/null
+source "$proof_dir/../../../setup-verifast-home"
+export VERIFAST_HOME
+timeout --signal=TERM --kill-after=10s 900s bash backend/prepare.sh --remote
+ulimit -v 2097152
+
+# Check both the defined-input case and rejection of a potentially overflowing
+# input before trusting the frontend mapping for the adapter proof.
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/add-valid.rs
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/const-valid.rs
+if ! timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/array-valid.rs; then
+  # The regression already failed. Emit heap context without changing that verdict.
+  diagnostic_status=0
+  timeout --signal=TERM --kill-after=5s 30s \
+    verifast -json -rustc_args '--edition 2024' backend/array-valid.rs || diagnostic_status=$?
+  printf 'Array regression diagnostic status: %s\n' "$diagnostic_status"
+  exit 1
+fi
+negative_log="$(mktemp)"
+trap 'rm -f -- "$negative_log"' EXIT
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/array-length-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The array-to-slice coercion accepted an incorrect length.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The array length check did not report the expected proof failure")
+PY
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/add-overflow.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The frontend accepted unchecked addition without an overflow precondition.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Potential arithmetic overflow." not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The negative check did not produce the required overflow diagnostic.")
+PY
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/const-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The frontend accepted an incorrect symbolic array length.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The const-parameter negative check did not reach a proof failure.")
+PY
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/array-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The frontend accepted an array reference without a shared borrow.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The array-reference negative check did not reach a borrow proof failure.")
+PY
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/array-mut-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The frontend accepted a mutable array reference without owning its storage.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The mutable-array negative check did not reach a storage proof failure.")
+PY
+timeout --signal=TERM --kill-after=10s 60s \
+  refinement-checker --rustc-args '--edition 2024' \
+  backend/refinement-original.rs backend/refinement-valid.rs
+if timeout --signal=TERM --kill-after=10s 60s \
+  refinement-checker --rustc-args '--edition 2024' \
+  backend/refinement-original.rs backend/refinement-invalid.rs >"$negative_log" 2>&1; then
+  cat "$negative_log"
+  echo 'The refinement checker equated distinct symbolic const parameters.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if not all(s in diagnostics for s in ("ConstParamTerm N", "ConstParamTerm M", "not equal")):
+    sys.exit("The refinement negative check did not distinguish the two const parameters.")
+PY
+
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/matrix-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The array-to-slice negative check unexpectedly passed.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The array-to-slice negative check did not reject missing reference permissions.")
+PY
+
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/nonzero-valid.rs
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/nonzero-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The NonZero negative check unexpectedly passed.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove" not in diagnostics or "Rust frontend failed" in diagnostics:
+    sys.exit("The NonZero negative check did not reject the missing nonzero precondition.")
+PY
+
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/maybeuninit-own-valid.rs
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/cast-init-valid.rs
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/cast-init-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The pointer cast granted access to missing initialized storage.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The cast negative check did not reject a read without storage")
+PY
+if timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/value-own-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The ownership model created ownership of an arbitrary T.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "No matching heap chunks" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The negative ownership check did not reject missing T ownership")
+PY
+
+# Keep every stage sequential and require both proof and refinement to succeed.
+# Collect their independent diagnostics even when the first stage fails.
+# No assumption, unwind, reference-creation, or overflow suppression flags.
+if timeout --signal=TERM --kill-after=5s 30s \
+  verifast -rustc_args '--edition 2024' backend/layout-invalid.rs >"$negative_log" 2>&1; then
+  echo 'The incorrect array stride unexpectedly verified' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove condition" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The negative layout check did not reject the incorrect stride")
+PY
+
+for negative_fixture in backend/subtype-invalid.rs backend/value-send-invalid.rs; do
+  if timeout --signal=TERM --kill-after=5s 30s \
+    verifast -rustc_args '--edition 2024' "$negative_fixture" >"$negative_log" 2>&1; then
+    printf 'Invalid generic conversion unexpectedly verified: %s\n' "$negative_fixture" >&2
+    exit 1
+  fi
+  cat "$negative_log"
+  python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if "Cannot prove condition" not in diagnostics or "Rust frontend failed" in diagnostics:
+    raise SystemExit("The negative conversion check did not reject its missing precondition")
+PY
+done
+
+if timeout --signal=TERM --kill-after=5s 30s \
+  verifast -rustc_args '--edition 2024' backend/ghost-reachability-invalid.rs >"$negative_log" 2>&1; then
+  echo 'An unreachable normal-path ghost assertion unexpectedly verified.' >&2
+  exit 1
+fi
+cat "$negative_log"
+python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+diagnostics = Path(sys.argv[1]).read_text()
+if not any("ghost-reachability-invalid.rs(9," in line and line.endswith(": dead code")
+           for line in diagnostics.splitlines()):
+    raise SystemExit("The reachability negative check did not reject the ghost assertion")
+PY
+
+layout_status=0
+timeout --signal=TERM --kill-after=10s 60s \
+  verifast -rustc_args '--edition 2024' backend/matrix-layout-valid.rs || layout_status=$?
+proof_status=0
+timeout --signal=TERM --kill-after=10s 600s \
+  verifast -rustc_args '--edition 2024 -C debug-assertions=yes' -skip_specless_fns verified/lib.rs || proof_status=$?
+refinement_status=0
+timeout --signal=TERM --kill-after=10s 600s \
+  refinement-checker --rustc-args '--edition 2024 -C debug-assertions=yes' original/lib.rs verified/lib.rs || refinement_status=$?
+python3 -I check_sources.py
+if (( proof_status != 0 || layout_status != 0 )); then
+  # Inspect compiler-generated cleanup when reachability diagnostics remain.
+  diagnostic_status=0
+  timeout --signal=TERM --kill-after=5s 60s \
+    rustup run nightly-2026-02-05 rustc --edition 2024 --crate-type lib \
+    --emit=mir -Zmir-include-spans=yes -o "$negative_log" verified/lib.rs || diagnostic_status=$?
+  printf 'MIR diagnostic process status: %s\n' "$diagnostic_status"
+  if (( diagnostic_status == 0 )); then
+    python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+if path.stat().st_size > 8 * 1024 * 1024:
+    raise SystemExit("MIR diagnostic exceeded the 8 MiB parsing limit")
+printing = False
+budget = 24000
+for line in path.read_text().splitlines():
+    if line.startswith("fn "):
+        printing = "::push(" in line
+    if printing and budget > 0:
+        print(line[:budget])
+        budget -= len(line) + 1
+PY
+  fi
+  diagnostic_status=0
+  timeout --signal=TERM --kill-after=5s 60s \
+    verifast -rustc_args '--edition 2024 -C debug-assertions=no' \
+    -skip_specless_fns verified/lib.rs || diagnostic_status=$?
+  printf 'Debug-assertions-disabled diagnostic status: %s\n' "$diagnostic_status"
+  # These bounded, sequential diagnostics cannot replace the full proof verdict.
+  while IFS= read -r proof_location; do
+    diagnostic_status=0
+    timeout --signal=TERM --kill-after=5s 30s \
+      verifast -json -rustc_args '--edition 2024' -skip_specless_fns \
+      -focus "$proof_location" verified/lib.rs >"$negative_log" 2>&1 || diagnostic_status=$?
+    printf 'Diagnostic %s: process status %s\n' "$proof_location" "$diagnostic_status"
+    python3 -I - "$negative_log" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+if path.stat().st_size > 8 * 1024 * 1024:
+    raise SystemExit("Diagnostic exceeded the 8 MiB parsing limit")
+lines = path.read_text().splitlines()
+for line in reversed(lines):
+    if line.startswith('["VeriFast-Json",'):
+        result = json.loads(line)[3]["result"]
+        if result[0] == "SymbolicExecutionError":
+            print(json.dumps(result[2:4]))
+            for frame in result[1]:
+                if frame[0] == "Executing":
+                    print(json.dumps(frame)[:7000])
+                    break
+        else:
+            print(json.dumps(result)[:7000])
+        break
+else:
+    print("No JSON verdict; last diagnostic lines:")
+    print("\n".join(lines[-15:])[:7000])
+PY
+  done < <(python3 -I - <<'PY'
+from pathlib import Path
+import re
+
+for path in (Path("array_layout.rs"), Path("verified/map_windows.rs"), Path("verified/step_by.rs")):
+    for line_number, line in enumerate(path.read_text().splitlines(), 1):
+        if re.match(r"\s*(?:unsafe\s+)?(?:fn|lem)\s+\w+", line):
+            location_path = "verified/../array_layout.rs" if path.name == "array_layout.rs" else str(path)
+            print(f"{location_path}:{line_number}")
+PY
+  )
+fi
+if (( proof_status != 0 || refinement_status != 0 || layout_status != 0 )); then
+  printf 'FAIL: proof status %s; refinement status %s; layout status %s\n' \
+    "$proof_status" "$refinement_status" "$layout_status" >&2
+  exit 1
+fi
+echo 'PASS: generic adapter contracts, source refinement, and source identity'

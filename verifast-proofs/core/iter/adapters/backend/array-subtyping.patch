@@ -1,0 +1,49 @@
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -381,6 +381,46 @@
+         req true;
+         ens std::mem::size_of::<MaybeUninit<T>>() == std::mem::size_of::<T>() &*&
+             std::mem::align_of::<MaybeUninit<T>>() == std::mem::align_of::<T>();
++
++    // Rust subtyping changes lifetime information, preserving layout and values.
++    lem upcast_identity<T>(value: T);
++        req true;
++        ens upcast::<T, T>(value) == value;
++
++    lem subtype_layout<T0, T1>();
++        req is_subtype_of::<T0, T1>() == true;
++        ens std::mem::size_of::<T0>() == std::mem::size_of::<T1>() &*&
++            std::mem::align_of::<T0>() == std::mem::align_of::<T1>();
++
++    lem array_subtype<T0, T1, N: ?Sized>();
++        req is_subtype_of::<T0, T1>() == true;
++        ens is_subtype_of::<[T0; N], [T1; N]>() == true;
++
++    lem array_upcast<T0, T1, N: ?Sized>(value: [T0; N]);
++        req is_subtype_of::<T0, T1>() == true;
++        ens Array_elems(upcast::<[T0; N], [T1; N]>(value)) ==
++            map::<T0, T1>(upcast, Array_elems(value));
++
++    lem array_elems_length<T, N: ?Sized>(value: [T; N]);
++        req true;
++        ens length(Array_elems(value)) == usize_of_const(typeid(N));
++
++    lem MaybeUninit_subtype<T0, T1>();
++        req is_subtype_of::<T0, T1>() == true;
++        ens is_subtype_of::<MaybeUninit<T0>, MaybeUninit<T1>>() == true;
++
++    lem MaybeUninit_upcast_new<T0, T1>(value: T0);
++        req is_subtype_of::<T0, T1>() == true;
++        ens upcast::<MaybeUninit<T0>, MaybeUninit<T1>>(MaybeUninit::new(value)) ==
++            MaybeUninit::new(upcast::<T0, T1>(value));
++
++    lem array_Send<T, N: ?Sized>();
++        req true;
++        ens is_Send(typeid([T; N])) == is_Send(typeid(T));
++
++    lem MaybeUninit_Send<T>();
++        req true;
++        ens is_Send(typeid(MaybeUninit<T>)) == is_Send(typeid(T));
+
+     fix size_of_val<T: ?Sized>(x: *T) -> usize;
+     fix align_of_val<T: ?Sized>(x: *T) -> usize;

@@ -1,0 +1,28 @@
+--- a/bin/rust/std/lib.rsspec
++++ b/bin/rust/std/lib.rsspec
+@@ -373,0 +374,11 @@
++    // Rust array layout and MaybeUninit transparency, including zero-sized T.
++    lem array_layout<T, N: ?Sized>();
++        req true;
++        ens std::mem::size_of(typeid([T; N])) == std::mem::size_of::<T>() * usize_of_const(typeid(N)) &*&
++            std::mem::align_of::<[T; N]>() == std::mem::align_of::<T>();
++
++    lem MaybeUninit_layout<T>();
++        req true;
++        ens std::mem::size_of::<MaybeUninit<T>>() == std::mem::size_of::<T>() &*&
++            std::mem::align_of::<MaybeUninit<T>>() == std::mem::align_of::<T>();
++
+@@ -478 +489 @@
+-    lem Array__MaybeUninit_to_Array_MaybeUninit<T, N>(self: *[MaybeUninit<T>; N]);
++    lem Array__MaybeUninit_to_Array_MaybeUninit<T, N: ?Sized>(self: *[MaybeUninit<T>; N]);
+--- a/bin/rust/prelude_core.rsspec
++++ b/bin/rust/prelude_core.rsspec
+@@ -315 +315 @@
+-lem Array__to_array_<T, N>(p: *[T; N]);
++lem Array__to_array_<T, N: ?Sized>(p: *[T; N]);
+@@ -319 +319 @@
+-lem Array_to_array<T, N>(p: *[T; N]);
++lem Array_to_array<T, N: ?Sized>(p: *[T; N]);
+@@ -323 +323 @@
+-lem array_to_Array<T, N>(p: *[T; N]);
++lem array_to_Array<T, N: ?Sized>(p: *[T; N]);
