@@ -31,11 +31,15 @@
 //   since leaf edges are empty and need no data representation. In an internal node,
 //   an edge both identifies a position and contains a pointer to a child node.
 
+#[cfg(kani)]
+use core::kani;
 use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::num::NonZero;
 use core::ptr::{self, NonNull};
 use core::slice::SliceIndex;
+
+use safety::{ensures, requires};
 
 use crate::alloc::{Allocator, Layout};
 use crate::boxed::Box;
@@ -72,6 +76,10 @@ impl<K, V> LeafNode<K, V> {
     /// # Safety
     ///
     /// The caller must ensure that `this` points to a (possibly uninitialized) `LeafNode`
+    #[requires(core::ub_checks::can_write(this))]
+    #[ensures(|_| unsafe { (*this).parent.is_none() })]
+    #[ensures(|_| unsafe { (*this).len == 0 })]
+    #[cfg_attr(kani, kani::modifies(this))]
     unsafe fn init(this: *mut Self) {
         // As a general policy, we leave fields uninitialized if they can be, as this should
         // be both slightly faster and easier to track in Valgrind.
@@ -1881,3 +1889,1209 @@ fn move_to_slice<T>(src: &mut [MaybeUninit<T>], dst: &mut [MaybeUninit<T>]) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::cell::Cell;
+
+    use super::*;
+    use crate::alloc::{AllocError, Global};
+
+    type OwnedLeaf = NodeRef<marker::Owned, u8, u8, marker::Leaf>;
+    type OwnedInternal = NodeRef<marker::Owned, u8, u8, marker::Internal>;
+    // Unit K/V fixtures preserve real node allocation, edge movement, and parent-link setup through
+    // production constructors and push operations, but intentionally do not verify non-ZST payload movement.
+    type UnitOwnedLeaf = NodeRef<marker::Owned, (), (), marker::Leaf>;
+    type UnitOwnedInternal = NodeRef<marker::Owned, (), (), marker::Internal>;
+
+    fn leaf_with_len(len: usize) -> OwnedLeaf {
+        assert!(len <= CAPACITY);
+        let mut leaf = OwnedLeaf::new_leaf(Global);
+        for _ in 0..len {
+            leaf.borrow_mut().push(kani::any(), kani::any());
+        }
+        leaf
+    }
+
+    /// Constructs a leaf with a Kani-selected length in the complete legal range
+    /// `0..=CAPACITY`. The node is populated through `NodeRef::new_leaf` and `push`,
+    /// so `len` and the initialized key/value prefix are established by the same
+    /// implementation paths used by the real collection.
+    /// Key/value contents are symbolic; this helper is used for structural and memory-safety
+    /// properties rather than position-sensitive content checks.
+    fn verifier_leaf() -> (OwnedLeaf, usize) {
+        let len = kani::any_where(|len: &usize| *len <= CAPACITY);
+        (leaf_with_len(len), len)
+    }
+
+    /// Constructs a non-empty leaf with a Kani-selected length in `1..=CAPACITY`.
+    /// A non-empty fixture is required by APIs such as `first_kv` and `last_kv`,
+    /// whose precondition is that at least one key/value is initialized. Using
+    /// `push` preserves the node invariant that exactly the first `len` key/value
+    /// slots are initialized. The domain is bounded by the fixed array capacity.
+    fn verifier_nonempty_leaf() -> (OwnedLeaf, usize) {
+        let len = kani::any_where(|len: &usize| *len > 0 && *len <= CAPACITY);
+        (leaf_with_len(len), len)
+    }
+
+    fn internal_with_len(len: usize) -> OwnedInternal {
+        assert!(len <= CAPACITY);
+        let first_child = OwnedLeaf::new_leaf(Global).forget_type();
+        let mut internal = NodeRef::new_internal(first_child, Global);
+        for _ in 0..len {
+            let child = OwnedLeaf::new_leaf(Global).forget_type();
+            internal.borrow_mut().push(kani::any(), kani::any(), child);
+        }
+        internal
+    }
+
+    /// Constructs a height-one internal node with a Kani-selected length in
+    /// `0..=CAPACITY`. `new_internal` first creates one valid child edge; each
+    /// subsequent `push` adds one key/value and one right-hand child, yielding
+    /// exactly `len + 1` initialized edges and valid parent links. The occupancy
+    /// domain is bounded because the internal node has `CAPACITY` key/value slots
+    /// and `CAPACITY + 1` edge slots.
+    fn verifier_internal() -> (OwnedInternal, usize) {
+        let len = kani::any_where(|len: &usize| *len <= CAPACITY);
+        (internal_with_len(len), len)
+    }
+
+    // Harness for `LeafNode::init`.
+    #[kani::proof_for_contract(LeafNode::init)]
+    fn harness_leaf_node_init() {
+        let mut leaf = Box::<LeafNode<u8, u8>, _>::new_uninit_in(Global);
+        unsafe {
+            LeafNode::init(leaf.as_mut_ptr());
+            kani::cover(true, "LeafNode::init was called");
+        }
+    }
+
+    // Harness for `LeafNode::new`.
+    #[kani::proof]
+    fn harness_leaf_node_new() {
+        let leaf = LeafNode::<u8, u8>::new(Global);
+        assert!(leaf.parent.is_none());
+        assert_eq!(leaf.len, 0);
+        kani::cover(true, "LeafNode::new returned an initialized empty leaf");
+    }
+
+    // Harness for `InternalNode::new`.
+    //
+    // `InternalNode::new` initializes only the embedded `LeafNode` portion. The
+    // edge array intentionally remains `MaybeUninit`; this harness therefore
+    // checks the initialized metadata and does not read any edge slot.
+    #[kani::proof]
+    fn harness_internal_node_new() {
+        let node = unsafe { InternalNode::<u8, u8>::new(Global) };
+
+        assert!(node.data.parent.is_none());
+        assert_eq!(node.data.len, 0);
+        kani::cover(true, "InternalNode::new returned initialized metadata");
+    }
+
+    // Harness for `NodeRef::as_internal_mut`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_as_internal_mut() {
+        let (mut internal, len) = verifier_internal();
+        let mut internal_view = internal.borrow_mut();
+        let node = internal_view.as_internal_mut();
+        assert_eq!(node.data.len, len as u16);
+        kani::cover(len == 0, "as_internal_mut checked an empty internal node");
+        kani::cover(len == CAPACITY, "as_internal_mut checked a full internal node");
+    }
+
+    // Harness for `NodeRef::len`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_len() {
+        let (root, len) = verifier_leaf();
+        assert_eq!(root.len(), len);
+        kani::cover(len == 0, "len checked an empty leaf");
+        kani::cover(len == CAPACITY, "len checked a full leaf");
+    }
+
+    // Harness for `NodeRef::first_edge`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_first_edge() {
+        let (root, len) = verifier_leaf();
+        let edge = root.first_edge();
+        assert_eq!(edge.idx(), 0);
+        kani::cover(len == 0, "first_edge checked an empty leaf");
+        kani::cover(len == CAPACITY, "first_edge checked a full leaf");
+    }
+
+    // Harness for `NodeRef::last_edge`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_last_edge() {
+        let (root, len) = verifier_leaf();
+        let edge = root.last_edge();
+        assert_eq!(edge.idx(), len);
+        kani::cover(len == 0, "last_edge checked an empty leaf");
+        kani::cover(len == CAPACITY, "last_edge checked a full leaf");
+    }
+
+    // Harness for `NodeRef::first_kv`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_first_kv() {
+        let (root, len) = verifier_nonempty_leaf();
+        let kv = root.first_kv();
+        assert_eq!(kv.idx(), 0);
+        kani::cover(len == 1, "first_kv checked a one-element leaf");
+        kani::cover(len == CAPACITY, "first_kv checked a full leaf");
+    }
+
+    // Harness for `NodeRef::last_kv`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_last_kv() {
+        let (root, len) = verifier_nonempty_leaf();
+        let kv = root.last_kv();
+        assert_eq!(kv.idx(), len - 1);
+        kani::cover(len == 1, "last_kv checked a one-element leaf");
+        kani::cover(len == CAPACITY, "last_kv checked a full leaf");
+    }
+
+    // Harness for `NodeRef::ascend` on a root node.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_ascend_root() {
+        let root = OwnedLeaf::new_leaf(Global);
+        let result = root.reborrow().ascend();
+        assert!(result.is_err());
+        kani::cover(true, "ascend checked a root without a parent");
+    }
+
+    // Harness for `NodeRef::ascend` on a child node.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_ascend_child() {
+        let child: Root<u8, u8> = NodeRef::new_leaf(Global).forget_type();
+        let internal = NodeRef::new_internal(child, Global);
+        let internal_view = internal.reborrow();
+        let edge = internal_view.first_edge();
+        let descended = edge.descend();
+        let result = descended.ascend();
+        assert!(result.is_ok());
+        let parent_edge = result.ok().unwrap();
+        assert_eq!(parent_edge.idx(), 0);
+        kani::cover(true, "ascend checked a child with a parent");
+    }
+
+    // Harness for `NodeRef::into_leaf`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_into_leaf() {
+        let (root, len) = verifier_leaf();
+        let leaf = root.reborrow().into_leaf();
+        assert_eq!(leaf.len as usize, len);
+        kani::cover(len == 0, "into_leaf checked an empty leaf");
+        kani::cover(len == CAPACITY, "into_leaf checked a full leaf");
+    }
+
+    // Harness for `NodeRef::keys`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_keys() {
+        let (root, len) = verifier_leaf();
+        let view = root.reborrow();
+        let keys = view.keys();
+        assert_eq!(keys.len(), len);
+        kani::cover(len == 0, "keys checked an empty leaf");
+        kani::cover(len == CAPACITY, "keys checked a full leaf");
+    }
+
+    // Harness for `NodeRef::as_leaf_mut`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_as_leaf_mut() {
+        let (mut root, len) = verifier_leaf();
+        let mut view = root.borrow_mut();
+        let leaf = view.as_leaf_mut();
+        assert_eq!(leaf.len as usize, len);
+        kani::cover(len == 0, "as_leaf_mut checked an empty leaf");
+        kani::cover(len == CAPACITY, "as_leaf_mut checked a full leaf");
+    }
+
+    // Harness for `NodeRef::into_leaf_mut`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_into_leaf_mut() {
+        let (mut root, len) = verifier_leaf();
+        let view = root.borrow_mut();
+        let leaf = view.into_leaf_mut();
+        assert_eq!(leaf.len as usize, len);
+        kani::cover(len == 0, "into_leaf_mut checked an empty leaf");
+        kani::cover(len == CAPACITY, "into_leaf_mut checked a full leaf");
+    }
+
+    // Harness for `NodeRef::as_leaf_dying`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_as_leaf_dying() {
+        let (mut root, len) = verifier_leaf();
+        let mut dying = root.into_dying();
+        let leaf = dying.as_leaf_dying();
+        assert_eq!(leaf.len as usize, len);
+        kani::cover(len == 0, "as_leaf_dying checked an empty leaf");
+        kani::cover(len == CAPACITY, "as_leaf_dying checked a full leaf");
+    }
+
+    // Harness for `NodeRef::pop_internal_level`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_pop_internal_level() {
+        let child = OwnedLeaf::new_leaf(Global).forget_type();
+        let mut root: Root<u8, u8> = NodeRef::new_internal(child, Global).forget_type();
+        root.pop_internal_level(Global);
+        assert_eq!(root.height(), 0);
+        assert_eq!(root.len(), 0);
+        kani::cover(true, "pop_internal_level removed an internal root");
+    }
+
+    // Harness for `NodeRef::pop_internal_level` with an internal child.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_pop_internal_level_height_two() {
+        let leaf = OwnedLeaf::new_leaf(Global).forget_type();
+        let child = OwnedInternal::new_internal(leaf, Global).forget_type();
+        let mut root: Root<u8, u8> = NodeRef::new_internal(child, Global).forget_type();
+        root.pop_internal_level(Global);
+        assert_eq!(root.height(), 1);
+        assert_eq!(root.len(), 0);
+        kani::cover(true, "pop_internal_level removed a height-two internal root");
+    }
+
+    // Harness for `NodeRef::push`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_push() {
+        let (mut root, _) = verifier_leaf();
+        let before = root.len();
+        if before < CAPACITY {
+            root.borrow_mut().push(kani::any::<u8>(), kani::any::<u8>());
+            assert_eq!(root.len(), before + 1);
+            kani::cover(before == 0, "push checked insertion into an empty leaf");
+            kani::cover(before == CAPACITY - 1, "push checked insertion into a nearly full leaf");
+        }
+    }
+
+    // Harness for `Handle::left_edge`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_left_edge() {
+        let (root, _) = verifier_nonempty_leaf();
+        let edge = root.first_kv().left_edge();
+        assert_eq!(edge.idx(), 0);
+        kani::cover(true, "left_edge returned the preceding edge");
+    }
+
+    // Harness for `Handle::right_edge`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_right_edge() {
+        let (root, _) = verifier_nonempty_leaf();
+        let edge = root.first_kv().right_edge();
+        assert_eq!(edge.idx(), 1);
+        kani::cover(true, "right_edge returned the following edge");
+    }
+
+    // Harness for `Handle::left_kv`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_left_kv() {
+        let (root, len) = verifier_nonempty_leaf();
+        let result = root.reborrow().last_edge().left_kv();
+        assert!(result.is_ok());
+        assert_eq!(result.ok().unwrap().idx(), len - 1);
+        kani::cover(len == 1, "left_kv checked a one-element leaf");
+        kani::cover(len == CAPACITY, "left_kv checked a full leaf");
+    }
+
+    // Harness for `Handle::right_kv`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_right_kv() {
+        let (root, _) = verifier_nonempty_leaf();
+        let result = root.reborrow().first_edge().right_kv();
+        assert!(result.is_ok());
+        assert_eq!(result.ok().unwrap().idx(), 0);
+        kani::cover(true, "right_kv checked the first edge");
+    }
+
+    // Harness for `Handle::descend`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_descend() {
+        let child: Root<u8, u8> = NodeRef::new_leaf(Global).forget_type();
+        let internal = NodeRef::new_internal(child, Global);
+        let view = internal.reborrow();
+        let descended = view.first_edge().descend();
+        assert_eq!(descended.height(), 0);
+        assert_eq!(descended.len(), 0);
+        kani::cover(true, "descend returned the first child");
+    }
+
+    // Harness for `Handle::into_kv`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_into_kv() {
+        let (root, _) = verifier_nonempty_leaf();
+        let (key, value) = root.reborrow().first_kv().into_kv();
+        let _ = (*key, *value);
+        kani::cover(true, "into_kv returned initialized references");
+    }
+
+    // Harness for `Handle::key_mut`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_key_mut() {
+        let (mut root, _) = verifier_nonempty_leaf();
+        let mut handle = root.borrow_mut().first_kv();
+        *handle.key_mut() = kani::any();
+        kani::cover(true, "key_mut accessed an initialized key");
+    }
+
+    // Harness for `Handle::into_val_mut`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_into_val_mut() {
+        let (mut root, _) = verifier_nonempty_leaf();
+        let handle = root.borrow_mut().first_kv();
+        *handle.into_val_mut() = kani::any();
+        kani::cover(true, "into_val_mut accessed an initialized value");
+    }
+
+    // Harness for `Handle::into_kv_mut`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_into_kv_mut() {
+        let (mut root, _) = verifier_nonempty_leaf();
+        let handle = root.borrow_mut().first_kv();
+        let (key, value) = handle.into_kv_mut();
+        *key = kani::any();
+        *value = kani::any();
+        kani::cover(true, "into_kv_mut accessed initialized key and value");
+    }
+
+    // Harness for `Handle::into_kv_valmut`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_into_kv_valmut() {
+        let (mut root, _) = verifier_nonempty_leaf();
+        let handle = root.borrow_valmut().first_kv();
+        let (key, value) = handle.into_kv_valmut();
+        let _ = *key;
+        *value = kani::any();
+        kani::cover(true, "into_kv_valmut accessed initialized key and value");
+    }
+
+    // Harness for `Handle::kv_mut`.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_handle_kv_mut() {
+        let (mut root, _) = verifier_nonempty_leaf();
+        let mut handle = root.borrow_mut().first_kv();
+        let (key, value) = handle.kv_mut();
+        *key = kani::any();
+        *value = kani::any();
+        kani::cover(true, "kv_mut accessed initialized key and value");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_node_ref_new_internal() {
+        let child = OwnedLeaf::new_leaf(Global).forget_type();
+        let child_ptr = child.node;
+        let mut parent = OwnedInternal::new_internal(child, Global);
+        assert_eq!(parent.height, 1);
+        assert_eq!(parent.len(), 0);
+        let edge_child = unsafe {
+            (*NodeRef::as_internal_ptr(&parent.borrow_mut())).edges[0].assume_init_read()
+        };
+        assert_eq!(edge_child, child_ptr);
+        let child_leaf = unsafe { &*child_ptr.as_ptr() };
+        assert_eq!(child_leaf.parent, Some(parent.node.cast()));
+        assert_eq!(unsafe { child_leaf.parent_idx.assume_init_read() }, 0);
+        kani::cover(true, "new_internal bounded probe completed");
+    }
+
+    fn leaf_balancing_fixture(left_len: usize, right_len: usize) -> OwnedInternal {
+        let left = leaf_with_len(left_len);
+        let right = leaf_with_len(right_len);
+        let mut parent = NodeRef::new_internal(left.forget_type(), Global);
+        parent.borrow_mut().push(kani::any(), kani::any(), right.forget_type());
+        parent
+    }
+
+    // These harnesses cover fixed tree heights and insertion positions, not arbitrary ones.
+    // Key/value contents are symbolic; tree shape and occupancy are fixed.
+
+    // Verifies insertion into a nearly-full leaf that still has room and therefore does not split.
+    #[kani::proof]
+    fn harness_insert_recursing_no_split() {
+        // A nearly-full leaf must absorb the insertion without splitting.
+        let mut leaf = leaf_with_len(CAPACITY - 1);
+        assert_eq!(leaf.len(), CAPACITY - 1);
+
+        let edge = leaf.borrow_mut().first_edge();
+        let _handle =
+            edge.insert_recursing(kani::any::<u8>(), kani::any::<u8>(), Global, |_split| {
+                panic!("a non-full leaf must absorb the insertion without splitting")
+            });
+
+        assert_eq!(leaf.len(), CAPACITY);
+        kani::cover(leaf.len() == CAPACITY, "insert_recursing completed without splitting");
+    }
+
+    // A full leaf root splits and reaches split_root in the first propagation iteration.
+    #[kani::proof]
+    fn harness_insert_recursing_root_split() {
+        let mut leaf = leaf_with_len(CAPACITY);
+        assert_eq!(leaf.len(), CAPACITY);
+
+        let edge = leaf.borrow_mut().first_edge();
+        let _handle =
+            edge.insert_recursing(kani::any::<u8>(), kani::any::<u8>(), Global, |split| {
+                assert_eq!(split.left.height(), 0);
+                kani::cover(true, "insert_recursing reached the leaf-root split callback");
+            });
+    }
+
+    // Rejects a third clone to bound Kani expansion; these fixed height-one paths expect exactly two.
+    struct InsertRecursingAlloc<'a> {
+        clones: &'a Cell<u8>,
+    }
+
+    impl Clone for InsertRecursingAlloc<'_> {
+        fn clone(&self) -> Self {
+            let count = self.clones.get();
+            assert!(count < 2, "height-one insertion exceeded two allocator clones");
+            self.clones.set(count + 1);
+            Self { clones: self.clones }
+        }
+    }
+
+    // SAFETY: allocation and deallocation delegate to Global; the counter does not affect ownership.
+    unsafe impl Allocator for InsertRecursingAlloc<'_> {
+        fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+            Global.allocate(layout)
+        }
+
+        unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+            unsafe { Global.deallocate(ptr, layout) }
+        }
+    }
+
+    // Non-ZST companion: a full u8 leaf splits, follows its real parent backlink, and is absorbed
+    // by an empty parent. This exercises data-bearing split/ascent but not recursive parent splitting.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_insert_recursing_parent_ascend() {
+        let leaf = leaf_with_len(CAPACITY);
+        assert_eq!(leaf.len(), CAPACITY);
+
+        let mut root = NodeRef::new_internal(leaf.forget_type(), Global);
+        assert_eq!(root.len(), 0);
+        assert_eq!(root.height(), 1);
+
+        // Re-read the child through the parent edge so ascend uses the real parent link.
+        let child = root.borrow_mut().first_edge().descend();
+        assert_eq!(child.height(), 0);
+        assert_eq!(child.len(), CAPACITY);
+
+        // SAFETY: a height-one root has leaf children.
+        let edge = unsafe { child.cast_to_leaf_unchecked().last_edge() };
+
+        let clone_count = Cell::new(0u8);
+        let alloc = InsertRecursingAlloc { clones: &clone_count };
+
+        let _handle =
+            edge.insert_recursing(kani::any::<u8>(), kani::any::<u8>(), alloc, |_split| {
+                panic!("an empty internal parent must absorb the leaf split")
+            });
+
+        assert_eq!(clone_count.get(), 2);
+        assert_eq!(root.len(), 1);
+        kani::cover(
+            clone_count.get() == 2 && root.len() == 1,
+            "insert_recursing split the leaf and was absorbed by its parent",
+        );
+    }
+
+    // Structural companion to `harness_insert_recursing_parent_ascend`: forces a leaf split to
+    // split its full parent and reach the root callback. Non-ZST payload movement is covered there.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn harness_insert_recursing_parent_split_unit() {
+        let mut root = insert_recursing_parent_split_unit_fixture();
+        assert_eq!(root.len(), CAPACITY);
+        assert_eq!(root.height(), 1);
+
+        // Re-read the full rightmost child through its real parent edge, so ascend()
+        // uses the backlink installed by the production new_internal/push paths.
+        let child = root.borrow_mut().last_edge().descend();
+        assert_eq!(child.height(), 0);
+        assert_eq!(child.len(), CAPACITY);
+
+        // SAFETY: root has height one, so its children are leaves.
+        let edge = unsafe { child.cast_to_leaf_unchecked().last_edge() };
+
+        let clone_count = Cell::new(0u8);
+        let callback_hit = Cell::new(false);
+        let alloc = InsertRecursingAlloc { clones: &clone_count };
+
+        let _handle = edge.insert_recursing((), (), alloc, |split| {
+            callback_hit.set(true);
+
+            // The original leaf split has height 0. Reaching the callback with
+            // height 1 therefore proves that the full parent also split and that
+            // insert_recursing entered its second propagation iteration.
+            assert_eq!(split.left.height(), 1);
+        });
+
+        assert!(callback_hit.get());
+        assert_eq!(clone_count.get(), 2);
+        kani::cover(
+            callback_hit.get() && clone_count.get() == 2,
+            "insert_recursing propagated a leaf split through a full parent to the root callback",
+        );
+    }
+
+    // Builds a full height-one parent whose rightmost leaf is also full, forcing a leaf split
+    // to propagate through a full parent. Pushes are source-unrolled intentionally to avoid
+    // consuming the unwind bound in fixture construction.
+    fn insert_recursing_parent_split_unit_fixture() -> UnitOwnedInternal {
+        const {
+            assert!(CAPACITY == 11);
+        }
+
+        let first_child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        let mut root = NodeRef::new_internal(first_child, Global);
+
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+        let child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        root.borrow_mut().push((), (), child);
+
+        assert_eq!(root.len(), CAPACITY - 1);
+
+        let mut target = UnitOwnedLeaf::new_leaf(Global);
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+        target.borrow_mut().push((), ());
+
+        assert_eq!(target.len(), CAPACITY);
+
+        root.borrow_mut().push((), (), target.forget_type());
+        assert_eq!(root.len(), CAPACITY);
+        root
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_do_merge_leaf() {
+        let left_len = kani::any_where(|n: &usize| *n <= CAPACITY);
+        let right_len = kani::any_where(|n: &usize| *n <= CAPACITY);
+        kani::assume(left_len + 1 + right_len <= CAPACITY);
+        kani::cover(
+            left_len + 1 + right_len <= CAPACITY,
+            "leaf do_merge: merge precondition is reachable",
+        );
+        let mut parent = leaf_balancing_fixture(left_len, right_len);
+        let context = unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+        let _ = context.merge_tracking_parent(Global);
+        kani::cover(true, "leaf do_merge completed");
+    }
+
+    // Builds a height-one internal node with unit K/V through real new_leaf/new_internal/push paths.
+    // N fixes the allocation shape while `len` selects the linked prefix; payload movement is not tested.
+    fn verifier_internal_fixed_unit<const N: usize>(len: usize) -> UnitOwnedInternal {
+        assert!(N > 0 && N <= CAPACITY + 1 && len < N);
+
+        let first_child = UnitOwnedLeaf::new_leaf(Global).forget_type();
+        let mut internal = NodeRef::new_internal(first_child, Global);
+
+        let mut i = 1;
+        while i < N {
+            let child = UnitOwnedLeaf::new_leaf(Global);
+            if i <= len {
+                internal.borrow_mut().push((), (), child.forget_type());
+            }
+            i += 1;
+        }
+
+        assert_eq!(internal.len(), len);
+        internal
+    }
+
+    // Builds a height-two parent with exactly two internal children separated by one KV.
+    // Used by internal balancing harnesses that do not need a trailing parent edge to shift.
+    fn internal_pair_fixture_unit<const N: usize>(
+        left_len: usize,
+        right_len: usize,
+    ) -> UnitOwnedInternal {
+        let left = verifier_internal_fixed_unit::<N>(left_len);
+        let right = verifier_internal_fixed_unit::<N>(right_len);
+        let mut parent = NodeRef::new_internal(left.forget_type(), Global);
+        parent.borrow_mut().push((), (), right.forget_type());
+        assert_eq!(parent.height(), 2);
+        assert_eq!(parent.len(), 1);
+        parent
+    }
+
+    // Adds a third internal child so merging KV 0 also shifts parent edge 2 to edge 1 and repairs
+    // its backlink. Child K/V remain unit; non-ZST merge payload movement is covered by the leaf harness.
+    fn internal_merge_fixture_unit(left_len: usize, right_len: usize) -> UnitOwnedInternal {
+        let mut parent = internal_pair_fixture_unit::<CAPACITY>(left_len, right_len);
+        let spare: UnitOwnedInternal =
+            NodeRef::new_internal(UnitOwnedLeaf::new_leaf(Global).forget_type(), Global);
+        parent.borrow_mut().push((), (), spare.forget_type());
+        assert_eq!(parent.len(), 2);
+        parent
+    }
+
+    // Structural `do_merge` proof over the full legal occupancy domain. It verifies both the
+    // internal-child edge copy/backlink repair and the parent's trailing-edge shift/backlink repair.
+    // K/V are unit; non-ZST payload movement is covered by `harness_do_merge_leaf`. A fixed right
+    // edge is used as the moved-edge witness; arbitrary tracked edges are covered separately below.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn harness_do_merge_internal() {
+        // Full successful-merge occupancy domain, encoded with 8-bit symbols.
+        let left_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let right_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+
+        kani::assume(left_len + 1 + right_len <= CAPACITY);
+        kani::cover(
+            left_len + 1 + right_len <= CAPACITY,
+            "internal do_merge: merge precondition is reachable",
+        );
+
+        let new_left_len = left_len + 1 + right_len;
+        let mut parent = internal_merge_fixture_unit(left_len, right_len);
+
+        // Parent edge 2 must shift to edge 1 after merging KV 0.
+        let spare_before = parent.reborrow().last_edge().descend().node;
+
+        // Track right edge 0. Even a zero-length internal node has one initialized edge.
+        // do_merge must move this grandchild into the merged left internal node.
+        let moved_child_before = {
+            let right = unsafe { Handle::new_kv(parent.reborrow(), 0) }.right_edge().descend();
+            let right = match right.force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            unsafe { Handle::new_edge(right, 0) }.descend().node
+        };
+
+        let context = unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+        let shrunk_parent = context.merge_tracking_parent(Global);
+
+        // The parent started with two KVs. Removing KV 0 leaves the old KV 1 and
+        // shifts the old edge 2 (spare) to edge 1.
+        assert_eq!(shrunk_parent.len(), 1);
+
+        let shrunk_parent_ptr = shrunk_parent.node;
+        let spare_after = shrunk_parent.reborrow().last_edge().descend();
+        assert_eq!(spare_after.node, spare_before);
+
+        let spare_back = spare_after.ascend().ok().unwrap();
+        assert_eq!(spare_back.idx(), 1);
+        assert_eq!(spare_back.into_node().node, shrunk_parent_ptr);
+
+        let merged = match shrunk_parent.reborrow().first_edge().descend().force() {
+            ForceResult::Internal(node) => node,
+            ForceResult::Leaf(_) => panic!("internal merge returned a leaf"),
+        };
+
+        assert_eq!(merged.len(), new_left_len);
+
+        // Right edge 0 must be appended immediately after all old left-child edges.
+        let new_idx = left_len + 1;
+        let moved_after = unsafe { Handle::new_edge(merged, new_idx) }.descend();
+        assert_eq!(moved_after.node, moved_child_before);
+
+        // Verify the internal-only backlink repair.
+        let parent_edge = moved_after.ascend().ok().unwrap();
+        assert_eq!(parent_edge.idx(), new_idx);
+        assert_eq!(parent_edge.into_node().node, merged.node);
+
+        kani::cover(new_left_len == CAPACITY, "internal do_merge: merged child becomes full");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_merge_tracking_child_edge_leaf() {
+        let left_len = kani::any_where(|n: &usize| *n <= CAPACITY);
+        let right_len = kani::any_where(|n: &usize| *n <= CAPACITY);
+        kani::assume(left_len + 1 + right_len <= CAPACITY);
+        kani::cover(
+            left_len + 1 + right_len <= CAPACITY,
+            "leaf merge_tracking_child_edge: merge precondition is reachable",
+        );
+        let track_left = kani::any::<bool>();
+        let track_idx = kani::any_where(|n: &usize| *n <= CAPACITY);
+        kani::assume(if track_left { track_idx <= left_len } else { track_idx <= right_len });
+        kani::cover(
+            if track_left { track_idx <= left_len } else { track_idx <= right_len },
+            "leaf merge_tracking_child_edge: tracked-edge precondition is reachable",
+        );
+        let mut parent = leaf_balancing_fixture(left_len, right_len);
+        let context = unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+        let side =
+            if track_left { LeftOrRight::Left(track_idx) } else { LeftOrRight::Right(track_idx) };
+        let _edge = context.merge_tracking_child_edge(side, Global);
+        kani::cover(true, "merge_tracking_child_edge completed");
+    }
+
+    // Verifies arbitrary left/right tracked-edge translation through an internal merge, including
+    // child identity and the translated backlink. K/V are unit; payload movement is covered by the
+    // leaf harness, while parent trailing-edge shift/relink is covered by `harness_do_merge_internal`.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn harness_merge_tracking_child_edge_internal() {
+        let left_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let right_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        kani::assume(left_len + 1 + right_len <= CAPACITY);
+        kani::cover(
+            left_len + 1 + right_len <= CAPACITY,
+            "internal merge_tracking_child_edge: merge precondition is reachable",
+        );
+
+        let track_left = kani::any::<bool>();
+        let track_idx = usize::from(kani::any_where(|i: &u8| usize::from(*i) <= CAPACITY));
+        kani::assume(if track_left { track_idx <= left_len } else { track_idx <= right_len });
+        kani::cover(
+            if track_left { track_idx <= left_len } else { track_idx <= right_len },
+            "internal merge_tracking_child_edge: tracked-edge precondition is reachable",
+        );
+
+        let new_left_len = left_len + 1 + right_len;
+        let expected_idx = if track_left { track_idx } else { left_len + 1 + track_idx };
+        let mut parent = internal_pair_fixture_unit::<CAPACITY>(left_len, right_len);
+
+        let tracked_child_before = {
+            let kv = unsafe { Handle::new_kv(parent.reborrow(), 0) };
+            let child =
+                if track_left { kv.left_edge().descend() } else { kv.right_edge().descend() };
+            let child = match child.force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            unsafe { Handle::new_edge(child, track_idx) }.descend().node
+        };
+
+        let side =
+            if track_left { LeftOrRight::Left(track_idx) } else { LeftOrRight::Right(track_idx) };
+        let context = unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+        let tracked_edge = context.merge_tracking_child_edge(side, Global);
+
+        assert_eq!(tracked_edge.idx(), expected_idx);
+
+        let tracked_edge = match tracked_edge.force() {
+            ForceResult::Internal(edge) => edge,
+            ForceResult::Leaf(_) => panic!("internal merge returned an edge in a leaf"),
+        };
+
+        let merged = tracked_edge.reborrow().into_node();
+        assert_eq!(merged.len(), new_left_len);
+
+        let tracked_child_after = tracked_edge.reborrow().descend();
+        assert_eq!(tracked_child_after.node, tracked_child_before);
+
+        let parent_edge = tracked_child_after.ascend().ok().unwrap();
+        assert_eq!(parent_edge.idx(), expected_idx);
+        assert_eq!(parent_edge.into_node().node, merged.node);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_steal_left_leaf() {
+        let left_len = kani::any_where(|n: &usize| *n > 0 && *n <= CAPACITY);
+        let right_len = kani::any_where(|n: &usize| *n < CAPACITY);
+        let track_idx = kani::any_where(|n: &usize| *n <= right_len);
+        let mut parent = leaf_balancing_fixture(left_len, right_len);
+        let context = unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+        let _edge = context.steal_left(track_idx);
+        kani::cover(true, "steal_left completed");
+    }
+
+    // Verifies the single-entry left steal and the wrapper's returned tracked-edge translation:
+    // the stolen final-left edge becomes right edge 0, while an arbitrary old right edge shifts
+    // right by one with identity and backlink preserved. K/V are unit.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_steal_left_internal() {
+        // Source is non-empty; destination has room for the one stolen entry.
+        let left_len = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= CAPACITY
+        }));
+        let right_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let track_idx = usize::from(kani::any_where(|i: &u8| usize::from(*i) <= right_len));
+        let mut parent = internal_pair_fixture_unit::<{ CAPACITY + 1 }>(left_len, right_len);
+
+        // The old final left edge is stolen; an arbitrary old right edge shifts right by one.
+        let (stolen_before, tracked_before) = {
+            let kv = unsafe { Handle::new_kv(parent.reborrow(), 0) };
+            let left = match kv.left_edge().descend().force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            let right = match kv.right_edge().descend().force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            let stolen = unsafe { Handle::new_edge(left, left_len) }.descend().node;
+            let tracked = unsafe { Handle::new_edge(right, track_idx) }.descend().node;
+            (stolen, tracked)
+        };
+
+        {
+            let context =
+                unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+            let tracked_edge = context.steal_left(track_idx);
+
+            assert_eq!(tracked_edge.idx(), track_idx + 1);
+
+            let tracked_edge = match tracked_edge.force() {
+                ForceResult::Internal(edge) => edge,
+                ForceResult::Leaf(_) => panic!("internal steal_left returned an edge in a leaf"),
+            };
+
+            let right_after = tracked_edge.reborrow().into_node();
+            assert_eq!(right_after.len(), right_len + 1);
+
+            // Every pre-existing right edge shifts right by one.
+            let tracked_after = tracked_edge.reborrow().descend();
+            assert_eq!(tracked_after.node, tracked_before);
+            let tracked_parent = tracked_after.ascend().ok().unwrap();
+            assert_eq!(tracked_parent.idx(), track_idx + 1);
+            assert_eq!(tracked_parent.into_node().node, right_after.node);
+
+            // The old final left edge becomes right edge 0.
+            let stolen_after = unsafe { Handle::new_edge(right_after, 0) }.descend();
+            assert_eq!(stolen_after.node, stolen_before);
+            let stolen_parent = stolen_after.ascend().ok().unwrap();
+            assert_eq!(stolen_parent.idx(), 0);
+            assert_eq!(stolen_parent.into_node().node, right_after.node);
+        }
+
+        let left_after = match parent.reborrow().first_edge().descend().force() {
+            ForceResult::Internal(node) => node,
+            ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+        };
+        assert_eq!(left_after.len(), left_len - 1);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_steal_right_leaf() {
+        let left_len = kani::any_where(|n: &usize| *n < CAPACITY);
+        let right_len = kani::any_where(|n: &usize| *n > 0 && *n <= CAPACITY);
+        let track_idx = kani::any_where(|n: &usize| *n <= left_len);
+        let mut parent = leaf_balancing_fixture(left_len, right_len);
+        let context = unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+        let _edge = context.steal_right(track_idx);
+        kani::cover(true, "steal_right completed");
+    }
+
+    // Verifies the single-entry right steal and the wrapper's returned tracked edge: an arbitrary
+    // old left edge stays put, right edge 0 is appended to the left child, and old right edge 1
+    // shifts to edge 0 with identity and backlinks preserved. K/V are unit.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn harness_steal_right_internal() {
+        // Source is non-empty; destination has room for the one stolen entry.
+        let left_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let right_len = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= CAPACITY
+        }));
+        let track_idx = usize::from(kani::any_where(|i: &u8| usize::from(*i) <= left_len));
+        let mut parent = internal_pair_fixture_unit::<{ CAPACITY + 1 }>(left_len, right_len);
+
+        // The tracked left edge stays put, right edge 0 is stolen, and old right edge 1 shifts to 0.
+        let (tracked_before, stolen_before, shifted_before) = {
+            let kv = unsafe { Handle::new_kv(parent.reborrow(), 0) };
+            let left = match kv.left_edge().descend().force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            let right = match kv.right_edge().descend().force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            let tracked = unsafe { Handle::new_edge(left, track_idx) }.descend().node;
+            let stolen = unsafe { Handle::new_edge(right, 0) }.descend().node;
+            let shifted = unsafe { Handle::new_edge(right, 1) }.descend().node;
+            (tracked, stolen, shifted)
+        };
+
+        {
+            let context =
+                unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+            let tracked_edge = context.steal_right(track_idx);
+
+            assert_eq!(tracked_edge.idx(), track_idx);
+
+            let tracked_edge = match tracked_edge.force() {
+                ForceResult::Internal(edge) => edge,
+                ForceResult::Leaf(_) => panic!("internal steal_right returned an edge in a leaf"),
+            };
+
+            let left_after = tracked_edge.reborrow().into_node();
+            assert_eq!(left_after.len(), left_len + 1);
+
+            // The tracked old left edge does not move.
+            let tracked_after = tracked_edge.reborrow().descend();
+            assert_eq!(tracked_after.node, tracked_before);
+            let tracked_parent = tracked_after.ascend().ok().unwrap();
+            assert_eq!(tracked_parent.idx(), track_idx);
+            assert_eq!(tracked_parent.into_node().node, left_after.node);
+
+            // Old right edge 0 is appended after the old left edges.
+            let stolen_idx = left_len + 1;
+            let stolen_after = unsafe { Handle::new_edge(left_after, stolen_idx) }.descend();
+            assert_eq!(stolen_after.node, stolen_before);
+            let stolen_parent = stolen_after.ascend().ok().unwrap();
+            assert_eq!(stolen_parent.idx(), stolen_idx);
+            assert_eq!(stolen_parent.into_node().node, left_after.node);
+        }
+
+        let right_after = match parent.reborrow().last_edge().descend().force() {
+            ForceResult::Internal(node) => node,
+            ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+        };
+        assert_eq!(right_after.len(), right_len - 1);
+
+        // Old right edge 1 becomes right edge 0.
+        let shifted_after = unsafe { Handle::new_edge(right_after, 0) }.descend();
+        assert_eq!(shifted_after.node, shifted_before);
+        let shifted_parent = shifted_after.ascend().ok().unwrap();
+        assert_eq!(shifted_parent.idx(), 0);
+        assert_eq!(shifted_parent.into_node().node, right_after.node);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_bulk_steal_left_leaf() {
+        let left_len = kani::any_where(|n: &usize| *n > 0 && *n <= CAPACITY);
+        let right_len = kani::any_where(|n: &usize| *n <= CAPACITY);
+        let count = kani::any_where(|n: &usize| *n > 0 && *n <= left_len);
+        kani::assume(count <= CAPACITY - right_len);
+        kani::cover(
+            count <= CAPACITY - right_len,
+            "leaf bulk_steal_left: destination-capacity precondition is reachable",
+        );
+        let mut parent = leaf_balancing_fixture(left_len, right_len);
+        let mut context =
+            unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+        context.bulk_steal_left(count);
+        kani::cover(true, "bulk_steal_left completed");
+    }
+
+    // Verifies arbitrary-count internal left stealing over the full legal occupancy domain.
+    // An arbitrary moved left edge and an arbitrary pre-existing right edge retain identity and
+    // receive the expected translated backlinks. K/V are unit; payload movement is not checked here.
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_bulk_steal_left_internal() {
+        // Full legal source/destination occupancy domain with a symbolic positive count.
+        let left_len = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= CAPACITY
+        }));
+        let right_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let count = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= left_len
+        }));
+
+        kani::assume(count <= CAPACITY - right_len);
+        kani::cover(
+            count <= CAPACITY - right_len,
+            "internal bulk_steal_left: destination-capacity precondition is reachable",
+        );
+
+        // Keep arbitrary witnesses for both important classes of edge movement.
+        let moved_offset = usize::from(kani::any_where(|i: &u8| usize::from(*i) < count));
+        let check_right_idx = usize::from(kani::any_where(|i: &u8| usize::from(*i) <= right_len));
+
+        let new_left_len = left_len - count;
+        let new_right_len = right_len + count;
+        let moved_src_idx = new_left_len + 1 + moved_offset;
+        let shifted_dst_idx = count + check_right_idx;
+
+        let mut parent = internal_pair_fixture_unit::<{ CAPACITY + 1 }>(left_len, right_len);
+
+        // Snapshot an arbitrary stolen left edge and an arbitrary old right edge.
+        let (moved_before, shifted_before) = {
+            let kv = unsafe { Handle::new_kv(parent.reborrow(), 0) };
+            let left = match kv.left_edge().descend().force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            let right = match kv.right_edge().descend().force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            let moved = unsafe { Handle::new_edge(left, moved_src_idx) }.descend().node;
+            let shifted = unsafe { Handle::new_edge(right, check_right_idx) }.descend().node;
+            (moved, shifted)
+        };
+
+        {
+            let mut context =
+                unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+            context.bulk_steal_left(count);
+        }
+
+        let left_after = match parent.reborrow().first_edge().descend().force() {
+            ForceResult::Internal(node) => node,
+            ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+        };
+        let right_after = match parent.reborrow().last_edge().descend().force() {
+            ForceResult::Internal(node) => node,
+            ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+        };
+
+        assert_eq!(left_after.len(), new_left_len);
+        assert_eq!(right_after.len(), new_right_len);
+
+        // The stolen left edges become the first `count` right edges.
+        let moved_after = unsafe { Handle::new_edge(right_after, moved_offset) }.descend();
+        assert_eq!(moved_after.node, moved_before);
+        let moved_parent = moved_after.ascend().ok().unwrap();
+        assert_eq!(moved_parent.idx(), moved_offset);
+        assert_eq!(moved_parent.into_node().node, right_after.node);
+
+        // Every pre-existing right edge shifts right by `count`.
+        let shifted_after = unsafe { Handle::new_edge(right_after, shifted_dst_idx) }.descend();
+        assert_eq!(shifted_after.node, shifted_before);
+        let shifted_parent = shifted_after.ascend().ok().unwrap();
+        assert_eq!(shifted_parent.idx(), shifted_dst_idx);
+        assert_eq!(shifted_parent.into_node().node, right_after.node);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(13)]
+    fn harness_bulk_steal_right_leaf() {
+        let left_len = kani::any_where(|n: &usize| *n <= CAPACITY);
+        let right_len = kani::any_where(|n: &usize| *n > 0 && *n <= CAPACITY);
+        let count = kani::any_where(|n: &usize| *n > 0 && *n <= right_len);
+        kani::assume(count <= CAPACITY - left_len);
+        kani::cover(
+            count <= CAPACITY - left_len,
+            "leaf bulk_steal_right: destination-capacity precondition is reachable",
+        );
+        let mut parent = leaf_balancing_fixture(left_len, right_len);
+        let mut context =
+            unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+        context.bulk_steal_right(count);
+        kani::cover(true, "bulk_steal_right completed");
+    }
+
+    // Verifies arbitrary-count internal right stealing over the full legal occupancy domain.
+    // An arbitrary moved right edge and an arbitrary surviving right edge retain identity and
+    // receive the expected translated backlinks. K/V are unit; payload movement is not checked here.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn harness_bulk_steal_right_internal() {
+        // Full legal source/destination occupancy domain with a symbolic positive count.
+        let left_len = usize::from(kani::any_where(|n: &u8| usize::from(*n) < CAPACITY));
+        let right_len = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= CAPACITY
+        }));
+        let count = usize::from(kani::any_where(|n: &u8| {
+            usize::from(*n) > 0 && usize::from(*n) <= right_len
+        }));
+
+        kani::assume(count <= CAPACITY - left_len);
+        kani::cover(
+            count <= CAPACITY - left_len,
+            "internal bulk_steal_right: destination-capacity precondition is reachable",
+        );
+
+        // Arbitrary stolen edge plus arbitrary surviving right edge.
+        let moved_offset = usize::from(kani::any_where(|i: &u8| usize::from(*i) < count));
+
+        let new_left_len = left_len + count;
+        let new_right_len = right_len - count;
+        let check_right_idx =
+            usize::from(kani::any_where(|i: &u8| usize::from(*i) <= new_right_len));
+        let moved_dst_idx = left_len + 1 + moved_offset;
+        let shifted_src_idx = count + check_right_idx;
+
+        let mut parent = internal_pair_fixture_unit::<{ CAPACITY + 1 }>(left_len, right_len);
+
+        // Snapshot an arbitrary stolen right edge and an arbitrary right edge that survives the shift.
+        let (moved_before, shifted_before) = {
+            let right = unsafe { Handle::new_kv(parent.reborrow(), 0) }.right_edge().descend();
+            let right = match right.force() {
+                ForceResult::Internal(node) => node,
+                ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+            };
+            let moved = unsafe { Handle::new_edge(right, moved_offset) }.descend().node;
+            let shifted = unsafe { Handle::new_edge(right, shifted_src_idx) }.descend().node;
+            (moved, shifted)
+        };
+
+        {
+            let mut context =
+                unsafe { Handle::new_kv(parent.borrow_mut(), 0) }.consider_for_balancing();
+            context.bulk_steal_right(count);
+        }
+
+        let left_after = match parent.reborrow().first_edge().descend().force() {
+            ForceResult::Internal(node) => node,
+            ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+        };
+        let right_after = match parent.reborrow().last_edge().descend().force() {
+            ForceResult::Internal(node) => node,
+            ForceResult::Leaf(_) => panic!("height-two fixture must have internal children"),
+        };
+
+        assert_eq!(left_after.len(), new_left_len);
+        assert_eq!(right_after.len(), new_right_len);
+
+        // The first `count` old right edges are appended after the old left edges.
+        let moved_after = unsafe { Handle::new_edge(left_after, moved_dst_idx) }.descend();
+        assert_eq!(moved_after.node, moved_before);
+        let moved_parent = moved_after.ascend().ok().unwrap();
+        assert_eq!(moved_parent.idx(), moved_dst_idx);
+        assert_eq!(moved_parent.into_node().node, left_after.node);
+
+        // Every right edge that remains shifts left by `count`.
+        let shifted_after = unsafe { Handle::new_edge(right_after, check_right_idx) }.descend();
+        assert_eq!(shifted_after.node, shifted_before);
+        let shifted_parent = shifted_after.ascend().ok().unwrap();
+        assert_eq!(shifted_parent.idx(), check_right_idx);
+        assert_eq!(shifted_parent.into_node().node, right_after.node);
+    }
+}
