@@ -81,6 +81,8 @@ use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 #[cfg(not(no_global_oom_handling))]
 use core::iter;
+#[cfg(kani)]
+use core::kani;
 #[cfg(not(no_global_oom_handling))]
 use core::marker::Destruct;
 use core::marker::{Freeze, PhantomData};
@@ -4461,5 +4463,274 @@ mod verify {
         if k != index {
             assert!(vect[k] == arr[k]);
         }
+    }
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod kani_vec_harness_helpers {
+    use core::alloc::Layout;
+    use core::marker::PhantomData;
+    use core::{mem, ptr};
+
+    use super::{Vec, *};
+
+    pub(super) const MAX_ALLOCATION_BYTES: usize = 1 << 48;
+
+    pub(super) trait Shape: kani::Arbitrary {
+        fn fill_byte() -> u8 {
+            kani::any()
+        }
+    }
+
+    /// Shapes for which changing the logical IntoIter range does not skip
+    /// observable destructor effects.
+    ///
+    /// This trait is intentionally implemented only for the representative
+    /// no-Drop shapes used by the primary unbounded IntoIter harnesses.
+    pub(super) trait NoDropShape: Shape {}
+
+    impl Shape for () {}
+    impl NoDropShape for () {}
+
+    impl Shape for bool {
+        fn fill_byte() -> u8 {
+            kani::any_where(|value: &u8| *value <= 1)
+        }
+    }
+    impl NoDropShape for bool {}
+
+    macro_rules! impl_scalar_shape {
+        ($($ty:ty),+ $(,)?) => {
+            $(
+                impl Shape for $ty {}
+                impl NoDropShape for $ty {}
+            )+
+        };
+    }
+
+    impl_scalar_shape!(u8, u16, u32, u64, u128, usize);
+    impl_scalar_shape!(i8, i16, i32, i64, i128, isize);
+
+    impl<T: Shape, const N: usize> Shape for [T; N] {
+        fn fill_byte() -> u8 {
+            T::fill_byte()
+        }
+    }
+
+    impl<T: NoDropShape, const N: usize> NoDropShape for [T; N] {}
+
+    #[derive(kani::Arbitrary)]
+    #[repr(align(16))]
+    pub(super) struct Al16(u8);
+
+    impl Shape for Al16 {}
+    impl NoDropShape for Al16 {}
+
+    #[derive(kani::Arbitrary)]
+    #[repr(transparent)]
+    pub(super) struct WithDrop(u8);
+
+    impl Drop for WithDrop {
+        fn drop(&mut self) {
+            core::hint::black_box(self.0);
+        }
+    }
+
+    impl Shape for WithDrop {}
+
+    /// A general iterator whose lower bound intentionally does not predict the remaining count.
+    /// This keeps the default `from_iter` path on its real reserve/growth branch.
+    pub(super) struct UnderreportingIter<T> {
+        remaining: usize,
+        marker: PhantomData<T>,
+    }
+
+    impl<T> UnderreportingIter<T> {
+        pub(super) fn new(remaining: usize) -> Self {
+            Self { remaining, marker: PhantomData }
+        }
+    }
+
+    impl<T: kani::Arbitrary> Iterator for UnderreportingIter<T> {
+        type Item = T;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.remaining == 0 {
+                None
+            } else {
+                self.remaining -= 1;
+                Some(kani::any())
+            }
+        }
+
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (0, Some(self.remaining))
+        }
+    }
+
+    /// Position a non-ZST IntoIter at an arbitrary reachable front/back state.
+    ///
+    /// For ZSTs, a fresh IntoIter with an arbitrary symbolic length already
+    /// represents every reachable logical iterator state: ptr never moves and
+    /// only the encoded remaining length changes. Avoid additional wrapping
+    /// pointer arithmetic in that case.
+    pub(super) fn position_into_iter<T: NoDropShape>(iter: &mut super::IntoIter<T>) {
+        let initial_len = iter.len();
+
+        if mem::size_of::<T>() == 0 {
+            kani::cover(initial_len == 0, "IntoIter ZST state: empty");
+            kani::cover(initial_len > 0, "IntoIter ZST state: non-empty");
+            return;
+        }
+
+        let front = kani::any_where(|front: &usize| *front <= initial_len);
+        let after_front = initial_len - front;
+        let back = kani::any_where(|back: &usize| *back <= after_front);
+        let expected_len = after_front - back;
+
+        // SAFETY: front <= initial_len, so advancing ptr by front stays
+        // within the initialized iterator range.
+        iter.ptr = unsafe { iter.ptr.add(front) };
+
+        // SAFETY: back <= initial_len - front, so moving end backward
+        // cannot cross the already-advanced ptr.
+        iter.end = unsafe { iter.end.sub(back) };
+
+        assert!(iter.len() == expected_len, "position_into_iter: remaining length mismatch");
+
+        kani::cover(initial_len == 0, "IntoIter state: initially empty");
+        kani::cover(initial_len > 0 && front == 0 && back == 0, "IntoIter state: fresh non-empty");
+        kani::cover(front > 0, "IntoIter state: front consumed");
+        kani::cover(back > 0, "IntoIter state: back consumed");
+        kani::cover(front > 0 && back > 0, "IntoIter state: both ends consumed");
+        kani::cover(initial_len > 0 && expected_len == 0, "IntoIter state: exhausted");
+    }
+
+    pub(super) fn verifier_nondet_vec<T: Shape>() -> Vec<T> {
+        if mem::size_of::<T>() == 0 {
+            let mut v = Vec::<T>::new();
+            unsafe {
+                let sz: usize = kani::any();
+                v.len = sz;
+            }
+            return v;
+        }
+
+        let cap: usize = kani::any();
+        kani::assume(Layout::array::<T>(cap).is_ok());
+        kani::assume(
+            cap.checked_mul(mem::size_of::<T>()).is_some_and(|bytes| bytes <= MAX_ALLOCATION_BYTES),
+        );
+        let mut v = Vec::<T>::with_capacity(cap);
+        let len = kani::any_where(|len: &usize| *len <= v.capacity());
+        unsafe {
+            if len != 0 {
+                ptr::write_bytes(
+                    v.as_mut_ptr().cast::<u8>(),
+                    T::fill_byte(),
+                    mem::size_of::<T>() * len,
+                );
+            }
+            v.len = len;
+        }
+        v
+    }
+
+    /// Construct an IntoIter with an arbitrary verifier-representable length.
+    ///
+    /// Non-ZST vectors are already restricted by `verifier_nondet_vec` so their
+    /// backing allocation fits CBMC's pointer/object representation.
+    ///
+    /// IntoIter encodes a ZST's logical length in the byte-address difference
+    /// between `ptr` and `end`. Therefore ZST lengths must also fit the verifier's
+    /// pointer-offset representation. This is a verifier representation bound,
+    /// not a semantic small-vector bound.
+    pub(super) fn verifier_nondet_into_iter<T: NoDropShape>() -> super::IntoIter<T> {
+        if mem::size_of::<T>() == 0 {
+            let mut v = Vec::<T>::new();
+            let len = kani::any_where(|len: &usize| *len <= MAX_ALLOCATION_BYTES);
+            unsafe {
+                v.len = len;
+            }
+            return v.into_iter();
+        }
+
+        verifier_nondet_vec::<T>().into_iter()
+    }
+
+    // Constrain states so that `reserve(additional)` cannot fail with `CapacityOverflow`.
+    pub(super) fn assume_reserve_no_capacity_overflow<T>(
+        len: usize,
+        cap: usize,
+        additional: usize,
+    ) {
+        // Restrict the harness to executions in which `Vec::reserve`
+        // returns normally and every newly-created allocation is representable
+        // in CBMC's object model.
+        //
+        // These are proof-domain/modeling assumptions, not safety assumptions
+        // about the operation being verified. Both the no-growth and growth
+        // paths remain possible for non-ZST vectors.
+        assert!(len <= cap);
+
+        let elem_size = mem::size_of::<T>();
+
+        if elem_size == 0 {
+            assert_eq!(cap, usize::MAX);
+
+            // For a ZST, reserve succeeds exactly while the logical length
+            // addition remains representable.
+            let zst_len_ok = additional <= usize::MAX - len;
+            kani::assume(zst_len_ok);
+            kani::cover(
+                zst_len_ok,
+                "reserve assumption: ZST logical length addition is representable",
+            );
+
+            return;
+        }
+
+        let spare = cap - len;
+        if additional <= spare {
+            return;
+        }
+
+        // We are now on the real RawVec growth path.
+        kani::cover(additional > spare, "reserve model: non-ZST growth path is reachable");
+
+        let required_cap_ok = len.checked_add(additional).is_some();
+        kani::assume(required_cap_ok);
+        kani::cover(required_cap_ok, "reserve assumption: required capacity is representable");
+
+        let required_cap = len + additional;
+
+        // RawVec stores non-ZST capacity below the high usize bit, so its
+        // amortized doubling cannot overflow.
+        assert!(cap.checked_mul(2).is_some());
+        let doubled_cap = cap * 2;
+
+        let new_cap = core::cmp::max(
+            core::cmp::max(doubled_cap, required_cap),
+            RawVec::<T>::MIN_NON_ZERO_CAP,
+        );
+
+        // `RawVec::finish_grow` must be able to construct the target layout.
+        let growth_layout_ok = Layout::array::<T>(new_cap).is_ok();
+        kani::assume(growth_layout_ok);
+        kani::cover(
+            growth_layout_ok,
+            "reserve assumption: grown allocation layout is representable",
+        );
+
+        // This is a verifier representation bound only.
+        let growth_object_model_ok =
+            new_cap.checked_mul(elem_size).is_some_and(|bytes| bytes <= MAX_ALLOCATION_BYTES);
+
+        kani::assume(growth_object_model_ok);
+        kani::cover(
+            growth_object_model_ok,
+            "reserve assumption: grown allocation fits the CBMC object model",
+        );
     }
 }
