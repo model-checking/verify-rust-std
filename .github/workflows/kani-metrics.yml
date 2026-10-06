@@ -4,52 +4,175 @@ on:
   schedule:
     - cron: '0 0 * * 0'  # Run at 00:00 UTC every Sunday
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate a real run and upload artifacts only (required for forks/non-main branches)'
+        type: boolean
+        default: true
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kani-metrics-update
+  cancel-in-progress: false
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  update-kani-metrics:
+  collect:
+    if: >-
+      (github.repository == 'model-checking/verify-rust-std' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Remove unnecessary software to free up disk space
+        run: |
+          # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
+          df -h
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+
+      # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Test collector packaging and failure handling
+        run: python3 dashboard/tests/collector.test.py
+      - name: Compute Kani Metrics and capture dashboard inputs
+        run: |
+          set -euo pipefail
+          python3 scripts/collect-autoharness-dashboard.py \
+            --work-dir "$GITHUB_WORKSPACE" --output-dir "$RUNNER_TEMP/dashboard-raw"
+      - name: Preserve inputs or failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoharness-raw-${{ github.run_id }}-${{ github.run_attempt }}-x86_64-unknown-linux-gnu
+          path: ${{ runner.temp }}/dashboard-raw/
+          if-no-files-found: error
+          retention-days: 30
+
+  validate:
+    needs: collect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: autoharness-raw-${{ github.run_id }}-${{ github.run_attempt }}-x86_64-unknown-linux-gnu
+          path: ${{ runner.temp }}/dashboard-raw
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+        working-directory: dashboard
+      - name: Test and convert the captured run
+        working-directory: dashboard
+        run: |
+          set -euo pipefail
+          npm test
+          node scripts/build-autoharness-dashboard.mjs \
+            --input-dir "$RUNNER_TEMP/dashboard-raw" --output-dir "$RUNNER_TEMP/dashboard-generated"
+          node scripts/write-update-summary.mjs \
+            --previous-dir public/data --data-dir "$RUNNER_TEMP/dashboard-generated" \
+            --output "$RUNNER_TEMP/dashboard-pr.md"
+          cp "$RUNNER_TEMP/dashboard-generated/"*.json public/data/
+          npm run validate:data -- --require-ready
+          if [ "$SOURCE_REPOSITORY" = 'model-checking/verify-rust-std' ]; then
+            npm run validate:data -- --require-ready --require-official
+          fi
+          npm run typecheck
+          npm run generate
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          NUXT_APP_BASE_URL: /verify-rust-std/dashboard/
+      - name: Package only reviewed update paths
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dashboard-update/dashboard/public/data"
+          mkdir -p "$RUNNER_TEMP/dashboard-update/scripts/kani-std-analysis"
+          cp dashboard/public/data/autoharness-{dashboard,functions}.json "$RUNNER_TEMP/dashboard-update/dashboard/public/data/"
+          for crate in core alloc std; do
+            cp "$RUNNER_TEMP/dashboard-raw/metrics/metrics-data-$crate.json" "$RUNNER_TEMP/dashboard-update/scripts/kani-std-analysis/"
+          done
+          cp "$RUNNER_TEMP/dashboard-pr.md" "$RUNNER_TEMP/dashboard-update/pr-body.md"
+          cat "$RUNNER_TEMP/dashboard-pr.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: autoharness-update-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dashboard-update/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload generated dashboard for local preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoharness-preview-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dashboard/.output/public
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
+  update-pr:
+    if: >-
+      github.repository == 'model-checking/verify-rust-std' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
+    needs: validate
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
-    if: github.repository == 'model-checking/verify-rust-std'
-    runs-on: ubuntu-latest
-    
     steps:
-    - name: Remove unnecessary software to free up disk space
-      run: |
-        # inspired by https://github.com/easimon/maximize-build-space/blob/master/action.yml
-        df -h
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /usr/local/.ghcup
-        df -h
-
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        submodules: true
-    
-    # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.x'
-
-    - name: Compute Kani Metrics
-      run: |
-        ./scripts/run-kani.sh --run metrics --with-autoharness --path ${{github.workspace}}
-        rm kani-list.json
-
-    - name: Create Pull Request
-      uses: peter-evans/create-pull-request@v7
-      with:
-        commit-message: Update Kani metrics
-        title: 'Update Kani Metrics'
-        body: |
-          This is an automated PR to update Kani metrics.
-          
-          The metrics have been updated by running `./scripts/run-kani.sh --run metrics`.
-        branch: update-kani-metrics
-        delete-branch: true
-        base: main
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Reject a stale source checkout
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          if [ "$(git rev-parse HEAD)" != "$SOURCE_SHA" ]; then
+            echo 'main changed during analysis. Rerun on main instead of overwriting newer metrics.' >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: autoharness-update-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dashboard-update
+      - name: Apply validated data
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/dashboard-update/dashboard/public/data/"*.json dashboard/public/data/
+          for crate in core alloc std; do
+            cp "$RUNNER_TEMP/dashboard-update/scripts/kani-std-analysis/metrics-data-$crate.json" scripts/kani-std-analysis/
+          done
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: Update Kani metrics and autoharness dashboard data
+          title: 'Update Kani metrics and autoharness dashboard data'
+          body-path: ${{ runner.temp }}/dashboard-update/pr-body.md
+          branch: update-kani-metrics
+          delete-branch: true
+          base: main
+          add-paths: |
+            dashboard/public/data/autoharness-dashboard.json
+            dashboard/public/data/autoharness-functions.json
+            scripts/kani-std-analysis/metrics-data-core.json
+            scripts/kani-std-analysis/metrics-data-alloc.json
+            scripts/kani-std-analysis/metrics-data-std.json
