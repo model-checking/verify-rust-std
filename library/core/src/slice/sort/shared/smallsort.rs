@@ -1,5 +1,7 @@
 //! This module contains a variety of sort implementations that are optimized for small lengths.
 
+#[cfg(kani)]
+use crate::kani;
 use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::slice::sort::shared::FreezeMarker;
 use crate::{hint, intrinsics, ptr, slice};
@@ -377,6 +379,40 @@ where
 /// types. `is_less` could be a huge function and we want to give the compiler an option to
 /// not inline this function. For the same reasons that this function is very perf critical
 /// it should be in the same module as the functions that use it.
+#[safety::requires(
+    size_of::<T>() == 0
+        || (
+            a_pos <= isize::MAX as usize / size_of::<T>()
+                && b_pos <= isize::MAX as usize / size_of::<T>()
+        )
+)]
+#[safety::requires({
+    let v_a = v_base.wrapping_add(a_pos);
+    let v_b = v_base.wrapping_add(b_pos);
+
+    if size_of::<T>() == 0 {
+        !v_base.is_null()
+            && crate::ub_checks::can_dereference(v_a)
+            && crate::ub_checks::can_dereference(v_b)
+            && crate::ub_checks::can_write(v_a)
+            && crate::ub_checks::can_write(v_b)
+    } else {
+        crate::ub_checks::same_allocation(v_base, v_a)
+            && crate::ub_checks::same_allocation(v_base, v_b)
+            && crate::ub_checks::can_dereference(v_a)
+            && crate::ub_checks::can_dereference(v_b)
+            && crate::ub_checks::can_write(v_a)
+            && crate::ub_checks::can_write(v_b)
+    }
+})]
+#[cfg_attr(
+    kani,
+    kani::modifies(
+        v_base.wrapping_add(a_pos),
+        v_base.wrapping_add(b_pos),
+        is_less
+    )
+)]
 unsafe fn swap_if_less<T, F>(v_base: *mut T, a_pos: usize, b_pos: usize, is_less: &mut F)
 where
     F: FnMut(&T, &T) -> bool,
@@ -603,6 +639,20 @@ pub fn insertion_sort_shift_left<T, F: FnMut(&T, &T) -> bool>(
 
 /// SAFETY: The caller MUST guarantee that `v_base` is valid for 4 reads and
 /// `dst` is valid for 4 writes. The result will be stored in `dst[0..4]`.
+#[safety::requires(crate::ub_checks::can_dereference(crate::ptr::slice_from_raw_parts(
+    v_base, 4
+)))]
+#[safety::requires(crate::ub_checks::can_write(crate::ptr::slice_from_raw_parts_mut(dst, 4)))]
+#[safety::requires(crate::ub_checks::maybe_is_nonoverlapping(
+    v_base as *const (),
+    dst as *const (),
+    size_of::<T>(),
+    4,
+))]
+#[cfg_attr(kani, kani::modifies(crate::ptr::slice_from_raw_parts_mut(dst, 4), is_less))]
+#[safety::ensures(|_| crate::ub_checks::can_dereference(
+    crate::ptr::slice_from_raw_parts(dst as *const T, 4)
+))]
 pub unsafe fn sort4_stable<T, F: FnMut(&T, &T) -> bool>(
     v_base: *const T,
     dst: *mut T,
@@ -858,4 +908,633 @@ fn panic_on_ord_violation() -> ! {
 pub(crate) const fn has_efficient_in_place_swap<T>() -> bool {
     // Heuristic that holds true on all tested 64-bit capable architectures.
     size_of::<T>() <= 8 // size_of::<u64>()
+}
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use super::*;
+    use crate::cell::Cell;
+
+    struct NonCopyU8(u8);
+
+    const LARGE_ELEMENT_SIZE: usize = 87;
+
+    struct LargeNonCopy([u8; LARGE_ELEMENT_SIZE]);
+
+    fn is_sorted_by_key<T, K: PartialOrd, F: Fn(&T) -> K>(v: &[T], key: F) -> bool {
+        let mut i = 1;
+        while i < v.len() {
+            if key(&v[i]) < key(&v[i - 1]) {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    fn count_by_key<T, K: PartialEq, F: Fn(&T) -> K>(v: &[T], key: F, probe: &K) -> usize {
+        let mut count = 0;
+        let mut i = 0;
+        while i < v.len() {
+            count += (key(&v[i]) == *probe) as usize;
+            i += 1;
+        }
+        count
+    }
+
+    fn assert_permutation_by_key<
+        T,
+        U,
+        K: PartialEq + kani::Arbitrary,
+        F: Fn(&T) -> K,
+        G: Fn(&U) -> K,
+    >(
+        before: &[T],
+        after: &[U],
+        before_key: F,
+        after_key: G,
+    ) {
+        assert_eq!(before.len(), after.len());
+        let probe: K = kani::any();
+        assert_eq!(
+            count_by_key(before, &before_key, &probe),
+            count_by_key(after, &after_key, &probe),
+        );
+    }
+
+    fn nondeterministic_cmp<T>(_: &T, _: &T) -> bool {
+        kani::any()
+    }
+
+    // ---------------------------------------------------------------------
+    // Safety contracts for the raw-pointer and public helper functions.
+    // ---------------------------------------------------------------------
+
+    macro_rules! gen_swap_if_less_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(swap_if_less)]
+            fn $name() {
+                let mut values: [$ty; 13] = kani::any();
+                let a_pos = kani::any::<u8>() as usize;
+                let b_pos = kani::any::<u8>() as usize;
+                let decision: bool = kani::any();
+                let mut calls = 0u8;
+                let mut is_less = move |_: &$ty, _: &$ty| {
+                    calls = calls.wrapping_add(1);
+                    decision
+                };
+                unsafe {
+                    swap_if_less(values.as_mut_ptr(), a_pos, b_pos, &mut is_less);
+                }
+                kani::cover(true, "swap_if_less call completes");
+                kani::cover(a_pos == b_pos, "equal positions are reachable");
+                kani::cover(a_pos != b_pos, "distinct positions are reachable");
+                kani::cover(
+                    a_pos == 0 && b_pos == 12,
+                    "maximum real call-site distance is reachable",
+                );
+                kani::cover(decision, "swap branch is reachable");
+                kani::cover(!decision, "no-swap branch is reachable");
+            }
+        };
+    }
+
+    gen_swap_if_less_harness!(harness_swap_if_less_u8, u8);
+    gen_swap_if_less_harness!(harness_swap_if_less_u128, u128);
+
+    #[kani::proof]
+    fn harness_swap_if_less_unit() {
+        let mut values = [(); 13];
+        let a_pos = kani::any::<u8>() as usize;
+        let b_pos = kani::any::<u8>() as usize;
+        kani::assume(a_pos < 13 && b_pos < 13);
+        kani::cover(a_pos < 13 && b_pos < 13, "valid ZST positions are reachable");
+        let mut is_less = nondeterministic_cmp::<()>;
+        unsafe {
+            swap_if_less(values.as_mut_ptr(), a_pos, b_pos, &mut is_less);
+        }
+        kani::cover(true, "ZST swap_if_less call completes");
+        kani::cover(a_pos == b_pos, "equal ZST positions are reachable");
+        kani::cover(a_pos != b_pos, "distinct ZST positions are reachable");
+        kani::cover(a_pos == 0 && b_pos == 12, "maximum real call-site distance is reachable");
+    }
+
+    macro_rules! gen_sort4_stable_contract_harness {
+        ($name:ident, $ty:ty) => {
+            #[kani::proof_for_contract(sort4_stable)]
+            fn $name() {
+                let input: [$ty; 4] = kani::any();
+                let mut output = [const { MaybeUninit::<$ty>::uninit() }; 4];
+                let mut calls = 0u8;
+                let mut is_less = move |_: &$ty, _: &$ty| {
+                    calls = calls.wrapping_add(1);
+                    kani::any::<bool>()
+                };
+                unsafe {
+                    sort4_stable(input.as_ptr(), output.as_mut_ptr().cast::<$ty>(), &mut is_less);
+                }
+                kani::cover(true, "sort4_stable call completes");
+            }
+        };
+    }
+
+    gen_sort4_stable_contract_harness!(harness_sort4_stable_u8, u8);
+    gen_sort4_stable_contract_harness!(harness_sort4_stable_u128, u128);
+
+    #[kani::proof]
+    fn harness_sort4_stable_unit() {
+        let input = [(); 4];
+        let mut output = [const { MaybeUninit::<()>::uninit() }; 4];
+        let mut is_less = nondeterministic_cmp::<()>;
+        unsafe {
+            sort4_stable(input.as_ptr(), output.as_mut_ptr().cast::<()>(), &mut is_less);
+        }
+        kani::cover(true, "ZST sort4_stable call completes");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(19)]
+    fn harness_insertion_sort_shift_left() {
+        const MAX_LEN: usize = 17;
+        let mut backing: [i32; MAX_LEN] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= MAX_LEN);
+        kani::cover(len == 1, "minimum length is reachable");
+        kani::cover(len == 16, "fallback threshold is reachable");
+        kani::cover(len == 17, "maximum network insertion region is reachable");
+        let offset: usize = kani::any();
+        kani::assume(offset >= 1 && offset <= len);
+        kani::cover(offset == 1, "minimum offset is reachable");
+        kani::cover(offset == len, "maximum offset is reachable");
+        let mut is_less = nondeterministic_cmp::<i32>;
+        insertion_sort_shift_left(&mut backing[..len], offset, &mut is_less);
+        kani::cover(true, "insertion_sort_shift_left completes");
+    }
+
+    #[kani::proof]
+    fn harness_has_efficient_in_place_swap() {
+        assert!(has_efficient_in_place_swap::<()>());
+        assert!(has_efficient_in_place_swap::<u8>());
+        assert!(has_efficient_in_place_swap::<u16>());
+        assert!(has_efficient_in_place_swap::<u32>());
+        assert!(has_efficient_in_place_swap::<u64>());
+        assert!(!has_efficient_in_place_swap::<u128>());
+        assert!(!has_efficient_in_place_swap::<[u8; 9]>());
+        assert!(has_efficient_in_place_swap::<Cell<u32>>());
+
+        kani::cover(true, "has_efficient_in_place_swap harness completes");
+    }
+
+    // ---------------------------------------------------------------------
+    // Symbolic length and specialization coverage for the three trait APIs.
+    // ---------------------------------------------------------------------
+
+    #[kani::proof]
+    #[kani::unwind(18)]
+    fn harness_stable_small_sort_nonfreeze() {
+        const MAX_LEN: usize = SMALL_SORT_FALLBACK_THRESHOLD;
+
+        let mut backing: [Cell<i32>; MAX_LEN] = crate::array::from_fn(|_| Cell::new(kani::any()));
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_LEN);
+        kani::cover(len == MAX_LEN, "full non-Freeze threshold is reachable");
+        kani::cover(len == 0, "empty slice is reachable");
+        kani::cover(len == 1, "single-element slice is reachable");
+        kani::cover(len == 2, "insertion path is reachable");
+        let mut scratch =
+            [const { MaybeUninit::<Cell<i32>>::uninit() }; SMALL_SORT_GENERAL_SCRATCH_LEN];
+        let mut is_less = nondeterministic_cmp::<Cell<i32>>;
+        <Cell<i32> as StableSmallSortTypeImpl>::small_sort(
+            &mut backing[..len],
+            &mut scratch,
+            &mut is_less,
+        );
+        kani::cover(true, "Stable non-Freeze small_sort completes");
+    }
+
+    macro_rules! gen_stable_freeze_harness {
+        (
+            $name:ident,
+            $ty:ty,
+            $less:expr,
+            $key:expr
+        ) => {
+            #[kani::proof]
+            #[kani::unwind(34)]
+            #[kani::solver(kissat)]
+            fn $name() {
+                const MAX_LEN: usize = SMALL_SORT_GENERAL_THRESHOLD;
+
+                let mut values: [$ty; MAX_LEN] = kani::any();
+                let before = values;
+
+                let len_u8: u8 = kani::any();
+                kani::assume(len_u8 <= MAX_LEN as u8);
+                let len = len_u8 as usize;
+
+                assert_eq!(<$ty as StableSmallSortTypeImpl>::small_sort_threshold(), MAX_LEN,);
+
+                kani::cover(len_u8 == 0, "empty slice is reachable");
+                kani::cover(len_u8 == 8, "sort4 threshold is reachable");
+                kani::cover(len_u8 == 16, "length 16 is reachable");
+                kani::cover(len_u8 == 17, "odd split is reachable");
+                kani::cover(len_u8 == MAX_LEN as u8, "full Stable Freeze threshold is reachable");
+
+                let mut scratch = [MaybeUninit::<$ty>::uninit(); SMALL_SORT_GENERAL_SCRATCH_LEN];
+
+                let mut is_less = $less;
+
+                <$ty as StableSmallSortTypeImpl>::small_sort(
+                    &mut values[..len],
+                    &mut scratch,
+                    &mut is_less,
+                );
+
+                // Sorting postcondition.
+                assert!(is_sorted_by_key(&values[..len], $key,));
+
+                // Permutation postcondition.
+                assert_permutation_by_key(
+                    &before[..len],
+                    &values[..len],
+                    |x: &$ty| *x,
+                    |x: &$ty| *x,
+                );
+
+                // Reaching here also means Kani found no UB on this path.
+                kani::cover(true, "Stable Freeze UB + sortedness + permutation");
+            }
+        };
+    }
+
+    gen_stable_freeze_harness!(
+        harness_stable_small_sort_freeze_small,
+        u8,
+        |a: &u8, b: &u8| a < b,
+        |x: &u8| *x
+    );
+    gen_stable_freeze_harness!(
+        harness_stable_small_sort_freeze_large,
+        [u8; 17],
+        |a: &[u8; 17], b: &[u8; 17]| a[0] < b[0],
+        |x: &[u8; 17]| x[0]
+    );
+
+    #[kani::proof]
+    #[kani::unwind(18)]
+    fn harness_stable_small_sort_nonfreeze_sorted() {
+        const MAX_LEN: usize = SMALL_SORT_FALLBACK_THRESHOLD;
+
+        let mut values: [Cell<u8>; MAX_LEN] = crate::array::from_fn(|_| Cell::new(kani::any()));
+
+        let len_u8: u8 = kani::any();
+        kani::assume(len_u8 <= MAX_LEN as u8);
+        kani::cover(len_u8 == MAX_LEN as u8, "full sortedness domain is reachable");
+        kani::cover(len_u8 == 0, "empty slice is reachable");
+        kani::cover(len_u8 == 1, "single-element slice is reachable");
+
+        let len = len_u8 as usize;
+
+        let mut scratch: [MaybeUninit<Cell<u8>>; 0] = [];
+
+        <Cell<u8> as StableSmallSortTypeImpl>::small_sort(
+            &mut values[..len],
+            &mut scratch,
+            &mut |a: &Cell<u8>, b: &Cell<u8>| a.get() < b.get(),
+        );
+
+        if len_u8 >= 2 {
+            let i: u8 = kani::any();
+
+            kani::assume(i < len_u8 - 1);
+            kani::cover(i < len_u8 - 1, "an arbitrary adjacent output pair is reachable");
+
+            let i = i as usize;
+
+            assert!(values[i].get() <= values[i + 1].get(), "output must be nondecreasing",);
+        }
+
+        kani::cover(true, "Stable non-Freeze sortedness proven for symbolic length");
+    }
+
+    #[derive(Clone, Copy)]
+    struct Tagged {
+        key: u8,
+        tag: u8,
+    }
+
+    macro_rules! stable_nonfreeze_permutation {
+        ($name:ident, $len:expr, $unwind:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            fn $name() {
+                const LEN: usize = $len;
+
+                let mut values: [Cell<Tagged>; LEN] =
+                    crate::array::from_fn(|i| Cell::new(Tagged { key: kani::any(), tag: i as u8 }));
+
+                let mut scratch: [MaybeUninit<Cell<Tagged>>; 0] = [];
+
+                <Cell<Tagged> as StableSmallSortTypeImpl>::small_sort(
+                    &mut values,
+                    &mut scratch,
+                    &mut |a: &Cell<Tagged>, b: &Cell<Tagged>| a.get().key < b.get().key,
+                );
+
+                let mut mask = 0u32;
+
+                for value in &values {
+                    mask |= 1u32 << value.get().tag;
+                }
+
+                assert_eq!(mask, if LEN == 0 { 0 } else { (1u32 << LEN) - 1 },);
+
+                kani::cover(true, "permutation proof completes");
+            }
+        };
+    }
+
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_0, 0, 2);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_1, 1, 3);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_2, 2, 4);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_3, 3, 5);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_4, 4, 6);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_5, 5, 7);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_6, 6, 8);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_7, 7, 9);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_8, 8, 10);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_9, 9, 11);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_10, 10, 12);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_11, 11, 13);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_12, 12, 14);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_13, 13, 15);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_14, 14, 16);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_15, 15, 17);
+    stable_nonfreeze_permutation!(stable_nonfreeze_perm_16, 16, 18);
+
+    macro_rules! gen_unstable_copy_route_harness {
+        (
+            $name:ident,
+            $trait_name:ident,
+            $ty:ty,
+            $max_len:expr,
+            $unwind:literal,
+            $less:expr,
+            $key:expr
+        ) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(kissat)]
+            fn $name() {
+                const MAX_LEN: usize = $max_len;
+
+                let mut values: [$ty; MAX_LEN] = kani::any();
+                let before = values;
+
+                let len_u8: u8 = kani::any();
+                kani::assume(len_u8 <= MAX_LEN as u8);
+                let len = len_u8 as usize;
+
+                assert_eq!(<$ty as $trait_name>::small_sort_threshold(), MAX_LEN,);
+
+                kani::cover(len_u8 == 0, "empty slice is reachable");
+                kani::cover(len_u8 == MAX_LEN as u8, "full route threshold is reachable");
+
+                let mut is_less = $less;
+
+                <$ty as $trait_name>::small_sort(&mut values[..len], &mut is_less);
+
+                assert!(is_sorted_by_key(&values[..len], $key,));
+
+                assert_permutation_by_key(
+                    &before[..len],
+                    &values[..len],
+                    |x: &$ty| *x,
+                    |x: &$ty| *x,
+                );
+
+                kani::cover(true, "UB + sortedness + permutation");
+            }
+        };
+    }
+
+    gen_unstable_copy_route_harness!(
+        harness_unstable_small_sort_copy_network,
+        UnstableSmallSortTypeImpl,
+        u8,
+        SMALL_SORT_NETWORK_THRESHOLD,
+        34,
+        |a: &u8, b: &u8| a < b,
+        |x: &u8| *x
+    );
+    gen_unstable_copy_route_harness!(
+        harness_unstable_small_sort_copy_general,
+        UnstableSmallSortTypeImpl,
+        u128,
+        SMALL_SORT_GENERAL_THRESHOLD,
+        34,
+        |a: &u128, b: &u128| a < b,
+        |x: &u128| *x
+    );
+    gen_unstable_copy_route_harness!(
+        harness_unstable_small_sort_copy_general_large_element,
+        UnstableSmallSortTypeImpl,
+        [u8; 17],
+        SMALL_SORT_GENERAL_THRESHOLD,
+        34,
+        |a: &[u8; 17], b: &[u8; 17]| a[0] < b[0],
+        |x: &[u8; 17]| x[0]
+    );
+    gen_unstable_copy_route_harness!(
+        harness_unstable_small_sort_copy_fallback,
+        UnstableSmallSortTypeImpl,
+        [u8; LARGE_ELEMENT_SIZE],
+        SMALL_SORT_FALLBACK_THRESHOLD,
+        18,
+        |a: &[u8; LARGE_ELEMENT_SIZE], b: &[u8; LARGE_ELEMENT_SIZE]| a[0] < b[0],
+        |x: &[u8; LARGE_ELEMENT_SIZE]| x[0]
+    );
+
+    macro_rules! gen_unstable_noncopy_route_harness {
+        (
+            $name:ident,
+            $trait_name:ident,
+            $ty:ty,
+            $snapshot_ty:ty,
+            $max_len:expr,
+            $unwind:literal,
+            $constructor:expr,
+            $less:expr,
+            $key:expr,
+            $snapshot:expr
+        ) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            #[kani::solver(kissat)]
+            fn $name() {
+                const MAX_LEN: usize = $max_len;
+
+                let mut values: [$ty; MAX_LEN] = crate::array::from_fn(|_| $constructor);
+
+                let before: [$snapshot_ty; MAX_LEN] =
+                    crate::array::from_fn(|i| ($snapshot)(&values[i]));
+
+                let len_u8: u8 = kani::any();
+                kani::assume(len_u8 <= MAX_LEN as u8);
+                let len = len_u8 as usize;
+
+                assert_eq!(<$ty as $trait_name>::small_sort_threshold(), MAX_LEN,);
+
+                kani::cover(len_u8 == 0, "empty slice is reachable");
+                kani::cover(len_u8 == MAX_LEN as u8, "full route threshold is reachable");
+
+                let mut is_less = $less;
+
+                <$ty as $trait_name>::small_sort(&mut values[..len], &mut is_less);
+
+                assert!(is_sorted_by_key(&values[..len], $key,));
+
+                assert_permutation_by_key(
+                    &before[..len],
+                    &values[..len],
+                    |x: &$snapshot_ty| *x,
+                    $snapshot,
+                );
+
+                kani::cover(true, "UB + sortedness + permutation");
+            }
+        };
+    }
+
+    gen_unstable_noncopy_route_harness!(
+        harness_unstable_small_sort_noncopy_general,
+        UnstableSmallSortTypeImpl,
+        NonCopyU8,
+        u8,
+        SMALL_SORT_GENERAL_THRESHOLD,
+        34,
+        NonCopyU8(kani::any()),
+        |a: &NonCopyU8, b: &NonCopyU8| a.0 < b.0,
+        |x: &NonCopyU8| x.0,
+        |x: &NonCopyU8| x.0
+    );
+    gen_unstable_noncopy_route_harness!(
+        harness_unstable_small_sort_noncopy_fallback,
+        UnstableSmallSortTypeImpl,
+        LargeNonCopy,
+        [u8; LARGE_ELEMENT_SIZE],
+        SMALL_SORT_FALLBACK_THRESHOLD,
+        18,
+        LargeNonCopy(kani::any()),
+        |a: &LargeNonCopy, b: &LargeNonCopy| a.0[0] < b.0[0],
+        |x: &LargeNonCopy| x.0[0],
+        |x: &LargeNonCopy| x.0
+    );
+
+    #[kani::proof]
+    #[kani::unwind(18)]
+    #[kani::solver(kissat)]
+    fn harness_unstable_small_sort_nonfreeze() {
+        const MAX_LEN: usize = SMALL_SORT_FALLBACK_THRESHOLD;
+
+        let mut values: [Cell<u8>; MAX_LEN] = crate::array::from_fn(|_| Cell::new(kani::any()));
+
+        let before: [u8; MAX_LEN] = crate::array::from_fn(|i| values[i].get());
+
+        let len_u8: u8 = kani::any();
+        kani::assume(len_u8 <= MAX_LEN as u8);
+        let len = len_u8 as usize;
+
+        assert_eq!(<Cell<u8> as UnstableSmallSortTypeImpl>::small_sort_threshold(), MAX_LEN,);
+
+        kani::cover(len_u8 == 0, "empty non-Freeze slice is reachable");
+        kani::cover(len_u8 == MAX_LEN as u8, "full non-Freeze threshold is reachable");
+
+        <Cell<u8> as UnstableSmallSortTypeImpl>::small_sort(&mut values[..len], &mut |a: &Cell<
+            u8,
+        >,
+                                                                                      b: &Cell<
+            u8,
+        >| {
+            a.get() < b.get()
+        });
+
+        assert!(is_sorted_by_key(&values[..len], |x: &Cell<u8>| x.get(),));
+
+        assert_permutation_by_key(
+            &before[..len],
+            &values[..len],
+            |x: &u8| *x,
+            |x: &Cell<u8>| x.get(),
+        );
+
+        kani::cover(true, "Unstable non-Freeze UB + sortedness + permutation");
+    }
+
+    // <T as UnstableSmallSortFreezeTypeImpl>::small_sort
+    gen_unstable_copy_route_harness!(
+        harness_unstable_freeze_small_sort_copy_network,
+        UnstableSmallSortFreezeTypeImpl,
+        u8,
+        SMALL_SORT_NETWORK_THRESHOLD,
+        34,
+        |a: &u8, b: &u8| a < b,
+        |x: &u8| *x
+    );
+
+    gen_unstable_copy_route_harness!(
+        harness_unstable_freeze_small_sort_copy_general,
+        UnstableSmallSortFreezeTypeImpl,
+        u128,
+        SMALL_SORT_GENERAL_THRESHOLD,
+        34,
+        |a: &u128, b: &u128| a < b,
+        |x: &u128| *x
+    );
+    gen_unstable_copy_route_harness!(
+        harness_unstable_freeze_small_sort_copy_general_large_element,
+        UnstableSmallSortFreezeTypeImpl,
+        [u8; 17],
+        SMALL_SORT_GENERAL_THRESHOLD,
+        34,
+        |a: &[u8; 17], b: &[u8; 17]| a[0] < b[0],
+        |x: &[u8; 17]| x[0]
+    );
+
+    gen_unstable_copy_route_harness!(
+        harness_unstable_freeze_small_sort_copy_fallback,
+        UnstableSmallSortFreezeTypeImpl,
+        [u8; LARGE_ELEMENT_SIZE],
+        SMALL_SORT_FALLBACK_THRESHOLD,
+        18,
+        |a: &[u8; LARGE_ELEMENT_SIZE], b: &[u8; LARGE_ELEMENT_SIZE]| a[0] < b[0],
+        |x: &[u8; LARGE_ELEMENT_SIZE]| x[0]
+    );
+
+    gen_unstable_noncopy_route_harness!(
+        harness_unstable_freeze_small_sort_noncopy_general,
+        UnstableSmallSortFreezeTypeImpl,
+        NonCopyU8,
+        u8,
+        SMALL_SORT_GENERAL_THRESHOLD,
+        34,
+        NonCopyU8(kani::any()),
+        |a: &NonCopyU8, b: &NonCopyU8| a.0 < b.0,
+        |x: &NonCopyU8| x.0,
+        |x: &NonCopyU8| x.0
+    );
+
+    gen_unstable_noncopy_route_harness!(
+        harness_unstable_freeze_small_sort_noncopy_fallback,
+        UnstableSmallSortFreezeTypeImpl,
+        LargeNonCopy,
+        [u8; LARGE_ELEMENT_SIZE],
+        SMALL_SORT_FALLBACK_THRESHOLD,
+        18,
+        LargeNonCopy(kani::any()),
+        |a: &LargeNonCopy, b: &LargeNonCopy| a.0[0] < b.0[0],
+        |x: &LargeNonCopy| x.0[0],
+        |x: &LargeNonCopy| x.0
+    );
 }
