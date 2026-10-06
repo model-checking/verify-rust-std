@@ -796,12 +796,12 @@ impl ops::Index<ops::RangeFrom<usize>> for CStr {
     type Output = CStr;
 
     #[inline]
-    // No `#[ensures]` contract on this trait method: `proof_for_contract` on a
-    // generic trait method isn't resolvable at this Kani pin, which predates the
-    // resolver fix (model-checking/kani#4865), so the tail-is-a-valid-`CStr` and
-    // byte-suffix properties are proven in the `check_index_range_from_contract`
-    // harness instead of as a contract. Restore the contract form once the pin
-    // includes kani#4865.
+    // The tail of a valid `CStr` is itself a valid `CStr`; the postcondition
+    // binds on normal return only — the out-of-bounds panic path is proven
+    // separately by the `check_index_range_from_out_of_bounds` harness.
+    #[requires(self.is_safe())]
+    #[ensures(|result: &&CStr| result.is_safe())]
+    #[ensures(|result: &&CStr| result.to_bytes_with_nul() == &self.to_bytes_with_nul()[index.start..])]
     fn index(&self, index: ops::RangeFrom<usize>) -> &CStr {
         let bytes = self.to_bytes_with_nul();
         // we need to manually check the starting index to account for the null
@@ -1230,17 +1230,8 @@ mod verify {
         assert!(c_str.is_safe());
     }
 
-    // impl ops::Index<ops::RangeFrom<usize>> for CStr — in-bounds tail slicing.
-    // Verified as a plain proof rather than proof_for_contract: a pfc target on
-    // a generic trait's method (Index<RangeFrom<usize>>) isn't resolvable at
-    // this Kani pin, which predates the resolver fix (model-checking/kani#4865)
-    // — "unable to find implementation of associated function Index::index for
-    // CStr". The
-    // tail-is-a-valid-`CStr` and byte-suffix postconditions are asserted
-    // directly on the result below rather than as method contracts.
-    // (Non-generic trait pfc, e.g. CloneToUninit, still resolves and is
-    // kept in contract form.)
-    #[kani::proof]
+    // impl ops::Index<ops::RangeFrom<usize>> for CStr — in-bounds tail slicing
+    #[kani::proof_for_contract(<CStr as ops::Index<ops::RangeFrom<usize>>>::index)]
     #[kani::unwind(17)] // bounded at 16: at 32 this harness took 263s.
     fn check_index_range_from_contract() {
         const MAX_SIZE: usize = 16;
