@@ -1,23 +1,24 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
-mod alloc;
 mod configure_builtins;
 mod helpers;
 mod pal;
 mod personality;
 
+pub mod alloc;
 pub mod args;
 pub mod backtrace;
 pub mod cmath;
 pub mod env;
 pub mod env_consts;
-pub mod exit_guard;
+pub mod exit;
 pub mod fd;
 pub mod fs;
 pub mod io;
 pub mod net;
 pub mod os_str;
 pub mod path;
+pub mod paths;
 pub mod pipe;
 pub mod platform_version;
 pub mod process;
