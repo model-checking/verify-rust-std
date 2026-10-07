@@ -2807,6 +2807,20 @@ pub mod verify {
     //   machine-checked through the real code. The direct
     //   `verify_twoway_step_next_match*` harnesses add end-to-end
     //   coverage of the real `MatchOnly` loop up to the array size.
+    // - The single-byte variant (`StrSearcherImpl::Byte`, one-byte
+    //   needles) has no loops of its own: `next`/`next_back` are
+    //   straight-line plus `str::ceil_char_boundary` (at most 3
+    //   iterations by U-cover; `floor_char_boundary` is loop-free), and
+    //   `next_match`/`next_match_back` are one `memchr`/`memrchr` scan.
+    //   The `verify_byte_step_*` harnesses unwind those scans and the
+    //   `next_reject`/`next_reject_back` defaults over the backing array
+    //   (`HAY_MAX + 2`); see their documentation.
+    //
+    // Upstream's `TwoWaySearcher::next`/`next_back` read haystack bytes in
+    // their inner compare loops with `get_unchecked`, under a SAFETY
+    // argument from the window check at the head of the `'search` loop;
+    // Kani checks the bounds of every such read, so the harnesses here
+    // discharge that argument.
     //
     // The Two-Way invariant is content-coupled: boundary validity of a
     // returned Match hinges on the match being byte-exact (a byte-exact
@@ -3118,13 +3132,30 @@ pub mod verify {
         assert!(haystack.is_char_boundary(tw.end), "c4 end boundary");
     }
 
+    /// Invariant of the single-byte searcher (`StrSearcherImpl::Byte`): the needle is one
+    /// byte, `b` is that byte, and both cursors are in-bounds char boundaries. A one-byte
+    /// `&str` is an ASCII char, so `b < 0x80`; that is what makes `Match(pos, pos + 1)`
+    /// boundary-valid, since an ASCII byte is a boundary and is followed by one.
+    fn type_invariant_byte_needle(bn: &ByteNeedle, haystack: &str, needle: &str) -> bool {
+        needle.len() == 1
+            && bn.b == needle.as_bytes()[0]
+            && bn.b < 0x80
+            && bn.position <= haystack.len()
+            && bn.end <= haystack.len()
+            && haystack.is_char_boundary(bn.position)
+            && haystack.is_char_boundary(bn.end)
+    }
+
     fn type_invariant_str_searcher(s: &StrSearcher<'_, '_>) -> bool {
         match &s.searcher {
             StrSearcherImpl::Empty(en) => {
                 s.needle.is_empty() && type_invariant_empty_needle(en, s.haystack)
             }
+            StrSearcherImpl::Byte(bn) => type_invariant_byte_needle(bn, s.haystack, s.needle),
+            // `StrSearcher::new` routes one-byte needles to the `Byte` variant, so the Two-Way
+            // variant only ever holds needles of at least two bytes.
             StrSearcherImpl::TwoWay(tw) => {
-                !s.needle.is_empty() && type_invariant_two_way(tw, s.haystack, s.needle)
+                s.needle.len() >= 2 && type_invariant_two_way(tw, s.haystack, s.needle)
             }
         }
     }
@@ -3156,6 +3187,10 @@ pub mod verify {
         assert!(type_invariant_str_searcher(&s));
         match &s.searcher {
             StrSearcherImpl::Empty(_) => kani::cover(true, "empty-needle variant created"),
+            StrSearcherImpl::Byte(bn) => {
+                assert!(bn.position == 0 && bn.end == haystack.len());
+                kani::cover(true, "single-byte variant created");
+            }
             StrSearcherImpl::TwoWay(tw) => {
                 assert!(tw.position == 0 && tw.end == haystack.len());
                 kani::cover(tw.memory == usize::MAX, "long-period factorization reached");
@@ -3304,6 +3339,98 @@ pub mod verify {
     empty_needle_step!(verify_empty_step_next_reject, next_reject, opt);
     empty_needle_step!(verify_empty_step_next_reject_back, next_reject_back, opt);
 
+    /// An arbitrary `C`-satisfying single-byte searcher (induction hypothesis; base case in
+    /// `verify_str_searcher_new`). `needle` must be one ASCII byte, as `C` requires.
+    fn any_byte_searcher<'a, 'b>(haystack: &'a str, needle: &'b str) -> StrSearcher<'a, 'b> {
+        let s = StrSearcher {
+            haystack,
+            needle,
+            searcher: StrSearcherImpl::Byte(ByteNeedle {
+                b: kani::any(),
+                position: kani::any(),
+                end: kani::any(),
+            }),
+        };
+        kani::assume(type_invariant_str_searcher(&s));
+        s
+    }
+
+    /// Inductive step for the single-byte variant: from any `C`-satisfying state, each real
+    /// method returns boundary-valid ranges and preserves `C`. The haystack has symbolic length
+    /// over the `HAY_MAX`-byte backing array, the needle is an arbitrary ASCII byte.
+    ///
+    /// Loop bounds. `next`/`next_back` are loop-free apart from `str::ceil_char_boundary`
+    /// (at most 3 iterations by U-cover; `floor_char_boundary` is loop-free), hence
+    /// `unwind(4)`. `next_match` runs core's real `cfg(kani)` `memchr` (the byte-by-byte
+    /// `memchr_naive` since #628) and `next_match_back` the semantically identical
+    /// `stub_memrchr` (see the Challenge 20 stub note); both scan at most `HAY_MAX` bytes.
+    /// The `next_reject`/`next_reject_back` trait defaults loop over `next`/`next_back`, and
+    /// on this variant a run of matching bytes makes them iterate up to the haystack length;
+    /// every iteration consumes at least one byte, so `unwind(18)` (`HAY_MAX + 2`) fully
+    /// unwinds all of these over the backing array, and the unbounded argument is the same
+    /// composition as for the Two-Way arm: each iteration is one proven step from a `C`-state.
+    macro_rules! byte_step {
+        ($name:ident, $call:ident, $unwind:literal, step) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            pub fn $name() {
+                let hbuf: [u8; HAY_MAX + PAD] = kani::any();
+                let haystack = any_utf8(&hbuf);
+                let nbuf: [u8; 1] = [kani::any_where(|b: &u8| *b < 0x80)];
+                // SAFETY: a single byte below 0x80 is valid UTF-8.
+                let needle = unsafe { crate::str::from_utf8_unchecked(&nbuf) };
+                let mut s = any_byte_searcher(haystack, needle);
+                match s.$call() {
+                    SearchStep::Match(a, b) => {
+                        assert_valid_range(haystack, a, b);
+                        assert!(b == a + 1 && haystack.as_bytes()[a] == nbuf[0]);
+                        kani::cover(true, "single-byte step returned Match");
+                    }
+                    SearchStep::Reject(a, b) => {
+                        assert_valid_range(haystack, a, b);
+                        kani::cover(true, "single-byte step returned Reject");
+                    }
+                    SearchStep::Done => kani::cover(true, "single-byte step returned Done"),
+                }
+                assert!(type_invariant_str_searcher(&s));
+            }
+        };
+        ($name:ident, $call:ident, $unwind:literal, opt $(, $stub:meta)?) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            $(#[$stub])?
+            pub fn $name() {
+                let hbuf: [u8; HAY_MAX + PAD] = kani::any();
+                let haystack = any_utf8(&hbuf);
+                let nbuf: [u8; 1] = [kani::any_where(|b: &u8| *b < 0x80)];
+                // SAFETY: a single byte below 0x80 is valid UTF-8.
+                let needle = unsafe { crate::str::from_utf8_unchecked(&nbuf) };
+                let mut s = any_byte_searcher(haystack, needle);
+                match s.$call() {
+                    Some((a, b)) => {
+                        assert_valid_range(haystack, a, b);
+                        kani::cover(true, "single-byte step returned a range");
+                    }
+                    None => kani::cover(true, "single-byte step returned None"),
+                }
+                assert!(type_invariant_str_searcher(&s));
+            }
+        };
+    }
+
+    byte_step!(verify_byte_step_next, next, 4, step);
+    byte_step!(verify_byte_step_next_back, next_back, 4, step);
+    byte_step!(verify_byte_step_next_match, next_match, 18, opt);
+    byte_step!(
+        verify_byte_step_next_match_back,
+        next_match_back,
+        18,
+        opt,
+        kani::stub(crate::slice::memchr::memrchr, stub_memrchr)
+    );
+    byte_step!(verify_byte_step_next_reject, next_reject, 18, opt);
+    byte_step!(verify_byte_step_next_reject_back, next_reject_back, 18, opt);
+
     /// Inductive step for the Two-Way variant through the public methods
     /// (`next`, `next_back`, `next_match`, `next_match_back`): from any
     /// `C`-satisfying state the real method returns boundary-valid ranges
@@ -3312,8 +3439,9 @@ pub mod verify {
     /// Unwind bounds. For `next`/`next_back` (`NDL_MAX + 1`) the `'search`
     /// loop runs at most two iterations for *any* haystack (see the
     /// module comment), the inner byte-compare loops at most `NDL_MAX`,
-    /// and the char-boundary walks in `StrSearcher::next`/`next_back` at
-    /// most 3 (U-cover); the bound covers all of them, and the haystack
+    /// and the boundary repair in `StrSearcher::next`/`next_back`
+    /// (`str::ceil_char_boundary`, at most 3 iterations by U-cover;
+    /// `floor_char_boundary` is loop-free); the bound covers all of them, and the haystack
     /// length is unconstrained up to the array size. For `next_match`/
     /// `next_match_back` (`MATCH_HAY_MAX + 2 = MATCH_NDL_MAX + 1`) the
     /// `MatchOnly` loop advances the cursor by at least one byte per
@@ -3329,7 +3457,7 @@ pub mod verify {
                 let nbuf: [u8; NDL_MAX + PAD] = kani::any();
                 let haystack = any_utf8(&hbuf);
                 let needle = any_utf8(&nbuf);
-                kani::assume(!needle.is_empty());
+                kani::assume(needle.len() >= 2);
                 let mut s = any_twoway_searcher(haystack, needle, $long);
                 match s.$call() {
                     SearchStep::Match(a, b) => {
@@ -3357,7 +3485,7 @@ pub mod verify {
                 let nbuf: [u8; MATCH_NDL_MAX + PAD] = kani::any();
                 let haystack = any_utf8(&hbuf);
                 let needle = any_utf8(&nbuf);
-                kani::assume(!needle.is_empty());
+                kani::assume(needle.len() >= 2);
                 let mut s = any_twoway_searcher(haystack, needle, $long);
                 match s.$call() {
                     Some((a, b)) => {
