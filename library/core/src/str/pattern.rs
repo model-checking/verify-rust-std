@@ -2189,10 +2189,7 @@ pub mod verify {
         let haystack = symbolic_str(&mut buf);
         let wrapper = ['a', 'b'].into_searcher(haystack);
         kani::cover(true, "ch20 mces creation reachable");
-        kani::assert(
-            wrapper.0.is_safe(),
-            "MultiCharEqSearcher: C established at creation",
-        );
+        kani::assert(wrapper.0.is_safe(), "MultiCharEqSearcher: C established at creation");
     }
 
     // Challenge 20 Task 1.2: criterion-2 (C implies the P2 safety property —
