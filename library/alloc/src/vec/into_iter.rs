@@ -1147,25 +1147,27 @@ mod verify {
         assert!(it.as_mut_slice().len() == n);
     }
 
-    // __iterator_get_unchecked: the #[requires(i < self.len())] + kani::modifies
-    // contract already exists on this method. Kani cannot resolve a generic
-    // trait-impl method as a proof_for_contract target (kani#1997), so this
-    // harness is the mirroring assume-guarded proof: the assume mirrors the
-    // #[requires]; the assert checks the read's value against the source slice.
-    #[kani::proof]
-    #[kani::unwind(8)]
+    // __iterator_get_unchecked carries #[requires(i < self.len())] + kani::modifies(self).
+    // Resolved here at the u8/Global monomorphization as a proof_for_contract target, so this
+    // is a real contract proof: the #[requires] is enforced by Kani (no manual assume). The
+    // receiver is an arbitrary reachable state (symbolic front/back consumed), so the
+    // contract is verified over interior ptr positions, not only a fresh iterator. Spelled
+    // with the explicit Global allocator (the defaulted trailing type param).
+    #[kani::proof_for_contract(<IntoIter<u8, Global> as core::iter::Iterator>::__iterator_get_unchecked)]
+    #[kani::unwind(72)]
     fn check_into_iter_get_unchecked_u8() {
-        let arr: [u8; 64] = kani::any();
-        let s = kani::slice::any_slice_of_array(&arr);
-        let mut it = s.to_vec().into_iter();
-        let len = it.len();
-        kani::assume(len > 0);
+        let (mut it, snapshot, front, _back) = any_reachable_u8_intoiter_snap::<64>();
         let i: usize = kani::any();
-        kani::assume(i < len);
-        kani::cover(i == len - 1, "non-vacuity: the maximal valid index is reachable");
-        // SAFETY: i < len mirrors the documented #[requires] precondition.
+        // Non-vacuity: certify a non-empty reachable state with a maximal valid index is
+        // exercised (a bare contract SUCCESS cannot distinguish reachable from vacuous).
+        kani::cover(
+            it.len() > 0 && i == it.len() - 1,
+            "non-vacuity: maximal valid index reachable",
+        );
+        // #[requires(i < self.len())] is enforced by proof_for_contract — no manual assume.
         let x = unsafe { it.__iterator_get_unchecked(i) };
-        assert!(x == s[i]);
+        // Reads offset i from the current front; element i is snapshot[front + i].
+        assert!(x == snapshot[front + i]);
     }
 
     // Drop: destroys the remaining elements (drop_in_place) + RawVec dealloc.
@@ -1315,28 +1317,22 @@ mod verify {
         check_next_back_shape::<ShapeDropToken, 8>();
     }
 
-    // __iterator_get_unchecked over arbitrary Copy T: the assume mirrors the
-    // existing #[requires(i < len)]; [u8; 3] adds the odd-stride (non-power-of-
-    // two) `add(i)` index arithmetic no other harness exercises. T: Copy is the
-    // method's own reach (TrustedRandomAccessNoCoerce requires NonDrop). Mirrors
-    // check_into_iter_get_unchecked_u8.
-    fn check_get_unchecked_shape<T: kani::Arbitrary + Copy + PartialEq, const N: usize>() {
-        let arr: [T; N] = kani::any();
-        let s = kani::slice::any_slice_of_array(&arr);
-        let mut it = s.to_vec().into_iter();
-        let len = it.len();
-        kani::assume(len > 0);
-        let i: usize = kani::any();
-        kani::assume(i < len);
-        kani::cover(i == len - 1, "non-vacuity: the maximal valid index is reachable");
-        // SAFETY: i < len mirrors the documented #[requires] precondition.
-        let x = unsafe { it.__iterator_get_unchecked(i) };
-        assert!(x == s[i]);
-    }
-
-    #[kani::proof]
+    // __iterator_get_unchecked at `[u8; 3]`: a second proof_for_contract instantiation
+    // of the same method, adding the odd-stride (non-power-of-two) `add(i)` index
+    // arithmetic the `u8` instantiation doesn't exercise. The #[requires(i < self.len())]
+    // is enforced by Kani (no manual assume).
+    #[kani::proof_for_contract(<IntoIter<[u8; 3], Global> as core::iter::Iterator>::__iterator_get_unchecked)]
     #[kani::unwind(16)]
     fn check_into_iter_get_unchecked_arr3() {
-        check_get_unchecked_shape::<[u8; 3], 8>();
+        let arr: [[u8; 3]; 8] = kani::any();
+        let s = kani::slice::any_slice_of_array(&arr);
+        let mut it = s.to_vec().into_iter();
+        let i: usize = kani::any();
+        kani::cover(
+            it.len() > 0 && i == it.len() - 1,
+            "non-vacuity: maximal valid index reachable",
+        );
+        let x = unsafe { it.__iterator_get_unchecked(i) };
+        assert!(x == s[i]);
     }
 }
