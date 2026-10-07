@@ -2135,13 +2135,19 @@ pub mod verify {
 
     impl<C: MultiCharEq> Invariant for MultiCharEqSearcher<'_, C> {
         /// Safety invariant: the `char_indices` cursor is an in-bounds,
-        /// char-boundary-aligned suffix window of `haystack`, modeled through
-        /// its public `offset`/`as_str` view (no access to its private state).
+        /// char-boundary-aligned `[front, back)` window of `haystack`,
+        /// modeled through its public `offset`/`as_str` view (no access to
+        /// its private state). `CharIndices` is double-ended: `next_back`
+        /// shrinks the window from the back without moving `offset()`, so
+        /// `back` is derived relationally (`offset() + as_str().len()`)
+        /// rather than assumed to sit at `haystack.len()`.
         fn is_safe(&self) -> bool {
-            let off = self.char_indices.offset();
-            off <= self.haystack.len()
-                && self.haystack.is_char_boundary(off)
-                && self.char_indices.as_str().len() == self.haystack.len() - off
+            let front = self.char_indices.offset();
+            let back = front + self.char_indices.as_str().len();
+            front <= back
+                && back <= self.haystack.len()
+                && self.haystack.is_char_boundary(front)
+                && self.haystack.is_char_boundary(back)
         }
     }
 
