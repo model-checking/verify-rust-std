@@ -7,10 +7,9 @@
 use crate::io::Result;
 use crate::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use crate::process::{self, ExitStatus};
-use crate::sealed::Sealed;
+use crate::sys::{AsInner, AsInnerMut, FromInner, IntoInner};
 #[cfg(not(doc))]
-use crate::sys::{fd::FileDesc, linux::pidfd::PidFd as InnerPidFd};
-use crate::sys_common::{AsInner, AsInnerMut, FromInner, IntoInner};
+use crate::sys::{fd::FileDesc, process::PidFd as InnerPidFd};
 
 #[cfg(doc)]
 struct InnerPidFd;
@@ -21,8 +20,10 @@ struct InnerPidFd;
 /// with [`create_pidfd`]. Subsequently, the created pidfd can be retrieved
 /// from the [`Child`] by calling [`pidfd`] or [`into_pidfd`].
 ///
-/// Example:
-/// ```no_run
+/// # Examples
+///
+#[cfg_attr(target_os = "linux", doc = "```no_run")]
+#[cfg_attr(not(target_os = "linux"), doc = "```ignore (needs linux)")]
 /// #![feature(linux_pidfd)]
 /// use std::os::linux::process::{CommandExt, ChildExt};
 /// use std::process::Command;
@@ -67,8 +68,10 @@ impl PidFd {
     /// Waits for the child to exit completely, returning the status that it exited with.
     ///
     /// Unlike [`Child::wait`] it does not ensure that the stdin handle is closed.
-    /// Additionally it will not return an `ExitStatus` if the child
-    /// has already been reaped. Instead an error will be returned.
+    ///
+    /// Additionally on kernels prior to 6.15 only the first attempt to
+    /// reap a child will return an ExitStatus, further attempts
+    /// will return an Error.
     ///
     /// [`Child::wait`]: process::Child::wait
     pub fn wait(&self) -> Result<ExitStatus> {
@@ -77,8 +80,8 @@ impl PidFd {
 
     /// Attempts to collect the exit status of the child if it has already exited.
     ///
-    /// Unlike [`Child::try_wait`] this method will return an Error
-    /// if the child has already been reaped.
+    /// On kernels prior to 6.15, and unlike [`Child::try_wait`], only the first attempt
+    /// to reap a child will return an ExitStatus, further attempts will return an Error.
     ///
     /// [`Child::try_wait`]: process::Child::try_wait
     pub fn try_wait(&self) -> Result<Option<ExitStatus>> {
@@ -145,7 +148,7 @@ impl From<PidFd> for OwnedFd {
 /// Os-specific extensions for [`Child`]
 ///
 /// [`Child`]: process::Child
-pub trait ChildExt: Sealed {
+pub impl(crate) trait ChildExt {
     /// Obtains a reference to the [`PidFd`] created for this [`Child`], if available.
     ///
     /// A pidfd will only be available if its creation was requested with
@@ -184,7 +187,7 @@ pub trait ChildExt: Sealed {
 /// Os-specific extensions for [`Command`]
 ///
 /// [`Command`]: process::Command
-pub trait CommandExt: Sealed {
+pub impl(self) trait CommandExt {
     /// Sets whether a [`PidFd`](struct@PidFd) should be created for the [`Child`]
     /// spawned by this [`Command`].
     /// By default, no pidfd will be created.

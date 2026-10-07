@@ -1,5 +1,6 @@
-use core::num::dec2flt::float::RawFloat;
-use core::num::dec2flt::lemire::compute_float;
+use core::num::imp::{Float, dec2flt};
+
+use dec2flt::lemire::compute_float;
 
 #[cfg(target_has_reliable_f16)]
 fn compute_float16(q: i64, w: u64) -> (i32, u64) {
@@ -17,7 +18,6 @@ fn compute_float64(q: i64, w: u64) -> (i32, u64) {
     (fp.p_biased, fp.m)
 }
 
-// FIXME(f16_f128): enable on all targets once possible.
 #[test]
 #[cfg(target_has_reliable_f16)]
 fn compute_float_f16_rounding() {

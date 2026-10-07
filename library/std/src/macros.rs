@@ -3,7 +3,10 @@
 //! This module contains a set of macros which are exported from the standard
 //! library. Each macro is available for use when linking against the standard
 //! library.
-// ignore-tidy-dbg
+// ignore-tidy-file-dbg
+
+#[cfg(test)]
+mod tests;
 
 #[doc = include_str!("../../core/src/macros/panic.md")]
 #[macro_export]
@@ -79,6 +82,7 @@ macro_rules! panic {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[cfg_attr(not(test), rustc_diagnostic_item = "print_macro")]
 #[allow_internal_unstable(print_internals)]
+#[rustc_diagnostic_opaque]
 macro_rules! print {
     ($($arg:tt)*) => {{
         $crate::io::_print($crate::format_args!($($arg)*));
@@ -135,6 +139,7 @@ macro_rules! print {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[cfg_attr(not(test), rustc_diagnostic_item = "println_macro")]
 #[allow_internal_unstable(print_internals, format_args_nl)]
+#[rustc_diagnostic_opaque]
 macro_rules! println {
     () => {
         $crate::print!("\n")
@@ -349,6 +354,7 @@ macro_rules! eprintln {
 #[macro_export]
 #[cfg_attr(not(test), rustc_diagnostic_item = "dbg_macro")]
 #[stable(feature = "dbg_macro", since = "1.32.0")]
+#[rustc_diagnostic_opaque]
 macro_rules! dbg {
     // NOTE: We cannot use `concat!` to make a static string as a format argument
     // of `eprintln!` because `file!` could contain a `{` or
@@ -378,4 +384,80 @@ macro_rules! dbg {
     ($($val:expr),+ $(,)?) => {
         ($($crate::dbg!($val)),+,)
     };
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[allow_internal_unstable(hash_map_internals)]
+#[unstable(feature = "hash_map_internals", issue = "none")]
+macro_rules! repetition_utils {
+    (@count $($tokens:tt),*) => {{
+        [$($crate::repetition_utils!(@replace $tokens => ())),*].len()
+    }};
+
+    (@replace $x:tt => $y:tt) => { $y }
+}
+
+/// Creates a [`HashMap`] containing the arguments.
+///
+/// `hash_map!` allows specifying the entries that make
+/// up the [`HashMap`] where the key and value are separated by a `=>`.
+///
+/// The entries are separated by commas with a trailing comma being allowed.
+///
+/// It is semantically equivalent to using repeated [`HashMap::insert`]
+/// on a newly created hashmap.
+///
+/// `hash_map!` will attempt to avoid repeated reallocations by
+/// using [`HashMap::with_capacity`].
+///
+/// # Examples
+///
+/// ```rust
+/// #![feature(hash_map_macro)]
+/// use std::hash_map;
+///
+/// let map = hash_map! {
+///     "key" => "value",
+///     "key1" => "value1"
+/// };
+///
+/// assert_eq!(map.get("key"), Some(&"value"));
+/// assert_eq!(map.get("key1"), Some(&"value1"));
+/// assert!(map.get("brrrrrrooooommm").is_none());
+/// ```
+///
+/// And with a trailing comma
+///
+///```rust
+/// #![feature(hash_map_macro)]
+/// use std::hash_map;
+///
+/// let map = hash_map! {
+///     "key" => "value", // notice the ,
+/// };
+///
+/// assert_eq!(map.get("key"), Some(&"value"));
+/// ```
+///
+/// The key and value are moved into the HashMap.
+///
+/// [`HashMap`]: crate::collections::HashMap
+/// [`HashMap::insert`]: crate::collections::HashMap::insert
+/// [`HashMap::with_capacity`]: crate::collections::HashMap::with_capacity
+#[macro_export]
+#[allow_internal_unstable(hash_map_internals)]
+#[unstable(feature = "hash_map_macro", issue = "144032")]
+macro_rules! hash_map {
+    () => {{
+        $crate::collections::HashMap::new()
+    }};
+
+    ( $( $key:expr => $value:expr ),* $(,)? ) => {{
+        let mut map = $crate::collections::HashMap::with_capacity(
+            const { $crate::repetition_utils!(@count $($key),*) }
+        );
+        $( map.insert($key, $value); )*
+        map
+    }}
 }

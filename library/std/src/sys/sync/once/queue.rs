@@ -60,7 +60,7 @@ use crate::sync::atomic::Ordering::{AcqRel, Acquire, Release};
 use crate::sync::atomic::{Atomic, AtomicBool, AtomicPtr};
 use crate::sync::once::OnceExclusiveState;
 use crate::thread::{self, Thread};
-use crate::{fmt, ptr, sync as public};
+use crate::{fmt, mem, ptr, sync as public};
 
 type StateAndQueue = *mut ();
 
@@ -119,6 +119,11 @@ impl Once {
     #[inline]
     pub const fn new() -> Once {
         Once { state_and_queue: AtomicPtr::new(ptr::without_provenance_mut(INCOMPLETE)) }
+    }
+
+    #[inline]
+    pub const fn new_complete() -> Once {
+        Once { state_and_queue: AtomicPtr::new(ptr::without_provenance_mut(COMPLETE)) }
     }
 
     #[inline]
@@ -232,6 +237,15 @@ impl Once {
     }
 }
 
+/// A type to guard against the unwinds of stacks that nodes are located on due to panics.
+struct PanicGuard;
+
+impl Drop for PanicGuard {
+    fn drop(&mut self) {
+        rtabort!("tried to drop node in intrusive list.");
+    }
+}
+
 fn wait(
     state_and_queue: &Atomic<*mut ()>,
     mut current: StateAndQueue,
@@ -267,6 +281,9 @@ fn wait(
             continue;
         }
 
+        // Guard against unwinds using a `PanicGuard` that aborts when dropped.
+        let guard = PanicGuard;
+
         // We have enqueued ourselves, now lets wait.
         // It is important not to return before being signaled, otherwise we
         // would drop our `Waiter` node and leave a hole in the linked list
@@ -282,6 +299,9 @@ fn wait(
             // SAFETY: we retrieved this handle on the current thread above.
             unsafe { node.thread.park() }
         }
+
+        // The node was removed from the queue, disarm the guard.
+        mem::forget(guard);
 
         return state_and_queue.load(Acquire);
     }

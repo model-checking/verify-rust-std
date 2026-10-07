@@ -1,7 +1,7 @@
 cfg_select! {
     target_os = "hermit" => {
         mod hermit;
-        pub use hermit::{Thread, available_parallelism, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use hermit::{DEFAULT_MIN_STACK_SIZE, Thread, available_parallelism, sleep, yield_now};
         #[expect(dead_code)]
         mod unsupported;
         pub use unsupported::{current_os_id, set_name};
@@ -12,7 +12,7 @@ cfg_select! {
     }
     all(target_vendor = "fortanix", target_env = "sgx") => {
         mod sgx;
-        pub use sgx::{Thread, current_os_id, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use sgx::{DEFAULT_MIN_STACK_SIZE, Thread, current_os_id, sleep, yield_now};
 
         // SGX should protect in-enclave data from outside attackers, so there
         // must not be any data leakage to the OS, particularly no 1-1 mapping
@@ -29,14 +29,14 @@ cfg_select! {
     }
     target_os = "solid_asp3" => {
         mod solid;
-        pub use solid::{Thread, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use solid::{DEFAULT_MIN_STACK_SIZE, Thread, sleep, yield_now};
         #[expect(dead_code)]
         mod unsupported;
         pub use unsupported::{available_parallelism, current_os_id, set_name};
     }
     target_os = "teeos" => {
         mod teeos;
-        pub use teeos::{Thread, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use teeos::{DEFAULT_MIN_STACK_SIZE, Thread, sleep, yield_now};
         #[expect(dead_code)]
         mod unsupported;
         pub use unsupported::{available_parallelism, current_os_id, set_name};
@@ -46,11 +46,10 @@ cfg_select! {
         pub use uefi::{available_parallelism, sleep};
         #[expect(dead_code)]
         mod unsupported;
-        pub use unsupported::{Thread, current_os_id, set_name, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use unsupported::{DEFAULT_MIN_STACK_SIZE, Thread, current_os_id, set_name, yield_now};
     }
-    target_family = "unix" => {
+    any(target_family = "unix", target_os = "wasi") => {
         mod unix;
-        pub use unix::{Thread, available_parallelism, current_os_id, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
         #[cfg(not(any(
             target_env = "newlib",
             target_os = "l4re",
@@ -58,6 +57,7 @@ cfg_select! {
             target_os = "redox",
             target_os = "hurd",
             target_os = "aix",
+            target_os = "wasi",
         )))]
         pub use unix::set_name;
         #[cfg(any(
@@ -69,10 +69,15 @@ cfg_select! {
             target_os = "illumos",
             target_os = "dragonfly",
             target_os = "hurd",
-            target_os = "fuchsia",
             target_os = "vxworks",
+            target_os = "wasi",
+            target_vendor = "apple",
+            target_os = "fuchsia",
         ))]
         pub use unix::sleep_until;
+        pub use unix::{
+            DEFAULT_MIN_STACK_SIZE, Thread, available_parallelism, current_os_id, sleep, yield_now,
+        };
         #[expect(dead_code)]
         mod unsupported;
         #[cfg(any(
@@ -82,36 +87,18 @@ cfg_select! {
             target_os = "redox",
             target_os = "hurd",
             target_os = "aix",
+            target_os = "wasi",
         ))]
         pub use unsupported::set_name;
     }
     target_os = "vexos" => {
         mod vexos;
-        pub use vexos::{sleep, yield_now};
+        pub use vexos::{sleep, sleep_until, yield_now};
         #[expect(dead_code)]
         mod unsupported;
-        pub use unsupported::{Thread, available_parallelism, current_os_id, set_name, DEFAULT_MIN_STACK_SIZE};
-    }
-    all(target_os = "wasi", target_env = "p1") => {
-        mod wasip1;
-        pub use wasip1::{DEFAULT_MIN_STACK_SIZE, sleep, yield_now};
-        #[cfg(target_feature = "atomics")]
-        pub use wasip1::{Thread, available_parallelism};
-        #[expect(dead_code)]
-        mod unsupported;
-        pub use unsupported::{current_os_id, set_name};
-        #[cfg(not(target_feature = "atomics"))]
-        pub use unsupported::{Thread, available_parallelism};
-    }
-    all(target_os = "wasi", any(target_env = "p2", target_env = "p3")) => {
-        mod wasip2;
-        pub use wasip2::{sleep, sleep_until};
-        #[expect(dead_code)]
-        mod unsupported;
-        // Note that unlike WASIp1 even if the wasm `atomics` feature is enabled
-        // there is no support for threads, not even experimentally, not even in
-        // wasi-libc. Thus this is unconditionally unsupported.
-        pub use unsupported::{Thread, available_parallelism, current_os_id, set_name, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use unsupported::{
+            DEFAULT_MIN_STACK_SIZE, Thread, available_parallelism, current_os_id, set_name,
+        };
     }
     all(target_family = "wasm", target_feature = "atomics") => {
         mod wasm;
@@ -119,15 +106,21 @@ cfg_select! {
 
         #[expect(dead_code)]
         mod unsupported;
-        pub use unsupported::{Thread, available_parallelism, current_os_id, set_name, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use unsupported::{
+            DEFAULT_MIN_STACK_SIZE, Thread, available_parallelism, current_os_id, set_name,
+            yield_now,
+        };
     }
     target_os = "windows" => {
         mod windows;
-        pub use windows::{Thread, available_parallelism, current_os_id, set_name, set_name_wide, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use windows::{
+            DEFAULT_MIN_STACK_SIZE, Thread, available_parallelism, current_os_id, set_name,
+            set_name_wide, sleep, yield_now,
+        };
     }
     target_os = "xous" => {
         mod xous;
-        pub use xous::{Thread, available_parallelism, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use xous::{DEFAULT_MIN_STACK_SIZE, Thread, available_parallelism, sleep, yield_now};
 
         #[expect(dead_code)]
         mod unsupported;
@@ -135,7 +128,10 @@ cfg_select! {
     }
     _ => {
         mod unsupported;
-        pub use unsupported::{Thread, available_parallelism, current_os_id, set_name, sleep, yield_now, DEFAULT_MIN_STACK_SIZE};
+        pub use unsupported::{
+            DEFAULT_MIN_STACK_SIZE, Thread, available_parallelism, current_os_id, set_name, sleep,
+            yield_now,
+        };
     }
 }
 
@@ -148,16 +144,26 @@ cfg_select! {
     target_os = "illumos",
     target_os = "dragonfly",
     target_os = "hurd",
-    target_os = "fuchsia",
     target_os = "vxworks",
-    all(target_os = "wasi", not(target_env = "p1")),
+    target_os = "wasi",
+    target_vendor = "apple",
+    target_os = "motor",
+    target_os = "vexos",
+    target_os = "fuchsia",
 )))]
 pub fn sleep_until(deadline: crate::time::Instant) {
     use crate::time::Instant;
 
-    let now = Instant::now();
-
-    if let Some(delay) = deadline.checked_duration_since(now) {
+    // The clock source used for `sleep` might not be the same used for `Instant`.
+    // Since this function *must not* return before the deadline, we recheck the
+    // time after every call to `sleep`. See #149935 for an example of this
+    // occurring on older Windows systems.
+    while let Some(delay) = deadline.checked_duration_since(Instant::now()) {
+        // Sleep for the estimated time remaining until the deadline.
+        //
+        // If your system has a better way of estimating the delay time or
+        // provides a way to sleep until an absolute time, specialize this
+        // function for your system.
         sleep(delay);
     }
 }
