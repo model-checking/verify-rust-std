@@ -2507,6 +2507,123 @@ pub mod verify {
         }
     }
 
+    // Challenge 20 Task 1.3: the four wrapper Searchers (CharArray, CharArrayRef,
+    // CharSlice, CharPredicate) carry no logic of their own -- each is a newtype
+    // over a `MultiCharEqSearcher<'_, C>` whose six methods delegate verbatim
+    // through the `searcher_methods!` macro. Task 1.2 machine-checks the inner
+    // core; these harnesses confirm the macro forwards every method to the right
+    // inner method and preserves the invariant, once per witness type `C`
+    // (`[char; N]`, `&[char; N]`, `&[char]`, `F: FnMut`). This is a completeness
+    // delta, not a rigor delta.
+
+    /// Arbitrary-state `MultiCharEqSearcher<'a, C>` for a caller-supplied
+    /// `char_eq`, so each wrapper's witness type can be seeded: symbolic
+    /// `char_indices` cursor over a `symbolic_str` haystack, filtered to
+    /// invariant-satisfying states (same ASCII license + soundness note as
+    /// `kani_any_multi_char_eq_searcher`).
+    fn kani_any_mces_generic<'a, C: MultiCharEq>(
+        buf: &'a mut [u8; 5],
+        char_eq: C,
+    ) -> MultiCharEqSearcher<'a, C> {
+        let haystack = symbolic_str(buf);
+        kani::assume(haystack.as_bytes().iter().all(|&b| b < 0x80));
+        let offset: usize = kani::any();
+        let suffix = haystack.get(offset..);
+        kani::assume(suffix.is_some());
+        let char_indices = CharIndices { front_offset: offset, iter: suffix.unwrap().chars() };
+        let s = MultiCharEqSearcher { char_eq, haystack, char_indices };
+        kani::assume(s.is_safe());
+        s
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_chararray_delegation() {
+        let mut buf = [0u8; 5];
+        let mut w = CharArraySearcher(kani_any_mces_generic(&mut buf, [kani::any(), kani::any()]));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next());
+        kani::assert(w.0.is_safe(), "ch20 chararray next: C preserved");
+        assert_range_on_boundaries(haystack, w.next_match());
+        kani::assert(w.0.is_safe(), "ch20 chararray next_match: C preserved");
+        assert_range_on_boundaries(haystack, w.next_reject());
+        kani::assert(w.0.is_safe(), "ch20 chararray next_reject: C preserved");
+        assert_step_on_boundaries(haystack, w.next_back());
+        kani::assert(w.0.is_safe(), "ch20 chararray next_back: C preserved");
+        assert_range_on_boundaries(haystack, w.next_match_back());
+        kani::assert(w.0.is_safe(), "ch20 chararray next_match_back: C preserved");
+        assert_range_on_boundaries(haystack, w.next_reject_back());
+        kani::assert(w.0.is_safe(), "ch20 chararray next_reject_back: C preserved");
+        kani::cover(true, "ch20 chararray delegation reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_chararrayref_delegation() {
+        let arr: [char; 2] = [kani::any(), kani::any()];
+        let mut buf = [0u8; 5];
+        let mut w = CharArrayRefSearcher(kani_any_mces_generic(&mut buf, &arr));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next());
+        kani::assert(w.0.is_safe(), "ch20 chararrayref next: C preserved");
+        assert_range_on_boundaries(haystack, w.next_match());
+        kani::assert(w.0.is_safe(), "ch20 chararrayref next_match: C preserved");
+        assert_range_on_boundaries(haystack, w.next_reject());
+        kani::assert(w.0.is_safe(), "ch20 chararrayref next_reject: C preserved");
+        assert_step_on_boundaries(haystack, w.next_back());
+        kani::assert(w.0.is_safe(), "ch20 chararrayref next_back: C preserved");
+        assert_range_on_boundaries(haystack, w.next_match_back());
+        kani::assert(w.0.is_safe(), "ch20 chararrayref next_match_back: C preserved");
+        assert_range_on_boundaries(haystack, w.next_reject_back());
+        kani::assert(w.0.is_safe(), "ch20 chararrayref next_reject_back: C preserved");
+        kani::cover(true, "ch20 chararrayref delegation reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_charslice_delegation() {
+        let arr: [char; 2] = [kani::any(), kani::any()];
+        let mut buf = [0u8; 5];
+        let mut w = CharSliceSearcher(kani_any_mces_generic(&mut buf, &arr[..]));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next());
+        kani::assert(w.0.is_safe(), "ch20 charslice next: C preserved");
+        assert_range_on_boundaries(haystack, w.next_match());
+        kani::assert(w.0.is_safe(), "ch20 charslice next_match: C preserved");
+        assert_range_on_boundaries(haystack, w.next_reject());
+        kani::assert(w.0.is_safe(), "ch20 charslice next_reject: C preserved");
+        assert_step_on_boundaries(haystack, w.next_back());
+        kani::assert(w.0.is_safe(), "ch20 charslice next_back: C preserved");
+        assert_range_on_boundaries(haystack, w.next_match_back());
+        kani::assert(w.0.is_safe(), "ch20 charslice next_match_back: C preserved");
+        assert_range_on_boundaries(haystack, w.next_reject_back());
+        kani::assert(w.0.is_safe(), "ch20 charslice next_reject_back: C preserved");
+        kani::cover(true, "ch20 charslice delegation reachable");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn check_charpredicate_delegation() {
+        let target: char = kani::any();
+        let mut buf = [0u8; 5];
+        let mut w =
+            CharPredicateSearcher(kani_any_mces_generic(&mut buf, move |c: char| c == target));
+        let haystack = w.haystack();
+        assert_step_on_boundaries(haystack, w.next());
+        kani::assert(w.0.is_safe(), "ch20 charpredicate next: C preserved");
+        assert_range_on_boundaries(haystack, w.next_match());
+        kani::assert(w.0.is_safe(), "ch20 charpredicate next_match: C preserved");
+        assert_range_on_boundaries(haystack, w.next_reject());
+        kani::assert(w.0.is_safe(), "ch20 charpredicate next_reject: C preserved");
+        assert_step_on_boundaries(haystack, w.next_back());
+        kani::assert(w.0.is_safe(), "ch20 charpredicate next_back: C preserved");
+        assert_range_on_boundaries(haystack, w.next_match_back());
+        kani::assert(w.0.is_safe(), "ch20 charpredicate next_match_back: C preserved");
+        assert_range_on_boundaries(haystack, w.next_reject_back());
+        kani::assert(w.0.is_safe(), "ch20 charpredicate next_reject_back: C preserved");
+        kani::cover(true, "ch20 charpredicate delegation reachable");
+    }
+
     #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
     #[kani::proof]
     #[kani::unwind(4)]
