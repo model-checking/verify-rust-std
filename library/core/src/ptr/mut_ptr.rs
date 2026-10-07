@@ -144,6 +144,7 @@ impl<T: PointeeSized> *mut T {
     /// [without_provenance]: without_provenance_mut
     #[must_use]
     #[inline(always)]
+    #[expect(clippy::transmutes_expressible_as_ptr_casts, reason = "implements pointer cast")]
     #[stable(feature = "strict_provenance", since = "1.84.0")]
     pub fn addr(self) -> usize {
         // A pointer-to-integer transmute currently has exactly the right semantics: it returns the
@@ -178,6 +179,7 @@ impl<T: PointeeSized> *mut T {
     /// [`with_exposed_provenance_mut`]: with_exposed_provenance_mut
     #[inline(always)]
     #[stable(feature = "exposed_provenance", since = "1.84.0")]
+    #[expect(implicit_provenance_casts, reason = "this *is* the replacement")]
     pub fn expose_provenance(self) -> usize {
         self.cast::<()>() as usize
     }
@@ -259,7 +261,6 @@ impl<T: PointeeSized> *mut T {
     /// [`as_uninit_ref`]: #method.as_uninit_ref-1
     /// [`as_ref_unchecked`]: #method.as_ref_unchecked-1
     /// [`as_mut`]: #method.as_mut
-
     #[stable(feature = "ptr_as_ref", since = "1.9.0")]
     #[rustc_const_stable(feature = "const_ptr_is_null", since = "1.84.0")]
     #[inline]
@@ -292,8 +293,8 @@ impl<T: PointeeSized> *mut T {
     ///     println!("We got back the value: {}!", ptr.as_ref_unchecked());
     /// }
     /// ```
-    #[stable(feature = "ptr_as_ref_unchecked", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "ptr_as_ref_unchecked", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "ptr_as_ref_unchecked", since = "1.95.0")]
+    #[rustc_const_stable(feature = "ptr_as_ref_unchecked", since = "1.95.0")]
     #[inline]
     #[must_use]
     pub const unsafe fn as_ref_unchecked<'a>(self) -> &'a T {
@@ -337,6 +338,10 @@ impl<T: PointeeSized> *mut T {
 
     #[doc = include_str!("./docs/offset.md")]
     ///
+    /// Consider using [`wrapping_offset`](#method.wrapping_offset) instead if these constraints are
+    /// difficult to satisfy. The only advantage of this method is that it
+    /// enables more aggressive compiler optimizations.
+    ///
     /// # Examples
     ///
     /// ```
@@ -359,9 +364,12 @@ impl<T: PointeeSized> *mut T {
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: adding the computed offset to `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
+        // Precondition 3: the byte offset does not wrap the model checker's pointer encoding,
+        // which would make precondition 4 hold spuriously. See `byte_offset_does_not_wrap`.
         count.checked_mul(core::mem::size_of::<T>() as isize)
-        .is_some_and(|computed_offset| (self as isize).checked_add(computed_offset).is_some()) &&
-        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        .is_some_and(|computed_offset| (self as isize).checked_add(computed_offset).is_some()
+            && crate::ptr::byte_offset_does_not_wrap(self, computed_offset)) &&
+        // Precondition 4: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_offset(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
         (count == 0 || (core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_offset(count))))
@@ -625,7 +633,7 @@ impl<T: PointeeSized> *mut T {
     ///
     /// [`as_mut`]: #method.as_mut
     /// [`as_uninit_mut`]: #method.as_uninit_mut
-    /// [`as_ref_unchecked`]: #method.as_mut_unchecked
+    /// [`as_ref_unchecked`]: #method.as_ref_unchecked
     ///
     /// # Safety
     ///
@@ -642,8 +650,8 @@ impl<T: PointeeSized> *mut T {
     /// # assert_eq!(s, [4, 2, 3]);
     /// println!("{s:?}"); // It'll print: "[4, 2, 3]".
     /// ```
-    #[stable(feature = "ptr_as_ref_unchecked", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "ptr_as_ref_unchecked", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "ptr_as_ref_unchecked", since = "1.95.0")]
+    #[rustc_const_stable(feature = "ptr_as_ref_unchecked", since = "1.95.0")]
     #[inline]
     #[must_use]
     pub const unsafe fn as_mut_unchecked<'a>(self) -> &'a mut T {
@@ -664,6 +672,8 @@ impl<T: PointeeSized> *mut T {
     ///
     /// When calling this method, you have to ensure that *either* the pointer is null *or*
     /// the pointer is [convertible to a reference](crate::ptr#pointer-to-reference-conversion).
+    /// Note that because the created reference is to `MaybeUninit<T>`, the
+    /// source pointer can point to uninitialized memory.
     ///
     /// # Panics during const evaluation
     ///
@@ -774,9 +784,8 @@ impl<T: PointeeSized> *mut T {
     /// needed for `const`-compatibility: the distance between pointers into *different* allocated
     /// objects is not known at compile-time. However, the requirement also exists at
     /// runtime and may be exploited by optimizations. If you wish to compute the difference between
-    /// pointers that are not guaranteed to be from the same allocation, use `(self as isize -
-    /// origin as isize) / size_of::<T>()`.
-    // FIXME: recommend `addr()` instead of `as usize` once that is stable.
+    /// pointers that are not guaranteed to be from the same allocation, use
+    /// `(self.addr() as isize - origin.addr() as isize) / size_of::<T>()`.
     ///
     /// [`add`]: #method.add
     /// [allocation]: crate::ptr#allocation
@@ -959,6 +968,10 @@ impl<T: PointeeSized> *mut T {
 
     #[doc = include_str!("./docs/add.md")]
     ///
+    /// Consider using [`wrapping_add`](#method.wrapping_add) instead if these constraints are
+    /// difficult to satisfy. The only advantage of this method is that it
+    /// enables more aggressive compiler optimizations.
+    ///
     /// # Examples
     ///
     /// ```
@@ -981,11 +994,14 @@ impl<T: PointeeSized> *mut T {
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: adding the computed offset to `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani. 
+        // Precondition 3: the byte offset does not wrap the model checker's pointer encoding,
+        // which would make precondition 4 hold spuriously. See `byte_offset_does_not_wrap`.
         count.checked_mul(core::mem::size_of::<T>())
         .is_some_and(|computed_offset| {
             computed_offset <= isize::MAX as usize && (self as isize).checked_add(computed_offset as isize).is_some()
+                && crate::ptr::byte_offset_does_not_wrap(self, computed_offset as isize)
         }) &&
-        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        // Precondition 4: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_add(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
         (count == 0 || (core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_add(count))))
@@ -1066,38 +1082,11 @@ impl<T: PointeeSized> *mut T {
         unsafe { self.cast::<u8>().add(count).with_metadata_of(self) }
     }
 
-    /// Subtracts an unsigned offset from a pointer.
+    #[doc = include_str!("./docs/sub.md")]
     ///
-    /// This can only move the pointer backward (or not move it). If you need to move forward or
-    /// backward depending on the value, then you might want [`offset`](#method.offset) instead
-    /// which takes a signed offset.
-    ///
-    /// `count` is in units of T; e.g., a `count` of 3 represents a pointer
-    /// offset of `3 * size_of::<T>()` bytes.
-    ///
-    /// # Safety
-    ///
-    /// If any of the following conditions are violated, the result is Undefined Behavior:
-    ///
-    /// * The offset in bytes, `count * size_of::<T>()`, computed on mathematical integers (without
-    ///   "wrapping around"), must fit in an `isize`.
-    ///
-    /// * If the computed offset is non-zero, then `self` must be [derived from][crate::ptr#provenance] a pointer to some
-    ///   [allocation], and the entire memory range between `self` and the result must be in
-    ///   bounds of that allocation. In particular, this range must not "wrap around" the edge
-    ///   of the address space.
-    ///
-    /// Allocations can never be larger than `isize::MAX` bytes, so if the computed offset
-    /// stays in bounds of the allocation, it is guaranteed to satisfy the first requirement.
-    /// This implies, for instance, that `vec.as_ptr().add(vec.len())` (for `vec: Vec<T>`) is always
-    /// safe.
-    ///
-    /// Consider using [`wrapping_sub`] instead if these constraints are
+    /// Consider using [`wrapping_sub`](#method.wrapping_sub) instead if these constraints are
     /// difficult to satisfy. The only advantage of this method is that it
     /// enables more aggressive compiler optimizations.
-    ///
-    /// [`wrapping_sub`]: #method.wrapping_sub
-    /// [allocation]: crate::ptr#allocation
     ///
     /// # Examples
     ///
@@ -1121,11 +1110,14 @@ impl<T: PointeeSized> *mut T {
         // Precondition 1: the computed offset `count * size_of::<T>()` does not overflow `isize`.
         // Precondition 2: substracting the computed offset from `self` does not cause overflow.
         // These two preconditions are combined for performance reason, as multiplication is computationally expensive in Kani.
+        // Precondition 3: the byte offset does not wrap the model checker's pointer encoding,
+        // which would make precondition 4 hold spuriously. See `byte_offset_does_not_wrap`.
         count.checked_mul(core::mem::size_of::<T>())
         .is_some_and(|computed_offset| {
             computed_offset <= isize::MAX as usize && (self as isize).checked_sub(computed_offset as isize).is_some()
+                && crate::ptr::byte_offset_does_not_wrap(self, -(computed_offset as isize))
         }) &&
-        // Precondition 3: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
+        // Precondition 4: If `T` is a unit type (`size_of::<T>() == 0`), this check is unnecessary as it has no allocated memory.
         // Otherwise, for non-unit types, `self` and `self.wrapping_sub(count)` should point to the same allocated object,
         // restricting `count` to prevent crossing allocation boundaries.
         (count == 0 || (core::mem::size_of::<T>() == 0) || (core::ub_checks::same_allocation(self, self.wrapping_sub(count))))
@@ -1263,6 +1255,7 @@ impl<T: PointeeSized> *mut T {
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[must_use = "returns a new pointer rather than modifying its argument"]
     #[rustc_const_stable(feature = "const_ptr_offset", since = "1.61.0")]
+    #[allow(clippy::ptr_offset_with_cast)]
     #[inline(always)]
     pub const fn wrapping_add(self, count: usize) -> Self
     where
@@ -1393,9 +1386,10 @@ impl<T: PointeeSized> *mut T {
     ///
     /// [`ptr::read_volatile`]: crate::ptr::read_volatile()
     #[stable(feature = "pointer_methods", since = "1.26.0")]
+    #[rustc_const_unstable(feature = "const_volatile", issue = "159094")]
     #[inline(always)]
     #[track_caller]
-    pub unsafe fn read_volatile(self) -> T
+    pub const unsafe fn read_volatile(self) -> T
     where
         T: Sized,
     {
@@ -1510,6 +1504,7 @@ impl<T: PointeeSized> *mut T {
     /// [`ptr::drop_in_place`]: crate::ptr::drop_in_place()
     #[stable(feature = "pointer_methods", since = "1.26.0")]
     #[rustc_const_unstable(feature = "const_drop_in_place", issue = "109342")]
+    #[rustc_diagnostic_item = "ptr_drop_in_place_self"]
     #[inline(always)]
     pub const unsafe fn drop_in_place(self)
     where
@@ -1567,9 +1562,10 @@ impl<T: PointeeSized> *mut T {
     ///
     /// [`ptr::write_volatile`]: crate::ptr::write_volatile()
     #[stable(feature = "pointer_methods", since = "1.26.0")]
+    #[rustc_const_unstable(feature = "const_volatile", issue = "159094")]
     #[inline(always)]
     #[track_caller]
-    pub unsafe fn write_volatile(self, val: T)
+    pub const unsafe fn write_volatile(self, val: T)
     where
         T: Sized,
     {
@@ -1794,13 +1790,13 @@ impl<T> *mut T {
     /// #![feature(ptr_cast_slice)]
     ///
     /// let x = &mut [5, 6, 7];
-    /// let slice = x.as_mut_ptr().cast_slice(3);
+    /// let raw_mut_slice = x.as_mut_ptr().cast_slice(3);
     ///
     /// unsafe {
-    ///     (*slice)[2] = 99; // assign a value at an index in the slice
+    ///     (*raw_mut_slice)[2] = 99; // assign a value at an index in the slice
     /// };
     ///
-    /// assert_eq!(unsafe { &*slice }[2], 99);
+    /// assert_eq!(unsafe { &*raw_mut_slice }[2], 99);
     /// ```
     ///
     /// You must ensure that the pointer is valid and not null before dereferencing
@@ -1820,6 +1816,7 @@ impl<T> *mut T {
         slice_from_raw_parts_mut(self, len)
     }
 }
+
 impl<T> *mut MaybeUninit<T> {
     /// Casts from a maybe-uninitialized type to its initialized version.
     ///
@@ -1919,7 +1916,6 @@ impl<T> *mut [T] {
     ///
     /// ```
     /// #![feature(raw_slice_split)]
-    /// #![feature(slice_ptr_get)]
     ///
     /// let mut v = [1, 0, 3, 0, 5, 6];
     /// let ptr = &mut v as *mut [_];

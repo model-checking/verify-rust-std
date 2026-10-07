@@ -12,8 +12,8 @@ use crate::error::Error;
 use crate::intrinsics::{unchecked_add, unchecked_mul, unchecked_sub};
 #[cfg(kani)]
 use crate::kani;
-use crate::mem::SizedTypeProperties;
-use crate::ptr::{Alignment, NonNull};
+use crate::mem::{Alignment, SizedTypeProperties};
+use crate::ptr::NonNull;
 // Used only for contract verification.
 #[allow(unused_imports)]
 use crate::ub_checks::Invariant;
@@ -249,37 +249,43 @@ impl Layout {
     ///
     /// # Safety
     ///
-    /// This function is only safe to call if the following conditions hold:
+    /// This function is safe to call if the pointer is safe to reborrow as `&T`
+    /// (in which case you could also call [`for_value`][Self::for_value]).
+    /// Otherwise, the following conditions must hold:
     ///
     /// - If `T` is `Sized`, this function is always safe to call.
     /// - If the unsized tail of `T` is:
-    ///     - a [slice], then the length of the slice tail must be an initialized
-    ///       integer, and the size of the *entire value*
+    ///     - a [slice] `[U]`, `str`, or a [trait object] `dyn Trait`, then the size of the *entire value*
     ///       (dynamic tail length + statically sized prefix) must fit in `isize`.
     ///       For the special case where the dynamic tail length is 0, this function
     ///       is safe to call.
-    ///     - a [trait object], then the vtable part of the pointer must point
-    ///       to a valid vtable for the type `T` acquired by an unsizing coercion,
-    ///       and the size of the *entire value*
-    ///       (dynamic tail length + statically sized prefix) must fit in `isize`.
-    ///     - an (unstable) [extern type], then this function is always safe to
-    ///       call, but may panic or otherwise return the wrong value, as the
-    ///       extern type's layout is not known. This is the same behavior as
-    ///       [`Layout::for_value`] on a reference to an extern type tail.
-    ///     - otherwise, it is conservatively not allowed to call this function.
+    //        NOTE: the reason this is safe is that if an overflow were to occur already with size 0,
+    //        then we would stop compilation as even the "statically known" part of the type would
+    //        already be too big (or the call may be in dead code and optimized away, but then it
+    //        doesn't matter).
+    ///     - No other kind of unsized tail currently exists that satisfies the trait bounds for this
+    ///       function. If more kinds of unsized tails get introduced in the future, the documentation
+    ///       of this function will have to be extended before it can be used for such types.
+    ///
+    /// Here, *unsized tail* refers to the type obtained by recursively descending through the last
+    /// field of a tuple or struct until we arrived at a built-in unsized type.
+    ///
+    /// As a consequence of these rules, it is the case that whenever it is allowed to convert `val`
+    /// into a shared reference, then it is also allowed to invoke this function.
     ///
     /// [trait object]: ../../book/ch17-02-trait-objects.html
     /// [extern type]: ../../unstable-book/language-features/extern-types.html
-    #[unstable(feature = "layout_for_ptr", issue = "69835")]
+    #[stable(feature = "layout_for_ptr", since = "1.99.0")]
+    #[rustc_const_stable(feature = "layout_for_ptr", since = "1.99.0")]
     #[must_use]
     #[inline]
     // TODO: we should try to capture the above constraints on T in a `requires` clause, and the
     // metadata helpers from https://github.com/model-checking/verify-rust-std/pull/37 may be able
     // to accomplish this.
     #[ensures(|result| result.align().is_power_of_two())]
-    pub const unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
+    pub const unsafe fn for_value_raw<T: ?Sized>(val: *const T) -> Self {
         // SAFETY: we pass along the prerequisites of these functions to the caller
-        let (size, alignment) = unsafe { (mem::size_of_val_raw(t), Alignment::of_val_raw(t)) };
+        let (size, alignment) = unsafe { (mem::size_of_val_raw(val), Alignment::of_val_raw(val)) };
         // SAFETY: see rationale in `new` for why this is using the unsafe variant
         unsafe { Layout::from_size_alignment_unchecked(size, alignment) }
     }
@@ -290,13 +296,13 @@ impl Layout {
     /// be that of a valid pointer, which means this must not be used
     /// as a "not yet initialized" sentinel value.
     /// Types that lazily allocate must track initialization by some other means.
-    #[stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "alloc_layout_extra", since = "1.95.0")]
+    #[rustc_const_stable(feature = "alloc_layout_extra", since = "1.95.0")]
     #[must_use]
     #[inline]
     #[ensures(|result| result.is_aligned())]
     pub const fn dangling_ptr(&self) -> NonNull<u8> {
-        NonNull::without_provenance(self.align.as_nonzero())
+        NonNull::without_provenance(self.align.as_nonzero_usize())
     }
 
     /// Creates a layout describing the record that can hold a value
@@ -458,8 +464,8 @@ impl Layout {
     /// let repeated = padding_needed.repeat(0).unwrap();
     /// assert_eq!(repeated, (Layout::from_size_align(0, 4).unwrap(), 8));
     /// ```
-    #[stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "alloc_layout_extra", since = "1.95.0")]
+    #[rustc_const_stable(feature = "alloc_layout_extra", since = "1.95.0")]
     #[inline]
     // Since rust-lang/rust#148769, the result does not include padding after the trailing
     // element, i.e., on success the resulting size is (n - 1) * stride + self.size() for n > 0
@@ -575,8 +581,8 @@ impl Layout {
     /// aligned.
     ///
     /// On arithmetic overflow, returns `LayoutError`.
-    #[stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "alloc_layout_extra", since = "1.95.0")]
+    #[rustc_const_stable(feature = "alloc_layout_extra", since = "1.95.0")]
     #[inline]
     // for Kani (v0.54.0), the below multiplication is too costly to prove (running into the
     // 6-hours timeout on GitHub); we use a weaker postcondition instead
@@ -600,8 +606,8 @@ impl Layout {
     /// and is not incorporated *at all* into the resulting layout.
     ///
     /// On arithmetic overflow, returns `LayoutError`.
-    #[stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
-    #[rustc_const_stable(feature = "alloc_layout_extra", since = "CURRENT_RUSTC_VERSION")]
+    #[stable(feature = "alloc_layout_extra", since = "1.95.0")]
+    #[rustc_const_stable(feature = "alloc_layout_extra", since = "1.95.0")]
     #[inline]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().size() == self.size() + next.size())]
     #[ensures(|result| result.is_err() || result.as_ref().unwrap().align() == self.align())]
