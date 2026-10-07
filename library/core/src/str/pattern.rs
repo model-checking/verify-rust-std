@@ -2329,31 +2329,24 @@ pub mod verify {
     }
 
     // ------------------------------------------------------------------
-    // Stubs for memchr/memrchr.
+    // Stub for memrchr.
     //
     // Challenge 20 allows assuming "the safety and functional correctness
     // of all functions in the slice module", which covers
-    // `core::slice::memchr::{memchr,memrchr}`. Following the stub pattern
-    // accepted in PR #544, these are *semantically identical
-    // implementations* of the first/last-occurrence contract — no
-    // nondeterminism, no `kani::assume` — replacing only the optimized
-    // word-at-a-time scan, which CBMC unwinds poorly. Each harness's
-    // unwind bound fully unwinds the linear scan, so the proofs remain
-    // exhaustive. They are applied per-harness, only where the real call
-    // graph reaches memchr/memrchr (`CharSearcher::next_match` /
-    // `next_match_back`).
+    // `core::slice::memchr::{memchr,memrchr}`. Since #628, `memchr` under
+    // `cfg(kani)` is already the byte-by-byte scan `memchr_naive`
+    // (`library/core/src/slice/memchr.rs`), so `verify_cs_next_match`
+    // runs the real `cfg(kani)` path and needs no stub. `memrchr` has no
+    // `cfg(kani)` path (it wraps `memrchr_aligned`'s `align_to` word
+    // scan), so, following the stub pattern accepted in PR #544,
+    // `stub_memrchr` is a *semantically identical implementation* of the
+    // last-occurrence contract — no nondeterminism, no `kani::assume` —
+    // replacing only the optimized word-at-a-time scan, which CBMC
+    // unwinds poorly. The harness's unwind bound fully unwinds the linear
+    // scan, so the proof remains exhaustive. It is applied per-harness,
+    // only where the real call graph reaches memrchr
+    // (`CharSearcher::next_match_back`).
     // ------------------------------------------------------------------
-
-    fn stub_memchr(x: u8, text: &[u8]) -> Option<usize> {
-        let mut i = 0;
-        while i < text.len() {
-            if text[i] == x {
-                return Some(i);
-            }
-            i += 1;
-        }
-        None
-    }
 
     fn stub_memrchr(x: u8, text: &[u8]) -> Option<usize> {
         let mut i = text.len();
@@ -2482,8 +2475,9 @@ pub mod verify {
     }
 
     /// Contract proof for the real `CharSearcher::next_match` (the memchr
-    /// loop, with memchr replaced by the semantically identical
-    /// `stub_memchr`, see above) and criteria 2+3 for it: Kani assumes
+    /// loop; under `cfg(kani)` core's `memchr` is the byte-by-byte scan
+    /// `memchr_naive` since #628, so it runs unstubbed) and criteria 2+3
+    /// for it: Kani assumes
     /// the `#[requires]` (which `any_char_searcher` establishes anyway),
     /// checks the `#[ensures]` and the write set on return, and the body
     /// re-asserts the boundary property and `C`. Every loop iteration
@@ -2491,7 +2485,6 @@ pub mod verify {
     /// unwinds the search.
     #[kani::proof_for_contract(CharSearcher::next_match)]
     #[kani::unwind(7)]
-    #[kani::stub(crate::slice::memchr::memchr, stub_memchr)]
     pub fn verify_cs_next_match() {
         let mut buf = [0u8; HAYSTACK_BYTES];
         let haystack = symbolic_str(&mut buf);
