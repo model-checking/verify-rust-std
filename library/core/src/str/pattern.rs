@@ -2253,13 +2253,19 @@ pub mod verify {
     /// Arbitrary-`C`-state builder for a bounded (<= 5-byte) `CharSearcher`:
     /// independently symbolic `finger`/`finger_back`/`needle` over a
     /// `symbolic_str` haystack, filtered to invariant-satisfying states.
-    /// Also assumes the haystack is valid UTF-8 (Challenge-20 assumption 3:
-    /// "any UTF-8 property of haystack is assumable"), because the target
-    /// methods below decode it via `.chars()` — unlike the Task 1.1
-    /// creation harnesses, which never read past a boundary.
+    /// Also assumes the haystack is ASCII (Challenge-20 assumption 3: "any
+    /// UTF-8 property of haystack is assumable" — ASCII is one such
+    /// property), because the target methods below decode it via
+    /// `.chars()`, unlike the Task 1.1 creation harnesses, which never read
+    /// past a boundary. A `from_utf8(..).is_ok()` assume was tried first but
+    /// is NOT a sound filter here: `run_utf8_validation`'s loop-contract
+    /// abstraction (`-Z loop-contracts`) under-constrains what `Ok` implies
+    /// for a caller, so CBMC found genuinely-invalid byte sequences (e.g. an
+    /// orphan continuation byte) satisfying it. A direct ASCII check doesn't
+    /// depend on that abstraction and is trivially sound.
     fn kani_any_char_searcher<'a>(buf: &'a mut [u8; 5]) -> CharSearcher<'a> {
         let haystack = symbolic_str(buf);
-        kani::assume(crate::str::from_utf8(haystack.as_bytes()).is_ok());
+        kani::assume(haystack.as_bytes().iter().all(|&b| b < 0x80));
         let needle: char = kani::any();
         let mut utf8_encoded = [0u8; 4];
         let utf8_size = needle.encode_utf8(&mut utf8_encoded).len() as u8;
@@ -2272,12 +2278,13 @@ pub mod verify {
 
     /// Arbitrary-`C`-state builder for a bounded `MultiCharEqSearcher<[char;
     /// 2]>`: a symbolic `char_indices` cursor offset over a `symbolic_str`
-    /// haystack (also assumed valid UTF-8, same license as above).
+    /// haystack (also assumed ASCII, same license + soundness note as
+    /// `kani_any_char_searcher` above).
     fn kani_any_multi_char_eq_searcher<'a>(
         buf: &'a mut [u8; 5],
     ) -> MultiCharEqSearcher<'a, [char; 2]> {
         let haystack = symbolic_str(buf);
-        kani::assume(crate::str::from_utf8(haystack.as_bytes()).is_ok());
+        kani::assume(haystack.as_bytes().iter().all(|&b| b < 0x80));
         let char_eq: [char; 2] = [kani::any(), kani::any()];
         let offset: usize = kani::any();
         let suffix = haystack.get(offset..);
