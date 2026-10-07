@@ -14,4 +14,6 @@ please see the [Tool Application](general-rules.md#tool-applications) section.
  | ESBMC (GOTO-Transcoder) | [![ESBMC](https://github.com/model-checking/verify-rust-std/actions/workflows/goto-transcoder.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/goto-transcoder.yml)      |
  | Flux  | [![Flux](https://github.com/model-checking/verify-rust-std/actions/workflows/flux.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/flux.yml)      |
  | Kani Rust Verifier  | [![Kani](https://github.com/model-checking/verify-rust-std/actions/workflows/kani.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/kani.yml)      |
+ | KMIR Symbolic Rust Execution | [![KMIR](https://github.com/model-checking/verify-rust-std/actions/workflows/kmir.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/kmir.yml)      |
+ | RAPx  | [![RAPx](https://github.com/model-checking/verify-rust-std/actions/workflows/rapx.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/rapx.yml)      |
  | VeriFast for Rust   | [![VeriFast](https://github.com/model-checking/verify-rust-std/actions/workflows/verifast.yml/badge.svg)](https://github.com/model-checking/verify-rust-std/actions/workflows/verifast.yml)      |

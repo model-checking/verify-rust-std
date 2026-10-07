@@ -10,12 +10,27 @@ use crate::range::{Range, RangeFrom, RangeInclusive, legacy};
 use crate::{intrinsics, mem};
 
 /// By-value [`Range`] iterator.
-#[unstable(feature = "new_range_api", issue = "125687")]
+#[stable(feature = "new_range_api", since = "1.96.0")]
 #[derive(Debug, Clone)]
-pub struct IterRange<A>(legacy::Range<A>);
+pub struct RangeIter<A>(pub(crate) legacy::Range<A>);
 
-impl<A> IterRange<A> {
+impl<A> RangeIter<A> {
+    #[unstable(feature = "new_range_remainder", issue = "154458")]
     /// Returns the remainder of the range being iterated over.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(new_range_remainder)]
+    ///
+    /// let range = core::range::Range::from(3..11);
+    /// let mut iter = range.into_iter();
+    /// assert_eq!(iter.clone().remainder(), range);
+    /// iter.next();
+    /// assert_eq!(iter.clone().remainder(), core::range::Range::from(4..11));
+    /// iter.by_ref().for_each(drop);
+    /// assert!(iter.remainder().is_empty());
+    /// ```
     pub fn remainder(self) -> Range<A> {
         Range { start: self.0.start, end: self.0.end }
     }
@@ -27,11 +42,11 @@ macro_rules! unsafe_range_trusted_random_access_impl {
     ($($t:ty)*) => ($(
         #[doc(hidden)]
         #[unstable(feature = "trusted_random_access", issue = "none")]
-        unsafe impl TrustedRandomAccess for IterRange<$t> {}
+        unsafe impl TrustedRandomAccess for RangeIter<$t> {}
 
         #[doc(hidden)]
         #[unstable(feature = "trusted_random_access", issue = "none")]
-        unsafe impl TrustedRandomAccessNoCoerce for IterRange<$t> {
+        unsafe impl TrustedRandomAccessNoCoerce for RangeIter<$t> {
             const MAY_HAVE_SIDE_EFFECT: bool = false;
         }
     )*)
@@ -53,8 +68,8 @@ unsafe_range_trusted_random_access_impl! {
     u64 i64
 }
 
-#[unstable(feature = "new_range_api", issue = "125687")]
-impl<A: Step> Iterator for IterRange<A> {
+#[stable(feature = "new_range_api", since = "1.96.0")]
+impl<A: Step> Iterator for RangeIter<A> {
     type Item = A;
 
     #[inline]
@@ -123,8 +138,8 @@ impl<A: Step> Iterator for IterRange<A> {
     }
 }
 
-#[unstable(feature = "new_range_api", issue = "125687")]
-impl<A: Step> DoubleEndedIterator for IterRange<A> {
+#[stable(feature = "new_range_api", since = "1.96.0")]
+impl<A: Step> DoubleEndedIterator for RangeIter<A> {
     #[inline]
     fn next_back(&mut self) -> Option<A> {
         self.0.next_back()
@@ -142,30 +157,45 @@ impl<A: Step> DoubleEndedIterator for IterRange<A> {
 }
 
 #[unstable(feature = "trusted_len", issue = "37572")]
-unsafe impl<A: TrustedStep> TrustedLen for IterRange<A> {}
+unsafe impl<A: TrustedStep> TrustedLen for RangeIter<A> {}
 
-#[unstable(feature = "new_range_api", issue = "125687")]
-impl<A: Step> FusedIterator for IterRange<A> {}
+#[stable(feature = "new_range_api", since = "1.96.0")]
+impl<A: Step> FusedIterator for RangeIter<A> {}
 
-#[unstable(feature = "new_range_api", issue = "125687")]
+#[stable(feature = "new_range_api", since = "1.96.0")]
 impl<A: Step> IntoIterator for Range<A> {
     type Item = A;
-    type IntoIter = IterRange<A>;
+    type IntoIter = RangeIter<A>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IterRange(self.into())
+        RangeIter(self.into())
     }
 }
 
 /// By-value [`RangeInclusive`] iterator.
-#[unstable(feature = "new_range_api", issue = "125687")]
+#[stable(feature = "new_range_inclusive_api", since = "1.95.0")]
 #[derive(Debug, Clone)]
-pub struct IterRangeInclusive<A>(legacy::RangeInclusive<A>);
+pub struct RangeInclusiveIter<A>(legacy::RangeInclusive<A>);
 
-impl<A: Step> IterRangeInclusive<A> {
+impl<A: Step> RangeInclusiveIter<A> {
     /// Returns the remainder of the range being iterated over.
     ///
     /// If the iterator is exhausted or empty, returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(new_range_remainder)]
+    ///
+    /// let range = core::range::RangeInclusive::from(3..=11);
+    /// let mut iter = range.into_iter();
+    /// assert_eq!(iter.clone().remainder().unwrap(), range);
+    /// iter.next();
+    /// assert_eq!(iter.clone().remainder().unwrap(), core::range::RangeInclusive::from(4..=11));
+    /// iter.by_ref().for_each(drop);
+    /// assert!(iter.remainder().is_none());
+    /// ```
+    #[unstable(feature = "new_range_remainder", issue = "154458")]
     pub fn remainder(self) -> Option<RangeInclusive<A>> {
         if self.0.is_empty() {
             return None;
@@ -175,8 +205,8 @@ impl<A: Step> IterRangeInclusive<A> {
     }
 }
 
-#[unstable(feature = "new_range_api", issue = "125687")]
-impl<A: Step> Iterator for IterRangeInclusive<A> {
+#[stable(feature = "new_range_inclusive_api", since = "1.95.0")]
+impl<A: Step> Iterator for RangeInclusiveIter<A> {
     type Item = A;
 
     #[inline]
@@ -231,8 +261,8 @@ impl<A: Step> Iterator for IterRangeInclusive<A> {
     }
 }
 
-#[unstable(feature = "new_range_api", issue = "125687")]
-impl<A: Step> DoubleEndedIterator for IterRangeInclusive<A> {
+#[stable(feature = "new_range_inclusive_api", since = "1.95.0")]
+impl<A: Step> DoubleEndedIterator for RangeInclusiveIter<A> {
     #[inline]
     fn next_back(&mut self) -> Option<A> {
         self.0.next_back()
@@ -250,18 +280,18 @@ impl<A: Step> DoubleEndedIterator for IterRangeInclusive<A> {
 }
 
 #[unstable(feature = "trusted_len", issue = "37572")]
-unsafe impl<A: TrustedStep> TrustedLen for IterRangeInclusive<A> {}
+unsafe impl<A: TrustedStep> TrustedLen for RangeInclusiveIter<A> {}
 
-#[unstable(feature = "new_range_api", issue = "125687")]
-impl<A: Step> FusedIterator for IterRangeInclusive<A> {}
+#[stable(feature = "new_range_inclusive_api", since = "1.95.0")]
+impl<A: Step> FusedIterator for RangeInclusiveIter<A> {}
 
-#[unstable(feature = "new_range_api", issue = "125687")]
+#[stable(feature = "new_range_inclusive_api", since = "1.95.0")]
 impl<A: Step> IntoIterator for RangeInclusive<A> {
     type Item = A;
-    type IntoIter = IterRangeInclusive<A>;
+    type IntoIter = RangeInclusiveIter<A>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IterRangeInclusive(self.into())
+        RangeInclusiveIter(self.into())
     }
 }
 
@@ -275,15 +305,15 @@ impl<A: Step> IntoIterator for RangeInclusive<A> {
 //   since e.g. `(0..=u64::MAX).len()` would be `u64::MAX + 1`.
 macro_rules! range_exact_iter_impl {
     ($($t:ty)*) => ($(
-        #[unstable(feature = "new_range_api", issue = "125687")]
-        impl ExactSizeIterator for IterRange<$t> { }
+        #[stable(feature = "new_range_api", since = "1.96.0")]
+        impl ExactSizeIterator for RangeIter<$t> { }
     )*)
 }
 
 macro_rules! range_incl_exact_iter_impl {
     ($($t:ty)*) => ($(
-        #[unstable(feature = "new_range_api", issue = "125687")]
-        impl ExactSizeIterator for IterRangeInclusive<$t> { }
+        #[stable(feature = "new_range_inclusive_api", since = "1.95.0")]
+        impl ExactSizeIterator for RangeInclusiveIter<$t> { }
     )*)
 }
 
@@ -298,45 +328,75 @@ range_incl_exact_iter_impl! {
 }
 
 /// By-value [`RangeFrom`] iterator.
-#[unstable(feature = "new_range_api", issue = "125687")]
+#[stable(feature = "new_range_from_api", since = "1.96.0")]
 #[derive(Debug, Clone)]
-pub struct IterRangeFrom<A> {
+pub struct RangeFromIter<A> {
     start: A,
-    /// Whether the first element of the iterator has yielded.
+    /// Whether the maximum value of the iterator has yielded.
     /// Only used when overflow checks are enabled.
-    first: bool,
+    exhausted: bool,
 }
 
-impl<A: Step> IterRangeFrom<A> {
+impl<A: Step> RangeFromIter<A> {
     /// Returns the remainder of the range being iterated over.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(new_range_remainder)]
+    ///
+    /// let range = core::range::RangeFrom::from(3..);
+    /// let mut iter = range.into_iter();
+    /// assert_eq!(iter.clone().remainder(), range);
+    /// iter.next();
+    /// assert_eq!(iter.remainder(), core::range::RangeFrom::from(4..));
+    /// ```
     #[inline]
     #[rustc_inherit_overflow_checks]
+    #[unstable(feature = "new_range_remainder", issue = "154458")]
     pub fn remainder(self) -> RangeFrom<A> {
-        if intrinsics::overflow_checks() {
-            if !self.first {
-                return RangeFrom { start: Step::forward(self.start, 1) };
-            }
+        // Need to handle this case even if overflow-checks are disabled,
+        // because a `RangeFromIter` could be exhausted in a crate with
+        // overflow-checks enabled, but then passed to a crate with them
+        // disabled before this is called.
+        if self.exhausted {
+            return RangeFrom { start: Step::forward(self.start, 1) };
         }
 
         RangeFrom { start: self.start }
     }
 }
 
-#[unstable(feature = "new_range_api", issue = "125687")]
-impl<A: Step> Iterator for IterRangeFrom<A> {
+#[stable(feature = "new_range_from_api", since = "1.96.0")]
+impl<A: Step> Iterator for RangeFromIter<A> {
     type Item = A;
 
     #[inline]
     #[rustc_inherit_overflow_checks]
     fn next(&mut self) -> Option<A> {
-        if intrinsics::overflow_checks() {
-            if self.first {
-                self.first = false;
-                return Some(self.start.clone());
-            }
-
+        if self.exhausted {
+            // This should panic if overflow checks are enabled, since
+            // `forward_checked` returned `None` in prior iteration.
             self.start = Step::forward(self.start.clone(), 1);
-            return Some(self.start.clone());
+
+            // If we get here, if means this iterator was exhausted by a crate
+            // with overflow-checks enabled, but now we're iterating in a crate with
+            // overflow-checks disabled. Since we successfully incremented `self.start`
+            // above (in many cases this will wrap around to MIN), we now unset
+            // the flag so we don't repeat this process in the next iteration.
+            //
+            // This could also happen if `forward_checked` returned None but
+            // (for whatever reason, not applicable to any std implementors)
+            // `forward` doesn't panic when overflow-checks are enabled. In that
+            // case, this is also the correct behavior.
+            self.exhausted = false;
+        }
+        if intrinsics::overflow_checks() {
+            let Some(n) = Step::forward_checked(self.start.clone(), 1) else {
+                self.exhausted = true;
+                return Some(self.start.clone());
+            };
+            return Some(mem::replace(&mut self.start, n));
         }
 
         let n = Step::forward(self.start.clone(), 1);
@@ -351,18 +411,22 @@ impl<A: Step> Iterator for IterRangeFrom<A> {
     #[inline]
     #[rustc_inherit_overflow_checks]
     fn nth(&mut self, n: usize) -> Option<A> {
+        // Typically `forward` will cause an overflow-check panic here,
+        // but unset the exhausted flag to handle the uncommon cases.
+        // See the comments in `next` for more details.
+        if self.exhausted {
+            self.start = Step::forward(self.start.clone(), 1);
+            self.exhausted = false;
+        }
         if intrinsics::overflow_checks() {
-            if self.first {
-                self.first = false;
-
-                let plus_n = Step::forward(self.start.clone(), n);
-                self.start = plus_n.clone();
-                return Some(plus_n);
-            }
-
             let plus_n = Step::forward(self.start.clone(), n);
-            self.start = Step::forward(plus_n.clone(), 1);
-            return Some(self.start.clone());
+            if let Some(plus_n1) = Step::forward_checked(plus_n.clone(), 1) {
+                self.start = plus_n1;
+            } else {
+                self.start = plus_n.clone();
+                self.exhausted = true;
+            }
+            return Some(plus_n);
         }
 
         let plus_n = Step::forward(self.start.clone(), n);
@@ -372,17 +436,17 @@ impl<A: Step> Iterator for IterRangeFrom<A> {
 }
 
 #[unstable(feature = "trusted_len", issue = "37572")]
-unsafe impl<A: TrustedStep> TrustedLen for IterRangeFrom<A> {}
+unsafe impl<A: TrustedStep> TrustedLen for RangeFromIter<A> {}
 
-#[unstable(feature = "new_range_api", issue = "125687")]
-impl<A: Step> FusedIterator for IterRangeFrom<A> {}
+#[stable(feature = "new_range_from_api", since = "1.96.0")]
+impl<A: Step> FusedIterator for RangeFromIter<A> {}
 
-#[unstable(feature = "new_range_api", issue = "125687")]
+#[stable(feature = "new_range_from_api", since = "1.96.0")]
 impl<A: Step> IntoIterator for RangeFrom<A> {
     type Item = A;
-    type IntoIter = IterRangeFrom<A>;
+    type IntoIter = RangeFromIter<A>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IterRangeFrom { start: self.start, first: true }
+        RangeFromIter { start: self.start, exhausted: false }
     }
 }

@@ -18,14 +18,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Build the book tools with stable: inside this repo, rust-toolchain.toml would select the
+      # pinned nightly, whose proc_macro no longer has features older dependencies rely on.
       - name: Install mdbook
         run: |
-          cargo install mdbook --version "^0.4" --locked
+          cargo +stable install mdbook --version "^0.4" --locked
           echo "${HOME}/.cargo/bin" >> $GITHUB_PATH
 
       # Removed --locked for now since it is broken due to old proc_macro feature.
       - name: Install linkchecker
-        run: cargo install mdbook-linkcheck --version "^0.7"
+        run: cargo +stable install mdbook-linkcheck --version "^0.7"
 
       - name: Build Documentation
         run: mdbook build doc

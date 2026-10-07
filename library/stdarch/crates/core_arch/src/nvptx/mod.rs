@@ -19,123 +19,125 @@ mod packed;
 pub use packed::*;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
-    #[link_name = "llvm.nvvm.barrier0"]
-    fn syncthreads() -> ();
+unsafe extern "llvm-intrinsic" {
+    #[link_name = "llvm.nvvm.barrier.cta.sync.aligned.all"]
+    fn syncthreads(a: u32) -> ();
     #[link_name = "llvm.nvvm.read.ptx.sreg.ntid.x"]
-    fn block_dim_x() -> i32;
+    fn block_dim_x() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ntid.y"]
-    fn block_dim_y() -> i32;
+    fn block_dim_y() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ntid.z"]
-    fn block_dim_z() -> i32;
+    fn block_dim_z() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ctaid.x"]
-    fn block_idx_x() -> i32;
+    fn block_idx_x() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ctaid.y"]
-    fn block_idx_y() -> i32;
+    fn block_idx_y() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ctaid.z"]
-    fn block_idx_z() -> i32;
+    fn block_idx_z() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.nctaid.x"]
-    fn grid_dim_x() -> i32;
+    fn grid_dim_x() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.nctaid.y"]
-    fn grid_dim_y() -> i32;
+    fn grid_dim_y() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.nctaid.z"]
-    fn grid_dim_z() -> i32;
+    fn grid_dim_z() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.tid.x"]
-    fn thread_idx_x() -> i32;
+    fn thread_idx_x() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.tid.y"]
-    fn thread_idx_y() -> i32;
+    fn thread_idx_y() -> u32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.tid.z"]
-    fn thread_idx_z() -> i32;
+    fn thread_idx_z() -> u32;
 }
 
 /// Synchronizes all threads in the block.
+///
+#[doc = include_str!("../amdgpu/intrinsic_is_convergent.md")]
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
 pub unsafe fn _syncthreads() -> () {
-    syncthreads()
+    syncthreads(0)
 }
 
 /// x-th thread-block dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_dim_x() -> i32 {
+pub unsafe fn _block_dim_x() -> u32 {
     block_dim_x()
 }
 
 /// y-th thread-block dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_dim_y() -> i32 {
+pub unsafe fn _block_dim_y() -> u32 {
     block_dim_y()
 }
 
 /// z-th thread-block dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_dim_z() -> i32 {
+pub unsafe fn _block_dim_z() -> u32 {
     block_dim_z()
 }
 
 /// x-th thread-block index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_idx_x() -> i32 {
+pub unsafe fn _block_idx_x() -> u32 {
     block_idx_x()
 }
 
 /// y-th thread-block index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_idx_y() -> i32 {
+pub unsafe fn _block_idx_y() -> u32 {
     block_idx_y()
 }
 
 /// z-th thread-block index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_idx_z() -> i32 {
+pub unsafe fn _block_idx_z() -> u32 {
     block_idx_z()
 }
 
 /// x-th block-grid dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _grid_dim_x() -> i32 {
+pub unsafe fn _grid_dim_x() -> u32 {
     grid_dim_x()
 }
 
 /// y-th block-grid dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _grid_dim_y() -> i32 {
+pub unsafe fn _grid_dim_y() -> u32 {
     grid_dim_y()
 }
 
 /// z-th block-grid dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _grid_dim_z() -> i32 {
+pub unsafe fn _grid_dim_z() -> u32 {
     grid_dim_z()
 }
 
 /// x-th thread index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _thread_idx_x() -> i32 {
+pub unsafe fn _thread_idx_x() -> u32 {
     thread_idx_x()
 }
 
 /// y-th thread index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _thread_idx_y() -> i32 {
+pub unsafe fn _thread_idx_y() -> u32 {
     thread_idx_y()
 }
 
 /// z-th thread index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _thread_idx_z() -> i32 {
+pub unsafe fn _thread_idx_z() -> u32 {
     thread_idx_z()
 }
 
@@ -155,10 +157,13 @@ unsafe extern "C" {
     /// * `format`: A pointer to the format specifier input (uses common `printf` format).
     /// * `valist`: A pointer to the valist input.
     ///
-    /// ```
+    /// ```ignore (available only for nvptx)
+    /// # use std::mem::transmute;
     /// #[repr(C)]
     /// struct PrintArgs(f32, f32, f32, i32);
     ///
+    /// let a = 0.1f32;
+    /// let b = 0.2f32;
     /// vprintf(
     ///     "int(%f + %f) = int(%f) = %d\n".as_ptr(),
     ///     transmute(&PrintArgs(a, b, a + b, (a + b) as i32)),

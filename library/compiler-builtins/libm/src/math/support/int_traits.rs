@@ -1,5 +1,10 @@
 use core::{cmp, fmt, ops};
 
+mod narrowing_div;
+pub use narrowing_div::NarrowingDiv;
+
+use crate::support::DisplayHex;
+
 /// Minimal integer implementations needed on all integer types, including wide integers.
 #[allow(dead_code)] // Some constants are only used with tests
 pub trait MinInt:
@@ -37,6 +42,7 @@ pub trait Int:
     + fmt::Display
     + fmt::Binary
     + fmt::LowerHex
+    + DisplayHex
     + ops::AddAssign
     + ops::SubAssign
     + ops::MulAssign
@@ -104,6 +110,7 @@ pub trait Int:
     fn borrowing_sub(self, other: Self, borrow: bool) -> (Self, bool);
     fn leading_zeros(self) -> u32;
     fn trailing_zeros(self) -> u32;
+    fn count_ones(self) -> u32;
     fn ilog2(self) -> u32;
 }
 
@@ -171,6 +178,10 @@ macro_rules! int_impl_common {
 
         fn trailing_zeros(self) -> u32 {
             <Self>::trailing_zeros(self)
+        }
+
+        fn count_ones(self) -> u32 {
+            <Self>::count_ones(self)
         }
 
         fn ilog2(self) -> u32 {
@@ -293,7 +304,14 @@ int_impl!(i128, u128);
 
 /// Trait for integers twice the bit width of another integer. This is implemented for all
 /// primitives except for `u8`, because there is not a smaller primitive.
-pub trait DInt: MinInt {
+pub trait DInt:
+    MinInt
+    + ops::Add<Output = Self>
+    + ops::Sub<Output = Self>
+    + ops::Shl<u32, Output = Self>
+    + ops::Shr<u32, Output = Self>
+    + Ord
+{
     /// Integer that is half the bit width of the integer this trait is implemented for
     type H: HInt<D = Self>;
 

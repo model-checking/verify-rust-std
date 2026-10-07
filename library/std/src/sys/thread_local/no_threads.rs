@@ -5,11 +5,14 @@ use crate::cell::{Cell, UnsafeCell};
 use crate::mem::MaybeUninit;
 use crate::ptr;
 
+#[cfg(target_has_threads)]
+compile_error!("Using no_threads implementation on a target with threads");
+
 #[doc(hidden)]
 #[allow_internal_unstable(thread_local_internals)]
 #[allow_internal_unsafe]
 #[unstable(feature = "thread_local_internals", issue = "none")]
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub macro thread_local_inner {
     // used to generate the `LocalKey` value for const-initialized thread locals
     (@key $t:ty, $(#[$align_attr:meta])*, const $init:expr) => {{
@@ -92,7 +95,7 @@ impl<T> LazyStorage<T> {
         let value = i.and_then(Option::take).unwrap_or_else(f);
 
         // Destroy the old value if it is initialized
-        // FIXME(#110897): maybe panic on recursive initialization.
+        // FIXME(#110897): maybe abort on recursive initialization.
         if self.state.get() == State::Alive {
             self.state.set(State::Destroying);
             // Safety: we check for no initialization during drop below
@@ -104,7 +107,7 @@ impl<T> LazyStorage<T> {
 
         // Guard against initialization during drop
         if self.state.get() == State::Destroying {
-            panic!("Attempted to initialize thread-local while it is being dropped");
+            rtabort!("Attempted to initialize thread-local while it is being dropped");
         }
 
         unsafe {
@@ -119,7 +122,7 @@ impl<T> LazyStorage<T> {
 // SAFETY: the target doesn't have threads.
 unsafe impl<T> Sync for LazyStorage<T> {}
 
-#[rustc_macro_transparency = "semitransparent"]
+#[rustc_macro_transparency = "semiopaque"]
 pub(crate) macro local_pointer {
     () => {},
     ($vis:vis static $name:ident; $($rest:tt)*) => {

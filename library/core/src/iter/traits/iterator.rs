@@ -8,9 +8,10 @@ use super::super::{
 };
 use super::TrustedLen;
 use crate::array;
-use crate::cmp::{self, Ordering};
+use crate::cmp::{self, KeyAndValue, Ordering};
 #[cfg(kani)]
 use crate::kani;
+use crate::marker::Destruct;
 use crate::num::NonZero;
 use crate::ops::{ChangeOutputType, ControlFlow, FromResidual, Residual, Try};
 
@@ -41,7 +42,8 @@ fn _assert_is_dyn_compatible(_: &dyn Iterator<Item = ()>) {}
 #[lang = "iterator"]
 #[rustc_diagnostic_item = "Iterator"]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-pub trait Iterator {
+#[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+pub const trait Iterator {
     /// The type of the elements being iterated over.
     #[rustc_diagnostic_item = "IteratorItem"]
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -110,7 +112,7 @@ pub trait Iterator {
     /// assert_eq!(third, "those");
     /// ```
     #[inline]
-    #[unstable(feature = "iter_next_chunk", reason = "recently added", issue = "98326")]
+    #[unstable(feature = "iter_next_chunk", issue = "98326")]
     fn next_chunk<const N: usize>(
         &mut self,
     ) -> Result<[Self::Item; N], array::IntoIter<Self::Item, N>>
@@ -225,12 +227,13 @@ pub trait Iterator {
     #[stable(feature = "rust1", since = "1.0.0")]
     fn count(self) -> usize
     where
-        Self: Sized,
+        Self: Sized + [const] Destruct,
+        Self::Item: [const] Destruct,
     {
         self.fold(
             0,
             #[rustc_inherit_overflow_checks]
-            |count, _| count + 1,
+            const |accum, _elem| accum + 1,
         )
     }
 
@@ -239,6 +242,10 @@ pub trait Iterator {
     /// This method will evaluate the iterator until it returns [`None`]. While
     /// doing so, it keeps track of the current element. After [`None`] is
     /// returned, `last()` will then return the last element it saw.
+    ///
+    /// # Panics
+    ///
+    /// This function might panic if the iterator is infinite.
     ///
     /// # Examples
     ///
@@ -253,10 +260,15 @@ pub trait Iterator {
     #[stable(feature = "rust1", since = "1.0.0")]
     fn last(self) -> Option<Self::Item>
     where
-        Self: Sized,
+        Self: Sized + [const] Destruct,
+        Self::Item: [const] Destruct,
     {
         #[inline]
-        fn some<T>(_: Option<T>, x: T) -> Option<T> {
+        #[rustc_const_unstable(feature = "const_destruct", issue = "133214")]
+        const fn some<T>(_: Option<T>, x: T) -> Option<T>
+        where
+            T: [const] Destruct,
+        {
             Some(x)
         }
 
@@ -297,14 +309,23 @@ pub trait Iterator {
     /// assert_eq!(iter.advance_by(100), Err(NonZero::new(99).unwrap())); // only `4` was skipped
     /// ```
     #[inline]
-    #[unstable(feature = "iter_advance_by", reason = "recently added", issue = "77404")]
-    fn advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
+    #[unstable(feature = "iter_advance_by", issue = "77404")]
+    fn advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>>
+    where
+        Self::Item: [const] Destruct,
+    {
         /// Helper trait to specialize `advance_by` via `try_fold` for `Sized` iterators.
-        trait SpecAdvanceBy {
+
+        #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+        const trait SpecAdvanceBy {
             fn spec_advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>>;
         }
 
-        impl<I: Iterator + ?Sized> SpecAdvanceBy for I {
+        #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+        const impl<I: [const] Iterator + ?Sized> SpecAdvanceBy for I
+        where
+            I::Item: [const] Destruct,
+        {
             default fn spec_advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
                 for i in 0..n {
                     if self.next().is_none() {
@@ -316,13 +337,17 @@ pub trait Iterator {
             }
         }
 
-        impl<I: Iterator> SpecAdvanceBy for I {
+        #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+        const impl<I: [const] Iterator> SpecAdvanceBy for I
+        where
+            I::Item: [const] Destruct,
+        {
             fn spec_advance_by(&mut self, n: usize) -> Result<(), NonZero<usize>> {
                 let Some(n) = NonZero::new(n) else {
                     return Ok(());
                 };
 
-                let res = self.try_fold(n, |n, _| NonZero::new(n.get() - 1));
+                let res = self.try_fold(n, const |n, _| NonZero::new(n.get() - 1));
 
                 match res {
                     None => Ok(()),
@@ -375,7 +400,10 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+    fn nth(&mut self, n: usize) -> Option<Self::Item>
+    where
+        Self::Item: [const] Destruct,
+    {
         self.advance_by(n).ok()?;
         self.next()
     }
@@ -425,6 +453,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "iterator_step_by", since = "1.28.0")]
+    #[rustc_non_const_trait_method]
     fn step_by(self, step: usize) -> StepBy<Self>
     where
         Self: Sized,
@@ -499,7 +528,7 @@ pub trait Iterator {
     fn chain<U>(self, other: U) -> Chain<Self, U::IntoIter>
     where
         Self: Sized,
-        U: IntoIterator<Item = Self::Item>,
+        U: [const] IntoIterator<Item = Self::Item>,
     {
         Chain::new(self, other.into_iter())
     }
@@ -614,6 +643,7 @@ pub trait Iterator {
     /// [`zip`]: crate::iter::zip
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_non_const_trait_method]
     fn zip<U>(self, other: U) -> Zip<Self, U::IntoIter>
     where
         Self: Sized,
@@ -622,8 +652,28 @@ pub trait Iterator {
         Zip::new(self, other.into_iter())
     }
 
-    /// Creates a new iterator which places a copy of `separator` between adjacent
-    /// items of the original iterator.
+    /// Creates a new iterator which places a copy of `separator` between items
+    /// of the original iterator.
+    ///
+    /// Specifically on fused iterators, it is guaranteed that the new iterator
+    /// places a copy of `separator` between *adjacent* `Some(_)` items. For non-fused iterators,
+    /// it is guaranteed that [`intersperse`] will create a new iterator that places a copy
+    /// of `separator` between `Some(_)` items, particularly just right before the subsequent
+    /// `Some(_)` item.
+    ///
+    /// For example, consider the following non-fused iterator:
+    ///
+    /// ```text
+    /// Some(1) -> Some(2) -> None -> Some(3) -> Some(4) -> ...
+    /// ```
+    ///
+    /// If this non-fused iterator were to be interspersed with `0`,
+    /// then the interspersed iterator will produce:
+    ///
+    /// ```text
+    /// Some(1) -> Some(0) -> Some(2) -> None -> Some(0) -> Some(3) -> Some(0) ->
+    /// Some(4) -> ...
+    /// ```
     ///
     /// In case `separator` does not implement [`Clone`] or needs to be
     /// computed every time, use [`intersperse_with`].
@@ -654,9 +704,10 @@ pub trait Iterator {
     /// ```
     ///
     /// [`Clone`]: crate::clone::Clone
+    /// [`intersperse`]: Iterator::intersperse
     /// [`intersperse_with`]: Iterator::intersperse_with
     #[inline]
-    #[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
+    #[unstable(feature = "iter_intersperse", issue = "79524")]
     fn intersperse(self, separator: Self::Item) -> Intersperse<Self>
     where
         Self: Sized,
@@ -666,12 +717,32 @@ pub trait Iterator {
     }
 
     /// Creates a new iterator which places an item generated by `separator`
-    /// between adjacent items of the original iterator.
+    /// between items of the original iterator.
     ///
-    /// The closure will be called exactly once each time an item is placed
-    /// between two adjacent items from the underlying iterator; specifically,
-    /// the closure is not called if the underlying iterator yields less than
-    /// two items and after the last item is yielded.
+    /// Specifically on fused iterators, it is guaranteed that the new iterator
+    /// places an item generated by `separator` between adjacent `Some(_)` items.
+    /// For non-fused iterators, it is guaranteed that [`intersperse_with`] will
+    /// create a new iterator that places an item generated by `separator` between `Some(_)`
+    /// items, particularly just right before the subsequent `Some(_)` item.
+    ///
+    /// For example, consider the following non-fused iterator:
+    ///
+    /// ```text
+    /// Some(1) -> Some(2) -> None -> Some(3) -> Some(4) -> ...
+    /// ```
+    ///
+    /// If this non-fused iterator were to be interspersed with a `separator` closure
+    /// that returns `0` repeatedly, the interspersed iterator will produce:
+    ///
+    /// ```text
+    /// Some(1) -> Some(0) -> Some(2) -> None -> Some(0) -> Some(3) -> Some(0) ->
+    /// Some(4) -> ...
+    /// ```
+    ///
+    /// The `separator` closure will be called exactly once each time an item
+    /// is placed between two adjacent items from the underlying iterator;
+    /// specifically, the closure is not called if the underlying iterator yields
+    /// less than two items and after the last item is yielded.
     ///
     /// If the iterator's item implements [`Clone`], it may be easier to use
     /// [`intersperse`].
@@ -713,8 +784,9 @@ pub trait Iterator {
     /// ```
     /// [`Clone`]: crate::clone::Clone
     /// [`intersperse`]: Iterator::intersperse
+    /// [`intersperse_with`]: Iterator::intersperse_with
     #[inline]
-    #[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
+    #[unstable(feature = "iter_intersperse", issue = "79524")]
     fn intersperse_with<G>(self, separator: G) -> IntersperseWith<Self, G>
     where
         Self: Sized,
@@ -819,6 +891,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "iterator_for_each", since = "1.21.0")]
+    #[rustc_non_const_trait_method]
     fn for_each<F>(self, f: F)
     where
         Self: Sized,
@@ -1474,6 +1547,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_non_const_trait_method]
     fn flat_map<U, F>(self, f: F) -> FlatMap<Self, U, F>
     where
         Self: Sized,
@@ -1590,24 +1664,12 @@ pub trait Iterator {
     /// items yielded by `self`). If 𝑘 is less than `N`, this method yields an
     /// empty iterator.
     ///
-    /// The returned iterator implements [`FusedIterator`], because once `self`
-    /// returns `None`, even if it returns a `Some(T)` again in the next iterations,
-    /// we cannot put it into a contiguous array buffer, and thus the returned iterator
-    /// should be fused.
-    ///
     /// [`slice::windows()`]: slice::windows
     /// [`FusedIterator`]: crate::iter::FusedIterator
     ///
     /// # Panics
     ///
-    /// Panics if `N` is zero. This check will most probably get changed to a
-    /// compile time error before this method gets stabilized.
-    ///
-    /// ```should_panic
-    /// #![feature(iter_map_windows)]
-    ///
-    /// let iter = std::iter::repeat(0).map_windows(|&[]| ());
-    /// ```
+    /// Panics if `N` is zero.
     ///
     /// # Examples
     ///
@@ -1655,7 +1717,7 @@ pub trait Iterator {
     /// assert_eq!(it.next(), None);
     /// ```
     ///
-    /// For non-fused iterators, they are fused after `map_windows`.
+    /// For non-fused iterators, the window is reset after `None` is yielded.
     ///
     /// ```
     /// #![feature(iter_map_windows)]
@@ -1672,11 +1734,11 @@ pub trait Iterator {
     ///         let val = self.state;
     ///         self.state = self.state + 1;
     ///
-    ///         // yields `0..5` first, then only even numbers since `6..`.
-    ///         if val < 5 || val % 2 == 0 {
-    ///             Some(val)
-    ///         } else {
+    ///         // Skip every 5th number
+    ///         if (val + 1) % 5 == 0 {
     ///             None
+    ///         } else {
+    ///             Some(val)
     ///         }
     ///     }
     /// }
@@ -1684,38 +1746,45 @@ pub trait Iterator {
     ///
     /// let mut iter = NonFusedIterator::default();
     ///
-    /// // yields 0..5 first.
     /// assert_eq!(iter.next(), Some(0));
     /// assert_eq!(iter.next(), Some(1));
     /// assert_eq!(iter.next(), Some(2));
     /// assert_eq!(iter.next(), Some(3));
-    /// assert_eq!(iter.next(), Some(4));
-    /// // then we can see our iterator going back and forth
     /// assert_eq!(iter.next(), None);
+    /// assert_eq!(iter.next(), Some(5));
     /// assert_eq!(iter.next(), Some(6));
-    /// assert_eq!(iter.next(), None);
+    /// assert_eq!(iter.next(), Some(7));
     /// assert_eq!(iter.next(), Some(8));
     /// assert_eq!(iter.next(), None);
+    /// assert_eq!(iter.next(), Some(10));
+    /// assert_eq!(iter.next(), Some(11));
     ///
-    /// // however, with `.map_windows()`, it is fused.
     /// let mut iter = NonFusedIterator::default()
     ///     .map_windows(|arr: &[_; 2]| *arr);
     ///
     /// assert_eq!(iter.next(), Some([0, 1]));
     /// assert_eq!(iter.next(), Some([1, 2]));
     /// assert_eq!(iter.next(), Some([2, 3]));
-    /// assert_eq!(iter.next(), Some([3, 4]));
     /// assert_eq!(iter.next(), None);
     ///
-    /// // it will always return `None` after the first time.
+    /// assert_eq!(iter.next(), Some([5, 6]));
+    /// assert_eq!(iter.next(), Some([6, 7]));
+    /// assert_eq!(iter.next(), Some([7, 8]));
     /// assert_eq!(iter.next(), None);
-    /// assert_eq!(iter.next(), None);
+    ///
+    /// assert_eq!(iter.next(), Some([10, 11]));
+    /// assert_eq!(iter.next(), Some([11, 12]));
+    /// assert_eq!(iter.next(), Some([12, 13]));
     /// assert_eq!(iter.next(), None);
     /// ```
     #[inline]
-    #[unstable(feature = "iter_map_windows", reason = "recently added", issue = "87155")]
+    #[unstable(feature = "iter_map_windows", issue = "87155")]
+    #[rustc_non_const_trait_method]
     #[requires(N > 0)]
-    fn map_windows<F, R, const N: usize>(self, f: F) -> MapWindows<Self, F, N>
+    fn map_windows<F, R, #[rustc_panics_when_zero] const N: usize>(
+        self,
+        f: F,
+    ) -> MapWindows<Self, F, N>
     where
         Self: Sized,
         F: FnMut(&[Self::Item; N]) -> R,
@@ -1881,7 +1950,7 @@ pub trait Iterator {
     /// without giving up ownership of the original iterator,
     /// so you can use the original iterator afterwards.
     ///
-    /// Uses [`impl<I: Iterator + ?Sized> Iterator for &mut I { type Item = I::Item; ...}`](https://doc.rust-lang.org/nightly/std/iter/trait.Iterator.html#impl-Iterator-for-%26mut+I).
+    /// Uses [`impl<I: Iterator + ?Sized> Iterator for &mut I { type Item = I::Item; ...}`](Iterator#impl-Iterator-for-%26mut+I).
     ///
     /// # Examples
     ///
@@ -1907,9 +1976,12 @@ pub trait Iterator {
 
     /// Transforms an iterator into a collection.
     ///
-    /// `collect()` can take anything iterable, and turn it into a relevant
-    /// collection. This is one of the more powerful methods in the standard
-    /// library, used in a variety of contexts.
+    /// `collect()` takes ownership of an iterator and produces whichever
+    /// collection type you request. The iterator itself carries no knowledge of
+    /// the eventual container; the target collection is chosen entirely by the
+    /// type you ask `collect()` to return. This makes `collect()` one of the
+    /// more powerful methods in the standard library, and it shows up in a wide
+    /// variety of contexts.
     ///
     /// The most basic pattern in which `collect()` is used is to turn one
     /// collection into another. You take a collection, call [`iter`] on it,
@@ -2017,6 +2089,7 @@ pub trait Iterator {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use = "if you really need to exhaust the iterator, consider `.for_each(drop)` instead"]
     #[rustc_diagnostic_item = "iterator_collect_fn"]
+    #[rustc_non_const_trait_method]
     fn collect<B: FromIterator<Self::Item>>(self) -> B
     where
         Self: Sized,
@@ -2104,6 +2177,7 @@ pub trait Iterator {
     /// [`collect`]: Iterator::collect
     #[inline]
     #[unstable(feature = "iterator_try_collect", issue = "94047")]
+    #[rustc_non_const_trait_method]
     fn try_collect<B>(&mut self) -> ChangeOutputType<Self::Item, B>
     where
         Self: Sized,
@@ -2175,7 +2249,8 @@ pub trait Iterator {
     /// assert_eq!(vec, vec![1, 2, 3, 1, 2, 3]);
     /// ```
     #[inline]
-    #[unstable(feature = "iter_collect_into", reason = "new API", issue = "94780")]
+    #[unstable(feature = "iter_collect_into", issue = "94780")]
+    #[rustc_non_const_trait_method]
     fn collect_into<E: Extend<Self::Item>>(self, collection: &mut E) -> &mut E
     where
         Self: Sized,
@@ -2208,6 +2283,7 @@ pub trait Iterator {
     /// assert_eq!(odd, [1, 3]);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_non_const_trait_method]
     fn partition<B, F>(self, f: F) -> (B, B)
     where
         Self: Sized,
@@ -2269,7 +2345,8 @@ pub trait Iterator {
     /// assert!(a[..i].iter().all(|n| n % 2 == 0)); // evens
     /// assert!(a[i..].iter().all(|n| n % 2 == 1)); // odds
     /// ```
-    #[unstable(feature = "iter_partition_in_place", reason = "new API", issue = "62543")]
+    #[unstable(feature = "iter_partition_in_place", issue = "62543")]
+    #[rustc_non_const_trait_method]
     fn partition_in_place<'a, T: 'a, P>(mut self, ref mut predicate: P) -> usize
     where
         Self: Sized + DoubleEndedIterator<Item = &'a mut T>,
@@ -2326,7 +2403,8 @@ pub trait Iterator {
     /// assert!("Iterator".chars().is_partitioned(char::is_uppercase));
     /// assert!(!"IntoIterator".chars().is_partitioned(char::is_uppercase));
     /// ```
-    #[unstable(feature = "iter_is_partitioned", reason = "new API", issue = "62544")]
+    #[unstable(feature = "iter_is_partitioned", issue = "62544")]
+    #[rustc_non_const_trait_method]
     fn is_partitioned<P>(mut self, mut predicate: P) -> bool
     where
         Self: Sized,
@@ -2424,8 +2502,8 @@ pub trait Iterator {
     fn try_fold<B, F, R>(&mut self, init: B, mut f: F) -> R
     where
         Self: Sized,
-        F: FnMut(B, Self::Item) -> R,
-        R: Try<Output = B>,
+        F: [const] FnMut(B, Self::Item) -> R + [const] Destruct,
+        R: [const] Try<Output = B>,
     {
         let mut accum = init;
         while let Some(x) = self.next() {
@@ -2479,6 +2557,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "iterator_try_fold", since = "1.27.0")]
+    #[rustc_non_const_trait_method]
     fn try_for_each<F, R>(&mut self, f: F) -> R
     where
         Self: Sized,
@@ -2600,8 +2679,8 @@ pub trait Iterator {
     #[stable(feature = "rust1", since = "1.0.0")]
     fn fold<B, F>(mut self, init: B, mut f: F) -> B
     where
-        Self: Sized,
-        F: FnMut(B, Self::Item) -> B,
+        Self: Sized + [const] Destruct,
+        F: [const] FnMut(B, Self::Item) -> B + [const] Destruct,
     {
         let mut accum = init;
         while let Some(x) = self.next() {
@@ -2637,8 +2716,8 @@ pub trait Iterator {
     #[stable(feature = "iterator_fold_self", since = "1.51.0")]
     fn reduce<F>(mut self, f: F) -> Option<Self::Item>
     where
-        Self: Sized,
-        F: FnMut(Self::Item, Self::Item) -> Self::Item,
+        Self: Sized + [const] Destruct,
+        F: [const] FnMut(Self::Item, Self::Item) -> Self::Item + [const] Destruct,
     {
         let first = self.next()?;
         Some(self.fold(first, f))
@@ -2705,14 +2784,14 @@ pub trait Iterator {
     /// assert_eq!(max, Ok(Some("5")));
     /// ```
     #[inline]
-    #[unstable(feature = "iterator_try_reduce", reason = "new API", issue = "87053")]
+    #[unstable(feature = "iterator_try_reduce", issue = "87053")]
     fn try_reduce<R>(
         &mut self,
-        f: impl FnMut(Self::Item, Self::Item) -> R,
+        f: impl [const] FnMut(Self::Item, Self::Item) -> R + [const] Destruct,
     ) -> ChangeOutputType<R, Option<R::Output>>
     where
         Self: Sized,
-        R: Try<Output = Self::Item, Residual: Residual<Option<Self::Item>>>,
+        R: [const] Try<Output = Self::Item, Residual: [const] Residual<Option<Self::Item>>>,
     {
         let first = match self.next() {
             Some(i) => i,
@@ -2767,11 +2846,14 @@ pub trait Iterator {
     fn all<F>(&mut self, f: F) -> bool
     where
         Self: Sized,
-        F: FnMut(Self::Item) -> bool,
+        F: [const] FnMut(Self::Item) -> bool + [const] Destruct,
     {
+        #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
         #[inline]
-        fn check<T>(mut f: impl FnMut(T) -> bool) -> impl FnMut((), T) -> ControlFlow<()> {
-            move |(), x| {
+        const fn check<T>(
+            mut f: impl [const] FnMut(T) -> bool + [const] Destruct,
+        ) -> impl [const] FnMut((), T) -> ControlFlow<()> + [const] Destruct {
+            const move |(), x| {
                 if f(x) { ControlFlow::Continue(()) } else { ControlFlow::Break(()) }
             }
         }
@@ -2817,6 +2899,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_non_const_trait_method]
     fn any<F>(&mut self, f: F) -> bool
     where
         Self: Sized,
@@ -2863,6 +2946,17 @@ pub trait Iterator {
     /// assert_eq!(a.into_iter().find(|&x| x == 5), None);
     /// ```
     ///
+    /// Iterating over references:
+    ///
+    /// ```
+    /// let a = [1, 2, 3];
+    ///
+    /// // `iter()` yields references i.e. `&i32` and `find()` takes a
+    /// // reference to each element.
+    /// assert_eq!(a.iter().find(|&&x| x == 2), Some(&2));
+    /// assert_eq!(a.iter().find(|&&x| x == 5), None);
+    /// ```
+    ///
     /// Stopping at the first `true`:
     ///
     /// ```
@@ -2879,6 +2973,7 @@ pub trait Iterator {
     /// Note that `iter.find(f)` is equivalent to `iter.filter(f).next()`.
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_non_const_trait_method]
     fn find<P>(&mut self, predicate: P) -> Option<Self::Item>
     where
         Self: Sized,
@@ -2910,6 +3005,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "iterator_find_map", since = "1.30.0")]
+    #[rustc_non_const_trait_method]
     fn find_map<B, F>(&mut self, f: F) -> Option<B>
     where
         Self: Sized,
@@ -2967,7 +3063,8 @@ pub trait Iterator {
     /// assert_eq!(result, None);
     /// ```
     #[inline]
-    #[unstable(feature = "try_find", reason = "new API", issue = "63178")]
+    #[unstable(feature = "try_find", issue = "63178")]
+    #[rustc_non_const_trait_method]
     fn try_find<R>(
         &mut self,
         f: impl FnMut(&Self::Item) -> R,
@@ -3051,6 +3148,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_non_const_trait_method]
     fn position<P>(&mut self, predicate: P) -> Option<usize>
     where
         Self: Sized,
@@ -3116,6 +3214,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_non_const_trait_method]
     fn rposition<P>(&mut self, predicate: P) -> Option<usize>
     where
         P: FnMut(Self::Item) -> bool,
@@ -3167,10 +3266,10 @@ pub trait Iterator {
     #[stable(feature = "rust1", since = "1.0.0")]
     fn max(self) -> Option<Self::Item>
     where
-        Self: Sized,
-        Self::Item: Ord,
+        Self: Sized + [const] Destruct,
+        Self::Item: [const] Ord + [const] Destruct,
     {
-        self.max_by(Ord::cmp)
+        self.reduce(Ord::max)
     }
 
     /// Returns the minimum element of an iterator.
@@ -3203,10 +3302,10 @@ pub trait Iterator {
     #[stable(feature = "rust1", since = "1.0.0")]
     fn min(self) -> Option<Self::Item>
     where
-        Self: Sized,
-        Self::Item: Ord,
+        Self: Sized + [const] Destruct,
+        Self::Item: [const] Ord + [const] Destruct,
     {
-        self.min_by(Ord::cmp)
+        self.reduce(Ord::min)
     }
 
     /// Returns the element that gives the maximum value from the
@@ -3223,23 +3322,23 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "iter_cmp_by_key", since = "1.6.0")]
+    #[rustc_non_const_trait_method]
     fn max_by_key<B: Ord, F>(self, f: F) -> Option<Self::Item>
     where
         Self: Sized,
         F: FnMut(&Self::Item) -> B,
     {
-        #[inline]
-        fn key<T, B>(mut f: impl FnMut(&T) -> B) -> impl FnMut(T) -> (B, T) {
-            move |x| (f(&x), x)
-        }
+        // If we implemented this via `max_by` that would force it to use `B::cmp`.
+        // By using `max` over `KeyAndValue`, it instead ends up calling `B::lt`
+        // (via `KeyAndValue::max`), which is often overridden more efficiently.
 
         #[inline]
-        fn compare<T, B: Ord>((x_p, _): &(B, T), (y_p, _): &(B, T)) -> Ordering {
-            x_p.cmp(y_p)
+        fn key<T, B>(mut f: impl FnMut(&T) -> B) -> impl FnMut(T) -> KeyAndValue<B, T> {
+            move |value| KeyAndValue { key: f(&value), value }
         }
 
-        let (_, x) = self.map(key(f)).max_by(compare)?;
-        Some(x)
+        let KeyAndValue { value, .. } = self.map(key(f)).max()?;
+        Some(value)
     }
 
     /// Returns the element that gives the maximum value with respect to the
@@ -3258,12 +3357,19 @@ pub trait Iterator {
     #[stable(feature = "iter_max_by", since = "1.15.0")]
     fn max_by<F>(self, compare: F) -> Option<Self::Item>
     where
-        Self: Sized,
-        F: FnMut(&Self::Item, &Self::Item) -> Ordering,
+        Self: Sized + [const] Destruct,
+        Self::Item: [const] Destruct,
+        F: [const] FnMut(&Self::Item, &Self::Item) -> Ordering + [const] Destruct,
     {
         #[inline]
-        fn fold<T>(mut compare: impl FnMut(&T, &T) -> Ordering) -> impl FnMut(T, T) -> T {
-            move |x, y| cmp::max_by(x, y, &mut compare)
+        #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+        const fn fold<T>(
+            mut compare: impl [const] FnMut(&T, &T) -> Ordering + [const] Destruct,
+        ) -> impl [const] FnMut(T, T) -> T + [const] Destruct
+        where
+            T: [const] Destruct,
+        {
+            const move |x, y| cmp::max_by(x, y, &mut compare)
         }
 
         self.reduce(fold(compare))
@@ -3283,23 +3389,23 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "iter_cmp_by_key", since = "1.6.0")]
+    #[rustc_non_const_trait_method]
     fn min_by_key<B: Ord, F>(self, f: F) -> Option<Self::Item>
     where
         Self: Sized,
         F: FnMut(&Self::Item) -> B,
     {
-        #[inline]
-        fn key<T, B>(mut f: impl FnMut(&T) -> B) -> impl FnMut(T) -> (B, T) {
-            move |x| (f(&x), x)
-        }
+        // If we implemented this via `min_by` that would force it to use `B::cmp`.
+        // By using `min` over `KeyAndValue`, it instead ends up calling `B::lt`
+        // (via `KeyAndValue::min`), which is often overridden more efficiently.
 
         #[inline]
-        fn compare<T, B: Ord>((x_p, _): &(B, T), (y_p, _): &(B, T)) -> Ordering {
-            x_p.cmp(y_p)
+        fn key<T, B>(mut f: impl FnMut(&T) -> B) -> impl FnMut(T) -> KeyAndValue<B, T> {
+            move |value| KeyAndValue { key: f(&value), value }
         }
 
-        let (_, x) = self.map(key(f)).min_by(compare)?;
-        Some(x)
+        let KeyAndValue { value, .. } = self.map(key(f)).min()?;
+        Some(value)
     }
 
     /// Returns the element that gives the minimum value with respect to the
@@ -3318,12 +3424,19 @@ pub trait Iterator {
     #[stable(feature = "iter_min_by", since = "1.15.0")]
     fn min_by<F>(self, compare: F) -> Option<Self::Item>
     where
-        Self: Sized,
-        F: FnMut(&Self::Item, &Self::Item) -> Ordering,
+        Self: Sized + [const] Destruct,
+        F: [const] FnMut(&Self::Item, &Self::Item) -> Ordering + [const] Destruct,
+        Self::Item: [const] Destruct,
     {
         #[inline]
-        fn fold<T>(mut compare: impl FnMut(&T, &T) -> Ordering) -> impl FnMut(T, T) -> T {
-            move |x, y| cmp::min_by(x, y, &mut compare)
+        #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+        const fn fold<T>(
+            mut compare: impl [const] FnMut(&T, &T) -> Ordering + [const] Destruct,
+        ) -> impl [const] FnMut(T, T) -> T + [const] Destruct
+        where
+            T: [const] Destruct,
+        {
+            const move |x, y| cmp::min_by(x, y, &mut compare)
         }
 
         self.reduce(fold(compare))
@@ -3389,6 +3502,7 @@ pub trait Iterator {
     /// assert_eq!(z, [3, 6]);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_non_const_trait_method]
     fn unzip<A, B, FromA, FromB>(self) -> (FromA, FromB)
     where
         FromA: Default + Extend<A>,
@@ -3501,7 +3615,7 @@ pub trait Iterator {
     #[inline]
     fn cycle(self) -> Cycle<Self>
     where
-        Self: Sized + Clone,
+        Self: Sized + [const] Clone,
     {
         Cycle::new(self)
     }
@@ -3541,8 +3655,8 @@ pub trait Iterator {
     /// }
     /// ```
     #[track_caller]
-    #[unstable(feature = "iter_array_chunks", reason = "recently added", issue = "100450")]
-    fn array_chunks<const N: usize>(self) -> ArrayChunks<Self, N>
+    #[unstable(feature = "iter_array_chunks", issue = "100450")]
+    fn array_chunks<#[rustc_panics_when_zero] const N: usize>(self) -> ArrayChunks<Self, N>
     where
         Self: Sized,
     {
@@ -3581,12 +3695,12 @@ pub trait Iterator {
     fn sum<S>(self) -> S
     where
         Self: Sized,
-        S: Sum<Self::Item>,
+        S: [const] Sum<Self::Item>,
     {
         Sum::sum(self)
     }
 
-    /// Iterates over the entire iterator, multiplying all the elements
+    /// Iterates over the entire iterator, multiplying all the elements.
     ///
     /// An empty iterator returns the one value of the type.
     ///
@@ -3613,7 +3727,7 @@ pub trait Iterator {
     fn product<P>(self) -> P
     where
         Self: Sized,
-        P: Product<Self::Item>,
+        P: [const] Product<Self::Item>,
     {
         Product::product(self)
     }
@@ -3631,6 +3745,7 @@ pub trait Iterator {
     /// assert_eq!([1, 2].iter().cmp([1].iter()), Ordering::Greater);
     /// ```
     #[stable(feature = "iter_order", since = "1.5.0")]
+    #[rustc_non_const_trait_method]
     fn cmp<I>(self, other: I) -> Ordering
     where
         I: IntoIterator<Item = Self::Item>,
@@ -3658,6 +3773,7 @@ pub trait Iterator {
     /// assert_eq!(xs.into_iter().cmp_by(ys, |x, y| (2 * x).cmp(&y)), Ordering::Greater);
     /// ```
     #[unstable(feature = "iter_order_by", issue = "64295")]
+    #[rustc_non_const_trait_method]
     fn cmp_by<I, F>(self, other: I, cmp: F) -> Ordering
     where
         Self: Sized,
@@ -3714,6 +3830,7 @@ pub trait Iterator {
     /// ```
     ///
     #[stable(feature = "iter_order", since = "1.5.0")]
+    #[rustc_non_const_trait_method]
     fn partial_cmp<I>(self, other: I) -> Option<Ordering>
     where
         I: IntoIterator,
@@ -3750,6 +3867,7 @@ pub trait Iterator {
     /// );
     /// ```
     #[unstable(feature = "iter_order_by", issue = "64295")]
+    #[rustc_non_const_trait_method]
     fn partial_cmp_by<I, F>(self, other: I, partial_cmp: F) -> Option<Ordering>
     where
         Self: Sized,
@@ -3783,6 +3901,7 @@ pub trait Iterator {
     /// assert_eq!([1].iter().eq([1, 2].iter()), false);
     /// ```
     #[stable(feature = "iter_order", since = "1.5.0")]
+    #[rustc_non_const_trait_method]
     fn eq<I>(self, other: I) -> bool
     where
         I: IntoIterator,
@@ -3806,6 +3925,7 @@ pub trait Iterator {
     /// assert!(xs.iter().eq_by(ys, |x, y| x * x == y));
     /// ```
     #[unstable(feature = "iter_order_by", issue = "64295")]
+    #[rustc_non_const_trait_method]
     fn eq_by<I, F>(self, other: I, eq: F) -> bool
     where
         Self: Sized,
@@ -3835,6 +3955,7 @@ pub trait Iterator {
     /// assert_eq!([1].iter().ne([1, 2].iter()), true);
     /// ```
     #[stable(feature = "iter_order", since = "1.5.0")]
+    #[rustc_non_const_trait_method]
     fn ne<I>(self, other: I) -> bool
     where
         I: IntoIterator,
@@ -3856,6 +3977,7 @@ pub trait Iterator {
     /// assert_eq!([1, 2].iter().lt([1, 2].iter()), false);
     /// ```
     #[stable(feature = "iter_order", since = "1.5.0")]
+    #[rustc_non_const_trait_method]
     fn lt<I>(self, other: I) -> bool
     where
         I: IntoIterator,
@@ -3877,6 +3999,7 @@ pub trait Iterator {
     /// assert_eq!([1, 2].iter().le([1, 2].iter()), true);
     /// ```
     #[stable(feature = "iter_order", since = "1.5.0")]
+    #[rustc_non_const_trait_method]
     fn le<I>(self, other: I) -> bool
     where
         I: IntoIterator,
@@ -3898,6 +4021,7 @@ pub trait Iterator {
     /// assert_eq!([1, 2].iter().gt([1, 2].iter()), false);
     /// ```
     #[stable(feature = "iter_order", since = "1.5.0")]
+    #[rustc_non_const_trait_method]
     fn gt<I>(self, other: I) -> bool
     where
         I: IntoIterator,
@@ -3919,6 +4043,7 @@ pub trait Iterator {
     /// assert_eq!([1, 2].iter().ge([1, 2].iter()), true);
     /// ```
     #[stable(feature = "iter_order", since = "1.5.0")]
+    #[rustc_non_const_trait_method]
     fn ge<I>(self, other: I) -> bool
     where
         I: IntoIterator,
@@ -3950,10 +4075,10 @@ pub trait Iterator {
     #[stable(feature = "is_sorted", since = "1.82.0")]
     fn is_sorted(self) -> bool
     where
-        Self: Sized,
-        Self::Item: PartialOrd,
+        Self: Sized + [const] Destruct,
+        Self::Item: [const] PartialOrd + [const] Destruct,
     {
-        self.is_sorted_by(|a, b| a <= b)
+        self.is_sorted_by(const |a, b| a <= b)
     }
 
     /// Checks if the elements of this iterator are sorted using the given comparator function.
@@ -3976,16 +4101,21 @@ pub trait Iterator {
     #[stable(feature = "is_sorted", since = "1.82.0")]
     fn is_sorted_by<F>(mut self, compare: F) -> bool
     where
-        Self: Sized,
-        F: FnMut(&Self::Item, &Self::Item) -> bool,
+        Self: Sized + [const] Destruct,
+        Self::Item: [const] Destruct,
+        F: [const] FnMut(&Self::Item, &Self::Item) -> bool + [const] Destruct,
     {
         #[inline]
-        fn check<'a, T>(
+        #[rustc_const_unstable(feature = "const_iter", issue = "92476")]
+        const fn check<'a, T>(
             last: &'a mut T,
-            mut compare: impl FnMut(&T, &T) -> bool + 'a,
-        ) -> impl FnMut(T) -> bool + 'a {
-            move |curr| {
-                if !compare(&last, &curr) {
+            mut compare: impl [const] FnMut(&T, &T) -> bool + 'a + [const] Destruct,
+        ) -> impl [const] FnMut(T) -> bool + 'a + [const] Destruct
+        where
+            T: [const] Destruct,
+        {
+            const move |curr| {
+                if !compare(last, &curr) {
                     return false;
                 }
                 *last = curr;
@@ -4018,6 +4148,7 @@ pub trait Iterator {
     /// ```
     #[inline]
     #[stable(feature = "is_sorted", since = "1.82.0")]
+    #[rustc_non_const_trait_method]
     fn is_sorted_by_key<F, K>(self, f: F) -> bool
     where
         Self: Sized,
@@ -4037,7 +4168,8 @@ pub trait Iterator {
     where
         Self: TrustedRandomAccessNoCoerce,
     {
-        unreachable!("Always specialized");
+        // Always specialized
+        unreachable!();
     }
 }
 

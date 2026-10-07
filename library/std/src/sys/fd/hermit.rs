@@ -4,8 +4,7 @@ use crate::cmp;
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut, Read, SeekFrom};
 use crate::os::hermit::hermit_abi;
 use crate::os::hermit::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
-use crate::sys::{cvt, unsupported};
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner, cvt, unsupported};
 
 const fn max_iov() -> usize {
     hermit_abi::IOV_MAX
@@ -23,7 +22,7 @@ impl FileDesc {
         Ok(result as usize)
     }
 
-    pub fn read_buf(&self, mut buf: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, mut buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         // SAFETY: The `read` syscall does not read from the buffer, so it is
         // safe to use `&mut [MaybeUninit<u8>]`.
         let result = cvt(unsafe {
@@ -34,7 +33,7 @@ impl FileDesc {
             )
         })?;
         // SAFETY: Exactly `result` bytes have been filled.
-        unsafe { buf.advance_unchecked(result as usize) };
+        unsafe { buf.advance(result as usize) };
         Ok(())
     }
 

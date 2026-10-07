@@ -1,7 +1,7 @@
-#![feature(powerpc_target_feature)]
+#![feature(f16)]
 #![cfg_attr(
     any(target_arch = "powerpc", target_arch = "powerpc64"),
-    feature(stdarch_powerpc)
+    feature(powerpc_target_feature, stdarch_powerpc)
 )]
 
 pub mod array;
@@ -11,6 +11,9 @@ pub mod wasm;
 
 #[macro_use]
 pub mod biteq;
+
+#[macro_use]
+pub mod approxeq;
 
 pub mod subnormals;
 use subnormals::FlushSubnormals;
@@ -44,6 +47,7 @@ impl_num! { u16 }
 impl_num! { u32 }
 impl_num! { u64 }
 impl_num! { usize }
+impl_num! { f16 }
 impl_num! { f32 }
 impl_num! { f64 }
 
@@ -118,12 +122,23 @@ pub fn make_runner() -> proptest::test_runner::TestRunner {
     proptest::test_runner::TestRunner::new(proptest::test_runner::Config::with_cases(4))
 }
 
+#[track_caller]
+fn unwrap_test_error<T, U: std::fmt::Debug>(
+    x: Result<T, proptest::test_runner::TestError<U>>,
+) -> T {
+    // Using the `Display` instance of the error is much more readable.
+    match x {
+        Ok(v) => v,
+        Err(e) => panic!("{e}"),
+    }
+}
+
 /// Test a function that takes a single value.
 pub fn test_1<A: core::fmt::Debug + DefaultStrategy>(
     f: &dyn Fn(A) -> proptest::test_runner::TestCaseResult,
 ) {
     let mut runner = make_runner();
-    runner.run(&A::default_strategy(), f).unwrap();
+    unwrap_test_error(runner.run(&A::default_strategy(), f))
 }
 
 /// Test a function that takes two values.
@@ -131,11 +146,11 @@ pub fn test_2<A: core::fmt::Debug + DefaultStrategy, B: core::fmt::Debug + Defau
     f: &dyn Fn(A, B) -> proptest::test_runner::TestCaseResult,
 ) {
     let mut runner = make_runner();
-    runner
-        .run(&(A::default_strategy(), B::default_strategy()), |(a, b)| {
+    unwrap_test_error(
+        runner.run(&(A::default_strategy(), B::default_strategy()), |(a, b)| {
             f(a, b)
-        })
-        .unwrap();
+        }),
+    )
 }
 
 /// Test a function that takes two values.
@@ -147,16 +162,14 @@ pub fn test_3<
     f: &dyn Fn(A, B, C) -> proptest::test_runner::TestCaseResult,
 ) {
     let mut runner = make_runner();
-    runner
-        .run(
-            &(
-                A::default_strategy(),
-                B::default_strategy(),
-                C::default_strategy(),
-            ),
-            |(a, b, c)| f(a, b, c),
-        )
-        .unwrap();
+    unwrap_test_error(runner.run(
+        &(
+            A::default_strategy(),
+            B::default_strategy(),
+            C::default_strategy(),
+        ),
+        |(a, b, c)| f(a, b, c),
+    ));
 }
 
 /// Test a unary vector function against a unary scalar function, applied elementwise.
@@ -181,6 +194,41 @@ pub fn test_unary_elementwise<Scalar, ScalarResult, Vector, VectorResult, const 
             .try_into()
             .unwrap();
         crate::prop_assert_biteq!(result_1, result_2);
+        Ok(())
+    });
+}
+
+/// Test a unary vector function against a unary scalar function, applied elementwise.
+///
+/// Floats are checked approximately.
+pub fn test_unary_elementwise_approx<
+    Scalar,
+    ScalarResult,
+    Vector,
+    VectorResult,
+    const LANES: usize,
+>(
+    fv: &dyn Fn(Vector) -> VectorResult,
+    fs: &dyn Fn(Scalar) -> ScalarResult,
+    check: &dyn Fn([Scalar; LANES]) -> bool,
+    ulps: i64,
+) where
+    Scalar: Copy + core::fmt::Debug + DefaultStrategy,
+    ScalarResult: Copy + approxeq::ApproxEq + core::fmt::Debug + DefaultStrategy,
+    Vector: Into<[Scalar; LANES]> + From<[Scalar; LANES]> + Copy,
+    VectorResult: Into<[ScalarResult; LANES]> + From<[ScalarResult; LANES]> + Copy,
+{
+    test_1(&|x: [Scalar; LANES]| {
+        proptest::prop_assume!(check(x));
+        let result_1: [ScalarResult; LANES] = fv(x.into()).into();
+        let result_2: [ScalarResult; LANES] = x
+            .iter()
+            .copied()
+            .map(fs)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        crate::prop_assert_approxeq!(result_1, result_2, ulps);
         Ok(())
     });
 }
@@ -286,6 +334,44 @@ pub fn test_binary_elementwise<
             .try_into()
             .unwrap();
         crate::prop_assert_biteq!(result_1, result_2);
+        Ok(())
+    });
+}
+
+/// Test a binary vector function against a binary scalar function, applied elementwise.
+pub fn test_binary_elementwise_approx<
+    Scalar1,
+    Scalar2,
+    ScalarResult,
+    Vector1,
+    Vector2,
+    VectorResult,
+    const LANES: usize,
+>(
+    fv: &dyn Fn(Vector1, Vector2) -> VectorResult,
+    fs: &dyn Fn(Scalar1, Scalar2) -> ScalarResult,
+    check: &dyn Fn([Scalar1; LANES], [Scalar2; LANES]) -> bool,
+    ulps: i64,
+) where
+    Scalar1: Copy + core::fmt::Debug + DefaultStrategy,
+    Scalar2: Copy + core::fmt::Debug + DefaultStrategy,
+    ScalarResult: Copy + approxeq::ApproxEq + core::fmt::Debug + DefaultStrategy,
+    Vector1: Into<[Scalar1; LANES]> + From<[Scalar1; LANES]> + Copy,
+    Vector2: Into<[Scalar2; LANES]> + From<[Scalar2; LANES]> + Copy,
+    VectorResult: Into<[ScalarResult; LANES]> + From<[ScalarResult; LANES]> + Copy,
+{
+    test_2(&|x: [Scalar1; LANES], y: [Scalar2; LANES]| {
+        proptest::prop_assume!(check(x, y));
+        let result_1: [ScalarResult; LANES] = fv(x.into(), y.into()).into();
+        let result_2: [ScalarResult; LANES] = x
+            .iter()
+            .copied()
+            .zip(y.iter().copied())
+            .map(|(x, y)| fs(x, y))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        crate::prop_assert_approxeq!(result_1, result_2, ulps);
         Ok(())
     });
 }
@@ -528,8 +614,6 @@ macro_rules! test_lanes {
                 use super::*;
 
                 fn implementation<const $lanes: usize>()
-                where
-                    core_simd::simd::LaneCount<$lanes>: core_simd::simd::SupportedLaneCount,
                 $body
 
                 #[cfg(target_arch = "wasm32")]
@@ -594,7 +678,7 @@ macro_rules! test_lanes {
                     //lanes_45 45;
                     //lanes_46 46;
                     lanes_47 47;
-                    //lanes_48 48;
+                    lanes_48 48;
                     //lanes_49 49;
                     //lanes_50 50;
                     //lanes_51 51;
@@ -628,8 +712,6 @@ macro_rules! test_lanes_panic {
                 use super::*;
 
                 fn implementation<const $lanes: usize>()
-                where
-                    core_simd::simd::LaneCount<$lanes>: core_simd::simd::SupportedLaneCount,
                 $body
 
                 // test some odd and even non-power-of-2 lengths on miri

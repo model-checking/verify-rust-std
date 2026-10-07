@@ -10,12 +10,13 @@ use crate::iter::FusedIterator;
 #[cfg(kani)]
 use crate::kani;
 use crate::marker::PhantomData;
+use crate::num::niche_types::UsizeNoHighBitMinusOne;
 use crate::ptr::NonNull;
 use crate::slice::memchr;
 use crate::ub_checks::Invariant;
 #[allow(unused_imports)]
 use crate::ub_checks::can_dereference;
-use crate::{fmt, ops, slice, str};
+use crate::{fmt, ops, range, slice, str};
 
 // FIXME: because this is doc(inline)d, we *have* to use intra-doc links because the actual link
 //   depends on where the item is being documented. however, since this is libcore, we can't
@@ -95,7 +96,8 @@ use crate::{fmt, ops, slice, str};
 /// ```
 ///
 /// [str]: prim@str "str"
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Hash)]
+#[derive_const(PartialEq, Eq)]
 #[stable(feature = "core_c_str", since = "1.64.0")]
 #[rustc_diagnostic_item = "cstr_type"]
 #[rustc_has_incoherent_inherent_impls]
@@ -162,7 +164,7 @@ impl Error for FromBytesWithNulError {}
 /// within the slice.
 ///
 /// This error is created by the [`CStr::from_bytes_until_nul`] method.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
 pub struct FromBytesUntilNulError(());
 
@@ -183,7 +185,8 @@ impl fmt::Debug for CStr {
 }
 
 #[stable(feature = "cstr_default", since = "1.10.0")]
-impl Default for &CStr {
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
+const impl Default for &CStr {
     #[inline]
     fn default() -> Self {
         c""
@@ -305,7 +308,12 @@ impl CStr {
         // means the call to `from_bytes_with_nul_unchecked` is correct.
         //
         // The cast from c_char to u8 is ok because a c_char is always one byte.
-        unsafe { Self::from_bytes_with_nul_unchecked(slice::from_raw_parts(ptr.cast(), len + 1)) }
+        unsafe {
+            Self::from_bytes_with_nul_unchecked(slice::from_raw_parts(
+                ptr.cast(),
+                len.as_inner() + 1,
+            ))
+        }
     }
 
     /// Creates a C string wrapper from a byte slice with any number of nuls.
@@ -560,7 +568,8 @@ impl CStr {
     #[stable(feature = "cstr_count_bytes", since = "1.79.0")]
     #[rustc_const_stable(feature = "const_cstr_from_ptr", since = "1.81.0")]
     pub const fn count_bytes(&self) -> usize {
-        self.inner.len() - 1
+        // SAFETY: This length includes the nul-terminator, so it's at least one.
+        unsafe { self.inner.len().unchecked_sub(1) }
     }
 
     /// Returns `true` if `self.to_bytes()` has a length of 0.
@@ -629,7 +638,12 @@ impl CStr {
     pub const fn to_bytes_with_nul(&self) -> &[u8] {
         // SAFETY: Transmuting a slice of `c_char`s to a slice of `u8`s
         // is safe on all supported targets.
-        unsafe { &*((&raw const self.inner) as *const [u8]) }
+        let bytes = unsafe { &*((&raw const self.inner) as *const [u8]) };
+
+        // SAFETY: A valid `CStr` always contains at least its trailing nul byte.
+        unsafe { crate::hint::assert_unchecked(!bytes.is_empty()) };
+
+        bytes
     }
 
     /// Iterates over the bytes in this C string.
@@ -693,8 +707,19 @@ impl CStr {
     #[must_use = "this does not display the `CStr`; \
                   it returns an object that can be displayed"]
     #[inline]
-    pub fn display(&self) -> impl fmt::Display {
-        crate::bstr::ByteStr::from_bytes(self.to_bytes())
+    pub fn display(&self) -> Display<'_> {
+        Display { c_str: self }
+    }
+
+    /// Returns the same string as a string slice `&CStr`.
+    ///
+    /// This method is redundant when used directly on `&CStr`, but
+    /// it helps dereferencing other string-like types to string slices,
+    /// for example references to `Box<CStr>` or `Arc<CStr>`.
+    #[inline]
+    #[unstable(feature = "str_as_str", issue = "130366")]
+    pub const fn as_c_str(&self) -> &CStr {
+        self
     }
 }
 
@@ -715,18 +740,20 @@ impl PartialEq<&Self> for CStr {
 // because `c_char` is `i8` (not `u8`) on some platforms.
 // That is why this is implemented manually and not derived.
 #[stable(feature = "rust1", since = "1.0.0")]
-impl PartialOrd for CStr {
+#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+const impl PartialOrd for CStr {
     #[inline]
     fn partial_cmp(&self, other: &CStr) -> Option<Ordering> {
-        self.to_bytes().partial_cmp(&other.to_bytes())
+        self.to_bytes().partial_cmp(other.to_bytes())
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl Ord for CStr {
+#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+const impl Ord for CStr {
     #[inline]
     fn cmp(&self, other: &CStr) -> Ordering {
-        self.to_bytes().cmp(&other.to_bytes())
+        self.to_bytes().cmp(other.to_bytes())
     }
 }
 
@@ -753,9 +780,19 @@ impl ops::Index<ops::RangeFrom<usize>> for CStr {
     }
 }
 
+#[stable(feature = "new_range_from_api", since = "1.96.0")]
+impl ops::Index<range::RangeFrom<usize>> for CStr {
+    type Output = CStr;
+
+    #[inline]
+    fn index(&self, index: range::RangeFrom<usize>) -> &CStr {
+        ops::Index::index(self, ops::RangeFrom::from(index))
+    }
+}
+
 #[stable(feature = "cstring_asref", since = "1.7.0")]
 #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl const AsRef<CStr> for CStr {
+const impl AsRef<CStr> for CStr {
     #[inline]
     fn as_ref(&self) -> &CStr {
         self
@@ -772,10 +809,13 @@ impl const AsRef<CStr> for CStr {
 #[unstable(feature = "cstr_internals", issue = "none")]
 #[rustc_allow_const_fn_unstable(const_eval_select)]
 #[requires(is_null_terminated(ptr))]
-#[ensures(|&result| result < isize::MAX as usize && unsafe { *ptr.add(result) } == 0)]
-const unsafe fn strlen(ptr: *const c_char) -> usize {
+#[ensures(|&result| {
+    let len = result.as_inner();
+    len < isize::MAX as usize && unsafe { *ptr.add(len) } == 0
+})]
+const unsafe fn strlen(ptr: *const c_char) -> UsizeNoHighBitMinusOne {
     const_eval_select!(
-        @capture { s: *const c_char = ptr } -> usize:
+        @capture { s: *const c_char = ptr } -> UsizeNoHighBitMinusOne:
         if const {
             let mut len = 0;
 
@@ -784,15 +824,16 @@ const unsafe fn strlen(ptr: *const c_char) -> usize {
                 len += 1;
             }
 
-            len
+            UsizeNoHighBitMinusOne::new(len).unwrap()
         } else {
             unsafe extern "C" {
                 /// Provided by libc or compiler_builtins.
                 fn strlen(s: *const c_char) -> usize;
             }
 
-            // SAFETY: Outer caller has provided a pointer to a valid C string.
-            unsafe { strlen(s) }
+            // SAFETY: Outer caller has provided a pointer to a valid C string,
+            // and its length is within bounds.
+            unsafe { UsizeNoHighBitMinusOne::new_unchecked(strlen(s)) }
         }
     )
 }
@@ -864,12 +905,50 @@ impl Iterator for Bytes<'_> {
     #[inline]
     fn count(self) -> usize {
         // SAFETY: We always hold a valid pointer to a C string
-        unsafe { strlen(self.ptr.as_ptr().cast()) }
+        unsafe { strlen(self.ptr.as_ptr().cast()) }.as_inner()
     }
 }
 
 #[unstable(feature = "cstr_bytes", issue = "112115")]
 impl FusedIterator for Bytes<'_> {}
+
+/// Helper struct for safely printing a [`CStr`] with [`format!`] and `{}`.
+///
+/// A [`CStr`] might contain non-Unicode data. This `struct` implements the
+/// [`Display`] trait in a way that mitigates that. It is created by the
+/// [`display`](CStr::display) method on [`CStr`]. This may perform lossy
+/// conversion, depending on the platform. If you would like an implementation
+/// which escapes the [`CStr`] please use [`Debug`] instead.
+///
+/// # Examples
+///
+/// ```
+/// #![feature(cstr_display)]
+///
+/// let s = c"Hello, world!";
+/// println!("{}", s.display());
+/// ```
+///
+/// [`Display`]: fmt::Display
+/// [`format!`]: ../../../std/macro.format.html
+#[unstable(feature = "cstr_display", issue = "139984")]
+pub struct Display<'a> {
+    c_str: &'a CStr,
+}
+
+#[unstable(feature = "cstr_display", issue = "139984")]
+impl fmt::Debug for Display<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.c_str, f)
+    }
+}
+
+#[unstable(feature = "cstr_display", issue = "139984")]
+impl fmt::Display for Display<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(crate::bstr::ByteStr::from_bytes(self.c_str.to_bytes()), f)
+    }
+}
 
 #[cfg(kani)]
 #[unstable(feature = "kani", issue = "none")]
@@ -890,7 +969,7 @@ mod verify {
 
     // pub const fn from_bytes_until_nul(bytes: &[u8]) -> Result<&CStr, FromBytesUntilNulError>
     #[kani::proof]
-    #[kani::unwind(32)] // 7.3 seconds when 16; 33.1 seconds when 32
+    #[kani::unwind(33)]
     fn check_from_bytes_until_nul() {
         const MAX_SIZE: usize = 32;
         let string: [u8; MAX_SIZE] = kani::any();
@@ -987,9 +1066,13 @@ mod verify {
 
     // pub const fn from_bytes_with_nul(bytes: &[u8]) -> Result<&Self, FromBytesWithNulError>
     #[kani::proof]
-    #[kani::unwind(17)]
+    #[kani::unwind(9)]
     fn check_from_bytes_with_nul() {
-        const MAX_SIZE: usize = 16;
+        // FIXME(kani): reduced from 16 to 8 because CBMC 6.10 (as pinned by the current Kani
+        // version) needs ~10 GB for MAX_SIZE == 16, which exhausts the memory of the
+        // macos-latest CI runners and makes the harness exceed the 10-minute autoharness
+        // timeout there.
+        const MAX_SIZE: usize = 8;
         let string: [u8; MAX_SIZE] = kani::any();
         let slice = kani::slice::any_slice_of_array(&string);
 

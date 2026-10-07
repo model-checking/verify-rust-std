@@ -1,14 +1,10 @@
 #![allow(missing_docs, nonstandard_style)]
 
-use crate::io::ErrorKind;
+use crate::io;
 
+pub mod conf;
 #[cfg(target_os = "fuchsia")]
 pub mod fuchsia;
-pub mod futex;
-#[cfg(target_os = "linux")]
-pub mod linux;
-pub mod os;
-pub mod pipe;
 pub mod stack_overflow;
 pub mod sync;
 pub mod thread_parking;
@@ -79,7 +75,6 @@ pub unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
 
         // fast path with a single syscall for systems with poll()
         #[cfg(not(any(
-            miri,
             target_os = "emscripten",
             target_os = "fuchsia",
             target_os = "vxworks",
@@ -88,11 +83,11 @@ pub unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
             target_os = "horizon",
             target_os = "vita",
             target_os = "rtems",
-            // The poll on Darwin doesn't set POLLNVAL for closed fds.
+            // The poll on Darwin doesn't set POLLNVAL for closed fds when `events == 0`.
             target_vendor = "apple",
         )))]
         'poll: {
-            use crate::sys::os::errno;
+            use crate::sys::io::errno;
             let pfds: &mut [_] = &mut [
                 libc::pollfd { fd: 0, events: 0, revents: 0 },
                 libc::pollfd { fd: 1, events: 0, revents: 0 },
@@ -126,8 +121,6 @@ pub unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
 
         // fallback in case poll isn't available or limited by RLIMIT_NOFILE
         #[cfg(not(any(
-            // The standard fds are always available in Miri.
-            miri,
             target_os = "emscripten",
             target_os = "fuchsia",
             target_os = "vxworks",
@@ -136,7 +129,7 @@ pub unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
             target_os = "vita",
         )))]
         {
-            use crate::sys::os::errno;
+            use crate::sys::io::errno;
             for fd in 0..3 {
                 if libc::fcntl(fd, libc::F_GETFD) == -1 && errno() == libc::EBADF {
                     open_devnull();
@@ -152,6 +145,7 @@ pub unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
             target_os = "horizon",
             target_os = "vxworks",
             target_os = "vita",
+            target_os = "l4re",
             // Unikraft's `signal` implementation is currently broken:
             // https://github.com/unikraft/lib-musl/issues/57
             target_vendor = "unikraft",
@@ -170,15 +164,15 @@ pub unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
                 pub const SIG_DFL: u8 = 3;
             }
 
-            let (sigpipe_attr_specified, handler) = match sigpipe {
+            let (on_broken_pipe_used, handler) = match sigpipe {
                 sigpipe::DEFAULT => (false, Some(libc::SIG_IGN)),
                 sigpipe::INHERIT => (true, None),
                 sigpipe::SIG_IGN => (true, Some(libc::SIG_IGN)),
                 sigpipe::SIG_DFL => (true, Some(libc::SIG_DFL)),
                 _ => unreachable!(),
             };
-            if sigpipe_attr_specified {
-                ON_BROKEN_PIPE_FLAG_USED.store(true, crate::sync::atomic::Ordering::Relaxed);
+            if on_broken_pipe_used {
+                ON_BROKEN_PIPE_USED.store(true, crate::sync::atomic::Ordering::Relaxed);
             }
             if let Some(handler) = handler {
                 rtassert!(signal(libc::SIGPIPE, handler) != libc::SIG_ERR);
@@ -200,7 +194,7 @@ pub unsafe fn init(argc: isize, argv: *const *const u8, sigpipe: u8) {
     target_os = "vxworks",
     target_os = "vita",
 )))]
-static ON_BROKEN_PIPE_FLAG_USED: crate::sync::atomic::Atomic<bool> =
+static ON_BROKEN_PIPE_USED: crate::sync::atomic::Atomic<bool> =
     crate::sync::atomic::AtomicBool::new(false);
 
 #[cfg(not(any(
@@ -212,75 +206,18 @@ static ON_BROKEN_PIPE_FLAG_USED: crate::sync::atomic::Atomic<bool> =
     target_os = "vita",
     target_os = "nuttx",
 )))]
-pub(crate) fn on_broken_pipe_flag_used() -> bool {
-    ON_BROKEN_PIPE_FLAG_USED.load(crate::sync::atomic::Ordering::Relaxed)
+pub(crate) fn on_broken_pipe_used() -> bool {
+    ON_BROKEN_PIPE_USED.load(crate::sync::atomic::Ordering::Relaxed)
 }
 
 // SAFETY: must be called only once during runtime cleanup.
-// NOTE: this is not guaranteed to run, for example when the program aborts.
-pub unsafe fn cleanup() {
-    stack_overflow::cleanup();
-}
+// NOTE: this is not guaranteed to run, for example when the program aborts, and
+//       is not guaranteed to run on the main thread (#161018 was caused by that
+//       mistaken assumption).
+pub unsafe fn cleanup() {}
 
 #[allow(unused_imports)]
 pub use libc::signal;
-
-#[inline]
-pub(crate) fn is_interrupted(errno: i32) -> bool {
-    errno == libc::EINTR
-}
-
-pub fn decode_error_kind(errno: i32) -> ErrorKind {
-    use ErrorKind::*;
-    match errno as libc::c_int {
-        libc::E2BIG => ArgumentListTooLong,
-        libc::EADDRINUSE => AddrInUse,
-        libc::EADDRNOTAVAIL => AddrNotAvailable,
-        libc::EBUSY => ResourceBusy,
-        libc::ECONNABORTED => ConnectionAborted,
-        libc::ECONNREFUSED => ConnectionRefused,
-        libc::ECONNRESET => ConnectionReset,
-        libc::EDEADLK => Deadlock,
-        libc::EDQUOT => QuotaExceeded,
-        libc::EEXIST => AlreadyExists,
-        libc::EFBIG => FileTooLarge,
-        libc::EHOSTUNREACH => HostUnreachable,
-        libc::EINTR => Interrupted,
-        libc::EINVAL => InvalidInput,
-        libc::EISDIR => IsADirectory,
-        libc::ELOOP => FilesystemLoop,
-        libc::ENOENT => NotFound,
-        libc::ENOMEM => OutOfMemory,
-        libc::ENOSPC => StorageFull,
-        libc::ENOSYS => Unsupported,
-        libc::EMLINK => TooManyLinks,
-        libc::ENAMETOOLONG => InvalidFilename,
-        libc::ENETDOWN => NetworkDown,
-        libc::ENETUNREACH => NetworkUnreachable,
-        libc::ENOTCONN => NotConnected,
-        libc::ENOTDIR => NotADirectory,
-        #[cfg(not(target_os = "aix"))]
-        libc::ENOTEMPTY => DirectoryNotEmpty,
-        libc::EPIPE => BrokenPipe,
-        libc::EROFS => ReadOnlyFilesystem,
-        libc::ESPIPE => NotSeekable,
-        libc::ESTALE => StaleNetworkFileHandle,
-        libc::ETIMEDOUT => TimedOut,
-        libc::ETXTBSY => ExecutableFileBusy,
-        libc::EXDEV => CrossesDevices,
-        libc::EINPROGRESS => InProgress,
-        libc::EOPNOTSUPP => Unsupported,
-
-        libc::EACCES | libc::EPERM => PermissionDenied,
-
-        // These two constants can have the same value on some systems,
-        // but different values on others, so we can't use a match
-        // clause
-        x if x == libc::EAGAIN || x == libc::EWOULDBLOCK => WouldBlock,
-
-        _ => Uncategorized,
-    }
-}
 
 #[doc(hidden)]
 pub trait IsMinusOne {
@@ -299,12 +236,12 @@ impl_is_minus_one! { i8 i16 i32 i64 isize }
 
 /// Converts native return values to Result using the *-1 means error is in `errno`*  convention.
 /// Non-error values are `Ok`-wrapped.
-pub fn cvt<T: IsMinusOne>(t: T) -> crate::io::Result<T> {
-    if t.is_minus_one() { Err(crate::io::Error::last_os_error()) } else { Ok(t) }
+pub fn cvt<T: IsMinusOne>(t: T) -> io::Result<T> {
+    if t.is_minus_one() { Err(io::Error::last_os_error()) } else { Ok(t) }
 }
 
 /// `-1` → look at `errno` → retry on `EINTR`. Otherwise `Ok()`-wrap the closure return value.
-pub fn cvt_r<T, F>(mut f: F) -> crate::io::Result<T>
+pub fn cvt_r<T, F>(mut f: F) -> io::Result<T>
 where
     T: IsMinusOne,
     F: FnMut() -> T,
@@ -319,8 +256,8 @@ where
 
 #[allow(dead_code)] // Not used on all platforms.
 /// Zero means `Ok()`, all other values are treated as raw OS errors. Does not look at `errno`.
-pub fn cvt_nz(error: libc::c_int) -> crate::io::Result<()> {
-    if error == 0 { Ok(()) } else { Err(crate::io::Error::from_raw_os_error(error)) }
+pub fn cvt_nz(error: libc::c_int) -> io::Result<()> {
+    if error == 0 { Ok(()) } else { Err(io::Error::from_raw_os_error(error)) }
 }
 
 // libc::abort() will run the SIGABRT handler.  That's fine because anyone who
@@ -365,8 +302,12 @@ pub fn abort_internal() -> ! {
 
 cfg_select! {
     target_os = "android" => {
-        #[link(name = "dl", kind = "static", modifiers = "-bundle",
-            cfg(target_feature = "crt-static"))]
+        #[link(
+            name = "dl",
+            kind = "static",
+            modifiers = "-bundle",
+            cfg(target_feature = "crt-static")
+        )]
         #[link(name = "dl", cfg(not(target_feature = "crt-static")))]
         #[link(name = "log", cfg(not(target_feature = "crt-static")))]
         unsafe extern "C" {}
@@ -427,15 +368,24 @@ cfg_select! {
     _ => {}
 }
 
-#[cfg(any(target_os = "espidf", target_os = "horizon", target_os = "vita", target_os = "nuttx"))]
-pub mod unsupported {
-    use crate::io;
+#[cfg(any(
+    target_os = "espidf",
+    target_os = "horizon",
+    target_os = "vita",
+    target_os = "nuttx",
+    target_os = "l4re",
+))]
+pub fn unsupported<T>() -> crate::io::Result<T> {
+    Err(unsupported_err())
+}
 
-    pub fn unsupported<T>() -> io::Result<T> {
-        Err(unsupported_err())
-    }
-
-    pub fn unsupported_err() -> io::Error {
-        io::Error::UNSUPPORTED_PLATFORM
-    }
+#[cfg(any(
+    target_os = "espidf",
+    target_os = "horizon",
+    target_os = "vita",
+    target_os = "nuttx",
+    target_os = "l4re",
+))]
+pub fn unsupported_err() -> crate::io::Error {
+    io::Error::UNSUPPORTED_PLATFORM
 }

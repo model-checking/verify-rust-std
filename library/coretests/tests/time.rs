@@ -439,7 +439,6 @@ fn debug_formatting_precision_two() {
     assert_eq!(format!("{:.2?}", Duration::new(4, 001_000_000)), "4.00s");
     assert_eq!(format!("{:.2?}", Duration::new(2, 100_000_000)), "2.10s");
     assert_eq!(format!("{:.2?}", Duration::new(2, 104_990_000)), "2.10s");
-    assert_eq!(format!("{:.2?}", Duration::new(2, 105_000_000)), "2.11s");
     assert_eq!(format!("{:.2?}", Duration::new(8, 999_999_999)), "9.00s");
 }
 
@@ -478,6 +477,15 @@ fn debug_formatting_precision_high() {
     assert_eq!(format!("{:.9?}", Duration::new(1, 000_000_000)), "1.000000000s");
     assert_eq!(format!("{:.10?}", Duration::new(4, 001_000_000)), "4.0010000000s");
     assert_eq!(format!("{:.20?}", Duration::new(4, 001_000_000)), "4.00100000000000000000s");
+}
+
+#[test]
+fn debug_formatting_round_to_even() {
+    assert_eq!(format!("{:.0?}", Duration::new(1, 500_000_000)), "2s");
+    assert_eq!(format!("{:.0?}", Duration::new(2, 500_000_000)), "2s");
+    assert_eq!(format!("{:.0?}", Duration::new(0, 1_500_000)), "2ms");
+    assert_eq!(format!("{:.0?}", Duration::new(0, 2_500_000)), "2ms");
+    assert_eq!(format!("{:.2?}", Duration::new(2, 105_000_000)), "2.10s");
 }
 
 #[test]
@@ -589,4 +597,101 @@ fn from_neg_zero() {
     assert_eq!(Duration::try_from_secs_f64(-0.0), Ok(Duration::ZERO));
     assert_eq!(Duration::from_secs_f32(-0.0), Duration::ZERO);
     assert_eq!(Duration::from_secs_f64(-0.0), Duration::ZERO);
+}
+
+#[test]
+#[should_panic(expected = "value is either too big or NaN")]
+fn duration_fp_mul_nan() {
+    let _ = Duration::NANOSECOND.mul_f64(f64::NAN);
+}
+
+#[test]
+#[should_panic(expected = "value is either too big or NaN")]
+fn duration_fp_mul_posinfinity() {
+    let _ = Duration::NANOSECOND.mul_f64(f64::INFINITY);
+}
+
+#[test]
+#[should_panic(expected = "value is negative")]
+fn duration_fp_mul_neginfinity() {
+    let _ = Duration::NANOSECOND.mul_f64(f64::NEG_INFINITY);
+}
+
+#[test]
+#[should_panic(expected = "value is either too big or NaN")]
+fn duration_fp_div_nan() {
+    let _ = Duration::NANOSECOND.div_f64(f64::NAN);
+}
+
+#[test]
+#[should_panic(expected = "value is either too big or NaN")]
+fn duration_fp_div_poszero() {
+    let _ = Duration::NANOSECOND.div_f64(0.0);
+}
+
+#[test]
+#[should_panic(expected = "value is negative")]
+fn duration_fp_div_negzero() {
+    let _ = Duration::NANOSECOND.div_f64(-0.0);
+}
+
+#[test]
+#[should_panic(expected = "value is negative")]
+fn duration_fp_div_negative() {
+    let _ = Duration::NANOSECOND.div_f64(f64::MIN);
+}
+
+const TOO_LARGE_FACTOR: f64 = Duration::MAX.as_nanos() as f64;
+const TOO_LARGE_DIVISOR: f64 = (Duration::MAX.as_secs_f64() * 2e9).next_up();
+const SMALLEST_DIVISOR: f64 = (TOO_LARGE_DIVISOR.recip() * 2.0).next_up().next_up();
+const SMALLEST_FACTOR: f64 = TOO_LARGE_FACTOR.recip() / 2.0;
+const SMALLEST_NEGFACTOR: f64 = (0.0f64.next_down() * 0.5e9).next_up();
+
+#[test]
+fn duration_fp_boundaries() {
+    const DURATION_BITS: u32 = Duration::MAX.as_nanos().ilog2() + 1;
+    const PRECISION: u32 = DURATION_BITS - f64::MANTISSA_DIGITS + 1;
+
+    assert_eq!(Duration::MAX.mul_f64(0.0), Duration::ZERO);
+    assert_eq!(Duration::MAX.mul_f64(-0.0), Duration::ZERO);
+
+    assert_eq!(Duration::MAX.mul_f64(SMALLEST_FACTOR), Duration::NANOSECOND);
+    assert_eq!(Duration::MAX.mul_f64(SMALLEST_FACTOR.next_down()), Duration::ZERO);
+
+    assert_eq!(Duration::MAX.div_f64(TOO_LARGE_DIVISOR), Duration::ZERO);
+    assert_eq!(Duration::MAX.div_f64(TOO_LARGE_DIVISOR.next_down()), Duration::NANOSECOND);
+
+    assert_eq!(Duration::MAX.div_f64(f64::INFINITY), Duration::ZERO);
+    assert_eq!(Duration::MAX.div_f64(f64::NEG_INFINITY), Duration::ZERO);
+
+    // the following assertions pair with the subsequent (`should_panic`) tests
+
+    assert_eq!(Duration::NANOSECOND.mul_f64(SMALLEST_NEGFACTOR), Duration::ZERO);
+
+    assert!(
+        Duration::MAX - Duration::NANOSECOND.mul_f64(TOO_LARGE_FACTOR.next_down())
+            < Duration::from_nanos(1 << PRECISION)
+    );
+    assert!(
+        Duration::MAX - Duration::NANOSECOND.div_f64(SMALLEST_DIVISOR)
+            < Duration::from_nanos(1 << PRECISION)
+    );
+}
+
+#[test]
+#[should_panic(expected = "value is negative")]
+fn duration_fp_mul_negative() {
+    let _ = Duration::NANOSECOND.mul_f64(SMALLEST_NEGFACTOR.next_down());
+}
+
+#[test]
+#[should_panic(expected = "value is either too big or NaN")]
+fn duration_fp_mul_overflow() {
+    let _ = Duration::NANOSECOND.mul_f64(TOO_LARGE_FACTOR);
+}
+
+#[test]
+#[should_panic(expected = "value is either too big or NaN")]
+fn duration_fp_div_overflow() {
+    let _ = Duration::NANOSECOND.div_f64(SMALLEST_DIVISOR.next_down());
 }

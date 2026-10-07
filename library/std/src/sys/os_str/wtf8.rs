@@ -8,17 +8,17 @@ use crate::borrow::Cow;
 use crate::collections::TryReserveError;
 use crate::rc::Rc;
 use crate::sync::Arc;
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner};
 use crate::{fmt, mem};
 
 #[derive(Hash)]
 #[repr(transparent)]
-pub struct Buf {
+pub(crate) struct Buf {
     pub inner: Wtf8Buf,
 }
 
 #[repr(transparent)]
-pub struct Slice {
+pub(crate) struct Slice {
     pub inner: Wtf8,
 }
 
@@ -240,6 +240,11 @@ impl Slice {
         unsafe { mem::transmute(Wtf8::from_bytes_unchecked(s)) }
     }
 
+    #[inline]
+    pub fn try_check_public_boundary(&self, index: usize) -> Option<()> {
+        self.inner.try_check_utf8_boundary(index).ok()
+    }
+
     #[track_caller]
     #[inline]
     pub fn check_public_boundary(&self, index: usize) {
@@ -269,11 +274,6 @@ impl Slice {
     #[inline]
     pub fn clone_into(&self, buf: &mut Buf) {
         self.inner.clone_into(&mut buf.inner)
-    }
-
-    #[inline]
-    pub fn into_box(&self) -> Box<Slice> {
-        unsafe { mem::transmute(self.inner.into_box()) }
     }
 
     #[inline]

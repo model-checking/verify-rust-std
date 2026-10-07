@@ -7,7 +7,7 @@
 use libc::{gid_t, pid_t, uid_t};
 
 /// Credentials for a UNIX process for credentials passing.
-#[unstable(feature = "peer_credentials_unix_socket", issue = "42839", reason = "unstable")]
+#[unstable(feature = "peer_credentials_unix_socket", issue = "42839")]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct UCred {
     /// The UID part of the peer credential. This is the effective UID of the process at the domain
@@ -30,7 +30,8 @@ pub(super) use self::impl_apple::peer_cred;
     target_os = "freebsd",
     target_os = "openbsd",
     target_os = "netbsd",
-    target_os = "nto"
+    target_os = "nto",
+    target_os = "qnx"
 ))]
 pub(super) use self::impl_bsd::peer_cred;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "cygwin"))]
@@ -79,6 +80,7 @@ mod impl_linux {
     target_os = "openbsd",
     target_os = "netbsd",
     target_os = "nto",
+    target_os = "qnx",
 ))]
 mod impl_bsd {
     use super::UCred;

@@ -1,11 +1,10 @@
 use crate::fmt;
-use crate::iter::{Fuse, FusedIterator};
 
 /// An iterator adapter that places a separator between all elements.
 ///
 /// This `struct` is created by [`Iterator::intersperse`]. See its documentation
 /// for more information.
-#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
+#[unstable(feature = "iter_intersperse", issue = "79524")]
 #[derive(Debug, Clone)]
 pub struct Intersperse<I: Iterator>
 where
@@ -14,27 +13,19 @@ where
     started: bool,
     separator: I::Item,
     next_item: Option<I::Item>,
-    iter: Fuse<I>,
-}
-
-#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
-impl<I> FusedIterator for Intersperse<I>
-where
-    I: FusedIterator,
-    I::Item: Clone,
-{
+    iter: I,
 }
 
 impl<I: Iterator> Intersperse<I>
 where
     I::Item: Clone,
 {
-    pub(in crate::iter) fn new(iter: I, separator: I::Item) -> Self {
-        Self { started: false, separator, next_item: None, iter: iter.fuse() }
+    pub(in crate::iter) const fn new(iter: I, separator: I::Item) -> Self {
+        Self { started: false, separator, next_item: None, iter }
     }
 }
 
-#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
+#[unstable(feature = "iter_intersperse", issue = "79524")]
 impl<I> Iterator for Intersperse<I>
 where
     I: Iterator,
@@ -57,8 +48,9 @@ where
                 }
             }
         } else {
-            self.started = true;
-            self.iter.next()
+            let item = self.iter.next();
+            self.started = item.is_some();
+            item
         }
     }
 
@@ -87,7 +79,7 @@ where
 ///
 /// This `struct` is created by [`Iterator::intersperse_with`]. See its
 /// documentation for more information.
-#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
+#[unstable(feature = "iter_intersperse", issue = "79524")]
 pub struct IntersperseWith<I, G>
 where
     I: Iterator,
@@ -95,18 +87,10 @@ where
     started: bool,
     separator: G,
     next_item: Option<I::Item>,
-    iter: Fuse<I>,
+    iter: I,
 }
 
-#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
-impl<I, G> FusedIterator for IntersperseWith<I, G>
-where
-    I: FusedIterator,
-    G: FnMut() -> I::Item,
-{
-}
-
-#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
+#[unstable(feature = "iter_intersperse", issue = "79524")]
 impl<I, G> fmt::Debug for IntersperseWith<I, G>
 where
     I: Iterator + fmt::Debug,
@@ -123,7 +107,7 @@ where
     }
 }
 
-#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
+#[unstable(feature = "iter_intersperse", issue = "79524")]
 impl<I, G> Clone for IntersperseWith<I, G>
 where
     I: Iterator + Clone,
@@ -145,12 +129,12 @@ where
     I: Iterator,
     G: FnMut() -> I::Item,
 {
-    pub(in crate::iter) fn new(iter: I, separator: G) -> Self {
-        Self { started: false, separator, next_item: None, iter: iter.fuse() }
+    pub(in crate::iter) const fn new(iter: I, separator: G) -> Self {
+        Self { started: false, separator, next_item: None, iter }
     }
 }
 
-#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
+#[unstable(feature = "iter_intersperse", issue = "79524")]
 impl<I, G> Iterator for IntersperseWith<I, G>
 where
     I: Iterator,
@@ -173,8 +157,9 @@ where
                 }
             }
         } else {
-            self.started = true;
-            self.iter.next()
+            let item = self.iter.next();
+            self.started = item.is_some();
+            item
         }
     }
 
