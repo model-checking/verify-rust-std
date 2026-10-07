@@ -1,3 +1,4 @@
+use crate::marker::Destruct;
 use crate::ops::ControlFlow;
 
 /// The `?` operator and `try {}` blocks.
@@ -147,16 +148,16 @@ pub const trait Try: [const] FromResidual {
     /// this type is typically a newtype of some sort to "color" the type
     /// so that it's distinguishable from the residuals of other types.
     ///
-    /// This is why `Result<T, E>::Residual` is not `E`, but `Result<Infallible, E>`.
+    /// This is why `Result<T, E>::Residual` is not `E`, but `Result<!, E>`.
     /// That way it's distinct from `ControlFlow<E>::Residual`, for example,
     /// and thus `?` on `ControlFlow` cannot be used in a method returning `Result`.
     ///
     /// If you're making a generic type `Foo<T>` that implements `Try<Output = T>`,
-    /// then typically you can use `Foo<std::convert::Infallible>` as its `Residual`
+    /// then typically you can use `Foo<!>` as its `Residual`
     /// type: that type will have a "hole" in the correct place, and will maintain the
     /// "foo-ness" of the residual so other types need to opt-in to interconversion.
     #[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
-    type Residual;
+    type Residual: Residual<Self::Output>;
 
     /// Constructs the type from its `Output` type.
     ///
@@ -228,7 +229,7 @@ pub const trait Try: [const] FromResidual {
         all(
             from_desugaring = "QuestionMark",
             Self = "core::result::Result<T, E>",
-            R = "core::option::Option<core::convert::Infallible>",
+            R = "core::option::Option<!>",
         ),
         message = "the `?` operator can only be used on `Result`s, not `Option`s, \
             in {ItemContext} that returns `Result`",
@@ -355,14 +356,15 @@ where
 /// and [`Try::Residual`] components, this allows putting them back together.
 ///
 /// For example,
-/// `Result<T, E>: Try<Output = T, Residual = Result<Infallible, E>>`,
+/// `Result<T, E>: Try<Output = T, Residual = Result<!, E>>`,
 /// and in the other direction,
-/// `<Result<Infallible, E> as Residual<T>>::TryType = Result<T, E>`.
+/// `<Result<!, E> as Residual<T>>::TryType = Result<T, E>`.
 #[unstable(feature = "try_trait_v2_residual", issue = "91285")]
 #[rustc_const_unstable(feature = "const_try_residual", issue = "91285")]
 pub const trait Residual<O>: Sized {
     /// The "return" type of this meta-function.
     #[unstable(feature = "try_trait_v2_residual", issue = "91285")]
+    // FIXME: ought to be implied
     type TryType: [const] Try<Output = O, Residual = Self>;
 }
 
@@ -403,21 +405,32 @@ impl<T> NeverShortCircuit<T> {
     /// This is useful for implementing infallible functions in terms of the `try_` ones,
     /// without accidentally capturing extra generic parameters in a closure.
     #[inline]
-    pub(crate) fn wrap_mut_1<A>(
-        mut f: impl FnMut(A) -> T,
-    ) -> impl FnMut(A) -> NeverShortCircuit<T> {
-        move |a| NeverShortCircuit(f(a))
+    #[rustc_const_unstable(feature = "const_array", issue = "147606")]
+    pub(crate) const fn wrap_mut_1<A, F>(
+        mut f: F,
+    ) -> impl [const] FnMut(A) -> Self + [const] Destruct
+    where
+        F: [const] FnMut(A) -> T + [const] Destruct,
+    {
+        const move |a| NeverShortCircuit(f(a))
     }
 
     #[inline]
-    pub(crate) fn wrap_mut_2<A, B>(mut f: impl FnMut(A, B) -> T) -> impl FnMut(A, B) -> Self {
-        move |a, b| NeverShortCircuit(f(a, b))
+    #[rustc_const_unstable(feature = "const_array", issue = "147606")]
+    pub(crate) const fn wrap_mut_2<A, B, F>(
+        mut f: F,
+    ) -> impl [const] FnMut(A, B) -> Self + [const] Destruct
+    where
+        F: [const] FnMut(A, B) -> T + [const] Destruct,
+    {
+        const move |a, b| NeverShortCircuit(f(a, b))
     }
 }
 
 pub(crate) enum NeverShortCircuitResidual {}
 
-impl<T> Try for NeverShortCircuit<T> {
+#[rustc_const_unstable(feature = "const_never_short_circuit", issue = "none")]
+const impl<T> Try for NeverShortCircuit<T> {
     type Output = T;
     type Residual = NeverShortCircuitResidual;
 
@@ -431,15 +444,15 @@ impl<T> Try for NeverShortCircuit<T> {
         NeverShortCircuit(x)
     }
 }
-
-impl<T> FromResidual for NeverShortCircuit<T> {
+#[rustc_const_unstable(feature = "const_never_short_circuit", issue = "none")]
+const impl<T> FromResidual for NeverShortCircuit<T> {
     #[inline]
     fn from_residual(never: NeverShortCircuitResidual) -> Self {
         match never {}
     }
 }
-
-impl<T> Residual<T> for NeverShortCircuitResidual {
+#[rustc_const_unstable(feature = "const_never_short_circuit", issue = "none")]
+const impl<T: [const] Destruct> Residual<T> for NeverShortCircuitResidual {
     type TryType = NeverShortCircuit<T>;
 }
 

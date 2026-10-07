@@ -1,8 +1,6 @@
 use crate::array;
 use crate::iter::adapters::SourceIter;
-use crate::iter::{
-    ByRefSized, FusedIterator, InPlaceIterable, TrustedFused, TrustedRandomAccessNoCoerce,
-};
+use crate::iter::{FusedIterator, InPlaceIterable, TrustedFused, TrustedRandomAccessNoCoerce};
 use crate::num::NonZero;
 use crate::ops::{ControlFlow, NeverShortCircuit, Try};
 
@@ -15,7 +13,7 @@ use crate::ops::{ControlFlow, NeverShortCircuit, Try};
 /// method on [`Iterator`]. See its documentation for more.
 #[derive(Debug, Clone)]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-#[unstable(feature = "iter_array_chunks", reason = "recently added", issue = "100450")]
+#[unstable(feature = "iter_array_chunks", issue = "100450")]
 pub struct ArrayChunks<I: Iterator, const N: usize> {
     iter: I,
     remainder: Option<array::IntoIter<I::Item, N>>,
@@ -26,7 +24,7 @@ where
     I: Iterator,
 {
     #[track_caller]
-    pub(in crate::iter) fn new(iter: I) -> Self {
+    pub(in crate::iter) const fn new(iter: I) -> Self {
         assert!(N != 0, "chunk size must be non-zero");
         Self { iter, remainder: None }
     }
@@ -44,7 +42,7 @@ where
     /// assert_eq!(rem.next(), Some(5));
     /// assert_eq!(rem.next(), None);
     /// ```
-    #[unstable(feature = "iter_array_chunks", reason = "recently added", issue = "100450")]
+    #[unstable(feature = "iter_array_chunks", issue = "100450")]
     #[inline]
     pub fn into_remainder(mut self) -> array::IntoIter<I::Item, N> {
         if self.remainder.is_none() {
@@ -54,7 +52,7 @@ where
     }
 }
 
-#[unstable(feature = "iter_array_chunks", reason = "recently added", issue = "100450")]
+#[unstable(feature = "iter_array_chunks", issue = "100450")]
 impl<I, const N: usize> Iterator for ArrayChunks<I, N>
 where
     I: Iterator,
@@ -89,7 +87,7 @@ where
             match self.iter.next_chunk() {
                 Ok(chunk) => acc = f(acc, chunk)?,
                 Err(remainder) => {
-                    // Make sure to not override `self.remainder` with an empty array
+                    // Make sure to not overwrite `self.remainder` with an empty array
                     // when `next` is called after `ArrayChunks` exhaustion.
                     self.remainder.get_or_insert(remainder);
 
@@ -108,7 +106,7 @@ where
     }
 }
 
-#[unstable(feature = "iter_array_chunks", reason = "recently added", issue = "100450")]
+#[unstable(feature = "iter_array_chunks", issue = "100450")]
 impl<I, const N: usize> DoubleEndedIterator for ArrayChunks<I, N>
 where
     I: DoubleEndedIterator + ExactSizeIterator,
@@ -128,15 +126,11 @@ where
         self.next_back_remainder();
 
         let mut acc = init;
-        let mut iter = ByRefSized(&mut self.iter).rev();
 
         // NB remainder is handled by `next_back_remainder`, so
-        // `next_chunk` can't return `Err` with non-empty remainder
+        // `next_chunk_back` can't return `Err` with non-empty remainder
         // (assuming correct `I as ExactSizeIterator` impl).
-        while let Ok(mut chunk) = iter.next_chunk() {
-            // FIXME: do not do double reverse
-            //        (we could instead add `next_chunk_back` for example)
-            chunk.reverse();
+        while let Ok(chunk) = self.iter.next_chunk_back() {
             acc = f(acc, chunk)?
         }
 
@@ -173,13 +167,13 @@ where
     }
 }
 
-#[unstable(feature = "iter_array_chunks", reason = "recently added", issue = "100450")]
+#[unstable(feature = "iter_array_chunks", issue = "100450")]
 impl<I, const N: usize> FusedIterator for ArrayChunks<I, N> where I: FusedIterator {}
 
 #[unstable(issue = "none", feature = "trusted_fused")]
 unsafe impl<I, const N: usize> TrustedFused for ArrayChunks<I, N> where I: TrustedFused + Iterator {}
 
-#[unstable(feature = "iter_array_chunks", reason = "recently added", issue = "100450")]
+#[unstable(feature = "iter_array_chunks", issue = "100450")]
 impl<I, const N: usize> ExactSizeIterator for ArrayChunks<I, N>
 where
     I: ExactSizeIterator,

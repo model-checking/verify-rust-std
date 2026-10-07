@@ -1,4 +1,4 @@
-#![allow(internal_features)]
+#![allow(internal_features, unused_features)]
 #![feature(stdarch_internal)]
 #![cfg_attr(target_arch = "arm", feature(stdarch_arm_feature_detection))]
 #![cfg_attr(
@@ -85,7 +85,6 @@ fn aarch64_linux() {
     println!("rcpc2: {}", is_aarch64_feature_detected!("rcpc2"));
     println!("rcpc3: {}", is_aarch64_feature_detected!("rcpc3"));
     println!("dotprod: {}", is_aarch64_feature_detected!("dotprod"));
-    println!("tme: {}", is_aarch64_feature_detected!("tme"));
     println!("fhm: {}", is_aarch64_feature_detected!("fhm"));
     println!("dit: {}", is_aarch64_feature_detected!("dit"));
     println!("flagm: {}", is_aarch64_feature_detected!("flagm"));
@@ -151,14 +150,22 @@ fn aarch64_linux() {
 fn aarch64_windows() {
     println!("asimd: {:?}", is_aarch64_feature_detected!("asimd"));
     println!("fp: {:?}", is_aarch64_feature_detected!("fp"));
+    println!("fp16: {:?}", is_aarch64_feature_detected!("fp16"));
     println!("crc: {:?}", is_aarch64_feature_detected!("crc"));
     println!("lse: {:?}", is_aarch64_feature_detected!("lse"));
+    println!("lse2: {:?}", is_aarch64_feature_detected!("lse2"));
+    println!("rdm: {:?}", is_aarch64_feature_detected!("rdm"));
     println!("dotprod: {:?}", is_aarch64_feature_detected!("dotprod"));
+    println!("i8mm: {:?}", is_aarch64_feature_detected!("i8mm"));
+    println!("bf16: {:?}", is_aarch64_feature_detected!("bf16"));
     println!("jsconv: {:?}", is_aarch64_feature_detected!("jsconv"));
     println!("rcpc: {:?}", is_aarch64_feature_detected!("rcpc"));
     println!("aes: {:?}", is_aarch64_feature_detected!("aes"));
     println!("pmull: {:?}", is_aarch64_feature_detected!("pmull"));
     println!("sha2: {:?}", is_aarch64_feature_detected!("sha2"));
+    println!("sha3: {:?}", is_aarch64_feature_detected!("sha3"));
+    println!("f32mm: {:?}", is_aarch64_feature_detected!("f32mm"));
+    println!("f64mm: {:?}", is_aarch64_feature_detected!("f64mm"));
 }
 
 #[test]
@@ -175,7 +182,6 @@ fn aarch64_bsd() {
     println!("rdm: {:?}", is_aarch64_feature_detected!("rdm"));
     println!("rcpc: {:?}", is_aarch64_feature_detected!("rcpc"));
     println!("dotprod: {:?}", is_aarch64_feature_detected!("dotprod"));
-    println!("tme: {:?}", is_aarch64_feature_detected!("tme"));
     println!("paca: {:?}", is_aarch64_feature_detected!("paca"));
     println!("pacg: {:?}", is_aarch64_feature_detected!("pacg"));
     println!("aes: {:?}", is_aarch64_feature_detected!("aes"));
@@ -237,6 +243,7 @@ fn riscv_linux() {
     println!("zicboz: {}", is_riscv_feature_detected!("zicboz"));
     println!("zicond: {}", is_riscv_feature_detected!("zicond"));
     println!("m: {}", is_riscv_feature_detected!("m"));
+    println!("zmmul: {}", is_riscv_feature_detected!("zmmul"));
     println!("a: {}", is_riscv_feature_detected!("a"));
     println!("zalrsc: {}", is_riscv_feature_detected!("zalrsc"));
     println!("zaamo: {}", is_riscv_feature_detected!("zaamo"));

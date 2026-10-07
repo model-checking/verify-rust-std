@@ -4,9 +4,10 @@
 
 # Collect some metrics related to the crates that compose the standard library.
 #
-# Files generates so far:
+# Files generated so far:
 #
 #  - ${crate}_scan_overall.csv: Summary of function metrics, such as safe vs unsafe.
+#  - ${crate}_scan_functions.csv: Function metrics including counts of unsafe functions and allegedly-safe abstractions.
 #  - ${crate}_scan_input_tys.csv: Detailed information about the inputs' type of each
 #    function found in this crate.
 #

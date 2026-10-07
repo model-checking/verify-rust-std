@@ -4,8 +4,7 @@
 #![stable(feature = "metadata_ext", since = "1.1.0")]
 
 use crate::fs::{self, Metadata};
-use crate::sealed::Sealed;
-use crate::sys_common::{AsInner, AsInnerMut, IntoInner};
+use crate::sys::{AsInner, AsInnerMut, IntoInner};
 use crate::time::SystemTime;
 
 /// OS-specific extensions to [`fs::Metadata`].
@@ -157,7 +156,7 @@ impl MetadataExt for Metadata {
 
 /// OS-specific extensions to [`fs::FileTimes`].
 #[stable(feature = "file_set_times", since = "1.75.0")]
-pub trait FileTimesExt: Sealed {
+pub impl(self) trait FileTimesExt {
     /// Set the creation time of a file.
     #[stable(feature = "file_set_times", since = "1.75.0")]
     fn set_created(self, t: SystemTime) -> Self;

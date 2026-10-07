@@ -4,11 +4,11 @@ use libc::{MSG_PEEK, c_int, c_void, size_t, sockaddr, socklen_t};
 use crate::ffi::CStr;
 use crate::io::{self, BorrowedBuf, BorrowedCursor, IoSlice, IoSliceMut};
 use crate::net::{Shutdown, SocketAddr};
-use crate::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd};
+use crate::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd};
 use crate::sys::fd::FileDesc;
 use crate::sys::net::{getsockopt, setsockopt};
 use crate::sys::pal::IsMinusOne;
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner};
 use crate::time::{Duration, Instant};
 use crate::{cmp, mem};
 
@@ -76,6 +76,7 @@ impl Socket {
                 target_os = "openbsd",
                 target_os = "cygwin",
                 target_os = "nto",
+                target_os = "qnx",
                 target_os = "solaris",
             ) => {
                 // On platforms that support it we pass the SOCK_CLOEXEC
@@ -87,7 +88,9 @@ impl Socket {
                 // DragonFlyBSD, FreeBSD and NetBSD use `SO_NOSIGPIPE` as a `setsockopt`
                 // flag to disable `SIGPIPE` emission on socket.
                 #[cfg(any(target_os = "freebsd", target_os = "netbsd", target_os = "dragonfly"))]
-                unsafe { setsockopt(&socket, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1)? };
+                unsafe {
+                    setsockopt(&socket, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1)?
+                };
 
                 Ok(socket)
             }
@@ -100,14 +103,16 @@ impl Socket {
                 // macOS and iOS use `SO_NOSIGPIPE` as a `setsockopt`
                 // flag to disable `SIGPIPE` emission on socket.
                 #[cfg(target_vendor = "apple")]
-                unsafe { setsockopt(&socket, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1)? };
+                unsafe {
+                    setsockopt(&socket, libc::SOL_SOCKET, libc::SO_NOSIGPIPE, 1)?
+                };
 
                 Ok(socket)
             }
         }
     }
 
-    #[cfg(not(target_os = "vxworks"))]
+    #[cfg(not(any(target_os = "vxworks", target_os = "wasi")))]
     pub fn new_pair(fam: c_int, ty: c_int) -> io::Result<(Socket, Socket)> {
         unsafe {
             let mut fds = [0, 0];
@@ -124,10 +129,14 @@ impl Socket {
                     target_os = "openbsd",
                     target_os = "cygwin",
                     target_os = "nto",
+                    target_os = "qnx",
                 ) => {
                     // Like above, set cloexec atomically
                     cvt(libc::socketpair(fam, ty | libc::SOCK_CLOEXEC, 0, fds.as_mut_ptr()))?;
-                    Ok((Socket(FileDesc::from_raw_fd(fds[0])), Socket(FileDesc::from_raw_fd(fds[1]))))
+                    Ok((
+                        Socket(FileDesc::from_raw_fd(fds[0])),
+                        Socket(FileDesc::from_raw_fd(fds[1])),
+                    ))
                 }
                 _ => {
                     cvt(libc::socketpair(fam, ty, 0, fds.as_mut_ptr()))?;
@@ -151,7 +160,7 @@ impl Socket {
         loop {
             let result = unsafe { libc::connect(self.as_raw_fd(), addr.as_ptr(), len) };
             if result.is_minus_one() {
-                let err = crate::sys::os::errno();
+                let err = crate::sys::io::errno();
                 match err {
                     libc::EINTR => continue,
                     libc::EISCONN => return Ok(()),
@@ -254,20 +263,17 @@ impl Socket {
                 target_os = "netbsd",
                 target_os = "openbsd",
                 target_os = "cygwin",
-            ) => {
-                unsafe {
-                    let fd = cvt_r(|| libc::accept4(self.as_raw_fd(), storage, len, libc::SOCK_CLOEXEC))?;
-                    Ok(Socket(FileDesc::from_raw_fd(fd)))
-                }
-            }
-            _ => {
-                unsafe {
-                    let fd = cvt_r(|| libc::accept(self.as_raw_fd(), storage, len))?;
-                    let fd = FileDesc::from_raw_fd(fd);
-                    fd.set_cloexec()?;
-                    Ok(Socket(fd))
-                }
-            }
+            ) => unsafe {
+                let fd =
+                    cvt_r(|| libc::accept4(self.as_raw_fd(), storage, len, libc::SOCK_CLOEXEC))?;
+                Ok(Socket(FileDesc::from_raw_fd(fd)))
+            },
+            _ => unsafe {
+                let fd = cvt_r(|| libc::accept(self.as_raw_fd(), storage, len))?;
+                let fd = FileDesc::from_raw_fd(fd);
+                fd.set_cloexec()?;
+                Ok(Socket(fd))
+            },
         }
     }
 
@@ -275,15 +281,16 @@ impl Socket {
         self.0.duplicate().map(Socket)
     }
 
+    #[cfg(not(target_os = "wasi"))]
     pub fn send_with_flags(&self, buf: &[u8], flags: c_int) -> io::Result<usize> {
-        let len = cmp::min(buf.len(), <wrlen_t>::MAX as usize) as wrlen_t;
+        let len = cmp::min(buf.len(), super::MAX_SEND_LEN) as wrlen_t;
         let ret = cvt(unsafe {
             libc::send(self.as_raw_fd(), buf.as_ptr() as *const c_void, len, flags)
         })?;
         Ok(ret as usize)
     }
 
-    fn recv_with_flags(&self, mut buf: BorrowedCursor<'_>, flags: c_int) -> io::Result<()> {
+    fn recv_with_flags(&self, mut buf: BorrowedCursor<'_, u8>, flags: c_int) -> io::Result<()> {
         let ret = cvt(unsafe {
             libc::recv(
                 self.as_raw_fd(),
@@ -293,7 +300,7 @@ impl Socket {
             )
         })?;
         unsafe {
-            buf.advance_unchecked(ret as usize);
+            buf.advance(ret as usize);
         }
         Ok(())
     }
@@ -310,7 +317,7 @@ impl Socket {
         Ok(buf.len())
     }
 
-    pub fn read_buf(&self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         self.recv_with_flags(buf, 0)
     }
 
@@ -361,6 +368,7 @@ impl Socket {
         self.recv_from_with_flags(buf, MSG_PEEK)
     }
 
+    #[cfg(not(target_os = "wasi"))]
     pub fn write(&self, buf: &[u8]) -> io::Result<usize> {
         self.0.write(buf)
     }
@@ -392,10 +400,7 @@ impl Socket {
                 } else {
                     dur.as_secs() as libc::time_t
                 };
-                let mut timeout = libc::timeval {
-                    tv_sec: secs,
-                    tv_usec: dur.subsec_micros() as libc::suseconds_t,
-                };
+                let mut timeout = libc::timeval { tv_sec: secs, tv_usec: dur.subsec_micros() as _ };
                 if timeout.tv_sec == 0 && timeout.tv_usec == 0 {
                     timeout.tv_usec = 1;
                 }
@@ -430,8 +435,8 @@ impl Socket {
     #[cfg(not(target_os = "cygwin"))]
     pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
         let linger = libc::linger {
-            l_onoff: linger.is_some() as libc::c_int,
-            l_linger: linger.unwrap_or_default().as_secs() as libc::c_int,
+            l_onoff: linger.is_some() as c_int,
+            l_linger: cmp::min(linger.unwrap_or_default().as_secs(), c_int::MAX as u64) as c_int,
         };
 
         unsafe { setsockopt(self, libc::SOL_SOCKET, SO_LINGER, linger) }
@@ -441,7 +446,8 @@ impl Socket {
     pub fn set_linger(&self, linger: Option<Duration>) -> io::Result<()> {
         let linger = libc::linger {
             l_onoff: linger.is_some() as libc::c_ushort,
-            l_linger: linger.unwrap_or_default().as_secs() as libc::c_ushort,
+            l_linger: cmp::min(linger.unwrap_or_default().as_secs(), libc::c_ushort::MAX as u64)
+                as libc::c_ushort,
         };
 
         unsafe { setsockopt(self, libc::SOL_SOCKET, SO_LINGER, linger) }
@@ -451,6 +457,15 @@ impl Socket {
         let val: libc::linger = unsafe { getsockopt(self, libc::SOL_SOCKET, SO_LINGER)? };
 
         Ok((val.l_onoff != 0).then(|| Duration::from_secs(val.l_linger as u64)))
+    }
+
+    pub fn set_keepalive(&self, keepalive: bool) -> io::Result<()> {
+        unsafe { setsockopt(self, libc::SOL_SOCKET, libc::SO_KEEPALIVE, keepalive as c_int) }
+    }
+
+    pub fn keepalive(&self) -> io::Result<bool> {
+        let raw: c_int = unsafe { getsockopt(self, libc::SOL_SOCKET, libc::SO_KEEPALIVE)? };
+        Ok(raw != 0)
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
@@ -612,7 +627,6 @@ impl Socket {
         if raw == 0 { Ok(None) } else { Ok(Some(io::Error::from_raw_os_error(raw as i32))) }
     }
 
-    // This is used by sys_common code to abstract over Windows and Unix.
     pub fn as_raw(&self) -> RawFd {
         self.as_raw_fd()
     }
@@ -683,7 +697,7 @@ fn on_resolver_failure() {
     use crate::sys;
 
     // If the version fails to parse, we treat it the same as "not glibc".
-    if let Some(version) = sys::os::glibc_version() {
+    if let Some(version) = sys::pal::conf::glibc_version() {
         if version < (2, 26) {
             unsafe { libc::res_init() };
         }

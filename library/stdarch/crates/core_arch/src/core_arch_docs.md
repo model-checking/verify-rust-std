@@ -31,11 +31,12 @@ ensure at least a few guarantees are upheld:
   typically done by ensuring that `#[cfg]` is used appropriately when using
   this module.
 * The CPU the program is currently running on supports the function being
-  called. For example it is unsafe to call an AVX2 function on a CPU that
+  called. For example, it is unsafe to call an AVX2 function on a CPU that
   doesn't actually support AVX2.
 
 As a result of the latter of these guarantees all intrinsics in this module
-are `unsafe` and extra care needs to be taken when calling them!
+are `unsafe` to call unless the caller enables the required target features,
+and extra care needs to be taken when calling them!
 
 # CPU Feature Detection
 
@@ -164,6 +165,25 @@ And with all that we should have a working program! This program will run
 across all machines and it'll use the optimized AVX2 implementation on
 machines where support is detected.
 
+# Differences from pure hardware behavior
+
+While the intrinsics in this module exist to expose particular instructions of the underlying
+hardware, not all of them behave *exactly* like their corresponding instructions.
+
+* Floating-point operations are subject to the usual [Rust semantics for NaN
+  values][nan].
+* Operations that read or write the floating-point status register generally cannot be meaningfully
+  used because Rust makes no guarantee about when and where floating-point operations can be
+  executed. In particular, it is generally undefined behavior to change the default rounding or
+  exception behavior.
+* Some operations have special memory-model effects that are incompatible with the Rust Abstract
+  Machine, which means they are subject to more strict requirements than they would be in an
+  assembly program. Most notably, this applies to [non-temporal ("streaming") stores on
+  x86][non-temporal].
+
+[nan]: ../../core/primitive.f32.html#nan-bit-patterns
+[non-temporal]: ../../core/arch/x86/fn._mm_sfence.html#safety-of-non-temporal-stores
+
 # Ergonomics
 
 It's important to note that using the `arch` module is not the easiest
@@ -185,6 +205,8 @@ others at:
 * [`x86_64`]
 * [`arm`]
 * [`aarch64`]
+* [`amdgpu`]
+* [`hexagon`]
 * [`riscv32`]
 * [`riscv64`]
 * [`mips`]
@@ -201,6 +223,8 @@ others at:
 [`x86_64`]: ../../core/arch/x86_64/index.html
 [`arm`]: ../../core/arch/arm/index.html
 [`aarch64`]: ../../core/arch/aarch64/index.html
+[`amdgpu`]: ../../core/arch/amdgpu/index.html
+[`hexagon`]: ../../core/arch/hexagon/index.html
 [`riscv32`]: ../../core/arch/riscv32/index.html
 [`riscv64`]: ../../core/arch/riscv64/index.html
 [`mips`]: ../../core/arch/mips/index.html

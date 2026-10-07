@@ -165,7 +165,6 @@ impl<T, F: FnOnce() -> T> LazyCell<T, F> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(lazy_get)]
     /// use std::cell::LazyCell;
     ///
     /// let mut lazy = LazyCell::new(|| 92);
@@ -176,7 +175,7 @@ impl<T, F: FnOnce() -> T> LazyCell<T, F> {
     /// assert_eq!(*lazy, 44);
     /// ```
     #[inline]
-    #[unstable(feature = "lazy_get", issue = "129333")]
+    #[stable(feature = "lazy_get", since = "1.94.0")]
     pub fn force_mut(this: &mut LazyCell<T, F>) -> &mut T {
         #[cold]
         /// # Safety
@@ -264,8 +263,6 @@ impl<T, F> LazyCell<T, F> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(lazy_get)]
-    ///
     /// use std::cell::LazyCell;
     ///
     /// let mut lazy = LazyCell::new(|| 92);
@@ -276,7 +273,7 @@ impl<T, F> LazyCell<T, F> {
     /// assert_eq!(*lazy, 44);
     /// ```
     #[inline]
-    #[unstable(feature = "lazy_get", issue = "129333")]
+    #[stable(feature = "lazy_get", since = "1.94.0")]
     pub fn get_mut(this: &mut LazyCell<T, F>) -> Option<&mut T> {
         let state = this.state.get_mut();
         match state {
@@ -291,8 +288,6 @@ impl<T, F> LazyCell<T, F> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(lazy_get)]
-    ///
     /// use std::cell::LazyCell;
     ///
     /// let lazy = LazyCell::new(|| 92);
@@ -302,7 +297,7 @@ impl<T, F> LazyCell<T, F> {
     /// assert_eq!(LazyCell::get(&lazy), Some(&92));
     /// ```
     #[inline]
-    #[unstable(feature = "lazy_get", issue = "129333")]
+    #[stable(feature = "lazy_get", since = "1.94.0")]
     pub fn get(this: &LazyCell<T, F>) -> Option<&T> {
         // SAFETY:
         // This is sound for the same reason as in `force`: once the state is
@@ -351,7 +346,8 @@ impl<T, F: FnOnce() -> T> DerefMut for LazyCell<T, F> {
 }
 
 #[stable(feature = "lazy_cell", since = "1.80.0")]
-impl<T: Default> Default for LazyCell<T> {
+#[rustc_const_unstable(feature = "const_default", issue = "143894")]
+const impl<T: Default> Default for LazyCell<T> {
     /// Creates a new lazy value using `Default` as the initializing function.
     #[inline]
     fn default() -> LazyCell<T> {
@@ -368,6 +364,16 @@ impl<T: fmt::Debug, F> fmt::Debug for LazyCell<T, F> {
             None => d.field(&format_args!("<uninit>")),
         };
         d.finish()
+    }
+}
+
+#[stable(feature = "from_wrapper_impls", since = "1.96.0")]
+impl<T, F> From<T> for LazyCell<T, F> {
+    /// Constructs a `LazyCell` that starts already initialized
+    /// with the provided value.
+    #[inline]
+    fn from(value: T) -> Self {
+        Self { state: UnsafeCell::new(State::Init(value)) }
     }
 }
 

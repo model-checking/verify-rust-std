@@ -46,10 +46,11 @@
 
 #![unstable(feature = "solid_ext", issue = "none")]
 
+use crate::alloc::Allocator;
 use crate::marker::PhantomData;
 use crate::mem::ManuallyDrop;
-use crate::sys_common::{AsInner, FromInner, IntoInner};
-use crate::{fmt, net, sys};
+use crate::sys::{AsInner, FromInner, IntoInner};
+use crate::{fmt, io, net, sys};
 
 /// Raw file descriptors.
 pub type RawFd = i32;
@@ -110,7 +111,7 @@ impl BorrowedFd<'_> {
 impl OwnedFd {
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `OwnedFd` instance.
-    pub fn try_clone(&self) -> crate::io::Result<Self> {
+    pub fn try_clone(&self) -> io::Result<Self> {
         self.as_fd().try_clone_to_owned()
     }
 }
@@ -118,7 +119,7 @@ impl OwnedFd {
 impl BorrowedFd<'_> {
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `BorrowedFd` instance.
-    pub fn try_clone_to_owned(&self) -> crate::io::Result<OwnedFd> {
+    pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
         let fd = sys::net::cvt(unsafe { crate::sys::abi::sockets::dup(self.as_raw_fd()) })?;
         Ok(unsafe { OwnedFd::from_raw_fd(fd) })
     }
@@ -180,11 +181,8 @@ impl fmt::Debug for OwnedFd {
 
 macro_rules! impl_is_terminal {
     ($($t:ty),*$(,)?) => {$(
-        #[unstable(feature = "sealed", issue = "none")]
-        impl crate::sealed::Sealed for $t {}
-
         #[stable(feature = "is_terminal", since = "1.70.0")]
-        impl crate::io::IsTerminal for $t {
+        impl io::IsTerminal for $t {
             #[inline]
             fn is_terminal(&self) -> bool {
                 crate::sys::io::is_terminal(self)
@@ -260,7 +258,8 @@ macro_rules! impl_owned_fd_traits {
 impl_owned_fd_traits! { TcpStream TcpListener UdpSocket }
 
 /// This impl allows implementing traits that require `AsFd` on Arc.
-/// ```
+#[cfg_attr(target_os = "solid", doc = "```")]
+#[cfg_attr(not(target_os = "solid"), doc = "```ignore (needs solid)")]
 /// # #[cfg(target_os = "solid_asp3")] mod group_cfg {
 /// # use std::os::solid::io::AsFd;
 /// use std::net::UdpSocket;
@@ -285,7 +284,7 @@ impl<T: AsFd> AsFd for crate::rc::Rc<T> {
     }
 }
 
-impl<T: AsFd> AsFd for Box<T> {
+impl<T: AsFd, A: Allocator> AsFd for Box<T, A> {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         (**self).as_fd()

@@ -1,17 +1,13 @@
 #![unstable(issue = "none", feature = "windows_handle")]
 
-#[cfg(test)]
-mod tests;
-
 use core::ffi::c_void;
 use core::{cmp, mem, ptr};
 
-use crate::io::{self, BorrowedCursor, ErrorKind, IoSlice, IoSliceMut, Read};
+use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut, Read};
 use crate::os::windows::io::{
     AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, IntoRawHandle, OwnedHandle, RawHandle,
 };
-use crate::sys::{c, cvt};
-use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::sys::{AsInner, FromInner, IntoInner, c, cvt};
 
 /// An owned container for `HANDLE` object, closing them on Drop.
 ///
@@ -87,7 +83,7 @@ impl Handle {
             // pipe semantics, which yields this error when *reading* from
             // a pipe after the other end has closed; we interpret that as
             // EOF on the pipe.
-            Err(ref e) if e.kind() == ErrorKind::BrokenPipe => Ok(0),
+            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(0),
 
             Err(e) => Err(e),
         }
@@ -113,7 +109,7 @@ impl Handle {
         }
     }
 
-    pub fn read_buf(&self, mut cursor: BorrowedCursor<'_>) -> io::Result<()> {
+    pub fn read_buf(&self, mut cursor: BorrowedCursor<'_, u8>) -> io::Result<()> {
         let res =
             unsafe { self.synchronous_read(cursor.as_mut().as_mut_ptr(), cursor.capacity(), None) };
 
@@ -121,7 +117,7 @@ impl Handle {
             Ok(read) => {
                 // Safety: `read` bytes were written to the initialized portion of the buffer
                 unsafe {
-                    cursor.advance_unchecked(read);
+                    cursor.advance(read);
                 }
                 Ok(())
             }
@@ -130,13 +126,13 @@ impl Handle {
             // pipe semantics, which yields this error when *reading* from
             // a pipe after the other end has closed; we interpret that as
             // EOF on the pipe.
-            Err(ref e) if e.kind() == ErrorKind::BrokenPipe => Ok(()),
+            Err(ref e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
 
             Err(e) => Err(e),
         }
     }
 
-    pub fn read_buf_at(&self, mut cursor: BorrowedCursor<'_>, offset: u64) -> io::Result<()> {
+    pub fn read_buf_at(&self, mut cursor: BorrowedCursor<'_, u8>, offset: u64) -> io::Result<()> {
         // SAFETY: `cursor.as_mut()` starts with `cursor.capacity()` writable bytes
         let read = unsafe {
             self.synchronous_read(cursor.as_mut().as_mut_ptr(), cursor.capacity(), Some(offset))
@@ -144,7 +140,7 @@ impl Handle {
 
         // SAFETY: `read` bytes were written to the initialized portion of the buffer
         unsafe {
-            cursor.advance_unchecked(read);
+            cursor.advance(read);
         }
         Ok(())
     }
@@ -167,7 +163,7 @@ impl Handle {
             let mut amt = 0;
             let res = cvt(c::ReadFile(
                 self.as_raw_handle(),
-                buf.as_mut_ptr().cast::<u8>(),
+                buf.as_mut_ptr().cast::<c_void>(),
                 len,
                 &mut amt,
                 overlapped,
@@ -351,7 +347,7 @@ impl<'a> Read for &'a Handle {
         (**self).read(buf)
     }
 
-    fn read_buf(&mut self, buf: BorrowedCursor<'_>) -> io::Result<()> {
+    fn read_buf(&mut self, buf: BorrowedCursor<'_, u8>) -> io::Result<()> {
         (**self).read_buf(buf)
     }
 

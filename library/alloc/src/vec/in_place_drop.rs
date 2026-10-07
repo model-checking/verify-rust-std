@@ -1,6 +1,5 @@
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull, drop_in_place};
-use core::slice::{self};
+use core::ptr::NonNull;
 
 use crate::alloc::Global;
 use crate::raw_vec::RawVec;
@@ -14,6 +13,7 @@ pub(super) struct InPlaceDrop<T> {
 
 impl<T> InPlaceDrop<T> {
     fn len(&self) -> usize {
+        // ignore-tidy-undocumented-unsafe
         unsafe { self.dst.offset_from_unsigned(self.inner) }
     }
 }
@@ -21,9 +21,8 @@ impl<T> InPlaceDrop<T> {
 impl<T> Drop for InPlaceDrop<T> {
     #[inline]
     fn drop(&mut self) {
-        unsafe {
-            ptr::drop_in_place(slice::from_raw_parts_mut(self.inner, self.len()));
-        }
+        // ignore-tidy-undocumented-unsafe
+        unsafe { self.inner.cast_slice(self.len()).drop_in_place() }
     }
 }
 
@@ -40,10 +39,11 @@ pub(super) struct InPlaceDstDataSrcBufDrop<Src, Dest> {
 impl<Src, Dest> Drop for InPlaceDstDataSrcBufDrop<Src, Dest> {
     #[inline]
     fn drop(&mut self) {
+        // ignore-tidy-undocumented-unsafe
         unsafe {
             let _drop_allocation =
                 RawVec::<Src>::from_nonnull_in(self.ptr.cast::<Src>(), self.src_cap, Global);
-            drop_in_place(core::ptr::slice_from_raw_parts_mut::<Dest>(self.ptr.as_ptr(), self.len));
+            self.ptr.as_ptr().cast_slice(self.len).drop_in_place();
         };
     }
 }

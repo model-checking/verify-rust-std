@@ -1,0 +1,73 @@
+cff-version: 1.2.0
+title: Verifying the Rust Standard Library
+message: >-
+  If you use this project in your research, please cite the NFM 2026 paper
+  listed under `preferred-citation`.
+type: software
+authors:
+  - name: The verify-rust-std Contributors
+abstract: >-
+  A fork of the Rust standard library created solely to formally verify the Rust
+  standard library. The repository is tool-agnostic and integrates complementary
+  verification tools into its continuous integration to prove the absence of a
+  subset of undefined behaviors (e.g., out-of-bounds access, null and dangling
+  pointer dereferences, and use of uninitialized memory) in the standard
+  library.
+repository-code: https://github.com/model-checking/verify-rust-std
+url: https://model-checking.github.io/verify-rust-std/
+keywords:
+  - rust
+  - formal verification
+  - model checking
+  - program analysis
+  - undefined behavior
+  - standard library
+preferred-citation:
+  type: conference-paper
+  title: Verifying the Rust Standard Library
+  authors:
+    - given-names: Byron
+      family-names: Cook
+    - given-names: Remi
+      family-names: Delmas
+    - given-names: Zyad
+      family-names: Hassan
+    - given-names: Bart
+      family-names: Jacobs
+    - given-names: Ranjit
+      family-names: Jhala
+    - given-names: Rahul
+      family-names: Kumar
+    - given-names: Felipe R.
+      family-names: Monteiro
+    - given-names: Thanh
+      family-names: Nguyen
+    - given-names: Rebecca
+      family-names: Rumbul
+    - given-names: Michael
+      family-names: Tautschnig
+    - given-names: Celina
+      family-names: Val
+    - given-names: Carolyn
+      family-names: Zech
+  collection-title: >-
+    NASA Formal Methods: 18th International Symposium, NFM 2026, Los Angeles, CA,
+    USA, May 5–7, 2026, Proceedings
+  collection-type: proceedings
+  conference:
+    name: 18th International Symposium on NASA Formal Methods (NFM 2026)
+    city: Los Angeles
+    region: CA
+    country: US
+    date-start: '2026-05-05'
+    date-end: '2026-05-07'
+  publisher:
+    name: Springer-Verlag
+    city: Berlin
+    country: DE
+  isbn: 978-3-032-28078-7
+  year: 2026
+  start: 415
+  end: 435
+  doi: 10.1007/978-3-032-28079-4_19
+  url: https://doi.org/10.1007/978-3-032-28079-4_19

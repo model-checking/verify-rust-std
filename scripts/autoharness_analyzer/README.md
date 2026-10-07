@@ -11,6 +11,8 @@ kani autoharness --std ./library -Z function-contracts -Z mem-predicates -Z floa
 
 on the standard library. The scanner_results/ directory contains the CSV files that the [scanner tool in Kani](https://github.com/model-checking/kani/tree/main/tools/scanner) produces.
 
+Without `--bounded-arguments`, functions whose arguments are only supported with bounded values are skipped with `Requires --bounded-arguments for argument(s)` and summarized in their own type-category table.
+
 The output is `autoharness_data.md`, which contains Markdown tables summarizing the autoharness application across all the crates in the standard library.
 
 One of the tables has a column for "Skipped Type Categories." Generally speaking, "precise types" are what we think of as actual Rust types, and "type categories" are my subjective sense of how to group those types further. For example, `&mut i32` and `&mut u32` are two precise types, but they're in the same type category `&mut`. See the code for exact details on how we create type categories; the TL;DR is that we have a few hardcoded ones for raw pointers and references, and the rest we create using a fully-qualified path splitting heuristic.

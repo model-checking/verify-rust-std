@@ -1,5 +1,18 @@
+//! Implements `System` on Windows.
+//!
+//! All pointers returned by this allocator have, in addition to the guarantees of `GlobalAlloc`, the
+//! following properties:
+//!
+//! If the pointer was allocated or reallocated with a `layout` specifying an alignment <= `MIN_ALIGN`
+//! the pointer will be aligned to at least `MIN_ALIGN` and point to the start of the allocated block.
+//!
+//! If the pointer was allocated or reallocated with a `layout` specifying an alignment > `MIN_ALIGN`
+//! the pointer will be aligned to the specified alignment and not point to the start of the allocated block.
+//! Instead there will be a header readable directly before the returned pointer, containing the actual
+//! location of the start of the block.
+
 use super::{MIN_ALIGN, realloc_fallback};
-use crate::alloc::{GlobalAlloc, Layout, System};
+use crate::alloc::Layout;
 use crate::ffi::c_void;
 use crate::mem::MaybeUninit;
 use crate::ptr;
@@ -20,7 +33,7 @@ const HEAP_ZERO_MEMORY: u32 = 0x00000008;
 // always return the same handle, which remains valid for the entire lifetime of the process.
 //
 // See https://docs.microsoft.com/windows/win32/api/heapapi/nf-heapapi-getprocessheap
-windows_targets::link!("kernel32.dll" "system" fn GetProcessHeap() -> c::HANDLE);
+windows_link::link!("kernel32.dll" "system" fn GetProcessHeap() -> c::HANDLE);
 
 // Allocate a block of `dwBytes` bytes of memory from a given heap `hHeap`.
 // The allocated memory may be uninitialized, or zeroed if `dwFlags` is
@@ -36,7 +49,7 @@ windows_targets::link!("kernel32.dll" "system" fn GetProcessHeap() -> c::HANDLE)
 // Note that `dwBytes` is allowed to be zero, contrary to some other allocators.
 //
 // See https://docs.microsoft.com/windows/win32/api/heapapi/nf-heapapi-heapalloc
-windows_targets::link!("kernel32.dll" "system" fn HeapAlloc(hheap: c::HANDLE, dwflags: u32, dwbytes: usize) -> *mut c_void);
+windows_link::link!("kernel32.dll" "system" fn HeapAlloc(hheap: c::HANDLE, dwflags: u32, dwbytes: usize) -> *mut c_void);
 
 // Reallocate a block of memory behind a given pointer `lpMem` from a given heap `hHeap`,
 // to a block of at least `dwBytes` bytes, either shrinking the block in place,
@@ -57,7 +70,7 @@ windows_targets::link!("kernel32.dll" "system" fn HeapAlloc(hheap: c::HANDLE, dw
 // Note that `dwBytes` is allowed to be zero, contrary to some other allocators.
 //
 // See https://docs.microsoft.com/windows/win32/api/heapapi/nf-heapapi-heaprealloc
-windows_targets::link!("kernel32.dll" "system" fn HeapReAlloc(
+windows_link::link!("kernel32.dll" "system" fn HeapReAlloc(
     hheap: c::HANDLE,
     dwflags : u32,
     lpmem: *const c_void,
@@ -78,7 +91,7 @@ windows_targets::link!("kernel32.dll" "system" fn HeapReAlloc(
 // Note that `lpMem` is allowed to be null, which will not cause the operation to fail.
 //
 // See https://docs.microsoft.com/windows/win32/api/heapapi/nf-heapapi-heapfree
-windows_targets::link!("kernel32.dll" "system" fn HeapFree(hheap: c::HANDLE, dwflags: u32, lpmem: *const c_void) -> c::BOOL);
+windows_link::link!("kernel32.dll" "system" fn HeapFree(hheap: c::HANDLE, dwflags: u32, lpmem: *const c_void) -> c::BOOL);
 
 fn get_process_heap() -> *mut c_void {
     // SAFETY: GetProcessHeap simply returns a valid handle or NULL so is always safe to call.
@@ -118,6 +131,9 @@ unsafe fn allocate(layout: Layout, zeroed: bool) -> *mut u8 {
         process_heap_alloc(MaybeUninit::uninit(), flags, layout.size()) as *mut u8
     } else {
         // Allocate extra padding in order to be able to satisfy the alignment.
+        // This addition does not overflow due to `Layout` type invariants,
+        // `size()` is at most `isize::MAX` while
+        // `align()` is at most `1 << (bits in usize - 2)` if `size()` is non-zero.
         let total = layout.align() + layout.size();
 
         let ptr = process_heap_alloc(MaybeUninit::uninit(), flags, total) as *mut u8;
@@ -147,70 +163,56 @@ unsafe fn allocate(layout: Layout, zeroed: bool) -> *mut u8 {
     }
 }
 
-// All pointers returned by this allocator have, in addition to the guarantees of `GlobalAlloc`, the
-// following properties:
-//
-// If the pointer was allocated or reallocated with a `layout` specifying an alignment <= `MIN_ALIGN`
-// the pointer will be aligned to at least `MIN_ALIGN` and point to the start of the allocated block.
-//
-// If the pointer was allocated or reallocated with a `layout` specifying an alignment > `MIN_ALIGN`
-// the pointer will be aligned to the specified alignment and not point to the start of the allocated block.
-// Instead there will be a header readable directly before the returned pointer, containing the actual
-// location of the start of the block.
-#[stable(feature = "alloc_system_type", since = "1.28.0")]
-unsafe impl GlobalAlloc for System {
-    #[inline]
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // SAFETY: Pointers returned by `allocate` satisfy the guarantees of `System`
-        let zeroed = false;
-        unsafe { allocate(layout, zeroed) }
-    }
+pub unsafe fn alloc(layout: Layout) -> *mut u8 {
+    // SAFETY: Pointers returned by `allocate` satisfy the guarantees of `System`
+    let zeroed = false;
+    unsafe { allocate(layout, zeroed) }
+}
 
-    #[inline]
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        // SAFETY: Pointers returned by `allocate` satisfy the guarantees of `System`
-        let zeroed = true;
-        unsafe { allocate(layout, zeroed) }
-    }
+#[inline]
+pub unsafe fn alloc_zeroed(layout: Layout) -> *mut u8 {
+    // SAFETY: Pointers returned by `allocate` satisfy the guarantees of `System`
+    let zeroed = true;
+    unsafe { allocate(layout, zeroed) }
+}
 
-    #[inline]
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let block = {
-            if layout.align() <= MIN_ALIGN {
-                ptr
-            } else {
-                // The location of the start of the block is stored in the padding before `ptr`.
+#[inline]
+pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
+    let block = {
+        if layout.align() <= MIN_ALIGN {
+            ptr
+        } else {
+            // The location of the start of the block is stored in the padding before `ptr`.
 
-                // SAFETY: Because of the contract of `System`, `ptr` is guaranteed to be non-null
-                // and have a header readable directly before it.
-                unsafe { ptr::read((ptr as *mut Header).sub(1)).0 }
-            }
-        };
+            // SAFETY: Because of the contract of `System`, `ptr` is guaranteed to be non-null
+            // and have a header readable directly before it.
+            unsafe { ptr::read((ptr as *mut Header).sub(1)).0 }
+        }
+    };
 
+    // because `ptr` has been successfully allocated with this allocator,
+    // there must be a valid process heap.
+    let heap = get_process_heap();
+
+    // SAFETY: `heap` is a non-null handle returned by `GetProcessHeap`,
+    // `block` is a pointer to the start of an allocated block.
+    unsafe { HeapFree(heap, 0, block.cast::<c_void>()) };
+}
+
+#[inline]
+pub unsafe fn realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+    if layout.align() <= MIN_ALIGN {
         // because `ptr` has been successfully allocated with this allocator,
         // there must be a valid process heap.
         let heap = get_process_heap();
 
         // SAFETY: `heap` is a non-null handle returned by `GetProcessHeap`,
-        // `block` is a pointer to the start of an allocated block.
-        unsafe { HeapFree(heap, 0, block.cast::<c_void>()) };
-    }
-
-    #[inline]
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if layout.align() <= MIN_ALIGN {
-            // because `ptr` has been successfully allocated with this allocator,
-            // there must be a valid process heap.
-            let heap = get_process_heap();
-
-            // SAFETY: `heap` is a non-null handle returned by `GetProcessHeap`,
-            // `ptr` is a pointer to the start of an allocated block.
-            // The returned pointer points to the start of an allocated block.
-            unsafe { HeapReAlloc(heap, 0, ptr.cast::<c_void>(), new_size).cast::<u8>() }
-        } else {
-            // SAFETY: `realloc_fallback` is implemented using `dealloc` and `alloc`, which will
-            // correctly handle `ptr` and return a pointer satisfying the guarantees of `System`
-            unsafe { realloc_fallback(self, ptr, layout, new_size) }
-        }
+        // `ptr` is a pointer to the start of an allocated block.
+        // The returned pointer points to the start of an allocated block.
+        unsafe { HeapReAlloc(heap, 0, ptr.cast::<c_void>(), new_size).cast::<u8>() }
+    } else {
+        // SAFETY: `realloc_fallback` is implemented using `dealloc` and `alloc`, which will
+        // correctly handle `ptr` and return a pointer satisfying the guarantees of `System`
+        unsafe { realloc_fallback(ptr, layout, new_size) }
     }
 }

@@ -6,21 +6,25 @@ use crate::path::{Path, PathBuf};
 pub mod common;
 
 cfg_select! {
-    target_family = "unix" => {
+    any(target_family = "unix", target_os = "wasi") => {
         mod unix;
         use unix as imp;
-        pub use unix::{chown, fchown, lchown, mkfifo};
-        #[cfg(not(target_os = "fuchsia"))]
-        pub use unix::chroot;
-        pub(crate) use unix::debug_assert_fd_is_open;
         #[cfg(any(target_os = "linux", target_os = "android"))]
         pub(super) use unix::CachedFileMetadata;
-        use crate::sys::common::small_c_string::run_path_with_cstr as with_native_path;
+        #[cfg(not(any(target_os = "fuchsia", target_os = "wasi")))]
+        pub use unix::chroot;
+        #[cfg(not(target_os = "wasi"))]
+        pub(crate) use unix::debug_assert_fd_is_open;
+        #[cfg(not(target_os = "wasi"))]
+        pub use unix::{chown, fchown, lchown, mkfifo};
+
+        use crate::sys::helpers::run_path_with_cstr as with_native_path;
     }
     target_os = "windows" => {
         mod windows;
         use windows as imp;
-        pub use windows::{symlink_inner, junction_point};
+        pub use windows::{junction_point, symlink_inner};
+
         use crate::sys::path::with_native_path;
     }
     target_os = "hermit" => {
@@ -43,10 +47,6 @@ cfg_select! {
         mod vexos;
         use vexos as imp;
     }
-    target_os = "wasi" => {
-        mod wasi;
-        use wasi as imp;
-    }
     _ => {
         mod unsupported;
         use unsupported as imp;
@@ -54,14 +54,14 @@ cfg_select! {
 }
 
 // FIXME: Replace this with platform-specific path conversion functions.
-#[cfg(not(any(target_family = "unix", target_os = "windows")))]
+#[cfg(not(any(target_family = "unix", target_os = "windows", target_os = "wasi")))]
 #[inline]
 pub fn with_native_path<T>(path: &Path, f: &dyn Fn(&Path) -> io::Result<T>) -> io::Result<T> {
     f(path)
 }
 
 pub use imp::{
-    DirBuilder, DirEntry, File, FileAttr, FilePermissions, FileTimes, FileType, OpenOptions,
+    Dir, DirBuilder, DirEntry, File, FileAttr, FilePermissions, FileTimes, FileType, OpenOptions,
     ReadDir,
 };
 
@@ -122,28 +122,8 @@ pub fn set_permissions(path: &Path, perm: FilePermissions) -> io::Result<()> {
     with_native_path(path, &|path| imp::set_perm(path, perm.clone()))
 }
 
-#[cfg(all(unix, not(target_os = "vxworks")))]
-pub fn set_permissions_nofollow(path: &Path, perm: crate::fs::Permissions) -> io::Result<()> {
-    use crate::fs::OpenOptions;
-
-    let mut options = OpenOptions::new();
-
-    // ESP-IDF and Horizon do not support O_NOFOLLOW, so we skip setting it.
-    // Their filesystems do not have symbolic links, so no special handling is required.
-    #[cfg(not(any(target_os = "espidf", target_os = "horizon")))]
-    {
-        use crate::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-
-    options.open(path)?.set_permissions(perm)
-}
-
-#[cfg(any(not(unix), target_os = "vxworks"))]
-pub fn set_permissions_nofollow(_path: &Path, _perm: crate::fs::Permissions) -> io::Result<()> {
-    crate::unimplemented!(
-        "`set_permissions_nofollow` is currently only implemented on Unix platforms"
-    )
+pub fn set_permissions_nofollow(path: &Path, perm: FilePermissions) -> io::Result<()> {
+    with_native_path(path, &|path| imp::set_perm_nofollow(path, perm.clone()))
 }
 
 pub fn canonicalize(path: &Path) -> io::Result<PathBuf> {

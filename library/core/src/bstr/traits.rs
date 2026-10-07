@@ -6,7 +6,8 @@ use crate::slice::SliceIndex;
 use crate::{hash, ops, range};
 
 #[unstable(feature = "bstr", issue = "134915")]
-impl Ord for ByteStr {
+#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+const impl Ord for ByteStr {
     #[inline]
     fn cmp(&self, other: &ByteStr) -> Ordering {
         Ord::cmp(&self.0, &other.0)
@@ -14,7 +15,8 @@ impl Ord for ByteStr {
 }
 
 #[unstable(feature = "bstr", issue = "134915")]
-impl PartialOrd for ByteStr {
+#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+const impl PartialOrd for ByteStr {
     #[inline]
     fn partial_cmp(&self, other: &ByteStr) -> Option<Ordering> {
         PartialOrd::partial_cmp(&self.0, &other.0)
@@ -22,15 +24,17 @@ impl PartialOrd for ByteStr {
 }
 
 #[unstable(feature = "bstr", issue = "134915")]
-impl PartialEq<ByteStr> for ByteStr {
+#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+const impl PartialEq<ByteStr> for ByteStr {
     #[inline]
     fn eq(&self, other: &ByteStr) -> bool {
-        &self.0 == &other.0
+        self.0 == other.0
     }
 }
 
 #[unstable(feature = "bstr", issue = "134915")]
-impl Eq for ByteStr {}
+#[rustc_const_unstable(feature = "const_cmp", issue = "143800")]
+const impl Eq for ByteStr {}
 
 #[unstable(feature = "bstr", issue = "134915")]
 impl hash::Hash for ByteStr {
@@ -45,8 +49,7 @@ impl hash::Hash for ByteStr {
 #[unstable(feature = "bstr_internals", issue = "none")]
 macro_rules! impl_partial_eq {
     ($lhs:ty, $rhs:ty) => {
-        #[allow(unused_lifetimes)]
-        impl<'a> PartialEq<$rhs> for $lhs {
+        impl PartialEq<$rhs> for $lhs {
             #[inline]
             fn eq(&self, other: &$rhs) -> bool {
                 let other: &[u8] = other.as_ref();
@@ -54,8 +57,7 @@ macro_rules! impl_partial_eq {
             }
         }
 
-        #[allow(unused_lifetimes)]
-        impl<'a> PartialEq<$lhs> for $rhs {
+        impl PartialEq<$lhs> for $rhs {
             #[inline]
             fn eq(&self, other: &$lhs) -> bool {
                 let this: &[u8] = self.as_ref();
@@ -76,9 +78,8 @@ macro_rules! impl_partial_eq_ord {
     ($lhs:ty, $rhs:ty) => {
         $crate::bstr::impl_partial_eq!($lhs, $rhs);
 
-        #[allow(unused_lifetimes)]
         #[unstable(feature = "bstr", issue = "134915")]
-        impl<'a> PartialOrd<$rhs> for $lhs {
+        impl PartialOrd<$rhs> for $lhs {
             #[inline]
             fn partial_cmp(&self, other: &$rhs) -> Option<Ordering> {
                 let other: &[u8] = other.as_ref();
@@ -86,9 +87,8 @@ macro_rules! impl_partial_eq_ord {
             }
         }
 
-        #[allow(unused_lifetimes)]
         #[unstable(feature = "bstr", issue = "134915")]
-        impl<'a> PartialOrd<$lhs> for $rhs {
+        impl PartialOrd<$lhs> for $rhs {
             #[inline]
             fn partial_cmp(&self, other: &$lhs) -> Option<Ordering> {
                 let this: &[u8] = self.as_ref();
@@ -107,7 +107,6 @@ pub use impl_partial_eq_ord;
 #[unstable(feature = "bstr_internals", issue = "none")]
 macro_rules! impl_partial_eq_n {
     ($lhs:ty, $rhs:ty) => {
-        #[allow(unused_lifetimes)]
         #[unstable(feature = "bstr", issue = "134915")]
         impl<const N: usize> PartialEq<$rhs> for $lhs {
             #[inline]
@@ -117,7 +116,6 @@ macro_rules! impl_partial_eq_n {
             }
         }
 
-        #[allow(unused_lifetimes)]
         #[unstable(feature = "bstr", issue = "134915")]
         impl<const N: usize> PartialEq<$lhs> for $rhs {
             #[inline]
@@ -274,4 +272,5 @@ impl_slice_index!(range::RangeFrom<usize>);
 impl_slice_index!(ops::RangeInclusive<usize>);
 impl_slice_index!(range::RangeInclusive<usize>);
 impl_slice_index!(ops::RangeToInclusive<usize>);
+impl_slice_index!(range::RangeToInclusive<usize>);
 impl_slice_index!((ops::Bound<usize>, ops::Bound<usize>));
