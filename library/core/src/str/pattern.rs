@@ -2104,6 +2104,89 @@ unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
 #[unstable(feature = "kani", issue = "none")]
 pub mod verify {
     use super::*;
+    use crate::ub_checks::Invariant;
+
+    // Challenge 20 Task 1.1: type invariants for the two char-Searcher cores,
+    // plus criterion-1 (creation establishes the invariant) harnesses.
+
+    impl Invariant for CharSearcher<'_> {
+        /// Safety invariant of a `CharSearcher`: the forward/backward cursors
+        /// stay ordered and on UTF-8 char boundaries of `haystack`, and the
+        /// cached needle encoding matches re-encoding `needle` fresh.
+        fn is_safe(&self) -> bool {
+            let size = self.utf8_size();
+            let mut buf = [0u8; 4];
+            let encoded_len = self.needle.encode_utf8(&mut buf).len();
+
+            self.finger <= self.finger_back
+                && self.finger_back <= self.haystack.len()
+                && self.haystack.is_char_boundary(self.finger)
+                && self.haystack.is_char_boundary(self.finger_back)
+                && size <= 4
+                && size == encoded_len
+                // Byte-wise, not `==` on slices: avoids a CBMC memcmp loop.
+                && (size < 1 || self.utf8_encoded[0] == buf[0])
+                && (size < 2 || self.utf8_encoded[1] == buf[1])
+                && (size < 3 || self.utf8_encoded[2] == buf[2])
+                && (size < 4 || self.utf8_encoded[3] == buf[3])
+        }
+    }
+
+    impl<C: MultiCharEq> Invariant for MultiCharEqSearcher<'_, C> {
+        /// Safety invariant: the `char_indices` cursor is an in-bounds,
+        /// char-boundary-aligned suffix window of `haystack`, modeled through
+        /// its public `offset`/`as_str` view (no access to its private state).
+        fn is_safe(&self) -> bool {
+            let off = self.char_indices.offset();
+            off <= self.haystack.len()
+                && self.haystack.is_char_boundary(off)
+                && self.char_indices.as_str().len() == self.haystack.len() - off
+        }
+    }
+
+    /// A `&str` of symbolic length in `[0, 5]` with nondeterministic (not
+    /// necessarily valid-UTF-8) backing bytes, stack-allocated. Bounded
+    /// cousin of `alloc::str::verify::symbolic_str` (same device, no
+    /// allocator needed at this size) for the creation-only harnesses below,
+    /// which only read positions `0` and `len()` — both unconditionally
+    /// boundaries per `is_char_boundary`'s own fast paths, independent of
+    /// content.
+    fn symbolic_str(buf: &mut [u8; 5]) -> &str {
+        *buf = kani::any();
+        let n: usize = kani::any();
+        kani::assume(n <= 5);
+        // SAFETY: content is nondeterministic and not assumed valid UTF-8;
+        // sound here because these harnesses never read past position 0 or
+        // n, both unconditional boundaries regardless of byte content.
+        unsafe { core::str::from_utf8_unchecked(&buf[..n]) }
+    }
+
+    // Criterion 1: constructing a `CharSearcher` via the real `char` Pattern
+    // path establishes the invariant.
+    #[kani::proof]
+    fn check_cs_invariant_at_creation() {
+        let mut buf = [0u8; 5];
+        let haystack = symbolic_str(&mut buf);
+        let needle: char = kani::any();
+        let s = needle.into_searcher(haystack);
+        kani::cover(true, "ch20 cs creation reachable");
+        kani::assert(s.is_safe(), "CharSearcher: C established at creation");
+    }
+
+    // Criterion 1: constructing a `MultiCharEqSearcher` via the `[char; N]`
+    // Pattern path (its `CharArraySearcher` wrapper's `.0`) establishes the
+    // invariant.
+    #[kani::proof]
+    fn check_mces_invariant_at_creation() {
+        let mut buf = [0u8; 5];
+        let haystack = symbolic_str(&mut buf);
+        let wrapper = ['a', 'b'].into_searcher(haystack);
+        kani::cover(true, "ch20 mces creation reachable");
+        kani::assert(
+            wrapper.0.is_safe(),
+            "MultiCharEqSearcher: C established at creation",
+        );
+    }
 
     #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
     #[kani::proof]
