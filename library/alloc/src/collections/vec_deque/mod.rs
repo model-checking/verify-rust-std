@@ -4461,7 +4461,7 @@ mod verify {
     //! |---|---|---|---|---|---|
     //! | `write_iter_loop` (cfg(kani) body of `write_iter`) | the shipped `for_each` statement | — | — (transcription) | `bounded_evidence::bounded_write_iter_shipped_text_*` runs the shipped statement (`write_iter_for_each`) against the same contract, `n <= 4` | `Iterator::fold` ≡ repeated `next()`; see `write_iter_loop`'s doc for why no loop contract can reach the shipped loop |
     //! | [`VecDeque::write_iter_contract_replacement`] (and its `_drop` variant for `resize_with`) | `write_iter_loop` | `write_iter`'s precondition, via `write_iter_precondition` | `write_iter`'s `modifies` region gets an arbitrary fill; `written += hi`; iterator advanced by `hi` | `bounded_write_iter_wrapping_shipped_text_u8` (the branch with the shipped statement iterating) and `bounded_replacement_advance_by_matches_next_u8` (`advance_by(hi)` ≡ `hi` × `next()`) | exact-`hi` = `TrustedLen` exactness (asserted `lo == hi`) |
-    //! | [`stub_ptr_rotate`] (`check_make_contiguous_*` only) | `core::slice::rotate::ptr_rotate` | its documented precondition (range writable) | leaves memory untouched | `bounded_evidence::bounded_rotate_permutes_range_u8`: the real `rotate_left`/`rotate_right` on ranges of every length and amount up to eight, symbolic contents, guard bytes — exactly the rotated sequence, nothing else written | a rotation only permutes initialized slots; `make_contiguous` does nothing value-dependent afterwards |
+    //! | [`stub_ptr_rotate`] (`check_make_contiguous_*` only) | `core::slice::rotate::ptr_rotate` | its documented precondition (range writable) | leaves memory untouched | `bounded_evidence::bounded_rotate_{left,right}_permutes_range_u8`: the real `rotate_left`/`rotate_right` on ranges of every length and amount up to six, symbolic contents, guard bytes — exactly the rotated sequence, nothing else written | a rotation only permutes initialized slots; `make_contiguous` does nothing value-dependent afterwards |
     //!
     //! Loop-contract proofs are partial-correctness proofs at the pinned Kani (termination is
     //! assumed); the loops involved terminate by the exact `size_hint` of `TrustedLen`
@@ -5954,7 +5954,7 @@ mod verify {
         // -----------------------------------------------------------------------------------
 
         /// `<[u8]>::rotate_left` / `rotate_right` — the calls `make_contiguous` makes, hence
-        /// `core::slice::rotate::ptr_rotate` — on ranges of every length up to eight and every
+        /// `core::slice::rotate::ptr_rotate` — on ranges of every length up to six and every
         /// rotation amount, with symbolic contents and a symbolic guard byte on each side: the
         /// range holds exactly the rotated sequence afterwards and the guards are untouched,
         /// i.e. `ptr_rotate` permutes the slots of the range and writes nothing else — what
@@ -5962,11 +5962,15 @@ mod verify {
         /// enumerated rather than symbolic so that `ptr_rotate`'s algorithm selection is
         /// concrete: only the selected, loop-free `ptr_rotate_memmove` is explored (the two
         /// looping algorithms need `min(left, right) > 256` for `u8`, and would otherwise be
-        /// unwound although unreachable).
+        /// unwound although unreachable). One harness per direction, each over 28 (length,
+        /// amount) pairs: the single harness over both directions and lengths up to eight
+        /// (90 rotations) exceeded the 10-minute budget of the macOS autoharness job.
+        const ROTATE_RANGE_LEN: usize = 6;
+
         #[kani::proof]
-        #[kani::unwind(10)]
-        fn bounded_rotate_permutes_range_u8() {
-            const N: usize = 8;
+        #[kani::unwind(8)]
+        fn bounded_rotate_left_permutes_range_u8() {
+            const N: usize = ROTATE_RANGE_LEN;
             for len in 0..=N {
                 for mid in 0..=len {
                     let mut buf: [u8; N + 2] = kani::any();
@@ -5979,6 +5983,17 @@ mod verify {
                     for i in 1 + len..N + 2 {
                         assert_eq!(buf[i], before[i]);
                     }
+                }
+            }
+            kani::cover(true, "rotate_left: all lengths and amounts up to 6 enumerated");
+        }
+
+        #[kani::proof]
+        #[kani::unwind(8)]
+        fn bounded_rotate_right_permutes_range_u8() {
+            const N: usize = ROTATE_RANGE_LEN;
+            for len in 0..=N {
+                for mid in 0..=len {
                     let mut buf: [u8; N + 2] = kani::any();
                     let before = buf;
                     buf[1..1 + len].rotate_right(mid);
@@ -5991,7 +6006,7 @@ mod verify {
                     }
                 }
             }
-            kani::cover(true, "rotate: all lengths and amounts up to 8 enumerated");
+            kani::cover(true, "rotate_right: all lengths and amounts up to 6 enumerated");
         }
 
         // -----------------------------------------------------------------------------------
