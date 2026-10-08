@@ -2107,8 +2107,8 @@ pub mod verify {
     use crate::str::CharIndices;
     use crate::ub_checks::Invariant;
 
-    // Challenge 20 Task 1.1: type invariants for the two char-Searcher cores,
-    // plus criterion-1 (creation establishes the invariant) harnesses.
+    // Challenge 20: type invariants for the two char-Searcher cores, plus
+    // criterion-1 (creation establishes the invariant) harnesses.
 
     impl Invariant for CharSearcher<'_> {
         /// Safety invariant of a `CharSearcher`: the forward/backward cursors
@@ -2152,19 +2152,18 @@ pub mod verify {
     }
 
     /// A `&str` of symbolic length in `[0, 5]` with nondeterministic (not
-    /// necessarily valid-UTF-8) backing bytes, stack-allocated. Bounded
-    /// cousin of `alloc::str::verify::symbolic_str` (same device, no
-    /// allocator needed at this size) for the creation-only harnesses below,
-    /// which only read positions `0` and `len()` — both unconditionally
-    /// boundaries per `is_char_boundary`'s own fast paths, independent of
-    /// content.
+    /// necessarily valid-UTF-8) backing bytes, stack-allocated. The creation
+    /// harnesses read only positions `0` and `len()` — both unconditionally
+    /// char boundaries per `is_char_boundary`'s fast paths, independent of
+    /// content; the arbitrary-state constructors below additionally assume
+    /// ASCII content before any decode (see their notes).
     fn symbolic_str(buf: &mut [u8; 5]) -> &str {
         *buf = kani::any();
         let n: usize = kani::any();
         kani::assume(n <= 5);
         // SAFETY: content is nondeterministic and not assumed valid UTF-8;
-        // sound here because these harnesses never read past position 0 or
-        // n, both unconditional boundaries regardless of byte content.
+        // sound because callers either read no content (creation harnesses)
+        // or assume ASCII before any decode (the constructors below).
         unsafe { core::str::from_utf8_unchecked(&buf[..n]) }
     }
 
@@ -2192,10 +2191,11 @@ pub mod verify {
         kani::assert(wrapper.0.is_safe(), "MultiCharEqSearcher: C established at creation");
     }
 
-    // Challenge 20 Task 1.2: criterion-2 (C implies the P2 safety property —
-    // returned ranges lie on UTF-8 char boundaries) and criterion-3 (C is
-    // preserved) for the six target methods on both cores, bounded to a
-    // 5-byte haystack (unbounded promotion is a later task).
+    // Challenge 20: criterion-2 (C implies the P2 safety property — returned
+    // ranges lie on UTF-8 char boundaries) and criterion-3 (C is preserved)
+    // for the six target methods on both cores, bounded to a 5-byte haystack;
+    // method harnesses use `unwind(7)` = 5 content bytes plus loop
+    // entry/exit slack.
 
     /// Independently-written naive first-occurrence byte scan: a
     /// `#[kani::stub]` replacement for `memchr::memchr` inside
@@ -2253,7 +2253,7 @@ pub mod verify {
     /// Also assumes the haystack is ASCII (Challenge-20 assumption 3: "any
     /// UTF-8 property of haystack is assumable" — ASCII is one such
     /// property), because the target methods below decode it via
-    /// `.chars()`, unlike the Task 1.1 creation harnesses, which never read
+    /// `.chars()`, unlike the creation harnesses, which never read
     /// past a boundary. A `from_utf8(..).is_ok()` assume was tried first but
     /// is NOT a sound filter here: `run_utf8_validation`'s loop-contract
     /// abstraction (`-Z loop-contracts`) under-constrains what `Ok` implies
@@ -2504,10 +2504,10 @@ pub mod verify {
         }
     }
 
-    // Challenge 20 Task 1.3: the four wrapper Searchers (CharArray, CharArrayRef,
+    // Challenge 20: the four wrapper Searchers (CharArray, CharArrayRef,
     // CharSlice, CharPredicate) carry no logic of their own -- each is a newtype
     // over a `MultiCharEqSearcher<'_, C>` whose six methods delegate verbatim
-    // through the `searcher_methods!` macro. Task 1.2 machine-checks the inner
+    // through the `searcher_methods!` macro. The harnesses above machine-check the inner
     // core; these harnesses confirm the macro forwards to the inner method and
     // preserves the invariant, per witness type `C` (`[char; N]`, `&[char; N]`,
     // `&[char]`, `F: FnMut`) in both directions (`next`/`next_back`). The four
