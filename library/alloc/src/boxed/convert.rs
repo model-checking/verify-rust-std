@@ -369,9 +369,10 @@ impl<A: Allocator> Box<dyn Any, A> {
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     #[requires(self.is::<T>())]
-    #[ensures(|result: &Box<T, A>| {
-        core::ub_checks::can_dereference(&**result as *const T)
-    })]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
@@ -434,9 +435,10 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     #[requires(self.is::<T>())]
-    #[ensures(|result: &Box<T, A>| {
-        core::ub_checks::can_dereference(&**result as *const T)
-    })]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
@@ -499,9 +501,10 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
     #[requires(self.is::<T>())]
-    #[ensures(|result: &Box<T, A>| {
-        core::ub_checks::can_dereference(&**result as *const T)
-    })]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
@@ -779,39 +782,58 @@ impl dyn Error + Send + Sync {
 mod verify {
     use core::fmt;
 
-    use super::super::kani_box_harness_helpers::*;
+    use super::super::kani_box_harness_helpers::verifier_nondet_vec_box;
     use super::*;
     use crate::string::String;
 
-    // Kani cannot resolve proof_for_contract on generic trait-object methods.
-    // Mirror the three downcast_unchecked contracts here; these checks exercise
-    // the body but must be kept manually synchronized with the attributes.
     macro_rules! unchecked_downcast {
-        ($name:ident, $object:ty, $ty:ty) => {
-            #[kani::proof]
+        ($name:ident, $object:ty, $ty:ty, $target:path) => {
+            #[kani::proof_for_contract($target)]
             fn $name() {
                 let erased: Box<$object> = Box::new(kani::any::<$ty>());
-                kani::assume(erased.is::<$ty>());
-                let result = unsafe { erased.downcast_unchecked::<$ty>() };
-                assert!(core::ub_checks::can_dereference(&*result as *const $ty));
-                kani::cover(true, "Box::downcast_unchecked returns the requested type");
+                let result: Box<$ty> = unsafe { erased.downcast_unchecked::<$ty>() };
+                kani::cover(true, "downcast_unchecked precondition is reachable");
             }
         };
     }
 
-    unchecked_downcast!(harness_box_dyn_any_downcast_unchecked_i32, dyn Any, i32);
-    unchecked_downcast!(harness_box_dyn_any_downcast_unchecked_unit, dyn Any, ());
-    unchecked_downcast!(harness_box_dyn_any_send_downcast_unchecked_i32, dyn Any + Send, i32);
-    unchecked_downcast!(harness_box_dyn_any_send_downcast_unchecked_unit, dyn Any + Send, ());
+    unchecked_downcast!(
+        harness_box_dyn_any_downcast_unchecked_i32,
+        dyn Any,
+        i32,
+        Box::<dyn core::any::Any + 'static, A>::downcast_unchecked::<i32>
+    );
+    unchecked_downcast!(
+        harness_box_dyn_any_downcast_unchecked_unit,
+        dyn Any,
+        (),
+        Box::<dyn core::any::Any + 'static, A>::downcast_unchecked::<()>
+    );
+
+    unchecked_downcast!(
+        harness_box_dyn_any_send_downcast_unchecked_i32,
+        dyn Any + Send,
+        i32,
+        Box::<dyn core::any::Any + core::marker::Send + 'static, A>::downcast_unchecked::<i32>
+    );
+    unchecked_downcast!(
+        harness_box_dyn_any_send_downcast_unchecked_unit,
+        dyn Any + Send,
+        (),
+        Box::<dyn core::any::Any + core::marker::Send + 'static, A>::downcast_unchecked::<()>
+    );
+
     unchecked_downcast!(
         harness_box_dyn_any_send_sync_downcast_unchecked_i32,
         dyn Any + Send + Sync,
-        i32
+        i32,
+        Box::<dyn core::any::Any + core::marker::Send + core::marker::Sync + 'static, A>::downcast_unchecked::<i32>
     );
     unchecked_downcast!(
         harness_box_dyn_any_send_sync_downcast_unchecked_unit,
         dyn Any + Send + Sync,
-        ()
+        (),
+        Box::<dyn core::any::Any + core::marker::Send + core::marker::Sync + 'static, A>::downcast_unchecked::<()>
     );
 
     // Checks the named Box<dyn Any...>::downcast or <dyn Error...>::downcast.

@@ -636,4 +636,5 @@ mod verify {
         assert!(core::ub_checks::can_dereference(value));
         unsafe { header.drop(value) };
         kani::cover(true, "WithHeader::drop completes for a slice");
+    }
 }
