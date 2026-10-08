@@ -5469,12 +5469,12 @@ mod kani_arc_harness_helpers {
         vec
     }
 
-    // Verification-only model of `fetch_update` for `Weak::upgrade`.
+    // Verification-only model of `try_update` for `Weak::upgrade`.
     // These harnesses are single-threaded and `checked_increment` is pure, so
     // retries only repeat the same state. Model them with one load and at most
     // one strong CAS. This is not valid for concurrent or liveness verification.
-    pub(super) fn fetch_update_no_retry<F>(
-        atomic: &core::sync::atomic::AtomicUsize,
+    pub(super) fn try_update_no_retry<F>(
+        atomic: &core::sync::atomic::Atomic<usize>,
         set_order: core::sync::atomic::Ordering,
         fetch_order: core::sync::atomic::Ordering,
         mut f: F,
@@ -7179,9 +7179,9 @@ mod verify {
     // length is symbolic. With `N` fixed to 100, Kani explores:
     // - `vec.len() == 100`: `into_array` calls `Arc::into_raw(self)`, casts the
     //   slice pointer to `*const [T; 100]`, rebuilds it with `Arc::from_raw`,
-    //   and returns `Some(Arc<[T; 100]>)`.
+    //   and returns `Ok(Arc<[T; 100]>)`.
     // - `vec.len() != 100`: the length check fails, so `into_array` returns
-    //   `None` without reinterpreting the slice pointer as an array.
+    //   `Err(Arc<[T]>)` without reinterpreting the slice pointer as an array.
 
     // Harness for Arc::into_array.
     macro_rules! gen_arc_into_array_slice_harness {
@@ -7191,7 +7191,7 @@ mod verify {
                 let vec = verifier_nondet_vec_arc::<$ty>();
                 let arc: Arc<[$ty]> = Arc::from(vec);
                 const N: usize = 100;
-                let _: Option<Arc<[$ty; N]>> = arc.into_array::<N>();
+                let _: Result<Arc<[$ty; N]>, Arc<[$ty]>> = arc.into_array::<N>();
             }
         };
     }
@@ -8690,7 +8690,7 @@ mod verify {
             // Stub the whole retrying operation, not only its weak CAS, so CBMC does
             // not retain the unbounded loop in the generated control-flow graph.
             #[kani::proof]
-            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
+            #[kani::stub(core::sync::atomic::Atomic::<usize>::try_update, try_update_no_retry)]
             pub fn $live() {
                 let strong: Arc<$ty, Global> = Arc::new_in(kani::any::<$ty>(), Global);
                 // Construct one explicit `Weak` without calling `Arc::downgrade`.
@@ -8710,7 +8710,7 @@ mod verify {
             // With strong == 0, the update closure returns `None`, so the
             // loop-free stub returns `Err(0)` without executing a CAS.
             #[kani::proof]
-            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
+            #[kani::stub(core::sync::atomic::Atomic::<usize>::try_update, try_update_no_retry)]
             pub fn $strong_zero() {
                 let strong: Arc<$ty, Global> = Arc::new_cyclic_in(
                     |weak| {
@@ -8720,7 +8720,7 @@ mod verify {
                         assert!(weak.inner().is_some());
                         assert_eq!(weak.inner().unwrap().strong.load(Relaxed), 0);
                         // With strong == 0, `checked_increment` returns `None`
-                        // before `fetch_update` can execute a CAS retry.
+                        // before `try_update` can execute a CAS retry.
                         let result = weak.upgrade();
                         assert!(result.is_none());
                         kani::any::<$ty>()
@@ -8734,11 +8734,11 @@ mod verify {
             // A sentinel Weak returns through `self.inner()?`; applying the same
             // stub keeps the unreachable retry loop out of this harness's model.
             #[kani::proof]
-            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
+            #[kani::stub(core::sync::atomic::Atomic::<usize>::try_update, try_update_no_retry)]
             pub fn $dangling() {
                 let weak: Weak<$ty, Global> = Weak::new_in(Global);
                 // A sentinel Weak must return through `self.inner()?` before
-                // reaching `AtomicUsize::fetch_update`.
+                // reaching `Atomic::<usize>::try_update`.
                 assert!(is_dangling(weak.ptr.as_ptr()));
                 assert!(weak.inner().is_none());
                 let result = Weak::<$ty, Global>::upgrade(&weak);
@@ -8747,11 +8747,11 @@ mod verify {
         };
     }
 
-    // Unsized cases use the same loop-free `fetch_update` model as the sized harnesses.
+    // Unsized cases use the same loop-free `try_update` model as the sized harnesses.
     macro_rules! gen_weak_upgrade_unsized_harness {
         ($live:ident, $strong_zero:ident, $dangling:ident, $elem:ty) => {
             #[kani::proof]
-            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
+            #[kani::stub(core::sync::atomic::Atomic::<usize>::try_update, try_update_no_retry)]
             pub fn $live() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
@@ -8764,7 +8764,7 @@ mod verify {
             }
 
             #[kani::proof]
-            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
+            #[kani::stub(core::sync::atomic::Atomic::<usize>::try_update, try_update_no_retry)]
             pub fn $strong_zero() {
                 let vec = verifier_nondet_vec_arc::<$elem>();
                 let strong: Arc<[$elem], Global> = Arc::from(vec);
@@ -8779,7 +8779,7 @@ mod verify {
             }
 
             #[kani::proof]
-            #[kani::stub(core::sync::atomic::AtomicUsize::fetch_update, fetch_update_no_retry)]
+            #[kani::stub(core::sync::atomic::Atomic::<usize>::try_update, try_update_no_retry)]
             pub fn $dangling() {
                 let weak_arr: Weak<[$elem; 1], Global> = Weak::new_in(Global);
                 let weak: Weak<[$elem], Global> = weak_arr;
