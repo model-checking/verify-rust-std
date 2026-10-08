@@ -2544,6 +2544,7 @@ pub mod verify {
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next());
         kani::assert(w.0.is_safe(), "ch20 chararray next: C preserved");
+        kani::cover(true, "ch20 chararray next: reachable");
     }
 
     #[kani::proof]
@@ -2554,6 +2555,7 @@ pub mod verify {
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next_back());
         kani::assert(w.0.is_safe(), "ch20 chararray next_back: C preserved");
+        kani::cover(true, "ch20 chararray next_back: reachable");
     }
 
     #[kani::proof]
@@ -2565,6 +2567,7 @@ pub mod verify {
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next());
         kani::assert(w.0.is_safe(), "ch20 chararrayref next: C preserved");
+        kani::cover(true, "ch20 chararrayref next: reachable");
     }
 
     #[kani::proof]
@@ -2576,6 +2579,7 @@ pub mod verify {
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next_back());
         kani::assert(w.0.is_safe(), "ch20 chararrayref next_back: C preserved");
+        kani::cover(true, "ch20 chararrayref next_back: reachable");
     }
 
     #[kani::proof]
@@ -2587,6 +2591,7 @@ pub mod verify {
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next());
         kani::assert(w.0.is_safe(), "ch20 charslice next: C preserved");
+        kani::cover(true, "ch20 charslice next: reachable");
     }
 
     #[kani::proof]
@@ -2598,6 +2603,7 @@ pub mod verify {
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next_back());
         kani::assert(w.0.is_safe(), "ch20 charslice next_back: C preserved");
+        kani::cover(true, "ch20 charslice next_back: reachable");
     }
 
     #[kani::proof]
@@ -2610,6 +2616,7 @@ pub mod verify {
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next());
         kani::assert(w.0.is_safe(), "ch20 charpredicate next: C preserved");
+        kani::cover(true, "ch20 charpredicate next: reachable");
     }
 
     #[kani::proof]
@@ -2622,6 +2629,7 @@ pub mod verify {
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next_back());
         kani::assert(w.0.is_safe(), "ch20 charpredicate next_back: C preserved");
+        kani::cover(true, "ch20 charpredicate next_back: reachable");
     }
 
     #[cfg(all(kani, target_arch = "x86_64"))] // only called on x86
