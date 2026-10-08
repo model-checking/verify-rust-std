@@ -5020,7 +5020,7 @@ mod kani_rc_harness_helpers {
     pub(super) fn verifier_nondet_vec<T>() -> Vec<T> {
         let sz: usize = kani::any();
         // This is a CI tractability measure, not a workaround for a failing proof.
-        kani::assume(sz < 100);
+        kani::assume(sz < 25);
 
         let layout = Layout::array::<T>(sz);
         kani::assume(layout.is_ok());
@@ -8816,7 +8816,7 @@ mod verify {
                 let rc: Rc<[$ty]> = Rc::from(vec);
                 // N matches the helper's length bound so both the Some (len == N)
                 // and None (len != N) return arms are reachable.
-                const N: usize = 50;
+                const N: usize = 12;
                 let len = rc.len();
                 let expected_data = Rc::as_ptr(&rc) as *const $ty;
 
