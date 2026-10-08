@@ -2151,28 +2151,37 @@ pub mod verify {
         }
     }
 
-    /// A `&str` of symbolic length in `[0, 5]` with nondeterministic (not
-    /// necessarily valid-UTF-8) backing bytes, stack-allocated. The creation
-    /// harnesses read only positions `0` and `len()` — both unconditionally
-    /// char boundaries per `is_char_boundary`'s fast paths, independent of
-    /// content; the arbitrary-state constructors below additionally assume
-    /// ASCII content before any decode (see their notes).
-    fn symbolic_str(buf: &mut [u8; 5]) -> &str {
-        *buf = kani::any();
-        let n: usize = kani::any();
-        kani::assume(n <= 5);
-        // SAFETY: content is nondeterministic and not assumed valid UTF-8;
-        // sound because callers either read no content (creation harnesses)
-        // or assume ASCII before any decode (the constructors below).
-        unsafe { core::str::from_utf8_unchecked(&buf[..n]) }
+    /// A symbolic valid-UTF-8 `&str` of length in `[0, 5]` bytes, built
+    /// constructively from symbolic `char`s via `encode_utf8`, so every width
+    /// class (1-4 bytes) is reachable. The haystack is the only `&str` these
+    /// harnesses decode; a real `&str` is always valid UTF-8, so this is the
+    /// faithful input domain. `buf` carries slack past the 5-byte cap so the
+    /// final `encode_utf8` always has room.
+    fn symbolic_utf8_str(buf: &mut [u8; 8]) -> &str {
+        let mut len = 0usize;
+        for _ in 0..5 {
+            if kani::any() {
+                break; // symbolic early stop -> variable length
+            }
+            let c: char = kani::any();
+            let w = c.len_utf8();
+            if len + w > 5 {
+                break; // keep the str <= 5 bytes
+            }
+            c.encode_utf8(&mut buf[len..]);
+            len += w;
+        }
+        // SAFETY: bytes were written only by `encode_utf8` of real `char`s, so
+        // `buf[..len]` is valid UTF-8 by construction.
+        unsafe { core::str::from_utf8_unchecked(&buf[..len]) }
     }
 
     // Criterion 1: constructing a `CharSearcher` via the real `char` Pattern
     // path establishes the invariant.
     #[kani::proof]
     fn check_cs_invariant_at_creation() {
-        let mut buf = [0u8; 5];
-        let haystack = symbolic_str(&mut buf);
+        let mut buf = [0u8; 8];
+        let haystack = symbolic_utf8_str(&mut buf);
         let needle: char = kani::any();
         let s = needle.into_searcher(haystack);
         kani::cover(true, "ch20 cs creation reachable");
@@ -2184,8 +2193,8 @@ pub mod verify {
     // invariant.
     #[kani::proof]
     fn check_mces_invariant_at_creation() {
-        let mut buf = [0u8; 5];
-        let haystack = symbolic_str(&mut buf);
+        let mut buf = [0u8; 8];
+        let haystack = symbolic_utf8_str(&mut buf);
         let wrapper = ['a', 'b'].into_searcher(haystack);
         kani::cover(true, "ch20 mces creation reachable");
         kani::assert(wrapper.0.is_safe(), "MultiCharEqSearcher: C established at creation");
@@ -2197,25 +2206,14 @@ pub mod verify {
     // method harnesses use `unwind(7)` = 5 content bytes plus loop
     // entry/exit slack.
 
-    /// Independently-written naive first-occurrence byte scan: a
-    /// `#[kani::stub]` replacement for `memchr::memchr` inside
-    /// `CharSearcher::next_match`. Licensed by Challenge-20 assumption 1
-    /// (the `slice` module is functionally correct) — re-verifying
-    /// memchr's SIMD/word-at-a-time internals is out of this challenge's
-    /// scope.
-    fn stub_memchr(x: u8, text: &[u8]) -> Option<usize> {
-        let mut i = 0;
-        while i < text.len() {
-            if text[i] == x {
-                return Some(i);
-            }
-            i += 1;
-        }
-        None
-    }
-
-    /// Independently-written naive last-occurrence byte scan; see
-    /// `stub_memchr`. Stubs `memchr::memrchr` for `next_match_back`.
+    /// Independently-written naive last-occurrence byte scan: a
+    /// `#[kani::stub]` replacement for `memchr::memrchr` inside
+    /// `CharSearcher::next_match_back`, licensed by Challenge-20 assumption 1
+    /// (the `slice` module is functionally correct). `memchr` needs no stub —
+    /// its `cfg(kani)` path is already a naive loop, so `next_match` runs the
+    /// real body — but `memrchr`'s only body is the word-at-a-time
+    /// `memrchr_aligned`, whose raw word reads overflow CBMC's object budget
+    /// at this bound; this scan stands in for it.
     fn stub_memrchr(x: u8, text: &[u8]) -> Option<usize> {
         let mut i = text.len();
         while i > 0 {
@@ -2227,42 +2225,31 @@ pub mod verify {
         None
     }
 
-    /// Always-panics stand-in for `memchr::memchr`, used only by the
+    /// Always-panics stand-in for `memchr::memrchr`, used only by the
     /// falsifier below (D10 stub-soundness protocol): if `#[kani::stub]`
-    /// were silently failing to substitute at `next_match`'s call site,
+    /// were silently failing to substitute at `next_match_back`'s call site,
     /// nothing would panic and the `#[kani::should_panic]` harness would
     /// FAIL instead of PASS — so a PASS here proves the stub genuinely
-    /// reaches that call site, i.e. `stub_memchr` above masks nothing.
-    fn panicking_memchr_stub(_x: u8, _text: &[u8]) -> Option<usize> {
-        panic!("ch20 stub falsifier: memchr call site reached");
+    /// reaches that call site, i.e. `stub_memrchr` above masks nothing.
+    fn panicking_memrchr_stub(_x: u8, _text: &[u8]) -> Option<usize> {
+        panic!("ch20 stub falsifier: memrchr call site reached");
     }
 
     #[kani::proof]
     #[kani::should_panic]
     #[kani::unwind(7)]
-    #[kani::stub(crate::slice::memchr::memchr, panicking_memchr_stub)]
-    fn check_memchr_stub_falsifier() {
-        let mut buf = [0u8; 5];
+    #[kani::stub(crate::slice::memchr::memrchr, panicking_memrchr_stub)]
+    fn check_memrchr_stub_falsifier() {
+        let mut buf = [0u8; 8];
         let mut s = kani_any_char_searcher(&mut buf);
-        let _ = s.next_match();
+        let _ = s.next_match_back();
     }
 
     /// Arbitrary-`C`-state builder for a bounded (<= 5-byte) `CharSearcher`:
-    /// independently symbolic `finger`/`finger_back`/`needle` over a
-    /// `symbolic_str` haystack, filtered to invariant-satisfying states.
-    /// Also assumes the haystack is ASCII (Challenge-20 assumption 3: "any
-    /// UTF-8 property of haystack is assumable" — ASCII is one such
-    /// property), because the target methods below decode it via
-    /// `.chars()`, unlike the creation harnesses, which never read
-    /// past a boundary. A `from_utf8(..).is_ok()` assume was tried first but
-    /// is NOT a sound filter here: `run_utf8_validation`'s loop-contract
-    /// abstraction (`-Z loop-contracts`) under-constrains what `Ok` implies
-    /// for a caller, so CBMC found genuinely-invalid byte sequences (e.g. an
-    /// orphan continuation byte) satisfying it. A direct ASCII check doesn't
-    /// depend on that abstraction and is trivially sound.
-    fn kani_any_char_searcher<'a>(buf: &'a mut [u8; 5]) -> CharSearcher<'a> {
-        let haystack = symbolic_str(buf);
-        kani::assume(haystack.as_bytes().iter().all(|&b| b < 0x80));
+    /// independently symbolic `finger`/`finger_back`/`needle` over a symbolic
+    /// valid-UTF-8 haystack, filtered to invariant-satisfying states.
+    fn kani_any_char_searcher<'a>(buf: &'a mut [u8; 8]) -> CharSearcher<'a> {
+        let haystack = symbolic_utf8_str(buf);
         let needle: char = kani::any();
         let mut utf8_encoded = [0u8; 4];
         let utf8_size = needle.encode_utf8(&mut utf8_encoded).len() as u8;
@@ -2274,14 +2261,12 @@ pub mod verify {
     }
 
     /// Arbitrary-`C`-state builder for a bounded `MultiCharEqSearcher<[char;
-    /// 2]>`: a symbolic `char_indices` cursor offset over a `symbolic_str`
-    /// haystack (also assumed ASCII, same license + soundness note as
-    /// `kani_any_char_searcher` above).
+    /// 2]>`: a symbolic `char_indices` cursor offset over a symbolic
+    /// valid-UTF-8 haystack, filtered to invariant-satisfying states.
     fn kani_any_multi_char_eq_searcher<'a>(
-        buf: &'a mut [u8; 5],
+        buf: &'a mut [u8; 8],
     ) -> MultiCharEqSearcher<'a, [char; 2]> {
-        let haystack = symbolic_str(buf);
-        kani::assume(haystack.as_bytes().iter().all(|&b| b < 0x80));
+        let haystack = symbolic_utf8_str(buf);
         let char_eq: [char; 2] = [kani::any(), kani::any()];
         let offset: usize = kani::any();
         let suffix = haystack.get(offset..);
@@ -2321,7 +2306,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_cs_next() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_char_searcher(&mut buf);
         let haystack = s.haystack();
         let step = s.next();
@@ -2336,9 +2321,8 @@ pub mod verify {
 
     #[kani::proof]
     #[kani::unwind(7)]
-    #[kani::stub(crate::slice::memchr::memchr, stub_memchr)]
     fn check_cs_next_match() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_char_searcher(&mut buf);
         let haystack = s.haystack();
         let m = s.next_match();
@@ -2353,7 +2337,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_cs_next_back() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_char_searcher(&mut buf);
         let haystack = s.haystack();
         let step = s.next_back();
@@ -2370,7 +2354,7 @@ pub mod verify {
     #[kani::unwind(7)]
     #[kani::stub(crate::slice::memchr::memrchr, stub_memrchr)]
     fn check_cs_next_match_back() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_char_searcher(&mut buf);
         let haystack = s.haystack();
         let m = s.next_match_back();
@@ -2385,7 +2369,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_cs_next_reject() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_char_searcher(&mut buf);
         let haystack = s.haystack();
         let r = s.next_reject();
@@ -2400,7 +2384,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_cs_next_reject_back() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_char_searcher(&mut buf);
         let haystack = s.haystack();
         let r = s.next_reject_back();
@@ -2415,7 +2399,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_mces_next() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_multi_char_eq_searcher(&mut buf);
         let haystack = s.haystack();
         let step = s.next();
@@ -2431,7 +2415,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_mces_next_back() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_multi_char_eq_searcher(&mut buf);
         let haystack = s.haystack();
         let step = s.next_back();
@@ -2447,7 +2431,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_mces_next_match() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_multi_char_eq_searcher(&mut buf);
         let haystack = s.haystack();
         let m = s.next_match();
@@ -2462,7 +2446,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_mces_next_match_back() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_multi_char_eq_searcher(&mut buf);
         let haystack = s.haystack();
         let m = s.next_match_back();
@@ -2477,7 +2461,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_mces_next_reject() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_multi_char_eq_searcher(&mut buf);
         let haystack = s.haystack();
         let r = s.next_reject();
@@ -2492,7 +2476,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_mces_next_reject_back() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut s = kani_any_multi_char_eq_searcher(&mut buf);
         let haystack = s.haystack();
         let r = s.next_reject_back();
@@ -2518,15 +2502,13 @@ pub mod verify {
 
     /// Arbitrary-state `MultiCharEqSearcher<'a, C>` for a caller-supplied
     /// `char_eq`, so each wrapper's witness type can be seeded: symbolic
-    /// `char_indices` cursor over a `symbolic_str` haystack, filtered to
-    /// invariant-satisfying states (same ASCII license + soundness note as
-    /// `kani_any_multi_char_eq_searcher`).
+    /// `char_indices` cursor over a symbolic valid-UTF-8 haystack, filtered to
+    /// invariant-satisfying states.
     fn kani_any_mces_generic<'a, C: MultiCharEq>(
-        buf: &'a mut [u8; 5],
+        buf: &'a mut [u8; 8],
         char_eq: C,
     ) -> MultiCharEqSearcher<'a, C> {
-        let haystack = symbolic_str(buf);
-        kani::assume(haystack.as_bytes().iter().all(|&b| b < 0x80));
+        let haystack = symbolic_utf8_str(buf);
         let offset: usize = kani::any();
         let suffix = haystack.get(offset..);
         kani::assume(suffix.is_some());
@@ -2539,7 +2521,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_chararray_delegation() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut w = CharArraySearcher(kani_any_mces_generic(&mut buf, [kani::any(), kani::any()]));
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next());
@@ -2550,7 +2532,7 @@ pub mod verify {
     #[kani::proof]
     #[kani::unwind(7)]
     fn check_chararray_delegation_back() {
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut w = CharArraySearcher(kani_any_mces_generic(&mut buf, [kani::any(), kani::any()]));
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next_back());
@@ -2562,7 +2544,7 @@ pub mod verify {
     #[kani::unwind(7)]
     fn check_chararrayref_delegation() {
         let arr: [char; 2] = [kani::any(), kani::any()];
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut w = CharArrayRefSearcher(kani_any_mces_generic(&mut buf, &arr));
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next());
@@ -2574,7 +2556,7 @@ pub mod verify {
     #[kani::unwind(7)]
     fn check_chararrayref_delegation_back() {
         let arr: [char; 2] = [kani::any(), kani::any()];
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut w = CharArrayRefSearcher(kani_any_mces_generic(&mut buf, &arr));
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next_back());
@@ -2586,7 +2568,7 @@ pub mod verify {
     #[kani::unwind(7)]
     fn check_charslice_delegation() {
         let arr: [char; 2] = [kani::any(), kani::any()];
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut w = CharSliceSearcher(kani_any_mces_generic(&mut buf, &arr[..]));
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next());
@@ -2598,7 +2580,7 @@ pub mod verify {
     #[kani::unwind(7)]
     fn check_charslice_delegation_back() {
         let arr: [char; 2] = [kani::any(), kani::any()];
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut w = CharSliceSearcher(kani_any_mces_generic(&mut buf, &arr[..]));
         let haystack = w.haystack();
         assert_step_on_boundaries(haystack, w.next_back());
@@ -2610,7 +2592,7 @@ pub mod verify {
     #[kani::unwind(7)]
     fn check_charpredicate_delegation() {
         let target: char = kani::any();
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut w =
             CharPredicateSearcher(kani_any_mces_generic(&mut buf, move |c: char| c == target));
         let haystack = w.haystack();
@@ -2623,7 +2605,7 @@ pub mod verify {
     #[kani::unwind(7)]
     fn check_charpredicate_delegation_back() {
         let target: char = kani::any();
-        let mut buf = [0u8; 5];
+        let mut buf = [0u8; 8];
         let mut w =
             CharPredicateSearcher(kani_any_mces_generic(&mut buf, move |c: char| c == target));
         let haystack = w.haystack();
