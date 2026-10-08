@@ -1,5 +1,4 @@
 #![cfg(test)]
-#![allow(unused_attributes)]
 #![unstable(feature = "alloctests", issue = "none")]
 #![no_std]
 // Lints:
@@ -14,17 +13,17 @@
 //
 // Library features:
 // tidy-alphabetical-start
-#![feature(allocator_api)]
+#![feature(allocator_ext)]
 #![feature(array_into_iter_constructors)]
-#![feature(assert_matches)]
-#![feature(box_vec_non_null)]
 #![feature(char_internals)]
 #![feature(const_alloc_error)]
 #![feature(const_cmp)]
 #![feature(const_convert)]
+#![feature(const_default)]
 #![feature(const_destruct)]
 #![feature(const_heap)]
 #![feature(const_option_ops)]
+#![feature(const_result_trait_fn)]
 #![feature(const_try)]
 #![feature(copied_into_inner)]
 #![feature(core_intrinsics)]
@@ -37,7 +36,7 @@
 #![feature(iter_next_chunk)]
 #![feature(maybe_uninit_uninit_array_transpose)]
 #![feature(ptr_alignment_type)]
-#![feature(ptr_internals)]
+#![feature(ptr_cast_slice)]
 #![feature(rev_into_inner)]
 #![feature(sized_type_properties)]
 #![feature(slice_iter_mut_as_mut_slice)]
@@ -51,21 +50,18 @@
 #![feature(trusted_random_access)]
 #![feature(try_reserve_kind)]
 #![feature(try_trait_v2)]
+#![feature(unwrap_infallible)]
 #![feature(wtf8_internals)]
 // tidy-alphabetical-end
 //
 // Language features:
 // tidy-alphabetical-start
-#![feature(cfg_sanitize)]
+#![feature(const_closures)]
 #![feature(const_trait_impl)]
 #![feature(dropck_eyepatch)]
-#![feature(lang_items)]
 #![feature(min_specialization)]
-#![feature(negative_impls)]
-#![feature(never_type)]
 #![feature(optimize_attribute)]
 #![feature(prelude_import)]
-#![feature(rustc_allow_const_fn_unstable)]
 #![feature(rustc_attrs)]
 #![feature(staged_api)]
 #![feature(test)]
