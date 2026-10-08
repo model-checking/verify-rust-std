@@ -50,6 +50,9 @@ case ${TARGET} in
     riscv*)
         export RUSTFLAGS="${RUSTFLAGS} -Ctarget-feature=+zk,+zks,+zbb,+zbc"
         ;;
+    hexagon*)
+        export RUSTFLAGS="${RUSTFLAGS} -Ctarget-feature=+hvxv60,+hvx-length128b"
+        ;;
 esac
 
 echo "RUSTFLAGS=${RUSTFLAGS}"
@@ -79,7 +82,7 @@ cargo_test() {
             else
               dir="debug"
             fi
-            export CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime -Wexceptions --dir /checkout/target/wasm32-wasip1/$dir/deps::."
+            export CARGO_TARGET_WASM32_WASIP1_RUNNER="wasmtime -Wexceptions --dir /checkout/target/wasm32-wasip1/$dir/build::."
             cmd="$cmd --nocapture"
             ;;
     esac

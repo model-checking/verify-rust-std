@@ -1,4 +1,4 @@
-#![allow(unused_macros)]
+#![allow(unused_macros, unused_features)]
 #![cfg_attr(f16_enabled, feature(f16))]
 #![cfg_attr(f128_enabled, feature(f128))]
 
@@ -87,7 +87,8 @@ macro_rules! float_sum {
             #[test]
             fn $fn_add() {
                 use core::ops::{Add, Sub};
-                use compiler_builtins::float::{{add::$fn_add, sub::$fn_sub}, Float};
+                use imp::{$fn_add, $fn_sub};
+                use compiler_builtins::{assert_biteq, support::Float, support::Hex};
 
                 fuzz_float_2(N, |x: $f, y: $f| {
                     let add0 = apfloat_fallback!($f, $apfloat_ty, $sys_available, Add::add, x, y);
@@ -107,13 +108,85 @@ macro_rules! float_sum {
                         );
                     }
                 });
+
+                let qnan = <$f as Float>::NAN;
+                let snan = <$f as Float>::SNAN;
+                let qsnan = <$f as Float>::QSNAN;
+                let neg_qnan = <$f as Float>::NEG_NAN;
+                let neg_snan = <$f as Float>::NEG_SNAN;
+                let neg_qsnan = <$f as Float>::NEG_QSNAN;
+                let one = <$f as Float>::ONE;
+
+                let nan_cases = [
+                    (qnan, qnan, qnan),
+                    (qnan, snan, qnan),
+                    (qnan, neg_qnan, qnan),
+                    (qnan, neg_snan, qnan),
+                    (qnan, one, qnan),
+                    (snan, qnan, qsnan),
+                    (snan, snan, qsnan),
+                    (snan, neg_qnan, qsnan),
+                    (snan, neg_snan, qsnan),
+                    (snan, one, qsnan),
+                    (neg_qnan, qnan, neg_qnan),
+                    (neg_qnan, snan, neg_qnan),
+                    (neg_qnan, neg_qnan, neg_qnan),
+                    (neg_qnan, neg_snan, neg_qnan),
+                    (neg_qnan, one, neg_qnan),
+                    (neg_snan, qnan, neg_qsnan),
+                    (neg_snan, snan, neg_qsnan),
+                    (neg_snan, neg_qnan, neg_qsnan),
+                    (neg_snan, neg_snan, neg_qsnan),
+                    (neg_snan, one, neg_qsnan),
+                ];
+                // Our semantics are to return a quieted version of the first NaN, which means
+                // results are flipped for subtraction when the second input is the NaN.
+                let add_cases = [
+                    (one, qnan, qnan),
+                    (one, snan, qsnan),
+                    (one, neg_qnan, neg_qnan),
+                    (one, neg_snan, neg_qsnan),
+                ];
+                let sub_cases = [
+                    (one, qnan, neg_qnan),
+                    (one, snan, neg_qsnan),
+                    (one, neg_qnan, qnan),
+                    (one, neg_snan, qsnan),
+                ];
+
+                for &(x, y, expected) in nan_cases.iter().chain(add_cases.iter()) {
+                    assert_biteq!($fn_add(x, y), expected, "{} + {}", Hex(x), Hex(y));
+                }
+                for &(x, y, expected) in nan_cases.iter().chain(sub_cases.iter()) {
+                    assert_biteq!($fn_sub(x, y), expected, "{} - {}", Hex(x), Hex(y));
+                }
             }
         )*
     }
 }
 
-#[cfg(not(x86_no_sse))]
+#[cfg(not(x86_no_sse2))]
 mod float_addsub {
+    mod imp {
+        #[cfg(f16_enabled)]
+        pub use compiler_builtins::float::add::__addhf3;
+        pub use compiler_builtins::float::add::{__adddf3, __addsf3};
+        #[cfg(f16_enabled)]
+        pub use compiler_builtins::float::sub::__subhf3;
+        pub use compiler_builtins::float::sub::{__subdf3, __subsf3};
+        #[cfg(f128_enabled)]
+        cfg_select! {
+            any(target_arch = "powerpc", target_arch = "powerpc64") => {
+                pub use compiler_builtins::float::add::__addkf3 as __addtf3;
+                pub use compiler_builtins::float::sub::__subkf3 as __subtf3;
+            }
+            _ => {
+                pub use compiler_builtins::float::add::__addtf3;
+                pub use compiler_builtins::float::sub::__subtf3;
+            }
+        }
+    }
+
     use super::*;
 
     #[cfg(f16_enabled)]
@@ -127,15 +200,7 @@ mod float_addsub {
     }
 
     #[cfg(f128_enabled)]
-    #[cfg(not(x86_no_sse))]
-    #[cfg(not(any(target_arch = "powerpc", target_arch = "powerpc64")))]
     float_sum! {
-        f128, __addtf3, __subtf3, Quad, not(feature = "no-sys-f128");
-    }
-
-    #[cfg(f128_enabled)]
-    #[cfg(any(target_arch = "powerpc", target_arch = "powerpc64"))]
-    float_sum! {
-        f128, __addkf3, __subkf3, Quad, not(feature = "no-sys-f128");
+        f128, __addtf3, __subtf3, Quad, not(no_sys_f128);
     }
 }

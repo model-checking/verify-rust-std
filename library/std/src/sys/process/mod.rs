@@ -27,9 +27,15 @@ cfg_select! {
 mod env;
 
 pub use env::CommandEnvs;
+#[unstable(feature = "command_resolved_envs", issue = "149070")]
+pub use env::CommandResolvedEnvs;
+#[cfg(target_os = "linux")]
+pub use imp::PidFd;
+#[cfg(target_family = "unix")]
+pub use imp::getppid;
 pub use imp::{
     ChildPipe, Command, CommandArgs, EnvKey, ExitCode, ExitStatus, ExitStatusError, Process, Stdio,
-    read_output,
+    getpid, read_output,
 };
 
 #[cfg(any(
@@ -39,11 +45,11 @@ pub use imp::{
             target_os = "espidf",
             target_os = "horizon",
             target_os = "vita",
-            target_os = "nuttx"
+            target_os = "nuttx",
+            target_os = "l4re"
         ))
     ),
-    target_os = "windows",
-    target_os = "motor"
+    target_os = "windows"
 ))]
 pub fn output(cmd: &mut Command) -> crate::io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
     let (mut process, mut pipes) = cmd.spawn(Stdio::MakePipe, false)?;
@@ -77,10 +83,10 @@ pub fn output(cmd: &mut Command) -> crate::io::Result<(ExitStatus, Vec<u8>, Vec<
             target_os = "espidf",
             target_os = "horizon",
             target_os = "vita",
-            target_os = "nuttx"
+            target_os = "nuttx",
+            target_os = "l4re"
         ))
     ),
-    target_os = "windows",
-    target_os = "motor"
+    target_os = "windows"
 )))]
 pub use imp::output;

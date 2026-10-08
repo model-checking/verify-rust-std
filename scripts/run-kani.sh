@@ -328,7 +328,8 @@ main() {
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown \
+                "${command_args[@]}"
         else
             "$kani_path" list $unstable_args ./library --std --format markdown
         fi
@@ -336,7 +337,8 @@ main() {
         local current_dir=$(pwd)
         echo "Running Kani list command..."
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format json \
+                "${command_args[@]}"
         else
             "$kani_path" list $unstable_args ./library --std --format json
         fi
@@ -348,6 +350,9 @@ main() {
         ./kani_std_analysis.py --crate core \
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-core.json
+        ./kani_std_analysis.py --crate alloc \
+          --kani-list-file $current_dir/kani-list.json \
+          --metrics-file metrics-data-alloc.json
         ./kani_std_analysis.py --crate std \
           --kani-list-file $current_dir/kani-list.json \
           --metrics-file metrics-data-std.json
@@ -362,19 +367,28 @@ main() {
             --cbmc-args --object-bits 12
         # remove metadata file for Kani-generated "dummy" crate that we won't
         # get scanner data for
-        local target=$(find "target/kani_verify_std/target/" -mindepth 1 \
-                         -type d -exec test -e '{}'/debug/deps/ \; -print)
-        rm $target/debug/deps/dummy-*
+        local target=$(find "target/kani_verify_std/target/" -mindepth 1 -maxdepth 1 \
+                         -type d -exec test -d '{}'/debug/ \; -print)
+        local metadata=$target/debug/deps
+        # Cargo 1.99+ gives each package its own debug/build/PKG/HASH/out/ and no longer creates
+        # debug/deps, so gather the metadata files in one directory for the analyzer.
+        if [ ! -d "$metadata" ]; then
+            metadata=$(mktemp -d)
+            find "$(pwd)/$target/debug/build" -path '*/out/*.kani-metadata.json' \
+                 -exec ln -s '{}' "$metadata/" \;
+        fi
+        rm $metadata/dummy-*
         echo "Running Kani's std-analysis command..."
         pushd scripts/kani-std-analysis
         ./std-analysis.sh $build_dir
         popd
         echo "Running autoharness-analyzer command..."
         pushd scripts/autoharness_analyzer
+        [[ $metadata = /* ]] || metadata=../../$metadata
         cargo run -- --per-crate \
-          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
+          $metadata/ /tmp/std_lib_analysis/results/
         cargo run -- --per-crate --unsafe-fns-only \
-          ../../$target/debug/deps/ /tmp/std_lib_analysis/results/
+          $metadata/ /tmp/std_lib_analysis/results/
         popd
     fi
 }
