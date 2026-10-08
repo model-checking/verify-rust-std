@@ -8821,12 +8821,12 @@ mod verify {
                 let expected_data = Rc::as_ptr(&rc) as *const $ty;
 
                 // Call the target function: this harness verifies `Rc::into_array`.
-                let arr: Option<Rc<[$ty; N]>> = rc.into_array::<N>();
+                let arr: Result<Rc<[$ty; N]>, Rc<[$ty]>> = rc.into_array::<N>();
 
                 match arr {
-                    Some(arr) => {
+                    Ok(arr) => {
                         assert!(len == N);
-                        kani::cover(true, "Rc::into_array returns Some when lengths match");
+                        kani::cover(true, "Rc::into_array returns Ok when lengths match");
 
                         // The conversion must reinterpret the existing allocation without reallocating.
                         assert!(core::ptr::eq(expected_data, Rc::as_ptr(&arr) as *const $ty));
@@ -8838,9 +8838,9 @@ mod verify {
                         assert!(Rc::weak_count(&arr) == 0);
                         kani::cover(true, "Rc::into_array preserves the weak reference count");
                     }
-                    None => {
+                    Err(rc) => {
                         assert!(len != N);
-                        kani::cover(true, "Rc::into_array returns None when lengths differ");
+                        kani::cover(true, "Rc::into_array returns Err when lengths differ");
                     }
                 }
             }
