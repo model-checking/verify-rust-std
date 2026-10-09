@@ -85,8 +85,28 @@ fn skipped_overview_table(autoharness_md: &AutoHarnessMetadata) -> Result<Markdo
     )?)
 }
 
+/// Return the (name, type) pairs behind a `MissingArbitraryImpl` skip, if that is the reason.
+fn missing_arbitrary_args(reason: &AutoHarnessSkipReason) -> Option<&Vec<(String, String)>> {
+    match reason {
+        AutoHarnessSkipReason::MissingArbitraryImpl(args) => Some(args),
+        _ => None,
+    }
+}
+
+/// Return the (name, type) pairs behind a `RequiresBoundedArguments` skip, if that is the reason.
+fn bounded_arguments_args(reason: &AutoHarnessSkipReason) -> Option<&Vec<(String, String)>> {
+    match reason {
+        AutoHarnessSkipReason::RequiresBoundedArguments(args) => Some(args),
+        _ => None,
+    }
+}
+
+/// Count the argument types behind every skip reason that `args_of` selects, grouped into
+/// type categories. `category_header` names the first column.
 fn skipped_breakdown_table(
     autoharness_md: &AutoHarnessMetadata,
+    category_header: &str,
+    args_of: fn(&AutoHarnessSkipReason) -> Option<&Vec<(String, String)>>,
     show_precise_types: bool,
 ) -> Result<MarkdownTable> {
     // Rust type -- &mut i32, &mut u32, bool, etc.
@@ -114,7 +134,7 @@ fn skipped_breakdown_table(
     };
 
     for reason in autoharness_md.skipped.values() {
-        if let AutoHarnessSkipReason::MissingArbitraryImpl(args) = reason {
+        if let Some(args) = args_of(reason) {
             for (_, arg_type) in args {
                 let mut is_categorized = false;
                 for category in &type_categories {
@@ -151,15 +171,12 @@ fn skipped_breakdown_table(
     Ok(MarkdownTable::new(
         Some(if show_precise_types {
             vec![
-                "Unsupported Type Category".to_string(),
+                category_header.to_string(),
                 "# of occurences".to_string(),
                 "Precise Types".to_string(),
             ]
         } else {
-            vec![
-                "Unsupported Type Category".to_string(),
-                "# of occurences".to_string(),
-            ]
+            vec![category_header.to_string(), "# of occurences".to_string()]
         }),
         sorted_by_count
             .into_iter()
@@ -235,7 +252,18 @@ pub fn compute_metrics(
 
     let chosen_overview_table = chosen_overview_table(&unsafe_metadata, fn_to_row_data)?;
     let skipped_overview_table = skipped_overview_table(&unsafe_metadata)?;
-    let skipped_breakdown_table = skipped_breakdown_table(&unsafe_metadata, show_precise_types)?;
+    let missing_arbitrary_table = skipped_breakdown_table(
+        &unsafe_metadata,
+        "Unsupported Type Category",
+        missing_arbitrary_args,
+        show_precise_types,
+    )?;
+    let bounded_arguments_table = skipped_breakdown_table(
+        &unsafe_metadata,
+        "Type Category Requiring --bounded-arguments",
+        bounded_arguments_args,
+        show_precise_types,
+    )?;
 
     let out_path = Path::new(&format!(
         "{}{}_autoharness_data",
@@ -247,7 +275,8 @@ pub fn compute_metrics(
 
     write_table_to_file(&mut out_file, &chosen_overview_table)?;
     write_table_to_file(&mut out_file, &skipped_overview_table)?;
-    write_table_to_file(&mut out_file, &skipped_breakdown_table)?;
+    write_table_to_file(&mut out_file, &missing_arbitrary_table)?;
+    write_table_to_file(&mut out_file, &bounded_arguments_table)?;
 
     println!("Wrote results to {}", out_path.to_string_lossy());
 
