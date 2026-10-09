@@ -49,8 +49,8 @@ package-lock.json
 ## Kani
 *.out
 
-## GOTO-Transcoder
-goto-transcoder
+## ESBMC
+esbmc
 # Added by cargo
 #
 # already existing elements were commented out
