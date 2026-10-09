@@ -1125,10 +1125,9 @@ mod verify {
 
     // sort13 network: sorted-only. The coupled sorted+permutation problem does
     // not converge at length 13 for this network (the input↔output multiset
-    // coupling is the intractable part, not the sortedness assertion) — so the
-    // permutation half is carried at length 9 (sort9 band, above) where it does
-    // converge, and this length-13 harness asserts sortedness only. Constant-fill
-    // degeneracy is excluded by the length-9 permutation harness on this path.
+    // coupling is the intractable part, not the sortedness assertion), so this
+    // length-13 harness asserts sortedness only. The permutation property is not
+    // verified for the sort13 network at this pin.
     #[kani::proof]
     #[kani::unwind(14)]
     fn check_unstable_small_sort_sorted_u8_13() {
