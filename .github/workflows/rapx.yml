@@ -8,8 +8,8 @@ on:
     branches: [main]
 
 env:
-  RAPX_VERSION: "0.7.50"
-  TOOLCHAIN: "nightly-2026-02-05"
+  RAPX_VERSION: "0.7.56"
+  TOOLCHAIN: "nightly-2026-09-25"
 
 jobs:
   verify-slice:
