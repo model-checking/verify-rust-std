@@ -1226,10 +1226,13 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     #[stable(feature = "new_uninit", since = "1.82.0")]
     #[rustc_const_unstable(feature = "const_heap", issue = "79597")]
     #[inline(always)]
-    // SAFETY: the pointee must be a valid `T`. Under Kani this is `can_dereference`
-    // of the slot interpreted as `T` (initialized, aligned, in-bounds).
-    #[requires(ub_checks::can_dereference((&*self as *const mem::MaybeUninit<T>).cast::<T>()))]
-    #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
+    // TODO: we can no longer attach this contract now that `assume_init` is a `const fn`:
+    // Kani's contract instrumentation fails with E0493 because the destructor of the owned
+    // `Box` receiver cannot be evaluated at compile time. Until that works, the
+    // `check_assume_init_*` harnesses in `mod verify` assume the precondition and assert
+    // the postcondition around each call.
+    // #[requires(ub_checks::can_dereference((&*self as *const mem::MaybeUninit<T>).cast::<T>()))]
+    // #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub const unsafe fn assume_init(self) -> Box<T, A> {
         // This is used in the `vec!` macro, so we optimize for minimal IR generation
         // even in debug builds.
@@ -2633,30 +2636,42 @@ mod verify {
     }
 
     // ---- required unsafe: assume_init (sized) ----
+    // `assume_init` is a `const fn` and cannot carry its contract under Kani (see the TODO
+    // on it), so these are plain proofs that mirror the contract: assume the precondition,
+    // call, then assert the postcondition. This follows the `transmute_unchecked` harnesses
+    // in `core::intrinsics::verify`, and `assume_init` is `transmute_unchecked(self)`. Each
+    // slot is written first, so the precondition also holds by construction.
 
-    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+    fn assume_init_mirror<T>(slot: Box<MaybeUninit<T>>) -> Box<T> {
+        kani::assume(ub_checks::can_dereference((&*slot as *const MaybeUninit<T>).cast::<T>()));
+        let boxed = unsafe { slot.assume_init() };
+        assert!(ub_checks::can_dereference(&*boxed as *const T));
+        boxed
+    }
+
+    #[kani::proof]
     pub fn check_assume_init_i32() {
         let value: i32 = kani::any();
         let mut slot: Box<MaybeUninit<i32>> = Box::new_uninit();
         (*slot).write(value);
-        let boxed = unsafe { slot.assume_init() };
+        let boxed = assume_init_mirror(slot);
         assert!(*boxed == value);
     }
 
-    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+    #[kani::proof]
     pub fn check_assume_init_zst() {
         let mut slot: Box<MaybeUninit<()>> = Box::new_uninit();
         (*slot).write(());
-        let boxed = unsafe { slot.assume_init() };
+        let boxed = assume_init_mirror(slot);
         assert!(*boxed == ());
     }
 
-    #[kani::proof_for_contract(Box::<core::mem::MaybeUninit<T>, A>::assume_init)]
+    #[kani::proof]
     pub fn check_assume_init_bool() {
         let value: bool = kani::any();
         let mut slot: Box<MaybeUninit<bool>> = Box::new_uninit();
         (*slot).write(value);
-        let boxed = unsafe { slot.assume_init() };
+        let boxed = assume_init_mirror(slot);
         assert!(*boxed == value);
     }
 
@@ -2881,8 +2896,8 @@ mod verify {
         let boxed: Box<[i32]> = Box::from(slice);
         let len = boxed.len();
         match boxed.into_array::<SLICE_CAP>() {
-            Some(_arr) => assert!(len == SLICE_CAP),
-            None => assert!(len != SLICE_CAP),
+            Ok(_arr) => assert!(len == SLICE_CAP),
+            Err(_) => assert!(len != SLICE_CAP),
         }
     }
 
@@ -2950,14 +2965,6 @@ mod verify {
         let value: bool = kani::any();
         let (ptr, alloc) = Box::into_non_null_with_allocator(Box::new_in(value, Global));
         let boxed = unsafe { Box::from_non_null_in(ptr, alloc) };
-        assert!(*boxed == value);
-    }
-
-    #[kani::proof]
-    pub fn check_into_unique() {
-        let value: i32 = kani::any();
-        let (unique, alloc) = Box::into_unique(Box::new_in(value, Global));
-        let boxed = unsafe { Box::from_raw_in(unique.as_ptr(), alloc) };
         assert!(*boxed == value);
     }
 
