@@ -1229,8 +1229,8 @@ impl<T, A: Allocator> Box<mem::MaybeUninit<T>, A> {
     // TODO: we can no longer attach this contract now that `assume_init` is a `const fn`:
     // Kani's contract instrumentation fails with E0493 because the destructor of the owned
     // `Box` receiver cannot be evaluated at compile time. Until that works, the
-    // `check_assume_init_*` harnesses in `mod verify` assume the precondition and assert
-    // the postcondition around each call.
+    // `check_assume_init_{i32,zst,bool}` harnesses in `mod verify` assume the precondition
+    // and assert the postcondition around each call.
     // #[requires(ub_checks::can_dereference((&*self as *const mem::MaybeUninit<T>).cast::<T>()))]
     // #[ensures(|result| ub_checks::can_dereference(&**result as *const T))]
     pub const unsafe fn assume_init(self) -> Box<T, A> {
