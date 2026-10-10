@@ -7447,13 +7447,13 @@ mod verify {
             pub fn $name() {
                 let vec = verifier_nondet_vec_rc::<$ty>();
                 let rc: Rc<[$ty]> = Rc::from(vec);
-                // N matches the helper's length bound so both the Some (len == N)
-                // and None (len != N) return arms are reachable.
+                // N matches the helper's length bound so both the Ok (len == N)
+                // and Err (len != N) return arms are reachable.
                 const N: usize = 100;
                 kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
                 let len = rc.len();
-                let arr: Option<Rc<[$ty; N]>> = rc.into_array::<N>();
-                assert!(arr.is_some() == (len == N));
+                let arr: Result<Rc<[$ty; N]>, Rc<[$ty]>> = rc.into_array::<N>();
+                assert!(arr.is_ok() == (len == N));
             }
         };
     }
