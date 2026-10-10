@@ -648,6 +648,7 @@ impl<T> Vec<T> {
     /// }
     /// ```
     #[inline]
+    #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_heap", issue = "79597")]
     #[requires(length <= capacity)]
     #[requires({
@@ -2331,6 +2332,7 @@ impl<T, A: Allocator> Vec<T, A> {
     ///
     /// [`spare_capacity_mut()`]: Vec::spare_capacity_mut
     #[inline]
+    #[stable(feature = "rust1", since = "1.0.0")]
     #[rustc_const_unstable(feature = "const_heap", issue = "79597")]
     #[requires(new_len <= self.capacity())]
     #[requires(
@@ -2641,11 +2643,7 @@ impl<T, A: Allocator> Vec<T, A> {
         let original_len = self.len();
 
         #[cfg(kani)]
-        let modified_items = if mem::size_of::<T>() == 0 {
-            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
-        } else {
-            core::ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), original_len)
-        };
+        let modified_items = core::ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), original_len);
 
         if original_len == 0 {
             // Empty case: explicit return allows better optimization, vs letting compiler infer it
@@ -2841,11 +2839,7 @@ impl<T, A: Allocator> Vec<T, A> {
         #[cfg(kani)]
         let capacity = self.capacity();
         #[cfg(kani)]
-        let modified_items = if mem::size_of::<T>() == 0 {
-            core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
-        } else {
-            core::ptr::slice_from_raw_parts_mut(start, len)
-        };
+        let modified_items = core::ptr::slice_from_raw_parts_mut(start, len);
 
         #[safety::loop_invariant(len <= capacity && first_duplicate_idx >= 1 && first_duplicate_idx <= len)]
         while first_duplicate_idx != len {
@@ -4019,11 +4013,7 @@ impl<T: Clone, A: Allocator> Vec<T, A> {
             let local_len_ptr = local_len.local_len_ptr();
 
             #[cfg(kani)]
-            let spare_write_set = if mem::size_of::<T>() == 0 || clone_count == 0 {
-                core::ptr::slice_from_raw_parts_mut(core::ptr::null_mut::<T>(), 0)
-            } else {
-                core::ptr::slice_from_raw_parts_mut(spare_start, clone_count)
-            };
+            let spare_write_set = core::ptr::slice_from_raw_parts_mut(spare_start, clone_count);
 
             #[cfg(kani)]
             if mem::size_of::<T>() != 0 && clone_count != 0 {
@@ -5338,8 +5328,48 @@ mod verify {
     use super::*;
     use crate::vec::Vec;
 
+    // Size chosen for testing the empty vector (0), middle element removal (1)
+    // and last element removal (2) cases while keeping verification tractable
+    const ARRAY_LEN: usize = 3;
+
     #[kani::proof]
     pub fn verify_swap_remove() {
+        // Creating a vector directly from a fixed length arbitrary array
+        let mut arr: [i32; ARRAY_LEN] = kani::Arbitrary::any_array();
+        let mut vect = Vec::from(&arr);
+
+        // Recording the original length and a copy of the vector for validation
+        let original_len = vect.len();
+        let original_vec = vect.clone();
+
+        // Generating a nondeterministic index which is guaranteed to be within bounds
+        let index: usize = kani::any_where(|x| *x < original_len);
+
+        let removed = vect.swap_remove(index);
+
+        // Verifying that the length of the vector decreases by one after the operation is performed
+        assert!(vect.len() == original_len - 1, "Length should decrease by 1");
+
+        // Verifying that the removed element matches the original element at the index
+        assert!(removed == original_vec[index], "Removed element should match original");
+
+        // Verifying that the removed index now contains the element originally at the vector's last index if applicable
+        if index < original_len - 1 {
+            assert!(
+                vect[index] == original_vec[original_len - 1],
+                "Index should contain last element"
+            );
+        }
+
+        // Check that all other unaffected elements remain unchanged
+        let k = kani::any_where(|&x: &usize| x < original_len - 1);
+        if k != index {
+            assert!(vect[k] == arr[k]);
+        }
+    }
+
+    #[kani::proof]
+    pub fn verify_swap_remove_symbolic() {
         // Start from a symbolic vector state rather than a fixed-size array.
         let mut vect = verifier_nondet_vec::<u8>();
 
@@ -5421,24 +5451,30 @@ mod verify {
     gen_from_parts_in_harness!(harness_vec_from_parts_in_array, [u8; 4]);
     gen_from_parts_in_harness!(harness_vec_from_parts_in_bool, bool);
 
-    // Harnesses for `Vec::into_raw_parts_with_alloc`
-    macro_rules! gen_into_raw_parts_with_alloc_harness {
+    // Harnesses for `Vec::into_raw_parts_with_allocator`
+    macro_rules! gen_into_raw_parts_with_allocator_harness {
         ($name:ident, $ty:ty) => {
             #[kani::proof]
             pub fn $name() {
                 // Create a non-deterministic Vec for the target element type
                 let vec = verifier_nondet_vec::<$ty>();
                 // Decompose the Vec into raw parts together with its allocator
-                let _ = vec.into_raw_parts_with_alloc();
+                let _ = vec.into_raw_parts_with_allocator();
             }
         };
     }
 
-    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_u8, u8);
-    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_u64, u64);
-    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_unit, ());
-    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_bool, bool);
-    gen_into_raw_parts_with_alloc_harness!(harness_vec_into_raw_parts_with_alloc_array, [u8; 4]);
+    gen_into_raw_parts_with_allocator_harness!(harness_vec_into_raw_parts_with_allocator_u8, u8);
+    gen_into_raw_parts_with_allocator_harness!(harness_vec_into_raw_parts_with_allocator_u64, u64);
+    gen_into_raw_parts_with_allocator_harness!(harness_vec_into_raw_parts_with_allocator_unit, ());
+    gen_into_raw_parts_with_allocator_harness!(
+        harness_vec_into_raw_parts_with_allocator_bool,
+        bool
+    );
+    gen_into_raw_parts_with_allocator_harness!(
+        harness_vec_into_raw_parts_with_allocator_array,
+        [u8; 4]
+    );
 
     // Harnesses for `Vec::into_boxed_slice`
     macro_rules! gen_into_boxed_slice_harness {
