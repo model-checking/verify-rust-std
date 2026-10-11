@@ -1436,6 +1436,28 @@
       "verified_safe_fns_under_contract": 317,
       "verified_safe_fns_with_loop_under_contract": 1,
       "total_functions_under_contract_all_crates": 651
+    },
+    {
+      "date": "2026-10-11",
+      "total_unsafe_fns": 7463,
+      "total_unsafe_fns_with_loop": 26,
+      "total_safe_abstractions": 2042,
+      "total_safe_abstractions_with_loop": 112,
+      "total_safe_fns": 17554,
+      "total_safe_fns_with_loop": 826,
+      "unsafe_fns_under_contract": 322,
+      "unsafe_fns_with_loop_under_contract": 3,
+      "verified_unsafe_fns_under_contract": 301,
+      "verified_unsafe_fns_with_loop_under_contract": 2,
+      "safe_abstractions_under_contract": 280,
+      "safe_abstractions_with_loop_under_contract": 0,
+      "verified_safe_abstractions_under_contract": 280,
+      "verified_safe_abstractions_with_loop_under_contract": 0,
+      "safe_fns_under_contract": 320,
+      "safe_fns_with_loop_under_contract": 1,
+      "verified_safe_fns_under_contract": 319,
+      "verified_safe_fns_with_loop_under_contract": 1,
+      "total_functions_under_contract_all_crates": 661
     }
   ]
 }
