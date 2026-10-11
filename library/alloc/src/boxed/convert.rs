@@ -2,8 +2,12 @@ use core::any::Any;
 use core::error::Error;
 #[cfg(not(no_global_oom_handling))]
 use core::fmt;
+#[cfg(kani)]
+use core::kani;
 use core::mem;
 use core::pin::Pin;
+
+use safety::{ensures, requires};
 
 use crate::alloc::{Allocator, StaticAllocator};
 #[cfg(not(no_global_oom_handling))]
@@ -364,6 +368,11 @@ impl<A: Allocator> Box<dyn Any, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
@@ -425,6 +434,11 @@ impl<A: Allocator> Box<dyn Any + Send, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
@@ -486,6 +500,11 @@ impl<A: Allocator> Box<dyn Any + Send + Sync, A> {
     /// [`downcast`]: Self::downcast
     #[inline]
     #[unstable(feature = "downcast_unchecked", issue = "90850")]
+    #[requires(self.is::<T>())]
+    #[ensures(|result: &Box<T, A>| core::ptr::addr_eq(
+        &raw const **result,
+        old(&raw const *self as *const T),
+    ))]
     pub unsafe fn downcast_unchecked<T: Any>(self) -> Box<T, A> {
         debug_assert!(self.is::<T>());
         // SAFETY: Caller ensures the type is correct.
@@ -754,4 +773,276 @@ impl dyn Error + Send + Sync {
             mem::transmute::<Box<dyn Error>, Box<dyn Error + Send + Sync>>(s)
         })
     }
+}
+
+// Challenge 29
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::fmt;
+
+    use super::super::kani_box_harness_helpers::verifier_nondet_vec_box;
+    use super::*;
+    use crate::string::String;
+
+    macro_rules! unchecked_downcast {
+        ($name:ident, $object:ty, $ty:ty, $target:path) => {
+            #[kani::proof_for_contract($target)]
+            fn $name() {
+                let erased: Box<$object> = Box::new(kani::any::<$ty>());
+                let result: Box<$ty> = unsafe { erased.downcast_unchecked::<$ty>() };
+                kani::cover(true, "downcast_unchecked precondition is reachable");
+            }
+        };
+    }
+
+    unchecked_downcast!(
+        harness_box_dyn_any_downcast_unchecked_i32,
+        dyn Any,
+        i32,
+        Box::<dyn core::any::Any + 'static, A>::downcast_unchecked::<i32>
+    );
+    unchecked_downcast!(
+        harness_box_dyn_any_downcast_unchecked_unit,
+        dyn Any,
+        (),
+        Box::<dyn core::any::Any + 'static, A>::downcast_unchecked::<()>
+    );
+
+    unchecked_downcast!(
+        harness_box_dyn_any_send_downcast_unchecked_i32,
+        dyn Any + Send,
+        i32,
+        Box::<dyn core::any::Any + core::marker::Send + 'static, A>::downcast_unchecked::<i32>
+    );
+    unchecked_downcast!(
+        harness_box_dyn_any_send_downcast_unchecked_unit,
+        dyn Any + Send,
+        (),
+        Box::<dyn core::any::Any + core::marker::Send + 'static, A>::downcast_unchecked::<()>
+    );
+
+    unchecked_downcast!(
+        harness_box_dyn_any_send_sync_downcast_unchecked_i32,
+        dyn Any + Send + Sync,
+        i32,
+        Box::<dyn core::any::Any + core::marker::Send + core::marker::Sync + 'static, A>::downcast_unchecked::<i32>
+    );
+    unchecked_downcast!(
+        harness_box_dyn_any_send_sync_downcast_unchecked_unit,
+        dyn Any + Send + Sync,
+        (),
+        Box::<dyn core::any::Any + core::marker::Send + core::marker::Sync + 'static, A>::downcast_unchecked::<()>
+    );
+
+    // Checks the named Box<dyn Any...>::downcast or <dyn Error...>::downcast.
+    // A symbolic choice checks both branches, including the Error wrappers that
+    // restore Send/Sync on failure after delegating to dyn Error::downcast.
+    macro_rules! checked_downcast {
+        ($name:ident, $object:ty, $ty:ty, $value:expr, $mismatch:expr) => {
+            #[kani::proof]
+            fn $name() {
+                let matches: bool = kani::any();
+                let erased: Box<$object> =
+                    if matches { Box::new($value) } else { Box::new($mismatch) };
+                assert_eq!(erased.downcast::<$ty>().is_ok(), matches);
+                kani::cover(matches, "Box::downcast succeeds for matching type");
+                kani::cover(!matches, "Box::downcast returns Err for mismatched type");
+            }
+        };
+    }
+
+    checked_downcast!(
+        harness_box_dyn_any_downcast_i32,
+        dyn Any,
+        i32,
+        kani::any::<i32>(),
+        String::from("mismatch")
+    );
+    checked_downcast!(harness_box_dyn_any_downcast_unit, dyn Any, (), (), String::from("mismatch"));
+    checked_downcast!(
+        harness_box_dyn_any_send_downcast_i32,
+        dyn Any + Send,
+        i32,
+        kani::any::<i32>(),
+        String::from("mismatch")
+    );
+    checked_downcast!(
+        harness_box_dyn_any_send_downcast_unit,
+        dyn Any + Send,
+        (),
+        (),
+        String::from("mismatch")
+    );
+    checked_downcast!(
+        harness_box_dyn_any_send_sync_downcast_i32,
+        dyn Any + Send + Sync,
+        i32,
+        kani::any::<i32>(),
+        String::from("mismatch")
+    );
+    checked_downcast!(
+        harness_box_dyn_any_send_sync_downcast_unit,
+        dyn Any + Send + Sync,
+        (),
+        (),
+        String::from("mismatch")
+    );
+
+    #[derive(Debug)]
+    struct Witness<T>(T);
+
+    impl<T: fmt::Debug> fmt::Display for Witness<T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("witness")
+        }
+    }
+
+    impl<T: fmt::Debug> Error for Witness<T> {}
+
+    checked_downcast!(
+        harness_box_dyn_error_downcast_byte,
+        dyn Error,
+        Witness<u8>,
+        Witness(kani::any::<u8>()),
+        fmt::Error
+    );
+    checked_downcast!(
+        harness_box_dyn_error_downcast_unit,
+        dyn Error,
+        Witness<()>,
+        Witness(()),
+        fmt::Error
+    );
+    checked_downcast!(
+        harness_box_dyn_error_send_downcast_byte,
+        dyn Error + Send,
+        Witness<u8>,
+        Witness(kani::any::<u8>()),
+        fmt::Error
+    );
+    checked_downcast!(
+        harness_box_dyn_error_send_downcast_unit,
+        dyn Error + Send,
+        Witness<()>,
+        Witness(()),
+        fmt::Error
+    );
+    checked_downcast!(
+        harness_box_dyn_error_send_sync_downcast_byte,
+        dyn Error + Send + Sync,
+        Witness<u8>,
+        Witness(kani::any::<u8>()),
+        fmt::Error
+    );
+    checked_downcast!(
+        harness_box_dyn_error_send_sync_downcast_unit,
+        dyn Error + Send + Sync,
+        Witness<()>,
+        Witness(()),
+        fmt::Error
+    );
+
+    /// Checks <Box<str> as From<&str>>::from for empty and nonempty input.
+    #[kani::proof]
+    fn harness_box_from_str() {
+        let value = if kani::any() { "" } else { "test" };
+        let boxed = Box::<str>::from(value);
+        assert_eq!(boxed.len(), value.len());
+        // Compare an arbitrary byte without introducing a memcmp loop.
+        if !value.is_empty() {
+            let index = kani::any_where(|i: &usize| *i < value.len());
+            assert_eq!(boxed.as_bytes()[index], value.as_bytes()[index]);
+        }
+        kani::cover(value.is_empty(), "Box::from str handles empty input");
+        kani::cover(!value.is_empty(), "Box::from str handles nonempty input");
+    }
+
+    /// Checks <Box<[u8]> as From<Box<str>>>::from.
+    #[kani::proof]
+    fn harness_box_from_box_str_to_u8_slice() {
+        let value = if kani::any() { "" } else { "test" };
+        let bytes = Box::<[u8]>::from(Box::<str>::from(value));
+        assert_eq!(bytes.len(), value.len());
+        // Compare an arbitrary byte without introducing a memcmp loop.
+        if !value.is_empty() {
+            let index = kani::any_where(|i: &usize| *i < value.len());
+            assert_eq!(bytes[index], value.as_bytes()[index]);
+        }
+        kani::cover(value.is_empty(), "Box<str> to bytes handles empty input");
+        kani::cover(!value.is_empty(), "Box<str> to bytes handles nonempty input");
+    }
+
+    /// Checks From<&[u8]> through CloneToUninit's TrivialClone slice specialization.
+    #[kani::proof]
+    fn harness_box_from_slice_trivial_clone() {
+        let source = verifier_nondet_vec_box::<u8>();
+        let boxed = Box::<[u8]>::from(source.as_slice());
+        assert_eq!(boxed.len(), source.len());
+        // A symbolic index checks copying without iterating over the unbounded length.
+        if !source.is_empty() {
+            let index = kani::any_where(|i: &usize| *i < source.len());
+            assert_eq!(boxed[index], source[index]);
+        }
+        kani::cover(source.is_empty(), "Box::from slice trivial clone handles empty input");
+        kani::cover(!source.is_empty(), "Box::from slice trivial clone copies an element");
+    }
+
+    // Deriving Clone alone does not implement TrivialClone, so CopySpec uses
+    // its generic element-wise Clone implementation.
+    #[derive(Clone)]
+    struct CloneOnly(u8);
+
+    /// Checks From<&[CloneOnly]> through CloneToUninit's generic slice clone.
+    #[kani::proof]
+    #[kani::unwind(3)]
+    fn harness_box_from_slice_clone() {
+        // This element-wise clone path uses a bounded, independently symbolic
+        // payload, including an empty slice. Other slice harnesses retain their
+        // symbolic lengths without a small fixed cap.
+        let values = [CloneOnly(kani::any()), CloneOnly(kani::any())];
+        let source = kani::slice::any_slice_of_array(&values);
+        let boxed = Box::<[CloneOnly]>::from(source);
+        assert_eq!(boxed.len(), source.len());
+        if !source.is_empty() {
+            let index = kani::any_where(|i: &usize| *i < source.len());
+            assert_eq!(boxed[index].0, source[index].0);
+        }
+        kani::cover(source.is_empty(), "Box::from slice clone handles empty input");
+        kani::cover(!source.is_empty(), "Box::from slice clone copies an element");
+    }
+
+    // Symbolic lengths cover success (len == N) and failure for fixed N = 100.
+    macro_rules! slice_to_array {
+        ($name:ident, $ty:ty) => {
+            mod $name {
+                use super::*;
+                const N: usize = 100;
+
+                /// Checks TryFrom<Box<[T]>> for Box<[T; N]>.
+                #[kani::proof]
+                fn boxed_slice() {
+                    let boxed = verifier_nondet_vec_box::<$ty>().into_boxed_slice();
+                    let matches = boxed.len() == N;
+                    assert_eq!(Box::<[$ty; N]>::try_from(boxed).is_ok(), matches);
+                    kani::cover(matches, "Box slice to array accepts matching length");
+                    kani::cover(!matches, "Box slice to array rejects mismatched length");
+                }
+
+                /// Checks TryFrom<Vec<T>> for Box<[T; N]>.
+                #[kani::proof]
+                fn vector() {
+                    let vec = verifier_nondet_vec_box::<$ty>();
+                    let matches = vec.len() == N;
+                    assert_eq!(Box::<[$ty; N]>::try_from(vec).is_ok(), matches);
+                    kani::cover(matches, "Box Vec to array accepts matching length");
+                    kani::cover(!matches, "Box Vec to array rejects mismatched length");
+                }
+            }
+        };
+    }
+
+    slice_to_array!(harness_box_try_from_array_i32, i32);
+    slice_to_array!(harness_box_try_from_array_unit, ());
 }
