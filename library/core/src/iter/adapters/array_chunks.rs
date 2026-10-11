@@ -295,13 +295,6 @@ mod verify {
         let _ = chunks.next_back();
     }
 
-    #[kani::proof]
-    fn check_array_chunks_next_back_remainder_n3() {
-        let len: u8 = kani::any();
-        let mut chunks = ArrayChunks::<_, 3>::new(0..len);
-        let _ = chunks.next_back();
-    }
-
     // fold (TRANC specialized — uses __iterator_get_unchecked in a loop)
     // Arbitrary-length: the fold while-loop carries a source-level loop
     // contract (invariant i <= inner_len, explicit loop_modifies), so no

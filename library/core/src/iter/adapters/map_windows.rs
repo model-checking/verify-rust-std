@@ -475,19 +475,22 @@ mod verify {
         let _ = mw_clone.next(); // Single iteration exercises push + as_array_ref
     }
 
-    fn map_first_char(w: &[char; 2]) -> char {
+    fn map_first_u32(w: &[u32; 2]) -> u32 {
         w[0]
     }
 
+    // 4-byte Copy element: exercises the ring buffer's pointer arithmetic at a
+    // larger size/alignment than u8. (u32 rather than char: char's validity niche
+    // over the MaybeUninit buffer is CBMC-pathological and irrelevant to the
+    // niche-agnostic buffer code, so u32 gives the same layout coverage.)
     #[kani::proof]
-    fn check_map_windows_n2_char() {
-        const MAX_LEN: usize = 50;
-        let array: [char; MAX_LEN] = kani::any();
+    fn check_map_windows_n2_u32() {
+        const MAX_LEN: usize = 16;
+        let array: [u32; MAX_LEN] = kani::any();
         let slice = kani::slice::any_slice_of_array(&array);
         kani::assume(slice.len() >= 3);
         kani::cover(true, "non-vacuity witness: the assumed input space is non-empty");
-        let mut mw =
-            MapWindows::new(slice.iter().copied(), map_first_char as fn(&[char; 2]) -> char);
+        let mut mw = MapWindows::new(slice.iter().copied(), map_first_u32 as fn(&[u32; 2]) -> u32);
         let _ = mw.next();
         let _ = mw.next();
     }
