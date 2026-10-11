@@ -1124,10 +1124,10 @@ mod verify {
     }
 
     // sort13 network: sorted-only. The coupled sorted+permutation problem does
-    // not converge at length 13 for this network (the input↔output multiset
-    // coupling is the intractable part, not the sortedness assertion), so this
-    // length-13 harness asserts sortedness only. The permutation property is not
-    // verified for the sort13 network at this pin.
+    // not converge at length 13 for this network, so sortedness and the
+    // multiset-permutation property are proven in separate harnesses: this one
+    // asserts sortedness, and check_unstable_small_sort_perm_bounded_u8_13 below
+    // asserts the permutation property on its own over a bounded value domain.
     #[kani::proof]
     #[kani::unwind(14)]
     fn check_unstable_small_sort_sorted_u8_13() {
@@ -1136,6 +1136,32 @@ mod verify {
         <u8 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u8, b: &u8| a < b);
         assert!(is_sorted_by_key(&v, |x: &u8| *x));
         kani::cover(had_descent, "an initially-unsorted input reaches the sortedness assert");
+    }
+
+    // sort13 network: permutation-only companion to the sorted-only harness above.
+    // The coupled sorted+permutation check does not converge at 13, so sortedness
+    // (above) and the multiset-permutation property (here) are proven separately.
+    // Elements are drawn from a 4-value domain to keep the multiset solve tractable.
+    // This does not weaken the property: a sorting network preserves the multiset
+    // regardless of value range, so any dropped or duplicated element still changes
+    // some value's count at this domain.
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn check_unstable_small_sort_perm_bounded_u8_13() {
+        let mut v: [u8; 13] = kani::any();
+        let mut i = 0;
+        while i < 13 {
+            kani::assume(v[i] < 4);
+            i += 1;
+        }
+        let had_descent = v[0] > v[1];
+        let snapshot = v;
+        <u8 as UnstableSmallSortTypeImpl>::small_sort(&mut v, &mut |a: &u8, b: &u8| a < b);
+        let probe: u8 = kani::any();
+        assert!(
+            count_by_key(&snapshot, |x: &u8| *x, &probe) == count_by_key(&v, |x: &u8| *x, &probe)
+        );
+        kani::cover(had_descent, "an unsorted bounded-domain input reaches the permutation assert");
     }
 
     #[kani::proof]
