@@ -1029,3 +1029,735 @@ unsafe fn replace_ascii(utf8_bytes: &[u8], from: u8, to: u8) -> String {
     // SAFETY: We replaced ascii with ascii on valid utf8 strings.
     unsafe { String::from_utf8_unchecked(result) }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::kani;
+    use core::str::pattern::{Pattern, ReverseSearcher, SearchStep, Searcher, StrSearcher};
+    use core::ub_checks::Invariant;
+
+    use crate::alloc::{Layout, alloc};
+
+    // Challenge 21 harnesses (str::pattern StrSearcher safety). They live in this crate,
+    // not core, because arbitrary-length inputs need the global allocator as HARNESS
+    // infrastructure: `symbolic_str` below builds a haystack/needle of genuinely symbolic
+    // length. Backing provenance (heap) is immaterial to the properties proven — every
+    // read goes through the same `&str` the real callers use.
+
+    /// A `&str` of symbolic length in `[1, 2^40]` with valid (nondet-content) backing.
+    /// The 2^40 cap is the pointer-offset budget at `--object-bits 12` (offsets get
+    /// ~52 bits); it is an encoding parameter, not a proof bound — a larger cap would
+    /// need a larger `--object-bits`. The floor is 1 because `alloc` forbids zero-size
+    /// allocations; the zero-length haystack is pinned by `ch21_bounded_empty_haystack`.
+    fn symbolic_str() -> &'static str {
+        let n: usize = kani::any();
+        kani::assume(n > 0 && n <= 1usize << 40);
+        // SAFETY: align 1 is a nonzero power of two and n <= 2^40 < isize::MAX; the
+        // checked constructor's unwrap would add panic-formatting to every harness.
+        let layout = unsafe { Layout::from_size_align_unchecked(n, 1) };
+        let ptr = unsafe { alloc(layout) };
+        kani::assume(!ptr.is_null());
+        // SAFETY: freshly allocated, n bytes, alignment 1; content is nondeterministic.
+        // UTF-8 properties of the content are assumed pointwise at use sites only where
+        // the challenge's assumptions grant them (see the per-harness notes).
+        unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr, n)) }
+    }
+
+    // Criterion 1, empty-needle arm: creating a searcher from any valid UTF-8 haystack of
+    // UNBOUNDED (symbolic) length establishes the type invariant. The empty-needle
+    // constructor sets position=0/end=haystack.len() and performs no slicing, so
+    // `is_char_boundary(0)` and `is_char_boundary(len)` take their O(1) fast paths.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn ch21_into_searcher_establishes_c_empty() {
+        let haystack = symbolic_str();
+        let s = "".into_searcher(haystack);
+        kani::cover(true, "ch21 empty ctor state live");
+        kani::assert(s.is_safe(), "C established at creation (empty arm)");
+    }
+
+    /// A 1-byte `&str` with a symbolic ASCII byte — the needle class `StrSearcher::new`
+    /// routes to the single-byte searcher arm. ASCII is forced: a one-byte str is valid
+    /// UTF-8 exactly when its byte is ASCII.
+    fn symbolic_ascii_needle() -> &'static str {
+        let needle = symbolic_str();
+        kani::assume(needle.len() == 1 && needle.as_bytes()[0] <= 0x7F);
+        needle
+    }
+
+    // Criterion 1, single-byte arm: creating a searcher from ANY 1-byte needle over a valid
+    // UTF-8 haystack of UNBOUNDED (symbolic) length establishes the type invariant
+    // (`StrSearcher::new` routes every one-byte needle to the single-byte arm). The
+    // constructor sets position=0/end=haystack.len() and performs no slicing, so the
+    // boundary checks take their O(1) fast paths.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn ch21_into_searcher_establishes_c_byte() {
+        let haystack = symbolic_str();
+        let needle = symbolic_ascii_needle();
+        let s = needle.into_searcher(haystack);
+        kani::cover(true, "ch21 byte ctor state live");
+        kani::assert(s.is_safe(), "C established at creation (byte arm)");
+    }
+
+    // UNBOUNDED stepping, single-byte arm: from ANY invariant-satisfying state over a
+    // SYMBOLIC-length haystack (assumption 3 encoded as a 1-char valid-UTF-8 window at the
+    // cursor), one real `next()` preserves the invariant. The byte-arm step is O(1): one
+    // byte compare plus `ceil_char_boundary`, whose scan ends inside the window's char.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn ch21_byte_next_preserves() {
+        let haystack = symbolic_str();
+        let needle = symbolic_ascii_needle();
+        let mut s = StrSearcher::kani_arbitrary_byte_step(haystack, needle);
+        let _step = s.next();
+        kani::assert(s.is_safe(), "byte next: C preserved (unbounded haystack)");
+    }
+
+    // UNBOUNDED stepping, single-byte arm: every span `next()` returns lies on UTF-8
+    // boundaries of the symbolic-length haystack.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn ch21_byte_next_boundaries() {
+        let haystack = symbolic_str();
+        let needle = symbolic_ascii_needle();
+        let mut s = StrSearcher::kani_arbitrary_byte_step(haystack, needle);
+        match s.next() {
+            SearchStep::Match(a, b) => {
+                kani::cover(true, "ch21 byte next match span returned");
+                kani::assert(haystack.is_char_boundary(a), "byte next match: start on boundary");
+                kani::assert(haystack.is_char_boundary(b), "byte next match: end on boundary");
+            }
+            SearchStep::Reject(a, b) => {
+                kani::cover(true, "ch21 byte next reject span returned");
+                kani::assert(haystack.is_char_boundary(a), "byte next reject: start on boundary");
+                kani::assert(haystack.is_char_boundary(b), "byte next reject: end on boundary");
+            }
+            SearchStep::Done => kani::cover(true, "ch21 byte next done arm"),
+        }
+    }
+
+    // The single-byte arm's match scans (`next_match`/`next_match_back`) call
+    // `memchr`/`memrchr`, whose functional correctness the challenge grants (the slice
+    // module assumption). The UNBOUNDED match proofs stub both with this nondeterministic
+    // model of that granted contract: it may report any in-range position holding the
+    // sought byte, or report no occurrence — a superset of the real scans' behaviors
+    // (minimality of the reported hit is dropped; the safety proofs do not consume it).
+    // When the sought byte is ASCII, a valid UTF-8 haystack also places a char boundary
+    // (or the end) immediately after a hit — the same locally granted window as the step
+    // builders. The real forward scan still runs end to end in the `ch21_bounded_next_match`
+    // companion; a bounded reverse-scan companion is a disclosed residual (see the
+    // reverse-method note below).
+    #[cfg(kani)]
+    fn ch21_stub_mem_scan(x: u8, text: &[u8]) -> Option<usize> {
+        if kani::any() {
+            let i: usize = kani::any();
+            kani::assume(i < text.len() && text[i] == x);
+            // The post-hit window holds only for an ASCII hit; the `x > 0x7F` disjunct keeps
+            // the model sound if ever reused for a non-ASCII byte (inert here — a single-byte
+            // needle is always ASCII).
+            kani::assume(x > 0x7F || i + 1 == text.len() || !matches!(text[i + 1], 0x80..=0xBF));
+            kani::cover(true, "ch21 mem-scan hit modeled");
+            Some(i)
+        } else {
+            None
+        }
+    }
+
+    // UNBOUNDED match scanning, single-byte arm: from ANY invariant-satisfying state over
+    // a SYMBOLIC-length haystack, one real `next_match()` preserves the invariant, with
+    // the `memchr` scan modeled by its granted contract (`ch21_stub_mem_scan`).
+    #[kani::proof]
+    #[kani::stub(core::slice::memchr::memchr, ch21_stub_mem_scan)]
+    #[kani::unwind(5)]
+    fn ch21_byte_next_match_preserves() {
+        let haystack = symbolic_str();
+        let needle = symbolic_ascii_needle();
+        let mut s = StrSearcher::kani_arbitrary_byte_state(haystack, needle);
+        let _m = s.next_match();
+        kani::assert(s.is_safe(), "byte next_match: C preserved (unbounded haystack)");
+    }
+
+    // UNBOUNDED match scanning, single-byte arm: every span `next_match()` returns lies on
+    // UTF-8 boundaries of the symbolic-length haystack.
+    #[kani::proof]
+    #[kani::stub(core::slice::memchr::memchr, ch21_stub_mem_scan)]
+    #[kani::unwind(5)]
+    fn ch21_byte_next_match_boundaries() {
+        let haystack = symbolic_str();
+        let needle = symbolic_ascii_needle();
+        let mut s = StrSearcher::kani_arbitrary_byte_state(haystack, needle);
+        if let Some((a, b)) = s.next_match() {
+            kani::cover(true, "ch21 byte next_match span returned");
+            kani::assert(haystack.is_char_boundary(a), "byte next_match: start on boundary");
+            kani::assert(haystack.is_char_boundary(b), "byte next_match: end on boundary");
+        } else {
+            kani::cover(true, "ch21 byte next_match none arm");
+        }
+    }
+
+    // UNBOUNDED reverse match scanning, single-byte arm: from ANY invariant-satisfying
+    // state, one real `next_match_back()` preserves the invariant, with the `memrchr`
+    // scan modeled by the same granted contract. Unlike the reverse step methods, this
+    // path performs no boundary walk — the found byte itself carries the boundary facts.
+    #[kani::proof]
+    #[kani::stub(core::slice::memchr::memrchr, ch21_stub_mem_scan)]
+    #[kani::unwind(5)]
+    fn ch21_byte_next_match_back_preserves() {
+        let haystack = symbolic_str();
+        let needle = symbolic_ascii_needle();
+        let mut s = StrSearcher::kani_arbitrary_byte_state(haystack, needle);
+        let _m = s.next_match_back();
+        kani::assert(s.is_safe(), "byte next_match_back: C preserved (unbounded haystack)");
+    }
+
+    // UNBOUNDED reverse match scanning, single-byte arm: every span `next_match_back()`
+    // returns lies on UTF-8 boundaries — the span end lands either strictly inside the
+    // scanned prefix (the window after the hit) or exactly on the backward cursor (a
+    // boundary by the invariant).
+    #[kani::proof]
+    #[kani::stub(core::slice::memchr::memrchr, ch21_stub_mem_scan)]
+    #[kani::unwind(5)]
+    fn ch21_byte_next_match_back_boundaries() {
+        let haystack = symbolic_str();
+        let needle = symbolic_ascii_needle();
+        let mut s = StrSearcher::kani_arbitrary_byte_state(haystack, needle);
+        if let Some((a, b)) = s.next_match_back() {
+            kani::cover(true, "ch21 byte next_match_back span returned");
+            kani::assert(haystack.is_char_boundary(a), "byte next_match_back: start on boundary");
+            kani::assert(haystack.is_char_boundary(b), "byte next_match_back: end on boundary");
+        } else {
+            kani::cover(true, "ch21 byte next_match_back none arm");
+        }
+    }
+
+    // UNBOUNDED stepping, empty-needle arm: from ANY invariant-satisfying state over a
+    // SYMBOLIC-length haystack (assumption 3 encoded as a 1-char valid-UTF-8 window at the
+    // cursor), one real `next()` preserves the invariant. The empty-arm step is O(1), so no
+    // loop contract is involved.
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(5)]
+    fn ch21_empty_next_preserves() {
+        let haystack = symbolic_str();
+        let mut s = StrSearcher::kani_arbitrary_empty_step(haystack, 1);
+        let _step = s.next();
+        kani::assert(s.is_safe(), "empty next: C preserved (unbounded haystack)");
+    }
+
+    // UNBOUNDED stepping, empty-needle arm: every span `next()` returns lies on UTF-8
+    // boundaries of the symbolic-length haystack.
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(5)]
+    fn ch21_empty_next_boundaries() {
+        let haystack = symbolic_str();
+        let mut s = StrSearcher::kani_arbitrary_empty_step(haystack, 1);
+        match s.next() {
+            SearchStep::Match(a, b) | SearchStep::Reject(a, b) => {
+                kani::cover(true, "ch21 empty next span returned");
+                kani::assert(haystack.is_char_boundary(a), "empty next: start on boundary");
+                kani::assert(haystack.is_char_boundary(b), "empty next: end on boundary");
+            }
+            SearchStep::Done => kani::cover(true, "ch21 empty next done arm"),
+        }
+    }
+
+    // UNBOUNDED stepping: on the empty arm `next_match` returns after <=2 internal `next`
+    // steps (Match/Reject strictly alternate), so a 2-char cursor window covers it — the
+    // iteration bound is structural, independent of haystack length.
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(4)]
+    fn ch21_empty_next_match_preserves() {
+        let haystack = symbolic_str();
+        let mut s = StrSearcher::kani_arbitrary_empty_step(haystack, 2);
+        let _m = s.next_match();
+        kani::assert(s.is_safe(), "empty next_match: C preserved (unbounded haystack)");
+    }
+
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(4)]
+    fn ch21_empty_next_match_boundaries() {
+        let haystack = symbolic_str();
+        let mut s = StrSearcher::kani_arbitrary_empty_step(haystack, 2);
+        if let Some((a, b)) = s.next_match() {
+            kani::cover(true, "ch21 empty next_match span returned");
+            kani::assert(haystack.is_char_boundary(a), "empty next_match: start on boundary");
+            kani::assert(haystack.is_char_boundary(b), "empty next_match: end on boundary");
+        } else {
+            kani::cover(true, "ch21 empty next_match exhausted arm");
+        }
+    }
+
+    // Same structural <=2-step argument for the provided method `next_reject`.
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(4)]
+    fn ch21_empty_next_reject_preserves() {
+        let haystack = symbolic_str();
+        let mut s = StrSearcher::kani_arbitrary_empty_step(haystack, 2);
+        let _r = s.next_reject();
+        kani::assert(s.is_safe(), "empty next_reject: C preserved (unbounded haystack)");
+    }
+
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(4)]
+    fn ch21_empty_next_reject_boundaries() {
+        let haystack = symbolic_str();
+        let mut s = StrSearcher::kani_arbitrary_empty_step(haystack, 2);
+        if let Some((a, b)) = s.next_reject() {
+            kani::cover(true, "ch21 empty next_reject span returned");
+            kani::assert(haystack.is_char_boundary(a), "empty next_reject: start on boundary");
+            kani::assert(haystack.is_char_boundary(b), "empty next_reject: end on boundary");
+        } else {
+            kani::cover(true, "ch21 empty next_reject exhausted arm");
+        }
+    }
+
+    // The str indexing in these methods carries a diverging panic-formatter path
+    // (`core::str::slice_error_fail`) that is DEAD under the type invariant — every index the
+    // methods produce is in-bounds and on a char boundary — but which CBMC still symbolically
+    // explores, exploding the object count (the reject methods loop internally, multiplying
+    // the cost). We stub it with a diverging no-op so the dead path is pruned;
+    // `ch21_stub_falsifier` proves the stub is divergence-preserving (a path that actually
+    // reaches it still halts verification — nothing is silently masked).
+    #[cfg(kani)]
+    fn ch21_stub_sef(_s: &str, _begin: usize, _end: usize) -> ! {
+        kani::panic("slice_error_fail stubbed: unreachable under the StrSearcher type invariant")
+    }
+
+    // Soundness falsifier for the stub: a deliberately out-of-range slice REACHES the stubbed
+    // path; `should_panic` requires it to panic (via the stub's divergence), proving the stub
+    // does not silently accept a bad slice. Passes in CI by panicking — machine-checked.
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::should_panic]
+    fn ch21_stub_falsifier() {
+        let h = "aé";
+        let i: usize = kani::any();
+        kani::assume(i > h.len());
+        let _ = &h[i..];
+    }
+
+    // Bounded companions: drive the real StrSearcher methods to completion on a concrete
+    // fixture containing a multi-byte char, asserting the type invariant is preserved after
+    // every step and that every returned span lies on UTF-8 char boundaries. Bounded by
+    // construction (concrete inputs); one loop per searcher arm: needle "" (empty arm),
+    // "a" (one byte, single-byte arm), "é" (two bytes, Two-Way arm). Fixture "aé" =
+    // 'a' (1 byte) + 'é' (2 bytes): char boundaries at 0, 1, 3; offset 2 is mid-character.
+    // unwind 10: each arm's loop drives at most 5 steps + Done (sequences traced in the
+    // count asserts below); 10 leaves slack for the unwind check itself.
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(10)]
+    fn ch21_bounded_next() {
+        let h = "aé";
+        let (mut m, mut r) = (0, 0);
+        let mut e = "".into_searcher(h);
+        loop {
+            match e.next() {
+                SearchStep::Match(a, b) => {
+                    m += 1;
+                    kani::assert(h.is_char_boundary(a), "next empty: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next empty: span end on boundary");
+                    kani::assert(e.is_safe(), "next empty: C preserved");
+                }
+                SearchStep::Reject(a, b) => {
+                    r += 1;
+                    kani::assert(h.is_char_boundary(a), "next empty: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next empty: span end on boundary");
+                    kani::assert(e.is_safe(), "next empty: C preserved");
+                }
+                SearchStep::Done => break,
+            }
+        }
+        // "" over "aé": Match(0,0) Reject(0,1) Match(1,1) Reject(1,3) Match(3,3) Done.
+        kani::assert(m == 3 && r == 2, "next empty: exact step counts (3 matches, 2 rejects)");
+        let (mut m, mut r) = (0, 0);
+        let mut by = "a".into_searcher(h);
+        loop {
+            match by.next() {
+                SearchStep::Match(a, b) => {
+                    m += 1;
+                    kani::assert(h.is_char_boundary(a), "next byte: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next byte: span end on boundary");
+                    kani::assert(by.is_safe(), "next byte: C preserved");
+                }
+                SearchStep::Reject(a, b) => {
+                    r += 1;
+                    kani::assert(h.is_char_boundary(a), "next byte: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next byte: span end on boundary");
+                    kani::assert(by.is_safe(), "next byte: C preserved");
+                }
+                SearchStep::Done => break,
+            }
+        }
+        // "a" over "aé" (one-byte needle, single-byte arm): Match(0,1) Reject(1,3) Done.
+        kani::assert(m == 1 && r == 1, "next byte: exact step counts (1 match, 1 reject)");
+        let (mut m, mut r) = (0, 0);
+        let mut tw = "é".into_searcher(h);
+        // Criterion 1, Two-Way arm (bounded): creation establishes C. The empty and
+        // single-byte arms have dedicated unbounded creation harnesses above; the Two-Way
+        // constructor is only reachable on a concrete fixture at this pin, so its
+        // creation check lives here, before the first step.
+        kani::assert(tw.is_safe(), "creation twoway: C established at creation");
+        loop {
+            match tw.next() {
+                SearchStep::Match(a, b) => {
+                    m += 1;
+                    kani::assert(h.is_char_boundary(a), "next twoway: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next twoway: span end on boundary");
+                    kani::assert(tw.is_safe(), "next twoway: C preserved");
+                }
+                SearchStep::Reject(a, b) => {
+                    r += 1;
+                    kani::assert(h.is_char_boundary(a), "next twoway: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next twoway: span end on boundary");
+                    kani::assert(tw.is_safe(), "next twoway: C preserved");
+                }
+                SearchStep::Done => break,
+            }
+        }
+        // "é" over "aé" (two-byte needle, Two-Way arm): Reject(0,1) Match(1,3) Done.
+        kani::assert(m == 1 && r == 1, "next twoway: exact step counts (1 match, 1 reject)");
+        kani::cover(true, "ch21 next: all three arms driven to Done");
+    }
+
+    // unwind 10: at most 3 yields + exhaustion per arm (counts asserted below).
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(10)]
+    fn ch21_bounded_next_match() {
+        let h = "aé";
+        let mut n = 0;
+        let mut e = "".into_searcher(h);
+        while let Some((a, b)) = e.next_match() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_match empty: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_match empty: end on boundary");
+            kani::assert(e.is_safe(), "next_match empty: C preserved");
+        }
+        kani::assert(e.is_safe(), "next_match empty: C preserved at Done");
+        // "" matches at every boundary of "aé": 0, 1, 3.
+        kani::assert(n == 3, "next_match empty: exactly 3 matches");
+        let mut n = 0;
+        let mut by = "a".into_searcher(h);
+        while let Some((a, b)) = by.next_match() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_match byte: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_match byte: end on boundary");
+            kani::assert(by.is_safe(), "next_match byte: C preserved");
+        }
+        kani::assert(by.is_safe(), "next_match byte: C preserved at Done");
+        // "a" occurs once in "aé", at (0,1).
+        kani::assert(n == 1, "next_match byte: exactly 1 match");
+        let mut n = 0;
+        let mut tw = "é".into_searcher(h);
+        while let Some((a, b)) = tw.next_match() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_match twoway: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_match twoway: end on boundary");
+            kani::assert(tw.is_safe(), "next_match twoway: C preserved");
+        }
+        kani::assert(tw.is_safe(), "next_match twoway: C preserved at Done");
+        // "é" occurs once in "aé", at (1,3).
+        kani::assert(n == 1, "next_match twoway: exactly 1 match");
+        kani::cover(true, "ch21 next_match: all three arms exhausted");
+    }
+
+    // unwind 10: at most 2 yields + exhaustion per arm (counts asserted below); exercises the
+    // provided-method path (`next_reject` is a `Searcher` default method looping `next`).
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(10)]
+    fn ch21_bounded_next_reject() {
+        let h = "aé";
+        let mut n = 0;
+        let mut e = "".into_searcher(h);
+        while let Some((a, b)) = e.next_reject() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_reject empty: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_reject empty: end on boundary");
+            kani::assert(e.is_safe(), "next_reject empty: C preserved");
+        }
+        kani::assert(e.is_safe(), "next_reject empty: C preserved at Done");
+        // "" rejects each char of "aé": (0,1) and (1,3).
+        kani::assert(n == 2, "next_reject empty: exactly 2 rejects");
+        let mut n = 0;
+        let mut by = "a".into_searcher(h);
+        while let Some((a, b)) = by.next_reject() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_reject byte: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_reject byte: end on boundary");
+            kani::assert(by.is_safe(), "next_reject byte: C preserved");
+        }
+        kani::assert(by.is_safe(), "next_reject byte: C preserved at Done");
+        // After the match at (0,1), the remaining "é" is rejected as (1,3).
+        kani::assert(n == 1, "next_reject byte: exactly 1 reject");
+        let mut n = 0;
+        let mut tw = "é".into_searcher(h);
+        while let Some((a, b)) = tw.next_reject() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_reject twoway: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_reject twoway: end on boundary");
+            kani::assert(tw.is_safe(), "next_reject twoway: C preserved");
+        }
+        kani::assert(tw.is_safe(), "next_reject twoway: C preserved at Done");
+        // The leading 'a' is rejected as (0,1); the match at (1,3) is skipped.
+        kani::assert(n == 1, "next_reject twoway: exactly 1 reject");
+        kani::cover(true, "ch21 next_reject: all three arms exhausted");
+    }
+
+    // Reverse bounded companions: the direction-symmetric mirror of the three forward
+    // companions above, driving the real reverse methods to completion on the same fixture.
+    // A reverse scan visits the same spans as the forward scan in the opposite order, so the
+    // step counts match their forward counterparts. unwind 10 as above.
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(10)]
+    fn ch21_bounded_next_back() {
+        let h = "aé";
+        let (mut m, mut r) = (0, 0);
+        let mut e = "".into_searcher(h);
+        loop {
+            match e.next_back() {
+                SearchStep::Match(a, b) => {
+                    m += 1;
+                    kani::assert(h.is_char_boundary(a), "next_back empty: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next_back empty: span end on boundary");
+                    kani::assert(e.is_safe(), "next_back empty: C preserved");
+                }
+                SearchStep::Reject(a, b) => {
+                    r += 1;
+                    kani::assert(h.is_char_boundary(a), "next_back empty: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next_back empty: span end on boundary");
+                    kani::assert(e.is_safe(), "next_back empty: C preserved");
+                }
+                SearchStep::Done => break,
+            }
+        }
+        // "" over "aé", reverse: Match(3,3) Reject(1,3) Match(1,1) Reject(0,1) Match(0,0) Done.
+        kani::assert(m == 3 && r == 2, "next_back empty: exact step counts (3 matches, 2 rejects)");
+        let (mut m, mut r) = (0, 0);
+        let mut by = "a".into_searcher(h);
+        loop {
+            match by.next_back() {
+                SearchStep::Match(a, b) => {
+                    m += 1;
+                    kani::assert(h.is_char_boundary(a), "next_back byte: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next_back byte: span end on boundary");
+                    kani::assert(by.is_safe(), "next_back byte: C preserved");
+                }
+                SearchStep::Reject(a, b) => {
+                    r += 1;
+                    kani::assert(h.is_char_boundary(a), "next_back byte: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next_back byte: span end on boundary");
+                    kani::assert(by.is_safe(), "next_back byte: C preserved");
+                }
+                SearchStep::Done => break,
+            }
+        }
+        // "a" over "aé", reverse (single-byte arm): Reject(1,3) Match(0,1) Done.
+        kani::assert(m == 1 && r == 1, "next_back byte: exact step counts (1 match, 1 reject)");
+        let (mut m, mut r) = (0, 0);
+        let mut tw = "é".into_searcher(h);
+        loop {
+            match tw.next_back() {
+                SearchStep::Match(a, b) => {
+                    m += 1;
+                    kani::assert(h.is_char_boundary(a), "next_back twoway: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next_back twoway: span end on boundary");
+                    kani::assert(tw.is_safe(), "next_back twoway: C preserved");
+                }
+                SearchStep::Reject(a, b) => {
+                    r += 1;
+                    kani::assert(h.is_char_boundary(a), "next_back twoway: span start on boundary");
+                    kani::assert(h.is_char_boundary(b), "next_back twoway: span end on boundary");
+                    kani::assert(tw.is_safe(), "next_back twoway: C preserved");
+                }
+                SearchStep::Done => break,
+            }
+        }
+        // "é" over "aé", reverse (Two-Way arm): Match(1,3) Reject(0,1) Done.
+        kani::assert(m == 1 && r == 1, "next_back twoway: exact step counts (1 match, 1 reject)");
+        kani::cover(true, "ch21 next_back: all three arms driven to Done");
+    }
+
+    // unwind 10: at most 3 yields + exhaustion per arm (counts asserted below).
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(10)]
+    fn ch21_bounded_next_match_back() {
+        let h = "aé";
+        let mut n = 0;
+        let mut e = "".into_searcher(h);
+        while let Some((a, b)) = e.next_match_back() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_match_back empty: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_match_back empty: end on boundary");
+            kani::assert(e.is_safe(), "next_match_back empty: C preserved");
+        }
+        kani::assert(e.is_safe(), "next_match_back empty: C preserved at Done");
+        // "" matches at every boundary of "aé": 3, 1, 0.
+        kani::assert(n == 3, "next_match_back empty: exactly 3 matches");
+        let mut n = 0;
+        let mut by = "a".into_searcher(h);
+        while let Some((a, b)) = by.next_match_back() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_match_back byte: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_match_back byte: end on boundary");
+            kani::assert(by.is_safe(), "next_match_back byte: C preserved");
+        }
+        kani::assert(by.is_safe(), "next_match_back byte: C preserved at Done");
+        // "a" occurs once in "aé", at (0,1).
+        kani::assert(n == 1, "next_match_back byte: exactly 1 match");
+        let mut n = 0;
+        let mut tw = "é".into_searcher(h);
+        while let Some((a, b)) = tw.next_match_back() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_match_back twoway: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_match_back twoway: end on boundary");
+            kani::assert(tw.is_safe(), "next_match_back twoway: C preserved");
+        }
+        kani::assert(tw.is_safe(), "next_match_back twoway: C preserved at Done");
+        // "é" occurs once in "aé", at (1,3).
+        kani::assert(n == 1, "next_match_back twoway: exactly 1 match");
+        kani::cover(true, "ch21 next_match_back: all three arms exhausted");
+    }
+
+    // unwind 10: at most 2 yields + exhaustion per arm; exercises the provided-method path
+    // (`next_reject_back` is a `ReverseSearcher` default method looping `next_back`).
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(10)]
+    fn ch21_bounded_next_reject_back() {
+        let h = "aé";
+        let mut n = 0;
+        let mut e = "".into_searcher(h);
+        while let Some((a, b)) = e.next_reject_back() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_reject_back empty: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_reject_back empty: end on boundary");
+            kani::assert(e.is_safe(), "next_reject_back empty: C preserved");
+        }
+        kani::assert(e.is_safe(), "next_reject_back empty: C preserved at Done");
+        // "" rejects each char of "aé": (1,3) and (0,1).
+        kani::assert(n == 2, "next_reject_back empty: exactly 2 rejects");
+        let mut n = 0;
+        let mut by = "a".into_searcher(h);
+        while let Some((a, b)) = by.next_reject_back() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_reject_back byte: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_reject_back byte: end on boundary");
+            kani::assert(by.is_safe(), "next_reject_back byte: C preserved");
+        }
+        kani::assert(by.is_safe(), "next_reject_back byte: C preserved at Done");
+        // The "é" at (1,3) is rejected; the match at (0,1) is skipped.
+        kani::assert(n == 1, "next_reject_back byte: exactly 1 reject");
+        let mut n = 0;
+        let mut tw = "é".into_searcher(h);
+        while let Some((a, b)) = tw.next_reject_back() {
+            n += 1;
+            kani::assert(h.is_char_boundary(a), "next_reject_back twoway: start on boundary");
+            kani::assert(h.is_char_boundary(b), "next_reject_back twoway: end on boundary");
+            kani::assert(tw.is_safe(), "next_reject_back twoway: C preserved");
+        }
+        kani::assert(tw.is_safe(), "next_reject_back twoway: C preserved at Done");
+        // The trailing 'a' is rejected as (0,1); the match at (1,3) is skipped.
+        kani::assert(n == 1, "next_reject_back twoway: exactly 1 reject");
+        kani::cover(true, "ch21 next_reject_back: all three arms exhausted");
+    }
+
+    // Zero-length-haystack companion: the symbolic harnesses float the haystack length in
+    // [1, 2^40] (`alloc` forbids zero-size allocations), so this pins the one excluded
+    // length concretely. All six methods on all three arms over `""`: the empty-needle
+    // searcher yields exactly one Match(0, 0) per direction (0 is the sole char boundary
+    // of `""`), and the single-byte and Two-Way searchers terminate immediately. The
+    // needle blocks are written out straight-line (no needle array) so every searcher
+    // kind stays a compile-time constant for the solver.
+    // unwind 10: the provided reject methods loop internally; every sequence here is at
+    // most one yield.
+    #[kani::proof]
+    #[kani::stub(core::str::slice_error_fail, ch21_stub_sef)]
+    #[kani::unwind(10)]
+    fn ch21_bounded_empty_haystack() {
+        let h = "";
+        let mut e = "".into_searcher(h);
+        kani::assert(e.is_safe(), "empty haystack: C established at creation (empty arm)");
+        kani::assert(
+            matches!(e.next(), SearchStep::Match(0, 0)),
+            "empty/empty: next is Match(0,0)",
+        );
+        kani::assert(e.is_safe(), "empty/empty: C preserved after next");
+        kani::assert(matches!(e.next(), SearchStep::Done), "empty/empty: next then Done");
+        let mut e = "".into_searcher(h);
+        kani::assert(
+            matches!(e.next_back(), SearchStep::Match(0, 0)),
+            "empty/empty: next_back is Match(0,0)",
+        );
+        kani::assert(e.is_safe(), "empty/empty: C preserved after next_back");
+        kani::assert(matches!(e.next_back(), SearchStep::Done), "empty/empty: next_back then Done");
+        let mut e = "".into_searcher(h);
+        kani::assert(matches!(e.next_match(), Some((0, 0))), "empty/empty: one match at (0,0)");
+        kani::assert(matches!(e.next_match(), None), "empty/empty: next_match exhausted");
+        let mut e = "".into_searcher(h);
+        kani::assert(matches!(e.next_reject(), None), "empty/empty: no rejects");
+        let mut e = "".into_searcher(h);
+        kani::assert(
+            matches!(e.next_match_back(), Some((0, 0))),
+            "empty/empty: one back-match at (0,0)",
+        );
+        kani::assert(matches!(e.next_match_back(), None), "empty/empty: next_match_back exhausted");
+        let mut e = "".into_searcher(h);
+        kani::assert(matches!(e.next_reject_back(), None), "empty/empty: no back-rejects");
+        kani::assert(e.is_safe(), "empty/empty: C preserved at exhaustion");
+        // "a" routes to the single-byte arm; over "" every method terminates on the
+        // first call.
+        let mut s = "a".into_searcher(h);
+        kani::assert(s.is_safe(), "empty/byte: C established at creation");
+        kani::assert(matches!(s.next(), SearchStep::Done), "empty/byte: next is Done");
+        kani::assert(s.is_safe(), "empty/byte: C preserved after next");
+        let mut s = "a".into_searcher(h);
+        kani::assert(matches!(s.next_back(), SearchStep::Done), "empty/byte: next_back is Done");
+        kani::assert(s.is_safe(), "empty/byte: C preserved after next_back");
+        let mut s = "a".into_searcher(h);
+        kani::assert(matches!(s.next_match(), None), "empty/byte: no matches");
+        let mut s = "a".into_searcher(h);
+        kani::assert(matches!(s.next_reject(), None), "empty/byte: no rejects");
+        let mut s = "a".into_searcher(h);
+        kani::assert(matches!(s.next_match_back(), None), "empty/byte: no back-matches");
+        let mut s = "a".into_searcher(h);
+        kani::assert(matches!(s.next_reject_back(), None), "empty/byte: no back-rejects");
+        kani::assert(s.is_safe(), "empty/byte: C preserved at exhaustion");
+        // "é" (two bytes) routes to the Two-Way arm.
+        let mut s = "é".into_searcher(h);
+        kani::assert(s.is_safe(), "empty/twoway: C established at creation");
+        kani::assert(matches!(s.next(), SearchStep::Done), "empty/twoway: next is Done");
+        kani::assert(s.is_safe(), "empty/twoway: C preserved after next");
+        let mut s = "é".into_searcher(h);
+        kani::assert(matches!(s.next_back(), SearchStep::Done), "empty/twoway: next_back is Done");
+        kani::assert(s.is_safe(), "empty/twoway: C preserved after next_back");
+        let mut s = "é".into_searcher(h);
+        kani::assert(matches!(s.next_match(), None), "empty/twoway: no matches");
+        let mut s = "é".into_searcher(h);
+        kani::assert(matches!(s.next_reject(), None), "empty/twoway: no rejects");
+        let mut s = "é".into_searcher(h);
+        kani::assert(matches!(s.next_match_back(), None), "empty/twoway: no back-matches");
+        let mut s = "é".into_searcher(h);
+        kani::assert(matches!(s.next_reject_back(), None), "empty/twoway: no back-rejects");
+        kani::assert(s.is_safe(), "empty/twoway: C preserved at exhaustion");
+        kani::cover(true, "ch21 empty haystack: all three arms exercised");
+    }
+
+    // Unbounded reverse coverage is staged, not blocked by technique. `next_back`'s Reject
+    // branch calls `str::floor_char_boundary`, which reads the haystack's first byte and
+    // walks back up to four bytes, resting on global UTF-8 well-formedness that the
+    // symbolic-length technique does not supply at the cursor. (`next_match_back` avoids
+    // this: `memrchr` returns an exact ASCII position, already a boundary — hence its
+    // unbounded proof above.) The loop-contract upgrade that lifts the Two-Way rows to
+    // unbounded lifts these too.
+}
