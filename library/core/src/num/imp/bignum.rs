@@ -149,7 +149,7 @@ macro_rules! define_bignum {
                 let mut sz = cmp::max(self.size, other.size);
                 #[cfg(kani)]
                 {
-                    sz = crate::num::bignum::kani_loop_size(sz);
+                    sz = crate::num::imp::bignum::kani_loop_size(sz);
                 }
                 let mut carry = false;
                 for (a, b) in iter::zip(&mut self.base[..sz], &other.base[..sz]) {
@@ -187,7 +187,7 @@ macro_rules! define_bignum {
 
                 let sz = cmp::max(self.size, other.size);
                 #[cfg(kani)]
-                let sz = crate::num::bignum::kani_loop_size(sz);
+                let sz = crate::num::imp::bignum::kani_loop_size(sz);
                 let mut noborrow = true;
                 for (a, b) in iter::zip(&mut self.base[..sz], &other.base[..sz]) {
                     let (v, c) = (*a).carrying_add(!*b, noborrow);
@@ -205,7 +205,7 @@ macro_rules! define_bignum {
                 let mut sz = self.size;
                 #[cfg(kani)]
                 {
-                    sz = crate::num::bignum::kani_loop_size(sz);
+                    sz = crate::num::imp::bignum::kani_loop_size(sz);
                 }
                 let mut carry = 0;
                 for a in &mut self.base[..sz] {
