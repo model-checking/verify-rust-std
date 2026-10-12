@@ -429,7 +429,15 @@ pub fn format_exact<'a>(
 pub mod dragon_verify {
     use super::*;
     use crate::kani;
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    use crate::num::imp::bignum::Big32x40 as Big;
+    #[cfg(target_pointer_width = "64")]
+    use crate::num::imp::bignum::Big64x20 as Big;
     use crate::num::imp::bignum::KANI_LIMBS;
+    #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
+    use crate::primitive::u32 as Digit;
+    #[cfg(target_pointer_width = "64")]
+    use crate::primitive::u64 as Digit;
     #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
     type WideDigit = u64;
     #[cfg(target_pointer_width = "64")]
