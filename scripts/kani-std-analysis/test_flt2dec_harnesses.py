@@ -15,10 +15,10 @@ class Flt2decHarnessesTests(unittest.TestCase):
 
     def test_complete_disjoint_batches_on_both_platforms(self):
         self.assertEqual(OPERATING_SYSTEMS, ["ubuntu-latest", "macos-latest"])
-        self.assertEqual(len(self.groups), 95)
-        self.assertEqual(len({group["name"] for group in self.groups}), 95)
-        self.assertEqual(len(self.dedicated), 342)
-        self.assertEqual(len(set(self.dedicated)), 342)
+        self.assertEqual(len(self.groups), 93)
+        self.assertEqual(len({group["name"] for group in self.groups}), 93)
+        self.assertEqual(len(self.dedicated), 322)
+        self.assertEqual(len(set(self.dedicated)), 322)
         self.assertLessEqual(len(self.groups) * len(OPERATING_SYSTEMS), 256)
         for group in self.groups:
             minutes = group["timeout_minutes"]
@@ -42,7 +42,15 @@ class Flt2decHarnessesTests(unittest.TestCase):
         multiplication = [harness for group in self.groups
                           if group["name"].startswith("small-multiplication-")
                           for harness in group["harnesses"]]
-        self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in multiplication}, set(range(40)))
+        self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in multiplication}, set(range(20)))
+
+        for width, limb_count in ((16, 40), (32, 40), (64, 20)):
+            with self.subTest(pointer_width=width):
+                cases = [harness for group in proof_groups(width)
+                         if group["name"].startswith("small-multiplication-")
+                         for harness in group["harnesses"]]
+                self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in cases},
+                                 set(range(limb_count)))
         division = [harness for group in self.groups
                     if group["name"].startswith("decimal-division-")
                     for harness in group["harnesses"]]
@@ -53,7 +61,7 @@ class Flt2decHarnessesTests(unittest.TestCase):
         self.assertEqual({int(harness.rsplit("_", 1)[1]) for harness in scaling}, set(range(66)))
 
     def test_only_exact_catalog_names_are_removed(self):
-        retained = ["num::flt2dec::check_wrapper", "num::flt2dec::check_future_proof",
+        retained = ["num::imp::flt2dec::check_wrapper", "num::imp::flt2dec::check_future_proof",
                     self.dedicated[0] + "_extra", "unrelated::proof", "unrelated::proof"]
         self.inventory["standard-harnesses"]["retained"] = retained[:3]
         self.inventory["contract-harnesses"]["retained"] = retained[3:]

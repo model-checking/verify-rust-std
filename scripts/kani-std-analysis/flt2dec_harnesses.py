@@ -5,12 +5,17 @@ import json
 import sys
 
 
-DRAGON = "num::flt2dec::strategy::dragon::dragon_verify"
-GRISU = "num::flt2dec::strategy::grisu::grisu_verify"
+DRAGON = "num::imp::flt2dec::strategy::dragon::dragon_verify"
+GRISU = "num::imp::flt2dec::strategy::grisu::grisu_verify"
 OPERATING_SYSTEMS = ["ubuntu-latest", "macos-latest"]
 
 
-def proof_groups():
+def proof_groups(pointer_width=None):
+    if pointer_width is None:
+        pointer_width = 64 if sys.maxsize > 2**32 else 32
+    if pointer_width not in (16, 32, 64):
+        raise ValueError("Expected a 16-, 32-, or 64-bit target")
+    limb_count = 20 if pointer_width == 64 else 40
     groups = []
 
     def add(name, kind, harnesses, timeout_minutes):
@@ -44,13 +49,13 @@ def proof_groups():
         ("limb-division-contract", DRAGON, "check_div_rem_digit_contract", "contract"),
         ("limb-multiplication-contract", DRAGON, "check_carrying_mul_add_contract", "contract"),
         ("bigint-small-division-contract", DRAGON, "check_div_rem_small_contract", "contract"),
-        ("rounding-contract", "num::flt2dec::rounding_verify", "check_round_up_contract", "contract"),
+        ("rounding-contract", "num::imp::flt2dec::rounding_verify", "check_round_up_contract", "contract"),
         ("grisu-exact-rounding-contract", GRISU, "check_round_exact_contract", "contract"),
         ("grisu-shortest-rounding-contract", GRISU, "check_round_shortest_contract", "contract"),
         ("comparison-equivalence", DRAGON, "check_comparison_models_agree", "equivalence"),
         ("addition-equivalence", DRAGON, "check_add_model_agrees", "equivalence"),
         ("subtraction-equivalence", DRAGON, "check_sub_model_agrees", "equivalence"),
-        ("bit-scan-equivalence", "num::flt2dec::bit_scan_verify", "check_leading_zeros_models_agree", "equivalence"),
+        ("bit-scan-equivalence", "num::imp::flt2dec::bit_scan_verify", "check_leading_zeros_models_agree", "equivalence"),
     ]:
         add(name, kind, [f"{module}::{proof}"], 30)
 
@@ -60,16 +65,17 @@ def proof_groups():
             f"{GRISU}::check_scale_shortest_{group:02d}" for group in range(first, last + 1)
         ], 60)
 
-    for first in range(0, 40, 8):
-        add(f"small-multiplication-equivalence-{first:02d}-{first + 7:02d}", "equivalence", [
+    for first in range(0, limb_count, 8):
+        last = min(first + 7, limb_count - 1)
+        add(f"small-multiplication-equivalence-{first:02d}-{last:02d}", "equivalence", [
             f"{DRAGON}::check_mul_small_model_agrees_{size:02d}"
-            for size in range(first, first + 8)
+            for size in range(first, last + 1)
         ], 30)
 
     for first in range(0, 65, 8):
         last = min(first + 7, 64)
         add(f"estimator-equivalence-{first:02d}-{last:02d}", "equivalence", [
-            f"num::flt2dec::estimator_verify::check_estimator_model_agrees_{bits:02d}"
+            f"num::imp::flt2dec::estimator_verify::check_estimator_model_agrees_{bits:02d}"
             for bits in range(first, last + 1)
         ], 30)
 

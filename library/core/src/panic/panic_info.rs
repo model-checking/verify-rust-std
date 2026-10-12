@@ -13,7 +13,7 @@ use crate::panic::Location;
 #[derive(Debug)]
 pub struct PanicInfo<'a> {
     message: &'a fmt::Arguments<'a>,
-    location: &'a Location<'a>,
+    location: &'static Location<'static>,
     can_unwind: bool,
     force_no_backtrace: bool,
 }
@@ -33,7 +33,7 @@ impl<'a> PanicInfo<'a> {
     #[inline]
     pub(crate) fn new(
         message: &'a fmt::Arguments<'a>,
-        location: &'a Location<'a>,
+        location: &'static Location<'static>,
         can_unwind: bool,
         force_no_backtrace: bool,
     ) -> Self {
@@ -88,10 +88,10 @@ impl<'a> PanicInfo<'a> {
     /// ```
     #[must_use]
     #[stable(feature = "panic_hooks", since = "1.10.0")]
-    pub fn location(&self) -> Option<&Location<'_>> {
+    pub fn location(&self) -> Option<&'static Location<'static>> {
         // NOTE: If this is changed to sometimes return None,
         // deal with that case in std::panicking::default_hook and core::panicking::panic_fmt.
-        Some(&self.location)
+        Some(self.location)
     }
 
     /// Returns the payload associated with the panic.
@@ -106,7 +106,7 @@ impl<'a> PanicInfo<'a> {
     /// [`std::panic::PanicHookInfo::payload`]: ../../std/panic/struct.PanicHookInfo.html#method.payload
     #[deprecated(since = "1.81.0", note = "this never returns anything useful")]
     #[stable(feature = "panic_hooks", since = "1.10.0")]
-    #[allow(deprecated, deprecated_in_future)]
+    #[allow(deprecated)]
     pub fn payload(&self) -> &(dyn crate::any::Any + Send) {
         struct NoPayload;
         &NoPayload
