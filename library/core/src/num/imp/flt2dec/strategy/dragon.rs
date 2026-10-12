@@ -559,8 +559,22 @@ pub mod dragon_verify {
         ($name:ident, $size:literal) => {
             #[kani::proof]
             #[kani::unwind(41)]
-            #[kani::stub(Digit::carrying_mul, carrying_mul_model)]
-            #[kani::stub(Digit::carrying_mul_add, carrying_mul_add_model)]
+            #[cfg_attr(
+                target_pointer_width = "64",
+                kani::stub(u64::carrying_mul, carrying_mul_model)
+            )]
+            #[cfg_attr(
+                target_pointer_width = "64",
+                kani::stub(u64::carrying_mul_add, carrying_mul_add_model)
+            )]
+            #[cfg_attr(
+                any(target_pointer_width = "16", target_pointer_width = "32"),
+                kani::stub(u32::carrying_mul, carrying_mul_model)
+            )]
+            #[cfg_attr(
+                any(target_pointer_width = "16", target_pointer_width = "32"),
+                kani::stub(u32::carrying_mul_add, carrying_mul_add_model)
+            )]
             #[kani::solver(z3)]
             fn $name() {
                 check_mul_small_model_agrees::<$size>();
@@ -746,10 +760,14 @@ pub mod dragon_verify {
     }
 
     #[kani::proof_for_contract(div_rem_small_contract)]
-    #[kani::stub(
-        <Digit as crate::num::imp::bignum::FullOps>::full_div_rem,
+    #[cfg_attr(target_pointer_width = "64", kani::stub(
+        <u64 as crate::num::imp::bignum::FullOps>::full_div_rem,
         stub_div_rem_digit
-    )]
+    ))]
+    #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(
+        <u32 as crate::num::imp::bignum::FullOps>::full_div_rem,
+        stub_div_rem_digit
+    ))]
     #[kani::stub_verified(div_rem_digit_contract)]
     #[kani::unwind(41)]
     #[kani::solver(kissat)]
@@ -983,8 +1001,10 @@ pub mod dragon_verify {
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
-                #[kani::stub(Digit::carrying_mul, carrying_mul_model)]
-                #[kani::stub(Digit::carrying_mul_add, carrying_mul_add_model)]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
                 #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
@@ -1026,8 +1046,10 @@ pub mod dragon_verify {
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
-                #[kani::stub(Digit::carrying_mul, carrying_mul_model)]
-                #[kani::stub(Digit::carrying_mul_add, carrying_mul_add_model)]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
+                #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul_add, carrying_mul_add_model))]
                 #[kani::stub(crate::num::imp::flt2dec::estimator::estimate_scaling_factor, $estimate)]
                 #[kani::stub(
                     u64::leading_zeros,
