@@ -1,0 +1,15 @@
+{
+  "crate_name": "core",
+  "autoharness_md": {
+    "chosen": ["z::<u8>", "a"],
+    "skipped": {
+      "bounded": {"RequiresBoundedArguments": [["input", "&[u8]"]]},
+      "generic": "GenericFn",
+      "generic_new": {"GenericFn": "no candidate type"},
+      "internal": "KaniImpl",
+      "missing": {"MissingArbitraryImpl": [["p", "*const u8"]]},
+      "no_body": "NoBody",
+      "unknown": {"FutureReason": {"z": 1, "a": 2}}
+    }
+  }
+}

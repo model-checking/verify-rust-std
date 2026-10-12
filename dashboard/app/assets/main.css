@@ -1,0 +1,11 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #f5f3ed; color: #17211d; }
+.site-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 18px; background: #fffdf8; border-bottom: 1px solid #dedbd2; }
+.site-nav > div { display: flex; gap: 8px; }
+.site-nav a { padding: 10px 14px; color: inherit; text-decoration: none; border-radius: 6px; }
+.site-nav a.router-link-active { background: #087f5b; color: white; }
+.my-app-dark body { background: #111714; color: #eef4ef; }
+.my-app-dark .site-nav { background: #18201c; border-color: #344039; }
+button, input, select { font: inherit; }
+a:focus-visible, button:focus-visible { outline: 3px solid #e87528; outline-offset: 3px; }
+@media (max-width: 450px) { .site-nav { padding: 6px; }.site-nav a { padding: 10px; } }
