@@ -31,9 +31,10 @@ if [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
         exit 2
     fi
     # The Yices-compatible encoding avoids CBMC's datatype construction failure.
-    # The external solver is the installed Z3 binary, which accepts this SMT2 input.
-    echo "Using Z3 with CBMC's Yices-compatible SMT encoding." >&2
-    kani_cbmc_args+=(--yices --external-smt2-solver z3)
+    # The adapter declares quantified logic without changing any assertions.
+    kani_flat_smt_wrapper="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/kani-std-analysis/z3-flat-smt.sh"
+    echo "Using Z3 with CBMC's flat SMT encoding and quantified logic." >&2
+    kani_cbmc_args+=(--yices --external-smt2-solver "$kani_flat_smt_wrapper")
 elif [[ "${KANI_ARITHMETIC_REFINEMENT:-false}" == true ]]; then
     kani_cbmc_args+=(--refine-arithmetic)
 fi
@@ -339,6 +340,10 @@ main() {
 
     echo "Running Kani command..."
     "$kani_path" --version
+
+    if [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
+        bash "$(dirname "$kani_flat_smt_wrapper")/test_z3_flat_smt.sh"
+    fi
 
     if [[ "$run_command" == "verify-std" ]]; then
         if [[ -n "$WORKER_INDEX" && -n "$WORKER_TOTAL" ]]; then

@@ -197,7 +197,22 @@ jobs:
         run: |
           python3 -I -B -m unittest discover \
             -s scripts/kani-std-analysis -p test_log_parser.py
+          scripts/run-kani.sh --run list
+          remaining_manual_harnesses=$(python3 -I scripts/kani-std-analysis/flt2dec_harnesses.py \
+            --remaining kani-list.json)
+          manual_harness_args=()
+          while IFS= read -r harness; do
+            [[ -n "$harness" ]] || continue
+            manual_harness_args+=(--harness "$harness")
+          done <<< "$remaining_manual_harnesses"
+          if (( ${#manual_harness_args[@]} == 0 )); then
+            echo "No remaining manual harnesses were found" >&2
+            exit 1
+          fi
+          # Manual filters leave Kani's automatic harness selection intact.
+          # Dedicated flt2dec proofs run in the check-flt2dec matrix.
           scripts/run-kani.sh --run autoharness --kani-args \
+            --exact "${manual_harness_args[@]}" \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::disjoint_bitor" \
             --include-pattern "<(.+)[[:space:]]as[[:space:]](.+)>::unchecked_disjoint_bitor" \
             --include-pattern "<(.+)[[:space:]]as[[:space:]]iter::range::Step>::backward_unchecked" \
