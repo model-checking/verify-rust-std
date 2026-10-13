@@ -310,12 +310,16 @@ run_verification_subset() {
 check_binary_exists() {
     local build_dir="$1"
     local expected_commit="$2"
-    local kani_path=$(get_kani_path "$build_dir")
-
     if [[ -d "${build_dir}" ]]; then
         local current_commit=$(get_current_commit "$build_dir")
         if [[ "$current_commit" = "$expected_commit" ]]; then
-            return 0
+            if [[ -x "$build_dir/scripts/kani" &&
+                  -x "$build_dir/target/kani/bin/kani-driver" &&
+                  -x "$build_dir/target/kani/bin/kani-compiler" &&
+                  -f "$build_dir/target/kani/lib/libkani.rlib" ]]; then
+                return 0
+            fi
+            echo "Kani runtime is missing or incomplete. Rebuilding..."
         else
             echo "Kani repository is out of date. Rebuilding..."
         fi
