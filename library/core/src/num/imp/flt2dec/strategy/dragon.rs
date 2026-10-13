@@ -931,8 +931,20 @@ pub mod dragon_verify {
         }
     }
 
-    fn checked_limb_count(size: usize) -> usize {
-        LimbCountMask(KANI_LIMBS.next_power_of_two() - 1).check(size)
+    fn checked_f32_limb_count(size: usize) -> usize {
+        // Scaled f32 values fit in five 32-bit limbs. The division abstraction
+        // can also add a carry limb when its result is added to the mantissa.
+        LimbCountMask(7).check(size)
+    }
+
+    fn checked_f64_limb_count<const GROUP: usize>(size: usize) -> usize {
+        let first_exponent = 64 * GROUP as i32;
+        let last_exponent = first_exponent + 63;
+        let value_bits = (1076 - first_exponent).max(last_exponent - 1021).max(64) as usize;
+        // Reserve sixteen bits for decimal scaling and digit extraction,
+        // and a full carry limb for the division abstraction's addition.
+        let limb_bound = (value_bits + 16).div_ceil(Digit::BITS as usize) + 1;
+        LimbCountMask((limb_bound + 1).next_power_of_two() - 1).check(size)
     }
 
     // Only the two unit-exponent diagnostics use these checked count encodings.
@@ -956,8 +968,9 @@ pub mod dragon_verify {
                 33,
                 crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor,
                 checked_pow10_f32,
-                checked_limb_count,
-                checked_limb_count
+                255,
+                checked_f32_limb_count,
+                checked_f32_limb_count
             );
         };
         ($name:ident, $decode:ident, $group:literal, $cover_fallback:literal) => {
@@ -976,20 +989,32 @@ pub mod dragon_verify {
                 $exact_unwind,
                 crate::num::imp::flt2dec::estimator_verify::estimate_scaling_factor,
                 checked_pow10_f64,
-                checked_limb_count,
-                checked_limb_count
+                2047,
+                partition_limb_count,
+                partition_limb_count
             );
         };
         (
             $name:ident, $decode:ident, $group:literal, $cover_fallback:literal,
-            $shortest_unwind:literal, $exact_unwind:literal, $estimate:path, $pow10:ident
+            $shortest_unwind:literal, $exact_unwind:literal, $estimate:path, $pow10:ident,
+            $pow2_mask:literal
             $(, $shortest_limbs:path, $exact_limbs:path)?
         ) => {
             mod $name {
                 use super::*;
 
+                fn partition_limb_count(size: usize) -> usize {
+                    checked_f64_limb_count::<$group>(size)
+                }
+
                 fn stub_pow10_exponent(n: usize) -> usize {
                     $pow10::<$group>(n)
+                }
+
+                fn stub_pow2_bits(bits: usize) -> usize {
+                    let encoded = bits & $pow2_mask;
+                    assert_eq!(encoded, bits);
+                    encoded
                 }
 
                 #[kani::proof]
@@ -1001,6 +1026,7 @@ pub mod dragon_verify {
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
                 #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
                 #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
                 #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
@@ -1046,6 +1072,7 @@ pub mod dragon_verify {
                     #[kani::stub(Big::mul_small, Big::kani_mul_small_model)]
                 )?
                 #[kani::stub(proof_pow10_exponent, stub_pow10_exponent)]
+                #[kani::stub(crate::num::imp::bignum::kani_pow2_bits, stub_pow2_bits)]
                 #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul, carrying_mul_model))]
                 #[cfg_attr(target_pointer_width = "64", kani::stub(u64::carrying_mul_add, carrying_mul_add_model))]
                 #[cfg_attr(any(target_pointer_width = "16", target_pointer_width = "32"), kani::stub(u32::carrying_mul, carrying_mul_model))]
@@ -1100,6 +1127,7 @@ pub mod dragon_verify {
         33,
         estimate_unit_scale,
         checked_pow10_unit,
+        63,
         unit_shortest_limb_count,
         unit_exact_limb_count
     );

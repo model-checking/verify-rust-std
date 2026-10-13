@@ -223,6 +223,12 @@ macro_rules! define_bignum {
 
             /// Multiplies itself by `2^bits` and returns its own mutable reference.
             pub fn mul_pow2(&mut self, bits: usize) -> &mut $name {
+                #[cfg(kani)]
+                let bits = crate::num::imp::bignum::kani_pow2_bits(bits);
+                #[cfg(kani)]
+                let size = crate::num::imp::bignum::kani_loop_size(self.size);
+                #[cfg(not(kani))]
+                let size = self.size;
                 let digitbits = <$ty>::BITS as usize;
                 let digits = bits / digitbits;
                 let bits = bits % digitbits;
@@ -232,7 +238,7 @@ macro_rules! define_bignum {
                 debug_assert!(bits == 0 || (self.base[$n - digits - 1] >> (digitbits - bits)) == 0);
 
                 // shift by `digits * digitbits` bits
-                for i in (0..self.size).rev() {
+                for i in (0..size).rev() {
                     self.base[i + digits] = self.base[i];
                 }
                 for i in 0..digits {
@@ -240,7 +246,7 @@ macro_rules! define_bignum {
                 }
 
                 // shift by `bits` bits
-                let mut sz = self.size + digits;
+                let mut sz = size + digits;
                 if bits > 0 {
                     let last = sz;
                     let overflow = self.base[last - 1] >> (digitbits - bits);
@@ -440,6 +446,11 @@ macro_rules! kani_for_each_limb {
 #[cfg(kani)]
 pub(crate) fn kani_loop_size(size: usize) -> usize {
     size
+}
+
+#[cfg(kani)]
+pub(crate) fn kani_pow2_bits(bits: usize) -> usize {
+    bits
 }
 
 #[cfg(kani)]
