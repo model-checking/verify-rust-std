@@ -342,7 +342,13 @@ main() {
     "$kani_path" --version
 
     if [[ "${KANI_FLAT_SMT_Z3:-false}" == true ]]; then
+        bash "$WORK_DIR/scripts/setup-flat-smt-cbmc.sh" "$WORK_DIR/cbmc_build"
+        export PATH="$WORK_DIR/cbmc_build/bin:$PATH"
         bash "$(dirname "$kani_flat_smt_wrapper")/test_z3_flat_smt.sh"
+        "$kani_path" "$WORK_DIR/scripts/kani-std-analysis/overflow-result.rs" \
+            -Z unstable-options --jobs 1 --harness-timeout 60s \
+            --solver minisat --output-format=terse \
+            --cbmc-args --yices --external-smt2-solver "$kani_flat_smt_wrapper"
     fi
 
     if [[ "$run_command" == "verify-std" ]]; then

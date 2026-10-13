@@ -10,6 +10,8 @@ on:
       - 'library/**'
       - '.github/workflows/kani.yml'
       - 'scripts/run-kani.sh'
+      - 'scripts/setup-flat-smt-cbmc.sh'
+      - 'scripts/kani-std-analysis/overflow-result.rs'
       - 'scripts/kani-std-analysis/flt2dec_harnesses.py'
       - 'scripts/kani-std-analysis/test_flt2dec_harnesses.py'
       - 'scripts/kani-std-analysis/test_run_kani_list.sh'
@@ -21,6 +23,29 @@ defaults:
     shell: bash
 
 jobs:
+  build-flat-smt-cbmc:
+    name: Build patched CBMC (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+      - name: Cache patched verifier
+        id: cbmc
+        uses: actions/cache@v4
+        with:
+          path: head/cbmc_build/bin
+          key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh') }}
+      - name: Install build dependencies
+        if: runner.os == 'Linux' && steps.cbmc.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y cmake flex bison
+      - name: Build pinned verifier with upstream fix
+        run: bash head/scripts/setup-flat-smt-cbmc.sh
+
   check-kani-on-std:
     name: Verify std library (partition ${{ matrix.partition }})
     runs-on: ${{ matrix.os }}
@@ -98,7 +123,7 @@ jobs:
 
   check-flt2dec:
     name: Verify flt2dec (${{ matrix.group.name }}, ${{ matrix.os }})
-    needs: flt2dec_matrix
+    needs: [flt2dec_matrix, build-flat-smt-cbmc]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -133,6 +158,14 @@ jobs:
       - name: Trust CBMC Homebrew tap
         if: runner.os == 'macOS'
         run: brew trust diffblue/cbmc
+
+      - name: Restore patched verifier
+        if: env.KANI_FLAT_SMT_Z3 == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: head/cbmc_build/bin
+          key: cbmc-flat-smt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('head/scripts/setup-flat-smt-cbmc.sh') }}
+          fail-on-cache-miss: true
 
       - name: Verify selected proof groups
         run: |
@@ -366,7 +399,7 @@ jobs:
 
       # The Kani metrics collection uses a Python script (kani_std_analysis.py), so make sure Python is installed
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
@@ -493,7 +526,7 @@ jobs:
 
       # Step 3: Add output to job summary
       - name: Add Kani List output to job summary
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
@@ -521,13 +554,15 @@ jobs:
       - name: Add Autoharness Analyzer output to job summary
         run: |
           pushd scripts/autoharness_analyzer
-          echo "# Autoharness Failure Summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "## Crate core, all functions" >> "$GITHUB_STEP_SUMMARY"
-          cat core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
-          echo "## Crate core, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
-          cat core_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
-          echo "## Crate std, all functions" >> "$GITHUB_STEP_SUMMARY"
-          cat std_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
-          echo "## Crate std, unsafe functions" >> "$GITHUB_STEP_SUMMARY"
-          cat std_unsafe_autoharness_data.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "# Autoharness Failure Summary"
+            echo "## Crate core, all functions"
+            cat core_autoharness_data.md
+            echo "## Crate core, unsafe functions"
+            cat core_autoharness_data.md
+            echo "## Crate std, all functions"
+            cat std_autoharness_data.md
+            echo "## Crate std, unsafe functions"
+            cat std_unsafe_autoharness_data.md
+          } >> "$GITHUB_STEP_SUMMARY"
           popd

@@ -20,6 +20,7 @@ Session.vim
 /book/
 /build/
 /kani_build/
+/cbmc_build/
 /target
 library/target
 scripts/autoharness_analyzer/target/
