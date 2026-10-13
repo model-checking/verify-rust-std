@@ -386,11 +386,24 @@ main() {
               --cbmc-args "${kani_cbmc_args[@]}"
     elif [[ "$run_command" == "list" ]]; then
         echo "Running Kani list command..."
+        local list_format_args=(--format markdown)
+        local argument
+        for argument in "${command_args[@]}"; do
+            case "$argument" in
+                --format|--format=*)
+                    list_format_args=()
+                    break
+                    ;;
+            esac
+        done
         if [[ "$with_autoharness" == "true" ]]; then
-            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library --format markdown \
+            "$kani_path" autoharness -Z autoharness --list $unstable_args --std ./library \
+                "${list_format_args[@]}" \
                 "${command_args[@]}"
         else
-            "$kani_path" list $unstable_args ./library --std --format markdown
+            "$kani_path" list $unstable_args ./library --std \
+                "${list_format_args[@]}" \
+                "${command_args[@]}"
         fi
     elif [[ "$run_command" == "metrics" ]]; then
         local current_dir=$(pwd)
@@ -452,4 +465,6 @@ main() {
     fi
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main
+fi

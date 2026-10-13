@@ -12,6 +12,9 @@ on:
       - 'scripts/run-kani.sh'
       - 'scripts/kani-std-analysis/flt2dec_harnesses.py'
       - 'scripts/kani-std-analysis/test_flt2dec_harnesses.py'
+      - 'scripts/kani-std-analysis/test_run_kani_list.sh'
+      - 'scripts/kani-std-analysis/z3-flat-smt.sh'
+      - 'scripts/kani-std-analysis/test_z3_flat_smt.sh'
 
 defaults:
   run:
@@ -84,7 +87,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check proof routing
-        run: python3 -I -m unittest discover -s scripts/kani-std-analysis -p test_flt2dec_harnesses.py
+        run: |
+          bash scripts/kani-std-analysis/test_run_kani_list.sh
+          python3 -I -m unittest discover -s scripts/kani-std-analysis -p test_flt2dec_harnesses.py
       - name: Build proof matrix
         id: groups
         run: |
