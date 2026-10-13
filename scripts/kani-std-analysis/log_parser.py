@@ -23,7 +23,7 @@ where each entry in the resulting JSON array is of the form
     "crate": string,
     "function": string,
     "function_safeness": string,
-    "file_name": string,
+    "file_name": string | array,
     "n_failed_properties": int,
     "n_total_properties": int,
     "result": string,
@@ -149,7 +149,7 @@ def read_kani_list(kani_list_file, scanner_data):
     standard_harnesses = {}
     for file_name, l in harnesses['standard-harnesses'].items():
         for h in l:
-            assert standard_harnesses.get(h) is None
+            previous = standard_harnesses.get(h)
             if harness_match := re.match(harness_pattern1, h):
                 fn = harness_match.group(1) + harness_match.group(3)
             elif harness_match := re.match(harness_pattern2, h):
@@ -195,6 +195,17 @@ def read_kani_list(kani_list_file, scanner_data):
                         'target_safeness': fn_info[crate]['target_safeness'],
                         'public_target': fn_info[crate]['public_target']
                     }
+            if previous is not None:
+                # Exported names can occur in more than one crate, such as
+                # __rust_panic_cleanup in panic_abort and panic_unwind.
+                # Retain all source locations instead of choosing one crate.
+                entry = standard_harnesses[h]
+                for field in ('file_name', 'crate'):
+                    values = []
+                    for value in (previous[field], entry[field]):
+                        candidates = value if isinstance(value, list) else [value]
+                        values.extend(v for v in candidates if v not in values)
+                    entry[field] = values[0] if len(values) == 1 else values
 
     contract_harnesses = {}
     for file_name, l in harnesses['contract-harnesses'].items():
@@ -203,16 +214,23 @@ def read_kani_list(kani_list_file, scanner_data):
             contract_harnesses[h] = {
                     'file_name': file_name,
                     'crate': crate_from_file(file_name, known_crates),
+                    'function': h,
                     'target_safeness': None,
                     'public_target': None
                 }
     for o in harnesses['contracts']:
         for h in o['harnesses']:
             fn = o['function']
-            if h == 'core::kani::internal::automatic_harness':
-                entry = contract_harnesses[fn]
-            elif h == 'kani::internal::automatic_harness':
-                entry = contract_harnesses[fn]
+            if h in ('core::kani::internal::automatic_harness',
+                     'kani::internal::automatic_harness'):
+                entry = contract_harnesses.get(fn)
+                if entry is None:
+                    # The contract table can name a generic definition while
+                    # the harness table lists concrete instantiations. Keep
+                    # those concrete entries and their contract status; the
+                    # list format does not provide an exact mapping between
+                    # them, so leave scanner classification unknown.
+                    continue
             else:
                 entry = contract_harnesses[h]
                 if o['file'] != entry['file_name']:

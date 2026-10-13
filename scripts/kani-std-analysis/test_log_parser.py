@@ -1,6 +1,55 @@
+import json
+import tempfile
 import unittest
 
-from log_parser import parse_log_lines
+from log_parser import parse_log_lines, read_kani_list
+
+
+class ReadKaniListTests(unittest.TestCase):
+    def read_standard_harnesses(self, harnesses, scanner_data):
+        with tempfile.NamedTemporaryFile(mode='w+') as source:
+            json.dump({'standard-harnesses': harnesses,
+                       'contract-harnesses': {}, 'contracts': []}, source)
+            source.flush()
+            return read_kani_list(source.name, scanner_data)[1]
+
+    def test_exported_name_in_two_crates_preserves_both_locations(self):
+        files = ['/repo/library/panic_abort/src/lib.rs',
+                 '/repo/library/panic_unwind/src/lib.rs']
+        scanner_data = {'other_function': {
+            crate: {'target_safeness': 'unsafe', 'public_target': False}
+            for crate in ('panic_abort', 'panic_unwind')}}
+        result = self.read_standard_harnesses(
+            {file: ['__rust_panic_cleanup'] for file in files}, scanner_data)
+        entry = result['__rust_panic_cleanup']
+        self.assertEqual(entry['file_name'], files)
+        self.assertEqual(entry['crate'], ['panic_abort', 'panic_unwind'])
+        self.assertEqual(entry['function'], '__rust_panic_cleanup')
+
+    def test_repeated_identical_entry_preserves_scalar_metadata(self):
+        result = self.read_standard_harnesses(
+            {'library/core/src/example.rs': ['check_example', 'check_example']}, {})
+        self.assertEqual(result['check_example']['file_name'],
+                         'library/core/src/example.rs')
+        self.assertIsNone(result['check_example']['crate'])
+
+    def test_generic_contract_keeps_concrete_automatic_harness(self):
+        concrete = '<array::IntoIter<i32, 2> as Iterator>::get_unchecked'
+        generic = '<array::IntoIter<T, N> as Iterator>::get_unchecked'
+        file = '/repo/library/core/src/array/iter.rs'
+        with tempfile.NamedTemporaryFile(mode='w+') as source:
+            json.dump({'standard-harnesses': {},
+                       'contract-harnesses': {file: [concrete]},
+                       'contracts': [{'function': generic, 'file': file,
+                                      'harnesses': ['kani::internal::automatic_harness']}]},
+                      source)
+            source.flush()
+            contracts, standard = read_kani_list(source.name, {})
+        self.assertEqual(standard, {})
+        self.assertEqual(set(contracts), {concrete})
+        self.assertEqual(contracts[concrete]['function'], concrete)
+        self.assertEqual(contracts[concrete]['file_name'], file)
+        self.assertIsNone(contracts[concrete]['target_safeness'])
 
 
 class ParseLogLinesTests(unittest.TestCase):
