@@ -938,11 +938,11 @@ pub mod dragon_verify {
     // Only the two unit-exponent diagnostics use these checked count encodings.
     // A count outside the mask fails an assertion, without excluding any input.
     fn unit_shortest_limb_count(size: usize) -> usize {
-        LimbCountMask(3).check(size)
+        LimbCountMask(if Digit::BITS == 64 { 1 } else { 3 }).check(size)
     }
 
     fn unit_exact_limb_count(size: usize) -> usize {
-        LimbCountMask(7).check(size)
+        LimbCountMask(if Digit::BITS == 64 { 3 } else { 7 }).check(size)
     }
 
     macro_rules! check_partition {
