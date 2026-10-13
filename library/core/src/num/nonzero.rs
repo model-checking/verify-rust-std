@@ -1,12 +1,8 @@
 //! Definitions of integer that is known not to equal zero.
 
-<<<<<<< HEAD
 use safety::{ensures, requires};
 
-use super::{IntErrorKind, ParseIntError};
-=======
 use super::{IntErrorKind, ParseIntError, TryFromIntError};
->>>>>>> subtree/library
 use crate::clone::{TrivialClone, UseCloned};
 use crate::cmp::Ordering;
 use crate::hash::{Hash, Hasher};
