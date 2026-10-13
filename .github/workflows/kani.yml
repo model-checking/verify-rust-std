@@ -17,6 +17,7 @@ on:
       - 'scripts/kani-std-analysis/test_run_kani_list.sh'
       - 'scripts/kani-std-analysis/test_cbmc_tap_retry.sh'
       - 'scripts/kani-std-analysis/test_kani_runtime_reuse.sh'
+      - 'scripts/kani-std-analysis/test_kani_bootstrap.sh'
       - 'scripts/kani-std-analysis/z3-flat-smt.sh'
       - 'scripts/kani-std-analysis/test_z3_flat_smt.sh'
 
@@ -118,6 +119,7 @@ jobs:
           bash scripts/kani-std-analysis/test_run_kani_list.sh
           bash scripts/kani-std-analysis/test_cbmc_tap_retry.sh
           bash scripts/kani-std-analysis/test_kani_runtime_reuse.sh
+          bash scripts/kani-std-analysis/test_kani_bootstrap.sh
           python3 -I -m unittest discover -s scripts/kani-std-analysis -p test_flt2dec_harnesses.py
       - name: Build proof matrix
         id: groups

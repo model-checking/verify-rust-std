@@ -137,13 +137,29 @@ read_commit_from_toml() {
     echo "$commit"
 }
 
-setup_kani_repo() {
+retry_kani_git() {
+    local attempt status
+    for attempt in 1 2 3; do
+        if git "$@"; then
+            return 0
+        else
+            status=$?
+        fi
+        if [[ "$attempt" -lt 3 ]]; then
+            echo "Kani Git download failed; retrying ($attempt/3)" >&2
+            sleep "$((attempt * 5))"
+        fi
+    done
+    return "$status"
+}
+
+setup_kani_repo() (
     local repo_url="$1"
     local directory="$2"
     local branch="$3"
     local commit="$4"
 
-    if [[ ! -d "${directory}" ]]; then
+    if [[ ! -d "${directory}/.git" ]]; then
         mkdir -p "${directory}"
         pushd "${directory}" > /dev/null
 
@@ -153,13 +169,13 @@ setup_kani_repo() {
         pushd "${directory}" > /dev/null
     fi
 
-    git fetch --depth 1 origin "$commit" --quiet
-    git checkout "$commit" --quiet
-    # Workaround for occasionally failing to copy a file in s2n-quic that we
-    # don't actually care about
-    GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --quiet
+    retry_kani_git fetch --depth 1 origin "$commit" --quiet || return $?
+    git checkout "$commit" --quiet || return $?
+    # Cargo resolves the compiler's optional Charon dependency. Firecracker
+    # and s2n-quic are benchmark fixtures and are not needed to build Kani.
+    GIT_LFS_SKIP_SMUDGE=1 retry_kani_git submodule update --init --recursive --depth 1 --quiet -- charon || return $?
     popd > /dev/null
-}
+)
 
 get_current_commit() {
     local directory="$1"
@@ -236,7 +252,7 @@ build_kani() {
         fi
     fi
 
-    cargo build-dev --release
+    CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}" cargo build-dev --release
     popd
 }
 
@@ -345,7 +361,7 @@ main() {
         echo "Building Kani from commit: $commit"
 
         # Clone repository and checkout specific commit
-        setup_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit"
+        setup_kani_repo "$REPO_URL" "$build_dir" "$BRANCH_NAME" "$commit" || return $?
 
         # Build project
         build_kani "$build_dir"
