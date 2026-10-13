@@ -2620,7 +2620,7 @@ impl<A: Allocator> RawVecInner<A> {
                 //@ div_rem_nonneg(isize::MAX, elem_layout.align());
                 let alloc_size = elem_layout.size().unchecked_mul(self.cap.as_inner());
                 let layout = Layout::from_size_align_unchecked(alloc_size, elem_layout.align());
-                let ptr_ = self.ptr.into();
+                let ptr_ = self.ptr;
                 //@ std::ptr::NonNull_new_as_ptr((*self).ptr);
                 //@ close [f]RawVecInner_frac_borrow_content::<A>(self, elem_layout, ptr, capacity)();
                 //@ close_frac_borrow(f, RawVecInner_frac_borrow_content::<A>(self, elem_layout, ptr, capacity));
