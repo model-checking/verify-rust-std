@@ -194,6 +194,20 @@ EOF
     CURL_HOME="$kani_download_config" "$@"
 )
 
+prepare_cbmc_tap() {
+    local attempt
+    for attempt in 1 2 3; do
+        if brew tap diffblue/cbmc; then
+            return 0
+        fi
+        echo "CBMC tap fetch failed (attempt $attempt of 3)" >&2
+        if [[ "$attempt" -lt 3 ]]; then
+            sleep 10
+        fi
+    done
+    return 1
+}
+
 build_kani() {
     local directory="$1"
     pushd "$directory"
@@ -215,6 +229,7 @@ build_kani() {
             # Trust the tap first (no-op on older Homebrew). Mirrors
             # model-checking/kani#4785.
             brew trust diffblue/cbmc 2>/dev/null || true
+            prepare_cbmc_tap || return 1
             install_kani_dependencies ./scripts/setup/macos/install_deps.sh
         else
             echo "Unknown operating system"
