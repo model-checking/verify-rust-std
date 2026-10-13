@@ -3677,3 +3677,626 @@ impl From<char> for String {
         c.to_string()
     }
 }
+
+#[cfg(kani)]
+#[unstable(feature = "kani", issue = "none")]
+mod verify {
+    use core::cell::Cell;
+    use core::kani;
+    use core::ops::Bound;
+    use core::str::pattern::{Pattern, SearchStep, Searcher};
+
+    use super::*;
+
+    // --object-bits 12, 64-bit target:
+    // 52 offset bits; the signed positive maximum is 2^51 - 1.
+    const MAX_ALLOC: usize = (1usize << 51) - 1;
+
+    fn any_string(max_len: usize) -> String {
+        let cap: usize = kani::any_where(|c: &usize| *c <= MAX_ALLOC);
+        let len: usize = kani::any_where(|n: &usize| *n <= cap && *n <= max_len);
+        let mut v = vec![0u8; cap];
+        v.truncate(len);
+        // SAFETY: the whole initialized prefix contains ASCII NUL bytes.
+        unsafe { String::from_utf8_unchecked(v) }
+    }
+
+    // One arbitrary char at an arbitrary position, surrounded by ASCII NULs.
+    fn with_char() -> (String, usize, char) {
+        let c: char = kani::any();
+        let w = c.len_utf8();
+        let before: usize = kani::any_where(|n: &usize| *n <= MAX_ALLOC - w);
+        let after: usize = kani::any_where(|n: &usize| *n <= MAX_ALLOC - w - before);
+        let len = before + w + after;
+        let cap: usize = kani::any_where(|n: &usize| *n >= len && *n <= MAX_ALLOC);
+        let mut v = vec![0u8; cap];
+        // SAFETY: the writable range lies inside the initialized allocation.
+        unsafe {
+            c.encode_utf8(core::slice::from_raw_parts_mut(v.as_mut_ptr().add(before), w));
+        }
+        v.truncate(len);
+        // SAFETY: ASCII bytes and a full UTF-8 encoding form a valid string.
+        (unsafe { String::from_utf8_unchecked(v) }, before, c)
+    }
+
+    // Different RangeBounds representations of the same valid [start, end) range.
+    fn bounds(start: usize, end: usize, len: usize) -> (Bound<usize>, Bound<usize>) {
+        let lo = if start > 0 && kani::any() {
+            Bound::Excluded(start - 1)
+        } else if start == 0 && kani::any() {
+            Bound::Unbounded
+        } else {
+            Bound::Included(start)
+        };
+        let hi = if end > 0 && kani::any() {
+            Bound::Included(end - 1)
+        } else if end == len && kani::any() {
+            Bound::Unbounded
+        } else {
+            Bound::Excluded(end)
+        };
+        (lo, hi)
+    }
+
+    #[kani::proof]
+    fn harness_string_pop() {
+        let (mut s, at, c) = with_char();
+        let nonempty: bool = kani::any();
+        // SAFETY: 0 and at + c.len_utf8() are initialized UTF-8 boundaries.
+        unsafe {
+            s.vec.set_len(if nonempty { at + c.len_utf8() } else { 0 });
+        }
+        assert_eq!(s.pop(), if nonempty { Some(c) } else { None });
+        assert_eq!(s.len(), if nonempty { at } else { 0 });
+        kani::cover(nonempty && c.len_utf8() == 4, "pop: four-byte char");
+    }
+
+    // Only truncates the infeasible str-slicing panic formatter, not the real path.
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn harness_string_remove() {
+        let (mut s, at, c) = with_char();
+        let old = s.len();
+        assert_eq!(s.remove(at), c);
+        assert_eq!(s.len(), old - c.len_utf8());
+    }
+
+    #[kani::proof]
+    fn harness_string_insert() {
+        let mut s = any_string(MAX_ALLOC - 4);
+        let old = s.len();
+        let at: usize = kani::any_where(|i: &usize| *i <= old);
+        let c: char = kani::any();
+        let full = old == s.capacity();
+        s.insert(at, c);
+        assert_eq!(s.len(), old + c.len_utf8());
+        kani::cover(full && c.len_utf8() == 4, "insert: reallocate");
+    }
+
+    #[kani::proof]
+    fn harness_string_insert_str() {
+        let mut s = any_string(MAX_ALLOC);
+        let old = s.len();
+        // Both the receiver and inserted string have symbolic lengths.
+        let t = any_string(MAX_ALLOC - old);
+        let inserted = t.len();
+        let at: usize = kani::any_where(|i: &usize| *i <= old);
+        let realloc = s.capacity() < old + inserted;
+        s.insert_str(at, &t);
+        assert_eq!(s.len(), old + inserted);
+        kani::cover(realloc && inserted > 0, "insert_str: reallocation");
+        kani::cover(
+            old > 64 && at > 0 && at < old && inserted > 0,
+            "insert_str: insert into a long string",
+        );
+        kani::cover(old > 0 && at == old && inserted > 0, "insert_str: append");
+    }
+
+    #[kani::proof]
+    fn harness_string_split_off() {
+        let mut s = any_string(MAX_ALLOC);
+        let old_len = s.len();
+        let old_cap = s.capacity();
+        let at: usize = kani::any_where(|i: &usize| *i <= old_len);
+        let other = s.split_off(at);
+        assert_eq!(s.len(), at);
+        assert_eq!(other.len(), old_len - at);
+        assert_eq!(s.capacity(), old_cap);
+        kani::cover(at == 0 && old_len > 0, "split_off: split at beginning");
+        kani::cover(at == old_len && old_len > 0, "split_off: split at end");
+        kani::cover(
+            old_len > 64 && at > 0 && at < old_len,
+            "split_off: split inside a long string",
+        );
+    }
+
+    #[kani::proof]
+    fn harness_string_drain() {
+        let (mut s, at, c) = with_char();
+        let old = s.len();
+        let take: bool = kani::any();
+        let empty: bool = kani::any();
+        let end = if empty {
+            at
+        } else {
+            kani::any_where(|e: &usize| *e >= at + c.len_utf8() && *e <= old)
+        };
+        let mut d = s.drain(bounds(at, end, old));
+        if take {
+            assert_eq!(d.next(), if empty { None } else { Some(c) });
+        }
+        drop(d);
+        assert_eq!(s.len(), old - (end - at));
+        kani::cover(empty, "drain: empty range");
+        kani::cover(take && !empty && end < old, "drain: next and shift tail");
+        kani::cover(!take && !empty && end < old, "drain: drop without next");
+    }
+
+    #[kani::proof]
+    fn harness_string_into_boxed_str() {
+        let s = any_string(MAX_ALLOC);
+        let len = s.len();
+        let spare = s.capacity() > len;
+        assert_eq!(s.into_boxed_str().len(), len);
+        kani::cover(spare && len > 0, "into_boxed_str: shrink capacity");
+    }
+
+    #[kani::proof]
+    fn harness_string_leak() {
+        let s = any_string(MAX_ALLOC);
+        let len = s.len();
+        let leaked: &mut str = s.leak();
+        assert_eq!(leaked.len(), len);
+    }
+
+    // Construct a valid UTF-8 replacement of at most four bytes.
+    fn short_str() -> ([u8; 4], usize) {
+        let chars: [char; 4] = kani::any();
+        let n: usize = kani::any_where(|n: &usize| *n <= 4);
+        let mut buf = [0u8; 4];
+        let mut len = 0usize;
+        for i in 0..n {
+            let w = chars[i].len_utf8();
+            if w > 4 - len {
+                break;
+            }
+            chars[i].encode_utf8(&mut buf[len..len + w]);
+            len += w;
+        }
+        (buf, len)
+    }
+
+    // Receiver length is symbolic; removed and inserted spans are <= 4 bytes.
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn harness_string_replace_range() {
+        let mut s = any_string(MAX_ALLOC - 4);
+        let old = s.len();
+        let start: usize = kani::any_where(|i: &usize| *i <= old);
+        let removed: usize = kani::any_where(|n: &usize| *n <= 4 && *n <= old - start);
+        let end = start + removed;
+        let (buf, inserted) = short_str();
+        // Constructed entirely from complete UTF-8 encodings.
+        let repl = unsafe { core::str::from_utf8_unchecked(&buf[..inserted]) };
+        let realloc = old - removed + inserted > s.capacity();
+        s.replace_range(bounds(start, end, old), repl);
+        assert_eq!(s.len(), old - removed + inserted);
+        kani::cover(realloc, "replace_range: reallocate");
+        kani::cover(
+            inserted > removed && start > 0 && end < old,
+            "replace_range: grow in the middle",
+        );
+        kani::cover(
+            inserted < removed && start > 0 && end < old,
+            "replace_range: shrink in the middle",
+        );
+        kani::cover(inserted == 4 && buf[0] >= 0xF0, "replace_range: four-byte replacement");
+    }
+
+    // General Searcher contract model
+    struct AnyPattern<'c> {
+        removed: &'c Cell<usize>,
+        count: &'c Cell<usize>,
+    }
+    struct AnySearcher<'a, 'c> {
+        haystack: &'a str,
+        front: usize,
+        left: usize,
+        pending: Option<(usize, usize)>,
+        removed: &'c Cell<usize>,
+        count: &'c Cell<usize>,
+    }
+
+    impl<'c> Pattern for AnyPattern<'c> {
+        type Searcher<'a> = AnySearcher<'a, 'c>;
+        fn into_searcher(self, haystack: &str) -> AnySearcher<'_, 'c> {
+            AnySearcher {
+                haystack,
+                front: 0,
+                left: 5,
+                pending: None,
+                removed: self.removed,
+                count: self.count,
+            }
+        }
+    }
+
+    impl<'a, 'c> AnySearcher<'a, 'c> {
+        fn choose(&mut self) -> Option<(usize, usize)> {
+            if self.left == 0 || kani::any() {
+                self.left = 0;
+                return None;
+            }
+            let a: usize =
+                kani::any_where(|i: &usize| *i >= self.front && *i <= self.haystack.len());
+            let b: usize = kani::any_where(|i: &usize| *i >= a && *i <= self.haystack.len());
+            assert!(self.haystack.is_char_boundary(a) && self.haystack.is_char_boundary(b));
+            self.front = b;
+            self.left -= 1;
+            self.removed.set(self.removed.get() + b - a);
+            self.count.set(self.count.get() + 1);
+            Some((a, b))
+        }
+    }
+
+    // SAFETY: the NUL haystack has a char boundary at every index; matches are in
+    // bounds, ordered and non-overlapping. Reject/Match steps cover every gap.
+    unsafe impl<'a, 'c> Searcher<'a> for AnySearcher<'a, 'c> {
+        fn haystack(&self) -> &'a str {
+            self.haystack
+        }
+        fn next(&mut self) -> SearchStep {
+            if let Some((a, b)) = self.pending.take() {
+                return SearchStep::Match(a, b);
+            }
+            let front = self.front;
+            match self.choose() {
+                Some((a, b)) if a > front => {
+                    self.pending = Some((a, b));
+                    SearchStep::Reject(front, a)
+                }
+                Some((a, b)) => SearchStep::Match(a, b),
+                None if front < self.haystack.len() => {
+                    self.front = self.haystack.len();
+                    SearchStep::Reject(front, self.front)
+                }
+                None => SearchStep::Done,
+            }
+        }
+        fn next_match(&mut self) -> Option<(usize, usize)> {
+            if let Some(m) = self.pending.take() {
+                return Some(m);
+            }
+            self.choose()
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn harness_string_remove_matches() {
+        let mut s = any_string(MAX_ALLOC);
+        let old = s.len();
+        let removed = Cell::new(0usize);
+        let count = Cell::new(0usize);
+        s.remove_matches(AnyPattern { removed: &removed, count: &count });
+        assert_eq!(s.len(), old - removed.get());
+        kani::cover(count.get() == 2 && removed.get() > 0, "remove_matches: two matches");
+        kani::cover(count.get() == 5 && removed.get() > 0, "match Vec grows");
+    }
+
+    fn any_chars() -> String {
+        let chars: [char; 4] = kani::any();
+        let n: usize = kani::any_where(|n: &usize| *n <= 4);
+        let mut v = vec![0u8; 16];
+        let mut len = 0;
+        for i in 0..n {
+            let w = chars[i].len_utf8();
+            chars[i].encode_utf8(&mut v[len..len + w]);
+            len += w;
+        }
+        v.truncate(len);
+        // SAFETY: a concatenation of complete UTF-8 characters is valid UTF-8.
+        unsafe { String::from_utf8_unchecked(v) }
+    }
+
+    // `retain`'s debug_assert calls `core::str::from_utf8`. With -Z loop-contracts,
+    // the standard UTF-8 validator may have a nondeterministic result. Only this
+    // debug validator is stubbed; the real `retain` body and all copies still run.
+    fn validate_retain_utf8(v: &[u8]) -> Result<&str, core::str::Utf8Error> {
+        assert!(v.len() <= 16);
+        let mut bytes = [0u8; 16];
+        bytes[..v.len()].copy_from_slice(v);
+        let mut i = 0;
+        while i < v.len() {
+            let b = bytes[i];
+            let w = match b {
+                0x00..=0x7F => 1,
+                0xC2..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF4 => 4,
+                _ => panic!("invalid UTF-8 lead byte"),
+            };
+            assert!(i + w <= v.len(), "truncated UTF-8 sequence");
+            if w > 1 {
+                let c = bytes[i + 1];
+                assert!((0x80..=0xBF).contains(&c));
+                assert!(match b {
+                    0xE0 => c >= 0xA0,
+                    0xED => c <= 0x9F,
+                    0xF0 => c >= 0x90,
+                    0xF4 => c <= 0x8F,
+                    _ => true,
+                });
+            }
+            if w > 2 {
+                assert!((0x80..=0xBF).contains(&bytes[i + 2]));
+            }
+            if w > 3 {
+                assert!((0x80..=0xBF).contains(&bytes[i + 3]));
+            }
+            i += w;
+        }
+        // SAFETY: the byte sequence has been checked against UTF-8's full rules.
+        Ok(unsafe { core::str::from_utf8_unchecked(v) })
+    }
+
+    #[kani::proof]
+    #[kani::unwind(6)] // Max 4 chars + loop exit (one spare step).
+    #[kani::stub(core::str::from_utf8, validate_retain_utf8)]
+    fn harness_string_retain() {
+        let mut s = any_chars();
+        let mut kept = 0;
+        let mut deleted = false;
+        let mut moved = false;
+        s.retain(|c| {
+            let keep: bool = kani::any();
+            if keep {
+                kept += c.len_utf8();
+                moved |= deleted && c.len_utf8() > 1;
+            } else {
+                deleted = true;
+            }
+            keep
+        });
+        assert_eq!(s.len(), kept);
+        kani::cover(moved, "retain: multibyte char moves after a deletion");
+    }
+
+    // The original well-formedness + exact lossy UTF-8 length specifications in one pass.
+    // A high surrogate with a non-low successor emits U+FFFD; the successor is reprocessed.
+    fn utf16_spec<const N: usize>(v: &[u8], le: bool) -> (bool, usize, bool) {
+        let mut valid = v.len() % 2 == 0;
+        let mut pending = false;
+        let mut pair = false;
+        let mut len = 0;
+        for i in 0..N / 2 {
+            if i >= v.len() / 2 {
+                break;
+            }
+            let b = [v[2 * i], v[2 * i + 1]];
+            let u = if le { u16::from_le_bytes(b) } else { u16::from_be_bytes(b) };
+            if pending {
+                pending = false;
+                if (0xDC00..=0xDFFF).contains(&u) {
+                    len += 4;
+                    pair = true;
+                    continue;
+                }
+                valid = false;
+                len += 3;
+            }
+            if (0xD800..=0xDBFF).contains(&u) {
+                pending = true;
+            } else if (0xDC00..=0xDFFF).contains(&u) {
+                valid = false;
+                len += 3;
+            } else {
+                len += if u < 0x80 {
+                    1
+                } else if u < 0x800 {
+                    2
+                } else {
+                    3
+                };
+            }
+        }
+        if pending {
+            valid = false;
+            len += 3;
+        }
+        if v.len() % 2 != 0 {
+            len += 3;
+        }
+        (valid, len, pair)
+    }
+
+    macro_rules! utf16_harness {
+        ($name:ident, $n:literal, $unwind:literal, $le:expr, $lossy:expr, $call:expr) => {
+            #[kani::proof]
+            #[kani::unwind($unwind)]
+            fn $name() {
+                let storage: [u8; $n + 1] = kani::any();
+                let len: usize = kani::any_where(|n: &usize| *n <= $n);
+                let start: usize = kani::any_where(|i: &usize| *i <= $n + 1 - len);
+                let v = &storage[start..start + len];
+                let (valid, expected_len, pair) = utf16_spec::<$n>(v, $le);
+                let result: Option<String> = ($call)(v);
+                if !$lossy {
+                    assert_eq!(result.is_some(), valid);
+                }
+                if let Some(s) = result {
+                    assert_eq!(s.len(), expected_len);
+                }
+                kani::cover(len == $n, "UTF-16: maximum input length");
+                kani::cover(len >= 4 && v.as_ptr().cast::<u16>().is_aligned(), "UTF-16: aligned");
+                kani::cover(
+                    len >= 4 && !v.as_ptr().cast::<u16>().is_aligned(),
+                    "UTF-16: unaligned",
+                );
+                kani::cover(len % 2 == 1, "UTF-16: odd length");
+                kani::cover(!valid && len % 2 == 0, "UTF-16: invalid surrogate");
+                kani::cover(valid && pair, "UTF-16: surrogate pair");
+            }
+        };
+    }
+
+    // Real decoding loops, bounded.
+    utf16_harness!(harness_string_from_utf16le, 12, 7, true, false, |v| String::from_utf16le(v)
+        .ok());
+    utf16_harness!(harness_string_from_utf16le_lossy, 12, 7, true, true, |v| Some(
+        String::from_utf16le_lossy(v)
+    ));
+    utf16_harness!(harness_string_from_utf16be, 16, 9, false, false, |v| String::from_utf16be(v)
+        .ok());
+    utf16_harness!(harness_string_from_utf16be_lossy, 16, 9, false, true, |v| Some(
+        String::from_utf16be_lossy(v)
+    ));
+
+    // Panic checks are separate from the 15 positive memory-safety harnesses.
+    // Every helper constructs the sole intended invalid condition; `should_panic`
+    // is existential, so unrelated panics must not make a harness pass.
+    fn panic_inside_char() -> (String, usize) {
+        let c: char = kani::any_where(|c: &char| c.len_utf8() > 1);
+        let mut s = String::with_capacity(8);
+        s.push('x');
+        s.push(c);
+        s.push('y');
+        let offset: usize = kani::any_where(|i: &usize| *i > 0 && *i < c.len_utf8());
+        (s, 1 + offset)
+    }
+
+    fn panic_past_end() -> (String, usize) {
+        let len: usize = kani::any_where(|n: &usize| *n <= 16);
+        let mut v = vec![0u8; 16];
+        v.truncate(len);
+        // SAFETY: every retained byte is an initialized ASCII NUL.
+        let s = unsafe { String::from_utf8_unchecked(v) };
+        let delta: usize = kani::any_where(|d: &usize| *d >= 1 && *d <= 3);
+        (s, len + delta)
+    }
+
+    fn panic_reversed_range() -> (String, usize, usize) {
+        let s = String::from("abcd");
+        let start: usize = kani::any_where(|i: &usize| *i > 0 && *i <= s.len());
+        let end: usize = kani::any_where(|i: &usize| *i < start);
+        (s, start, end)
+    }
+
+    // Shared macro for the other index panic checks.
+    macro_rules! panic_index_harnesses {
+        ($inside:ident, $past:ident, |$s:ident, $idx:ident| $call:expr) => {
+            #[kani::proof]
+            #[kani::should_panic]
+            fn $inside() {
+                let (mut $s, $idx) = panic_inside_char();
+                let _ = $call;
+            }
+
+            #[kani::proof]
+            #[kani::should_panic]
+            fn $past() {
+                let (mut $s, $idx) = panic_past_end();
+                let _ = $call;
+            }
+        };
+    }
+
+    panic_index_harnesses!(
+        harness_string_insert_panics_inside_char,
+        harness_string_insert_panics_past_end,
+        |s, idx| s.insert(idx, 'x')
+    );
+    panic_index_harnesses!(
+        harness_string_insert_str_panics_inside_char,
+        harness_string_insert_str_panics_past_end,
+        |s, idx| s.insert_str(idx, "x")
+    );
+    panic_index_harnesses!(
+        harness_string_split_off_panics_inside_char,
+        harness_string_split_off_panics_past_end,
+        |s, idx| s.split_off(idx)
+    );
+    panic_index_harnesses!(
+        harness_string_remove_panics_inside_char,
+        harness_string_remove_panics_past_end,
+        |s, idx| s.remove(idx)
+    );
+    panic_index_harnesses!(
+        harness_string_drain_panics_inside_char,
+        harness_string_drain_panics_past_end,
+        |s, idx| s.drain(idx..)
+    );
+
+    // Seven additional checks isolate distinct valid-index / invalid-range causes.
+    // remove(len) is invalid, unlike insert(len) and split_off(len).
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_string_remove_panics_at_end() {
+        let (mut s, _) = panic_past_end();
+        let end = s.len();
+        let _ = s.remove(end);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_string_drain_panics_end_inside_char() {
+        let (mut s, idx) = panic_inside_char();
+        let _ = s.drain(..idx);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_string_drain_panics_end_past_end() {
+        let (mut s, idx) = panic_past_end();
+        let _ = s.drain(..idx);
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn harness_string_drain_panics_reversed_range() {
+        let (mut s, start, end) = panic_reversed_range();
+        let _ = s.drain(start..end);
+    }
+
+    // `replace_range` checks the range before Vec::splice; keep these out of the macro
+    // so each panic path can have its own unwind bound if needed.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(2)]
+    fn harness_string_replace_range_panics_inside_char() {
+        let (mut s, idx) = panic_inside_char();
+        s.replace_range(idx.., "x");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(2)]
+    fn harness_string_replace_range_panics_past_end() {
+        let (mut s, idx) = panic_past_end();
+        s.replace_range(idx.., "x");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(2)]
+    fn harness_string_replace_range_panics_end_inside_char() {
+        let (mut s, idx) = panic_inside_char();
+        s.replace_range(..idx, "x");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(2)]
+    fn harness_string_replace_range_panics_end_past_end() {
+        let (mut s, idx) = panic_past_end();
+        s.replace_range(..idx, "x");
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(2)]
+    fn harness_string_replace_range_panics_reversed_range() {
+        let (mut s, start, end) = panic_reversed_range();
+        s.replace_range(start..end, "x");
+    }
+}
