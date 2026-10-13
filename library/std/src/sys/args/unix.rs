@@ -81,6 +81,7 @@ pub fn args() -> Args {
     target_os = "horizon",
     target_os = "aix",
     target_os = "nto",
+    target_os = "qnx",
     target_os = "hurd",
     target_os = "rtems",
     target_os = "nuttx",
@@ -164,7 +165,7 @@ mod imp {
 // of this used `[[NSProcessInfo processInfo] arguments]`.
 #[cfg(target_vendor = "apple")]
 mod imp {
-    use crate::ffi::{c_char, c_int};
+    use crate::ffi::c_char;
 
     pub unsafe fn init(_argc: isize, _argv: *const *const u8) {
         // No need to initialize anything in here, `libdyld.dylib` has already
@@ -172,12 +173,6 @@ mod imp {
     }
 
     pub fn argc_argv() -> (isize, *const *const c_char) {
-        unsafe extern "C" {
-            // These functions are in crt_externs.h.
-            fn _NSGetArgc() -> *mut c_int;
-            fn _NSGetArgv() -> *mut *mut *mut c_char;
-        }
-
         // SAFETY: The returned pointer points to a static initialized early
         // in the program lifetime by `libdyld.dylib`, and as such is always
         // valid.
@@ -187,9 +182,9 @@ mod imp {
         // doesn't exist a lock that we can take. Instead, it is generally
         // expected that it's only modified in `main` / before other code
         // runs, so reading this here should be fine.
-        let argc = unsafe { _NSGetArgc().read() };
+        let argc = unsafe { libc::_NSGetArgc().read() };
         // SAFETY: Same as above.
-        let argv = unsafe { _NSGetArgv().read() };
+        let argv = unsafe { libc::_NSGetArgv().read() };
 
         // Cast from `*mut *mut c_char` to `*const *const c_char`
         (argc as isize, argv.cast())

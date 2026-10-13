@@ -52,6 +52,10 @@ pub struct AutoHarnessMetadata {
 /// Reasons that Kani does not generate an automatic harness for a function.
 #[derive(Debug, Clone, Serialize, Deserialize, Display, EnumString)]
 pub enum AutoHarnessSkipReason {
+    /// A `#[rustc_comptime]` function, which rustc only lets const items, statics and const
+    /// blocks call; a harness calling it would not be a program rustc accepts.
+    #[strum(serialize = "Can only be called at compile time")]
+    Comptime,
     /// The function is generic and autoharness could not find a monomorphic instantiation to
     /// verify. The payload gives the specific reason (e.g. const generic parameters, or trait
     /// bounds that no candidate type satisfies).
@@ -72,6 +76,10 @@ pub enum AutoHarnessSkipReason {
     /// (The Vec<(String, String)> contains the list of (name, type) tuples for each such argument.)
     #[strum(serialize = "Requires --bounded-arguments for argument(s)")]
     RequiresBoundedArguments(Vec<(String, String)>),
+    /// The function is a C-variadic whose calling convention Kani cannot model, e.g.
+    /// `unsafe extern "sysv64" fn(_: ...)`.
+    #[strum(serialize = "Unsupported variadic calling convention")]
+    UnsupportedVariadic,
     /// The function doesn't match the user's provided filters.
     #[strum(serialize = "Did not match provided filters")]
     UserFilter,
