@@ -131,10 +131,12 @@ jobs:
     env:
       KANI_JOBS: 1
       RAYON_NUM_THREADS: 1
+      # Reachability verdicts do not need the large diagnostic traces that
+      # CBMC otherwise builds for every satisfied Kani reachability check.
+      KANI_PATCHED_CBMC: 'true'
       KANI_HARNESS_TIMEOUT: ${{ matrix.group.timeout_minutes }}m
       KANI_OBJECT_BITS: ${{ (matrix.group.kind == 'contract' || matrix.group.kind == 'equivalence') && '12' || '14' }}
-      # Keep encoding experiments scoped to the diagnostic probes.
-      KANI_SYMEX_CACHE_DEREFERENCES: ${{ matrix.group.kind == 'probe' && 'true' || 'false' }}
+      KANI_SYMEX_CACHE_DEREFERENCES: ${{ (matrix.group.kind == 'probe' || startsWith(matrix.group.name, 'bigint-shift-equivalence-') || startsWith(matrix.group.name, 'grisu-shortest-scaling-')) && 'true' || 'false' }}
       # Dragon's fixed limb indices can use the default array field splitting.
       KANI_ARRAY_FIELD_SENSITIVITY: ${{ matrix.group.kind == 'probe' && startsWith(matrix.group.name, 'grisu-') && 'false' || 'true' }}
       # Use SAT arithmetic refinement for the full Grisu shortest domain.
@@ -160,7 +162,6 @@ jobs:
         run: brew trust diffblue/cbmc
 
       - name: Restore patched verifier
-        if: env.KANI_FLAT_SMT_Z3 == 'true'
         uses: actions/cache/restore@v4
         with:
           path: head/cbmc_build/bin

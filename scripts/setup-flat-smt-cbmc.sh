@@ -3,9 +3,12 @@ set -euo pipefail
 
 # CBMC 6.11's flat SMT encoding reverses arithmetic result and overflow fields.
 # Backport the approved fix from https://github.com/diffblue/cbmc/pull/9145.
+# Keep diagnostic traces opt-in with https://github.com/diffblue/cbmc/pull/9150.
+# Kani explicitly requests --trace when generating concrete playback tests.
 release=cbmc-6.11.0
 fix=e36c27dd2e57ef6ce39c02a382d1c60ff6f4593f
-revision="$release-$fix"
+trace_fix=d7caa9d6ff314348a99cb31778e569239ff6dd27
+revision="$release-$fix-$trace_fix"
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 build_root=${1:-"$repository_root/cbmc_build"}
 mkdir -p "$build_root/bin"
@@ -34,9 +37,13 @@ download "https://api.github.com/repos/diffblue/cbmc/tarball/$release" \
 download "https://github.com/diffblue/cbmc/commit/$fix.patch" \
     "$work_root/overflow.patch" \
     24824fb1ae03d82d5ae81002e60c933d4d516caa9620759c95da3bf43ee4fbe2
+download "https://github.com/diffblue/cbmc/commit/$trace_fix.patch" \
+    "$work_root/traces.patch" \
+    3446691194b090e199b2e5d9ccbad1687154656530666f1a3526d0b3ae82618e
 mkdir "$work_root/source"
 tar -xzf "$work_root/source.tar.gz" -C "$work_root/source" --strip-components 1
 patch --batch -p1 -d "$work_root/source" < "$work_root/overflow.patch"
+patch --batch -p1 -d "$work_root/source" < "$work_root/traces.patch"
 
 # Keep CBMC's pinned MiniSAT checksum, using Debian's HTTPS endpoint.
 python3 -I - "$work_root/source/src/solvers/CMakeLists.txt" <<'PY'
